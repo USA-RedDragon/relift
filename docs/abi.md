@@ -566,29 +566,40 @@ Mac unless marked]:
   `pend.sp = RL_SP_NONE`, which no 16-byte aligned sp equals, so they pass
   every frame up to the thread entry. [inferred change from the verified
   shape]
-- **`rl_resume(c, mem, r)`** replaces the guest unwinder's register-install
-  step. It copies x0-x30, sp and d8-d15 (`v[8..15].d[0]`; upper halves
-  untouched, AAPCS64 preserves only the low halves) into `c`, sets
-  `pend = {pc, sp, RL_PEND_UNWIND}`, and returns `RL_PENDING`. The lifted
-  unwinder's frames then return up to the throw site and on to the target
-  frame. The step is replaced by an override on the unwinder's install
-  function, which converts the unwinder's own register layout to
-  `rl_resume_regs`:
-  - LLVM libunwind (what nnSdk ships): `unw_resume` reaches
+- **`rl_resume(c, mem, r)`** is the unwind primitive. It copies x0-x30, sp
+  and d8-d15 (`v[8..15].d[0]`; upper halves untouched, AAPCS64 preserves
+  only the low halves) into `c`, sets `pend = {pc, sp, RL_PEND_UNWIND}`, and
+  returns `RL_PENDING`. The lifted unwinder's frames then return up to the
+  throw site and on to the target frame.
+- **Two shapes of register install**, and both are supported; a guest
+  unwinder is one or the other (the `relift` end-to-end tests
+  `e2e_eh` run a guest unwinder of each shape through `relift build`):
+  - **A computed jump (libgcc).** `_Unwind_RaiseException`,
+    `_Unwind_Resume` and friends end in the `__builtin_eh_return`
+    epilogue: restore x19-x28 and d8-d15, pop the frame, then
+    `add sp, sp, x5; br x6` (x5 the stack adjustment, x6 the landing pad,
+    x0-x3 the exception data). Nothing is recognized: the `br` is an
+    ordinary computed jump, and what makes it an unwind is its target
+    (next item). [verified: disassembly of a libnx C++ exceptions test
+    program built with devkitA64, which also runs]
+  - **A return (LLVM libunwind, what nnSdk ships).** `unw_resume` reaches
     `UnwindCursor::jumpto`, which passes the register block to an
-    unnamed routine that loads x2-x29, sp, pc (into x30), d0-d31 (low 64
-    bits) and finally x0-x1, then `ret`. It does not touch FPCR or FPSR.
-    The emitter recognizes that routine by its first instruction
-    (`ldp x2, x3, [x0, #0x10]`) and its tail (`ldp x0, x1, [x0]; ret` after
-    the `sp` and `x30` loads) and replaces it with `rl_resume` reading the
-    same block layout. [verified: disassembly of the SDK module]
-  - libgcc (libnx): `_Unwind_RaiseException`, `_Unwind_Resume` and
-    friends end in the `__builtin_eh_return` epilogue: restore x19-x28 and
-    d8-d15, pop the frame, then `add sp, sp, x5; br x6` (x5 the stack
-    adjustment, x6 the landing pad, x0-x3 the exception data). No pattern
-    is recognized: the jump is an ordinary computed jump, and what makes it
-    an unwind is its target (next item). [verified: disassembly of a libnx
-    C++ exceptions test program built with devkitA64]
+    unnamed routine (`__libunwind_Registers_arm64_jumpto`) that loads x2-x29,
+    sp (from offset 0xf8), the pc (offset 0x100, into x30), d0-d31 (low 64
+    bits, from 0x110) and finally x0-x1, then `ret`s to the pc. It does
+    not touch FPCR or FPSR. A `ret` is a return to the host caller in
+    lifted code, not a jump, so this shape needs an override:
+    `program::known` recognizes the routine by its code (all 36
+    instructions, so a different build of the library is not mistaken for
+    it) and replaces it with `rl_a64_unw_jumpto` (`RL_FN_OVERRIDE |
+    RL_FN_MAY_UNWIND`), which reads the block at x0, sets d0-d31, and calls
+    `rl_resume` with the block's x0-x29, sp and pc (x30 is the pc, as on
+    hardware). The jump to the pad is then the same table entry as in the
+    libgcc shape. [verified: the SDK module's routine has exactly this
+    code; the synthetic unwinder in `relift/tests/tiny/eh.s` ends in it]
+  Another unwinder needs the same only if its install step is not a
+  computed jump: write its recognizer in `program::known` and a host
+  function that converts its register layout to `rl_resume_regs`.
 - **A landing pad is a dispatch-table entry that unwinds.** The unit table
   has, at every landing pad of the unwind tables that lies in a lifted
   function and is not itself a function entry, an entry with
