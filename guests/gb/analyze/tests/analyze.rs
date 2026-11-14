@@ -1,6 +1,6 @@
 //! Function discovery over synthetic cartridges.
 
-use relift_gb_analyze::{CallKind, Loc, Report, UnresolvedKind, analyze};
+use relift_gb_analyze::{CallKind, Loc, Report, TableBound, UnresolvedKind, analyze};
 use relift_gb_formats::banks::ROM_BANK_SIZE;
 use relift_gb_formats::synth::{self, Spec};
 
@@ -174,12 +174,14 @@ fn a_call_to_an_inline_table_dispatcher_ends_the_path_and_is_listed() {
 }
 
 #[test]
-fn a_jump_to_a_pushed_address_is_listed_as_indirect() {
+fn a_jump_to_the_popped_return_address_is_a_return() {
     let r = Cart::new(0x19, 0x02)
         .put(0, 0x300, &[0xE1, 0xE9])
         .put(0, 0x150, &[0x21, 0x00, 0x03, 0xE5, 0xCD, 0x00, 0x03, 0xC9])
         .analyze();
-    assert_eq!(kinds(&r), vec![UnresolvedKind::IndirectJump]);
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+    let entry = &r.functions[&Loc::fixed(0x100)];
+    assert!(entry.body.contains_key(&Loc::fixed(0x157)));
 }
 
 #[test]
@@ -284,10 +286,21 @@ fn window_code_keeps_its_bank_across_a_switching_call() {
 }
 
 #[test]
-fn a_fixed_caller_loses_the_bank_after_a_switching_call() {
+fn a_fixed_caller_takes_the_bank_a_callee_leaves() {
     let r = Cart::new(0x19, 0x04)
         .put(0, 0x150, &[0xCD, 0x00, 0x03, 0xCD, 0x00, 0x40, 0xC9])
         .put(0, 0x300, &[0x3E, 0x02, 0xEA, 0x00, 0x20, 0xC9])
+        .put(2, 0x4000, &[0xC9])
+        .analyze();
+    assert!(has(&r, 2, 0x4000));
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+#[test]
+fn a_fixed_caller_loses_the_bank_after_a_variable_switch() {
+    let r = Cart::new(0x19, 0x04)
+        .put(0, 0x150, &[0xCD, 0x00, 0x03, 0xCD, 0x00, 0x40, 0xC9])
+        .put(0, 0x300, &[0xFA, 0x00, 0xC0, 0xEA, 0x00, 0x20, 0xC9])
         .put(2, 0x4000, &[0xC9])
         .analyze();
     assert_eq!(kinds(&r), vec![UnresolvedKind::UnknownBank]);
@@ -472,4 +485,218 @@ fn unmodelled_mappers_are_refused() {
     });
     synth::fix_checksums(&mut rom);
     assert!(analyze(&rom).is_err());
+}
+
+const JP_THROUGH_C100: [u8; 7] = [0x21, 0x00, 0xC1, 0x2A, 0x66, 0x6F, 0xE9];
+
+fn table(r: &Report, site: Loc) -> &relift_gb_analyze::JumpTable {
+    r.tables
+        .iter()
+        .find(|t| t.site == site)
+        .expect("table followed")
+}
+
+#[test]
+fn a_jump_through_a_ram_pointer_follows_the_constants_stored_there() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x00, 0xEA, 0x00, 0xC1, 0x3E, 0x03, 0xEA, 0x01, 0xC1, 0xCD, 0x00, 0x02, 0xC9,
+            ],
+        )
+        .put(0, 0x200, &JP_THROUGH_C100)
+        .put(0, 0x300, &[0xC9])
+        .analyze();
+    assert!(has(&r, 0, 0x300), "{:?}", r.functions.keys());
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+    let p = &r.ram_pointers[0];
+    assert_eq!((p.cell, p.targets, p.partial), (0xC100, 1, false));
+}
+
+#[test]
+fn a_ram_pointer_stored_by_code_found_through_another_is_followed() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x00, 0xEA, 0x00, 0xC1, 0x3E, 0x03, 0xEA, 0x01, 0xC1, 0xCD, 0x00, 0x02, 0xC9,
+            ],
+        )
+        .put(0, 0x200, &JP_THROUGH_C100)
+        .put(
+            0,
+            0x300,
+            &[
+                0x3E, 0x00, 0xEA, 0x02, 0xC1, 0x3E, 0x04, 0xEA, 0x03, 0xC1, 0xCD, 0x10, 0x02, 0xC9,
+            ],
+        )
+        .put(0, 0x210, &[0x21, 0x02, 0xC1, 0x2A, 0x66, 0x6F, 0xE9])
+        .put(0, 0x400, &[0xC9])
+        .analyze();
+    assert!(has(&r, 0, 0x400), "{:?}", r.functions.keys());
+}
+
+#[test]
+fn a_ram_pointer_to_data_is_not_followed_and_is_listed() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x00, 0xEA, 0x00, 0xC1, 0x3E, 0x05, 0xEA, 0x01, 0xC1, 0xCD, 0x00, 0x02, 0xC9,
+            ],
+        )
+        .put(0, 0x200, &JP_THROUGH_C100)
+        .put(0, 0x500, &[0xD3])
+        .analyze();
+    assert!(!has(&r, 0, 0x500));
+    assert_eq!(kinds(&r), vec![UnresolvedKind::RamPointer]);
+}
+
+#[test]
+fn a_ram_pointer_cell_without_a_constant_store_is_listed() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x150, &[0xCD, 0x00, 0x02, 0xC9])
+        .put(0, 0x200, &JP_THROUGH_C100)
+        .analyze();
+    assert_eq!(kinds(&r), vec![UnresolvedKind::RamPointer]);
+}
+
+#[test]
+fn a_ram_pointer_into_the_window_takes_the_bank_at_the_jump() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x03, 0xEA, 0x00, 0x20, 0x3E, 0x00, 0xEA, 0x00, 0xC1, 0x3E, 0x41, 0xEA, 0x01,
+                0xC1, 0xCD, 0x00, 0x02, 0xC9,
+            ],
+        )
+        .put(0, 0x200, &JP_THROUGH_C100)
+        .put(3, 0x4100, &[0xC9])
+        .analyze();
+    assert!(has(&r, 3, 0x4100), "{:?}", r.functions.keys());
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+const DISPATCH: [u8; 9] = [0x5F, 0x16, 0x00, 0x19, 0x2A, 0x66, 0x6F, 0xE9, 0x00];
+
+fn table_cart(prefix: &[u8], words: &[u16]) -> Cart {
+    let mut code = prefix.to_vec();
+    code.extend_from_slice(&[0x21, 0x00, 0x03]);
+    code.extend_from_slice(&DISPATCH[..8]);
+    let mut bytes = Vec::new();
+    for w in words {
+        bytes.extend_from_slice(&w.to_le_bytes());
+    }
+    Cart::new(0x19, 0x02)
+        .put(0, 0x150, &code)
+        .put(0, 0x300, &bytes)
+        .put(0, 0x400, &[0xC9])
+        .put(0, 0x410, &[0xC9])
+        .put(0, 0x420, &[0xC9])
+        .put(0, 0x430, &[0xC9])
+        .put(0, 0x500, &[0xD3])
+}
+
+#[test]
+fn a_table_bounded_by_a_compare_follows_only_the_entries_below_it() {
+    let r = table_cart(
+        &[0xFA, 0x00, 0xC0, 0xFE, 0x03, 0xD0, 0x87],
+        &[0x400, 0x410, 0x420, 0x430],
+    )
+    .analyze();
+    assert!(has(&r, 0, 0x400) && has(&r, 0, 0x410) && has(&r, 0, 0x420));
+    assert!(!has(&r, 0, 0x430));
+    let t = table(&r, Loc::fixed(0x161));
+    assert_eq!((t.entries, t.bound), (3, TableBound::Index));
+}
+
+#[test]
+fn an_unbounded_table_ends_at_the_first_entry_that_is_not_code() {
+    let r = table_cart(&[0xFA, 0x00, 0xC0, 0x87], &[0x400, 0x410, 0x500, 0x420]).analyze();
+    assert!(has(&r, 0, 0x400) && has(&r, 0, 0x410));
+    assert!(!has(&r, 0, 0x500));
+    assert!(!has(&r, 0, 0x420), "the table must not run across data");
+    let t = table(&r, Loc::fixed(0x15E));
+    assert_eq!((t.entries, t.bound), (2, TableBound::Run));
+}
+
+#[test]
+fn a_table_of_data_words_is_not_followed() {
+    let r = table_cart(&[0xFA, 0x00, 0xC0, 0x87], &[0x500, 0x500]).analyze();
+    assert!(!has(&r, 0, 0x500));
+    assert_eq!(kinds(&r), vec![UnresolvedKind::JumpTable]);
+}
+
+#[test]
+fn an_index_scaled_by_a_pure_helper_bounds_its_table() {
+    let mut words = Vec::new();
+    for w in [0x400u16, 0x410, 0x420, 0x430] {
+        words.extend_from_slice(&w.to_le_bytes());
+        words.push(0);
+    }
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0xFA, 0x00, 0xC0, 0xFE, 0x03, 0xD0, 0xCD, 0x50, 0x02, 0x11, 0x00, 0x03, 0x19, 0x2A,
+                0x66, 0x6F, 0xE9,
+            ],
+        )
+        .put(0, 0x250, &[0x6F, 0x26, 0x00, 0x54, 0x5D, 0x29, 0x19, 0xC9])
+        .put(0, 0x300, &words)
+        .put(0, 0x400, &[0xC9])
+        .put(0, 0x410, &[0xC9])
+        .put(0, 0x420, &[0xC9])
+        .put(0, 0x430, &[0xC9])
+        .analyze();
+    assert!(has(&r, 0, 0x400) && has(&r, 0, 0x410) && has(&r, 0, 0x420));
+    assert!(!has(&r, 0, 0x430));
+    let t = table(&r, Loc::fixed(0x160));
+    assert_eq!((t.step, t.entries, t.bound), (3, 3, TableBound::Index));
+}
+
+#[test]
+fn a_code_pointer_passed_in_a_register_is_followed_at_the_caller() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x150, &[0x11, 0x00, 0x04, 0xCD, 0x00, 0x02, 0xC9])
+        .put(0, 0x200, &[0xD5, 0xC9])
+        .put(0, 0x400, &[0xC9])
+        .analyze();
+    assert!(has(&r, 0, 0x400), "{:?}", r.functions.keys());
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+#[test]
+fn a_table_entry_inside_a_found_instruction_is_not_followed() {
+    let r = table_cart(&[0xFA, 0x00, 0xC0, 0x87], &[0x151, 0x400]).analyze();
+    assert!(!r.functions.contains_key(&Loc::fixed(0x151)));
+}
+
+#[test]
+fn a_call_that_returns_past_an_inline_string_continues_after_it() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[0xCD, 0x00, 0x03, 0x41, 0x42, 0x00, 0xCD, 0x00, 0x04, 0xC9],
+        )
+        .put(0, 0x300, &[0xE1, 0xCD, 0x10, 0x03, 0xE9])
+        .put(0, 0x310, &[0x2A, 0xB7, 0x20, 0xFC, 0xC9])
+        .put(0, 0x400, &[0xC9])
+        .analyze();
+    assert!(
+        has(&r, 0, 0x400),
+        "{:?} {:?}",
+        r.functions.keys(),
+        r.unresolved
+    );
+    let entry = &r.functions[&Loc::fixed(0x100)];
+    assert!(!entry.body.contains_key(&Loc::fixed(0x153)));
 }

@@ -6,7 +6,7 @@ use crate::func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 use crate::loc::Loc;
 
 /// Why a transfer could not be followed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum UnresolvedKind {
     /// A target in `$4000-$7FFF` while the mapped bank is not known.
     UnknownBank,
@@ -24,9 +24,20 @@ pub enum UnresolvedKind {
     /// not constant.
     IndirectCall,
     /// A call to a routine that jumps through a table placed right after
-    /// the call. The table's length is not known, so its targets are not
-    /// followed.
+    /// the call, and no entry of the table points to code.
     InlineTable,
+    /// A jump through a table in ROM with no entry that points to code.
+    JumpTable,
+    /// A jump through a pointer kept in RAM whose stored values are not
+    /// all known: no constant store was found, or some bytes stored there
+    /// are not part of a known pointer.
+    RamPointer,
+    /// A jump through a pointer kept in RAM into the switchable window,
+    /// while the bank at the jump is not known.
+    CellBank,
+    /// A callee that has to be run inside its caller, called too deep in a
+    /// chain of such callees.
+    ContextDepth,
     /// An unused opcode.
     Illegal,
     /// An instruction runs past the end of its bank window.
@@ -47,6 +58,10 @@ impl UnresolvedKind {
             UnresolvedKind::TrampolineBank => "trampoline-bank",
             UnresolvedKind::IndirectCall => "indirect-call",
             UnresolvedKind::InlineTable => "inline-table",
+            UnresolvedKind::JumpTable => "jump-table",
+            UnresolvedKind::RamPointer => "ram-pointer",
+            UnresolvedKind::CellBank => "ram-pointer-bank",
+            UnresolvedKind::ContextDepth => "context-depth",
             UnresolvedKind::Illegal => "illegal-opcode",
             UnresolvedKind::RunsOffWindow => "runs-off-window",
             UnresolvedKind::OutsideRom => "outside-rom",
@@ -98,6 +113,46 @@ pub struct Trampoline {
     pub bank_reg: Option<char>,
     /// The register pair holding the target address.
     pub target_regs: Option<(char, char)>,
+}
+
+/// How the length of a followed jump table is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TableBound {
+    /// The index is bounded by a compare, a mask or a constant.
+    Index,
+    /// The table is the run of entries that point to code, ending at the
+    /// first entry that does not or at code.
+    Run,
+}
+
+/// A jump table that was followed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct JumpTable {
+    /// The jump.
+    pub site: Loc,
+    /// The first entry.
+    pub table: Loc,
+    /// Bytes from one entry to the next.
+    pub step: u8,
+    /// Entries followed.
+    pub entries: usize,
+    /// Rows of the table read, including rows left out.
+    pub rows: usize,
+    /// How the length is known.
+    pub bound: TableBound,
+}
+
+/// A jump through a pointer kept in RAM that was followed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RamPointerJump {
+    /// The jump.
+    pub site: Loc,
+    /// The RAM address of the pointer's low byte.
+    pub cell: u16,
+    /// Targets followed: constants stored there anywhere in the program.
+    pub targets: usize,
+    /// Whether some values are not known.
+    pub partial: bool,
 }
 
 /// An edge between functions.
@@ -158,4 +213,8 @@ pub struct Report {
     /// every instruction found. Some are data; some are code that is only
     /// reached through a pointer. They are not followed.
     pub unreached_pointers: Vec<AddressTaken>,
+    /// Jump tables followed.
+    pub tables: Vec<JumpTable>,
+    /// Jumps through pointers kept in RAM that were followed.
+    pub ram_pointers: Vec<RamPointerJump>,
 }
