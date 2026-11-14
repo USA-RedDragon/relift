@@ -109,7 +109,9 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
             .status
             .success()
     );
-    let out = run(&project, &[], &["--cache-dir", &cache, "-j", "4", "build"]);
+    let no_sdl3 = root.join("no-sdl3").display().to_string();
+    let env = [("RELIFT_SDL3_DIR", no_sdl3.as_str())];
+    let out = run(&project, &env, &["--cache-dir", &cache, "-j", "4", "build"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let err = stderr(&out);
     assert!(!err.contains('\x1b') && !err.contains('\r'), "{err:?}");
@@ -118,6 +120,7 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         \x20 main discover 2 functions  <time>\n\
         \x20 main lift     2 functions, 0 unlifted  <time>\n\
         \x20 main emit     1 shard, 0 overrides  <time>\n\
+        window: SDL3 not found, building headless (set RELIFT_SDL3_DIR)\n\
         \x20      compile  <n> files, clang -O2, -j4  <time>\n\
         built 2 functions, 0 instructions not lifted, <time> in all\n\
         \x20 output: <root>/cache/projects/tiny/build/host/game\n",
@@ -126,7 +129,7 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
     );
     assert_eq!(mask(&err, &root), want);
 
-    let again = run(&project, &[], &["--cache-dir", &cache, "-j", "4", "build"]);
+    let again = run(&project, &env, &["--cache-dir", &cache, "-j", "4", "build"]);
     assert!(
         mask(&stderr(&again), &root).contains("compile  up to date, clang -O2, -j4  <time>\n"),
         "{}",

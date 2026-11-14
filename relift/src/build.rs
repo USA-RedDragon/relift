@@ -342,7 +342,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
     let compile_row = ui.row("");
     let root = cache_root(settings)?;
     std::fs::create_dir_all(&root)?;
-    let out = std::fs::canonicalize(root)?
+    let out = std::fs::canonicalize(&root)?
         .join("projects")
         .join(name)
         .join("build")
@@ -393,6 +393,8 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
     } else {
         lifted_flags
     };
+    let extras = crate::runtime_link::extras(&rt, &root)?;
+    ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
         .iter()
         .cloned()
@@ -413,6 +415,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             inc("cpus/a64"),
             inc("guests/switch"),
         ])
+        .chain(extras.defines())
         .collect();
     let obj = |src: &Path, tag: &str| {
         let stem = src
@@ -452,13 +455,18 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             flags: rt_flags.clone(),
         });
     }
+    compiles.extend(extras.compiles(&rt, &rt_flags, &|s| obj(s, "rt")));
     let clang = tool(&settings.toolchain.clang, "clang").ok_or("no clang on PATH")?;
     let exe = out.join("game");
     let plan = Plan {
         cc: vec![clang.display().to_string()],
         compiles,
         output: exe.clone(),
-        link_flags: vec!["-lpthread".into(), "-lm".into()],
+        link_flags: ["-lpthread", "-lm"]
+            .map(String::from)
+            .into_iter()
+            .chain(extras.libs())
+            .collect(),
     };
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = if ninja.is_some() {

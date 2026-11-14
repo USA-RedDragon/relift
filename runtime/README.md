@@ -31,6 +31,8 @@ make -C runtime sched-bench                  # device scheduler microbenchmark
 make -C runtime -j2 CC="zig cc" AR="zig ar" TARGET=x86_64-windows-gnu BUILD=build/win portable
 ```
 
+`relift build` links `guests/switch/vk` into every game. It also links `host/window_sdl3.c` when it finds SDL3: `RELIFT_SDL3_DIR` (a directory with `include/` and `lib/`), else `<cache>/sdk/sdl3/<arch>-<os>/` (where the pinned prebuilt is unpacked), else `pkg-config sdl3`. Without SDL3 it prints one line and builds headless.
+
 `portable` builds only `crash_test`, `fiber_tests` and `sched_bench`,
 which link the host-portable part of the core (crash handler, fibers,
 scheduler), so they build for Windows (x86-64 and arm64), where the rest
