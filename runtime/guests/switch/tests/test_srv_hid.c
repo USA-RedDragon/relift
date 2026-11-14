@@ -620,6 +620,20 @@ static uint32_t vib_handle(uint8_t type, uint8_t player, uint8_t pos)
     return (uint32_t)type | ((uint32_t)player << 8) | ((uint32_t)pos << 16);
 }
 
+TEST(hid_has_a_pointer_buffer_for_its_x_buffers)
+{
+    env e;
+    CHECK(start(&e));
+    tc_req q = tc_new(3);
+    q.type = HIPC_CONTROL;
+    tc_res r = tc_call(e.c, e.hid.handle, &q, false);
+    CHECK_EQ(r.result, 0);
+    uint16_t pbs;
+    memcpy(&pbs, r.data, 2);
+    CHECK(pbs >= 10 * 4);
+    rl_hid_stop();
+}
+
 TEST(hid_control_commands)
 {
     env e;
