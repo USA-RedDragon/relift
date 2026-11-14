@@ -68,10 +68,12 @@ struct Charter {
 const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries or are not wired into `relift` yet
-/// (`relift-cpu-sm83` until its lifter lands), so the reachability controls
-/// skip them; the absence walks still cover them.
+/// (`relift-cpu-sm83` until its lifter lands, `relift-emit-wasm` until a
+/// browser build uses it), so the reachability controls skip them; the
+/// absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-cpu-sm83",
+    "relift-emit-wasm",
     "relift-gb-formats",
     "relift-gb-tools",
     "relift-switch-tools",
@@ -141,6 +143,14 @@ const CHARTERS: &[Charter] = &[
         why: "IR to C per host target; knows no CPU and no guest",
         normal: &["relift-guest", "relift-host", "relift-ir"],
         dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-emit-wasm",
+        band: 2,
+        why: "IR to WebAssembly modules; knows no CPU and no guest; wasmtime runs its differential tests only",
+        normal: &["relift-guest", "relift-ir", "wasm-encoder"],
+        dev: &["wasmtime"],
         build: NONE,
     },
     Charter {
@@ -564,6 +574,21 @@ impl Workspace {
             }
         }
         routes
+    }
+
+    /// Every package `from` links into a build of its own (normal and build
+    /// edges only, at every hop), so what its tests compile is left out.
+    fn linked(&self, from: &str) -> BTreeSet<String> {
+        let mut seen = BTreeSet::new();
+        let mut queue = VecDeque::from([from.to_string()]);
+        while let Some(node) = queue.pop_front() {
+            for (dep, kinds) in self.resolved.get(&node).into_iter().flatten() {
+                if kinds.iter().any(|k| *k != Kind::Dev) && seen.insert(dep.clone()) {
+                    queue.push_back(dep.clone());
+                }
+            }
+        }
+        seen
     }
 
     /// The members of `closure` and the routes to them.
@@ -999,4 +1024,40 @@ fn the_reader_reads_this_workspace() {
             && ws.closure(ir).keys().all(|k| !ws.members.contains_key(k)),
         "control: relift-analyze must reach relift-ir, and relift-ir must reach no member"
     );
+}
+
+/// The packages only a test may link: a WebAssembly runtime is how
+/// `relift-emit-wasm` checks its modules, never part of a shipped build.
+const TEST_ONLY: &[&str] = &["wasmtime", "cranelift-codegen"];
+
+/// No member links a [`TEST_ONLY`] package through normal or build edges.
+/// Control: `relift-emit-wasm`'s tests do reach `wasmtime`, and its own
+/// build does reach `wasm-encoder`, so the walk sees both kinds of edge.
+#[test]
+fn test_only_packages_stay_out_of_every_build() {
+    let ws = workspace();
+    let name = |id: &String| ws.packages[id].0.clone();
+    let wasm = ws.id_of("relift-emit-wasm");
+    let tests: BTreeSet<String> = ws.closure(wasm).keys().map(name).collect();
+    assert!(
+        TEST_ONLY.iter().all(|t| tests.contains(*t)),
+        "control: relift-emit-wasm's tests no longer reach {TEST_ONLY:?}; point this control elsewhere"
+    );
+    assert!(
+        ws.linked(wasm)
+            .iter()
+            .map(name)
+            .any(|n| n == "wasm-encoder"),
+        "control: relift-emit-wasm's build does not reach wasm-encoder"
+    );
+    let mut broken = Vec::new();
+    for (id, m) in &ws.members {
+        for dep in ws.linked(id) {
+            let n = name(&dep);
+            if TEST_ONLY.contains(&n.as_str()) {
+                broken.push(format!("{} links {n}", m.name));
+            }
+        }
+    }
+    report("test-only packages", broken);
 }
