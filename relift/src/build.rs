@@ -259,6 +259,7 @@ fn emit_modules(
                 unit_name: p.name.clone(),
                 unit_symbol: unit.clone(),
                 module_base: p.base,
+                parts: false,
             },
             &mut |d, total| {
                 shards = total;
