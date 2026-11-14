@@ -17,6 +17,8 @@ use relift_ir::{Block, Flow, Next, Op};
 
 use crate::regs;
 
+pub mod region;
+
 /// One function as the census sees it: lifted blocks by address (`None` for
 /// an instruction that did not lift) and the raw instruction words.
 pub struct Function<'a> {
@@ -187,6 +189,215 @@ fn returned_is_used(
         }
     }
     false
+}
+
+/// Whether `w` is `MSR FPSR, Xt`.
+pub fn msr_fpsr(w: u32) -> bool {
+    w & 0xffff_ffe0 == 0xd51b_4420
+}
+
+/// Whether block `b` may raise FP exception flags: an FP operation other
+/// than negation and absolute value (sign-bit operations), flags an IR-built
+/// operation raises, or an FP guard whose slow path runs the exact layer.
+pub fn raises(b: &Block) -> bool {
+    use relift_ir::FpOp;
+    b.insts.iter().any(|i| match &i.op {
+        Op::Fp(op, _) => !matches!(op, FpOp::Neg | FpOp::Abs),
+        Op::Intrinsic(name, _) => *name == crate::lift::system::FP_RAISE,
+        Op::Guard(_, code) => {
+            *code == crate::lift::sail::SLOW_FPCR || *code == crate::lift::sail::SLOW_FLAGS
+        }
+        _ => false,
+    })
+}
+
+/// What [`summarize`] needs to know about the rest of the program.
+pub struct Context<'a> {
+    /// Whether an address is a function entry.
+    pub is_entry: &'a dyn Fn(u64) -> bool,
+    /// The targets of the computed call or jump at an address, when the
+    /// build resolved them (a transfer through a loader-filled slot).
+    pub resolved: &'a dyn Fn(u64) -> Option<Vec<u64>>,
+    /// Whether a call to an entry may come back to its return point from
+    /// elsewhere (`setjmp`).
+    pub resume_point: &'a dyn Fn(u64) -> bool,
+}
+
+/// One instruction's edges: successors in the function and what leaves it.
+fn edges(
+    f: &Function<'_>,
+    tables: &BTreeMap<u64, Vec<u64>>,
+    cx: &Context<'_>,
+    pc: u64,
+    b: &Block,
+) -> (Vec<u64>, region::End) {
+    use region::{End, Targets};
+    let inside = |t: u64| f.insts.contains_key(&t);
+    let mut succs = Vec::new();
+    let mut out = Vec::new();
+    let mut unknown = false;
+    let mut to = |t: u64, succs: &mut Vec<u64>| {
+        if inside(t) {
+            succs.push(t);
+        } else if (cx.is_entry)(t) {
+            out.push(t);
+        } else {
+            unknown = true;
+        }
+    };
+    let end = match b.exit.flow {
+        Flow::Return => End::Return,
+        Flow::Call { ret } => {
+            if inside(ret) {
+                succs.push(ret);
+            }
+            let t = match b.exit.next {
+                Next::Const(t) => Targets::Known(vec![t]),
+                _ => (cx.resolved)(pc).map_or(Targets::Unknown, Targets::Known),
+            };
+            return (succs, End::Call(t));
+        }
+        Flow::Jump | Flow::Trap(_) => {
+            match b.exit.next {
+                Next::Const(t) => to(t, &mut succs),
+                Next::Select {
+                    taken, not_taken, ..
+                } => {
+                    to(taken, &mut succs);
+                    to(not_taken, &mut succs);
+                }
+                Next::Dynamic(_) => match tables.get(&pc) {
+                    Some(ts) => ts.iter().for_each(|&t| to(t, &mut succs)),
+                    None => match (cx.resolved)(pc) {
+                        Some(ts) => out.extend(ts),
+                        None => unknown = true,
+                    },
+                },
+            }
+            End::Fall
+        }
+    };
+    let end = if unknown {
+        End::Exit(Targets::Unknown)
+    } else if !out.is_empty() {
+        End::Exit(Targets::Known(out))
+    } else {
+        end
+    };
+    (succs, end)
+}
+
+/// The region analysis view of `f`, with jump tables `tables`, whose live
+/// reads are `reads`.
+pub fn summarize(
+    f: &Function<'_>,
+    tables: &BTreeMap<u64, Vec<u64>>,
+    reads: &BTreeSet<u64>,
+    cx: &Context<'_>,
+) -> region::Func {
+    use region::{Bb, End, Func, Targets};
+    struct I {
+        pc: u64,
+        succs: Vec<u64>,
+        end: End,
+        fp: bool,
+        writes: bool,
+    }
+    let mut insts = Vec::with_capacity(f.insts.len());
+    let mut foreign = BTreeSet::new();
+    for (&pc, b) in &f.insts {
+        let Some(b) = b else {
+            // It reports itself as undefined and ends the thread.
+            insts.push(I {
+                pc,
+                succs: Vec::new(),
+                end: End::Fall,
+                fp: false,
+                writes: false,
+            });
+            continue;
+        };
+        let (succs, end) = edges(f, tables, cx, pc, b);
+        if let (End::Call(Targets::Known(ts)), Flow::Call { ret }) = (&end, b.exit.flow)
+            && ts.iter().any(|&t| (cx.resume_point)(t))
+        {
+            foreign.insert(ret);
+        }
+        let w = (f.raw)(pc);
+        insts.push(I {
+            pc,
+            succs,
+            end,
+            fp: raises(b),
+            writes: msr_fpsr(w),
+        });
+    }
+    let mut npreds: BTreeMap<u64, usize> = BTreeMap::new();
+    for i in &insts {
+        for &s in &i.succs {
+            *npreds.entry(s).or_default() += 1;
+        }
+    }
+    // A block starts at the entry, a read, a foreign point, a join, a
+    // branch target, or after an instruction that does more than fall
+    // through to the next one.
+    let mut leaders = BTreeSet::from([f.entry]);
+    let mut prev_falls: Option<u64> = None;
+    for (k, i) in insts.iter().enumerate() {
+        let n = npreds.get(&i.pc).copied().unwrap_or(0);
+        if prev_falls != Some(i.pc) || n != 1 || reads.contains(&i.pc) || foreign.contains(&i.pc) {
+            leaders.insert(i.pc);
+        }
+        let next = insts.get(k + 1).map(|j| j.pc);
+        prev_falls = (i.end == End::Fall && i.succs.len() == 1 && Some(i.succs[0]) == next)
+            .then(|| i.succs[0]);
+    }
+    // The entry block comes first, even when code below the entry belongs
+    // to the function.
+    let order: Vec<u64> = std::iter::once(f.entry)
+        .chain(leaders.iter().copied().filter(|&a| a != f.entry))
+        .collect();
+    let index: BTreeMap<u64, usize> = order.iter().enumerate().map(|(k, &a)| (a, k)).collect();
+    let mut blocks: Vec<Bb> = order
+        .iter()
+        .map(|&a| Bb {
+            start: a,
+            fp: false,
+            fp_tail: false,
+            writes: false,
+            succs: Vec::new(),
+            end: End::Fall,
+            foreign: foreign.contains(&a),
+        })
+        .collect();
+    let mut cur = 0;
+    for i in insts {
+        if let Some(&k) = index.get(&i.pc) {
+            cur = k;
+        }
+        let blk = &mut blocks[cur];
+        blk.fp |= i.fp;
+        if i.writes {
+            blk.writes = true;
+            blk.fp_tail = false;
+        }
+        blk.fp_tail |= i.fp;
+        blk.succs = i
+            .succs
+            .iter()
+            .filter_map(|s| index.get(s).copied())
+            .collect();
+        blk.end = i.end;
+    }
+    let reads = reads
+        .iter()
+        .filter_map(|r| index.get(r).map(|&k| (*r, k)))
+        .collect();
+    Func {
+        entry: f.entry,
+        blocks,
+        reads,
+    }
 }
 
 #[cfg(test)]
