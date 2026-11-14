@@ -7,9 +7,11 @@
  * The client encoder follows the message layout of libnx (ISC) sf/hipc.h and
  * sf/cmif.h, written with guest addresses.
  */
+#include "fs_priv.h"
 #include "hos_fs.h"
 #include "t.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -625,6 +627,229 @@ TEST(fs_save_data_is_a_host_directory_per_user)
     CHECK_EQ(stat(host("/save/0100000000010000/user-00000000000000010000000000000000/slot"), &st), 0);
     CHECK(S_ISDIR(st.st_mode));
     CHECK(stat(host("/slot"), &st) != 0);
+    rl_hos_fs_set_save(NULL);
+    tmp_clean();
+}
+
+#define SAVE_DIR "/save/0100000000010000/user-00000000000000010000000000000000"
+
+static uint32_t mount_save(fsx *x, uint32_t cmd, uint32_t *h)
+{
+    uint64_t in[9] = { 1, 0, 1, 0, 0, 1, 0, 0, 0 };
+    rq q;
+    rs r;
+    memset(&q, 0, sizeof q);
+    q.cmd = cmd;
+    put_data(&q, in, sizeof in);
+    r = call(x->c, x->proxy, &q);
+    *h = r.nmove ? r.move[0] : 0;
+    return r.svc_rc ? r.svc_rc : r.result;
+}
+
+static void unmount_save(fsx *x, uint32_t h) { t_svc(x->c, SVC_CLOSE_HANDLE, h, 0, 0, 0, 0, 0); }
+
+static void save_setup(fsx *x, const char *name, uint32_t *h)
+{
+    tmp_make(name);
+    CHECK(fs_open(x, g_tmp));
+    rl_hos_fs_set_save(host("/save"));
+    CHECK(mount_save(x, 51, h) == 0);
+    x->fs = *h;
+}
+
+static long host_read(const char *rel, char *out, size_t n)
+{
+    char path[PATH_MAX];
+    ssize_t k;
+    int fd;
+    snprintf(path, sizeof path, "%s%s", g_tmp, rel);
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+    k = read(fd, out, n);
+    close(fd);
+    return (long)k;
+}
+
+static void guest_put(fsx *x, const char *path, const char *text)
+{
+    uint32_t fh;
+    uint64_t n = strlen(text);
+    CHECK(create_file(x, path, n) == 0);
+    CHECK(open_file(x, path, 6, &fh) == 0);
+    CHECK(file_write(x, fh, 0, text, n) == 0);
+    t_svc(x->c, SVC_CLOSE_HANDLE, fh, 0, 0, 0, 0, 0);
+}
+
+static int guest_has(fsx *x, const char *path, const char *text)
+{
+    uint32_t fh;
+    char buf[64] = { 0 };
+    uint64_t got = 0;
+    if (open_file(x, path, 1, &fh) != 0)
+        return 0;
+    if (file_read(x, fh, 0, sizeof buf, sizeof buf, buf, &got) != 0)
+        got = 0;
+    t_svc(x->c, SVC_CLOSE_HANDLE, fh, 0, 0, 0, 0, 0);
+    return got == strlen(text) && memcmp(buf, text, got) == 0;
+}
+
+static int host_has(const char *rel, const char *text)
+{
+    char buf[64];
+    long n = host_read(rel, buf, sizeof buf);
+    return n == (long)strlen(text) && memcmp(buf, text, (size_t)n) == 0;
+}
+
+TEST(fs_save_writes_are_visible_but_not_durable_until_commit)
+{
+    fsx x;
+    uint32_t h, h2;
+    save_setup(&x, "fs-save-j", &h);
+    guest_put(&x, "/slot", "one");
+    CHECK(guest_has(&x, "/slot", "one"));
+    CHECK(!host_has(SAVE_DIR "/slot", "one"));
+    unmount_save(&x, h);
+    CHECK_EQ(mount_save(&x, 51, &h2), 0);
+    x.fs = h2;
+    CHECK_EQ(fs_result(&x, 7, "/slot", NULL, NULL, 0), RL_MAKE_RESULT(2, 1));
+    guest_put(&x, "/slot", "two");
+    CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+    CHECK(host_has(SAVE_DIR "/slot", "two"));
+    CHECK(guest_has(&x, "/slot", "two"));
+    {
+        uint32_t fh;
+        CHECK_EQ(open_file(&x, "/slot", 6, &fh), 0);
+        CHECK_EQ(file_write(&x, fh, 0, "tre", 3), 0);
+        CHECK(guest_has(&x, "/slot", "tre"));
+        CHECK(host_has(SAVE_DIR "/slot", "two"));
+        CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+        CHECK(host_has(SAVE_DIR "/slot", "tre"));
+        CHECK_EQ(file_write(&x, fh, 0, "fou", 3), 0);
+        CHECK(host_has(SAVE_DIR "/slot", "tre"));
+        t_svc(x.c, SVC_CLOSE_HANDLE, fh, 0, 0, 0, 0, 0);
+    }
+    unmount_save(&x, h2);
+    CHECK_EQ(mount_save(&x, 51, &h2), 0);
+    x.fs = h2;
+    CHECK(guest_has(&x, "/slot", "tre"));
+    unmount_save(&x, h2);
+    rl_hos_fs_set_save(NULL);
+    tmp_clean();
+}
+
+TEST(fs_save_commit_leaves_only_the_plain_save_directory)
+{
+    fsx x;
+    uint32_t h;
+    char path[PATH_MAX];
+    DIR *d;
+    struct dirent *de;
+    int entries = 0;
+    save_setup(&x, "fs-save-l", &h);
+    CHECK_EQ(fs_result(&x, 2, "/dir", NULL, NULL, 0), 0);
+    guest_put(&x, "/dir/f", "x");
+    CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+    snprintf(path, sizeof path, "%s/save/0100000000010000", g_tmp);
+    d = opendir(path);
+    CHECK(d != NULL);
+    while ((de = readdir(d)) != NULL)
+        if (strcmp(de->d_name, ".") && strcmp(de->d_name, "..")) {
+            entries++;
+            CHECK(strncmp(de->d_name, "user-", 5) == 0 || de->d_name[0] == '.');
+        }
+    closedir(d);
+    CHECK_EQ(entries, 2);
+    CHECK(host_has(SAVE_DIR "/dir/f", "x"));
+    unmount_save(&x, h);
+    d = opendir(path);
+    entries = 0;
+    while ((de = readdir(d)) != NULL)
+        if (strcmp(de->d_name, ".") && strcmp(de->d_name, ".."))
+            entries++;
+    closedir(d);
+    CHECK_EQ(entries, 1);
+    rl_hos_fs_set_save(NULL);
+    tmp_clean();
+}
+
+static void crash_case(int step)
+{
+    {
+        fsx x;
+        uint32_t h, h2;
+        save_setup(&x, "fs-save-c", &h);
+        guest_put(&x, "/slot", "old");
+        CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+        guest_put(&x, "/new", "n");
+        CHECK_EQ(fs_result(&x, 1, "/slot", NULL, NULL, 0), 0);
+        guest_put(&x, "/slot", "new");
+        rl_save_set_fault(step);
+        CHECK(fs_result(&x, 10, NULL, NULL, NULL, 0) != 0);
+        CHECK(fs_result(&x, 10, NULL, NULL, NULL, 0) != 0);
+        unmount_save(&x, h);
+        CHECK_EQ(mount_save(&x, 51, &h2), 0);
+        x.fs = h2;
+        if (step == 1) {
+            CHECK(guest_has(&x, "/slot", "old"));
+            CHECK_EQ(fs_result(&x, 7, "/new", NULL, NULL, 0), RL_MAKE_RESULT(2, 1));
+        } else {
+            CHECK(guest_has(&x, "/slot", "new"));
+            CHECK(guest_has(&x, "/new", "n"));
+        }
+        guest_put(&x, "/after", "a");
+        CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+        CHECK(host_has(SAVE_DIR "/after", "a"));
+        unmount_save(&x, h2);
+        rl_hos_fs_set_save(NULL);
+        tmp_clean();
+    }
+}
+
+TEST(fs_save_crash_in_commit_step_1_recovers_to_one_state)
+{
+    crash_case(1);
+}
+
+TEST(fs_save_crash_in_commit_step_2_recovers_to_one_state)
+{
+    crash_case(2);
+}
+
+TEST(fs_save_crash_in_commit_step_3_recovers_to_one_state)
+{
+    crash_case(3);
+}
+
+TEST(fs_save_crash_in_commit_step_4_recovers_to_one_state)
+{
+    crash_case(4);
+}
+
+TEST(fs_save_crash_in_commit_step_5_recovers_to_one_state)
+{
+    crash_case(5);
+}
+
+TEST(fs_save_second_mount_is_locked_and_read_only_refuses_writes)
+{
+    fsx x;
+    uint32_t h, h2, fh;
+    save_setup(&x, "fs-save-r", &h);
+    guest_put(&x, "/slot", "one");
+    CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+    CHECK_EQ(mount_save(&x, 51, &h2), RL_MAKE_RESULT(2, 7));
+    CHECK_EQ(mount_save(&x, 53, &h2), 0);
+    x.fs = h2;
+    CHECK(guest_has(&x, "/slot", "one"));
+    CHECK_EQ(open_file(&x, "/slot", 2, &fh), RL_MAKE_RESULT(2, 6203));
+    CHECK_EQ(create_file(&x, "/other", 1), RL_MAKE_RESULT(2, 6203));
+    CHECK_EQ(fs_result(&x, 1, "/slot", NULL, NULL, 0), RL_MAKE_RESULT(2, 6203));
+    CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+    unmount_save(&x, h2);
+    unmount_save(&x, h);
+    CHECK_EQ(mount_save(&x, 51, &h2), 0);
+    unmount_save(&x, h2);
     rl_hos_fs_set_save(NULL);
     tmp_clean();
 }
