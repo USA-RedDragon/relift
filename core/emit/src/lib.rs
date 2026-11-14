@@ -219,7 +219,159 @@ pub fn emit_with(
     opts: &Options,
     on: &mut dyn FnMut(usize, usize),
 ) -> Output {
-    let mut targets: BTreeMap<u64, Target> = fns
+    let heads: Vec<Head> = fns.iter().map(Head::of).collect();
+    let mut out = Output::default();
+    out.undefined = emit_core(
+        fe,
+        &heads,
+        overrides,
+        opts,
+        on,
+        &mut |ks, targets| {
+            ks.iter()
+                .map(|&k| {
+                    func::emit_function(fe, &fns[k], targets, opts.piece_bytes.max(1), &opts.io_map)
+                })
+                .collect()
+        },
+        &mut |f| out.files.push(f),
+    );
+    out
+}
+
+/// One function as [`emit_streamed`] takes it before its code: what the
+/// unit table, the function maps and calls to it need.
+#[derive(Clone, Debug)]
+pub struct Head {
+    /// The entry address.
+    pub entry: u64,
+    /// The host identifier of the C function.
+    pub name: String,
+    /// The readable guest name for crash reports, if there is one.
+    pub guest_name: Option<String>,
+    /// The guest bytes it spans from the entry, for crash mapping.
+    pub span: u64,
+    /// The landing pads in the function.
+    pub pads: BTreeSet<u64>,
+}
+
+impl Head {
+    /// The head of `f`.
+    pub fn of(f: &Function<'_>) -> Head {
+        Head {
+            entry: f.entry,
+            name: f.name.clone(),
+            guest_name: f.guest_name.clone(),
+            span: f.span,
+            pads: f.pads.clone(),
+        }
+    }
+}
+
+/// Lends functions to [`emit_streamed`]: called with indices into its
+/// heads, in order, it calls the sink with each index and that function,
+/// whose head must be the one at the index.
+pub type Lend<'l> = dyn Fn(&[usize], &mut dyn FnMut(usize, &Function<'_>)) + Sync + 'l;
+
+/// How many functions [`emit_streamed`] emits between two shard packings.
+const BATCH: usize = 1024;
+
+/// How many neighboring functions one thread takes at a time.
+const GROUP: usize = 16;
+
+/// As [`emit_with`], for the functions `heads` whose code `lend` gives a
+/// few at a time, so that only those are held; `fe` turns them into C on
+/// up to one thread per CPU. Each file goes to `sink` when it is complete,
+/// in the order [`emit`] gives them. Gives the number of instructions that
+/// report themselves as undefined at run time ([`Output::undefined`]).
+pub fn emit_streamed(
+    fe: &(dyn Frontend + Sync),
+    heads: &[Head],
+    lend: &Lend<'_>,
+    overrides: &[Override],
+    opts: &Options,
+    on: &mut dyn FnMut(usize, usize),
+    sink: &mut dyn FnMut(File),
+) -> usize {
+    emit_core(
+        fe,
+        heads,
+        overrides,
+        opts,
+        on,
+        &mut |ks, targets| {
+            let groups: Vec<&[usize]> = ks.chunks(GROUP).collect();
+            parallel(&groups, |g| {
+                let mut out = Vec::with_capacity(g.len());
+                lend(g, &mut |_, f| {
+                    out.push(func::emit_function(
+                        fe,
+                        f,
+                        targets,
+                        opts.piece_bytes.max(1),
+                        &opts.io_map,
+                    ));
+                });
+                out
+            })
+            .into_iter()
+            .flatten()
+            .collect()
+        },
+        sink,
+    )
+}
+
+/// `f` of every item of `items`, in order, on up to one thread per CPU.
+fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(items.len());
+    if threads <= 1 {
+        return items.iter().map(f).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(item) = items.get(i) else {
+                            break;
+                        };
+                        mine.push((i, f(item)));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    });
+    out.sort_unstable_by_key(|r| r.0);
+    out.into_iter().map(|r| r.1).collect()
+}
+
+/// Gives the C of a run of functions, by index, with the direct-call
+/// targets of the module.
+type Compute<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<func::Emitted1> + 'c;
+
+/// Emits the functions `heads`, whose C `compute` gives for a run of
+/// indices into them, and gives each file to `sink`.
+fn emit_core(
+    fe: &dyn Frontend,
+    heads: &[Head],
+    overrides: &[Override],
+    opts: &Options,
+    on: &mut dyn FnMut(usize, usize),
+    compute: &mut Compute<'_>,
+    sink: &mut dyn FnMut(File),
+) -> usize {
+    let mut targets: BTreeMap<u64, Target> = heads
         .iter()
         .map(|f| {
             (
@@ -242,12 +394,12 @@ pub fn emit_with(
             },
         );
     }
-    let fns: Vec<&Function<'_>> = fns
-        .iter()
-        .filter(|f| targets.get(&f.entry).is_some_and(|t| t.lifted))
+    let kept: Vec<usize> = (0..heads.len())
+        .filter(|&k| targets.get(&heads[k].entry).is_some_and(|t| t.lifted))
         .collect();
-    let mut out = Output::default();
-    out.files.push(File {
+    let fns: Vec<&Head> = kept.iter().map(|&k| &heads[k]).collect();
+    let mut undefined = 0;
+    sink(File {
         name: PRELUDE_NAME.into(),
         text: PRELUDE.into(),
         fns: Vec::new(),
@@ -257,14 +409,21 @@ pub fn emit_with(
         opts,
         targets: &targets,
         maps: Vec::new(),
-        files: Vec::new(),
+        sink,
         cur: Shard::default(),
     };
     let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
     let budget = opts.shard_bytes.max(1);
+    let mut done = std::collections::VecDeque::new();
     for (k, f) in fns.iter().enumerate() {
-        let e = func::emit_function(fe, f, &targets, opts.piece_bytes.max(1), &opts.io_map);
-        out.undefined += e.undefined;
+        if done.is_empty() {
+            let end = kept.len().min(k + BATCH);
+            done.extend(compute(&kept[k..end], &targets));
+        }
+        let Some(e) = done.pop_front() else {
+            break;
+        };
+        undefined += e.undefined;
         flags.insert(f.entry, e.flags);
         // A shard map's range stops at the next function of the module, so
         // maps of different shards never overlap either.
@@ -350,13 +509,12 @@ pub fn emit_with(
         on(fns.len(), fns.len());
     }
     let maps = std::mem::take(&mut w.maps);
-    out.files.extend(w.files);
-    out.files.push(File {
+    (w.sink)(File {
         name: "unit.c".into(),
         text: unit_table(fe, &fns, overrides, &flags, &maps, opts),
         fns: Vec::new(),
     });
-    out
+    undefined
 }
 
 /// One function-map entry of a shard.
@@ -395,7 +553,7 @@ struct Shards<'a> {
     opts: &'a Options,
     targets: &'a BTreeMap<u64, Target>,
     maps: Vec<String>,
-    files: Vec<File>,
+    sink: &'a mut dyn FnMut(File),
     cur: Shard,
 }
 
@@ -415,7 +573,7 @@ impl Shards<'_> {
     /// Closes the current shard into a file.
     fn flush(&mut self) {
         let sh = std::mem::take(&mut self.cur);
-        let i = self.files.len();
+        let i = self.maps.len();
         let opts = self.opts;
         let own: BTreeSet<&str> = sh.defined.iter().map(String::as_str).collect();
         let mut text = self.header.clone();
@@ -484,7 +642,7 @@ impl Shards<'_> {
                 opts.unit_name, opts.module_base
             );
             self.maps.push(map);
-            self.files.push(File {
+            (self.sink)(File {
                 name: format!("{shard}.c"),
                 text,
                 fns: owners,
@@ -499,7 +657,7 @@ impl Shards<'_> {
             opts.module_base
         );
         self.maps.push(map);
-        self.files.push(File {
+        (self.sink)(File {
             name: format!("{shard}.c"),
             text,
             fns: owners,
@@ -516,7 +674,7 @@ fn includes(fe: &dyn Frontend) -> String {
 
 fn unit_table(
     fe: &dyn Frontend,
-    fns: &[&Function<'_>],
+    fns: &[&Head],
     overrides: &[Override],
     flags: &BTreeMap<u64, &'static str>,
     maps: &[String],

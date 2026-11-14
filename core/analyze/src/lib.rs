@@ -501,20 +501,29 @@ pub fn each_lifted<R: Send>(
     f: impl Fn(&Outline, &Function) -> R + Sync,
 ) -> Vec<R> {
     grouped(outlines, |group| {
-        let mut lifter = Lifter::new(fe, module, &NO_PADS);
-        group
-            .iter()
-            .enumerate()
-            .map(|(k, o)| {
-                let r = f(o, &o.lift_with(&mut lifter));
-                match group.get(k + 1) {
-                    Some(next) => lifter.cache.retain(|pc, _| next.contains(*pc)),
-                    None => lifter.cache.clear(),
-                }
-                r
-            })
-            .collect()
+        let mut out = Vec::with_capacity(group.len());
+        lift_each(fe, module, group, &mut |o, l| out.push(f(o, l)));
+        out
     })
+}
+
+/// Calls `f` with each of `outlines` lifted again with `fe` from `module`,
+/// in order, on this thread; a function shares the blocks of the
+/// instructions it has in common with the one before.
+pub fn lift_each(
+    fe: &dyn Frontend,
+    module: &Module,
+    outlines: &[&Outline],
+    f: &mut dyn FnMut(&Outline, &Function),
+) {
+    let mut lifter = Lifter::new(fe, module, &NO_PADS);
+    for (k, o) in outlines.iter().enumerate() {
+        f(o, &o.lift_with(&mut lifter));
+        match outlines.get(k + 1) {
+            Some(next) => lifter.cache.retain(|pc, _| next.contains(*pc)),
+            None => lifter.cache.clear(),
+        }
+    }
 }
 
 /// The functions of one module as outlines, without their lifted code.

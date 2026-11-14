@@ -253,37 +253,52 @@ fn emit_modules(
         done.functions += layout.functions.len();
         ui.done(row, lift_summary(layout.functions.len(), failed.len()));
         let all: Vec<&Outline> = layout.functions.values().collect();
-        let lifted = relift_analyze::each_lifted(&cpu, &module, &all, |_, f| f.clone());
         let raw = |pc: u64| {
             module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
                 u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
             })
         };
-        let fns: Vec<relift_emit::Function<'_>> = lifted
+        let heads: Vec<relift_emit::Head> = all
             .iter()
-            .map(|f| relift_emit::Function {
-                entry: f.entry,
-                name: program::host_name(p, f.name.as_deref(), f.entry),
-                guest_name: f.name.clone(),
-                span: f.span(4),
-                insts: f
-                    .insts
-                    .iter()
-                    .map(|(&pc, i)| {
-                        let e = match i {
-                            Insn::Lifted(b) => relift_emit::Insn::Lifted {
-                                block: b,
-                                raw: raw(pc),
-                            },
-                            Insn::Failed(e) => relift_emit::Insn::Failed(e),
-                        };
-                        (pc, e)
-                    })
-                    .collect::<BTreeMap<_, _>>(),
-                tables: f.tables.clone(),
-                pads: f.pads.clone(),
+            .map(|o| relift_emit::Head {
+                entry: o.entry,
+                name: program::host_name(p, o.name.as_deref(), o.entry),
+                guest_name: o.name.clone(),
+                span: o.span(),
+                pads: o.pads.clone(),
             })
             .collect();
+        let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &relift_emit::Function<'_>)| {
+            let group: Vec<&Outline> = ks.iter().map(|&k| all[k]).collect();
+            let mut n = 0;
+            relift_analyze::lift_each(&cpu, &module, &group, &mut |_, f| {
+                let k = ks[n];
+                n += 1;
+                let e = relift_emit::Function {
+                    entry: f.entry,
+                    name: heads[k].name.clone(),
+                    guest_name: f.name.clone(),
+                    span: heads[k].span,
+                    insts: f
+                        .insts
+                        .iter()
+                        .map(|(&pc, i)| {
+                            let e = match i {
+                                Insn::Lifted(b) => relift_emit::Insn::Lifted {
+                                    block: b,
+                                    raw: raw(pc),
+                                },
+                                Insn::Failed(e) => relift_emit::Insn::Failed(e),
+                            };
+                            (pc, e)
+                        })
+                        .collect::<BTreeMap<_, _>>(),
+                    tables: f.tables.clone(),
+                    pads: f.pads.clone(),
+                };
+                sink(k, &e);
+            });
+        };
         let overrides: Vec<relift_emit::Override> = layout
             .functions
             .keys()
@@ -300,9 +315,14 @@ fn emit_modules(
         fpsr.add_module(i, p, &module, &layout, &cpu, &overrides);
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         ui.begin(row, "emit");
-        let out = relift_emit::emit_with(
+        let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
+        std::fs::create_dir_all(&dir)?;
+        let mut files: Vec<relift_emit::File> = Vec::new();
+        let mut written: Result<(), BoxError> = Ok(());
+        let undefined = relift_emit::emit_streamed(
             &cpu,
-            &fns,
+            &heads,
+            &lend,
             &overrides,
             &relift_emit::Options {
                 shard_bytes: kib(settings.emit.shard_kib),
@@ -325,18 +345,28 @@ fn emit_modules(
                     },
                 );
             },
+            &mut |f| {
+                if written.is_ok() {
+                    written = relift_cache::write_if_changed(&dir.join(&f.name), f.text.as_bytes())
+                        .map(|_| ())
+                        .map_err(Into::into);
+                }
+                files.push(relift_emit::File {
+                    text: String::new(),
+                    ..f
+                });
+            },
         );
+        written?;
+        let out = relift_emit::Output { files, undefined };
         let shards = out
             .files
             .iter()
             .filter(|f| f.name.starts_with("shard"))
             .count();
-        let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
-        std::fs::create_dir_all(&dir)?;
         fpsr.add_files(&dir, &out.files);
         for f in &out.files {
             let path = dir.join(&f.name);
-            relift_cache::write_if_changed(&path, f.text.as_bytes())?;
             if f.name.ends_with(".c") {
                 done.files.push(path);
             }
