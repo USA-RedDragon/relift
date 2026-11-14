@@ -86,3 +86,16 @@ jobs:
         env:
           RELIFT_ADDRESS_BITS: "36"
         run: make test CC=clang
+
+      - name: Install gdb
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdb
+
+      - name: The gdb frame filter shows guest names
+        if: runner.os == 'Linux'
+        working-directory: runtime
+        run: |
+          gdb --version | head -n 1
+          make gdb-test CC=clang
