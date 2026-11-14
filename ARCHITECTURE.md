@@ -96,7 +96,11 @@ interpreter and in Unicorn (GPL-2) on random states, and compares the
 registers, flags, next PC and a data window; `--mutate` breaks the first
 live operation of each lifted block and expects the comparison to catch it.
 Nothing in the main workspace may link it; `relift check` runs it as a
-subprocess. The root manifest excludes it.
+subprocess. The root manifest excludes it. `--oracle rustyboi` swaps in a
+Game Boy SM83 reference built on the rustyboi-core emulator (pinned by git
+commit, `step` for one instruction, `rom` for a whole cartridge); it
+names raw opcode bytes and a plain register struct, so the lifted-IR
+comparison can plug in later.
 
 `relift-cpu-a64` lifts each encoding with its Sail-generated template when it
 has one, else with a hand-written lifter. Templates that use the
