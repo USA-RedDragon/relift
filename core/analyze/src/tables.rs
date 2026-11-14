@@ -5,7 +5,8 @@
 //! falls through or branches to the body), then straight-line code that loads from the table and computes the target, and
 //! the jump. Walking back from the jump over instructions that fall through
 //! into each other finds the conditional branch; the code between them is
-//! the body. Each register the body reads before writing it, and that the
+//! the body; its blocks the jump target does not depend on are left out.
+//! Each register the body reads before writing it, and that the
 //! constant propagation does not know, is a candidate index. For a
 //! candidate, the check (the instructions before the branch back to the one
 //! that last writes the candidate, at most [`CMP_BACK`]) runs with the
@@ -96,21 +97,6 @@ impl GuestMemory for Image<'_> {
     }
 }
 
-/// Runs `blocks` (lifted, so verified when built) in order from `state`; the address after the last one, or
-/// `None` when the path leaves the sequence or an instruction faults.
-fn run(blocks: &[Arc<Block>], state: &mut State, mem: &mut Image<'_>) -> Option<u64> {
-    let mut next = blocks.first()?.pc;
-    for b in blocks {
-        if b.pc != next {
-            return None;
-        }
-        next = interp::run_verified(b, state, mem, &mut NoIntrinsics, &mut NoDevices)
-            .ok()?
-            .next;
-    }
-    Some(next)
-}
-
 /// Runs `blocks` in order from `state` whether or not they follow each
 /// other (the check, with independent instructions left out); the address
 /// after the last one, or `None` when an instruction faults.
@@ -145,6 +131,34 @@ fn reads(blocks: &[Arc<Block>]) -> BTreeSet<Reg> {
         }
     }
     read
+}
+
+/// The blocks of `body` the jump at its end depends on, in order: a block
+/// whose writes no later kept block reads (a load the compiler scheduled
+/// into the body for later code) is left out, so it cannot fault the run.
+fn slice(body: &[Arc<Block>]) -> Vec<Arc<Block>> {
+    let Some((jump, rest)) = body.split_last() else {
+        return Vec::new();
+    };
+    let mut needed = reads(std::slice::from_ref(jump));
+    let mut keep = vec![jump.clone()];
+    for b in rest.iter().rev() {
+        let sets: BTreeSet<Reg> = b
+            .insts
+            .iter()
+            .filter_map(|i| match i.op {
+                Op::Set(x, _) => Some(x),
+                _ => None,
+            })
+            .collect();
+        if sets.iter().any(|x| needed.contains(x)) {
+            needed.retain(|x| !sets.contains(x));
+            needed.extend(reads(std::slice::from_ref(b)));
+            keep.push(b.clone());
+        }
+    }
+    keep.reverse();
+    keep
 }
 
 /// The targets of the computed jump `jump` at `pc`, or `None` when it is not
@@ -190,6 +204,7 @@ pub(crate) fn resolve(
     };
     let start = body[0].pc;
     let seeds = known(start);
+    let body = slice(&body);
     let mut read = Vec::new();
     let mut written = BTreeSet::new();
     for b in &body {
@@ -273,7 +288,7 @@ pub(crate) fn resolve(
                 break;
             }
             let mut st = fresh(&seeds, r, idx);
-            let Some(t) = run(&body, &mut st, &mut mem) else {
+            let Some(t) = run_seq(&body, &mut st, &mut mem) else {
                 continue 'cand;
             };
             if !module.is_code(t) || t % granule != 0 {
