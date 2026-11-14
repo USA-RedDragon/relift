@@ -52,6 +52,9 @@ pub enum V {
     S(K, Rc<str>, u32),
     /// A dynamic value: its type and the Rust local holding the IR value.
     D(K, Rc<str>),
+    /// A bit vector wider than 128 bits, as its parts, least significant
+    /// first; each part is at most 128 bits.
+    Wide(Rc<Vec<V>>),
 }
 
 /// The type class of a value, for signature matching.
@@ -88,7 +91,7 @@ impl V {
             V::Unit => Kind::Unit,
             V::Bool(_) | V::S(K::Bool, ..) | V::D(K::Bool, _) => Kind::Bool,
             V::Int(_) | V::S(K::Int, ..) | V::D(K::Int, _) => Kind::Int,
-            V::Bits(..) | V::S(K::Bits(_), ..) | V::D(K::Bits(_), _) => Kind::Bits,
+            V::Bits(..) | V::S(K::Bits(_), ..) | V::D(K::Bits(_), _) | V::Wide(_) => Kind::Bits,
             V::Str(_) => Kind::Str,
             V::Enum(t, _) => Kind::Enum(t.clone()),
             V::S(K::Enum(t), ..) | V::D(K::Enum(t), _) => Kind::Enum((*t).into()),
@@ -105,6 +108,7 @@ impl V {
         match self {
             V::Bits(w, _) | V::S(K::Bits(w), ..) | V::D(K::Bits(w), _) => Some(*w),
             V::Undef(w) => *w,
+            V::Wide(ps) => ps.iter().map(V::width).sum(),
             _ => None,
         }
     }
@@ -113,7 +117,7 @@ impl V {
     pub fn deps(&self) -> u32 {
         match self {
             V::S(_, _, d) => *d,
-            V::Tuple(vs) => vs.iter().fold(0, |a, v| a | v.deps()),
+            V::Tuple(vs) | V::Wide(vs) => vs.iter().fold(0, |a, v| a | v.deps()),
             V::Struct(_, fs) => fs.iter().fold(0, |a, (_, v)| a | v.deps()),
             V::Bf(_, v) | V::Union(_, v) => v.deps(),
             _ => 0,
@@ -122,7 +126,11 @@ impl V {
 
     /// Whether the value is known while generating.
     pub fn is_concrete(&self) -> bool {
-        !matches!(self, V::S(..) | V::D(..))
+        match self {
+            V::S(..) | V::D(..) => false,
+            V::Wide(ps) => ps.iter().all(V::is_concrete),
+            _ => true,
+        }
     }
 
     /// Whether the value is dynamic.
