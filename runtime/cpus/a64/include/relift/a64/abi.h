@@ -1,5 +1,5 @@
 /**
- * @file relift/abi.h
+ * @file relift/a64/abi.h
  * @brief Runtime ABI contract between relift-emitted C and the relift C runtime.
  *
  * Every lifted translation unit includes this header and nothing else from the
@@ -14,7 +14,7 @@
 #include <string.h>
 
 #if !defined(__clang__) && !defined(__GNUC__)
-#error "relift/abi.h needs clang or a gcc-compatible compiler (zig cc is clang)"
+#error "relift/a64/abi.h needs clang or a gcc-compatible compiler (zig cc is clang)"
 #endif
 #if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 #error "relift supports little-endian hosts only"
@@ -23,7 +23,7 @@
 #error "relift supports 64-bit hosts only"
 #endif
 #if defined(__x86_64__) && !defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)
-#error "relift/abi.h needs -mcx16 on x86-64 so 16-byte compare-and-swap is lock-free"
+#error "relift/a64/abi.h needs -mcx16 on x86-64 so 16-byte compare-and-swap is lock-free"
 #endif
 
 /**

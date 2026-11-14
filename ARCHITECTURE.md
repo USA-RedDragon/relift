@@ -88,7 +88,7 @@ The C runtime (`runtime/core`, `runtime/switch`, built and tested by
 override header (`include/relift/override.h`) does not exist yet.
 
 The contract between emitted C and that runtime is the header
-`runtime/include/relift/abi.h`; `docs/abi.md` gives the reason for each choice.
+`runtime/cpus/a64/include/relift/a64/abi.h`; `docs/abi.md` gives the reason for each choice.
 
 ## 2. Structural rules and the tests that enforce them
 

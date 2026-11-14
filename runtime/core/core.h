@@ -9,7 +9,7 @@
 #ifndef RELIFT_CORE_H
 #define RELIFT_CORE_H
 
-#include <relift/abi.h>
+#include <relift/a64/abi.h>
 
 #include <setjmp.h>
 #include <stdarg.h>

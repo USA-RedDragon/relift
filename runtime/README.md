@@ -1,7 +1,7 @@
 # relift C runtime
 
 The C half of relift: lifted code links against it. The contract is
-`include/relift/abi.h`, explained in `../docs/abi.md`.
+`cpus/a64/include/relift/a64/abi.h`, explained in `../docs/abi.md`.
 
 | Directory | What it holds |
 |---|---|
