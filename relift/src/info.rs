@@ -223,14 +223,14 @@ mod tests {
     fn the_tree_hash_depends_on_names_and_contents_not_on_order() {
         let a = scratch("info-tree-a");
         std::fs::create_dir_all(a.join("d")).unwrap();
-        std::fs::write(a.join("x"), b"1").unwrap();
-        std::fs::write(a.join("d/y"), b"2").unwrap();
+        relift_cache::write_if_changed(&a.join("x"), b"1").unwrap();
+        relift_cache::write_if_changed(&a.join("d/y"), b"2").unwrap();
         let b = scratch("info-tree-b");
         std::fs::create_dir_all(b.join("d")).unwrap();
-        std::fs::write(b.join("d/y"), b"2").unwrap();
-        std::fs::write(b.join("x"), b"1").unwrap();
+        relift_cache::write_if_changed(&b.join("d/y"), b"2").unwrap();
+        relift_cache::write_if_changed(&b.join("x"), b"1").unwrap();
         assert_eq!(tree_hash(&a).unwrap(), tree_hash(&b).unwrap());
-        std::fs::write(b.join("x"), b"3").unwrap();
+        relift_cache::write_if_changed(&b.join("x"), b"3").unwrap();
         assert_ne!(tree_hash(&a).unwrap(), tree_hash(&b).unwrap());
     }
 
