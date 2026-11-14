@@ -261,7 +261,7 @@ static rl_fiber *fiber_of(rl_sched *s, uint32_t i)
 
 static void check_fp_mode(void)
 {
-#if !defined(NDEBUG)
+#if defined(RL_CHECKS)
     uint64_t d = rl_fiber_fp_mode_diff();
     if (RL_UNLIKELY(d != 0)) {
         fprintf(stderr, "[relift sched] host FP control differs from the default (bits 0x%llx) at a hand-over\n",

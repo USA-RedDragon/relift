@@ -1038,11 +1038,10 @@ stacks, not a wake-up of another host thread.
 - **No FP control is saved.** Every fiber of a thread runs in the host's
   default FP mode (MXCSR 0x1F80 with any flags, FPCR 0): lifted code
   assumes it, and FP slow paths that need another mode set and restore it
-  around their own work. Builds without `NDEBUG` check the mode at every
-  hand-over and abort with a message when it differs
-  (`rl_fiber_fp_mode_diff`). zig cc defines `NDEBUG` at `-O2`, so a dev
-  runtime built with zig cc needs `-UNDEBUG` to keep the check. [verified:
-  fiber_tests]
+  around their own work. Builds with `RL_CHECKS` (the runtime Makefile and
+  `relift build` define it) check the mode at every hand-over and abort with
+  a message when it differs (`rl_fiber_fp_mode_diff`). The check does not
+  depend on `NDEBUG`, which zig cc defines at `-O2`. [verified: fiber_tests]
 - **Stacks:** each spawned CPU gets a reservation of `rl_sched_config.stack`
   bytes (16 MiB by default) with a 64 KiB guard below. POSIX: the guard is
   `PROT_NONE` and the stack is mapped read-write. Windows: up to 64 KiB are
