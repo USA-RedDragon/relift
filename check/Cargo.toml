@@ -9,6 +9,9 @@ publish = false
 [workspace]
 
 [dependencies]
+relift-cpu-a64 = { path = "../cpus/a64" }
+relift-ir = { path = "../core/ir" }
+unicorn-engine = { version = "=2.1.5", default-features = false, features = ["arch_aarch64"] }
 
 [lints.rust]
 unsafe_code = "forbid"
