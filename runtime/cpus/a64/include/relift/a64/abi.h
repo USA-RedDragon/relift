@@ -338,6 +338,45 @@ typedef struct rl_resume_regs {
 
 /** @brief Install r into c, set an RL_PEND_UNWIND record and return RL_PENDING. Replaces the guest unwinder's register-install step and guest longjmp. */
 RL_RUNTIME_API int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r);
+
+/**
+ * @brief Where a guest libc's jmp_buf keeps the registers setjmp saves:
+ * x19 to x30 as 12 consecutive 8-byte slots, sp, and d8 to d15 as 8
+ * consecutive slots (docs/abi.md section 7.1).
+ */
+typedef struct rl_a64_jmp_layout {
+    /** @brief Byte offset of x19; x20 to x30 follow. */
+    uint32_t x19;
+    /** @brief Byte offset of sp. */
+    uint32_t sp;
+    /** @brief Byte offset of d8; d9 to d15 follow. */
+    uint32_t d8;
+    /** @brief Bytes of the jmp_buf the layout uses. */
+    uint32_t size;
+} rl_a64_jmp_layout;
+
+/** @brief The newlib (devkitA64, libnx) layout: x19 at 0, sp at 96, d8 at 112, 176 bytes. The default. */
+RL_RUNTIME_API extern const rl_a64_jmp_layout rl_a64_jmp_newlib;
+/** @brief Sets the layout rl_a64_setjmp and rl_a64_longjmp use (the guest layer, from the guest's libc); NULL restores the default. */
+RL_RUNTIME_API void rl_a64_set_jmp_layout(const rl_a64_jmp_layout *l);
+/** @brief The layout in use. */
+RL_RUNTIME_API const rl_a64_jmp_layout *rl_a64_jmp_layout_current(void);
+/**
+ * @brief Override of guest setjmp (`RL_FN_OVERRIDE`): saves x19 to x30, sp and
+ * d8 to d15 into the jmp_buf at guest address x0 and returns with x0 = 0. The
+ * caller's call site is a resume point at the return address (section 7.1).
+ */
+RL_RUNTIME_API int rl_a64_setjmp(rl_ctx *c, uint8_t *mem);
+/**
+ * @brief Override of guest longjmp (`RL_FN_OVERRIDE | RL_FN_MAY_UNWIND`): reads
+ * the jmp_buf at guest address x0 and calls rl_resume with pc = the saved x30,
+ * the saved sp and x0 = w1, or 1 when w1 is 0. Returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_a64_longjmp(rl_ctx *c, uint8_t *mem);
+/** @brief rl_a64_setjmp with an explicit layout and jmp_buf address. */
+RL_RUNTIME_API int rl_a64_setjmp_at(rl_ctx *c, uint8_t *mem, const rl_a64_jmp_layout *l, uint64_t buf);
+/** @brief rl_a64_longjmp with an explicit layout, jmp_buf address and value. */
+RL_RUNTIME_API int rl_a64_longjmp_at(rl_ctx *c, uint8_t *mem, const rl_a64_jmp_layout *l, uint64_t buf, uint32_t val);
 /** @brief SVC #imm, implemented by the guest layer (the guest OS's system call). Arguments and results in c->x and c->v; clears the monitor. Returns RL_PENDING for thread or process exit. */
 RL_RUNTIME_API int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm);
 /** @brief UDF, BRK, HLT, an instruction relift cannot lift, or MSR to a read-only register. Reports a guest crash; always returns RL_PENDING with RL_PEND_EXIT_PROCESS. */
