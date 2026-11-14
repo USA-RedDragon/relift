@@ -426,7 +426,6 @@ impl Harness {
             "-std=c11",
             "-O2",
             "-ffp-contract=off",
-            "-mcx16",
             "-w",
             "-D_GNU_SOURCE",
             &format!("-DWINDOW={WINDOW}"),
@@ -439,6 +438,7 @@ impl Harness {
         ]
         .iter()
         .map(|s| s.to_string())
+        .chain(cfg!(target_arch = "x86_64").then(|| "-mcx16".to_string()))
         .collect();
         let harness = dir.join("harness.c");
         write(&harness, HARNESS.as_bytes());

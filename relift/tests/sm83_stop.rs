@@ -184,7 +184,6 @@ fn a_lifted_rom_with_stop_links_and_runs() {
         "-std=gnu11".to_string(),
         "-O1".into(),
         "-w".into(),
-        "-mcx16".into(),
         "-D_GNU_SOURCE".into(),
         "-DRL_BUILDING_RUNTIME".into(),
         format!("-I{}", rt.join("core/include").display()),
@@ -193,7 +192,9 @@ fn a_lifted_rom_with_stop_links_and_runs() {
         format!("-I{}", rt.join("cpus/sm83").display()),
         format!("-I{}", dir.display()),
     ]
-    .into();
+    .into_iter()
+    .chain(cfg!(target_arch = "x86_64").then(|| "-mcx16".to_string()))
+    .collect();
     let objs: Vec<PathBuf> = (0..sources.len())
         .map(|i| dir.join(format!("o{i}.o")))
         .collect();
