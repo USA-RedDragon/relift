@@ -124,6 +124,23 @@ TEST(a64_undefined_names_the_instruction)
     CHECK(strstr(out, "undefined instruction 0xd4207d00 (BRK #1000) at guest pc 0x4000 (lr 0x1230, sp 0x8000)") != NULL);
 }
 
+TEST(a64_brk_reports_a_breakpoint)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    c->x[30] = 0x1230;
+    c->sp = 0x8000;
+    int fds[2];
+    char out[1024];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_brk(c, rl_mem_base(), 1000);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK(strstr(out, "breakpoint BRK #1000 (lr 0x1230, sp 0x8000)") != NULL);
+}
+
 TEST(a64_resume_installs_registers)
 {
     rl_ctx *c = boot();

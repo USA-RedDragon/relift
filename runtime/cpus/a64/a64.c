@@ -136,6 +136,12 @@ const char *rl_a64_insn_kind(uint32_t insn, char *buf, size_t n)
     return buf;
 }
 
+int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm)
+{
+    (void)mem;
+    return rl_guest_fatal(c, "guest", "breakpoint BRK #%u", imm);
+}
+
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     char kind[32];

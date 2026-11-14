@@ -1,4 +1,4 @@
-//! System instructions lifted by hand: SVC, MRS and MSR of the registers EL0
+//! System instructions lifted by hand: SVC, BRK, MRS and MSR of the registers EL0
 //! code reads, cache maintenance, WFE and SEV, and the feature hints; none
 //! of them has a generated template. The registers here
 //! are runtime state the Sail model cannot see. The intrinsics are
@@ -60,11 +60,16 @@ impl relift_ir::interp::Intrinsics for InterpIntrinsics {
     }
 }
 
+/// The trap code of `BRK #imm` is `TRAP_BRK | imm`; an SVC's code is its
+/// 16-bit immediate, so the two never collide.
+pub const TRAP_BRK: u32 = 0x1_0000;
+
 /// The hand-written system lifter for `enc`, if there is one.
 pub fn lifter(enc: Encoding) -> Option<LiftFn> {
     use Encoding::*;
     let f: LiftFn = match enc {
         SVC_EX_exception => svc,
+        BRK_EX_exception => brk,
         MRS_RS_systemmove => mrs,
         MSR_SR_systemmove => msr,
         SYS_CR_systeminstrs => sys,
@@ -80,6 +85,15 @@ fn svc(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
     Ok(End::Exit(Exit {
         next: Next::Const(b.pc().wrapping_add(4)),
         flow: Flow::Trap(insn.get("imm16")),
+    }))
+}
+
+/// A breakpoint: a trap the runtime reports as a guest crash (the Switch
+/// kernel raises it to the process as an exception).
+fn brk(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
+    Ok(End::Exit(Exit {
+        next: Next::Const(b.pc().wrapping_add(4)),
+        flow: Flow::Trap(TRAP_BRK | insn.get("imm16")),
     }))
 }
 

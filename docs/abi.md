@@ -751,7 +751,8 @@ CAS success and failure, the 16-byte forms, and multi-threaded counters]
 | `YIELD` | `rl_yield()` | inline | `pause` / `yield` plus compiler barrier |
 | `SEV`, `SEVL` | `rl_sev()` | inline | no effect: `rl_wfe` never waits unbounded |
 | `DMB`, `DSB`, `ISB` | section 9 | inline | |
-| `UDF`, `BRK`, `HLT`, unliftable | `int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)` | runtime | crash report naming the kind and immediate (`BRK #1000`), `RL_PEND_EXIT_PROCESS` |
+| `BRK #imm` | `int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm)` | runtime | a trap (`Flow::Trap`), not a lift failure; crash report `breakpoint BRK #imm`, `RL_PEND_EXIT_PROCESS`. The guest pc is not passed: the crash handler's function map names the lifted function |
+| `UDF`, `HLT`, unliftable | `int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)` | runtime | crash report naming the kind and immediate (`BRK #1000`), `RL_PEND_EXIT_PROCESS` |
 
 Reasons: entries that only read or write a context
 field are inline so they cost one load or store; entries that touch host

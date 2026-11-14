@@ -115,6 +115,12 @@ impl Frontend for A64 {
     }
 
     fn trap(&self, code: u32) -> String {
+        if code & crate::lift::system::TRAP_BRK != 0 {
+            return format!(
+                "rl_brk(c, mem, {:#x}u)",
+                code & !crate::lift::system::TRAP_BRK
+            );
+        }
         format!("rl_svc(c, mem, {code:#x}u)")
     }
 

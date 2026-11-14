@@ -45,6 +45,13 @@ fn svc_is_a_trap_that_resumes_after_it() {
 }
 
 #[test]
+fn brk_is_a_breakpoint_trap() {
+    let b = lift(0xd420_0000 | (1000 << 5), PC, &Features::ALL).expect("lifts");
+    assert_eq!(b.exit.flow, Flow::Trap(0x1_0000 | 1000));
+    assert_eq!(b.exit.next, Next::Const(PC + 4));
+}
+
+#[test]
 fn mrs_reads_the_thread_pointers() {
     let mut s = State::new(regs::regs().len());
     s.regs[TPIDRRO_EL0.index()] = 0x1234_5000;
