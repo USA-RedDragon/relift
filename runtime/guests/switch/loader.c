@@ -274,8 +274,33 @@ static int replace_exports(const rl_switch_module *m, const dyn_info *d)
     return rl_units_register(list, 1) == 0 ? (int)n : -1;
 }
 
-/** @brief Writes the module's relocations against undefined symbols the hooks resolve; returns how many. */
-static int resolve_imports(const rl_switch_module *m, const dyn_info *d)
+/** @brief True when a module of p other than m defines name: the guest's own loader binds those. */
+static bool defined_elsewhere(const rl_switch_program *p, const rl_switch_module *m, const char *name)
+{
+    for (uint32_t i = 0; i < p->module_count; i++) {
+        const rl_switch_module *o = &p->modules[i];
+        dyn_info d;
+        if (o == m || !o->image || !dyn_of(o, &d))
+            continue;
+        for (uint64_t k = 1; k < d.nsyms; k++) {
+            uint16_t shndx;
+            uint64_t value;
+            const char *s = sym_of(o, &d, k, &shndx, &value);
+            if (s && shndx && value && !strcmp(s, name))
+                return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Writes the module's relocations against undefined symbols the hooks
+ * resolve and no other module defines; returns how many. An import another
+ * module defines is left to the guest's dynamic loader, which binds it to that
+ * module's export (replaced by the hook when the hook replaces it) and which
+ * checks that every PLT slot still holds its link-time value before binding.
+ */
+static int resolve_imports(const rl_switch_program *p, const rl_switch_module *m, const dyn_info *d)
 {
     uint64_t lo, hi;
     int n = 0;
@@ -295,7 +320,7 @@ static int resolve_imports(const rl_switch_module *m, const dyn_info *d)
             if (!name || shndx || where < lo || where + 8 > hi)
                 continue;
             uint64_t a = hook_import(name);
-            if (!a)
+            if (!a || defined_elsewhere(p, m, name))
                 continue;
             a += addend;
             rl_vm_kernel_write(&hos.vm, where, &a, 8);
@@ -304,7 +329,7 @@ static int resolve_imports(const rl_switch_module *m, const dyn_info *d)
     return n;
 }
 
-static int link_module(const rl_switch_module *m)
+static int link_module(const rl_switch_program *p, const rl_switch_module *m)
 {
     dyn_info d;
     if (!g_nhooks || !dyn_of(m, &d))
@@ -314,7 +339,7 @@ static int link_module(const rl_switch_module *m)
         rl_log(RL_LOG_ERROR, "loader", "module %s: replacing its functions failed", m->name);
         return -1;
     }
-    int imported = resolve_imports(m, &d);
+    int imported = resolve_imports(p, m, &d);
     if (replaced || imported)
         rl_log(RL_LOG_INFO, "loader", "module %s: hooks replaced functions: %d, resolved imports: %d", m->name,
                replaced, imported);
@@ -393,7 +418,7 @@ static int run_program(void *arg)
         if (load_module(&p->modules[i]) != 0)
             return 1;
     for (uint32_t i = 0; i < p->module_count; i++)
-        if (link_module(&p->modules[i]) != 0)
+        if (link_module(p, &p->modules[i]) != 0)
             return 1;
     c = rl_hos_attach_thread(p->main_prio, p->main_core);
     if (!c) {

@@ -61,11 +61,22 @@ static int linked_entry(rl_ctx *restrict c, uint8_t *mem)
     return rl_svc(c, mem, 0x07);
 }
 
+/** @brief Mode 3: another module defines the import, so the slots keep their link-time zero. */
+static int left_entry(rl_ctx *restrict c, uint8_t *mem)
+{
+    if (rl_ld64(mem, BASE + 0x2800) == 0 && rl_ld64(mem, BASE + 0x2808) == 0)
+        say(c, mem, BASE + 0x1F00, 9);
+    c->x[0] = 0;
+    return rl_svc(c, mem, 0x07);
+}
+
 static int fake_entry(rl_ctx *restrict c, uint8_t *mem)
 {
     uint64_t x1 = c->x[1];
     if (g_mode == 2)
         return linked_entry(c, mem);
+    if (g_mode == 3)
+        return left_entry(c, mem);
     if (g_mode == 0) {
         say(c, mem, BASE + 0x1000, sizeof g_msg - 1);
         if (mem[BASE + 0x2000] == 0xAB && mem[BASE + 0x2FFF] == 0x00 && mem[BASE + 0x3000] == 0 &&
@@ -348,6 +359,43 @@ TEST(loader_refuses_bad_programs)
     p.module_count = 0;
     run_program(&p, out, sizeof out, &status);
     CHECK_EQ(WEXITSTATUS(status), 1);
+    remove_base();
+}
+
+/** @brief A second module whose image is the linked one with the import defined. */
+static uint8_t g_image2[0x3000] __attribute__((aligned(16)));
+
+TEST(loader_leaves_imports_another_module_defines)
+{
+    char out[8192];
+    int status = 0;
+    static bool added;
+    if (!added) {
+        CHECK_EQ(rl_switch_add_hook(&g_hook), 0);
+        added = true;
+    }
+    fill_linked_image();
+    memcpy(g_image2, g_image, sizeof g_image2);
+    {
+        uint16_t shndx = 1;
+        uint64_t value = 0x300;
+        memcpy(g_image2 + 0x1100 + 24 + 6, &shndx, 2);
+        memcpy(g_image2 + 0x1100 + 24 + 8, &value, 8);
+    }
+    rl_switch_module mods[2] = { g_module, g_module };
+    mods[1].name = "lib";
+    mods[1].base = BASE + 0x10000;
+    mods[1].image = g_image2;
+    rl_switch_program p = g_program;
+    p.modules = mods;
+    p.module_count = 2;
+    g_mode = 3;
+    run_program(&p, out, sizeof out, &status);
+    CHECK(WIFEXITED(status));
+    CHECK_EQ(WEXITSTATUS(status), 0);
+    CHECK_EQ(count_lines(out, "PASS link"), 1);
+    CHECK(strstr(out, "module main: hooks replaced functions: 1, resolved imports: 0") != NULL);
+    g_mode = 0;
     remove_base();
 }
 
