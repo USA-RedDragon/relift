@@ -51,6 +51,12 @@ another; its exefs and romfs replace the base's when it has them. The same
 choice applies to the update packages of a `.nup`. The program ID comes from
 `main.npdm`.
 
+`relift coverage` (`--json` for a machine-readable form, `--module <name>`
+for one module) lists what discovery could not resolve: per module, the
+functions found, the instructions that do not lift, each indirect call or
+computed jump left to the dispatcher with its reason (`slot`, `table` or
+`pointer`), and the hint addresses earlier dev runs recorded in `game.toml`.
+
 ### Game Boy and Game Boy Color
 
 Import is not available yet. `relift-gbrom` reads and checks a ROM header, and `relift-gbrom functions` lists the functions of a ROM per mapper bank.
@@ -74,7 +80,7 @@ next `relift build` lifts it with the rest (docs/abi.md section 6).
 
 | Binary | Guest | Does |
 |---|---|---|
-| `relift` | all | the recompiler: `import`, `build`, `run`, `check`, `where` |
+| `relift` | all | the recompiler: `import`, `build`, `run`, `coverage`, `check`, `where` |
 | `relift-nup` | Switch | list and extract `.nup` containers |
 | `relift-romfs` | Switch | list, extract and print files of a romfs image |
 | `relift-nso` | Switch | show, list symbols of and decompress NSO modules |
