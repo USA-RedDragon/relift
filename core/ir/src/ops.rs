@@ -197,13 +197,27 @@ pub enum FpRound {
 
 /// Floating-point operations on IEEE 754 binary32 or binary64 bit patterns.
 ///
-/// They are named intrinsics: the interpreter evaluates them with the host's
-/// IEEE arithmetic in round-to-nearest-even and records no exception flags.
-/// Guest-specific behavior (NaN propagation rules, flush to zero, flags) is
-/// built by the frontend around them. The arithmetic operations take and
-/// give the instruction's width; the conversions (`ToSInt` through
-/// `Convert`) take an operand of 32 or 64 bits and give a result of 32 or
-/// 64 bits, either of which may differ.
+/// Each is an IEEE primitive with one fixed meaning, so an emitter can map it
+/// to a host instruction or a libm call: round to nearest even, subnormals
+/// kept (no flush), no exception flags. A NaN result may be any NaN; the
+/// conversions are exact about their edge cases instead: `ToSInt` and
+/// `ToUInt` saturate and give 0 for a NaN (an emitter must not use a raw
+/// x86 `cvttsd2si`, which gives the integer indefinite value).
+///
+/// Guest semantics are built by the frontend around these primitives, from
+/// ordinary IR operations. For A64 (`cpus/a64/src/lift/sail/rt.rs`) that is
+/// NaN propagation and quieting, the default NaN, FMAX/FMIN/FMAXNM/FMINNM
+/// with signed zeros, the FMA invalid case and FCVT NaN payloads.
+///
+/// The A64 templates are generated for FPCR zero (round to nearest, no FZ,
+/// FZ16, DN, AH or AHP). Every block whose semantics assume that starts with
+/// an [`Op::Guard`] on `FPCR != 0`, so with any other FPCR it leaves before
+/// any effect for the runtime's slow path (`runtime/cpus/a64/fp.c`); an
+/// emitter may hoist that check to function entry and after each write of
+/// FPCR. Known gap: no FPSR cumulative flags are produced, which is right
+/// only for code that saves and restores FPSR (`fegetenv`, `fesetenv`) but
+/// never tests the flags (`fetestexcept`); code that tests them needs the
+/// flags produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FpOp {
     /// `a + b`.
@@ -335,6 +349,11 @@ pub enum Op {
     Fence(Order),
     /// A floating-point operation of the instruction's width (32 or 64).
     Fp(FpOp, Vec<Value>),
+    /// Leaves the block before it has any effect when `cond` (one bit) is 1:
+    /// the block's assumption does not hold, and the runtime runs the
+    /// instruction on its slow path, the one named by `code`. A guard comes
+    /// before every operation with an effect, so leaving discards nothing.
+    Guard(Value, u32),
     /// A call to a named intrinsic the frontend and runtime define, giving
     /// the instruction's width, or nothing when the instruction has none.
     Intrinsic(&'static str, Vec<Value>),
@@ -345,7 +364,9 @@ impl Op {
     pub fn operands(&self) -> Vec<Value> {
         match self {
             Op::Const(_) | Op::Get(_) | Op::ClearExclusive | Op::Fence(_) => Vec::new(),
-            Op::Set(_, v) | Op::Un(_, v) | Op::Ext(_, v) | Op::Extract(v, _) => vec![*v],
+            Op::Set(_, v) | Op::Un(_, v) | Op::Ext(_, v) | Op::Extract(v, _) | Op::Guard(v, _) => {
+                vec![*v]
+            }
             Op::Bin(_, a, b) | Op::Cmp(_, a, b) | Op::Concat(a, b) => vec![*a, *b],
             Op::Select(c, a, b) => vec![*c, *a, *b],
             Op::Load { addr, .. } | Op::LoadExclusive { addr, .. } => vec![*addr],
@@ -369,6 +390,7 @@ impl Op {
                 | Op::ClearExclusive
                 | Op::Fence(_)
                 | Op::Intrinsic(..)
+                | Op::Guard(..)
         )
     }
 }

@@ -444,6 +444,15 @@ pub fn run(
                 0
             }
             Op::Fence(_) => 0,
+            Op::Guard(c, code) => {
+                if v(*c) != 0 {
+                    return Ok(Outcome {
+                        next: block.pc,
+                        flow: Flow::Trap(*code),
+                    });
+                }
+                0
+            }
             Op::Fp(op, args) => {
                 let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
                 let aw = block.insts[args[0].index()].width.unwrap_or(width);

@@ -247,6 +247,12 @@ impl Builder {
         )
     }
 
+    /// Leaves the block for slow path `code` when `cond` (one bit) is 1;
+    /// see [`Op::Guard`].
+    pub fn guard(&mut self, cond: Value, code: u32) {
+        self.push(Op::Guard(cond, code), None);
+    }
+
     /// Clears the exclusive monitor.
     pub fn clear_exclusive(&mut self) {
         self.push(Op::ClearExclusive, None);
