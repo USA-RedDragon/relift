@@ -110,7 +110,8 @@ fn a_tiny_program_builds_and_runs() {
     let want = "hello from relift\n".repeat(3);
     assert_eq!(stdout, want, "{stderr}");
     assert!(
-        stderr.contains("2 functions, 0 overrides, 0 instructions do not lift"),
+        stderr.contains("main   lift     2 functions, 0 unlifted")
+            && stderr.contains("built 2 functions, 0 instructions not lifted"),
         "{stderr}"
     );
 }

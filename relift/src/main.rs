@@ -39,12 +39,15 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
+    let mut ui = relift::ui::open(&settings);
     let result = match &cli.command {
-        Command::Import { dump, update } => relift::import::run(&settings, dump, update.as_deref()),
-        Command::Build { target } => relift::build::run_build(&settings, target),
+        Command::Import { dump, update } => {
+            relift::import::run(&settings, dump, update.as_deref(), &mut ui)
+        }
+        Command::Build { target } => relift::build::run_build(&settings, target, &mut ui),
         Command::Run {
             target, trace_os, ..
-        } => match relift::build::run_run(&settings, target.as_deref(), *trace_os) {
+        } => match relift::build::run_run(&settings, target.as_deref(), *trace_os, &mut ui) {
             Ok(code) => return ExitCode::from(u8::try_from(code).unwrap_or(1)),
             Err(e) => Err(e),
         },
@@ -53,7 +56,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("relift {}: {e}", cli.command.name());
+            ui.error(&format!("relift {}: {e}", cli.command.name()));
             ExitCode::FAILURE
         }
     }

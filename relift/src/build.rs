@@ -4,15 +4,17 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use relift_analyze::{Insn, discover};
-use relift_build::{Compile, Plan};
+use relift_analyze::{Insn, Progress, discover_with};
+use relift_build::{Compile, Event, Plan};
 use relift_cpu_a64::frontend::A64;
+use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration};
 use relift_switch::program::{self, Placed};
 use relift_switch_formats::npdm::Npdm;
 use relift_switch_formats::nso::Nso;
 
 use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
+use crate::ui::Ui;
 
 /// The runtime sources this binary was built beside, used when the
 /// `runtime-dir` setting is empty.
@@ -84,14 +86,103 @@ fn c_ident(s: &str) -> String {
         .collect()
 }
 
+/// What lifting and emitting the modules gave.
+struct Emitted {
+    files: Vec<PathBuf>,
+    units: Vec<String>,
+    functions: usize,
+    unlifted: usize,
+    unlifted_list: String,
+}
+
+fn unlifted_line(module: &str, pc: u64, word: u64, message: &str) -> String {
+    format!("{module}\t{pc:#x}\t{word:08x}\t{message}\n")
+}
+
 /// Lifts and emits `placed` into `cdir`, one directory per module; returns
 /// the emitted C files and the unit symbols.
-fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<String>), BoxError> {
-    let mut files = Vec::new();
-    let mut units = Vec::new();
-    for (i, p) in placed.iter().enumerate() {
+fn emit_modules(
+    placed: &[Placed],
+    cdir: &Path,
+    ui: &mut Ui,
+    rows: &[usize],
+) -> Result<Emitted, BoxError> {
+    let mut done = Emitted {
+        files: Vec::new(),
+        units: Vec::new(),
+        functions: 0,
+        unlifted: 0,
+        unlifted_list: String::new(),
+    };
+    for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
         let module = program::module(p);
-        let analysis = discover(&A64, &module);
+        ui.begin(row, "discover");
+        let mut lifting = false;
+        let mut found = 0;
+        let analysis = discover_with(&A64, &module, &mut |event| match event {
+            Progress::Found { entries, .. } => {
+                found = entries;
+                ui.update(
+                    row,
+                    Metrics {
+                        done: entries as u64,
+                        unit: "functions found",
+                        ..Metrics::default()
+                    },
+                );
+            }
+            Progress::Lifted {
+                done,
+                total,
+                unlifted,
+            } => {
+                if !lifting {
+                    lifting = true;
+                    ui.done(
+                        row,
+                        Line::new().text(format!("{} functions", count(total as u64))),
+                    );
+                    ui.begin(row, "lift");
+                }
+                ui.update(
+                    row,
+                    Metrics {
+                        done: done as u64,
+                        total: Some(total as u64),
+                        unit: "functions",
+                        unlifted: Some(unlifted as u64),
+                        ..Metrics::default()
+                    },
+                );
+            }
+        });
+        if !lifting {
+            ui.done(
+                row,
+                Line::new().text(format!("{} functions", count(found as u64))),
+            );
+            ui.begin(row, "lift");
+        }
+        let mut failed = BTreeMap::new();
+        for f in analysis.functions.values() {
+            for (&pc, i) in &f.insts {
+                if let Insn::Failed(e) = i {
+                    failed.insert(pc, e);
+                }
+            }
+        }
+        for (&pc, e) in &failed {
+            done.unlifted_list
+                .push_str(&unlifted_line(&p.name, pc, e.insn, &e.message));
+            ui.detail(
+                &Line::new()
+                    .text(format!("  {}  {pc:#x}  {:08x}  ", p.name, e.insn))
+                    .paint(Paint::Yellow, e.message.clone()),
+            );
+        }
+        done.unlifted += failed.len();
+        done.functions += analysis.functions.len();
+        ui.done(row, lift_summary(analysis.functions.len(), failed.len()));
         let raw = |pc: u64| {
             module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
                 u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
@@ -136,7 +227,9 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
             })
             .collect();
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
-        let out = relift_emit::emit(
+        ui.begin(row, "emit");
+        let mut shards = 0;
+        let out = relift_emit::emit_with(
             &A64,
             &fns,
             &overrides,
@@ -146,6 +239,18 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
                 unit_symbol: unit.clone(),
                 module_base: p.base,
             },
+            &mut |d, total| {
+                shards = total;
+                ui.update(
+                    row,
+                    Metrics {
+                        done: d as u64,
+                        total: Some(total as u64),
+                        unit: "shards",
+                        ..Metrics::default()
+                    },
+                );
+            },
         );
         let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
         std::fs::create_dir_all(&dir)?;
@@ -153,20 +258,31 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
             let path = dir.join(&f.name);
             relift_cache::write_if_changed(&path, f.text.as_bytes())?;
             if f.name.ends_with(".c") {
-                files.push(path);
+                done.files.push(path);
             }
         }
-        eprintln!(
-            "relift build: {} at {:#x}: {} functions, {} overrides, {} instructions do not lift",
-            p.name,
-            p.base,
-            analysis.functions.len(),
-            overrides.len(),
-            out.undefined
+        ui.done(
+            row,
+            Line::new().text(format!(
+                "{} shards, {} overrides",
+                count(shards as u64),
+                count(overrides.len() as u64)
+            )),
         );
-        units.push(unit);
+        done.units.push(unit);
     }
-    Ok((files, units))
+    Ok(done)
+}
+
+fn lift_summary(functions: usize, unlifted: usize) -> Line {
+    let paint = if unlifted > 0 {
+        Paint::Yellow
+    } else {
+        Paint::Plain
+    };
+    Line::new()
+        .text(format!("{} functions, ", count(functions as u64)))
+        .paint(paint, format!("{} unlifted", count(unlifted as u64)))
 }
 
 fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
@@ -192,7 +308,7 @@ fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
     }
 }
 
-fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxError> {
+fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<Built, BoxError> {
     if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
         return Err(format!("target {t}: only the host target builds so far").into());
     }
@@ -203,6 +319,15 @@ fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxEr
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "project".into());
+    ui.title(&format!(
+        "relift build: {name} ({} module{}, {}-{})",
+        placed.len(),
+        if placed.len() == 1 { "" } else { "s" },
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+    let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
+    let compile_row = ui.row("");
     let root = cache_root(settings)?;
     std::fs::create_dir_all(&root)?;
     let out = std::fs::canonicalize(root)?
@@ -211,7 +336,10 @@ fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxEr
         .join("build")
         .join("host");
     let cdir = out.join("c");
-    let (lifted, units) = emit_modules(&placed, &cdir)?;
+    let emitted = emit_modules(&placed, &cdir, ui, &rows)?;
+    let (lifted, units) = (emitted.files, emitted.units);
+    let unlifted_file = out.join("unlifted.txt");
+    relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
     let prog = cdir.join("program.c");
     relift_cache::write_if_changed(
         &prog,
@@ -296,9 +424,94 @@ fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxEr
         link_flags: vec!["-lpthread".into(), "-lm".into()],
     };
     let ninja = tool(&settings.toolchain.ninja, "ninja");
-    relift_build::build(&plan, &out, ninja.as_deref(), settings.jobs)?;
-    eprintln!("relift build: {}", exe.display());
+    let jobs = if ninja.is_some() {
+        relift_build::job_count(settings.jobs)
+    } else {
+        1
+    };
+    let note = format!(
+        "{} {}, -j{jobs}",
+        clang
+            .file_stem()
+            .map_or_else(|| "clang".to_string(), |s| s.to_string_lossy().into_owned()),
+        lifted_flags
+            .iter()
+            .find(|f| f.starts_with("-O"))
+            .map_or("", String::as_str)
+    );
+    let compile = Metrics {
+        unit: "files",
+        note: Some(note.clone()),
+        elapsed: true,
+        ..Metrics::default()
+    };
+    ui.begin(compile_row, "compile");
+    ui.update(compile_row, compile.clone());
+    let mut finished = 0;
+    let verbose = ui.verbosity() == Verbosity::Verbose;
+    relift_build::build_with(
+        &plan,
+        &out,
+        ninja.as_deref(),
+        settings.jobs,
+        &mut |e| match e {
+            Event::Tick => ui.tick(),
+            Event::Step { done, total, what } => {
+                finished = done;
+                ui.update(
+                    compile_row,
+                    Metrics {
+                        done: done as u64,
+                        total: Some(total as u64),
+                        ..compile.clone()
+                    },
+                );
+                if verbose {
+                    ui.detail(&Line::new().text(format!("  {what}")));
+                }
+            }
+        },
+    )?;
+    ui.done(
+        compile_row,
+        if finished == 0 {
+            Line::new().text(format!("up to date, {note}"))
+        } else {
+            Line::new().text(format!("{} files, {note}", count(finished as u64)))
+        },
+    );
+    summarize(
+        ui,
+        emitted.functions,
+        emitted.unlifted,
+        &unlifted_file,
+        &exe,
+    );
     Ok(Built { exe })
+}
+
+fn summarize(ui: &mut Ui, functions: usize, unlifted: usize, list: &Path, exe: &Path) {
+    let paint = if unlifted > 0 {
+        Paint::Yellow
+    } else {
+        Paint::Plain
+    };
+    ui.summary(
+        &Line::new()
+            .paint(Paint::Green, "built")
+            .text(format!(" {} functions, ", count(functions as u64)))
+            .paint(
+                paint,
+                format!("{} instructions not lifted", count(unlifted as u64)),
+            )
+            .text(", ")
+            .text(duration(ui.elapsed()))
+            .text(" in all"),
+    );
+    if unlifted > 0 {
+        ui.summary(&Line::new().text(format!("  not lifted, with addresses: {}", list.display())));
+    }
+    ui.summary(&Line::new().text(format!("  output: {}", exe.display())));
 }
 
 /// `relift build`.
@@ -307,8 +520,8 @@ fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxEr
 ///
 /// No game.toml or import, a module that does not parse, or a failed
 /// compile or link.
-pub fn run_build(settings: &Settings, targets: &[String]) -> Result<(), BoxError> {
-    build_project(settings, targets).map(|_| ())
+pub fn run_build(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<(), BoxError> {
+    build_project(settings, targets, ui).map(|_| ())
 }
 
 /// `relift run`: build, then run the program in the working directory,
@@ -317,9 +530,14 @@ pub fn run_build(settings: &Settings, targets: &[String]) -> Result<(), BoxError
 /// # Errors
 ///
 /// As [`run_build`], or the program cannot start.
-pub fn run_run(settings: &Settings, target: Option<&str>, trace_os: bool) -> Result<i32, BoxError> {
+pub fn run_run(
+    settings: &Settings,
+    target: Option<&str>,
+    trace_os: bool,
+    ui: &mut Ui,
+) -> Result<i32, BoxError> {
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
-    let built = build_project(settings, &targets)?;
+    let built = build_project(settings, &targets, ui)?;
     let mut cmd = relift_proc::command(&built.exe);
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
