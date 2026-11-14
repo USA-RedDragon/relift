@@ -27,6 +27,15 @@ child process serves the whole run; the checker streams every state of a
 form before it reads the results, so an ssh round trip is paid once per
 form, not once per state.
 
+`slow.c` is the slow-path engine: it speaks the same protocol on the host
+and runs one FP instruction through the runtime's `rl_fp_slow`
+(`runtime/cpus/a64/fp_slow.c`, `fp.c`). Build it with
+`check/oracle/build-slow.sh <out dir> [cc]` and pass `--slow
+cmd:<out>/slow`: every block that leaves through its FPCR guard then runs
+there and is compared with the oracle, so the slow paths are checked
+against hardware for any `--fpcr`. `--all-slow` sends every guarded block
+there, also with FPCR zero.
+
 How a run works:
 - The code region (2 MiB around `CODE`) and the data window sit at the
   addresses in `check/src/emu.rs`, above 0x70_0000_0000 because macOS
