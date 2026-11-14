@@ -1,19 +1,21 @@
 //! One guest function as one C function.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use relift_guest::{Frontend, Home};
 use relift_ir::{Block, Flow, Next, Op, Reg};
 
 use crate::value::{Emitted, cty, emit_op, reg, val};
-use crate::{Function, Insn, fn_name};
+use crate::{Function, Insn, Target};
 
 /// What one function emitted.
 pub(crate) struct Emitted1 {
     pub(crate) text: String,
     pub(crate) callees: BTreeSet<u64>,
     pub(crate) undefined: usize,
+    /// The C expression of the function's `rl_fn_flags`.
+    pub(crate) flags: &'static str,
 }
 
 fn label(pc: u64) -> String {
@@ -23,9 +25,11 @@ fn label(pc: u64) -> String {
 struct Ctx<'a> {
     fe: &'a dyn Frontend,
     f: &'a Function<'a>,
-    entries: &'a BTreeSet<u64>,
+    targets: &'a BTreeMap<u64, Target>,
     callees: BTreeSet<u64>,
     hoisted: BTreeSet<Reg>,
+    /// The landing-pad check's sp local, when the function has resume points.
+    lp_sp: Option<String>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -35,7 +39,7 @@ fn flag(r: Reg) -> String {
 
 impl Ctx<'_> {
     fn inside(&self, t: u64) -> bool {
-        self.f.insts.contains_key(&t) && (t == self.f.entry || !self.entries.contains(&t))
+        self.f.insts.contains_key(&t) && (t == self.f.entry || !self.targets.contains_key(&t))
     }
 
     /// A transfer to the constant `t` that leaves no frame behind.
@@ -43,20 +47,40 @@ impl Ctx<'_> {
         if self.inside(t) {
             return format!("goto {};", label(t));
         }
-        if self.entries.contains(&t) {
+        if let Some(target) = self.targets.get(&t) {
             self.callees.insert(t);
-            return format!("RL_STORE(); RL_MUSTTAIL return {}(c, mem);", fn_name(t));
+            return format!("RL_STORE(); RL_MUSTTAIL return {}(c, mem);", target.name);
         }
         format!("RL_STORE(); RL_MUSTTAIL return rl_indirect(c, UINT64_C({t:#x}))(c, mem);")
     }
 }
 
-/// Emits `f`; `entries` are every function entry of the module.
+/// The return addresses of the calls in `f` that are resume points.
+fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<u64> {
+    f.insts
+        .values()
+        .filter_map(|i| match i {
+            Insn::Lifted { block: b, .. } => match (b.exit.flow, b.exit.next) {
+                (Flow::Call { ret }, Next::Const(t))
+                    if targets.get(&t).is_some_and(|t| t.resume_point) =>
+                {
+                    Some(ret)
+                }
+                _ => None,
+            },
+            Insn::Failed(_) => None,
+        })
+        .collect()
+}
+
+/// Emits `f`; `targets` are every direct-call target of the module.
 pub(crate) fn emit_function(
     fe: &dyn Frontend,
     f: &Function<'_>,
-    entries: &BTreeSet<u64>,
+    targets: &BTreeMap<u64, Target>,
 ) -> Emitted1 {
+    let resumes = resume_points(f, targets);
+    let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let mut used: BTreeSet<Reg> = BTreeSet::new();
     let mut written: BTreeSet<Reg> = BTreeSet::new();
     let mut has_fp = false;
@@ -87,9 +111,10 @@ pub(crate) fn emit_function(
         used.extend(fe.fp_state());
     }
     used.extend(hoisted.iter().copied());
+    used.extend(lp_reg);
     let regs = fe.regs();
     let mut t = String::new();
-    let _ = writeln!(t, "\nRL_LIFTED({})\n{{", fn_name(f.entry));
+    let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({})\n{{", f.name);
     for &r in &used {
         let ty = cty(regs.width(r));
         let _ = match fe.home(r) {
@@ -132,9 +157,10 @@ pub(crate) fn emit_function(
     let mut cx = Ctx {
         fe,
         f,
-        entries,
+        targets,
         callees: BTreeSet::new(),
         hoisted,
+        lp_sp: lp_reg.map(reg),
     };
     let mut undefined = 0;
     for (&pc, i) in &f.insts {
@@ -152,11 +178,31 @@ pub(crate) fn emit_function(
         }
         t.push_str("}\n");
     }
+    if lp_reg.is_some() {
+        t.push_str("lp_dispatch:\n    switch (c->pend.pc) {\n");
+        for r in &resumes {
+            let next = cx.jump(*r);
+            let _ = writeln!(
+                t,
+                "    case UINT64_C({r:#x}):\n        c->pend.kind = RL_PEND_NONE;\n        RL_RELOAD();\n        {next}"
+            );
+        }
+        let _ = writeln!(
+            t,
+            "    default:\n        break;\n    }}\n    rl_bad_resume(c, mem, UINT64_C({:#x}));",
+            f.entry
+        );
+    }
     t.push_str("#undef RL_STORE\n#undef RL_RELOAD\n}\n");
     Emitted1 {
         text: t,
         callees: cx.callees,
         undefined,
+        flags: if lp_reg.is_some() {
+            "RL_FN_MAY_UNWIND | RL_FN_LANDING_PADS"
+        } else {
+            "RL_FN_MAY_UNWIND"
+        },
     }
 }
 
@@ -198,19 +244,25 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             let _ = writeln!(s, "    {} = {} != 0;", flag(r), reg(r));
         }
     }
+    let check = match &cx.lp_sp {
+        Some(sp) => format!(
+            "    if (RL_UNLIKELY(rc)) {{\n        if (c->pend.sp == {sp})\n            goto lp_dispatch;\n        return RL_PENDING;\n    }}"
+        ),
+        None => "    if (RL_UNLIKELY(rc))\n        return RL_PENDING;".to_string(),
+    };
     let after = |s: &mut String, call: String| {
         let _ = writeln!(
             s,
-            "    RL_STORE();\n    rc = {call};\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n    RL_RELOAD();"
+            "    RL_STORE();\n    rc = {call};\n{check}\n    RL_RELOAD();"
         );
     };
     match b.exit.flow {
         Flow::Return => s.push_str("    RL_STORE();\n    return RL_OK;\n"),
         Flow::Call { ret } => {
             let call = match b.exit.next {
-                Next::Const(t) if cx.entries.contains(&t) => {
+                Next::Const(t) if cx.targets.contains_key(&t) => {
                     cx.callees.insert(t);
-                    format!("{}(c, mem)", fn_name(t))
+                    format!("{}(c, mem)", cx.targets[&t].name)
                 }
                 Next::Const(t) => format!("rl_indirect(c, UINT64_C({t:#x}))(c, mem)"),
                 Next::Dynamic(v) => format!("rl_indirect(c, {})(c, mem)", val(v)),
