@@ -185,7 +185,9 @@ static rl_result out_get_released(rl_ipc_req *r)
     if ((uint64_t)n * 8 > out.size)
         n = (uint32_t)(out.size / 8);
     rl_result rc = KR_SUCCESS;
-    if (n && !rl_ipc_buf_write(&out, a->released, (uint64_t)n * 8))
+    uint64_t none = 0;
+    if (n ? !rl_ipc_buf_write(&out, a->released, (uint64_t)n * 8)
+          : out.size >= sizeof none && !rl_ipc_buf_write(&out, &none, sizeof none))
         rc = KR_INVALID_MEM_STATE;
     if (rc == KR_SUCCESS) {
         memmove(a->released, a->released + n, (a->rn - n) * 8);

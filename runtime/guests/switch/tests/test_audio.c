@@ -280,6 +280,15 @@ TEST(audout_releases_buffers_as_they_play)
     q.a_addr[0] = heap + 0x1000;
     q.a_size[0] = 0x28;
     CHECK_EQ(call(c, out, &q).result, 0);
+    q = mk(5);
+    q.nb = 1;
+    q.b_addr[0] = heap + 0x3000;
+    q.b_size[0] = 8 * 4;
+    memset(t_mem() + heap + 0x3000, 0xEE, 8 * 4);
+    r = call(c, out, &q);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(rd32(&r, 0), 0);
+    CHECK_EQ(le64(t_mem() + heap + 0x3000), 0);
     CHECK_EQ(call(c, out, &(msg){ .cmd = 1 }).result, 0);
     uint64_t t0 = rl_clock_ns();
     CHECK_EQ(wait_event(c, heap + 0x800, ev, 5000000000ull), 0);
