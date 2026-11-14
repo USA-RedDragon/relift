@@ -61,7 +61,7 @@ pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Before contributing, read
-`ARCHITECTURE.md`: section 0 lists the rules that bite, and the rest covers
+`ARCHITECTURE.md`: section 0 lists the hard rules, and the rest covers
 how the workspace is laid out and which tests hold it in shape.
 
 ## Configuration

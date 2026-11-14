@@ -7,11 +7,11 @@ system, into a native program for the host.
 This file describes the **shape** of the workspace and the rules that hold it
 in that shape. Every structural claim names the file or test that enforces
 it. A rule with no test is marked as a convention. Section 0 is the short
-list of what bites; read it before changing anything.
+list of hard rules; read it before changing anything.
 
 ---
 
-## 0. What bites
+## 0. Hard rules
 
 - **No game data in the repo, ever.** No dumps, keys, extracted files,
   symbol lists, offsets or anything else derived from a game, and no game
