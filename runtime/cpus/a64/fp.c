@@ -14,6 +14,7 @@
 #include <relift/a64/abi.h>
 
 #include "fp.h"
+#include "a64.h"
 
 #define FPSR_IOC 0x01u
 #define FPSR_DZC 0x02u
@@ -782,6 +783,8 @@ static void commit(const fpenv *v, uint32_t *fpsr)
 {
     if (fpsr)
         *fpsr |= v->flags;
+    else if (v->flags && rl_a64_fp_flags())
+        rl_fp_host_raise(v->flags);
 }
 
 #define ENV(fpcr) { (fpcr), 0, 0 }

@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
+
 #if defined(__x86_64__) && !defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)
 #error "relift/a64/abi.h needs -mcx16 on x86-64 so 16-byte compare-and-swap is lock-free"
 #endif
@@ -48,6 +52,15 @@
 #define RL_FPCR_RMODE (3u << 22)
 /** @brief FPCR bits that change arithmetic results. */
 #define RL_FPCR_MODE (RL_FPCR_AHP | RL_FPCR_DN | RL_FPCR_FZ | RL_FPCR_RMODE)
+/**
+ * @brief Exact-flags mode: a bit of c->fpcr that is RES0 in the architecture
+ * and never reaches the guest or the host FPCR. While it is set, every
+ * FPCR-guarded block leaves for rl_fp_slow, which produces FPSR's
+ * cumulative flags exactly (docs/abi.md section 10.1).
+ */
+#define RL_FPCR_EXACT (1u << 31)
+/** @brief FPCR bits the guest sees: AHP, DN, FZ, RMode, FZ16 (the Cortex-A57 implements no trap enables). */
+#define RL_FPCR_GUEST 0x07C80000u
 /** @brief FPSR cumulative exception and saturation bits (IOC DZC OFC UFC IXC IDC QC). */
 #define RL_FPSR_MASK 0x0800009Fu
 
@@ -402,7 +415,7 @@ static inline uint64_t rl_mrs_ctr_el0(void) { return RL_CTR_EL0; }
 /** @brief MRS DCZID_EL0. */
 static inline uint64_t rl_mrs_dczid_el0(void) { return RL_DCZID_EL0; }
 /** @brief MRS FPCR. */
-static inline uint64_t rl_mrs_fpcr(const rl_ctx *c) { return c->fpcr; }
+static inline uint64_t rl_mrs_fpcr(const rl_ctx *c) { return c->fpcr & RL_FPCR_GUEST; }
 /** @brief MRS FPSR. */
 static inline uint64_t rl_mrs_fpsr(const rl_ctx *c) { return c->fpsr; }
 /** @brief MSR FPSR. */
@@ -465,6 +478,90 @@ RL_RUNTIME_API uint64_t rl_fp_to_fixed(uint64_t a, unsigned from_bits, unsigned 
 /** @brief FixedToFP (SCVTF, UCVTF, fixed-point forms). */
 RL_RUNTIME_API uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
 
+/*
+ * FPSR flags on host hardware (docs/abi.md section 10.1). In a program the
+ * build's FPSR census marks, lifted code is compiled with RL_FP_FLAGS and
+ * strict FP semantics: host FP operations raise the host's sticky flags,
+ * fp.c deposits its flags there too, and MRS FPSR ORs them, mapped to Arm
+ * bits, into the FPSR slot. Programs without the mark never touch them.
+ */
+
+/** @brief 1 in lifted code of a program that produces FPSR flags (the home of the a64 frontend's FP_FLAGS slot). */
+#if defined(RL_FP_FLAGS)
+#define RL_FP_FLAGS_ON 1
+#else
+#define RL_FP_FLAGS_ON 0
+#endif
+
+/** @brief The host's sticky FP flags as FPSR bits IOC, DZC, OFC, UFC, IXC (and IDC on arm64). */
+static inline uint32_t rl_fp_host_flags(void)
+{
+#if defined(__x86_64__)
+    unsigned m = _mm_getcsr();
+    return (m & 1u) | ((m >> 1) & 0x1Eu);
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile("mrs %0, fpsr" : "=r"(v));
+    return (uint32_t)v & 0x9Fu;
+#else
+    return 0;
+#endif
+}
+
+/** @brief Clears the host's sticky FP flags. */
+static inline void rl_fp_host_clear(void)
+{
+#if defined(__x86_64__)
+    _mm_setcsr(_mm_getcsr() & ~0x3Fu);
+#elif defined(__aarch64__)
+    __asm__ volatile("msr fpsr, xzr" ::: "memory");
+#endif
+}
+
+/** @brief ORs FPSR bits into the host's sticky FP flags (IDC only on arm64). */
+static inline void rl_fp_host_raise(uint32_t f)
+{
+#if defined(__x86_64__)
+    _mm_setcsr(_mm_getcsr() | (f & 1u) | ((f & 0x1Eu) << 1));
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile("mrs %0, fpsr" : "=r"(v));
+    v |= f & 0x9Fu;
+    __asm__ volatile("msr fpsr, %0" ::"r"(v) : "memory");
+#else
+    (void)f;
+#endif
+}
+
+/** @brief MRS FPSR: the slot value with the host's flags in flag-producing programs. */
+static inline uint32_t rl_mrs_fpsr_flags(uint32_t slot)
+{
+#if defined(RL_FP_FLAGS)
+    return slot | rl_fp_host_flags();
+#else
+    return slot;
+#endif
+}
+
+/** @brief After MSR FPSR (the slot takes the value): clears the host's flags in flag-producing programs. */
+static inline void rl_msr_fpsr_flags(void)
+{
+#if defined(RL_FP_FLAGS)
+    rl_fp_host_clear();
+#endif
+}
+
+/** @brief Raises FPSR flags an IR-built FP operation computed (compares, min/max, estimates); free without RL_FP_FLAGS. */
+static inline void rl_fp_raise(uint32_t f)
+{
+#if defined(RL_FP_FLAGS)
+    if (f)
+        rl_fp_host_raise(f);
+#else
+    (void)f;
+#endif
+}
+
 /** @brief True when the host's native IEEE operation gives the guest result for this FPCR, except possibly for NaN bits. */
 static inline int rl_fp_fast(uint32_t fpcr, const uint32_t *fpsr)
 {
@@ -486,6 +583,23 @@ static inline int rl_fp_nan_fixup(void)
 #endif
 }
 
+/**
+ * @brief True when a host result needs the slow path for its flags: x86
+ * detects tininess after rounding and Arm before, so a result of exactly the
+ * smallest normal magnitude may lack UFC. Only in flag-producing programs.
+ */
+static inline int rl_fp_tiny_fixup(uint64_t u, unsigned bits)
+{
+#if defined(RL_FP_FLAGS) && !defined(__aarch64__)
+    uint64_t mag = bits == 32 ? (u & 0x7FFFFFFFu) : (u & 0x7FFFFFFFFFFFFFFFull);
+    return RL_UNLIKELY(mag == (bits == 32 ? 0x00800000u : 0x0010000000000000ull));
+#else
+    (void)u;
+    (void)bits;
+    return 0;
+#endif
+}
+
 #define RL_FP_BINOP(name, slow, T, U, expr)                                             \
     static inline U name(U a, U b, uint32_t fpcr, uint32_t *fpsr)                      \
     {                                                                                  \
@@ -499,6 +613,8 @@ static inline int rl_fp_nan_fixup(void)
         if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
             return slow(a, b, fpcr, fpsr);                                             \
         memcpy(&u, &r, sizeof u);                                                      \
+        if (rl_fp_tiny_fixup((uint64_t)u, sizeof(U) * 8))                              \
+            return slow(a, b, fpcr, fpsr);                                             \
         return u;                                                                      \
     }
 

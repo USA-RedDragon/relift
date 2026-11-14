@@ -13,6 +13,8 @@
 #include <relift/a64/abi.h>
 #include <relift/a64/fp_slow.h>
 
+int rl_a64_fp_flags(void);
+
 static int g_fatal;
 
 /* The runtime's fatal report, for the one caller fp_slow.c has. */
@@ -24,6 +26,9 @@ int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...)
     g_fatal = 1;
     return RL_PENDING;
 }
+
+/* Flags go to the context here, never to the host. */
+int rl_a64_fp_flags(void) { return 0; }
 
 static uint8_t g_window[DATA_SIZE], g_mem[DATA_SIZE];
 
