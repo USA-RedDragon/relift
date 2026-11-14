@@ -700,9 +700,45 @@ are also call boundaries. [inferred]
   `__sfp_handle_exceptions`, linked into every libnx program, reads FPSR
   only to raise exceptions and does not count. Without a usable read the
   program is built flag-free and pays nothing.
-- With one, the build compiles lifted code with `-DRL_FP_FLAGS
-  -ffp-exception-behavior=strict` and `program.c` calls
-  `rl_a64_set_fp_flags(1)`. The flags then live in two places: the FPSR
+- With one, flags are produced per function, not per program. FPSR's
+  flags are sticky, so a read sees every flag raised on its thread since
+  the last FPSR write. The flags-live analysis
+  (`cpus/a64/src/flags/region.rs`, driven by `relift/src/fpflags.rs`)
+  walks back from each live read to the writes that bound it: an `MSR
+  FPSR`, a callee that writes FPSR on every path, or the start of a thread
+  (the program entry, where `bind` has cleared the host flags). A call on
+  the way puts the callee's tail (after its own last write) in the region;
+  reaching a function's entry goes on before each of its call sites, so a
+  region follows one thread. Only functions with an FP operation in some
+  region, and the functions holding the reads, are compiled with
+  `-DRL_FP_FLAGS -ffp-exception-behavior=strict`; every other function,
+  including a function in a region that does no FP, keeps the flag-free
+  fast path, because what it raises is never read or is nothing.
+  [verified: `relift/tests/e2e_fpsr.rs`, the region unit tests]
+- The build gets this without lifting twice: each module is emitted in two
+  parts (`relift_emit::Options::parts`), and once every module is lifted,
+  its `relift_parts.h` moves the chosen functions into part 1 of their
+  shards, which is compiled a second time with the flag options and
+  `-DRL_PART=1`. Each part has its own function map.
+- A region is unbounded when it meets code the walk cannot follow: an
+  indirect call or computed jump with unknown targets, the entry of a
+  function whose address escapes, or a point entered from elsewhere (the
+  return point of a `setjmp` override). Then every function produces
+  flags, as a whole-program build. An address escapes through a relative
+  relocation, `DT_INIT` or `DT_FINI`, a code address the code computes, a
+  module entry other than the first module's, or a GOT or data word naming
+  a symbol whose value or address reaches other code. A computed call or
+  jump through a GOT or PLT word (a PLT stub, an optional call after a null
+  check) goes to the definitions of its symbol in the program's modules.
+  [inferred: exports no module names are not called, because a module the
+  game loads at run time is outside the program the build sees; the
+  runtime never enters the program entry again, since it does not deliver
+  exceptions through it; landing pads, once lifted, must be marked as
+  entered from elsewhere]
+- `program.c` of a program with a live read calls
+  `rl_a64_set_fp_flags(1)`, and `MSR FPSR` clears the host flags in every
+  function, so a write in flag-free code still starts a region cleanly. In
+  flag-producing code the flags live in two places: the FPSR
   slot (`c->fpsr`: QC, MSR values, the FPCR slow paths) and the host's
   sticky flags (MXCSR on x86-64, FPSR on arm64), which host FP operations
   raise and the exact layer (`fp.c`, called with a NULL `fpsr`) and
