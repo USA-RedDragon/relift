@@ -909,61 +909,49 @@ fn nothing_reaches_check() {
     report("nothing reaches check/", broken);
 }
 
-/// Cipher, key-handling and TLS crates. relift reads decrypted dumps only,
-/// so none of them may enter the graph by any route.
-const CRYPTO_CRATES: &[&str] = &[
-    "aead",
-    "aes",
-    "aes-gcm",
-    "aes-siv",
-    "aws-lc-rs",
-    "aws-lc-sys",
-    "block-modes",
-    "block-padding",
-    "boring",
-    "cbc",
-    "ccm",
-    "cfb-mode",
-    "chacha20",
-    "chacha20poly1305",
-    "cipher",
-    "cmac",
-    "ctr",
-    "des",
-    "ecb",
-    "ghash",
-    "inout",
-    "ofb",
-    "openssl",
-    "openssl-sys",
-    "polyval",
-    "ring",
-    "rsa",
-    "salsa20",
-    "universal-hash",
-    "xts-mode",
-];
+/// The separate tool that converts encrypted dumps. relift has no dependency
+/// on it in either direction, so none of its crates may be in the graph.
+const SEPARATE_TOOL_CRATES: &[&str] = &["switch-formats", "switch-io", "switch-tools"];
 
-/// No cipher crate is anywhere in the resolved graph: relift holds no keys
-/// and no decryption. Control: the RustCrypto hash crates the formats use
-/// (`sha2` and its `digest`) are found, so the reader sees registry
-/// packages under the names this list spells.
+/// The decrypted-only policy, in the graph: no crate of the separate
+/// conversion tool is a dependency of any kind, by name or by manifest
+/// folder. Crypto crates are not banned: a crate such as `aes` may enter
+/// where its charter row states why (guest crypto instructions, SDK
+/// `nn::crypto` replacements, save data hashing). The source rules are in
+/// `decrypted_only.rs`; the refusal rules are in the import tests. Control:
+/// the RustCrypto hash crates the formats use (`sha2` and its `digest`) are
+/// found, and so is a member whose name ends the same way as a banned one
+/// (`relift-switch-formats`), so the list matches whole names only.
 #[test]
-fn no_crypto_crate_is_in_the_graph() {
+fn no_crate_of_the_separate_tool_is_in_the_graph() {
     let ws = workspace();
     let names: BTreeSet<&str> = ws.packages.values().map(|(n, _)| n.as_str()).collect();
-    for control in ["sha2", "digest"] {
+    for control in ["sha2", "digest", "relift-switch-formats"] {
         assert!(
             names.contains(control),
-            "control: {control} is not in the graph, so the reader may not see registry packages"
+            "control: {control} is not in the graph, so the reader may not see its packages"
         );
     }
-    let broken: Vec<String> = CRYPTO_CRATES
-        .iter()
-        .filter(|c| names.contains(**c))
-        .map(|c| format!("{c} is in the graph; relift reads decrypted dumps only"))
-        .collect();
-    report("no crypto crate in the graph", broken);
+    let mut broken = Vec::new();
+    for (id, (name, dir)) in &ws.packages {
+        if SEPARATE_TOOL_CRATES.contains(&name.as_str()) {
+            broken.push(format!("{name} ({id}) is in the graph"));
+        }
+        if dir
+            .components()
+            .any(|c| c.as_os_str().to_string_lossy() == "switch-tools")
+        {
+            broken.push(format!("{name} ({id}) lives in {}", dir.display()));
+        }
+    }
+    for member in ws.members.values() {
+        for (kind, dep) in &member.declared {
+            if SEPARATE_TOOL_CRATES.contains(&dep.as_str()) {
+                broken.push(format!("{} declares {dep} ({})", member.name, kind.label()));
+            }
+        }
+    }
+    report("no crate of the separate tool in the graph", broken);
 }
 
 /// The reader reads this tree and the walk recurses: the controls every
