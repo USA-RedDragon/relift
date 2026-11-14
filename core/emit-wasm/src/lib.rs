@@ -298,8 +298,9 @@ pub(crate) const T_F64: u32 = T_MULHI + 3;
 pub(crate) const T_PAIR: u32 = T_MULHI + 4;
 pub(crate) const T_UN64: u32 = T_MULHI + 5;
 pub(crate) const T_RUN: u32 = T_MULHI + 6;
-pub(crate) const T_H2D: u32 = T_MULHI + 7;
-pub(crate) const T_D2H: u32 = T_MULHI + 8;
+pub(crate) const T_BYTE: u32 = T_MULHI + 7;
+pub(crate) const T_H2D: u32 = T_MULHI + 8;
+pub(crate) const T_D2H: u32 = T_MULHI + 9;
 const N_FIXED_TYPES: u32 = T_D2H + 1;
 
 /// The runtime import indices, which are also their function indices.
@@ -330,9 +331,16 @@ pub(crate) enum Helper {
     Run,
     F16ToF64,
     F64ToF16,
+    MixColumns64,
+    InvMixColumns64,
+    SboxAes,
+    SboxAesInv,
+    SboxSm4,
+    SubBytesAes64,
+    SubBytesAesInv64,
 }
 
-pub(crate) const HELPERS: [Helper; 11] = [
+pub(crate) const HELPERS: [Helper; 18] = [
     Helper::MulHi,
     Helper::Shl128,
     Helper::LShr128,
@@ -344,6 +352,13 @@ pub(crate) const HELPERS: [Helper; 11] = [
     Helper::Run,
     Helper::F16ToF64,
     Helper::F64ToF16,
+    Helper::MixColumns64,
+    Helper::InvMixColumns64,
+    Helper::SboxAes,
+    Helper::SboxAesInv,
+    Helper::SboxSm4,
+    Helper::SubBytesAes64,
+    Helper::SubBytesAesInv64,
 ];
 
 /// What every function of one module shares.
@@ -412,6 +427,7 @@ pub fn emit(fns: &[Function<'_>], opts: &Options) -> Output {
     sigs.push((vec![], vec![I64, I64]));
     sigs.push((vec![I64], vec![I64]));
     sigs.push((vec![I32, I32, I32], vec![I32]));
+    sigs.push((vec![I32], vec![I32]));
     sigs.push((vec![I64], vec![F64]));
     sigs.push((vec![F64], vec![I64]));
     debug_assert_eq!(sigs.len() as u32, N_FIXED_TYPES);
@@ -498,7 +514,7 @@ pub fn emit(fns: &[Function<'_>], opts: &Options) -> Output {
     let mut code = CodeSection::new();
     for h in HELPERS {
         funcs.function(helpers::type_of(h));
-        code.function(&helpers::body(h));
+        code.function(&helpers::body(h, &cx));
     }
     let mut out = Output::default();
     let mut exports = ExportSection::new();

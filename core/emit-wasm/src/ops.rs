@@ -5,7 +5,8 @@
 //! the high half masked to `w - 64` bits.
 
 use relift_ir::{
-    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, UnOp,
+    Value, Width,
 };
 use wasm_encoder::{BlockType, Instruction as I};
 
@@ -595,7 +596,10 @@ impl Em<'_> {
                 self.store_le(a, v, nb);
                 self.i(I::End);
             }
-            Op::Crypto(..) => return Err("a cipher step".into()),
+            Op::Crypto(c, x) => {
+                let x = loc(self, *x);
+                self.crypto(*c, x, dst);
+            }
             Op::AtomicRmw {
                 op: k,
                 addr,
@@ -705,6 +709,39 @@ impl Em<'_> {
             }
         }
         out
+    }
+
+    /// Cipher step `c` on `x` into `dst`: the AES byte substitutions and the
+    /// SM4 S-box through the module's table helpers, the column mixes by
+    /// their helpers on each 64-bit half (two columns each).
+    fn crypto(&mut self, c: CryptoOp, x: V, dst: V) {
+        let h = match c {
+            CryptoOp::Sm4Sbox => {
+                self.push_lo(x);
+                self.i(I::I32WrapI64);
+                self.i(I::Call(self.cx.helper(Helper::SboxSm4)));
+                self.i(I::I64ExtendI32U);
+                self.set(dst.lo());
+                return;
+            }
+            CryptoOp::AesSubBytes => Helper::SubBytesAes64,
+            CryptoOp::AesInvSubBytes => Helper::SubBytesAesInv64,
+            CryptoOp::AesMixColumns => Helper::MixColumns64,
+            CryptoOp::AesInvMixColumns => Helper::InvMixColumns64,
+        };
+        let f = self.cx.helper(h);
+        self.push_lo(x);
+        self.i(I::Call(f));
+        self.set(Self::t(0));
+        self.push_hi(x);
+        self.i(I::Call(f));
+        if let V::P(_, hi) = dst {
+            self.set(hi);
+        } else {
+            self.i(I::Drop);
+        }
+        self.get(Self::t(0));
+        self.set(dst.lo());
     }
 
     /// `v` in memory order: itself when little-endian, else byte-swapped

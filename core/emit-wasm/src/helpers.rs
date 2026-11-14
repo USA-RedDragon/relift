@@ -1,12 +1,14 @@
 //! The small functions every module defines for operations WebAssembly has
 //! no instruction for, and the dispatch loop of modules without tail calls.
 
+use relift_ir::CryptoOp;
+use relift_ir::interp::eval_crypto;
 use wasm_encoder::{BlockType, Function, Instruction as I, ValType};
 
 use crate::func::ma;
 use crate::{
-    Helper, RC_CHAIN, T_D2H, T_F32, T_F64, T_H2D, T_LIFTED, T_MULHI, T_PAIR, T_RUN, T_SH128,
-    T_UN64, ctx, rt,
+    Helper, ModuleCx, RC_CHAIN, T_BYTE, T_D2H, T_F32, T_F64, T_H2D, T_LIFTED, T_MULHI, T_PAIR,
+    T_RUN, T_SH128, T_UN64, ctx, rt,
 };
 
 /// The type index of helper `h`.
@@ -16,10 +18,16 @@ pub(crate) fn type_of(h: Helper) -> u32 {
         Helper::Shl128 | Helper::LShr128 | Helper::AShr128 => T_SH128,
         Helper::RoundAway32 => T_F32,
         Helper::RoundAway64 => T_F64,
-        Helper::BitReverse64 | Helper::ByteSwap64 => T_UN64,
+        Helper::BitReverse64
+        | Helper::ByteSwap64
+        | Helper::MixColumns64
+        | Helper::InvMixColumns64
+        | Helper::SubBytesAes64
+        | Helper::SubBytesAesInv64 => T_UN64,
         Helper::Run => T_RUN,
         Helper::F16ToF64 => T_H2D,
         Helper::F64ToF16 => T_D2H,
+        Helper::SboxAes | Helper::SboxAesInv | Helper::SboxSm4 => T_BYTE,
     }
 }
 
@@ -56,11 +64,18 @@ fn byte_steps(f: &mut Function) {
     emit(f, &[I::LocalGet(0), I::I64Const(32), I::I64Rotl, I::End]);
 }
 
-/// The body of helper `h`.
-pub(crate) fn body(h: Helper) -> Function {
+/// The body of helper `h` in the module `cx`.
+pub(crate) fn body(h: Helper, cx: &ModuleCx<'_>) -> Function {
     match h {
         Helper::F16ToF64 => f16_to_f64(),
         Helper::F64ToF16 => f64_to_f16(),
+        Helper::MixColumns64 => mix_columns(false),
+        Helper::InvMixColumns64 => mix_columns(true),
+        Helper::SboxAes => sbox(CryptoOp::AesSubBytes),
+        Helper::SboxAesInv => sbox(CryptoOp::AesInvSubBytes),
+        Helper::SboxSm4 => sbox(CryptoOp::Sm4Sbox),
+        Helper::SubBytesAes64 => sub_bytes(cx.helper(Helper::SboxAes)),
+        Helper::SubBytesAesInv64 => sub_bytes(cx.helper(Helper::SboxAesInv)),
         Helper::MulHi => mulhi(),
         Helper::Shl128 => shift128(0),
         Helper::LShr128 => shift128(1),
@@ -454,5 +469,169 @@ fn f64_to_f16() -> Function {
             I::End,
         ],
     );
+    f
+}
+
+/// Pushes `2 * x` in GF(2^8) for each byte of the `i64` in local `l`.
+fn xtime(f: &mut Function, l: u32) {
+    emit(
+        f,
+        &[
+            I::LocalGet(l),
+            I::I64Const(0x7f7f_7f7f_7f7f_7f7f),
+            I::I64And,
+            I::I64Const(1),
+            I::I64Shl,
+            I::LocalGet(l),
+            I::I64Const(7),
+            I::I64ShrU,
+            I::I64Const(0x0101_0101_0101_0101),
+            I::I64And,
+            I::I64Const(0x1b),
+            I::I64Mul,
+            I::I64Xor,
+        ],
+    );
+}
+
+/// Pushes each 32-bit column of the `i64` in local `l` with its bytes
+/// rotated down by `k`: byte `r` of a column becomes byte `r + k mod 4`.
+fn rot_rows(f: &mut Function, l: u32, k: u32) {
+    let keep: i64 = match k {
+        1 => 0x00ff_ffff_00ff_ffff,
+        2 => 0x0000_ffff_0000_ffff,
+        _ => 0x0000_00ff_0000_00ff,
+    };
+    emit(
+        f,
+        &[
+            I::LocalGet(l),
+            I::I64Const(i64::from(8 * k)),
+            I::I64ShrU,
+            I::I64Const(keep),
+            I::I64And,
+            I::LocalGet(l),
+            I::I64Const(i64::from(32 - 8 * k)),
+            I::I64Shl,
+            I::I64Const(!keep),
+            I::I64And,
+            I::I64Or,
+        ],
+    );
+}
+
+/// AES `MixColumns` (or `InvMixColumns`) on the two columns in the `i64`
+/// in local 0, row 0 lowest: with `rk` the rows rotated by `k`, out is
+/// `2 x ^ 3 r1 ^ r2 ^ r3 = xtime(x ^ r1) ^ r1 ^ r2 ^ r3`. The inverse is
+/// `MixColumns` after `x ^= 4 (x ^ r2)`, since the circulant `[14 11 13 9]`
+/// is `[2 3 1 1]` times `[5 0 4 0]`.
+fn mix_columns(inverse: bool) -> Function {
+    let mut f = Function::new([(2, ValType::I64)]);
+    let (x, r1, t) = (0, 1, 2);
+    if inverse {
+        emit(&mut f, &[I::LocalGet(x)]);
+        rot_rows(&mut f, x, 2);
+        emit(&mut f, &[I::I64Xor, I::LocalSet(t)]);
+        xtime(&mut f, t);
+        emit(&mut f, &[I::LocalSet(t)]);
+        xtime(&mut f, t);
+        emit(&mut f, &[I::LocalGet(x), I::I64Xor, I::LocalSet(x)]);
+    }
+    rot_rows(&mut f, x, 1);
+    emit(
+        &mut f,
+        &[
+            I::LocalSet(r1),
+            I::LocalGet(x),
+            I::LocalGet(r1),
+            I::I64Xor,
+            I::LocalSet(t),
+        ],
+    );
+    xtime(&mut f, t);
+    emit(&mut f, &[I::LocalGet(r1), I::I64Xor]);
+    rot_rows(&mut f, x, 2);
+    emit(&mut f, &[I::I64Xor]);
+    rot_rows(&mut f, x, 3);
+    emit(&mut f, &[I::I64Xor, I::End]);
+    f
+}
+
+/// A byte table lookup for the byte in the `i32` local 0: the 256 entries
+/// of cipher step `op` (computed from `relift_ir`'s definition) as 32
+/// `i64` words, one picked by a `br_table` on the byte's top five bits and
+/// shifted by its low three.
+fn sbox(op: CryptoOp) -> Function {
+    let entry = |i: u64| -> u64 { (eval_crypto(op, u128::from(i)) & 0xff) as u64 };
+    let words: Vec<i64> = (0..32u64)
+        .map(|k| (0..8).fold(0u64, |w, j| w | (entry(8 * k + j) << (8 * j))) as i64)
+        .collect();
+    let mut f = Function::new([(1, ValType::I64)]);
+    let word = 1;
+    f.instruction(&I::Block(BlockType::Empty));
+    for _ in 0..32 {
+        f.instruction(&I::Block(BlockType::Empty));
+    }
+    let cases: Vec<u32> = (0..32).collect();
+    emit(
+        &mut f,
+        &[
+            I::LocalGet(0),
+            I::I32Const(3),
+            I::I32ShrU,
+            I::BrTable(cases.into(), 31),
+        ],
+    );
+    for (k, w) in words.iter().enumerate() {
+        emit(&mut f, &[I::End, I::I64Const(*w), I::LocalSet(word)]);
+        if k < 31 {
+            f.instruction(&I::Br(31 - k as u32));
+        }
+    }
+    emit(
+        &mut f,
+        &[
+            I::End,
+            I::LocalGet(word),
+            I::LocalGet(0),
+            I::I32Const(7),
+            I::I32And,
+            I::I32Const(3),
+            I::I32Shl,
+            I::I64ExtendI32U,
+            I::I64ShrU,
+            I::I32WrapI64,
+            I::I32Const(0xff),
+            I::I32And,
+            I::End,
+        ],
+    );
+    f
+}
+
+/// Each byte of the `i64` in local 0 through the byte table helper `table`.
+fn sub_bytes(table: u32) -> Function {
+    let mut f = Function::new([]);
+    for k in 0..8i64 {
+        emit(
+            &mut f,
+            &[
+                I::LocalGet(0),
+                I::I64Const(8 * k),
+                I::I64ShrU,
+                I::I32WrapI64,
+                I::I32Const(0xff),
+                I::I32And,
+                I::Call(table),
+                I::I64ExtendI32U,
+                I::I64Const(8 * k),
+                I::I64Shl,
+            ],
+        );
+        if k > 0 {
+            f.instruction(&I::I64Or);
+        }
+    }
+    f.instruction(&I::End);
     f
 }
