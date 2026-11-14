@@ -106,6 +106,19 @@ pub trait Cpu: Default + Sized {
         None
     }
 
+    /// Reads the register `name` itself (guest state the template reads at
+    /// lift time, as the SM83 layer does for every register); `None` for the
+    /// generic rule. Asked only when no local of that name is bound.
+    fn read_reg(_g: &mut Gen<'_, Self>, _name: &str) -> Option<R<V>> {
+        None
+    }
+
+    /// Handles an assignment to the register `name` itself; `None` for the
+    /// generic rule. Asked only when no local of that name is bound.
+    fn assign_reg(_g: &mut Gen<'_, Self>, _name: &str, _v: &V) -> Option<R<()>> {
+        None
+    }
+
     /// Whether `name` is a register the model does not declare.
     fn is_register(_name: &str) -> bool {
         false
@@ -394,6 +407,9 @@ impl<'m, C: Cpu> Gen<'m, C> {
         if let Some(v) = self.locals.get(&format!("'{name}")) {
             return Ok(v.clone());
         }
+        if let Some(r) = C::read_reg(self, name) {
+            return r;
+        }
         if let Some((ty, i)) = self.m.enum_of.get(name) {
             return Ok(V::Enum(ty.as_str().into(), *i));
         }
@@ -454,6 +470,9 @@ impl<'m, C: Cpu> Gen<'m, C> {
         if self.locals.contains_key(name) {
             self.locals.insert(name.to_string(), v);
             return Ok(());
+        }
+        if let Some(r) = C::assign_reg(self, name, &v) {
+            return r;
         }
         if self.m.registers.contains_key(name) || C::is_register(name) {
             self.regs.insert(name.to_string(), v);
@@ -1707,7 +1726,11 @@ impl<C: Cpu> Gen<'_, C> {
             "w".into(),
             !self.known & mask(word_bits) as u32,
         );
-        let argv = V::tuple(C::decode_args(word));
+        let mut args = C::decode_args(word);
+        let argv = match args.len() {
+            1 => args.remove(0),
+            _ => V::tuple(args),
+        };
         let cond = self.pat_cond(&c.params, &argv)?;
         if cond != V::Bool(true) {
             return fail(format!("decode clause pattern is {cond:?}"));

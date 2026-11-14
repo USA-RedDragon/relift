@@ -6,6 +6,7 @@
 
 use std::fmt::Write as _;
 
+use crate::ast::{Expr, Lit, Pat, Typ, TypArg};
 use crate::eval::{Cpu, E, Gen};
 use crate::model::Model;
 
@@ -80,13 +81,85 @@ pub struct DecodeClause {
 /// The bit patterns of every clause of `group`, in order, for words of
 /// `bits` bits.
 pub fn clauses(m: &Model, group: &str, bits: u32) -> Vec<DecodeClause> {
+    let parsed = match m.func(group) {
+        Some(Ok(c)) => Some(c),
+        _ => None,
+    };
     let mut out = Vec::new();
     for (index, raw) in m.funcs.get(group).into_iter().flatten().enumerate() {
-        if let Some((mask, value)) = clause_bits(raw, bits) {
+        let from_ast = || {
+            let c = parsed.as_ref()?.get(index)?;
+            let p = match &c.params {
+                Pat::Tuple(ps) if ps.len() == 2 => &ps[1],
+                p => p,
+            };
+            pat_bits(p, bits)
+        };
+        if let Some((mask, value)) = clause_bits(raw, bits).or_else(from_ast) {
             out.push(DecodeClause { index, mask, value });
         }
     }
     out
+}
+
+/// The fixed bits and their values of an opcode pattern of `nbits` bits
+/// written as a literal (`0x3F`, `0b0110`), a bit list, or a concatenation
+/// of literals and typed names (`0b01 @ r : bits(3) @ 0b110`); `None` for
+/// a pattern that fixes no bits or whose widths are unknown.
+fn pat_bits(p: &Pat, nbits: u32) -> Option<(u32, u32)> {
+    let (w, mask, value) = pat_parts(p)?;
+    (w == nbits && mask != 0).then_some((mask, value))
+}
+
+/// The width, fixed bits and values of a pattern.
+fn pat_parts(p: &Pat) -> Option<(u32, u32, u32)> {
+    match p {
+        Pat::Lit(Lit::Bits { width, value }) if *width <= 32 => {
+            let all = if *width == 32 {
+                u32::MAX
+            } else {
+                (1u32 << width) - 1
+            };
+            Some((*width, all, u32::try_from(*value).ok()?))
+        }
+        Pat::Lit(Lit::Bit(b)) => Some((1, 1, u32::from(*b))),
+        Pat::As(q, _) => pat_parts(q),
+        Pat::Typed(q, t) => {
+            let w = bits_of(t)?;
+            match pat_parts(q) {
+                Some((qw, m, v)) => (qw == w).then_some((w, m, v)),
+                None => matches!(q.as_ref(), Pat::Id(_) | Pat::Wild).then_some((w, 0, 0)),
+            }
+        }
+        Pat::Vec(ps) | Pat::Concat(ps) => {
+            let (mut w, mut mask, mut value) = (0u32, 0u32, 0u32);
+            for q in ps {
+                let (qw, m, v) = match (p, q) {
+                    (Pat::Vec(_), Pat::Wild | Pat::Id(_)) => (1, 0, 0),
+                    _ => pat_parts(q)?,
+                };
+                w += qw;
+                if w > 32 {
+                    return None;
+                }
+                mask = mask.checked_shl(qw).unwrap_or(0) | m;
+                value = value.checked_shl(qw).unwrap_or(0) | v;
+            }
+            Some((w, mask, value))
+        }
+        _ => None,
+    }
+}
+
+/// The width of `bits(N)`.
+fn bits_of(t: &Typ) -> Option<u32> {
+    match t {
+        Typ::App(n, args) if n == "bits" => match args.as_slice() {
+            [TypArg::Expr(Expr::Lit(Lit::Int(w)))] => u32::try_from(*w).ok(),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The fixed bits and their values of a decode clause's opcode pattern,
@@ -430,4 +503,33 @@ pub fn deposit(x: u32, m: u32) -> u32 {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bits(text: &str, n: u32) -> Option<(u32, u32)> {
+        let p = crate::parse::Parser::new(text)
+            .and_then(|mut p| p.pat())
+            .expect("pattern parses");
+        pat_bits(&p, n)
+    }
+
+    #[test]
+    fn typed_literal_patterns_give_their_fixed_bits() {
+        assert_eq!(bits("0x3F", 8), Some((0xFF, 0x3F)));
+        assert_eq!(
+            bits("0b01 @ d : bits(3) @ 0b110", 8),
+            Some((0b1100_0111, 0b0100_0110))
+        );
+        assert_eq!(
+            bits("(0b001 @ cc : bits(2) @ 0b000)", 8),
+            Some((0xE7, 0x20))
+        );
+        assert_eq!(bits("[bitone, _, bitzero, _]", 4), Some((0b1010, 0b1000)));
+        assert_eq!(bits("op", 8), None);
+        assert_eq!(bits("0b01 @ x", 8), None);
+        assert_eq!(bits("0x3F", 16), None);
+    }
 }
