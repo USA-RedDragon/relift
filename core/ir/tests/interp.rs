@@ -27,7 +27,7 @@ static DECLS: [RegDecl; 4] = [
 ];
 
 fn file() -> RegFile {
-    RegFile::new(&DECLS)
+    RegFile::new("test", &DECLS)
 }
 
 fn mem() -> FlatMemory {

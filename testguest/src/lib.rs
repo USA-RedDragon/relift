@@ -50,7 +50,7 @@ pub const Z: Reg = Reg(4);
 
 /// The guest's register file: `r0` to `r3` at indexes 0 to 3, then `z`.
 pub fn regs() -> RegFile {
-    RegFile::new(&DECLS)
+    RegFile::new("testguest", &DECLS)
 }
 
 /// Encodes one instruction.

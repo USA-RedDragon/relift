@@ -26,16 +26,27 @@ impl Reg {
 /// flag or a thread pointer is the frontend's business.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RegFile {
+    name: &'static str,
     decls: &'static [RegDecl],
 }
 
 impl RegFile {
-    /// A register file over `decls`.
+    /// A register file called `name` over `decls`. The name identifies the
+    /// file in the text format.
     ///
     /// # Panics
     ///
-    /// Panics if two slots share a name, or there are more than 65,536 slots.
-    pub fn new(decls: &'static [RegDecl]) -> RegFile {
+    /// Panics if two slots share a name, there are more than 65,536 slots, or
+    /// `name` is empty or has a character other than ASCII letters, digits,
+    /// `_` and `-`.
+    pub fn new(name: &'static str, decls: &'static [RegDecl]) -> RegFile {
+        assert!(
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "bad register file name {name:?}"
+        );
         assert!(decls.len() <= usize::from(u16::MAX) + 1, "too many slots");
         for (i, a) in decls.iter().enumerate() {
             assert!(
@@ -44,7 +55,12 @@ impl RegFile {
                 a.name
             );
         }
-        RegFile { decls }
+        RegFile { name, decls }
+    }
+
+    /// The name of the file.
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 
     /// Every slot in index order.
