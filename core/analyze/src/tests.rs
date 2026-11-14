@@ -197,6 +197,48 @@ fn jump_tables_are_resolved_into_the_function() {
 }
 
 #[test]
+fn an_address_taken_entry_does_not_cut_the_function_around_it() {
+    // The table base is set before an address the code also takes (as a
+    // loader does with a loop head it computes with adr); the function
+    // must run through that address to know the base at the jump.
+    let table = BASE + 0x44;
+    let m = module(
+        &[
+            word(0x04, 0, table as u16),   // 0x00 li r0, table
+            word(0x04, 3, 0x1010),         // 0x04 li r3, 0x1010 (address taken)
+            word(0x04, 2, 0),              // 0x08 li r2, 0
+            word(0x05, 2, 1),              // 0x0c add r2, r1
+            word(0x09, 2, (-3i16) as u16), // 0x10 addi r2, -3
+            word(0x0d, 2, 0),              // 0x14 cmpz r2
+            branch(0x0e, 0, 8),            // 0x18 bz +8 -> 0x38
+            word(0x05, 1, 1),              // 0x1c add r1, r1
+            word(0x05, 1, 1),              // 0x20 add r1, r1
+            word(0x05, 1, 1),              // 0x24 add r1, r1 (r1 *= 8)
+            word(0x05, 0, 1),              // 0x28 add r0, r1
+            word(0x0a, 0, 0),              // 0x2c ld r0, [r0]
+            word(0x06, 0, 0),              // 0x30 br r0
+            word(0x03, 0, 0),              // 0x34 ret
+            word(0x03, 0, 0),              // 0x38 ret
+            word(0x03, 0, 0),              // 0x3c ret
+            word(0x03, 0, 0),              // 0x40 ret
+        ],
+        &[0x1000u64 + 0x34, 0x1000 + 0x3c, 0x1000 + 0x40]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert_eq!(a.functions[&(BASE + 0x10)].kind, EntryKind::AddressTaken);
+    let f = &a.functions[&BASE];
+    assert!(f.insts.contains_key(&(BASE + 0x10)), "{:?}", f.insts.keys());
+    assert_eq!(
+        f.tables[&(BASE + 0x30)],
+        [BASE + 0x34, BASE + 0x3c, BASE + 0x40]
+    );
+}
+
+#[test]
 fn a_jump_table_entered_by_a_taken_branch() {
     let m = module(
         &[

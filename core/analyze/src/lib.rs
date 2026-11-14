@@ -306,9 +306,22 @@ pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Prog
         }
     }
     let mut done: BTreeSet<u64> = BTreeSet::new();
+    // A function's extent stops at the entries of other functions, except
+    // at addresses only known as computed values: those are often labels
+    // inside a function (a jump-table base or a loop head taken with adr),
+    // and cutting there would lose the state the code before them set up.
+    // They still get a function of their own for indirect jumps to them.
+    let stops = |kinds: &BTreeMap<u64, EntryKind>| -> BTreeSet<u64> {
+        kinds
+            .iter()
+            .filter(|(_, k)| **k != EntryKind::AddressTaken)
+            .map(|(&a, _)| a)
+            .collect()
+    };
     loop {
         let entries: BTreeSet<u64> = kinds.keys().copied().collect();
         let todo: Vec<u64> = entries.difference(&done).copied().collect();
+        let entries = stops(&kinds);
         if todo.is_empty() {
             break;
         }
@@ -324,7 +337,7 @@ pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Prog
             });
         }
     }
-    let entries: BTreeSet<u64> = kinds.keys().copied().collect();
+    let entries = stops(&kinds);
     let total = kinds.len();
     let mut failed: HashSet<u64> = HashSet::new();
     let functions = kinds
