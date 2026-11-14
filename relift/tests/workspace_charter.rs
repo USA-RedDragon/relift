@@ -804,6 +804,63 @@ fn nothing_reaches_check() {
     report("nothing reaches check/", broken);
 }
 
+/// Cipher, key-handling and TLS crates. relift reads decrypted dumps only,
+/// so none of them may enter the graph by any route.
+const CRYPTO_CRATES: &[&str] = &[
+    "aead",
+    "aes",
+    "aes-gcm",
+    "aes-siv",
+    "aws-lc-rs",
+    "aws-lc-sys",
+    "block-modes",
+    "block-padding",
+    "boring",
+    "cbc",
+    "ccm",
+    "cfb-mode",
+    "chacha20",
+    "chacha20poly1305",
+    "cipher",
+    "cmac",
+    "ctr",
+    "des",
+    "ecb",
+    "ghash",
+    "inout",
+    "ofb",
+    "openssl",
+    "openssl-sys",
+    "polyval",
+    "ring",
+    "rsa",
+    "salsa20",
+    "universal-hash",
+    "xts-mode",
+];
+
+/// No cipher crate is anywhere in the resolved graph: relift holds no keys
+/// and no decryption. Control: the RustCrypto hash crates the formats use
+/// (`sha2` and its `digest`) are found, so the reader sees registry
+/// packages under the names this list spells.
+#[test]
+fn no_crypto_crate_is_in_the_graph() {
+    let ws = workspace();
+    let names: BTreeSet<&str> = ws.packages.values().map(|(n, _)| n.as_str()).collect();
+    for control in ["sha2", "digest"] {
+        assert!(
+            names.contains(control),
+            "control: {control} is not in the graph, so the reader may not see registry packages"
+        );
+    }
+    let broken: Vec<String> = CRYPTO_CRATES
+        .iter()
+        .filter(|c| names.contains(**c))
+        .map(|c| format!("{c} is in the graph; relift reads decrypted dumps only"))
+        .collect();
+    report("no crypto crate in the graph", broken);
+}
+
 /// The reader reads this tree and the walk recurses: the controls every
 /// zero above rests on.
 #[test]
