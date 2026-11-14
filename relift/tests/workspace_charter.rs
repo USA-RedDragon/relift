@@ -314,9 +314,10 @@ const CHARTERS: &[Charter] = &[
             "relift-switch",
             "relift-switch-formats",
             "relift-testguest",
+            "serde_json",
             "toml",
         ],
-        dev: &["serde_json"],
+        dev: NONE,
         build: NONE,
     },
     Charter {
