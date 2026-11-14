@@ -176,6 +176,7 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
                 }
                 Err(E::NoMatch) => return Err("unmatched call".into()),
             }
+            let lines = hoist_align(lines)?;
             arms.push((val, dead_lines(lines)));
         }
         if !failed.is_empty() && good == 0 {
@@ -265,8 +266,77 @@ fn pure_def(line: &str) -> Option<&str> {
         return Some(name);
     }
     let pure = PURE_CALLS.iter().any(|c| rhs.starts_with(c))
-        || (rhs.starts_with("if ") && !rhs.contains("b.load") && !rhs.contains("b.store"));
+        || (rhs.starts_with("if ") && !EFFECTS.iter().any(|e| rhs.contains(e)));
     pure.then_some(name)
+}
+
+/// The builder calls with an effect on memory or the monitor.
+const EFFECTS: &[&str] = &[
+    "b.load",
+    "b.store",
+    "b.atomic_rmw(",
+    "b.compare_swap(",
+    "b.fence(",
+    "b.clear_exclusive(",
+];
+
+/// Moves every alignment check (a guard) above the template's first memory
+/// effect, with the pure definitions it reads: the IR wants every guard
+/// before every effect, and a later access of a pair checks its own
+/// address. Fails when a check reads a value only an effect defines.
+fn hoist_align(lines: Vec<String>) -> Result<Vec<String>, String> {
+    let is_effect = |l: &str| EFFECTS.iter().any(|e| l.contains(e)) && !l.contains("align::check");
+    let Some(first) = lines.iter().position(|l| is_effect(l)) else {
+        return Ok(lines);
+    };
+    let mut moved = vec![false; lines.len()];
+    let def_at = |n: &str| -> Option<usize> {
+        lines.iter().position(|l| {
+            l.strip_prefix("let ")
+                .and_then(|r| r.split_once(" = "))
+                .is_some_and(|(lhs, _)| lhs.split(':').next().map(str::trim) == Some(n))
+        })
+    };
+    for i in first..lines.len() {
+        if !lines[i].contains("align::check") {
+            continue;
+        }
+        let mut todo = vec![i];
+        while let Some(j) = todo.pop() {
+            if moved[j] {
+                continue;
+            }
+            moved[j] = true;
+            for t in idents(&lines[j]) {
+                if !(t.starts_with('v') || t.starts_with('s'))
+                    || !t[1..].chars().all(|c| c.is_ascii_digit())
+                {
+                    continue;
+                }
+                if let Some(k) = def_at(t)
+                    && k > first
+                    && !moved[k]
+                {
+                    if pure_def(&lines[k]).is_none() {
+                        return Err(format!("alignment check reads {t}, defined by an effect"));
+                    }
+                    todo.push(k);
+                }
+            }
+        }
+    }
+    let mut out: Vec<String> = lines[..first].to_vec();
+    for (i, l) in lines.iter().enumerate().skip(first) {
+        if moved[i] {
+            out.push(l.clone());
+        }
+    }
+    for (i, l) in lines.iter().enumerate().skip(first) {
+        if !moved[i] {
+            out.push(l.clone());
+        }
+    }
+    Ok(out)
 }
 
 fn idents(line: &str) -> impl Iterator<Item = &str> {

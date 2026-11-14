@@ -134,7 +134,7 @@ use relift_ir::{{AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRoun
 
 use crate::decode::{{Encoding, Feature}};
 use crate::lift::LiftError;
-use crate::lift::sail::{{GenFn, half}};
+use crate::lift::sail::{{GenFn, align, half}};
 use crate::lift::sail::rt::{{self, Kind, St, Target}};
 use crate::regs;
 ",

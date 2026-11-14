@@ -9,6 +9,8 @@
 //! - FEAT: `IsFeatureImplemented`: true for the Armv8.0-A base, a lift-time
 //!   test of the CPU's `Features` (`St::has`) for the extensions in
 //!   `eval::LIFT_TIME_FEATURES`, false for every other feature.
+//!   `HaveFP16Ext`, which `impdefs.sail` defines as true, is the same test
+//!   of `FEAT_FP16`.
 //! - MEM: memory access, ordering, the exclusive monitor and barriers
 //!   (fences).
 //! - FP: arithmetic, compares, min/max, conversions, rounding to integral
@@ -500,6 +502,10 @@ impl Gen<'_> {
         if self.no_cut && CRYPTO_CUT.iter().any(|(n, _)| *n == name) {
             return Ok(None);
         }
+        if name == "HaveFP16Ext" {
+            self.used_cut.insert("FEAT");
+            return Ok(Some(self.st(K::Bool, "st.has(Feature::FP16)".into(), 0)));
+        }
         if let Some(v) = self.real(name, a)? {
             self.used_cut.insert("REAL");
             return Ok(Some(v));
@@ -594,11 +600,11 @@ impl Gen<'_> {
                     return fail("load under a dynamic condition");
                 }
                 let order = self.order(&a[2]);
-                let f = if std::mem::take(&mut self.excl_load) {
-                    "load_exclusive"
-                } else {
-                    "load"
-                };
+                let excl = std::mem::take(&mut self.excl_load);
+                let f = if excl { "load_exclusive" } else { "load" };
+                if excl || order != "Plain" {
+                    self.effect(format!("align::check(b, st, {x}, {size}, {excl});"));
+                }
                 let call = format!(
                     "b.{f}({x}, Width::new({}), Endian::Little, Order::{order})",
                     size * 8
@@ -620,9 +626,17 @@ impl Gen<'_> {
                 let x = self.dx(&addr)?;
                 let y = self.dx(&data)?;
                 let order = self.order(&a[2]);
+                let size = data.width().unwrap_or(8) / 8;
                 if let Some(p) = self.excl_pass.clone()
                     && self.guard.d.as_deref() == Some(p.as_ref())
                 {
+                    if self.guard.s.is_none() {
+                        self.line(format!("align::check(b, st, {x}, {size}, true);"));
+                    } else if let Some((s, _)) = self.guard.s.clone() {
+                        self.line(format!(
+                            "if {s} {{ align::check(b, st, {x}, {size}, true); }}"
+                        ));
+                    }
                     let call =
                         format!("b.store_exclusive({x}, {y}, Endian::Little, Order::{order})");
                     let l = match self.guard.s.clone() {
@@ -639,6 +653,9 @@ impl Gen<'_> {
                 }
                 if self.guard.d.is_some() {
                     return fail("store under a dynamic condition");
+                }
+                if order != "Plain" {
+                    self.effect(format!("align::check(b, st, {x}, {size}, false);"));
                 }
                 self.effect(format!(
                     "b.store({x}, {y}, Endian::Little, Order::{order});"
@@ -681,6 +698,7 @@ impl Gen<'_> {
                     return fail("atomic under a dynamic condition");
                 }
                 let order = self.order(&a[3]);
+                self.effect(format!("align::check(b, st, {x}, {}, false);", w / 8));
                 let call = if atomic.is_empty() {
                     let c = self.bitify(&a[1])?;
                     let cx = self.dx(&c)?;
