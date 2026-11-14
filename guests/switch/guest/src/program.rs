@@ -158,23 +158,41 @@ fn unwind_starts(img: &[u8], hdr: usize) -> Vec<u64> {
         .collect()
 }
 
-/// The values the module's relocations store, as image offsets.
+/// The values the module's relocations store, as image offsets. A PLT
+/// slot also names the word it holds before binding: with lazy binding the
+/// loader only adds the base to it, so it is the PLT header's address, code
+/// that nothing else reaches.
 fn reloc_targets(
     img: &[u8],
     dynamic: usize,
     symbols: &[relift_switch_formats::nso::Symbol],
 ) -> Vec<u64> {
-    relocs(img, dynamic)
-        .into_iter()
-        .filter_map(|r| match r {
-            Reloc::Value(v) => Some(v),
-            Reloc::Symbol { sym, addend, .. } => sym
-                .checked_sub(1)
-                .and_then(|k| symbols.get(k))
-                .filter(|s| s.is_defined())
-                .map(|s| s.value.wrapping_add(addend)),
-        })
-        .collect()
+    let mut out = Vec::new();
+    for r in relocs(img, dynamic) {
+        match r {
+            Reloc::Value(v) => out.push(v),
+            Reloc::Symbol {
+                at,
+                sym,
+                addend,
+                kind,
+            } => {
+                if kind == SlotKind::Plt
+                    && let Some(lazy) = u64_at(img, at as usize).filter(|&w| w != 0)
+                {
+                    out.push(lazy);
+                }
+                if let Some(s) = sym
+                    .checked_sub(1)
+                    .and_then(|k| symbols.get(k))
+                    .filter(|s| s.is_defined())
+                {
+                    out.push(s.value.wrapping_add(addend));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// One relocation, as image offsets.
@@ -700,6 +718,9 @@ mod tests {
                 },
             ]
         );
+        // Unbound, the PLT slot holds the PLT header's address: an entry.
+        put(&mut img, 0x48, 0x30);
+        assert_eq!(reloc_targets(&img, 0, &[]), [0x30]);
     }
 
     #[test]
