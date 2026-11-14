@@ -9,6 +9,7 @@
 //! ```text
 //! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]
 //! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]
+//! relift-check --oracle rustyboi step|rom ...   (Game Boy SM83, see gb/cli.rs)
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -23,6 +24,7 @@
 //! slow path), and every other block must still match.
 
 mod emu;
+mod gb;
 mod mutate;
 mod states;
 
@@ -185,6 +187,9 @@ fn usage() -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = gb::cli::dispatch(&args) {
+        return code;
+    }
     if args.len() < 2 {
         return usage();
     }
