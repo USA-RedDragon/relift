@@ -880,6 +880,7 @@ dependencies = [
  "relift-input",
  "relift-ir",
  "relift-manifest",
+ "relift-patch",
  "relift-proc",
  "relift-progress",
  "relift-switch",

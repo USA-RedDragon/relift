@@ -25,6 +25,7 @@ relift-info = { workspace = true }
 relift-input = { workspace = true }
 relift-ir = { workspace = true }
 relift-manifest = { workspace = true }
+relift-patch = { workspace = true }
 relift-proc = { workspace = true }
 relift-progress = { workspace = true }
 relift-switch = { workspace = true }
