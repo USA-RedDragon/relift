@@ -90,6 +90,26 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
 }
 
 #[test]
+fn a_jump_to_an_entry_inside_the_function_stays_a_goto() {
+    // 0x104 is another function's entry (an address-taken label) and also
+    // part of this function's extent: the loop back to it keeps the locals.
+    let code = [
+        word(0x04, 0, 5),
+        word(0x09, 0, 1),
+        branch(0x07, 0, -1),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x100, &blocks), function(0x104, &blocks[1..])];
+    let out = emit(&Toy, &fns, &[], &Options::default());
+    let s = shard(&out);
+    let body = &s[s.find("RL_LIFTED(F_100)\n{").expect("F_100")..];
+    let body = &body[..body.find("RL_LIFTED(F_104)\n{").unwrap_or(body.len())];
+    assert!(body.contains("goto L_104;"), "{body}");
+    assert!(!body.contains("return F_104(c, mem);"), "{body}");
+}
+
+#[test]
 fn failures_and_unknown_intrinsics_report_undefined() {
     let fail = relift_guest::LiftFailure {
         insn: 0xdead,

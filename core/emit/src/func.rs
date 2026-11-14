@@ -74,8 +74,12 @@ fn flag(r: Reg) -> String {
     format!("g{}", reg(r))
 }
 
-fn inside(f: &Function<'_>, targets: &BTreeMap<u64, Target>, t: u64) -> bool {
-    f.insts.contains_key(&t) && (t == f.entry || !targets.contains_key(&t))
+/// Whether a transfer to `t` stays in `f`: analysis puts in a function's
+/// extent only code it owns, which may include an address that is also the
+/// entry of another function (an address-taken label inside it), and a jump
+/// there must keep the function's state rather than leave it.
+fn inside(f: &Function<'_>, _targets: &BTreeMap<u64, Target>, t: u64) -> bool {
+    f.insts.contains_key(&t)
 }
 
 impl Ctx<'_> {
