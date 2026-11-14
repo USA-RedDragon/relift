@@ -368,6 +368,14 @@ TEST(fs_proxy_commands)
     CHECK_EQ(r.svc_rc, 0);
     CHECK_EQ(r.result, 0);
     memset(&q, 0, sizeof q);
+    q.cmd = 1005;
+    r = call(x.c, x.proxy, &q);
+    CHECK_EQ(r.result, 0);
+    memset(&q, 0, sizeof q);
+    q.cmd = 1006;
+    r = call(x.c, x.proxy, &q);
+    CHECK_EQ(r.result, 0);
+    memset(&q, 0, sizeof q);
     q.cmd = 12345;
     r = call(x.c, x.proxy, &q);
     CHECK_EQ(r.svc_rc, 0);

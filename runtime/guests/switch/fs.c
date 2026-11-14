@@ -690,6 +690,12 @@ static rl_result disable_auto_save_data_creation(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+static rl_result get_global_access_log_mode(rl_ipc_req *r)
+{
+    *(uint32_t *)rl_ipc_out(r, 4) = 0;
+    return KR_SUCCESS;
+}
+
 static const rl_ipc_cmd proxy_cmds[] = {
     { 1, "SetCurrentProcess", set_current_process },
     { 18, "OpenSdCardFileSystem", open_sd_card_file_system },
@@ -698,6 +704,9 @@ static const rl_ipc_cmd proxy_cmds[] = {
     { 202, "OpenDataStorageByDataId", rl_fs_open_data_storage_data_id },
     { 203, "OpenPatchDataStorageByCurrentProcess", rl_fs_open_patch_data_storage },
     { 1003, "DisableAutoSaveDataCreation", disable_auto_save_data_creation },
+    RL_SRV_STUB(1004, "SetGlobalAccessLogMode"),
+    { 1005, "GetGlobalAccessLogMode", get_global_access_log_mode },
+    RL_SRV_STUB(1006, "OutputAccessLogToSdCard"),
 };
 
 static const rl_ipc_class proxy_class = { "nn::fssrv::sf::IFileSystemProxy", proxy_cmds,
