@@ -350,7 +350,34 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 d: a.d.clone(),
             });
         }
-        fail("guard union of mixed conditions")
+        let da = self.guard_dyn(a);
+        let db = self.guard_dyn(b);
+        let d = match self.dy(K::Bool, format!("b.or({da}, {db})")) {
+            V::D(_, n) => n,
+            _ => unreachable!(),
+        };
+        Ok(Guard {
+            dead: false,
+            s: None,
+            d: Some(d),
+        })
+    }
+
+    /// A guard as one dynamic condition: its static part, chosen at lift
+    /// time, gates its dynamic part.
+    fn guard_dyn(&mut self, g: &Guard) -> Rc<str> {
+        let base = match &g.d {
+            Some(d) => d.to_string(),
+            None => "b.konst(Width::new(1), 1u128)".to_string(),
+        };
+        let expr = match &g.s {
+            Some((s, _)) => format!("if {s} {{ {base} }} else {{ b.konst(Width::new(1), 0u128) }}"),
+            None => base,
+        };
+        match self.dy(K::Bool, expr) {
+            V::D(_, n) => n,
+            _ => unreachable!(),
+        }
     }
 
     /// `g ? a : b` for a guard.

@@ -31,6 +31,8 @@ pub trait Form {
     fn reachable(&self, known: u32, value: u32) -> bool;
     /// Checks the decode clause chosen for the words (by its raw text);
     /// a CPU that restricts decoding to a profile refuses clauses outside it.
+    /// A refused clause fails the template when it takes every word of the
+    /// encoding, and makes the words of a split arm undefined otherwise.
     fn accept_clause(&self, _raw: &str) -> Result<(), String> {
         Ok(())
     }
@@ -57,6 +59,8 @@ const PURE_CALLS: &[&str] = &[
 
 /// The per-CPU hooks of the staging loop that are not on the evaluator.
 pub trait Stage: Cpu {
+    /// The most bits a template may split on.
+    const MAX_SPLIT: u32 = 8;
     /// State reads of the CPU's `St` without effects.
     const PURE_READS: &'static [&'static str] = &[];
     /// Checks a finished run; a CPU layer refuses a run that left work undone.
@@ -230,9 +234,6 @@ pub struct Template {
     pub code: String,
 }
 
-/// The most bits a template may split on.
-const MAX_SPLIT: u32 = 8;
-
 /// Generates the template of `enc`.
 pub fn template<C: Stage>(m: &Model, enc: &dyn Form) -> Result<Template, String> {
     let group = enc.group().ok_or("no decode group")?;
@@ -246,8 +247,11 @@ pub fn template<C: Stage>(m: &Model, enc: &dyn Form) -> Result<Template, String>
     let raws = &m.funcs[group];
     let mut split = 0u32;
     'outer: loop {
-        if split.count_ones() > MAX_SPLIT {
-            return Err(format!("needs a split on {} bits", split.count_ones()));
+        if split.count_ones() > C::MAX_SPLIT {
+            return Err(format!(
+                "needs a split on {} bits ({split:#010x})",
+                split.count_ones()
+            ));
         }
         let combos = 1u32 << split.count_ones();
         let mut arms = Vec::new();
@@ -277,7 +281,13 @@ pub fn template<C: Stage>(m: &Model, enc: &dyn Form) -> Result<Template, String>
                         continue 'outer;
                     }
                 };
-                enc.accept_clause(&raws[pats[at].index])?;
+                if let Err(e) = enc.accept_clause(&raws[pats[at].index]) {
+                    if split == 0 && from == 0 {
+                        return Err(e);
+                    }
+                    let g: Gen<'_, C> = Gen::new(m, known, value);
+                    break (g, Err(E::Throw("Undefined")));
+                }
                 let mut g: Gen<'_, C> = Gen::new(m, known, value);
                 C::setup(&mut g);
                 let r = g.run_decode(&cls[pats[at].index], nbits);
@@ -285,7 +295,7 @@ pub fn template<C: Stage>(m: &Model, enc: &dyn Form) -> Result<Template, String>
                     break (g, r);
                 }
                 if from != 0 {
-                    return Err("Error_See on the retry".into());
+                    break (g, Err(E::Fail("Error_See on the retry".into())));
                 }
                 from = at + 1;
             };
