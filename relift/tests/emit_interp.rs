@@ -521,7 +521,11 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    sources.push(rt.join("cpus/a64/fp.c"));
+    // The FP exact layer, the binary16 helpers and the cipher steps the
+    // emitted code calls.
+    for c in ["fp.c", "fp16.c", "crypto.c"] {
+        sources.push(rt.join("cpus/a64").join(c));
+    }
     let objs: Vec<PathBuf> = sources
         .iter()
         .enumerate()

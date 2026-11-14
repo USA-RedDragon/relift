@@ -9,6 +9,7 @@
 mod arith;
 mod branch;
 mod mem;
+pub mod native;
 pub mod sail;
 pub mod system;
 
@@ -79,6 +80,17 @@ pub fn lift_insn(insn: Insn, pc: u64, f: &Features) -> Result<Block, LiftError> 
         return sail::lift_insn(insn, pc, f);
     }
     hand_insn(insn, pc)
+}
+
+/// Lifts `word` at `pc` for the emitter: as [`lift`], except that the
+/// cryptographic instructions become one intrinsic each ([`native`]), which
+/// the runtime runs on the host's own instruction where it has one.
+pub fn lift_for_emit(word: u32, pc: u64, f: &Features) -> Result<Block, LiftError> {
+    let insn = decode_for(word, f).ok_or(LiftError::Unallocated(word))?;
+    if let Some(b) = native::lift(insn, pc) {
+        return Ok(b);
+    }
+    lift_insn(insn, pc, f)
 }
 
 /// Lifts `word` at `pc` with its hand-written lifter only.

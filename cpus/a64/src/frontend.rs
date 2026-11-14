@@ -2,7 +2,7 @@
 //! the lifted-code ABI (`runtime/cpus/a64/include/relift/a64/abi.h`).
 
 use relift_guest::{Frontend, Home, LiftFailure, WasmIntrinsic};
-use relift_ir::{Block, FpOp, FpRound, Reg, RegFile, Width};
+use relift_ir::{Block, CryptoOp, FpOp, FpRound, Reg, RegFile, Width};
 
 use crate::decode::Features;
 use crate::lift::{self, sail, system};
@@ -51,14 +51,19 @@ impl Frontend for A64 {
             });
         };
         let word = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
-        lift::lift(word, pc, &self.features).map_err(|e| LiftFailure {
+        lift::lift_for_emit(word, pc, &self.features).map_err(|e| LiftFailure {
             insn: u64::from(word),
             message: e.to_string(),
         })
     }
 
     fn abi_headers(&self) -> &'static [&'static str] {
-        &["relift/a64/abi.h", "relift/a64/fp_slow.h"]
+        &[
+            "relift/a64/abi.h",
+            "relift/a64/fp_slow.h",
+            "relift/a64/fp16.h",
+            "relift/a64/crypto.h",
+        ]
     }
 
     fn home(&self, reg: Reg) -> Home {
@@ -93,7 +98,7 @@ impl Frontend for A64 {
             system::MRS_FPSR => format!("rl_mrs_fpsr_flags({})", arg(0)),
             system::MSR_FPSR => "rl_msr_fpsr_flags()".into(),
             system::FP_RAISE => format!("rl_fp_raise({})", arg(0)),
-            _ => return None,
+            _ => return lift::native::c_call(name, args),
         })
     }
 
@@ -132,6 +137,19 @@ impl Frontend for A64 {
         let fpcr = reg(regs::FPCR);
         let (f, t) = (from.bits(), to.bits());
         let arg = |i: usize| args.get(i).cloned().unwrap_or_default();
+        // The binary16 helpers take over when the operation's floating-point
+        // format is half precision: the source of a conversion to an
+        // integer, the result of one from an integer, either side of a
+        // format conversion. An integer side of 16 bits is not.
+        let half_fmt = match op {
+            FpOp::ToSInt(_) | FpOp::ToUInt(_) => f == 16,
+            FpOp::FromSInt | FpOp::FromUInt => t == 16,
+            FpOp::Convert => f == 16 || t == 16,
+            _ => t == 16,
+        };
+        if half_fmt {
+            return half(op, f, t, &arg);
+        }
         Some(match op {
             FpOp::Add | FpOp::Sub | FpOp::Mul | FpOp::Div => {
                 // The inline host operation with its NaN and (in programs
@@ -170,6 +188,16 @@ impl Frontend for A64 {
         })
     }
 
+    fn crypto(&self, op: CryptoOp, arg: &str) -> Option<String> {
+        Some(match op {
+            CryptoOp::AesSubBytes => format!("rl_aes_subbytes({arg})"),
+            CryptoOp::AesInvSubBytes => format!("rl_aes_invsubbytes({arg})"),
+            CryptoOp::AesMixColumns => format!("rl_aesmc({arg})"),
+            CryptoOp::AesInvMixColumns => format!("rl_aesimc({arg})"),
+            CryptoOp::Sm4Sbox => format!("rl_sm4_sbox((uint8_t)({arg}))"),
+        })
+    }
+
     fn fp_state(&self) -> Vec<Reg> {
         vec![regs::FPCR]
     }
@@ -186,6 +214,40 @@ impl Frontend for A64 {
         matches!(code, sail::SLOW_FPCR | sail::SLOW_FLAGS)
             .then(|| format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
     }
+}
+
+/// A half-precision operation (an operand or the result binary16) as a call
+/// to `relift/a64/fp16.h`. Only the fast path: a block with FP starts with
+/// the FPCR guard, so these run with FPCR zero.
+fn half(op: FpOp, f: u32, t: u32, arg: &dyn Fn(usize) -> String) -> Option<String> {
+    Some(match op {
+        FpOp::Add => format!("rl_fp16_add({}, {})", arg(0), arg(1)),
+        FpOp::Sub => format!("rl_fp16_sub({}, {})", arg(0), arg(1)),
+        FpOp::Mul => format!("rl_fp16_mul({}, {})", arg(0), arg(1)),
+        FpOp::Div => format!("rl_fp16_div({}, {})", arg(0), arg(1)),
+        FpOp::Sqrt => format!("rl_fp16_sqrt({})", arg(0)),
+        FpOp::MulAdd => format!("rl_fp16_muladd({}, {}, {})", arg(0), arg(1), arg(2)),
+        FpOp::RoundInt(r) => format!("rl_fp16_round_int({}, {})", arg(0), rmode(r)),
+        FpOp::ToSInt(r) | FpOp::ToUInt(r) => format!(
+            "rl_fp16_to_int({}, {t}, {}, {})",
+            arg(0),
+            u8::from(matches!(op, FpOp::ToUInt(_))),
+            rmode(r)
+        ),
+        FpOp::FromSInt | FpOp::FromUInt => format!(
+            "rl_fp16_from_int((uint64_t)({}), {f}, {})",
+            arg(0),
+            u8::from(op == FpOp::FromUInt)
+        ),
+        FpOp::Convert => match (f, t) {
+            (16, 32) => format!("rl_fp16_to_f32({})", arg(0)),
+            (16, 64) => format!("rl_fp16_to_f64({})", arg(0)),
+            (32, 16) => format!("rl_fp16_from_f32({})", arg(0)),
+            (64, 16) => format!("rl_fp16_from_f64({})", arg(0)),
+            _ => arg(0),
+        },
+        FpOp::Neg | FpOp::Abs => return None,
+    })
 }
 
 /// The runtime's `enum rl_rmode` value for an IR rounding direction.
@@ -312,5 +374,68 @@ mod tests {
             f.fp(FpOp::Neg, Width::W32, Width::W32, &args, &name)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn half_precision_and_cipher_steps_map_to_runtime_helpers() {
+        let f = A64;
+        let name = |r: Reg| format!("r{}", r.index());
+        let args = ["a".to_string(), "b".to_string(), "c".to_string()];
+        let fp = |op, from, to| f.fp(op, from, to, &args, &name).expect("maps");
+        assert_eq!(fp(FpOp::Add, Width::W16, Width::W16), "rl_fp16_add(a, b)");
+        assert_eq!(
+            fp(FpOp::MulAdd, Width::W16, Width::W16),
+            "rl_fp16_muladd(a, b, c)"
+        );
+        assert_eq!(
+            fp(FpOp::Convert, Width::W16, Width::W64),
+            "rl_fp16_to_f64(a)"
+        );
+        assert_eq!(
+            fp(FpOp::Convert, Width::W32, Width::W16),
+            "rl_fp16_from_f32(a)"
+        );
+        assert_eq!(
+            fp(FpOp::ToSInt(FpRound::Zero), Width::W16, Width::W32),
+            "rl_fp16_to_int(a, 32, 0, RL_RM_ZERO)"
+        );
+        // A double to a 16-bit integer and a 16-bit integer to a double are
+        // not half precision.
+        assert_eq!(
+            fp(FpOp::ToSInt(FpRound::TiesAway), Width::W64, Width::W16),
+            "rl_fp_to_fixed(a, 64, 16, 0, 0, RL_RM_AWAY, r1, 0)".replace("r1", &name(regs::FPCR))
+        );
+        assert_eq!(
+            fp(FpOp::FromUInt, Width::W16, Width::W64),
+            "rl_fixed_to_fp(a, 16, 64, 0, 1, RL_RM_FPCR, r1, 0)".replace("r1", &name(regs::FPCR))
+        );
+        assert_eq!(
+            f.crypto(CryptoOp::AesMixColumns, "x").as_deref(),
+            Some("rl_aesmc(x)")
+        );
+    }
+
+    #[test]
+    fn crypto_instructions_lift_to_one_intrinsic() {
+        let f = A64 {
+            features: Features::CORTEX_A57,
+        };
+        let aese = 0x4e28_4820u32.to_le_bytes();
+        let b = f.lift(&aese, 0x1000).expect("lifts");
+        let calls: Vec<&str> = b
+            .insts
+            .iter()
+            .filter_map(|i| match i.op {
+                relift_ir::Op::Intrinsic(n, _) => Some(n),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(calls, ["a64.aese"]);
+        let c = f.intrinsic("a64.aese", &["d".into(), "n".into()]);
+        assert_eq!(c.as_deref(), Some("rl_aese(d, n)"));
+        let v80 = A64 {
+            features: Features::ARMV8_0,
+        };
+        assert!(v80.lift(&aese, 0x1000).is_err());
     }
 }
