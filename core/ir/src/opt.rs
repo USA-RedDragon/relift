@@ -75,6 +75,7 @@ pub fn dce(block: &Block) -> Block {
             next,
             flow: block.exit.flow,
         },
+        bank: block.bank,
     }
 }
 

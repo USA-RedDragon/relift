@@ -454,6 +454,7 @@ fn verify_rejects_ill_typed_blocks() {
             next: Next::Const(4),
             flow: Flow::Jump,
         },
+        bank: None,
     };
     let c8 = Inst {
         op: Op::Const(1),

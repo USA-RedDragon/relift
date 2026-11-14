@@ -71,6 +71,17 @@ pub struct Block {
     pub insts: Vec<Inst>,
     /// The exit.
     pub exit: Exit,
+    /// Which mapping of the guest bytes at `pc` was lifted, for guests
+    /// whose code at one address changes: a cartridge ROM bank behind a
+    /// bank controller, an overlay, or code copied to RAM (where the guest
+    /// may use a hash of the bytes). The value is the guest's own; `None`
+    /// means the address holds one piece of code for the whole run, and it
+    /// is always `None` for guests without banking. `(pc, bank)` is the
+    /// block's identity ([`Block::key`]): blocks with one `pc` and
+    /// different banks are different code. Exit targets are plain guest
+    /// addresses; which bank one reaches is decided by the mapping at run
+    /// time, or by an analysis that tracks the bank-switch writes.
+    pub bank: Option<u64>,
 }
 
 /// A type error in a block, found by [`Block::verify`] or the builder.
@@ -301,6 +312,11 @@ impl Block {
             }
         }
         Ok(())
+    }
+
+    /// The block's identity: its address and bank.
+    pub fn key(&self) -> (u64, Option<u64>) {
+        (self.pc, self.bank)
     }
 
     /// The width of value `v`, if it is defined and has one.
