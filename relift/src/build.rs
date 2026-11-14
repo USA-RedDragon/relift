@@ -117,6 +117,7 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
                         (pc, e)
                     })
                     .collect::<BTreeMap<_, _>>(),
+                tables: f.tables.clone(),
             })
             .collect();
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));

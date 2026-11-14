@@ -49,6 +49,9 @@ pub struct Function<'a> {
     pub span: u64,
     /// The instructions by address.
     pub insts: BTreeMap<u64, Insn<'a>>,
+    /// Known targets of computed jumps, by the jump's address; the emitter
+    /// branches to those inside the function directly.
+    pub tables: BTreeMap<u64, Vec<u64>>,
 }
 
 /// Emitter options.
