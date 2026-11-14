@@ -197,7 +197,7 @@ const CHARTERS: &[Charter] = &[
             "relift-switch",
             "relift-switch-formats",
             "relift-testguest",
-            "serde_yaml_ng",
+            "toml",
         ],
         dev: &["serde_json"],
         build: NONE,
