@@ -1015,6 +1015,7 @@ dependencies = [
 name = "relift-input"
 version = "0.1.0"
 dependencies = [
+ "relift-cache",
  "relift-info",
  "toml",
 ]

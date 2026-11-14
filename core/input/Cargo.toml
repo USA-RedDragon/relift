@@ -10,5 +10,8 @@ publish.workspace = true
 relift-info = { workspace = true }
 toml = { workspace = true }
 
+[dev-dependencies]
+relift-cache = { workspace = true }
+
 [lints]
 workspace = true

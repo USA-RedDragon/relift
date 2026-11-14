@@ -197,7 +197,7 @@ const CHARTERS: &[Charter] = &[
         band: 2,
         why: "the input model: ports, controls, bindings; reads the runtime's name table and renders the self-description section",
         normal: &["relift-info", "toml"],
-        dev: NONE,
+        dev: &["relift-cache"],
         build: NONE,
     },
     Charter {

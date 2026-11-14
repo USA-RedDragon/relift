@@ -11,6 +11,7 @@ mod extras;
 mod json;
 mod model;
 mod names;
+mod native;
 
 pub use bind::{BindingTarget, Bindings, Device, Half, HostInput, KeyBindingSetting};
 pub use cdecl::declarations_c;
@@ -18,3 +19,4 @@ pub use error::Error;
 pub use json::input_section;
 pub use model::{Control, ControlKind, Origin, Port, PortSet};
 pub use names::{HostName, host_names};
+pub use native::{SwitchLayout, native_c_file, native_ports, switch_player};
