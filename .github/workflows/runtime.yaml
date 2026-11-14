@@ -19,6 +19,20 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  charter:
+    name: C runtime charter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Core names no guest OS and no guest CPU
+        working-directory: runtime
+        run: |
+          python3 --version
+          make charter
+
   c-tests:
     name: C runtime (${{ matrix.os }})
     strategy:
@@ -32,13 +46,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build the static and shared libraries and the tests
+      - name: Build the layer libraries, the runtime libraries and each layer's tests
         working-directory: runtime
         run: |
           clang --version
           make -j2 CC=clang
 
-      - name: Run the tests
+      - name: Run the core, a64 and Switch tests
         working-directory: runtime
         run: make test CC=clang
 
