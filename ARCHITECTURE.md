@@ -79,6 +79,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 1 | `relift-guest` | `core/guest` | The guest contract and vocabulary, including the `Naming` trait a guest implements for its symbol scheme |
 | 2 | `relift-analyze` | `core/analyze` | Function boundaries, CFG, jump tables, indirect targets, generic over a CPU frontend |
 | 2 | `relift-emit` | `core/emit` | IR to C, shards, `#line` and listings, memory strategy per host target |
+| 2 | `relift-emit-wasm` | `core/emit-wasm` | IR to WebAssembly modules that share one memory and one funcref table (`docs/abi.md` section 15); not linked by `relift` yet; its tests run the modules in wasmtime against the IR interpreter |
 | 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
@@ -116,6 +117,17 @@ the guard trips (see `relift_ir::FpOp` for the contract). The hand-written lifte
 the forms the checker was brought up on, kept as a cross-check:
 `cpus/a64/tests/lift.rs` (`generated_templates_agree_with_the_hand_lifter`)
 runs both in the interpreter.
+
+`relift-emit-wasm` is the second emitter, for WebAssembly hosts. Like
+`relift-emit` it knows no CPU: the frontend says how each intrinsic is
+carried (`relift_guest::Frontend::wasm_intrinsic`). Its differential test
+(`core/emit-wasm/tests/diff/`) emits random blocks over every IR operation,
+section 13 blocks over a Game Boy-like I/O map, and random multi-function
+programs in two modules (with and without tail calls), runs them in
+wasmtime, compares them with `relift_ir::interp`, and breaks one operation
+per block as a mutation control. The default sample takes seconds;
+`RELIFT_WASM_CHECK=full` runs the full sizes and `RELIFT_WASM_SEED` picks
+another seed. wasmtime is a dev-dependency of that crate only.
 
 There is no core names crate: Itanium remangling is the Switch guest's
 business (`relift-switch-names`), and the core sees only
@@ -158,6 +170,7 @@ All of these run in `cargo test` and in CI's checks job.
 | No workspace source names key files or key material (`prod.keys`, `title.keys`, title keys, header keys, key area keys, `titlekek`, `eticket`, master keys) or the NCA, ticket and BKTR structures; the allow list is empty; controls: a fixture built at run time with each kind of word is found, a clean one is not | `relift/tests/decrypted_only.rs`: `no_workspace_source_handles_key_material`, `the_scan_finds_planted_words`, `the_allow_list_is_empty_or_names_real_files` |
 | Import refuses NSP, NSZ, XCI, XCZ, NCA and NCZ by extension and by magic, an NCA with an encrypted header, and the removed `--keys` setting | `guests/switch/formats/tests/import.rs`: `encrypted_inputs_are_refused`, `an_encrypted_header_is_refused_without_a_key`; `relift/tests/cli.rs`: `import_refuses_encrypted_dumps_pointing_to_a_separate_tool` |
 | No member reaches a generator (`cpus/*/gen`) | `workspace_charter.rs`: `no_member_reaches_a_generator` |
+| No member links a test-only package (`wasmtime`, `cranelift-codegen`) through normal or build edges; controls: `relift-emit-wasm`'s tests reach both and its build reaches `wasm-encoder` | `workspace_charter.rs`: `test_only_packages_stay_out_of_every_build` |
 | The charter reads this tree and its walk recurses | `workspace_charter.rs`: `the_reader_reads_this_workspace` |
 | `unsafe_code = "forbid"` for the workspace; every member inherits it or is on the roster with its own `deny` pair | `relift/tests/unsafe_roster.rs`: `the_workspace_lint_table_forbids_unsafe_code`, `every_member_inherits_the_forbid_or_is_rostered` |
 | No `unsafe` outside the roster; each rostered crate reads exactly its ceiling | `unsafe_roster.rs`: `no_unrostered_member_spells_unsafe`, `each_rostered_crate_holds_its_unsafe_ceiling` |
