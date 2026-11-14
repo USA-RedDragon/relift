@@ -55,6 +55,7 @@ endif
 CORE_INC := -Icore/include -Icore
 A64_INC := $(CORE_INC) -Icpus/a64/include -Icpus/a64
 SWITCH_INC := $(A64_INC) -Iguests/switch
+VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen
 RUNNER_INC := -Icore/tests
 
 CORE_SRCS := $(wildcard core/*.c) $(HOST_SRCS)
@@ -63,6 +64,8 @@ A64_SRCS := $(wildcard cpus/a64/*.c)
 A64_HDRS := $(CORE_HDRS) $(wildcard cpus/a64/include/relift/a64/*.h cpus/a64/*.h)
 SWITCH_SRCS := $(wildcard guests/switch/*.c)
 SWITCH_HDRS := $(A64_HDRS) $(wildcard guests/switch/*.h)
+VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c)
+VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h)
 
 RUNNER_SRCS := core/tests/runner.c
 RUNNER_HDRS := core/tests/runner.h
@@ -70,29 +73,34 @@ CORE_TEST_SRCS := $(filter-out $(RUNNER_SRCS),$(wildcard core/tests/*.c))
 A64_TEST_SRCS := $(wildcard cpus/a64/tests/*.c)
 SWITCH_TEST_SRCS := $(wildcard guests/switch/tests/*.c)
 SWITCH_TEST_HDRS := $(wildcard guests/switch/tests/*.h)
+VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
 
 obj = $(patsubst %.c,$(BUILD)/obj/%.o,$(1))
 CORE_OBJS := $(call obj,$(CORE_SRCS))
 A64_OBJS := $(call obj,$(A64_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
+VK_OBJS := $(call obj,$(VK_SRCS))
 RUNNER_OBJS := $(call obj,$(RUNNER_SRCS))
 CORE_TEST_OBJS := $(call obj,$(CORE_TEST_SRCS))
 A64_TEST_OBJS := $(call obj,$(A64_TEST_SRCS))
 SWITCH_TEST_OBJS := $(call obj,$(SWITCH_TEST_SRCS))
-RT_OBJS := $(CORE_OBJS) $(A64_OBJS) $(SWITCH_OBJS)
+VK_TEST_OBJS := $(call obj,$(VK_TEST_SRCS))
+RT_OBJS := $(CORE_OBJS) $(A64_OBJS) $(SWITCH_OBJS) $(VK_OBJS)
 
 CORE_LIB := $(BUILD)/librelift_core.a
 A64_LIB := $(BUILD)/librelift_a64.a
 SWITCH_LIB := $(BUILD)/librelift_switch.a
+VK_LIB := $(BUILD)/librelift_switch_vk.a
 STATIC := $(BUILD)/librelift_rt.a
 SHARED := $(BUILD)/librelift_rt.$(SHLIB_EXT)
 CORE_TESTS := $(BUILD)/core_tests
 A64_TESTS := $(BUILD)/a64_tests
 SWITCH_TESTS := $(BUILD)/switch_tests
-TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS)
+VK_TESTS := $(BUILD)/switch_vk_tests
+TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
 
 .PHONY: all test charter clean
-all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(STATIC) $(SHARED) $(TESTS)
+all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS)
 
 $(CORE_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 	@mkdir -p $(dir $@)
@@ -105,6 +113,14 @@ $(A64_OBJS): $(BUILD)/obj/%.o: %.c $(A64_HDRS)
 $(SWITCH_OBJS): $(BUILD)/obj/%.o: %.c $(SWITCH_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(SWITCH_INC) $(CFLAGS) -c $< -o $@
+
+$(VK_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(VK_INC) $(CFLAGS) -c $< -o $@
+
+$(VK_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(VK_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
 $(RUNNER_OBJS) $(CORE_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
@@ -121,8 +137,9 @@ $(SWITCH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(SWITCH_HDRS) $(RUNNER_HDRS) $(SWITC
 $(CORE_LIB): $(CORE_OBJS)
 $(A64_LIB): $(A64_OBJS)
 $(SWITCH_LIB): $(SWITCH_OBJS)
+$(VK_LIB): $(VK_OBJS)
 $(STATIC): $(RT_OBJS)
-$(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(STATIC):
+$(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC):
 	@rm -f $@
 	$(AR) rcs $@ $^
 
@@ -133,6 +150,7 @@ $(SHARED): $(RT_OBJS)
 $(CORE_TESTS): $(CORE_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS)
 $(A64_TESTS): $(A64_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(A64_OBJS)
 $(SWITCH_TESTS): $(SWITCH_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
+$(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
@@ -140,6 +158,7 @@ test: $(TESTS)
 	$(abspath $(CORE_TESTS))
 	$(abspath $(A64_TESTS))
 	$(abspath $(SWITCH_TESTS))
+	$(abspath $(VK_TESTS))
 
 charter:
 	$(PYTHON) charter/check.py
