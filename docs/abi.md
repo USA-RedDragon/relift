@@ -248,11 +248,18 @@ int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
   emitted code is identical for hit and miss. [verified: probe, 10 million
   indirect tail calls, misaligned and out-of-range targets miss]
 - **Table shape:** one flat array with an entry per 4-byte word over the
-  guest code range of all loaded modules, zero for "no entry". Pages that
-  hold no entry stay untouched zero pages. Cost up to 2 bytes of table per
-  byte of guest text if every page has an entry. A hash table would be far smaller but adds a hash and a probe on
-  every indirect call. [inferred; open: measure resident size, revisit for
-  Android and iOS]
+  guest code range of all loaded modules, zero for "no entry". Functions
+  are spread through the whole text, so nearly every table page holds an
+  entry and the resident cost is close to the full 2 bytes of table per byte
+  of guest text. [verified: static count of function starts against table
+  pages on real SDK-based guest code; 83% of 4 KiB pages and 96% of 16 KiB
+  pages touched]
+- **Per host target:** desktop hosts use the flat table (one load per
+  indirect call). Android and iOS use an open-addressing hash table keyed by
+  guest address, about 16 bytes per known entry at 50% load, an order of
+  magnitude smaller, at the cost of a hash and a probe per indirect call.
+  The emitter calls the same `rl_dispatch` helper either way. [decided;
+  hash cost not yet measured]
 - **Table reads:** shipped builds never change the table after start-up, so
   `rl_lookup` uses a plain load. Dev builds (`-DRL_HOTLOAD`) use an acquire
   load, paired with the release store at registration (section 6).
@@ -366,14 +373,22 @@ Mac unless marked]:
   frame. The step is replaced by an override on the unwinder's install
   function, which converts the unwinder's own register layout to
   `rl_resume_regs`:
-  - LLVM libunwind style (`__unw_resume`, `Registers_arm64::jumpto`): the
-    override reads x0-x30, sp, pc and d8-d15 from the guest object.
-    [inferred; open: confirm which unwinder the SDK uses]
-  - libgcc style (libnx): `_Unwind_RaiseException` and friends end in
-    `__builtin_eh_return` (restore patched callee-saved registers, add the
-    stack adjustment, branch). The emitter must recognize these epilogues
-    by symbol and emit `rl_resume` with the current registers instead of
-    the indirect branch. [open: confirm on a libnx C++ exceptions test program]
+  - LLVM libunwind (what nnSdk ships): `unw_resume` reaches
+    `UnwindCursor::jumpto`, which passes the register block to an
+    unnamed routine that loads x2-x29, sp, pc (into x30), d0-d31 (low 64
+    bits) and finally x0-x1, then `ret`. It does not touch FPCR or FPSR.
+    The emitter recognizes that routine by its first instruction
+    (`ldp x2, x3, [x0, #0x10]`) and its tail (`ldp x0, x1, [x0]; ret` after
+    the `sp` and `x30` loads) and replaces it with `rl_resume` reading the
+    same block layout. [verified: disassembly of the SDK module]
+  - libgcc (libnx): `_Unwind_RaiseException`, `_Unwind_Resume` and
+    friends end in the `__builtin_eh_return` epilogue: restore x19-x28 and
+    d8-d15, pop the frame, then `add sp, sp, x5; br x6` (x5 the stack
+    adjustment, x6 the landing pad, x0-x3 the exception data). The emitter
+    recognizes the fixed pair `add sp, sp, x5; br x6` and emits `rl_resume`
+    with the current registers, `sp + x5` and `pc = x6`. [verified:
+    disassembly of a libnx C++ exceptions test program built with
+    devkitA64]
 - **d8-d15** are in `c->v` and in `rl_resume_regs`, so a landing pad sees
   the values the unwinder restored. [inferred; the exceptions prototype did not track FP
   registers]
@@ -433,7 +448,10 @@ registers (counters, flags, locks, and every `compare_exchange` the guest
 compiler expanded into LDAXR/STLXR, whose source semantics already are CAS).
 It is visible only for hand-written sequences that load other memory
 between the LDXR and the STXR and rely on the monitor to validate it
-(classic lock-free stack pop). The emitter flags every LDXR/STXR pair with
+(classic lock-free stack pop). A path-sensitive scan of SDK-based guest
+code found no pair with a load between LDXR and STXR on any path; every
+pair is a pure read-modify-write or a compare-and-bail. [verified: static
+scan] The emitter flags every LDXR/STXR pair with
 another guest load in between in `relift coverage`. [inferred; open: count
 such pairs in real code]
 
@@ -531,9 +549,13 @@ are also call boundaries. [inferred]
 - `rl_msr_fpcr` stores the value; on arm64 hosts it also sets the host FPCR
   for the thread. If the new value's RMode, FZ, DN or AHP differ from the
   default, dev builds report it, because code generated for the default
-  mode keeps running. MSR FPCR is expected to be rare (likely `fesetround`-style library code). [open: find
-  out which guest code writes FPCR and whether it runs; then decide between a
-  report, per-mode function variants, or passing FPCR at run time]
+  mode keeps running. In nnSdk, FPCR is written only by libc's `fesetenv`
+  and `fesetround` (RMode only) and by the OS user exception handler's
+  save and restore; library code such as a physics engine's FPU guard
+  sets FPCR to 0 (round to nearest, no FZ, no DN) around scoped blocks.
+  No per-mode function variants are needed while the default is 0.
+  [verified: static scan of SDK-based guest code; open: Horizon's initial
+  FPCR]
 - **FPSR cumulative flags** are not tracked in the default build: `fpsr`
   arguments are NULL and MRS FPSR returns the last MSR value. The
   `fp-exact` build passes the FPSR local and every operation takes the slow
@@ -618,28 +640,24 @@ committed.
 
 ## Open items
 
-1. Horizon's initial FPCR value, and which guest code issues MSR FPCR;
-   decides the x86-64 fast path and the MSR FPCR policy (10.1).
+1. Horizon's initial FPCR value; if it is not 0, scoped `fesetenv` blocks
+   run in a different mode from the rest (10.1).
 2. FP cut-layer implementations (11 operations, slow paths) and their
    checker run against the Sail interpreter (10.1).
-3. Which unwinder the SDK ships (libunwind `jumpto` or other) and the libgcc
-   `__builtin_eh_return` epilogue for libnx; the synthetic end-of-stack FDE
-   for host-to-guest calls (7).
+3. The synthetic end-of-stack FDE for host-to-guest calls (7).
 4. Interprocedural analyses: "may unwind" to drop plain checks; exit-store
    pruning of caller-dead registers (4, 7).
-5. Dispatch table resident size on real guest code; hash table fallback for
-   mobile (5).
+5. Cost of the hash-table dispatch on Android and iOS (5).
 6. Dev hot-load: runtime as a shared library on Windows gnullvm and macOS;
    AF_UNIX on Windows; first end-to-end hot-load (6).
-7. LDXR/STXR pairs with intervening loads (ABA-sensitive) in real code (8).
-8. `spin_flag` and `llsc_stress` recompiled from the libnx test programs, on
+7. `spin_flag` and `llsc_stress` recompiled from the libnx test programs, on
    x86-64 Linux and arm64 macOS (8, 9).
-9. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
+8. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
    preservation (which registers `rl_svc` may change besides outputs) (10).
-10. Whether any guest program keeps an alias that is not 16 KiB aligned live
-    while both views are in use; aligned live aliases are not yet prototyped
-    (2).
-11. Guard sizes against real wild-pointer patterns (2).
-12. Whether passing guest arguments in host registers is worth a second
+9. Whether any guest program keeps an alias that is not 16 KiB aligned live
+   while both views are in use; aligned live aliases are not yet prototyped
+   (2).
+10. Guard sizes against real wild-pointer patterns (2).
+11. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
-13. Running the zig cc Windows builds (they link; not yet run) (1).
+12. Running the zig cc Windows builds (they link; not yet run) (1).
