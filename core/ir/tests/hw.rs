@@ -1,4 +1,5 @@
-//! Hardware-register guest support: the guest clock and I/O accesses.
+//! Hardware-register guest support: the guest clock, I/O accesses and
+//! sync points.
 
 use relift_ir::interp::{
     self, Devices, Error, Fault, FlatMemory, GuestMemory, NoIntrinsics, Outcome, State,
@@ -32,6 +33,7 @@ enum Event {
     Tick(u64),
     Read(u64, usize),
     Write(u64, Vec<u8>),
+    Sync { next: u64, a: u128 },
 }
 
 fn gb_map() -> IoMap {
@@ -64,6 +66,7 @@ fn gb_map() -> IoMap {
 struct Log {
     map: IoMap,
     events: Vec<Event>,
+    irq: Option<u64>,
 }
 
 impl Default for Log {
@@ -71,6 +74,7 @@ impl Default for Log {
         Log {
             map: gb_map(),
             events: Vec::new(),
+            irq: None,
         }
     }
 }
@@ -106,6 +110,27 @@ impl Devices for Log {
         self.events.push(Event::Write(addr, data.to_vec()));
         Ok(())
     }
+
+    fn sync(
+        &mut self,
+        state: &mut State,
+        mem: &mut dyn GuestMemory,
+        next: u64,
+    ) -> Result<Option<u64>, Error> {
+        self.events.push(Event::Sync {
+            next,
+            a: state.regs[0],
+        });
+        let Some(entry) = self.irq.take() else {
+            return Ok(None);
+        };
+        let sp = (state.regs[1] as u64).wrapping_sub(2) & 0xffff;
+        mem.write(sp, &(next as u16).to_le_bytes())
+            .map_err(Error::Fault)?;
+        state.regs[1] = u128::from(sp);
+        self.tick(20);
+        Ok(Some(entry))
+    }
 }
 
 fn mem() -> FlatMemory {
@@ -116,10 +141,21 @@ fn mem() -> FlatMemory {
 }
 
 fn run(b: &Block, regs: &[u128]) -> (Result<Outcome, Error>, State, FlatMemory, Log) {
+    run_irq(b, regs, None)
+}
+
+fn run_irq(
+    b: &Block,
+    regs: &[u128],
+    irq: Option<u64>,
+) -> (Result<Outcome, Error>, State, FlatMemory, Log) {
     let mut s = State::new(DECLS.len());
     s.regs = regs.to_vec();
     let mut m = mem();
-    let mut d = Log::default();
+    let mut d = Log {
+        irq,
+        ..Log::default()
+    };
     let r = interp::run_with(b, &mut s, &mut m, &mut NoIntrinsics, &mut d);
     (r, s, m, d)
 }
@@ -375,6 +411,68 @@ fn classify_io_routes_constant_addresses_and_keeps_behavior() {
             .iter()
             .any(|i| matches!(i.op, Op::IoStore { .. }))
     );
+}
+
+fn synced() -> Block {
+    let mut b = Builder::new(file(), Width::W16, 0x400);
+    let k = b.konst(Width::W8, 0x5a);
+    b.set(Reg(0), k);
+    b.tick(4);
+    b.sync();
+    b.jump(1, 0x401)
+}
+
+#[test]
+fn a_sync_without_an_interrupt_sees_committed_state_and_continues() {
+    let b = synced();
+    roundtrip(&b);
+    let (r, s, _, d) = run(&b, &[0, 0xd000, 0]);
+    let o = r.unwrap();
+    assert_eq!((o.next, o.resume), (0x401, None));
+    assert_eq!(s.regs[0], 0x5a);
+    assert_eq!(
+        d.events,
+        [
+            Event::Tick(4),
+            Event::Sync {
+                next: 0x401,
+                a: 0x5a
+            }
+        ]
+    );
+}
+
+#[test]
+fn a_taken_interrupt_redirects_to_the_handler() {
+    let (r, s, m, d) = run_irq(&synced(), &[0, 0xd000, 0], Some(0x40));
+    let o = r.unwrap();
+    assert_eq!((o.next, o.resume), (0x40, Some(0x401)));
+    assert_eq!(s.regs[1], 0xcffe);
+    assert_eq!(&m.bytes[0xcffe..0xd000], &[0x01, 0x04]);
+    assert_eq!(d.events.last(), Some(&Event::Tick(20)));
+
+    let mut s = State::new(DECLS.len());
+    let o = interp::run(&synced(), &mut s, &mut mem(), &mut NoIntrinsics).unwrap();
+    assert_eq!((o.next, o.resume), (0x401, None));
+}
+
+#[test]
+fn a_block_without_sync_never_calls_the_hook() {
+    let (r, _, _, d) = run_irq(&branch(), &[0, 0, 0], Some(0x40));
+    assert_eq!(r.unwrap().resume, None);
+    assert!(!d.events.iter().any(|e| matches!(e, Event::Sync { .. })));
+}
+
+#[test]
+fn sync_must_be_last_and_dce_keeps_it() {
+    let text = "block 0x100 len 1 regs hw addr i16\n  sync\n  tick 4\n  exit jump 0x101\n";
+    let e = parse(text, &[file()]).expect_err("must not parse");
+    assert_eq!((e.line, e.col), (2, 3));
+    assert!(e.message.contains("sync"), "{}", e.message);
+    let text = "block 0x100 len 1 regs hw addr i16\n  sync\n  sync\n  exit jump 0x101\n";
+    assert!(parse(text, &[file()]).is_err());
+    let b = synced();
+    assert_eq!(dce(&b), b);
 }
 
 #[test]

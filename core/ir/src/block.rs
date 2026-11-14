@@ -242,7 +242,7 @@ pub(crate) fn check_op(
             }
             Ok(())
         }
-        Op::Tick(_) => none(),
+        Op::Tick(_) | Op::Sync => none(),
         Op::TickIf(c, _) => {
             none()?;
             same(w(*c)?, Width::W1)
@@ -256,6 +256,14 @@ impl Block {
         let mut widths = Vec::with_capacity(self.insts.len());
         let mut effect = false;
         for (i, inst) in self.insts.iter().enumerate() {
+            if let Op::Sync = inst.op
+                && i + 1 != self.insts.len()
+            {
+                return Err(VerifyError {
+                    at: Some(i),
+                    message: "a sync is not the last instruction".to_string(),
+                });
+            }
             if let Op::Guard(..) = inst.op {
                 if effect {
                     return Err(VerifyError {
