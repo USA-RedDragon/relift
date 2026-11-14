@@ -148,9 +148,17 @@ counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.
 
 ## Loading
 
-The player adds `rl_vk_switch_hook()` with `rl_switch_add_hook` before
-`rl_switch_main`. When the process is up, the hook claims a page after the
-modules for the thunk table and a map window above the layout (both marked
+`rl_switch_main` adds `rl_vk_switch_hook()` by itself; a program calls nothing.
+Before it starts anything, it reads the dynamic section of every module (MOD0)
+and enables forwarding when a dynamic symbol is `vkGetInstanceProcAddr` or
+`vkGetDeviceProcAddr`, imported (the game's main module) or defined (the
+`vulkan` module, which is then replaced). The hook declares this with its
+`wants` function; the rule lives here, the loader only asks. A program with
+none of those symbols starts no hook: no thunk page, no mapped-memory window,
+no window backend (it runs on the calling thread). A program may still add the
+hook itself with `rl_switch_add_hook`; it is never added twice. When the process
+is up, the hook claims a page after the modules for the thunk table and a map
+window above the layout (both marked
 inaccessible with `rl_hos_reserve*`, so the guest's own allocations never land
 there), starts the layer and registers the thunk unit; without host Vulkan it
 does nothing and the guest's own Vulkan runs. While loading, the loader reads
@@ -188,6 +196,11 @@ skips the guest loader and driver entirely:
 
 ## Tests
 
+`tests/test_vk_auto.c` runs three synthetic modules through `rl_switch_main` with no
+hook call: one importing `vkGetInstanceProcAddr` (thunks reach its GOT), one
+defining `vkGetDeviceProcAddr` (thunk page reserved) and one with no Vulkan
+symbol (nothing reserved, GOT untouched).
+
 `tests/test_vk.c` drives the thunks the way lifted code does: guest structs in a
 synthetic guest memory image, arguments in the context, thunk addresses from
 `vkGetInstanceProcAddr` and calls through the dispatch table, against the host's
@@ -207,7 +220,7 @@ by `rl_switch_main` with the hook, which creates a `vi` stray layer and sets
 its size over IPC, then an instance, a `VK_NN_vi_surface` surface, a device and
 a swapchain, clears and presents `RELIFT_DEMO_FRAMES` frames (60 by default)
 and reads the last one back through mapped memory. `make test` runs it
-headless (`RELIFT_VIDEO=none`); `make VIDEO=sdl3 BUILD=build/video vk-present`
+headless (`RELIFT_VIDEO=headless`); `make VIDEO=sdl3 BUILD=build/video vk-present`
 shows it in a window.
 
 ## Regenerating
@@ -223,8 +236,7 @@ the pin, the configuration or the generator means regenerating and committing
 
 ## Not done yet
 
-- `relift build` does not compile this folder or `runtime/host` yet, and the
-  program it emits does not add the hook.
+- `relift build` does not compile this folder or `runtime/host` yet.
 - Commands that take file descriptors or platform handles (`*_fd`,
   `VK_KHR_display`), which a guest cannot use on the host: their lookups return
   NULL.

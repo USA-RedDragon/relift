@@ -641,7 +641,5 @@ int main(int argc, char **argv)
         return SKIP;
     }
     build_image();
-    if (rl_switch_add_hook(rl_vk_switch_hook()) != 0)
-        return 1;
     return rl_switch_main(&g_program, argc, argv);
 }
