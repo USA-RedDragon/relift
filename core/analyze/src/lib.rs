@@ -8,10 +8,13 @@
 //! targets and code addresses the code computes ([`consts`]) as new entries
 //! until nothing new appears. Then every extent is lifted again against the
 //! final entry set, so a jump to an entry found late becomes a tail call
-//! rather than a copy of its code. Jump tables stay dynamic exits; they go
-//! through the dispatcher at run time.
+//! rather than a copy of its code. Jump tables are resolved by running the
+//! code before the jump ([`tables`]); their targets join the function. A
+//! computed jump that is not a recognized table stays a dynamic exit through
+//! the dispatcher.
 
 mod consts;
+mod tables;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -50,6 +53,8 @@ pub struct Function {
     pub kind: EntryKind,
     /// The instructions by address.
     pub insts: BTreeMap<u64, Insn>,
+    /// The targets of the jump tables, by the address of their computed jump.
+    pub tables: BTreeMap<u64, Vec<u64>>,
 }
 
 impl Function {
@@ -146,20 +151,65 @@ pub fn successors(module: &Module, entries: &BTreeSet<u64>, entry: u64, insn: &I
     out
 }
 
+/// A function's instructions and its jump tables.
+type Extent = (BTreeMap<u64, Insn>, BTreeMap<u64, Vec<u64>>);
+
 /// Lifts the extent of the function at `entry`: everything reachable over
-/// [`successors`].
-fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> BTreeMap<u64, Insn> {
-    let mut insts = BTreeMap::new();
+/// [`successors`] and over the jump tables found in it.
+fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Extent {
+    let mut insts: BTreeMap<u64, Insn> = BTreeMap::new();
+    let mut tables: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
     let mut work = vec![entry];
-    while let Some(pc) = work.pop() {
-        if insts.contains_key(&pc) || !lifter.module.is_code(pc) {
-            continue;
+    let granule = lifter.fe.granule();
+    let preserved = lifter.fe.preserved();
+    loop {
+        while let Some(pc) = work.pop() {
+            if insts.contains_key(&pc) || !lifter.module.is_code(pc) {
+                continue;
+            }
+            let i = lifter.get(pc);
+            work.extend(successors(lifter.module, entries, entry, &i));
+            insts.insert(pc, i);
         }
-        let i = lifter.get(pc);
-        work.extend(successors(lifter.module, entries, entry, &i));
-        insts.insert(pc, i);
+        let jumps: Vec<(u64, Block)> = insts
+            .iter()
+            .filter(|(pc, _)| !tables.contains_key(pc))
+            .filter_map(|(pc, i)| match i {
+                Insn::Lifted(b)
+                    if b.exit.flow == Flow::Jump && matches!(b.exit.next, Next::Dynamic(_)) =>
+                {
+                    Some((*pc, b.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        if jumps.is_empty() {
+            break;
+        }
+        let states = consts::in_states(&insts, entry, &preserved);
+        let known = |a: u64| states.get(&a).cloned().unwrap_or_default();
+        let module = lifter.module;
+        let mut found = false;
+        for (pc, b) in jumps {
+            let mut at = |a: u64| match lifter.get(a) {
+                Insn::Lifted(b) => Some(b),
+                Insn::Failed(_) => None,
+            };
+            let t = tables::resolve(module, pc, &b, granule, &mut at, &known).unwrap_or_default();
+            work.extend(
+                t.iter()
+                    .copied()
+                    .filter(|a| *a == entry || !entries.contains(a)),
+            );
+            found |= !t.is_empty();
+            tables.insert(pc, t);
+        }
+        if !found {
+            break;
+        }
     }
-    insts
+    tables.retain(|_, t| !t.is_empty());
+    (insts, tables)
 }
 
 /// Direct call targets and computed code addresses in `insts`.
@@ -211,7 +261,7 @@ pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
             break;
         }
         for e in todo {
-            let insts = extent(&mut lifter, &entries, e);
+            let (insts, _) = extent(&mut lifter, &entries, e);
             for (a, k) in new_entries(module, granule, &insts) {
                 kinds.entry(a).or_insert(k);
             }
@@ -222,7 +272,7 @@ pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
     let functions = kinds
         .iter()
         .map(|(&e, &kind)| {
-            let insts = extent(&mut lifter, &entries, e);
+            let (insts, tables) = extent(&mut lifter, &entries, e);
             (
                 e,
                 Function {
@@ -230,6 +280,7 @@ pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
                     name: names.get(&e).cloned(),
                     kind,
                     insts,
+                    tables,
                 },
             )
         })
