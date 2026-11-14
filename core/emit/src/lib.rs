@@ -7,7 +7,7 @@
 //! call, trap and exit and the used ones reloaded after a call, one label per
 //! instruction, direct calls by name followed by the pending check, indirect
 //! calls and dynamic exits through `rl_indirect`, tail calls with
-//! `RL_MUSTTAIL`, and the module's unit table for registration. Instructions
+//! `RL_MUSTTAIL`, and the module's unit table (`rl_unit`) for registration. Instructions
 //! that did not lift, or use an operation this emitter cannot express,
 //! report themselves through the frontend's undefined-instruction entry.
 
@@ -58,6 +58,9 @@ pub struct Options {
     pub shard_size: usize,
     /// The unit's name, for reports.
     pub unit_name: String,
+    /// The C symbol of the unit table (`const rl_unit`), which the program
+    /// lists for registration.
+    pub unit_symbol: String,
 }
 
 impl Default for Options {
@@ -65,6 +68,7 @@ impl Default for Options {
         Options {
             shard_size: 256,
             unit_name: "module".into(),
+            unit_symbol: "rl_unit_module".into(),
         }
     }
 }
@@ -155,9 +159,10 @@ fn unit_table(fe: &dyn Frontend, fns: &[Function<'_>], opts: &Options) -> String
     t.push_str("};\n");
     let _ = write!(
         t,
-        "static const rl_unit unit = {{\n    RL_ABI_VERSION,\n    sizeof(rl_ctx),\n    {{ 0 }},\n    {}u,\n    0,\n    fns,\n    0,\n    0,\n    {:?},\n}};\nconst rl_unit *const rl_static_units[] = {{ &unit }};\nconst uint32_t rl_static_unit_count = 1;\n",
+        "const rl_unit {sym};\nconst rl_unit {sym} = {{\n    RL_ABI_VERSION,\n    sizeof(rl_ctx),\n    {{ 0 }},\n    {}u,\n    0,\n    fns,\n    0,\n    0,\n    {:?},\n}};\n",
         fns.len(),
-        opts.unit_name
+        opts.unit_name,
+        sym = opts.unit_symbol
     );
     t
 }
