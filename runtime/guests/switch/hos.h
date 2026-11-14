@@ -9,9 +9,37 @@
 #ifndef RELIFT_HOS_H
 #define RELIFT_HOS_H
 
-#include "core.h"
+#include "a64.h"
 
 #include <pthread.h>
+
+/** @brief Horizon page size: the guest page the Switch guest gives the core. */
+#define HOS_PAGE 0x1000ull
+/** @brief Horizon system counter rate (CNTFRQ_EL0), 19.2 MHz: the guest clock the Switch guest gives the core. */
+#define HOS_TICK_HZ 19200000u
+_Static_assert(HOS_TICK_HZ == RL_CNTFRQ, "lifted A64 code reports the Horizon counter rate");
+
+/** @brief Memory permission bits as Horizon encodes them (svcSetMemoryPermission, svcQueryMemory). */
+enum hos_perm {
+    HOS_PERM_NONE = 0,
+    HOS_PERM_R = 1,
+    HOS_PERM_W = 2,
+    HOS_PERM_X = 4,
+    HOS_PERM_RW = 3,
+    HOS_PERM_RX = 5
+};
+
+/** @brief Translates Horizon permission bits to the core's (enum rl_vm_perm). */
+static inline uint32_t hos_vm_perm(uint32_t p)
+{
+    return ((p & HOS_PERM_R) ? RL_VM_R : 0) | ((p & HOS_PERM_W) ? RL_VM_W : 0) | ((p & HOS_PERM_X) ? RL_VM_X : 0);
+}
+
+/** @brief Translates the core's permission bits to Horizon's. */
+static inline uint32_t hos_perm(uint32_t v)
+{
+    return ((v & RL_VM_R) ? HOS_PERM_R : 0) | ((v & RL_VM_W) ? HOS_PERM_W : 0) | ((v & RL_VM_X) ? HOS_PERM_X : 0);
+}
 
 /** @brief Horizon result code: module in bits 0-8, description in bits 9-21. */
 typedef uint32_t rl_result;
@@ -258,7 +286,7 @@ typedef struct hos_shmem {
     rl_shm shm;
     /** @brief Guest addresses of the mapped views, 0 for a free slot. */
     uint64_t views[HOS_SHMEM_VIEWS];
-    /** @brief Permission the guest may map it with. */
+    /** @brief Horizon permission the guest may map it with (enum hos_perm). */
     uint32_t user_perm;
 } hos_shmem;
 
@@ -270,7 +298,7 @@ typedef struct hos_tmem {
     uint64_t addr;
     /** @brief Size in bytes. */
     uint64_t size;
-    /** @brief Permission the owner keeps while lent. */
+    /** @brief Horizon permission the owner keeps while lent (enum hos_perm). */
     uint32_t perm;
 } hos_tmem;
 
@@ -401,7 +429,7 @@ RL_RUNTIME_API void rl_hos_shutdown(void);
 /** @brief Guest memory base. */
 static inline uint8_t *hos_mem(void) { return hos.vm.base; }
 
-/** @brief Maps a module segment with state CODE_STATIC (text, rodata) or CODE_MUTABLE (data, bss). */
+/** @brief Maps a module segment with Horizon permission perm (enum hos_perm) and state CODE_STATIC (text, rodata) or CODE_MUTABLE (data, bss). */
 RL_RUNTIME_API rl_result rl_hos_map_segment(uint64_t addr, uint64_t size, uint32_t perm, uint32_t state);
 /** @brief Maps the main thread stack in the stack region; *top receives its top. */
 RL_RUNTIME_API rl_result rl_hos_map_main_stack(uint64_t size, uint64_t *top);
@@ -442,7 +470,7 @@ RL_RUNTIME_API void rl_hos_event_signal(hos_revent *e);
 /** @brief Clears a readable event. Takes the lock. */
 RL_RUNTIME_API void rl_hos_event_clear(hos_revent *e);
 
-/** @brief Creates a shared memory object (service side), zero filled. */
+/** @brief Creates a shared memory object (service side), zero filled; user_perm in Horizon bits. */
 RL_RUNTIME_API hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm);
 /** @brief Host pointer to a shared memory object's bytes (always writable, coherent with every guest view). */
 RL_RUNTIME_API uint8_t *rl_hos_shmem_ptr(hos_shmem *s);
@@ -464,7 +492,7 @@ rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_inf
 rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32_t perm);
 rl_result hos_unmap_shared_memory(uint32_t h, uint64_t addr, uint64_t size);
 rl_result hos_create_transfer_memory(uint32_t *out, uint64_t addr, uint64_t size, uint32_t perm);
-/** @brief True when guest range [addr, addr+size) is mapped with the given user permission bits. Lock held. */
+/** @brief True when guest range [addr, addr+size) is mapped with the given Horizon permission bits (enum hos_perm). Lock held. */
 bool hos_user_range(uint64_t addr, uint64_t size, uint32_t perm);
 /** @brief Memory in use for svcGetInfo 7. */
 uint64_t hos_used_memory(void);

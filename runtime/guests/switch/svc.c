@@ -62,6 +62,14 @@ static const char *const svc_names[0x80] = {
     [0x45] = "CreateEvent",
 };
 
+/** @brief What the Switch guest tells the core: 4 KiB pages, at most 39 address bits, the 19.2 MHz counter. */
+static const rl_guest_desc hos_guest = {
+    .name = "switch",
+    .page_size = HOS_PAGE,
+    .address_bits = 39,
+    .tick_hz = HOS_TICK_HZ,
+};
+
 static void reslimit_destroy(hos_kobj *o) { free(o); }
 
 static int64_t res_limit(uint32_t which)
@@ -195,9 +203,8 @@ static rl_result get_info(uint64_t *out, uint32_t id, uint32_t handle, uint64_t 
         *out = 1;
         return KR_SUCCESS;
     default:
-        if (rl_once(0x474554494E464F00ull ^ id))
-            rl_log(RL_LOG_WARN, "svc", "GetInfo: unknown id %u (handle 0x%x, sub 0x%llx)", id, handle,
-                   (unsigned long long)sub);
+        (void)rl_report_unknown(0x474554494E464F00ull ^ id, "svc", "GetInfo: unknown id %u (handle 0x%x, sub 0x%llx)", id,
+                                handle, (unsigned long long)sub);
         return KR_INVALID_ENUM_VALUE;
     }
 }
@@ -208,7 +215,7 @@ static void debug_string(uint64_t addr, uint64_t size)
     if (size >= sizeof buf)
         size = sizeof buf - 1;
     hos_lock();
-    bool ok = hos_user_range(addr, size, RL_PERM_R);
+    bool ok = hos_user_range(addr, size, HOS_PERM_R);
     if (ok)
         memcpy(buf, hos.vm.base + addr, size);
     hos_unlock();
@@ -251,11 +258,9 @@ static rl_result process_id(uint32_t h, uint64_t *out)
 
 static int unknown_svc(rl_ctx *c, uint32_t imm)
 {
-    if (rl_once(0x5356430000000000ull | imm))
-        rl_log(RL_LOG_WARN, "svc", "unimplemented svc 0x%02x%s%s (lr 0x%llx, host return %p)", imm,
-               imm < 0x80 && svc_names[imm] ? " " : "", imm < 0x80 && svc_names[imm] ? svc_names[imm] : "",
-               (unsigned long long)c->x[30], __builtin_return_address(0));
-    if (rl_cfg()->strict) {
+    if (rl_report_unknown(0x5356430000000000ull | imm, "svc", "unimplemented svc 0x%02x%s%s (lr 0x%llx, host return %p)",
+                          imm, imm < 0x80 && svc_names[imm] ? " " : "", imm < 0x80 && svc_names[imm] ? svc_names[imm] : "",
+                          (unsigned long long)c->x[30], __builtin_return_address(0))) {
         rl_log(RL_LOG_ERROR, "svc", "stopping: --strict");
         return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
     }
@@ -435,7 +440,7 @@ int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
 {
     (void)mem;
     rl_clrex(&c->excl);
-    if (!rl_cfg()->trace_svc)
+    if (!rl_cfg()->trace_os)
         return dispatch(c, imm);
     uint64_t a[4] = { c->x[0], c->x[1], c->x[2], c->x[3] };
     uint64_t t0 = rl_clock_ns();
@@ -486,6 +491,8 @@ int rl_hos_init(const rl_hos_config *cfg)
         return -1;
     if (!rl_cfg()->loaded)
         rl_config_load();
+    if (rl_core_init(&hos_guest, rl_a64_cpu()) != 0)
+        return -1;
     memset(&hos, 0, sizeof hos);
     pthread_mutexattr_init(&ma);
     pthread_mutexattr_settype(&ma, PTHREAD_MUTEX_RECURSIVE);

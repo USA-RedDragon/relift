@@ -131,7 +131,7 @@ bool rl_ipc_buf_read(const rl_ipc_buf *b, void *dst, uint64_t size)
     if (!size)
         return true;
     hos_lock();
-    bool ok = hos_user_range(b->addr, size, RL_PERM_R);
+    bool ok = hos_user_range(b->addr, size, HOS_PERM_R);
     if (ok)
         memcpy(dst, hos.vm.base + b->addr, size);
     hos_unlock();
@@ -145,7 +145,7 @@ bool rl_ipc_buf_write(const rl_ipc_buf *b, const void *src, uint64_t size)
     if (!size)
         return true;
     hos_lock();
-    bool ok = hos_user_range(b->addr, size, RL_PERM_W);
+    bool ok = hos_user_range(b->addr, size, HOS_PERM_W);
     if (ok)
         memcpy(hos.vm.base + b->addr, src, size);
     hos_unlock();
@@ -283,14 +283,13 @@ static rl_result run_cmd(rl_ipc_req *r, bool *stop)
         if (cls->cmds[i].id == r->cmd) {
             uint64_t t0 = rl_clock_ns();
             rl_result rc = cls->cmds[i].fn(r);
-            if (rl_cfg()->trace_svc)
+            if (rl_cfg()->trace_os)
                 rl_log(RL_LOG_INFO, "ipc", "%s%s %u %s -> 0x%x (%llu us)", r->tipc ? "tipc " : "", cls->name, r->cmd,
                        cls->cmds[i].name, rc, (unsigned long long)((rl_clock_ns() - t0) / 1000));
             return rc;
         }
-    if (rl_once(((uint64_t)(uintptr_t)cls << 20) ^ r->cmd ^ (r->tipc ? 1ull << 63 : 0)))
-        rl_log(RL_LOG_WARN, "ipc", "%s: unknown %scommand %u", cls->name, r->tipc ? "tipc " : "", r->cmd);
-    if (rl_cfg()->strict)
+    if (rl_report_unknown(((uint64_t)(uintptr_t)cls << 20) ^ r->cmd ^ (r->tipc ? 1ull << 63 : 0), "ipc",
+                          "%s: unknown %scommand %u", cls->name, r->tipc ? "tipc " : "", r->cmd))
         *stop = true;
     return SF_RESULT_UNKNOWN_COMMAND;
 }
@@ -389,12 +388,11 @@ static rl_result control(msg *m, rl_ipc_req *r, uint32_t *len)
         *(uint16_t *)rl_ipc_out(r, 2) = s->root->cls->pointer_buffer_size;
         break;
     default:
-        if (rl_once(0x434F4E54524F4C00ull ^ r->cmd))
-            rl_log(RL_LOG_WARN, "ipc", "unknown control command %u", r->cmd);
+        (void)rl_report_unknown(0x434F4E54524F4C00ull ^ r->cmd, "ipc", "unknown control command %u", r->cmd);
         rc = SF_RESULT_UNKNOWN_COMMAND;
         break;
     }
-    if (rl_cfg()->trace_svc)
+    if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "ipc", "control %u on %s -> 0x%x", r->cmd, s->root->cls->name, rc);
     return finish(m, r, RESP_CMIF, rc, len);
 }
@@ -479,7 +477,7 @@ rl_result hos_ipc_request(uint32_t handle, uint64_t msg_addr, uint64_t msg_size,
         return KR_INVALID_SIZE;
     hos_lock();
     hos_session *s = (hos_session *)hos_handle_get(handle, KOBJ_SESSION);
-    bool ok = hos_user_range(msg_addr, RL_IPC_MSG, RL_PERM_RW);
+    bool ok = hos_user_range(msg_addr, RL_IPC_MSG, HOS_PERM_RW);
     hos_unlock();
     if (!s)
         return KR_INVALID_HANDLE;
@@ -520,8 +518,8 @@ rl_result hos_ipc_request(uint32_t handle, uint64_t msg_addr, uint64_t msg_size,
         rl_result res = run_cmd(r, stop);
         rc = finish(m, r, RESP_TIPC, res, &len);
     } else {
-        if (rl_once(0x4950435459504500ull ^ p.type))
-            rl_log(RL_LOG_WARN, "ipc", "unsupported message type %u on %s", p.type, s->root->cls->name);
+        (void)rl_report_unknown(0x4950435459504500ull ^ p.type, "ipc", "unsupported message type %u on %s", p.type,
+                                s->root->cls->name);
         rc = SF_RESULT_INVALID_HEADER;
     }
     if (len) {

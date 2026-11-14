@@ -106,8 +106,7 @@ static rl_result sm_get_service_handle(rl_ipc_req *r)
     if (!f) {
         char s[9] = { 0 };
         memcpy(s, &name, 8);
-        if (rl_once(name ^ 0x5300000000000000ull))
-            rl_log(RL_LOG_WARN, "sm", "GetServiceHandle(\"%s\"): no such service", s);
+        (void)rl_report_unknown(name ^ 0x5300000000000000ull, "sm", "GetServiceHandle(\"%s\"): no such service", s);
         return SM_RESULT_NOT_REGISTERED;
     }
     rl_ipc_object *o = f();
@@ -151,9 +150,9 @@ rl_result hos_connect_named_port(uint32_t *out, uint64_t name_addr)
 {
     char name[13] = { 0 };
     hos_lock();
-    bool ok = hos_user_range(name_addr, 1, RL_PERM_R);
+    bool ok = hos_user_range(name_addr, 1, HOS_PERM_R);
     for (int i = 0; ok && i < 12; i++) {
-        if (!hos_user_range(name_addr + (uint64_t)i, 1, RL_PERM_R)) {
+        if (!hos_user_range(name_addr + (uint64_t)i, 1, HOS_PERM_R)) {
             ok = false;
             break;
         }
