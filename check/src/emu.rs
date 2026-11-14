@@ -394,6 +394,9 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
                 {
                     return Outcome::Slow(code);
                 }
+                if let Flow::Trap(relift_cpu_a64::lift::sail::SLOW_ALIGN) = o.flow {
+                    return Outcome::Fault("alignment fault".to_string());
+                }
                 if let Flow::Trap(UNDEF_TRAP) = o.flow {
                     return Outcome::Fault("undefined instruction".to_string());
                 }

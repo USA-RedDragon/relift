@@ -3,6 +3,8 @@
 //! the generator's output (`cpus/a64/gen`), one per instruction class; the
 //! build needs neither the generator nor Sail.
 
+#[allow(dead_code)]
+mod align;
 mod generated;
 #[allow(dead_code)]
 mod half;
@@ -23,6 +25,12 @@ pub(crate) type GenFn = fn(u32, &mut Builder, &mut St) -> Result<(), LiftError>;
 pub fn has_template(enc: Encoding) -> bool {
     generated::template(enc).is_some()
 }
+
+/// The slow-path code of an ordered, exclusive or atomic access that faults
+/// for alignment (see `align.rs`): there is no slow path, the guest takes
+/// an alignment fault, which the runtime reports like an undefined
+/// instruction.
+pub const SLOW_ALIGN: u32 = 0x414c_4e47;
 
 /// The slow-path code of a block that needs a non-default FPCR.
 pub const SLOW_FPCR: u32 = 0x4650_4352;

@@ -642,6 +642,27 @@ probe; the recompiled test program is phase 4]
 Switch code targets Armv8.0 (Cortex-A57), so it has no LSE atomics and
 uses LDAXR/STLXR loops.
 
+**Reservation granule:** the monitor holds the exact address and size, so
+an STXR to another address than the LDXR fails, also inside the same
+reservation granule. The architecture leaves that case IMPLEMENTATION
+DEFINED (a store to a different address in the granule may succeed); the
+Apple M2 lets it succeed. relift's choice fails it, which is one of the
+permitted behaviors and only costs a retry in correct guest code (no
+compiler emits such a pair). The checker's exclusive prelude keeps its
+other address outside the granule, so it does not compare this case.
+[verified: `relift-check --oracle m2` on the exclusive forms]
+
+**Alignment:** the lifted ordered, exclusive and atomic accesses (LDAR,
+STLR, LDAPR, LDAPUR, STLUR, LDXR, STXR, LSE atomics, LRCPC3 pairs) check
+alignment before any effect and leave the block through slow path
+`SLOW_ALIGN` when the access faults: natural alignment without
+`FEAT_LSE2` and for every exclusive, and with `FEAT_LSE2` a fault only
+when an ordered or atomic access crosses a 16-byte boundary (Arm ARM,
+`AArch64_UnalignedAccessFaults` at EL0 with SCTLR_EL1.A clear). The
+runtime has no slow path for it, so it reports the instruction like an
+undefined one, where hardware raises an alignment fault (SIGBUS).
+[verified: unaligned states against QEMU and the M2]
+
 ## 8.1 LSE atomics
 
 Switch code does not use them, but other A64 guests may, so the helpers are
