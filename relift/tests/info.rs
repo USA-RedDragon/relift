@@ -34,7 +34,7 @@ fn the_section_and_the_flag_give_the_same_document() {
         .expect("the built game");
     let image = std::fs::read(&exe).unwrap();
     let from_section = section::read(&image).expect("a section").to_vec();
-    let run = std::process::Command::new(&exe)
+    let run = relift_proc::command(&exe)
         .arg("--relift-info")
         .output()
         .unwrap();
