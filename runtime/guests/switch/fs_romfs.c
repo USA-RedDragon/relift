@@ -13,12 +13,14 @@
 #include "romfs_image.h"
 #include "services.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /** @brief Largest piece moved between an image and guest memory in one step. */
 #define STORAGE_CHUNK 0x100000u
@@ -68,6 +70,71 @@ void rl_hos_fs_set_addons(const char *dir)
     free(g_addon_root);
     g_addon_root = dup_dir(dir);
     pthread_mutex_unlock(&g_lock);
+}
+
+static int id_cmp(const void *a, const void *b)
+{
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return x < y ? -1 : x > y;
+}
+
+static bool parse_id(const char *name, uint64_t *id)
+{
+    uint64_t v = 0;
+    if (strlen(name) != 16)
+        return false;
+    for (int i = 0; i < 16; i++) {
+        char ch = name[i];
+        uint32_t d;
+        if (ch >= '0' && ch <= '9')
+            d = (uint32_t)(ch - '0');
+        else if (ch >= 'a' && ch <= 'f')
+            d = (uint32_t)(ch - 'a') + 10;
+        else
+            return false;
+        v = v << 4 | d;
+    }
+    *id = v;
+    return true;
+}
+
+size_t rl_hos_fs_addon_ids(uint64_t *out, size_t cap)
+{
+    char root[PATH_MAX];
+    char path[PATH_MAX];
+    struct dirent *de;
+    struct stat st;
+    uint64_t *ids = NULL;
+    size_t n = 0, alloc = 0;
+    DIR *d;
+    pthread_mutex_lock(&g_lock);
+    snprintf(root, sizeof root, "%s", g_addon_root ? g_addon_root : "");
+    pthread_mutex_unlock(&g_lock);
+    d = root[0] ? opendir(root) : NULL;
+    while (d && (de = readdir(d))) {
+        uint64_t id;
+        if (!parse_id(de->d_name, &id))
+            continue;
+        if (snprintf(path, sizeof path, "%s/%s/0/romfs", root, de->d_name) >= (int)sizeof path ||
+            stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+            continue;
+        if (n == alloc) {
+            uint64_t *grown = realloc(ids, (alloc ? alloc * 2 : 16) * sizeof *ids);
+            if (!grown)
+                break;
+            ids = grown;
+            alloc = alloc ? alloc * 2 : 16;
+        }
+        ids[n++] = id;
+    }
+    if (d)
+        closedir(d);
+    if (n)
+        qsort(ids, n, sizeof *ids, id_cmp);
+    for (size_t i = 0; out && i < n && i < cap; i++)
+        out[i] = ids[i];
+    free(ids);
+    return n;
 }
 
 void rl_fs_romfs_env(void)

@@ -7,6 +7,9 @@
 
 #include <relift/abi_core.h>
 
+#include <stddef.h>
+#include <stdint.h>
+
 /**
  * @brief Registers the "fsp-srv" service (IFileSystemProxy, IFileSystem,
  * IFile, IDirectory). OpenSdCardFileSystem returns a file system whose root
@@ -40,5 +43,13 @@ RL_RUNTIME_API void rl_hos_fs_set_romfs(const char *dir);
  * $RELIFT_DLC.
  */
 RL_RUNTIME_API void rl_hos_fs_set_addons(const char *dir);
+
+/**
+ * @brief Lists the ids of the add-ons in the add-on directory: the names of
+ * its sub-directories that are 16 lower-case hex digits and hold index 0's
+ * romfs. Writes up to cap ids in ascending order to out (which may be NULL)
+ * and returns how many there are. A missing directory has none.
+ */
+RL_RUNTIME_API size_t rl_hos_fs_addon_ids(uint64_t *out, size_t cap);
 
 #endif
