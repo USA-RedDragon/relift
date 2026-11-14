@@ -41,9 +41,9 @@ pub enum Command {
         /// The host target to run on. Default: this host.
         #[arg(long)]
         target: Option<String>,
-        /// Log every system call and service request.
+        /// Log every guest OS call and service request (RELIFT_TRACE_OS).
         #[arg(long)]
-        trace_svc: bool,
+        trace_os: bool,
         /// Log entry and exit of guest functions matching this glob.
         #[arg(long)]
         trace: Vec<String>,
