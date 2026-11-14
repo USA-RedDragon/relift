@@ -1,0 +1,618 @@
+# Runtime ABI contract
+
+This is the contract between relift-emitted C and the relift C runtime. The
+header is `runtime/include/relift/abi.h`; this file gives the reason for each
+choice. Contract version: `RL_ABI_VERSION` 1.
+
+Tags:
+- **[verified]**: backed by a prototype test or by a check run for this
+  contract (listed under "Checks run for this contract").
+  The prototypes are not yet in the repo.
+- **[inferred]**: reasoning only, not run.
+- **[open]**: not decided or not proven; listed again under "Open items".
+
+Prototype names used in the tags:
+- **memory prototype**: a benchmark of guest memory access strategies
+  (base+offset, masking, global base) on x86-64 Linux and an Apple M2 Mac.
+- **Sail prototype**: a generator from the Arm Sail model to a small IR and
+  an interpreter for it, checked against Unicorn on a set of instruction
+  forms.
+- **libnx test programs**: small libnx programs (TLS, exclusives, spin flag,
+  C++ exceptions, sleep) that the lifted output must reproduce.
+- **exceptions prototype**: a hand-written lifted-style C++ exception test on
+  x86-64 Linux and an Apple M2 Mac.
+- **placement prototype**: a test of Vulkan placed memory mapping, host
+  pointer import and shadow buffers inside a guest reservation, on an NVIDIA
+  GPU and llvmpipe on x86-64 Linux and MoltenVK on an Apple M2 Mac.
+- **slice prototype**: a lift, compile and compare run over a small set of
+  functions, checked against a reference with many inputs.
+- **probe**: the ABI probe programs described under "Checks run for this
+  contract".
+
+## 1. Hosts and compilers
+
+- 64-bit little-endian hosts only; clang or zig cc (gcc-compatible builtins).
+  The header refuses anything else at compile time. Reason: every target in
+  scope (x86-64 and arm64 on Linux, Windows gnullvm, macOS, Android, iOS) is
+  64-bit little-endian, and the helpers use `__atomic_*`, `__int128` and
+  `musttail`. [verified: header compiles for x86_64-linux-gnu,
+  aarch64-linux-gnu, x86_64-pc-windows-gnu, Apple clang on arm64]
+- Lifted C is built with `-std=c11 -O2 -ffp-contract=off`. Without
+  `-ffp-contract=off` arm64 hosts fuse `a * b + c` and diverge from x86.
+  [verified: memory prototype]
+- x86-64 builds pass `-mcx16`. Without it, 16-byte compare-and-swap becomes a
+  call to `__atomic_compare_exchange_16`, which may take a lock. [verified:
+  clang 23 emits `lock cmpxchg16b` with the flag and a libcall without it]
+- On arm64 without `-march=...+lse`, clang emits outline atomics
+  (`__aarch64_cas16_acq_rel`); these come from compiler-rt, which zig cc
+  ships. [verified: disassembly; zig link not tried, open]
+- Runtime C that replaces guest libc routines is built with `-fno-builtin`,
+  or clang turns byte loops into calls to the routine itself. [inferred from the slice
+  prototype]
+
+## 2. Guest memory
+
+- **Base passing.** Every lifted function takes the guest memory base as its
+  second parameter, `uint8_t *mem`. A guest address `a` is `mem + a`. The
+  base is never a global and never loaded from the context. Reason: an
+  externally visible base is reloaded after every store (1.5x to 1.6x
+  slower); a base in a local is as fast as raw host pointers and lets clang
+  vectorize. A parameter is a local that also survives calls in a register.
+  [verified: memory prototype]
+- **`mem` is not `restrict`.** Reason: with `restrict`, clang treats guest
+  memory as unreachable by anything else and moves loads across compiler
+  barriers, so `RL_LOOP_FENCE` stops working. [verified: a spin loop with
+  `restrict` mem and `__atomic_signal_fence` compiled to `jmp .` on x86-64
+  and arm64; without `restrict` it reloads each iteration]
+- **Accesses.** Plain loads and stores go through `rl_ld*`/`rl_st*`, which
+  are `memcpy` of the access size, so any alignment works. [verified: slice
+  prototype, 40,000 inputs including misaligned ones]
+- **Reservation.** The runtime reserves the guest space (2^39 on desktop;
+  smaller on Android) `PROT_NONE` with
+  `MAP_NORESERVE`, plus a 1 MiB guard below the base and a 4 GiB guard above
+  it. The low guard covers null pointer plus immediate offset (imm9 and LDP
+  imm7 reach -1024; LDR unsigned offsets are positive). The high guard
+  covers a 32-bit offset added to a pointer near the top. A guest address
+  beyond both guards is a wild pointer that would fault on Horizon too; here
+  it may hit host memory. No masking: masking costs 1.2x to 2.5x.
+  [verified cost: memory prototype; guard sizes inferred]
+- **Faults.** The runtime catches SIGSEGV and SIGBUS (macOS arm64 raises
+  SIGBUS for `PROT_NONE`). A fault address inside the reservation is a guest
+  fault at `si_addr - mem`. [verified: placement prototype]
+- **16 KiB host pages.** Lifted code does not care; only the runtime's
+  memory manager does. Rules: host mappings and protections are applied at
+  host page granularity; a host page gets the union of the permissions of
+  the guest pages in it; the runtime keeps the exact 4 KiB guest state for
+  `svcQueryMemory` and friends. Consequence: a guest access to a 4 KiB page
+  the guest unmapped or protected is not caught if a neighbor in the same
+  host page is accessible. `svcMapMemory`-style aliases that are not 16 KiB
+  aligned cannot be built with host `mmap` on such hosts: the runtime stops
+  with a report. Vulkan host-pointer imports need 16 KiB alignment and size
+  on macOS. [verified: placement prototype, `mmap(FIXED)` and `mprotect` at a 4 KiB
+  offset fail with EINVAL on an Apple M2 Mac; rules inferred; open: whether
+  any guest program aliases at 4 KiB granularity]
+
+## 3. Guest context (`rl_ctx`)
+
+One `rl_ctx` per guest thread, allocated by the runtime, 64-byte aligned.
+Lifted code reaches it only through its first parameter `c`.
+
+| offset | field | notes |
+|---|---|---|
+| 0 | `x[31]` | x0 to x30 |
+| 248 | `sp` | |
+| 256 | `v[32]` | 16 bytes each, union of lanes |
+| 768 | `pc` | target of the current indirect call or jump |
+| 776 | `nzcv` | packed, MRS NZCV layout |
+| 780 | `fpcr` | |
+| 784 | `fpsr` | |
+| 788 | reserved | |
+| 792 | `tpidr_el0` | |
+| 800 | `tpidrro_el0` | |
+| 808 | `excl` | exclusive monitor, 32 bytes |
+| 840 | `pend` | pending record, 24 bytes |
+| 864 | `thread` | runtime thread object |
+| 872 | `disp_table`, `disp_lo`, `disp_count` | dispatch table view |
+| 896 | | size |
+
+`_Static_assert`s in the header pin every offset, the size and the alignment.
+
+Reasons:
+- **x0-x30 then sp, 256 bytes; v at 256.** GPRs and SP fill the first 256
+  bytes so `v` starts 16-byte aligned without padding. sp is separate from
+  `x[]` because register 31 means sp or zr depending on the instruction, and
+  the Sail cut line already reads them through separate accessors (the Sail
+  prototype: X_read, SP_read). [verified: Sail prototype]
+- **v0-v31 as 128-bit unions.** The Sail IR treats each V register as one
+  128-bit slot with partial reads and writes (Vpart_read/Vpart_set); a union
+  of `__int128`, `d`, `s`, `h`, `b` lanes matches that and needs no type
+  punning beyond what C11 allows for unions. d8-d15 for exceptions are
+  `v[8..15].d[0]`. [verified: Sail prototype]
+- **NZCV packed, stored rarely.** Flags live in four C locals inside a
+  function, and clang deletes them where they are dead (zero cost in the
+  plain build). The context field is written only by MSR NZCV, by the
+  full-state build at every boundary, and by the runtime when it captures a
+  thread (svc, fault). Packed in the MRS layout because MRS and MSR then copy
+  it as is and the full-state build stores one word. NZCV is not live across
+  calls and returns in the plain build; AAPCS64 says it is not preserved,
+  and the checker's full-state build catches code that relies on it.
+  [verified: slice prototype, flag cost 0 in the plain build, full-state
+  build catches a V-flag mutation the plain build misses]
+- **pc** is not a program counter of the running code; it is the target of
+  the last indirect transfer, written just before the lookup, so the miss
+  handler can have the lifted signature (section 6). Host pc maps to guest
+  pc for reports (section 11). [inferred]
+- **tpidr_el0, tpidrro_el0.** Per-thread values. `tpidrro_el0` is the guest
+  address of the thread's 0x200-byte TLS slot in guest memory; libnx keeps
+  its thread pointer at `tpidrro_el0 + 0x1f8` and reads it with a plain
+  load, so that slot is ordinary guest memory. nnSdk code reads
+  `tpidrro_el0` too (the IPC buffer lives there) and uses `tpidr_el0`.
+  [verified: disassembly of a libnx TLS test program]
+- **excl** holds the local monitor in the context, not in locals, so an
+  LDXR and STXR in different functions or across a call still pair up. With
+  `c` declared `restrict`, clang keeps the fields in registers inside a loop.
+  [verified: section 8 probe]
+- **pend** is the exceptions prototype's resume record, extended with a kind (section 7).
+- **thread** points to the runtime's thread object, opaque to lifted code.
+- **Dispatch view** (`disp_table`, `disp_lo`, `disp_count`) is copied into
+  each context so the inline lookup reads it through `c` (cached by clang
+  thanks to `restrict`) instead of a global that a guest store could alias.
+  [inferred from the memory prototype's global-reload result]
+- **64-byte alignment** keeps two threads' contexts off one cache line.
+  [inferred]
+
+## 4. Lifted function signature
+
+```c
+int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
+```
+
+- Return `RL_OK` (0) for a normal return, `RL_PENDING` (1) when `c->pend`
+  says the host stack must unwind (guest exception, thread exit, process
+  exit). Reason: the exceptions prototype measured the check after a call at below noise on
+  both hosts (one `test/jne` or `cbnz`), against 0.4 to 3.4 ns per entry for
+  setjmp. Thread and process exit reuse the same path so the runtime never
+  longjmps over lifted frames. [verified: exceptions prototype; exit reuse inferred]
+- `c` is `restrict`: the context is never reachable through `mem` (it is
+  host memory outside the reservation), and with `restrict` clang keeps
+  context fields in registers across guest stores. [verified: with
+  `restrict`, `c->x[1]` was not reloaded after a store through `mem`; without
+  it, it was]
+- Host overrides that replace a guest function use the same signature, so
+  calls, dispatch entries and unwinding treat them the same.
+- Considered: passing guest registers as C arguments (fewer context stores
+  per call). Rejected for now: one signature keeps dispatch, hot-load and
+  overrides simple, and the exceptions and slice prototypes measured the context
+  traffic as the main cost only for tiny leaves. [open: measure on real code after phase 4]
+
+### Locals and the context
+
+- Inside a function every guest register is a C local. At entry the
+  function loads the registers it reads from `c`.
+- **Call boundary rule:** before any call (BL, BLR, imported or override
+  call, `rl_svc`, any runtime entry that reads registers) the caller stores
+  every register it has written since entry or since the last boundary, and
+  `sp`. After the call it reloads the registers it reads afterwards. So at
+  every boundary `c` holds the full architectural state (NZCV excepted, see
+  above). This does not depend on the guest following AAPCS64.
+  [verified shape: exceptions prototype; the slice prototype found this
+  traffic to be the main per-call cost]
+- **Exit rule:** at RET and before a tail call, store every register written
+  on any path. A path that did not write a register stores the value it
+  loaded, which forces a load (in the slice prototype a strlen loaded x10/x11 only for
+  this). Allowed optimization: the emitter may skip storing x9-x17 and
+  v16-v31 (and the upper halves of v8-v15) at exits when its interprocedural
+  analysis shows no caller reads them before writing. The full-state checker
+  build always stores everything. [inferred; open: the analysis]
+
+## 5. Calls
+
+- **Direct (BL):** store per the boundary rule, set x30 to the guest return
+  address, call `F_<target>(c, mem)` by name, then the pending check.
+  PLT stubs are resolved at build time to direct calls when the target is
+  known. Each shard declares only the callees it uses. [inferred]
+- **Indirect (BLR):** `rc = rl_indirect(c, target)(c, mem);`
+  `rl_indirect` stores `target` in `c->pc` and calls `rl_lookup`:
+  `off = target - disp_lo`, `i = rotate_right(off, 2)`, then
+  `i < disp_count ? disp_table[i] : NULL`, and NULL becomes
+  `rl_dispatch_miss`. The rotate folds the alignment check into the bounds
+  check (a misaligned target gets high bits and misses). Hit path: one
+  subtract, one rotate, one compare, one load, one indirect call. Miss path:
+  the miss handler, called in place with the same arguments, so the
+  emitted code is identical for hit and miss. [verified: probe, 10 million
+  indirect tail calls, misaligned and out-of-range targets miss]
+- **Table shape:** one flat array with an entry per 4-byte word over the
+  guest code range of all loaded modules, zero for "no entry". Pages that
+  hold no entry stay untouched zero pages. Cost up to 2 bytes of table per
+  byte of guest text if every page has an entry. A hash table would be far smaller but adds a hash and a probe on
+  every indirect call. [inferred; open: measure resident size, revisit for
+  Android and iOS]
+- **Table reads:** shipped builds never change the table after start-up, so
+  `rl_lookup` uses a plain load. Dev builds (`-DRL_HOTLOAD`) use an acquire
+  load, paired with the release store at registration (section 6).
+  [inferred]
+- **Tail calls (B to another function, BR resolved to a function):**
+  `RL_MUSTTAIL return F_<target>(c, mem);` or
+  `RL_MUSTTAIL return rl_indirect(c, target)(c, mem);`. `musttail` makes
+  the host stack not grow for guest tail-call chains. No pending check:
+  the callee's code is returned as is. [verified: clang 23 emits `jmp`/`b`
+  on x86-64 Linux, x86-64 Windows gnu and arm64; probe ran 10 million
+  indirect tail calls on x86-64 Linux, arm64 under qemu and an Apple M2 Mac]
+- **Unresolved BR inside a function** (unknown jump table): treated as an
+  indirect tail call to the target. The target gets its own entry
+  (`RL_FN_FRAGMENT`); since the context holds the full state at that point
+  and the guest frame is in guest memory, the fragment continues correctly.
+  Its landing pads come from the LSDA of the FDE that contains it.
+  [inferred]
+- **Pending through the dispatcher:** the lookup is not a frame; the caller
+  gets the callee's return code directly, and the miss handler returns the
+  return code of the function it finally calls. No extra code.
+  [verified for the hit path by the probe; miss path inferred]
+
+## 6. Missed code
+
+`int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)` has the lifted signature
+and reads the target from `c->pc`.
+
+### Dev builds (`relift run`, `RL_HOTLOAD` defined)
+
+1. Take the process miss lock. If another thread already loaded the target,
+   release the lock and continue at step 6.
+2. Connect once per process to the socket named by `RELIFT_DEV_SOCKET`
+   (Unix domain socket; Windows 10 1803+ has AF_UNIX) and send
+   `RL_DEV_HELLO` (ABI version, host page size, image id, pid). relift
+   refuses a different image id or ABI version.
+3. Send `RL_DEV_LIFT` with the target, the call site (from the host return
+   address through the line map; 0 after a tail call, where it is lost),
+   the guest thread id, the reason (`RL_MISS_CALL`, `RL_MISS_JUMP`,
+   `RL_MISS_ENTRY`, `RL_MISS_RESUME`) and the thread's FPCR.
+4. relift lifts the target (and any new code it reaches), compiles a shared
+   library, adds the target to the hint list in `game.toml`, and answers
+   `RL_DEV_LIFT_REPLY`: status, absolute library path, message text.
+5. The runtime opens the library, calls its exported `relift_unit()`, and
+   refuses the unit unless `abi_version == RL_ABI_VERSION`,
+   `ctx_size == sizeof(rl_ctx)` and `image_id` matches. It then stores
+   each entry into an empty table slot with a release store (existing
+   entries win, except `RL_FN_OVERRIDE`), and adds the unit's functions and
+   line map to the crash map.
+6. Release the lock and `RL_MUSTTAIL return rl_lookup(c, c->pc)(c, mem);`.
+
+Only the missing thread waits; other guest threads keep running, because
+table entries change only from NULL to a function, once. [inferred]
+
+**Frames:** every message is `rl_dev_hdr` (magic `RLDV`, kind, seq,
+payload length) and a fixed payload struct; replies add `path_len` and
+`msg_len` bytes of UTF-8 after the struct. Little-endian, fixed sizes pinned
+by `_Static_assert`. Binary because the runtime is C and the socket is local
+to one machine. [inferred]
+
+**Hot-loaded code** calls everything outside itself through `rl_indirect`,
+never by symbol, so it does not need the main program's lifted symbols. It
+calls runtime entry points by name: in dev builds the runtime is a shared
+library (`librelift_rt`) that both the program and hot-loaded units link
+against. Shipped builds link it statically. [inferred; open: check on
+Windows gnullvm and macOS]
+
+**Registration ABI** (`rl_unit`): ABI version, `sizeof(rl_ctx)`, 32-byte
+image id, sorted `rl_fn_entry` array (guest address, guest size, flags,
+host function), optional line map, code base, name. The same record
+describes statically linked code: relift emits `rl_units.c` with
+`rl_static_units[]` and `rl_static_unit_count`, and the runtime fills the
+table from them at start-up.
+
+### Shipped builds
+
+`rl_dispatch_miss` prints the target, the call site, the guest and host
+backtraces and the module offset, writes the same to the log file, and
+ends the process (`RL_PEND_EXIT_PROCESS`). Shipped builds never load code
+at run time. [decided]
+
+## 7. Exceptions
+
+From the exceptions prototype [verified on x86-64 Linux and an Apple M2
+Mac unless marked]:
+
+- Every call whose callee may unwind is followed by a check:
+  - call site inside an LSDA range with a landing pad:
+    `if (RL_UNLIKELY(rc)) { if (c->pend.sp == sp) goto lp_dispatch; return RL_PENDING; }`
+  - any other such call: `if (RL_UNLIKELY(rc)) return RL_PENDING;`
+  This includes functions without an LSDA; dropping one plain check broke
+  the rethrow test (negative control neg2).
+- "May unwind" is every call until a call-graph analysis proves otherwise
+  (no path to `__cxa_throw`, `__cxa_rethrow`, `_Unwind_Resume`, an indirect
+  call or an `RL_FN_MAY_UNWIND` override). [open: the analysis]
+- `lp_dispatch` reloads the registers the pads read (x0/x1 carry the
+  exception pointer and selector) and `sp` from `c`, then switches on
+  `c->pend.pc`, setting `pend.kind = RL_PEND_NONE` in each case. No case
+  calls `rl_bad_resume(c, mem, fn)` (dev builds may first ask for the code
+  with `RL_MISS_RESUME`).
+- **Matching on sp:** the check compares `c->pend.sp` with the frame's sp
+  local (the exceptions prototype compared `c->sp`; moving it into the record keeps the
+  context's sp free for the installed registers). Exit kinds set
+  `pend.sp = RL_SP_NONE`, which no 16-byte aligned sp equals, so they pass
+  every frame up to the thread entry. [inferred change from the verified
+  shape]
+- **`rl_resume(c, mem, r)`** replaces the guest unwinder's register-install
+  step. It copies x0-x30, sp and d8-d15 (`v[8..15].d[0]`; upper halves
+  untouched, AAPCS64 preserves only the low halves) into `c`, sets
+  `pend = {pc, sp, RL_PEND_UNWIND}`, and returns `RL_PENDING`. The lifted
+  unwinder's frames then return up to the throw site and on to the target
+  frame. The step is replaced by an override on the unwinder's install
+  function, which converts the unwinder's own register layout to
+  `rl_resume_regs`:
+  - LLVM libunwind style (`__unw_resume`, `Registers_arm64::jumpto`): the
+    override reads x0-x30, sp, pc and d8-d15 from the guest object.
+    [inferred; open: confirm which unwinder the SDK uses]
+  - libgcc style (libnx): `_Unwind_RaiseException` and friends end in
+    `__builtin_eh_return` (restore patched callee-saved registers, add the
+    stack adjustment, branch). The emitter must recognize these epilogues
+    by symbol and emit `rl_resume` with the current registers instead of
+    the indirect branch. [open: confirm on a libnx C++ exceptions test program]
+- **d8-d15** are in `c->v` and in `rl_resume_regs`, so a landing pad sees
+  the values the unwinder restored. [inferred; the exceptions prototype did not track FP
+  registers]
+- **Guest setjmp/longjmp:** each call to `setjmp` is a resume point (the
+  `lp_dispatch` shape with one case, the instruction after the call, x0 =
+  the longjmp value); guest `longjmp` is an override that calls
+  `rl_resume`. [inferred]
+- **Host code that must raise a guest exception** (an override or a
+  service): allocate with the guest `__cxa_allocate_exception`, construct
+  the object in guest memory, put the arguments in `c->x[0..2]`, leave x30
+  and sp as they were at the override's entry, and
+  `RL_MUSTTAIL return rl_indirect(c, cxa_throw_addr)(c, mem);`. The guest
+  unwinder then sees the override's caller as the throwing frame, with no
+  host frame between, and the caller's call site has the full check
+  because the override is flagged `RL_FN_MAY_UNWIND`. [inferred]
+- **Exceptions do not cross host frames.** When the runtime or an override
+  calls guest code and continues afterwards, it sets x30 to a runtime-owned
+  guest address whose synthetic FDE marks the end of the stack, so the guest
+  unwinder reports end of stack (and guest `std::terminate`) instead of
+  walking into host code. Any other `RL_PENDING` that reaches such a host
+  caller is propagated if the host caller has the lifted signature, else
+  reported. [inferred; open: build the synthetic FDE]
+
+## 8. Exclusives
+
+**Decision:** monitor emulation in `rl_ctx.excl`, with the store done as a
+host compare-and-swap against the value the exclusive load returned.
+Not pattern matching. [verified: probe; see below]
+
+- LDXR/LDAXR (`rl_ldx`): atomic load; record address, size and value.
+- STXR/STLXR (`rl_stx`): fail (status 1) unless the monitor holds the same
+  address and size; otherwise strong CAS from the recorded value to the new
+  one; status is 0 on success. The monitor opens either way.
+- LDXP/STXP 64-bit pairs (`rl_ldxp64`/`rl_stxp64`): two 64-bit loads, 16-byte
+  CAS (`cmpxchg16b` on x86-64, `ldaxp/stlxp` or `casp` on arm64). A torn
+  pair read only makes the CAS fail. 32-bit pairs use the 8-byte form.
+- CLREX (`rl_clrex`) and every `rl_svc` open the monitor, as an exception
+  return does on hardware.
+
+Why not pattern matching: pairs that span blocks, calls or functions, STXR
+without a preceding LDXR, and CLREX all work with the emulation without any
+matcher, and when the pair sits in one loop clang reduces the emulation to
+the same CAS loop a matcher would produce (the context fields stay in
+registers because `c` is `restrict`). [inferred from codegen; perf not
+measured]
+
+**Correctness under contention:** a successful STXR is a CAS that saw the
+value the LDXR read, so the read-modify-write is atomic. A failed STXR
+leaves memory unchanged, as on hardware; spurious failure is allowed by the
+architecture and guest code always retries. Progress is lock-free: a CAS
+fails only because another thread's store succeeded. [inferred]
+
+**ABA:** the CAS succeeds if other threads wrote and then restored the same
+value between the LDXR and STXR, where hardware would fail. That is
+harmless when the stored value depends only on the loaded value and
+registers (counters, flags, locks, and every `compare_exchange` the guest
+compiler expanded into LDAXR/STLXR, whose source semantics already are CAS).
+It is visible only for hand-written sequences that load other memory
+between the LDXR and the STXR and rely on the monitor to validate it
+(classic lock-free stack pop). The emitter flags every LDXR/STXR pair with
+another guest load in between in `relift coverage`. [inferred; open: count
+such pairs in real code]
+
+**Ordering:** LDAXR and STLXR use sequentially consistent operations, LDXR
+and STXR relaxed ones (section 9 explains SC). Failed CAS is relaxed.
+
+**Test:** the libnx test program `llsc_stress` (4 threads x 100,000:
+LDAXR/STLXR 32-bit, LDXR/STXR 64-bit, LDXP/STXP pair with a no-tearing check,
+LDAXR spinlock with STLR release protecting a plain counter, CLREX makes
+STXR fail) must pass recompiled on x86-64 Linux and arm64 macOS. A probe that
+reimplements its checks on top of these helpers (4 threads x 200,000) passed
+on x86-64 Linux, arm64 under qemu, and an Apple M2 Mac. [verified for the
+probe; the recompiled test program is phase 4]
+
+Switch code targets Armv8.0 (Cortex-A57), so it has no LSE atomics and
+uses LDAXR/STLXR loops.
+
+## 9. Memory ordering
+
+- **Plain loads and stores** are plain C accesses (`memcpy`). Naturally
+  aligned accesses up to 8 bytes compile to single host instructions, which
+  are single-copy atomic on both host ISAs, matching Arm's guarantee for
+  aligned accesses. [verified for the instruction shape in slice prototype
+  disassembly; atomicity inferred from the host ISAs]
+- **The hazard:** a loop that waits on a plain guest load (spin on a flag
+  another thread sets) lets clang hoist the load out of the loop, so the
+  loop never ends. [verified: the probe's lifted spin loop without a fence
+  hung on x86-64 Linux and on an Apple M2 Mac and was killed by its alarm]
+- **Policy:** the emitter puts `RL_LOOP_FENCE()` (a compiler-only signal
+  fence, no instruction) on the back edge of every loop whose exit condition
+  depends on a value loaded from guest memory inside the loop, and the loop
+  has no call, atomic, exclusive or barrier in it already (those are
+  compiler barriers). Loops whose exit depends only on registers (counted
+  copies) get no fence and stay vectorizable. Rationale: hoisting a load out
+  of a loop that ends anyway is a legal Arm execution (the other thread's
+  store was just late); only loops whose termination depends on seeing a
+  new value need the reload. [verified: with the fence, the spin loop
+  reloads every iteration and passes on x86-64, qemu arm64 and an Apple M2 Mac]
+  Covers the libnx `spin_flag` test program, which must pass recompiled. [open:
+  run it in phase 4]
+- **Barriers:** DMB and DSB with a full domain and both access types
+  (ISH, SY, OSH, NSH) map to `rl_dmb_full` (`seq_cst` fence: `mfence` on
+  x86-64, `dmb ish` on arm64); the LD type to `rl_dmb_ld` (acquire fence);
+  the ST type to `rl_dmb_st` (release fence, stronger than ST, which only
+  orders stores). DSB is treated like DMB: the guest has no device memory.
+  ISB is a compiler barrier. clang treats these fences as barriers for all
+  memory accesses, including non-atomic ones. [inferred]
+- **LDAR/STLR** map to `seq_cst` atomic load and store (`rl_ldar`,
+  `rl_stlr`). Reason: Arm's acquire/release are RCsc (a STLR followed by a
+  LDAR is not reordered), and compilers map C/C++ `seq_cst` atomics to
+  exactly LDAR/STLR, so guest seq_cst code relies on it. Plain acquire and
+  release in C would allow store-to-load reordering on x86-64. Cost: STLR is
+  `xchg` on x86-64. [inferred from the standard C/C++ to Armv8 mapping]
+- Data races between plain accesses are undefined in C11. relift relies on
+  clang compiling them as plain host accesses, which is what it does at
+  `-O2` with the fence policy. [inferred; tested only by the probe and,
+  later, the libnx test programs]
+
+## 10. System instructions
+
+| guest | entry | kind | notes |
+|---|---|---|---|
+| `SVC #imm` | `int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)` | runtime | call boundary; arguments and results in `c`; opens the monitor; `RL_PENDING` on exit |
+| `MRS TPIDR_EL0` | `rl_mrs_tpidr_el0(c)` | inline | |
+| `MSR TPIDR_EL0` | `rl_msr_tpidr_el0(c, v)` | inline | |
+| `MRS TPIDRRO_EL0` | `rl_mrs_tpidrro_el0(c)` | inline | MSR is UNDEFINED at EL0 and goes to `rl_undefined` |
+| `MRS CNTPCT_EL0`, `CNTVCT_EL0` | `uint64_t rl_mrs_cntpct(rl_ctx *c)` | runtime | host monotonic clock scaled to 19.2 MHz |
+| `MRS CNTFRQ_EL0` | `rl_mrs_cntfrq_el0()` | inline | 19,200,000 [inferred: a libnx sleep test program expects 19.2 MHz; not run on hardware] |
+| `MRS FPCR` | `rl_mrs_fpcr(c)` | inline | |
+| `MSR FPCR` | `void rl_msr_fpcr(rl_ctx *c, uint64_t v)` | runtime | section 10.1 |
+| `MRS FPSR`, `MSR FPSR` | `rl_mrs_fpsr(c)`, `rl_msr_fpsr(c, v)` | inline | |
+| `MRS NZCV`, `MSR NZCV` | none | emitter | packs or unpacks the flag locals |
+| `MRS CTR_EL0` | `rl_mrs_ctr_el0()` | inline | Cortex-A57 value [inferred from the A57 manual; open: confirm on hardware] |
+| `MRS DCZID_EL0` | `rl_mrs_dczid_el0()` | inline | 64-byte DC ZVA [inferred, same] |
+| `DC ZVA` | `rl_dc_zva(mem, a)` | inline | zeroes the 64-byte block |
+| `DC CVAC/CVAU/CIVAC/CVAP`, `IC IVAU` | `rl_cache_maint(a)` | inline | compiler barrier only; hosts are cache coherent and relift does not support guest code generation |
+| `WFE` | `void rl_wfe(rl_ctx *c)` | runtime | bounded wait or host yield; spurious wake is allowed |
+| `YIELD` | `rl_yield()` | inline | `pause` / `yield` plus compiler barrier |
+| `SEV`, `SEVL` | `rl_sev()` | inline | no effect: `rl_wfe` never waits unbounded |
+| `DMB`, `DSB`, `ISB` | section 9 | inline | |
+| `UDF`, `BRK`, `HLT`, unliftable | `int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)` | runtime | crash report, `RL_PEND_EXIT_PROCESS` |
+
+Reasons: entries that only read or write a context
+field are inline so they cost one load or store; entries that touch host
+state (clock, FPCR, scheduling, syscalls) are runtime calls, and those calls
+are also call boundaries. [inferred]
+
+## 10.1 Floating point
+
+- **FPCR is a generation-time constant per function**, as in the Sail prototype:
+  the Sail generator folds FPCR into the semantics, and only the FP cut
+  layer below takes it as an argument (always a constant in emitted code).
+  The default is the value Horizon gives new threads. [verified approach:
+  Sail prototype; open: the exact initial FPCR on Horizon]
+- `rl_msr_fpcr` stores the value; on arm64 hosts it also sets the host FPCR
+  for the thread. If the new value's RMode, FZ, DN or AHP differ from the
+  default, dev builds report it, because code generated for the default
+  mode keeps running. MSR FPCR is expected to be rare (likely `fesetround`-style library code). [open: find
+  out which guest code writes FPCR and whether it runs; then decide between a
+  report, per-mode function variants, or passing FPCR at run time]
+- **FPSR cumulative flags** are not tracked in the default build: `fpsr`
+  arguments are NULL and MRS FPSR returns the last MSR value. The
+  `fp-exact` build passes the FPSR local and every operation takes the slow
+  path, so the checker can compare flags. [inferred; open: check that no
+  guest logic reads exception flags]
+- **FP cut layer** (the Sail prototype's option (b), 11 operations): FPAdd, FPSub,
+  FPMul, FPDiv, FPMulAdd, FPSqrt, FPRoundInt, FPRSqrtEstimate (each for
+  single and double), FPConvert, FPToFixed, FixedToFP. Every one has an
+  exact out-of-line slow path (`rl_fp32_*`, `rl_fp64_*`, `rl_fp_convert`,
+  `rl_fp_to_fixed`, `rl_fixed_to_fp`) that implements Arm's rules for every
+  FPCR mode, NaN propagation and FPSR flags. FSQRT and FRSQRTE are the two
+  forms the Sail route cannot generate, so they must
+  be in the layer. The rest of FP (compares, min/max, FRECPE, FCSEL, moves)
+  stays generated from Sail. [verified need: Sail prototype; implementations
+  open]
+- **Inline fast paths** (`rl_fadd32` ... `rl_fsqrt64`, `rl_fmuladd32/64`):
+  - x86-64: valid when RMode is round-to-nearest and FZ, DN, AHP are clear
+    and FPSR is not tracked. IEEE basic operations and fused multiply-add
+    are correctly rounded on both ISAs, so non-NaN results are bit-exact.
+    NaN results differ (x86-64 produces a negative default NaN and picks
+    NaN operands differently), so a NaN result is recomputed by the slow
+    path. [inferred from IEEE 754 and the x86 and Arm manuals; checker to
+    prove]
+  - arm64 hosts: the runtime keeps the host FPCR equal to the guest FPCR,
+    so the native instruction is the guest instruction, for every mode and
+    for NaNs; no fixup. [inferred]
+  - Non-default modes on x86-64 go to the slow path. If Horizon's default
+    FPCR turns out to set FZ or DN, x86-64 needs a fast path for that mode
+    before performance work. [open]
+- `__builtin_fmaf`/`__builtin_fma` lower to an FMA instruction where the
+  target has one and to libm's correctly rounded `fma` otherwise. [inferred]
+
+## 11. Crash mapping
+
+What the emitter and build provide:
+- the `rl_fn_entry` table of every unit (guest address, guest size, host
+  function), which the runtime also needs for dispatch;
+- `#line` directives that map each statement to its line in the per-module
+  listing (one guest instruction per line; CodeView caps lines at 2^24, so
+  listing lines, not raw guest addresses);
+- a host-offset to guest-address line map (`rl_line_entry`), produced by
+  relift after linking from the binary's line table and the listings,
+  embedded in the unit or written as a side file;
+- builds with `-fno-omit-frame-pointer` and unwind tables.
+
+What the runtime does on a fault or fatal report: map the faulting host pc
+through the line map to a guest address; take the host backtrace (frame
+pointers or the host unwinder) and map each host frame that lands in a unit
+to its guest function and address; print host and guest backtraces with
+module, offset and symbol. Tail-called frames are missing, as in native
+code. The guest x29 chain in guest memory is used only from a context the
+runtime captured (svc, override entry), because at a fault the live guest
+registers are host locals. [inferred; phase 6 exit test:
+an injected crash names the right guest function]
+
+## 12. Versioning
+
+- `RL_ABI_VERSION` changes with any change to a type, layout, signature,
+  constant or emitted call shape in this contract.
+- Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
+  runtime refuses a unit if any differs (section 6). The dev hello carries
+  the runtime's version and image id, so relift refuses to serve a
+  mismatched runtime before any code is built.
+- Static units carry the same fields and are checked at start-up, which
+  catches a stale shard linked against a newer runtime.
+
+## Checks run for this contract
+
+All with clang 23.1.1 on Linux unless noted. Probe sources are scratch, not
+committed.
+
+| check | result |
+|---|---|
+| `clang -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c-header abi.h`, default target, `--target=aarch64-linux-gnu`, `--target=x86_64-pc-windows-gnu` | clean |
+| a TU that includes the header, same three targets, plus `-Wpedantic` | clean |
+| same header check with Apple clang 21 on an Apple M2 Mac; gcc 16 `-fsyntax-only` | clean |
+| a lifted-style function using every call shape (direct call with the LSDA check, indirect call, musttail, landing-pad switch, FP fast paths) at `-O2 -Wpedantic -Werror`: x86-64 Linux, x86-64 Windows gnu, arm64 Linux, Apple clang arm64 | compiles |
+| exclusives probe (llsc_stress checks on `rl_ldx`/`rl_stx`/`rl_ldxp64`/`rl_stxp64`/`rl_clrex`, 4 threads x 200,000), x86-64 Linux, arm64 Linux under qemu, Apple M2 Mac | 15/15 PASS each |
+| spin-flag probe: lifted spin loop with `RL_LOOP_FENCE` | PASS on all three; without the fence it hangs (alarm) on x86-64 Linux and an Apple M2 Mac |
+| dispatch probe: 10 million `musttail` indirect calls through `rl_indirect`, plus misaligned, below-range and above-range targets reaching the miss handler | PASS on all three |
+| `restrict` on `mem` vs on `c`, signal fence vs asm barrier in a spin loop, `musttail` and `cmpxchg16b` codegen | see the sections above |
+
+## Open items
+
+1. Horizon's initial FPCR value, and which guest code issues MSR FPCR;
+   decides the x86-64 fast path and the MSR FPCR policy (10.1).
+2. FP cut-layer implementations (11 operations, slow paths) and their
+   checker run against the Sail interpreter (10.1).
+3. Which unwinder the SDK ships (libunwind `jumpto` or other) and the libgcc
+   `__builtin_eh_return` epilogue for libnx; the synthetic end-of-stack FDE
+   for host-to-guest calls (7).
+4. Interprocedural analyses: "may unwind" to drop plain checks; exit-store
+   pruning of caller-dead registers (4, 7).
+5. Dispatch table resident size on real guest code; hash table fallback for
+   mobile (5).
+6. Dev hot-load: runtime as a shared library on Windows gnullvm and macOS;
+   AF_UNIX on Windows; first end-to-end hot-load (6).
+7. LDXR/STXR pairs with intervening loads (ABA-sensitive) in real code (8).
+8. `spin_flag` and `llsc_stress` recompiled from the libnx test programs, on
+   x86-64 Linux and arm64 macOS (8, 9).
+9. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
+   preservation (which registers `rl_svc` may change besides outputs) (10).
+10. 4 KiB-granular aliasing on 16 KiB hosts (2).
+11. Guard sizes against real wild-pointer patterns (2).
+12. Whether passing guest arguments in host registers is worth a second
+    signature after phase 4 measurements (4).
+13. zig cc link of the outline atomics and `-mcx16` in the player toolchain
+    (1).
