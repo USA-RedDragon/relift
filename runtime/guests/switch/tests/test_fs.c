@@ -1,8 +1,8 @@
 /**
  * @file test_fs.c
  * @brief fsp-srv through svcSendSyncRequest: files, directories, renames,
- * errors and path confinement on a host directory under
- * ~/spare/relift-phase4/tmp.
+ * errors and path confinement on a fresh host directory made with mkdtemp
+ * under $TMPDIR (or /tmp).
  *
  * The client encoder follows the message layout of libnx (ISC) sf/hipc.h and
  * sf/cmif.h, written with guest addresses.
@@ -166,16 +166,19 @@ static int rm_cb(const char *path, const struct stat *st, int flag, struct FTW *
 
 static void tmp_make(const char *name)
 {
-    const char *home = getenv("HOME");
-    char base[PATH_MAX];
-    snprintf(base, sizeof base, "%s/spare/relift-phase4/tmp", home ? home : ".");
-    snprintf(g_tmp, sizeof g_tmp, "%s/%s", base, name);
-    nftw(g_tmp, rm_cb, 8, FTW_DEPTH | FTW_PHYS);
-    mkdir(base, 0777);
-    mkdir(g_tmp, 0777);
+    const char *base = getenv("TMPDIR");
+    if (!base || !*base)
+        base = "/tmp";
+    snprintf(g_tmp, sizeof g_tmp, "%s/relift-%s-XXXXXX", base, name);
+    if (!mkdtemp(g_tmp))
+        g_tmp[0] = 0;
 }
 
-static void tmp_clean(void) { nftw(g_tmp, rm_cb, 8, FTW_DEPTH | FTW_PHYS); }
+static void tmp_clean(void)
+{
+    if (g_tmp[0])
+        nftw(g_tmp, rm_cb, 8, FTW_DEPTH | FTW_PHYS);
+}
 
 static char *host(const char *rel)
 {
