@@ -3,17 +3,20 @@
 //!
 //! It lifts A64 instruction words with `relift-cpu-a64`, runs them in the
 //! `relift-ir` interpreter and in Unicorn on generated states, and compares
-//! every general register, SP, NZCV, the next PC and the data window.
+//! every general and vector register, SP, NZCV, the next PC and the data
+//! window.
 //!
 //! ```text
-//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate]
-//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate]
+//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand]
+//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
 //! every encoding that has a lifter) on N states, each with a fresh random
 //! word of that encoding. `--mutate` breaks the lifted IR of the last word
-//! (see `mutate.rs`); then a form passes when the run catches it.
+//! (see `mutate.rs`); then a form passes when the run catches it. `--hand`
+//! lifts with the hand-written lifter instead of the generated templates, and
+//! `all` then means every encoding that has one.
 
 mod emu;
 mod mutate;
@@ -22,7 +25,7 @@ mod states;
 use std::process::ExitCode;
 
 use relift_cpu_a64::decode::{Encoding, Insn, decode};
-use relift_cpu_a64::lift::supported;
+use relift_cpu_a64::lift::{lifter, supported};
 
 use emu::{Emu, compare, interpret, lift_all};
 use states::Rng;
@@ -145,7 +148,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate]"
+        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand]"
     );
     ExitCode::from(2)
 }
@@ -175,6 +178,7 @@ fn main() -> ExitCode {
                 i += 1;
             }
             "--mutate" => opts.mutate = true,
+            "--hand" => emu::HAND.store(true, std::sync::atomic::Ordering::Relaxed),
             _ => return usage(),
         }
         i += 1;
@@ -205,12 +209,19 @@ fn main() -> ExitCode {
             }
         }
         "forms" => {
-            let encs: Vec<Encoding> = if args[1] == "all" {
+            let hand = emu::HAND.load(std::sync::atomic::Ordering::Relaxed);
+            let encs: Vec<Encoding> = if args[1] == "all" && hand {
+                Encoding::all().filter(|e| lifter(*e).is_some()).collect()
+            } else if args[1] == "all" {
                 supported().collect()
             } else {
                 let mut v = Vec::new();
                 for name in args[1].split(',') {
                     match Encoding::all().find(|e| e.name() == name) {
+                        Some(e) if hand && lifter(e).is_none() => {
+                            eprintln!("{name} has no hand-written lifter");
+                            return ExitCode::FAILURE;
+                        }
                         Some(e) => v.push(e),
                         None => {
                             eprintln!("no encoding named {name}");

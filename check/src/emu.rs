@@ -1,6 +1,8 @@
 //! The two machines a check runs: Unicorn and the `relift-ir` interpreter.
 
-use relift_cpu_a64::lift::lift;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use relift_cpu_a64::lift::{self, LiftError};
 use relift_cpu_a64::regs;
 use relift_ir::Block;
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
@@ -28,6 +30,8 @@ pub struct Guest {
     pub sp: u64,
     /// N, Z, C, V.
     pub nzcv: [bool; 4],
+    /// `v0` to `v31`.
+    pub v: [u128; 32],
     /// The program counter after the run.
     pub pc: u64,
     /// The data window.
@@ -126,6 +130,9 @@ impl Emu {
             .enumerate()
             .fold(0u64, |acc, (i, f)| acc | (u64::from(*f) << (31 - i)));
         uc.reg_write(R::NZCV, n)?;
+        for (i, v) in input.v.iter().enumerate() {
+            uc.reg_write_long(qreg(i), &v.to_le_bytes())?;
+        }
         uc.mem_write(DATA, &input.mem)?;
         let r = uc.emu_start(CODE, u64::MAX, 0, words.len());
         match r {
@@ -137,11 +144,18 @@ impl Emu {
             x: [0; 31],
             sp: uc.reg_read(R::SP)?,
             nzcv: [false; 4],
+            v: [0; 32],
             pc: uc.reg_read(R::PC)?,
             mem: vec![0; DATA_SIZE],
         };
         for (i, r) in XREGS.iter().enumerate() {
             out.x[i] = uc.reg_read(*r)?;
+        }
+        for (i, v) in out.v.iter_mut().enumerate() {
+            let b = uc.reg_read_long(qreg(i))?;
+            let mut a = [0u8; 16];
+            a.copy_from_slice(&b[..16]);
+            *v = u128::from_le_bytes(a);
         }
         let f = uc.reg_read(R::NZCV)?;
         for i in 0..4 {
@@ -150,6 +164,22 @@ impl Emu {
         uc.mem_read(DATA, &mut out.mem)?;
         Ok(Outcome::Done(Box::new(out)))
     }
+}
+
+fn qreg(i: usize) -> i32 {
+    R::Q0 as i32 + i as i32
+}
+
+/// Whether words lift with the hand-written lifter only.
+pub static HAND: AtomicBool = AtomicBool::new(false);
+
+/// Lifts `w` at `pc` as the frontend does, or with the hand-written lifter
+/// under [`HAND`].
+pub fn lift(w: u32, pc: u64) -> Result<Block, LiftError> {
+    if HAND.load(Ordering::Relaxed) {
+        return lift::lift_hand(w, pc);
+    }
+    lift::lift(w, pc)
 }
 
 /// Lifts every word at its address from [`CODE`].
@@ -169,6 +199,9 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
         st.regs[i] = u128::from(*v);
     }
     st.regs[regs::SP.index()] = u128::from(input.sp);
+    for (i, v) in input.v.iter().enumerate() {
+        st.regs[regs::vreg(i as u32).index()] = *v;
+    }
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
     }
@@ -190,6 +223,7 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
         x: [0; 31],
         sp: st.regs[regs::SP.index()] as u64,
         nzcv: [false; 4],
+        v: [0; 32],
         pc,
         mem: mem.bytes,
     };
@@ -198,6 +232,9 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
     }
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         out.nzcv[i] = st.regs[r.index()] == 1;
+    }
+    for (i, v) in out.v.iter_mut().enumerate() {
+        *v = st.regs[regs::vreg(i as u32).index()];
     }
     Outcome::Done(Box::new(out))
 }
@@ -214,6 +251,11 @@ pub fn compare(ir: &Outcome, uc: &Outcome) -> Vec<String> {
             for i in 0..31 {
                 if a.x[i] != b.x[i] {
                     d.push(format!("x{i} ir={:#x} uc={:#x}", a.x[i], b.x[i]));
+                }
+            }
+            for i in 0..32 {
+                if a.v[i] != b.v[i] {
+                    d.push(format!("v{i} ir={:#x} uc={:#x}", a.v[i], b.v[i]));
                 }
             }
             if a.sp != b.sp {

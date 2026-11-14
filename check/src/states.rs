@@ -1,8 +1,8 @@
 //! Structured generators: instruction words of one encoding, and input
 //! states with register patterns, flag sweeps and mapped memory windows.
 
+use crate::emu::lift;
 use relift_cpu_a64::decode::{Encoding, Insn, decode};
-use relift_cpu_a64::lift::lift;
 
 use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, DATA_SIZE, Guest};
 
@@ -126,7 +126,7 @@ pub fn kind(enc: Encoding) -> Kind {
     let n = enc.name();
     if n.contains("_ldstexclr") || n.contains("_ldstord") {
         Kind::Mem { aligned: true }
-    } else if n.contains("_ldst") {
+    } else if n.contains("_ldst") || n.contains("_asisdls") {
         Kind::Mem { aligned: false }
     } else if n.ends_with("_branch_reg") {
         Kind::BranchReg
@@ -135,17 +135,37 @@ pub fn kind(enc: Encoding) -> Kind {
     }
 }
 
+/// The log2 access size of a SIMD and FP load or store (`LDR_Q_ldst_pos`),
+/// `None` for the general-register forms.
+fn simd_scale(name: &str) -> Option<u32> {
+    let kind = name.split('_').nth(1)?;
+    Some(match kind {
+        "B" | "BL" => 0,
+        "H" => 1,
+        "S" => 2,
+        "D" => 3,
+        "Q" => 4,
+        _ => return None,
+    })
+}
+
 /// The offset an `Rn`-based access adds to the base, from the fields, after
 /// placing any index register in `g`; `None` when the word cannot be placed.
 fn mem_offset(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<i64> {
     let n = insn.encoding.name();
     let f = |s: &str| insn.get(s);
+    let scale = simd_scale(n);
+    let size = || scale.unwrap_or_else(|| f("size"));
     if n.ends_with("_ldst_pos") {
-        Some(i64::from(f("imm12")) << f("size"))
+        Some(i64::from(f("imm12")) << size())
     } else if n.ends_with("_ldst_immpre") || n.ends_with("_ldst_unscaled") {
         Some(sext(f("imm9"), 9))
     } else if n.ends_with("_ldstpair_off") || n.ends_with("_ldstpair_pre") {
-        Some(sext(f("imm7"), 7) << (2 + (f("opc") >> 1)))
+        let pair = match scale {
+            Some(_) => 2 + f("opc"),
+            None => 2 + (f("opc") >> 1),
+        };
+        Some(sext(f("imm7"), 7) << pair)
     } else if n.ends_with("_ldst_regoff") {
         let m = f("Rm");
         if m == f("Rn") {
@@ -168,15 +188,16 @@ fn mem_offset(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<i64> {
             0b110 => i64::from(v as u32 as i32),
             _ => v as i64,
         };
-        let shift = if f("S") == 1 { f("size") } else { 0 };
+        let shift = if f("S") == 1 { size() } else { 0 };
         Some(ext << shift)
     } else {
         Some(0)
     }
 }
 
-/// A prelude for exclusive stores: `clrex`, then half the time an exclusive
-/// load of the same size, through the same address or another one.
+/// A prelude for exclusive stores: `clrex`, then half the time a
+/// load-acquire exclusive (`ldaxr`) of the same size, through the same
+/// address or another one.
 pub fn prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Vec<u32> {
     const CLREX: u32 = 0xd503_3f5f;
     let name = insn.encoding.name();
@@ -198,7 +219,7 @@ pub fn prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Vec<u32> {
                 base.wrapping_add(8 * r.range(1, 8) as u64)
             };
             let size = insn.get("size");
-            words.push((size << 30) | 0x085f_7c00 | (p << 5) | q);
+            words.push((size << 30) | 0x085f_fc00 | (p << 5) | q);
         }
     }
     words
@@ -211,11 +232,15 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
         x: [0; 31],
         sp: DATA + 0x2000 - 16 * r.below(0x40),
         nzcv: [false; 4],
+        v: [0; 32],
         pc: 0,
         mem: (0..DATA_SIZE).map(|_| r.next() as u8).collect(),
     };
     for x in &mut g.x {
         *x = reg_value(r);
+    }
+    for v in &mut g.v {
+        *v = (u128::from(reg_value(r)) << 64) | u128::from(reg_value(r));
     }
     for f in &mut g.nzcv {
         *f = r.chance(0.5);
