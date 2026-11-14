@@ -87,7 +87,11 @@ static const rl_ipc_cmd service_cmds[] = {
     { 0, "OpenLogger", open_logger },
 };
 
-static const rl_ipc_class service_class = { "lm", service_cmds, sizeof service_cmds / sizeof service_cmds[0], 0, NULL };
+/** @brief The lm server's pointer buffer size, after Ryujinx (MIT) Horizon LmIpcServer. */
+#define LM_POINTER_BUFFER_SIZE 0x400
+
+static const rl_ipc_class service_class = { "lm", service_cmds, sizeof service_cmds / sizeof service_cmds[0],
+                                            LM_POINTER_BUFFER_SIZE, NULL };
 
 static rl_ipc_object *service_factory(void) { return rl_srv_object(&service_class, NULL); }
 

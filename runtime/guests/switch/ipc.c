@@ -408,7 +408,8 @@ static rl_result control(msg *m, rl_ipc_req *r, uint32_t *len)
         break;
     }
     case 3:
-        *(uint16_t *)rl_ipc_out(r, 2) = s->root->cls->pointer_buffer_size;
+        *(uint16_t *)rl_ipc_out(r, 2) =
+            s->root->cls->pointer_buffer_size ? s->root->cls->pointer_buffer_size : RL_IPC_POINTER_BUFFER_DEFAULT;
         break;
     default:
         (void)rl_report_unknown(0x434F4E54524F4C00ull ^ r->cmd, "ipc", "unknown control command %u", r->cmd);

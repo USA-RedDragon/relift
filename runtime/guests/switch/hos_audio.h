@@ -15,6 +15,9 @@
 
 #include <relift/audio.h>
 
+/** @brief The audio server's pointer buffer size, after Ryujinx (MIT) Horizon AudioUserIpcServer. */
+#define RL_AUDIO_POINTER_BUFFER_SIZE 0xB40
+
 /** @brief Audio service results (module 153), as in Ryujinx's ResultCode. */
 #define AUDIO_RESULT(n) RL_MAKE_RESULT(153, (n))
 #define AUDIO_DEVICE_NOT_FOUND AUDIO_RESULT(1)

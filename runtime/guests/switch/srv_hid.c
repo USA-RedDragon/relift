@@ -72,13 +72,6 @@ typedef struct in_flag_u32_aruid {
     uint64_t aruid;
 } in_flag_u32_aruid;
 
-/**
- * @brief The SDK sends its X buffers (the npad id list of
- * SetSupportedNpadIdType) through the server's pointer buffer and aborts with
- * hipc PointerBufferTooSmall when QueryPointerBufferSize answers 0.
- */
-#define HID_POINTER_BUFFER_SIZE 0x1000
-
 #define ST(r) ((hid_srv *)(r)->self->state)
 
 #define NEED(r, T, name)                          \
@@ -756,9 +749,7 @@ static void hid_destroy(void *state)
     free(s);
 }
 
-static const rl_ipc_class hid_cls = {
-    "hid", hid_cmds, (uint32_t)(sizeof hid_cmds / sizeof hid_cmds[0]), HID_POINTER_BUFFER_SIZE, hid_destroy
-};
+static const rl_ipc_class hid_cls = { "hid", hid_cmds, (uint32_t)(sizeof hid_cmds / sizeof hid_cmds[0]), 0, hid_destroy };
 
 static rl_ipc_object *hid_factory(void)
 {

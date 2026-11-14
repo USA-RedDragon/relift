@@ -65,6 +65,22 @@ rl_ipc_factory *hos_ipc_find_service(uint64_t name)
     return f;
 }
 
+uint32_t hos_ipc_service_count(void)
+{
+    hos_lock();
+    uint32_t n = g_service_count;
+    hos_unlock();
+    return n;
+}
+
+uint64_t hos_ipc_service_name(uint32_t i)
+{
+    hos_lock();
+    uint64_t n = i < g_service_count ? g_services[i].name : 0;
+    hos_unlock();
+    return n;
+}
+
 /** @brief Per-session sm: state. */
 typedef struct sm_state {
     bool registered;

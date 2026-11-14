@@ -369,7 +369,7 @@ static const rl_ipc_class mgr_class = {
     .name = "nn::audio::detail::IAudioOutManager",
     .cmds = mgr_cmds,
     .ncmds = sizeof mgr_cmds / sizeof mgr_cmds[0],
-    .pointer_buffer_size = 0,
+    .pointer_buffer_size = RL_AUDIO_POINTER_BUFFER_SIZE,
     .destroy = NULL,
 };
 

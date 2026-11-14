@@ -842,7 +842,7 @@ static const rl_ipc_class manager_class = {
     .name = "nn::audio::detail::IAudioRendererManager",
     .cmds = manager_cmds,
     .ncmds = sizeof manager_cmds / sizeof manager_cmds[0],
-    .pointer_buffer_size = 0,
+    .pointer_buffer_size = RL_AUDIO_POINTER_BUFFER_SIZE,
     .destroy = NULL,
 };
 

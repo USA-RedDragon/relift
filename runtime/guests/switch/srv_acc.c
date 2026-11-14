@@ -17,7 +17,6 @@
 #define ACC_INVALID_BUFFER ACC_RESULT(32)
 #define ACC_USER_NOT_FOUND ACC_RESULT(100)
 
-#define ACC_POINTER_BUFFER_SIZE 0x1000
 #define ACC_USER_DATA_SIZE 0x80u
 #define ACC_NICKNAME_SIZE 0x20u
 #define ACC_NICKNAME "relift"
@@ -132,7 +131,7 @@ static const rl_ipc_cmd profile_cmds[] = {
 };
 
 static const rl_ipc_class profile_class = { "nn::account::profile::IProfile", profile_cmds, AM_N(profile_cmds),
-                                            ACC_POINTER_BUFFER_SIZE, NULL };
+                                            0, NULL };
 
 static rl_result get_profile(rl_ipc_req *r)
 {
@@ -173,7 +172,7 @@ static const rl_ipc_cmd manager_cmds[] = {
 };
 
 static const rl_ipc_class manager_class = { "nn::account::baas::IManagerForApplication", manager_cmds,
-                                            AM_N(manager_cmds), ACC_POINTER_BUFFER_SIZE, NULL };
+                                            AM_N(manager_cmds), 0, NULL };
 
 static rl_result get_manager(rl_ipc_req *r)
 {
@@ -213,7 +212,7 @@ static const rl_ipc_cmd service_cmds[] = {
 };
 
 static const rl_ipc_class service_class = { "nn::account::IAccountServiceForApplication", service_cmds,
-                                            AM_N(service_cmds), ACC_POINTER_BUFFER_SIZE, NULL };
+                                            AM_N(service_cmds), 0, NULL };
 
 static rl_ipc_object *service_factory(void) { return rl_srv_object(&service_class, NULL); }
 

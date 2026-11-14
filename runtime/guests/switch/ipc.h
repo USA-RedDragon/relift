@@ -42,6 +42,13 @@ enum {
 
 /** @brief Most descriptors of one kind, handles and objects in one message. */
 #define RL_IPC_MAX 16
+/**
+ * @brief Pointer buffer size of a service that does not set one. The SDK
+ * sends X buffers through the server's pointer buffer and aborts with hipc
+ * PointerBufferTooSmall when QueryPointerBufferSize answers less than it
+ * needs, so no service answers 0.
+ */
+#define RL_IPC_POINTER_BUFFER_DEFAULT 0x1000u
 /** @brief Size of the IPC message area at the start of the TLS slot. */
 #define RL_IPC_MSG 0x100u
 
@@ -69,7 +76,7 @@ typedef struct rl_ipc_class {
     const rl_ipc_cmd *cmds;
     /** @brief Number of commands. */
     uint32_t ncmds;
-    /** @brief Pointer buffer size reported by QueryPointerBufferSize. */
+    /** @brief Pointer buffer size reported by QueryPointerBufferSize on a session to this class; 0 selects RL_IPC_POINTER_BUFFER_DEFAULT. */
     uint16_t pointer_buffer_size;
     /** @brief Frees state when the last reference goes; may be NULL. */
     void (*destroy)(void *state);
@@ -207,6 +214,10 @@ RL_RUNTIME_API void rl_ipc_reset_services(void);
 uint64_t rl_ipc_name(const char *name);
 /** @brief Finds a registered service's factory by encoded name. */
 rl_ipc_factory *hos_ipc_find_service(uint64_t name);
+/** @brief Number of registered services. */
+uint32_t hos_ipc_service_count(void);
+/** @brief Encoded name of registered service i, 0 when out of range. */
+uint64_t hos_ipc_service_name(uint32_t i);
 
 /** @brief svcConnectToNamedPort: "sm:" only. */
 rl_result hos_connect_named_port(uint32_t *out, uint64_t name_addr);

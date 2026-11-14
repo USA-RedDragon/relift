@@ -792,15 +792,8 @@ static const rl_ipc_cmd proxy_cmds[] = {
     RL_SRV_STUB(1006, "OutputAccessLogToSdCard"),
 };
 
-/**
- * @brief The SDK sends paths (FspPath, 0x301 bytes) as X buffers through the
- * server's pointer buffer and aborts with hipc PointerBufferTooSmall when
- * QueryPointerBufferSize answers less.
- */
-#define FS_POINTER_BUFFER_SIZE 0x800
-
 static const rl_ipc_class proxy_class = { "nn::fssrv::sf::IFileSystemProxy", proxy_cmds,
-                                          sizeof proxy_cmds / sizeof proxy_cmds[0], FS_POINTER_BUFFER_SIZE, NULL };
+                                          sizeof proxy_cmds / sizeof proxy_cmds[0], 0, NULL };
 
 static rl_ipc_object *proxy_factory(void) { return rl_ipc_object_new(&proxy_class, NULL); }
 
