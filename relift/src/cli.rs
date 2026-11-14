@@ -9,6 +9,17 @@ use clap::{Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(name = "relift", version, propagate_version = true)]
 pub struct Cli {
+    /// Print only the final summary and errors.
+    ///
+    /// A flag of its own, not a setting: configulator's boolean flags take
+    /// an optional value and would swallow the subcommand in `relift -q
+    /// build`.
+    #[arg(short = 'q', long, global = true, conflicts_with = "verbose")]
+    pub quiet: bool,
+    /// Also print each file as it compiles and every instruction that does
+    /// not lift.
+    #[arg(short = 'v', long, global = true)]
+    pub verbose: bool,
     #[command(subcommand)]
     pub command: Command,
 }

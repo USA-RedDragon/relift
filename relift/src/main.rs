@@ -39,7 +39,7 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
-    let mut ui = relift::ui::open(&settings);
+    let mut ui = relift::ui::open(&settings, &cli);
     let result = match &cli.command {
         Command::Import { dump, update } => {
             relift::import::run(&settings, dump, update.as_deref(), &mut ui)
