@@ -796,9 +796,21 @@ default = "p1:a"
         let root = std::env::temp_dir().join(format!("relift-gs-{}", std::process::id()));
         let sub = root.join("deep");
         std::fs::create_dir_all(&sub).unwrap();
-        std::fs::write(root.join("a.c"), "relift_setting_bool(\"fast_text\");").unwrap();
-        std::fs::write(sub.join("b.cpp"), "relift_setting_bool(\"fast_tex\");").unwrap();
-        std::fs::write(sub.join("note.txt"), "relift_setting_bool(\"zz\");").unwrap();
+        relift_cache::write_if_changed(
+            &root.join("a.c"),
+            "relift_setting_bool(\"fast_text\");".as_bytes(),
+        )
+        .unwrap();
+        relift_cache::write_if_changed(
+            &sub.join("b.cpp"),
+            "relift_setting_bool(\"fast_tex\");".as_bytes(),
+        )
+        .unwrap();
+        relift_cache::write_if_changed(
+            &sub.join("note.txt"),
+            "relift_setting_bool(\"zz\");".as_bytes(),
+        )
+        .unwrap();
         let s = parse(GOOD).unwrap();
         let e = check_dir(&root, &s).expect_err("misspelled").to_string();
         assert!(e.contains("b.cpp:1") && !e.contains("note.txt") && !e.contains("a.c:"));

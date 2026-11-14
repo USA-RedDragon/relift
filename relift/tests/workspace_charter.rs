@@ -81,6 +81,14 @@ const STANDALONE: &[&str] = &[
 
 const CHARTERS: &[Charter] = &[
     Charter {
+        member: "relift-info",
+        band: 0,
+        why: "the self-description types shared by the tool and launchers, a leaf",
+        normal: &["serde", "serde_json"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-ir",
         band: 0,
         why: "the guest-neutral IR, a leaf",
@@ -332,6 +340,7 @@ const CHARTERS: &[Charter] = &[
             "relift-emit",
             "relift-guest",
             "relift-host",
+            "relift-info",
             "relift-ir",
             "relift-manifest",
             "relift-proc",

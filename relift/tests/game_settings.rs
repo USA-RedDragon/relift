@@ -20,7 +20,7 @@ fn imported(name: &str) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let toml = project.join("game.toml");
     let mut text = std::fs::read_to_string(&toml).unwrap();
     text.push_str(SETTINGS);
-    std::fs::write(&toml, text).unwrap();
+    relift_cache::write_if_changed(&toml, text.as_bytes()).unwrap();
     (root, project, cache)
 }
 
@@ -32,9 +32,10 @@ fn a_misspelled_setting_key_fails_the_build() {
     }
     let (_root, project, cache) = imported("settings-typo");
     std::fs::create_dir_all(project.join("overrides")).unwrap();
-    std::fs::write(
-        project.join("overrides/a.c"),
-        "#include <relift/override.h>\nint f(void) { return relift_setting_bool(\"fast_txt\"); }\n",
+    relift_cache::write_if_changed(
+        &project.join("overrides/a.c"),
+        "#include <relift/override.h>\nint f(void) { return relift_setting_bool(\"fast_txt\"); }\n"
+            .as_bytes(),
     )
     .unwrap();
     let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
@@ -54,9 +55,9 @@ fn a_program_with_declared_settings_builds_and_runs() {
     }
     let (_root, project, cache) = imported("settings-run");
     std::fs::create_dir_all(project.join("overrides")).unwrap();
-    std::fs::write(
-        project.join("overrides/a.c"),
-        "#include <relift/override.h>\nint f(void) { return relift_setting_bool(\"fast_text\"); }\n",
+    relift_cache::write_if_changed(
+        &project.join("overrides/a.c"),
+        "#include <relift/override.h>\nint f(void) { return relift_setting_bool(\"fast_text\"); }\n".as_bytes(),
     )
     .unwrap();
     let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "run"]);
