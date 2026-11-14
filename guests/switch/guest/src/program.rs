@@ -228,6 +228,115 @@ fn relr_targets(img: &[u8], start: u64, size: u64) -> Vec<u64> {
     out
 }
 
+/// The host identifier of the function at `addr` in placed module `p`,
+/// whose guest symbol is `symbol` (docs/abi.md section 11): the Itanium
+/// rewrite into `guest::<module>`, or the address name when there is no
+/// symbol or it cannot be rewritten exactly.
+pub fn host_name(p: &Placed, symbol: Option<&str>, addr: u64) -> String {
+    let module = c_module(&p.name);
+    symbol
+        .and_then(|s| relift_switch_names::host_name(&module, s))
+        .unwrap_or_else(|| relift_switch_names::fallback_name(&module, addr - p.base))
+}
+
+/// The module name as a C identifier, for host names.
+fn c_module(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if s.starts_with(|c: char| c.is_ascii_digit()) || s.is_empty() {
+        format!("m{s}")
+    } else {
+        s
+    }
+}
+
+/// A guest libc routine a host override replaces, recognized by its code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Known {
+    /// The host function (`relift/a64/abi.h`).
+    pub host_fn: &'static str,
+    /// Whether it may return `RL_PENDING`.
+    pub may_unwind: bool,
+    /// Whether a call to it is a resume point (`setjmp`).
+    pub resume_point: bool,
+}
+
+const BTI_C: u32 = 0xd503_245f;
+
+/// newlib's AArch64 `setjmp`: x19 to x30, sp and d8 to d15 into the buffer
+/// at x0 (the layout `rl_a64_jmp_newlib` reads), then 0.
+const NEWLIB_SETJMP: [u32; 15] = [
+    0x9100_03f0,
+    0xa900_5013,
+    0xa901_5815,
+    0xa902_6017,
+    0xa903_6819,
+    0xa904_701b,
+    0xa905_781d,
+    0xf900_3010,
+    0x6d07_2408,
+    0x6d08_2c0a,
+    0x6d09_340c,
+    0x6d0a_3c0e,
+    0x5280_0000,
+    0xd65f_03c0,
+    0xd503_201f,
+];
+
+/// newlib's AArch64 `longjmp`.
+const NEWLIB_LONGJMP: [u32; 16] = [
+    0xa940_5013,
+    0xa941_5815,
+    0xa942_6017,
+    0xa943_6819,
+    0xa944_701b,
+    0xa945_781d,
+    0xf940_3010,
+    0x6d47_2408,
+    0x6d48_2c0a,
+    0x6d49_340c,
+    0x6d4a_3c0e,
+    0x9100_021f,
+    0x7100_003f,
+    0x1a81_1420,
+    0xd61f_03c0,
+    0xd503_201f,
+];
+
+/// The override for the code at `bytes`, if it is a routine this knows.
+pub fn known(bytes: &[u8]) -> Option<Known> {
+    let words: Vec<u32> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .take(17)
+        .map(|w| u32::from_le_bytes(*w))
+        .collect();
+    let body = match words.first() {
+        Some(&BTI_C) => &words[1..],
+        _ => &words[..],
+    };
+    let is =
+        |pat: &[u32]| body.len() >= pat.len() - 1 && body[..pat.len() - 1] == pat[..pat.len() - 1];
+    if is(&NEWLIB_SETJMP) {
+        return Some(Known {
+            host_fn: "rl_a64_setjmp",
+            may_unwind: false,
+            resume_point: true,
+        });
+    }
+    if is(&NEWLIB_LONGJMP) {
+        return Some(Known {
+            host_fn: "rl_a64_longjmp",
+            may_unwind: true,
+            resume_point: false,
+        });
+    }
+    None
+}
+
 /// The C file that describes the placed modules to the runtime's loader
 /// and holds their images, with the process parameters from `npdm` and the
 /// lifted unit tables `units` (C symbols of `const rl_unit`) to register.
@@ -369,6 +478,31 @@ mod tests {
         put(&mut img, 0x180, 0x100);
         put(&mut img, 0x188, 0b1011);
         assert_eq!(relr_targets(&img, 0x180, 16), [0x11, 0x22, 0x33]);
+    }
+
+    #[test]
+    fn newlib_setjmp_and_longjmp_are_recognized() {
+        let bytes = |w: &[u32]| w.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let mut sj = vec![BTI_C];
+        sj.extend_from_slice(&NEWLIB_SETJMP);
+        assert_eq!(known(&bytes(&sj)).map(|k| k.host_fn), Some("rl_a64_setjmp"));
+        let lj = known(&bytes(&NEWLIB_LONGJMP)).expect("longjmp");
+        assert!(lj.may_unwind && !lj.resume_point);
+        sj[3] ^= 1;
+        assert_eq!(known(&bytes(&sj)), None);
+    }
+
+    #[test]
+    fn host_names_fall_back_to_module_offsets() {
+        let p = &place(vec![("main".into(), nso(vec![0; 8]))])[0];
+        assert_eq!(
+            host_name(p, None, CODE_START + 0x40),
+            "_ZN5guest4main11fn_00000040E"
+        );
+        assert_eq!(
+            host_name(p, Some("_ZN3foo3barEv"), CODE_START),
+            "_ZN5guest4main3foo3barEv"
+        );
     }
 
     #[test]
