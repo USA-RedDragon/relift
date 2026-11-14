@@ -731,12 +731,15 @@ fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags:
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp_flags {
-        t.push_str("#include \"a64.h\"\nint main(int argc, char **argv) { rl_a64_set_fp_flags(1); return rl_switch_main(&rl_program, argc, argv); }\n");
-    } else {
-        t.push_str(
-            "int main(int argc, char **argv) { return rl_switch_main(&rl_program, argc, argv); }\n",
-        );
+        t.push_str("#include \"a64.h\"\n");
     }
+    t.push_str(
+        "#include <string.h>\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
+    );
+    if fp_flags {
+        t.push_str("    rl_a64_set_fp_flags(1);\n");
+    }
+    t.push_str("    return rl_switch_main(&rl_program, argc, argv);\n}\n");
     t
 }
 
