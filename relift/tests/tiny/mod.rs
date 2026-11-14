@@ -78,7 +78,13 @@ fn hidden_call() -> Vec<u8> {
     text
 }
 
-fn program(undefined: bool) -> Vec<u8> {
+/// `ldr x8, [x0]`.
+const LDR_X8_X0: u32 = 0xf940_0008;
+
+/// `blr x8`.
+const BLR_X8: u32 = 0xd63f_0100;
+
+fn program(undefined: bool, pointer: bool) -> Vec<u8> {
     let code = [
         movz(19, 3),
         adr(0, 0x1000 - 0x04),
@@ -94,6 +100,8 @@ fn program(undefined: bool) -> Vec<u8> {
     let tail = [
         Some(movz(1, MSG.len() as u32)),
         undefined.then_some(0),
+        pointer.then_some(LDR_X8_X0),
+        pointer.then_some(BLR_X8),
         Some(RET),
     ];
     for w in tail.into_iter().flatten() {
@@ -127,12 +135,19 @@ pub fn dump(root: &Path) -> PathBuf {
 /// As [`dump`]; with `undefined`, the called function holds one word that
 /// does not lift.
 pub fn dump_with(root: &Path, undefined: bool) -> PathBuf {
-    dump_text(root, program(undefined))
+    dump_text(root, program(undefined, false))
 }
 
 /// As [`dump`], with the call to a hidden function of [`hidden_call`].
 pub fn dump_hidden(root: &Path) -> PathBuf {
     dump_text(root, hidden_call())
+}
+
+/// As [`dump`]; the called function also calls through a pointer it
+/// loads from memory (`ldr x8, [x0]; blr x8`), a transfer analysis cannot
+/// resolve. It is for analysis only: the program does not run.
+pub fn dump_with_pointer(root: &Path) -> PathBuf {
+    dump_text(root, program(false, true))
 }
 
 fn dump_text(root: &Path, text: Vec<u8>) -> PathBuf {
