@@ -384,9 +384,19 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         .map(|s| s.to_string())
         .chain(arch)
         .collect();
+    // Lifted code gets line tables only: full -g makes clang track every
+    // local of functions with tens of thousands of them, which made one
+    // large shard take minutes instead of seconds. Crash mapping needs only
+    // the function maps and line tables (docs/abi.md section 11).
     let lifted_flags: Vec<String> = base
         .iter()
-        .cloned()
+        .map(|f| {
+            if f == "-g" {
+                "-gline-tables-only".to_string()
+            } else {
+                f.clone()
+            }
+        })
         .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))
         .chain([inc("core/include"), inc("cpus/a64/include")])
         .collect();
