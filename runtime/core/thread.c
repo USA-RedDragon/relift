@@ -5,14 +5,19 @@
  */
 #include "core.h"
 
-#include <pthread.h>
-#include <sched.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(_WIN32)
+#include <malloc.h>
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
+#endif
 
 static _Thread_local struct rl_thread *t_self;
 static rl_exit_hook *g_exit_hook;
@@ -44,7 +49,12 @@ struct rl_thread *rl_thread_alloc(void)
     if (!t)
         return NULL;
     void *p = NULL;
+#if defined(_WIN32)
+    p = _aligned_malloc(cpu->ctx_size, cpu->ctx_align);
+    if (!p) {
+#else
     if (posix_memalign(&p, cpu->ctx_align, cpu->ctx_size) != 0) {
+#endif
         free(t);
         return NULL;
     }
@@ -63,7 +73,11 @@ void rl_thread_free(struct rl_thread *t)
 {
     if (!t)
         return;
+#if defined(_WIN32)
+    _aligned_free(t->ctx);
+#else
     free(t->ctx);
+#endif
     free(t->host);
     free(t);
 }
@@ -73,6 +87,68 @@ typedef struct spawn_arg {
     rl_thread_body *body;
 } spawn_arg;
 
+#if defined(_WIN32)
+static DWORD WINAPI spawn_main(void *p)
+{
+    spawn_arg a = *(spawn_arg *)p;
+    free(p);
+    rl_thread_bind(a.t);
+    a.body(a.t);
+    return 0;
+}
+
+int rl_thread_spawn(struct rl_thread *t, rl_thread_body *body)
+{
+    spawn_arg *a = malloc(sizeof *a);
+    if (!a)
+        return -1;
+    a->t = t;
+    a->body = body;
+    HANDLE h = CreateThread(NULL, HOST_STACK, spawn_main, a, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+    if (!h) {
+        free(a);
+        return -1;
+    }
+    t->host = h;
+    return 0;
+}
+
+void rl_thread_join(struct rl_thread *t)
+{
+    if (t && t->host) {
+        WaitForSingleObject((HANDLE)t->host, INFINITE);
+        CloseHandle((HANDLE)t->host);
+        t->host = NULL;
+    }
+}
+
+void rl_thread_detach(struct rl_thread *t)
+{
+    if (t && t->host) {
+        CloseHandle((HANDLE)t->host);
+        t->host = NULL;
+    }
+}
+
+void rl_sleep_ns(uint64_t ns)
+{
+    static _Thread_local HANDLE timer;
+    if (!timer)
+        timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (timer) {
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)((ns + 99) / 100);
+        if (SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) {
+            WaitForSingleObject(timer, INFINITE);
+            return;
+        }
+    }
+    Sleep((DWORD)((ns + 999999) / 1000000));
+}
+
+void rl_host_yield(void) { SwitchToThread(); }
+
+#else
 static void *spawn_main(void *p)
 {
     spawn_arg a = *(spawn_arg *)p;
@@ -136,6 +212,8 @@ void rl_sleep_ns(uint64_t ns)
 
 void rl_host_yield(void) { sched_yield(); }
 
+#endif
+
 void rl_set_exit_hook(rl_exit_hook *hook) { g_exit_hook = hook; }
 
 void rl_process_exit(uint32_t code)
@@ -146,7 +224,11 @@ void rl_process_exit(uint32_t code)
     }
     fflush(stdout);
     fflush(stderr);
+#if defined(_WIN32)
+    ExitProcess(code);
+#else
     _exit((int)code);
+#endif
 }
 
 int rl_pend_exit_process(rl_ctx *c, uint32_t code)
