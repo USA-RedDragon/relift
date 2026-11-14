@@ -864,17 +864,15 @@ CAS success and failure, the 16-byte forms, and multi-threaded counters]
   loop never ends. [verified: the probe's lifted spin loop without a fence
   hung on x86-64 Linux and on an Apple M2 Mac and was killed by its alarm]
 - **Policy:** the emitter puts `RL_LOOP_FENCE()` (a compiler-only signal
-  fence, no instruction) on the back edge of every loop whose exit condition
-  depends on a value loaded from guest memory inside the loop, and the loop
-  has no call, atomic, exclusive or barrier in it already (those are
-  compiler barriers). Loops whose exit depends only on registers (counted
-  copies) get no fence and stay vectorizable. Rationale: hoisting a load out
-  of a loop that ends anyway is a legal Arm execution (the other thread's
-  store was just late); only loops whose termination depends on seeing a
-  new value need the reload. [verified: with the fence, the spin loop
+  fence, no instruction) before every jump that stays in the function and
+  may go to the jump's own or a lower address. Every loop has such an edge
+  (a cycle of addresses cannot only climb), so every loop reloads guest
+  memory on each turn. The fence also costs loops whose exit depends only
+  on registers (counted copies) their vectorization. [verified: with the fence, the spin loop
   reloads every iteration and passes on x86-64, qemu arm64 and an Apple M2 Mac]
-  Covers the libnx `spin_flag` test program, which must pass recompiled. [open:
-  run it in phase 4]
+  Covers the libnx `spin_flag` test program, which passes recompiled; without
+  the fence its `pong` thread compiled to a jump to itself after the first
+  round. [verified: x86-64 Linux, corpus03]
 - **Barriers:** DMB and DSB with a full domain and both access types
   (ISH, SY, OSH, NSH) map to `rl_dmb_full` (`seq_cst` fence: `mfence` on
   x86-64, `dmb ish` on arm64); the LD type to `rl_dmb_ld` (acquire fence);

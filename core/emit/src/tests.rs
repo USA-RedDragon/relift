@@ -92,6 +92,31 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
 }
 
 #[test]
+fn a_loop_back_edge_fences_and_a_forward_branch_does_not() {
+    let code = [
+        word(0x0a, 0, 1),
+        word(0x0d, 0, 0),
+        branch(0x0e, 0, -2),
+        branch(0x07, 0, 2),
+        word(0x09, 0, 1),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(&Toy, &[function(0x100, &blocks)], &[], &Options::default());
+    let s = shard(&out);
+    let at = |pc: u64| {
+        let from = s.find(&format!("L_{pc:x}: {{")).expect("label");
+        &s[from..from + s[from..].find("\n}\n").expect("end")]
+    };
+    assert!(
+        at(0x108).contains("    RL_LOOP_FENCE();\n    if (r4) { goto L_100; }"),
+        "{s}"
+    );
+    assert!(!at(0x10c).contains("RL_LOOP_FENCE"), "{s}");
+    assert_eq!(s.matches("RL_LOOP_FENCE();").count(), 1, "{s}");
+}
+
+#[test]
 fn a_jump_to_an_entry_inside_the_function_stays_a_goto() {
     // 0x104 is another function's entry (an address-taken label) and also
     // part of this function's extent: the loop back to it keeps the locals.

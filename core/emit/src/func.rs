@@ -640,6 +640,23 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     }
 }
 
+/// Whether the exit of `b` may jump back to its own or an earlier address
+/// in the function: every loop has such an edge, and its fence makes the C
+/// reload guest memory on each turn (docs/abi.md section 9).
+fn loops_back(cx: &Ctx<'_>, b: &Block) -> bool {
+    let back = |t: u64| t <= b.pc && cx.inside(t);
+    match (b.exit.flow, b.exit.next) {
+        (Flow::Jump, Next::Const(t)) => back(t),
+        (
+            Flow::Jump,
+            Next::Select {
+                taken, not_taken, ..
+            },
+        ) => back(taken) || back(not_taken),
+        _ => false,
+    }
+}
+
 /// The body of one instruction, or the raw word and reason it cannot be
 /// emitted.
 fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)> {
@@ -717,6 +734,9 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
         };
         s.push_str(&time::sync(&next));
+    }
+    if loops_back(cx, b) {
+        s.push_str("    RL_LOOP_FENCE();\n");
     }
     match b.exit.flow {
         Flow::Return => s.push_str("    RL_STORE();\n    return RL_OK;\n"),
