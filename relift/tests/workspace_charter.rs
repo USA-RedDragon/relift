@@ -74,6 +74,7 @@ const NONE: &[&str] = &[];
 const STANDALONE: &[&str] = &[
     "relift-cpu-sm83",
     "relift-emit-wasm",
+    "relift-gb-analyze",
     "relift-gb-formats",
     "relift-gb-tools",
     "relift-switch-tools",
@@ -194,10 +195,23 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-gb-analyze",
+        band: 2,
+        why: "Game Boy function discovery across mapper banks, over the SM83 decoder and the cartridge format; decode and control flow only",
+        normal: &["relift-cpu-sm83", "relift-gb-formats"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-gb-tools",
         band: 2,
-        why: "single-purpose tools for Game Boy files, thin wrappers over relift-gb-formats",
-        normal: &["clap", "relift-gb-formats", "serde_json"],
+        why: "single-purpose tools for Game Boy files, thin wrappers over relift-gb-formats and relift-gb-analyze",
+        normal: &[
+            "clap",
+            "relift-gb-analyze",
+            "relift-gb-formats",
+            "serde_json",
+        ],
         dev: &[
             "relift-cache",
             "relift-gb-formats",
