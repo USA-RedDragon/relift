@@ -1,6 +1,8 @@
 //! The guest contract and vocabulary: the traits a guest implements and the ids
 //! every stage shares.
 
+pub mod toy;
+
 use relift_ir::{Block, Reg, RegFile};
 
 /// How a guest turns its own symbol names into host names.
