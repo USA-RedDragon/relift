@@ -130,6 +130,7 @@ fn remap(op: &Op, map: &[u32]) -> Op {
             order: *order,
         },
         Op::ClearExclusive => Op::ClearExclusive,
+        Op::Guard(v, code) => Op::Guard(r(v), *code),
         Op::Fence(o) => Op::Fence(*o),
         Op::Fp(f, args) => Op::Fp(*f, args.iter().map(r).collect()),
         Op::Intrinsic(name, args) => Op::Intrinsic(name, args.iter().map(r).collect()),

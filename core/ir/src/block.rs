@@ -212,6 +212,10 @@ pub(crate) fn check_op(
             bytes(w(*value)?)
         }
         Op::ClearExclusive | Op::Fence(_) => none(),
+        Op::Guard(c, _) => {
+            none()?;
+            same(w(*c)?, Width::W1)
+        }
         Op::Fp(f, args) => {
             let r = need()?;
             if r != Width::W32 && r != Width::W64 {
@@ -245,7 +249,18 @@ impl Block {
     /// Checks every width and operand reference, and the exit.
     pub fn verify(&self) -> Result<(), VerifyError> {
         let mut widths = Vec::with_capacity(self.insts.len());
+        let mut effect = false;
         for (i, inst) in self.insts.iter().enumerate() {
+            if let Op::Guard(..) = inst.op {
+                if effect {
+                    return Err(VerifyError {
+                        at: Some(i),
+                        message: "a guard follows an operation with an effect".to_string(),
+                    });
+                }
+            } else if inst.op.has_effect() && !matches!(inst.op, Op::Load { .. }) {
+                effect = true;
+            }
             check_op(&inst.op, inst.width, &widths, &self.regs, self.addr_width).map_err(
                 |message| VerifyError {
                     at: Some(i),

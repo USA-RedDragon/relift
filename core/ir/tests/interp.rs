@@ -510,3 +510,35 @@ fn the_builder_panics_on_a_width_mismatch() {
     let y = b.konst(Width::W16, 1);
     b.add(x, y);
 }
+
+#[test]
+fn a_guard_leaves_for_the_slow_path_before_any_write() {
+    let mut b = Builder::new(file(), Width::W64, 0x40);
+    let x = b.get(Reg(0));
+    let zero = b.konst(Width::W64, 0);
+    let ne = b.cmp(CmpOp::Ne, x, zero);
+    b.guard(ne, 0x51);
+    let one = b.konst(Width::W64, 1);
+    b.set(Reg(1), one);
+    let block = b.jump(4, 0x44);
+    let mut s = State::new(4);
+    s.regs[0] = 7;
+    let o = run(&block, &mut s, &mut mem()).expect("runs");
+    assert_eq!((o.next, o.flow), (0x40, Flow::Trap(0x51)));
+    assert_eq!(s.regs[1], 0);
+    s.regs[0] = 0;
+    let o = run(&block, &mut s, &mut mem()).expect("runs");
+    assert_eq!(o.next, 0x44);
+    assert_eq!(s.regs[1], 1);
+}
+
+#[test]
+#[should_panic(expected = "a guard follows an operation with an effect")]
+fn a_guard_after_an_effect_does_not_verify() {
+    let mut b = Builder::new(file(), Width::W64, 0);
+    let x = b.get(Reg(0));
+    b.set(Reg(1), x);
+    let c = b.konst(Width::W1, 1);
+    b.guard(c, 1);
+    let _ = b.jump(4, 4);
+}

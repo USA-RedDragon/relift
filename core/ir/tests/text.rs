@@ -47,6 +47,8 @@ fn everything(exit: Exit, addr: Width) -> Block {
     let w2 = b.get(Reg(3));
     let ad = if addr == Width::W64 { x1 } else { w2 };
     let k = b.konst(Width::W64, 0x10);
+    let g = b.cmp(CmpOp::Eq, x0, k);
+    b.guard(g, 0x4650_4352);
     let wide = b.konst(Width::new(65), 1 << 64);
     let _ = wide;
     for op in [

@@ -62,6 +62,7 @@
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
 //! | `fp.rint.R fp.tosint.R fp.touint.R fp.fromsint fp.fromuint fp.convert v` | [`FpOp`] conversions; `R` is `n`, `a`, `m`, `p` or `z` ([`FpRound`]) |
 //! | `intrinsic "name" args` | [`Op::Intrinsic`], args may be empty |
+//! | `guard c, HEX` | [`Op::Guard`]: leave to slow path `HEX` when `c` is 1 |
 //!
 //! The ordering `O` is `plain`, `acquire`, `release`, `acqrel` or `seqcst`.
 //! Intrinsic names are quoted with `\"` and `\\` escapes. A parsed
@@ -273,6 +274,7 @@ impl fmt::Display for Block {
                     value.0
                 )?,
                 Op::ClearExclusive => f.write_str("clear.excl")?,
+                Op::Guard(v, code) => write!(f, "guard v{}, {code:#x}", v.0)?,
                 Op::Fence(o) => write!(f, "fence.{}", name_of(&ORDER, *o))?,
                 Op::Fp(op, args) => {
                     write!(f, "fp.{}", name_of(&FP, *op))?;
@@ -668,6 +670,15 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
                 Op::Concat(v[0], v[1])
             }
             "clear.excl" => Op::ClearExclusive,
+            "guard" => {
+                let v = c.value(defined)?;
+                c.comma()?;
+                let code = c.hex("a slow-path code")?;
+                let Ok(code) = u32::try_from(code) else {
+                    return c.err(at, "the slow-path code does not fit 32 bits");
+                };
+                Op::Guard(v, code)
+            }
             "intrinsic" => {
                 let n = c.next("an intrinsic name")?;
                 if n.kind != Kind::Str {
