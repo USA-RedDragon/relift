@@ -243,8 +243,35 @@ fn new_entries(
     out
 }
 
+/// What [`discover_with`] reports while it works.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Progress {
+    /// Entries found so far, and how many of them have been explored.
+    Found {
+        /// Function entries known.
+        entries: usize,
+        /// Entries whose code has been followed.
+        explored: usize,
+    },
+    /// Functions built so far.
+    Lifted {
+        /// Functions finished.
+        done: usize,
+        /// Functions in all.
+        total: usize,
+        /// Instructions that failed to lift, over the finished functions.
+        unlifted: usize,
+    },
+}
+
 /// Finds the functions of `module` with frontend `fe`.
 pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
+    discover_with(fe, module, &mut |_| {})
+}
+
+/// As [`discover`], calling `on` after every entry explored and every
+/// function built.
+pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Progress)) -> Analysis {
     let granule = fe.granule();
     let mut lifter = Lifter {
         fe,
@@ -276,13 +303,29 @@ pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
                 kinds.entry(a).or_insert(k);
             }
             done.insert(e);
+            on(Progress::Found {
+                entries: kinds.len(),
+                explored: done.len(),
+            });
         }
     }
     let entries: BTreeSet<u64> = kinds.keys().copied().collect();
+    let total = kinds.len();
+    let mut unlifted = 0;
     let functions = kinds
         .iter()
-        .map(|(&e, &kind)| {
+        .enumerate()
+        .map(|(n, (&e, &kind))| {
             let (insts, tables) = extent(&mut lifter, &entries, e);
+            unlifted += insts
+                .values()
+                .filter(|i| matches!(i, Insn::Failed(_)))
+                .count();
+            on(Progress::Lifted {
+                done: n + 1,
+                total,
+                unlifted,
+            });
             (
                 e,
                 Function {

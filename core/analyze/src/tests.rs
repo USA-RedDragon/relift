@@ -215,3 +215,41 @@ fn a_jump_table_entered_by_a_taken_branch() {
     let a = discover(&Toy, &m);
     assert_eq!(a.functions[&BASE].tables[&(BASE + 0x1c)], [BASE + 0x0c]);
 }
+
+#[test]
+fn progress_reports_every_entry_and_function_with_real_counts() {
+    let m = module(
+        &[
+            word(0x04, 0, 1),
+            word(0xff, 0, 0),
+            word(0x03, 0, 0),
+            word(0x03, 0, 0),
+        ],
+        &[],
+        &[BASE, BASE + 12],
+    );
+    let mut seen = Vec::new();
+    let a = discover_with(&Toy, &m, &mut |p| seen.push(p));
+    assert_eq!(a, discover(&Toy, &m));
+    let found: Vec<(usize, usize)> = seen
+        .iter()
+        .filter_map(|p| match p {
+            Progress::Found { entries, explored } => Some((*entries, *explored)),
+            Progress::Lifted { .. } => None,
+        })
+        .collect();
+    assert_eq!(found, [(2, 1), (2, 2)]);
+    let lifted: Vec<(usize, usize, usize)> = seen
+        .iter()
+        .filter_map(|p| match p {
+            Progress::Lifted {
+                done,
+                total,
+                unlifted,
+            } => Some((*done, *total, *unlifted)),
+            Progress::Found { .. } => None,
+        })
+        .collect();
+    assert_eq!(lifted, [(1, 2, 1), (2, 2, 1)]);
+    assert_eq!(a.failures(), 1);
+}
