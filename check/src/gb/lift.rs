@@ -42,7 +42,7 @@ use std::rc::Rc;
 use relift_cpu_sm83::irq;
 use relift_cpu_sm83::{
     AccessTarget, BASE, CB, Opcode, Options as LiftOptions, SyncPolicy, decode, lift_bytes,
-    regs as r,
+    lift_bytes_sail, regs as r,
 };
 use relift_ir::interp::{self, Devices, Fault, FlatMemory, GuestMemory, Intrinsics, State};
 use relift_ir::{AddrClass, BinOp, Block, IoMap, IoRange, Next, Op};
@@ -96,6 +96,16 @@ pub struct Options {
     pub mutation: Mutation,
     pub only: Option<(bool, u8)>,
     pub verbose: bool,
+    pub lifter: Lifter,
+}
+
+/// Which SM83 lifter the check runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lifter {
+    /// The hand-written lifter.
+    Hand,
+    /// The templates generated from the Sail model.
+    Sail,
 }
 
 #[derive(Clone)]
@@ -577,6 +587,7 @@ fn run_ir(
     opts: &LiftOptions,
     mutation: Mutation,
     mutated: &mut bool,
+    lifter: Lifter,
 ) -> Result<Ir, String> {
     let rom = flat_rom(case.hardware, &{
         let mut v = vec![0u8; usize::from(PC)];
@@ -646,7 +657,11 @@ fn run_ir(
         }
         let low = (pc & 0xFFFF) as usize;
         let window = &mem.mem.bytes[low..(low + 4).min(0x10000)].to_vec();
-        let mut block = lift_bytes(window, pc, opts).map_err(|e| format!("lift {pc:#x}: {e}"))?;
+        let lift = match lifter {
+            Lifter::Hand => lift_bytes,
+            Lifter::Sail => lift_bytes_sail,
+        };
+        let mut block = lift(window, pc, opts).map_err(|e| format!("lift {pc:#x}: {e}"))?;
         if mutation != Mutation::None && !*mutated {
             *mutated = mutate(&mut block, mutation);
         }
@@ -700,10 +715,15 @@ enum Verdict {
     Fail(String),
 }
 
-fn compare(case: &Case, opts: &LiftOptions, mutation: Mutation) -> Result<(Verdict, bool), String> {
+fn compare(
+    case: &Case,
+    opts: &LiftOptions,
+    mutation: Mutation,
+    lifter: Lifter,
+) -> Result<(Verdict, bool), String> {
     let nop = run_sequence(&case.spec(&[0x00]), Sequence::ONE).map_err(|e| e.to_string())?;
     let mut mutated = false;
-    let ir = match run_ir(case, &nop.io, opts, mutation, &mut mutated) {
+    let ir = match run_ir(case, &nop.io, opts, mutation, &mut mutated, lifter) {
         Err(e) if e.starts_with("skip:") || e.contains("is not lifted") => {
             return Ok((Verdict::Skip, mutated));
         }
@@ -915,7 +935,7 @@ pub fn run_lift(opts: &Options) -> Result<bool, String> {
                 let hw = opts.hardware[i as usize % opts.hardware.len()];
                 let case = make_case(&mut rng, hw, prefix, code);
                 decode(&case.code).map_err(|e| e.to_string())?;
-                let (verdict, mutated) = compare(&case, &lift_opts, opts.mutation)?;
+                let (verdict, mutated) = compare(&case, &lift_opts, opts.mutation, opts.lifter)?;
                 mutated_any |= mutated;
                 if opts.mutation != Mutation::None && !mutated {
                     break;

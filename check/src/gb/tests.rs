@@ -327,6 +327,7 @@ fn lift_options(op: (bool, u8), mutation: super::lift::Mutation) -> super::lift:
         mutation,
         only: Some(op),
         verbose: false,
+        lifter: super::lift::Lifter::Hand,
     }
 }
 
@@ -356,4 +357,30 @@ fn a_mutated_lift_is_caught() {
     use super::lift::{Mutation, run_lift};
     assert!(run_lift(&lift_options((false, 0x86), Mutation::Cycles)).unwrap());
     assert!(run_lift(&lift_options((false, 0x86), Mutation::Ops)).unwrap());
+}
+
+#[test]
+fn the_generated_lifter_matches_the_oracle() {
+    use super::lift::{Lifter, Mutation, run_lift};
+    for op in [
+        (false, 0x27),
+        (false, 0x86),
+        (false, 0xC4),
+        (false, 0xD0),
+        (false, 0xE8),
+        (false, 0xF1),
+        (true, 0x16),
+        (true, 0x7E),
+    ] {
+        let o = super::lift::Options {
+            lifter: Lifter::Sail,
+            ..lift_options(op, Mutation::None)
+        };
+        assert!(run_lift(&o).unwrap(), "{op:?}");
+    }
+    let o = super::lift::Options {
+        lifter: Lifter::Sail,
+        ..lift_options((false, 0x86), Mutation::Ops)
+    };
+    assert!(run_lift(&o).unwrap());
 }
