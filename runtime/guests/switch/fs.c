@@ -22,8 +22,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#if !defined(_WIN32)
 #include <sys/statvfs.h>
+#endif
 #include <unistd.h>
+
+#include "hostio.h"
 
 /** @brief Size of a guest path buffer (FspPath) in bytes. */
 #define FS_GUEST_PATH 0x301u
@@ -488,7 +492,7 @@ static rl_result space_size(rl_ipc_req *r, int total)
 {
     struct statvfs sv;
     uint64_t v;
-    if (statvfs(fs_root(r), &sv) != 0)
+    if (rl_statvfs_fn(fs_root(r), &sv) != 0)
         return errno_result(errno);
     v = (uint64_t)(total ? sv.f_blocks : sv.f_bavail) * (uint64_t)sv.f_frsize;
     *(uint64_t *)rl_ipc_out(r, 8) = v;

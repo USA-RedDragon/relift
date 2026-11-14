@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "hostio.h"
+
 #define NONE 0xFFFFFFFFu
 #define HEADER_SIZE 0x50u
 #define DATA_ALIGN 0x200u
