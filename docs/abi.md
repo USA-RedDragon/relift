@@ -857,6 +857,151 @@ only on the C library and the host OS.
 - Static units carry the same fields and are checked at start-up, which
   catches a stale shard linked against a newer runtime.
 
+## 13. Hardware-register guests
+
+Guests such as the Game Boy (later GBA, NDS and N64) drive devices through
+memory-mapped registers and depend on CPU timing relative to them. Their
+lifted code carries a guest cycle clock, routes device accesses to the
+runtime and gives the runtime points where it may run devices and deliver
+interrupts. A64 code uses none of this: the Switch CPU layer has no clock
+(`rl_cpu_desc.time_offset` is 0) and the A64 frontend emits none of the
+operations below. The IR side is defined by the reference interpreter
+(`core/ir/src/interp.rs`, `run_with` and the `Devices` trait) and checked by
+`core/ir/tests/hw.rs`; the runtime side lives in `runtime/core/sched.c` and
+`relift/sched.h`. [verified: IR semantics by `core/ir/tests/hw.rs`; the
+emitter half is not written yet, so every emitter rule below is
+[inferred] until it is]
+
+### IR operations
+
+| IR | Meaning | Emitted C |
+|---|---|---|
+| `tick N` (`Op::Tick`) | the clock moves N guest cycles at this point | `budget -= N;` |
+| `tick.if c, N` (`Op::TickIf`) | N more cycles when `c` is 1 (taken branch) | `budget -= c ? N : 0;` |
+| `io.load.E.any a` (`Op::IoLoad`, `IoKind::Any`) | memory or device, by the guest's `IoMap` | inline range check, then a plain access or `rl_io_read` |
+| `io.load.E.dev a` (`IoKind::Device`) | always a device | `rl_io_read` |
+| `io.store.E.K a, v` (`Op::IoStore`) | the write twin, with the map's write classes | a plain store or `rl_io_write` |
+| `sync` (`Op::Sync`, last instruction) | the exit is a sync point | budget check, then `rl_sync` |
+| `bank HEX` in the block header (`Block::bank`) | which mapping of the bytes at `pc` was lifted | part of the function's identity |
+
+- **Cycles.** The unit is the guest CPU's own cycle (Game Boy: T-cycles,
+  4 per M-cycle); the scheduler turns cycles into timeline ticks with the
+  clock's ratio (`rl_sched_add_cpu`). A frontend gives each instruction its
+  cost and may split it around the instruction's accesses, so that each I/O
+  access happens at its own cycle (`tick 4; io.store ...; tick 4`).
+- **Ordering.** Ticks, I/O accesses and memory operations happen in program
+  order. A guard may not follow a tick or an I/O access (`Block::verify`),
+  so a block that leaves for a slow path has not charged any cycles.
+- **Dead values.** `dce` keeps every tick, I/O access and sync: a device
+  read can change device state even when its value is unused.
+
+### The budget
+
+- The clock is an `rl_time { int64_t budget; uint64_t deadline; }`
+  (`abi_core.h`) that the CPU layer puts in its `rl_ctx` and names in
+  `rl_cpu_desc.time_offset`. The CPU is at cycle `deadline - budget`.
+- Inside a lifted function the emitter keeps `budget` in a local, loaded
+  from `c` at entry. Each tick subtracts its cycles. The emitter may sum the
+  ticks of a straight-line run and subtract once, as long as the local is
+  exact at every I/O access, sync point and runtime call.
+- Before any runtime call (`rl_io_read`, `rl_io_write`, `rl_sync`, an
+  intrinsic, a guest call or return) the emitter stores the local to
+  `c->time.budget`, and reloads it after the call: a device access may
+  stall the CPU (`rl_sched_stall`), and `rl_sync`, events and interrupt
+  entries change the budget and deadline.
+
+### I/O accesses
+
+- `rl_io_read(c, mem, addr, size)` and `rl_io_write(c, mem, addr, size,
+  value)` take `size` 1, 2, 4 or 8 bytes. `value` is the bytes in memory
+  order read as a little-endian number (byte 0 at `addr` is the low byte),
+  so the emitter byte-swaps around the call for a big-endian access and
+  truncates or extends to the IR width. An IR access of another whole-byte
+  size (3, 5 to 7, 9 to 16 bytes) is split by the emitter into supported
+  sizes in address order.
+- The hook first brings the devices that observe the address up to the
+  CPU's cycle, then does the access. It may move the CPU's clock
+  (`rl_sched_stall`, wait states) or end its budget (`rl_sched_break`). It
+  never changes a guest register and never redirects control: a change it
+  makes to the interrupt state takes effect at the next sync point.
+- `IoKind::Any` accesses get an inline range check compiled from the
+  guest's `IoMap` (`core/ir/src/io.rs`): bytes that are memory for that
+  direction take a plain access through `mem`, anything else the hook. An
+  access that straddles a boundary counts as a device access as a whole.
+  `IoKind::Device` accesses call the hook directly, and plain `Load` and
+  `Store` never reach it.
+- `classify_io` (`core/ir/src/opt.rs`) runs before emission: an `any`
+  access whose address is constant (`opt::constants`: built from constants
+  by pure operations, such as `LDH (n),A` giving `0xff00 + n`) becomes a plain
+  access or a `dev` access, so only accesses through a register keep the
+  range check.
+- The guest layer builds its `IoMap` and its `rl_sched_map` ranges from one
+  table. Every byte a device answers for a direction must be a device byte
+  of the `IoMap` for that direction, since a memory byte bypasses the
+  scheduler. Banked memory that reads like memory (a cartridge ROM bank) is
+  memory to read: the guest layer remaps the bank in the reservation when
+  its controller is written, and the controller write is a device write.
+
+### Sync points and interrupts
+
+- At a block with `sync`, after the exit's register stores, the emitter
+  writes:
+
+  ```c
+  if (RL_UNLIKELY(budget <= 0)) {
+      c->time.budget = budget;
+      if (rl_sync(c, mem, next) != RL_OK) return RL_PENDING;
+      budget = c->time.budget;
+  }
+  ```
+
+  where `next` is the exit's target (computed before the check for a
+  select or dynamic exit), then continues to `next` as the exit says.
+- `rl_sync` runs the due events and devices up to the CPU's cycle and sets
+  a new budget that ends at the next event. It then asks the clock's
+  interrupt hook (`rl_irq_hook`, set per clock with `rl_sched_set_irq`)
+  whether an interrupt is taken. The hook does the guest-visible entry
+  (push `next` as the return address, clear the master enable, acknowledge
+  the request, charge the entry cycles to the clock) and returns the
+  handler's entry pc, or `RL_NO_IRQ`. A taken interrupt is entered as a
+  nested call through dispatch, and when the handler returns `rl_sync`
+  asks again, so several pending interrupts are entered one after another.
+  `rl_sync` returns `RL_OK`, or `RL_PENDING` to propagate a pending record.
+- In IR terms (the interpreter's `Devices::sync`): the outcome of a block
+  whose sync took an interrupt has `next` equal to the handler entry and
+  `resume` equal to the exit's target. The nested call is the runtime's
+  way of running that handler and coming back to `resume`.
+- **Why the budget check is exact.** A sync at which no event is due and no
+  interrupt can be taken has no guest-visible effect, so skipping it while
+  `budget > 0` changes nothing, provided the runtime ends the budget
+  whenever an interrupt becomes deliverable or an event becomes due
+  earlier. The scheduler does this when a line in a CPU's mask is raised
+  (`rl_sched_raise`), when the mask changes to include a raised line
+  (`rl_sched_set_mask`) and when an event is posted earlier than the
+  deadline (`rl_sched_post`). Interrupt enable state that a guest CPU keeps
+  in a register (the Game Boy's IME, set by EI and RETI) must therefore
+  reach the runtime through an intrinsic that updates the mask, never
+  through a plain `Set` alone.
+- **Granularity.** Where `sync` goes is a frontend and per-game choice, not
+  an IR rule: at the end of each basic block of guest code (the default;
+  every loop back edge, call and return is then a sync point), after each
+  instruction with an I/O store as well (interrupts follow a register write
+  at the next instruction), or after every instruction (exact interrupt
+  timing, slowest). A guest's frontend may also place a sync at HALT-like
+  instructions, which then wait through `rl_sched_halt`.
+
+### Banked code
+
+- `Block::bank` is `None` for code at a fixed address and the guest's bank
+  number (or another guest-chosen id, such as a hash of code copied to RAM)
+  otherwise. `(pc, bank)` is the identity of lifted code
+  (`Block::key`): two blocks with one `pc` and different banks are
+  different functions, and emitted names carry the bank. Exit targets stay
+  plain guest addresses; the dispatch lookup of a banked region uses the
+  bank mapped there at run time, and an analysis that tracks bank-switch
+  writes may resolve a direct call to one bank at build time.
+  [open: the dispatch table shape for banked regions]
+
 ## Checks run for this contract
 
 All with clang 23.1.1 on Linux unless noted. Probe sources are scratch, not
@@ -893,3 +1038,11 @@ committed.
 9. Guard sizes against real wild-pointer patterns (2).
 10. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
+11. Interrupt handlers that do not return to the address the entry pushed
+    (they rewrite the return address on the stack, or never return): the
+    nested call of `rl_sync` then returns to the wrong place or grows the
+    host stack. A check after the handler's return against `next`, with a
+    dispatch to the real target, is the likely fix (13).
+12. How `rl_sched_read` and `rl_sched_write` treat an access that straddles
+    two ranges; the IR sends it to the hook as a whole (13).
+13. The dispatch table shape for banked code regions (13).
