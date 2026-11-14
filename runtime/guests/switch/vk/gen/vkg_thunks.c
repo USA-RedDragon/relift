@@ -2457,8 +2457,9 @@ static int vkt_vkDeviceWaitIdle(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkDeviceWaitIdle fn = (PFN_vkDeviceWaitIdle)k.fns->f[VKG_vkDeviceWaitIdle];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDeviceWaitIdle);
+    vkf_queue_lock(&k);
     VkResult r = fn(a0);
-    vkf_shadow_pull(&k);
+    vkf_queue_pull_leave(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -2832,51 +2833,6 @@ static int vkt_vkGetDeviceMemoryOpaqueCaptureAddress(rl_ctx *restrict c, uint8_t
         return vkf_no_fn(&k, VKG_vkGetDeviceMemoryOpaqueCaptureAddress);
     uint64_t r = fn(a0, a1);
     c->x[0] = (uint64_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetDeviceQueue(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetDeviceQueue, c->x[0]);
-    uint32_t a1 = (uint32_t)(c->x[1]);
-    uint32_t a2 = (uint32_t)(c->x[2]);
-    uint64_t n3 = 1;
-    VkQueue *a3 = c->x[3] ? vkf_alloc(&k, (n3 ? n3 : 1) * sizeof *a3) : NULL;
-    PFN_vkGetDeviceQueue fn = (PFN_vkGetDeviceQueue)k.fns->f[VKG_vkGetDeviceQueue];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetDeviceQueue);
-    fn(a0, a1, a2, a3);
-    if (a3) {
-        uint64_t w3 = 1;
-        for (uint64_t j = 0; j < w3 && j < n3; j++)
-            vkf_s64(&k, c->x[3] + 8 * j, vkf_wrap(&k, VKG_KIND_VkQueue, a3[j]));
-    }
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetDeviceQueue2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetDeviceQueue2, c->x[0]);
-    const VkDeviceQueueInfo2 * a1 = vkg_ain_VkDeviceQueueInfo2(&k, c->x[1], 1);
-    uint64_t n2 = 1;
-    VkQueue *a2 = c->x[2] ? vkf_alloc(&k, (n2 ? n2 : 1) * sizeof *a2) : NULL;
-    PFN_vkGetDeviceQueue2 fn = (PFN_vkGetDeviceQueue2)k.fns->f[VKG_vkGetDeviceQueue2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetDeviceQueue2);
-    fn(a0, a1, a2);
-    if (a2) {
-        uint64_t w2 = 1;
-        for (uint64_t j = 0; j < w2 && j < n2; j++)
-            vkf_s64(&k, c->x[2] + 8 * j, vkf_wrap(&k, VKG_KIND_VkQueue, a2[j]));
-    }
     return vkf_end(&k);
 }
 
@@ -3300,43 +3256,6 @@ static int vkt_vkGetPhysicalDeviceProperties2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkGetPhysicalDeviceQueueFamilyProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceQueueFamilyProperties, c->x[0]);
-    uint32_t * a1 = (uint32_t *)vkf_ptr(&k, c->x[1]);
-    VkQueueFamilyProperties * a2 = (VkQueueFamilyProperties *)vkf_ptr(&k, c->x[2]);
-    PFN_vkGetPhysicalDeviceQueueFamilyProperties fn = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)k.fns->f[VKG_vkGetPhysicalDeviceQueueFamilyProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceQueueFamilyProperties);
-    fn(a0, a1, a2);
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceQueueFamilyProperties2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceQueueFamilyProperties2, c->x[0]);
-    uint32_t * a1 = (uint32_t *)vkf_ptr(&k, c->x[1]);
-    uint64_t n2 = (a1 ? *a1 : 0);
-    VkQueueFamilyProperties2 *a2 = vkg_ain_VkQueueFamilyProperties2(&k, c->x[2], n2);
-    PFN_vkGetPhysicalDeviceQueueFamilyProperties2 fn = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)k.fns->f[VKG_vkGetPhysicalDeviceQueueFamilyProperties2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceQueueFamilyProperties2);
-    fn(a0, a1, a2);
-    {
-        uint64_t w2 = (a1 ? *a1 : 0);
-        vkg_aout_VkQueueFamilyProperties2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
-    }
-    return vkf_end(&k);
-}
-
 static int vkt_vkGetPhysicalDeviceSparseImageFormatProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -3620,8 +3539,9 @@ static int vkt_vkQueueBindSparse(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkQueueBindSparse fn = (PFN_vkQueueBindSparse)k.fns->f[VKG_vkQueueBindSparse];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkQueueBindSparse);
-    vkf_shadow_flush(&k);
+    vkf_queue_enter(&k);
     VkResult r = fn(a0, a1, a2, a3);
+    vkf_queue_unlock(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3668,8 +3588,9 @@ static int vkt_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkQueueSubmit fn = (PFN_vkQueueSubmit)k.fns->f[VKG_vkQueueSubmit];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkQueueSubmit);
-    vkf_shadow_flush(&k);
+    vkf_queue_enter(&k);
     VkResult r = fn(a0, a1, a2, a3);
+    vkf_queue_unlock(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3687,8 +3608,9 @@ static int vkt_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkQueueSubmit2 fn = (PFN_vkQueueSubmit2)k.fns->f[VKG_vkQueueSubmit2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkQueueSubmit2);
-    vkf_shadow_flush(&k);
+    vkf_queue_enter(&k);
     VkResult r = fn(a0, a1, a2, a3);
+    vkf_queue_unlock(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3703,8 +3625,9 @@ static int vkt_vkQueueWaitIdle(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkQueueWaitIdle fn = (PFN_vkQueueWaitIdle)k.fns->f[VKG_vkQueueWaitIdle];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkQueueWaitIdle);
+    vkf_queue_lock(&k);
     VkResult r = fn(a0);
-    vkf_shadow_pull(&k);
+    vkf_queue_pull_leave(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -4862,8 +4785,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetDeviceMemoryCommitment,
     vkt_vkGetDeviceMemoryOpaqueCaptureAddress,
     vkh_vkGetDeviceProcAddr,
-    vkt_vkGetDeviceQueue,
-    vkt_vkGetDeviceQueue2,
+    vkh_vkGetDeviceQueue,
+    vkh_vkGetDeviceQueue2,
     vkt_vkGetEventStatus,
     vkt_vkGetFenceStatus,
     vkt_vkGetImageMemoryRequirements,
@@ -4888,8 +4811,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetPhysicalDevicePresentRectanglesKHR,
     vkt_vkGetPhysicalDeviceProperties,
     vkt_vkGetPhysicalDeviceProperties2,
-    vkt_vkGetPhysicalDeviceQueueFamilyProperties,
-    vkt_vkGetPhysicalDeviceQueueFamilyProperties2,
+    vkh_vkGetPhysicalDeviceQueueFamilyProperties,
+    vkh_vkGetPhysicalDeviceQueueFamilyProperties2,
     vkt_vkGetPhysicalDeviceSparseImageFormatProperties,
     vkt_vkGetPhysicalDeviceSparseImageFormatProperties2,
     vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR,

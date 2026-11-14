@@ -51,6 +51,27 @@ pNext chains are rebuilt from the sType of each guest struct. A struct the
 generator does not know is reported once (`rl_report_unknown`) and dropped from
 the chain.
 
+## Queue families
+
+The guest sees the Switch's layout on every host (`vk_queue.c`): one family,
+graphics, compute, transfer and sparse binding, 16 queues, 64 timestamp bits,
+a 1x1x1 transfer granularity. This is the family the console's NVIDIA driver
+always builds; it adds a transfer family and a compute family only when its
+hardware queries allow, so those are not shown. Games size their arrays for the
+console: one engine fills a four-entry `VkDeviceQueueCreateInfo` array with
+every family it is shown.
+
+The family stands for host family 0, which must have graphics and compute
+(true of every desktop and mobile driver seen so far; `vkCreateDevice` fails
+with a log line otherwise), so family indices pass through unchanged and a
+guest family other than 0 is refused. Guest queue `i` is host queue
+`i % n` of the `n` the host has. When the guest creates more queues than the
+host has, its queues share host queues, and every queue operation on that
+device (`vkQueueSubmit`, `vkQueueSubmit2`, `vkQueueBindSparse`,
+`vkQueuePresentKHR`, `vkQueueWaitIdle`, `vkDeviceWaitIdle`) takes the device's
+queue lock, which Vulkan's external synchronization rules would otherwise leave
+to the guest.
+
 ## Handles
 
 Dispatchable handles (instance, physical device, device, queue, command

@@ -818,12 +818,12 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
     VkQueue q = vkf_first(&k, VKG_KIND_VkQueue, c->x[0]);
     if (!q)
         return vkf_bad_handle(&k, VKG_vkQueuePresentKHR, c->x[0]);
-    vkf_shadow_flush(&k);
     uint64_t g = c->x[1];
     if (!g) {
         c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
         return vkf_end(&k);
     }
+    vkf_queue_enter(&k);
     uint32_t nwaits = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, waitSemaphoreCount));
     uint64_t gwaits = vkf_g64(&k, g + offsetof(VkPresentInfoKHR, pWaitSemaphores));
     uint32_t nsw = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, swapchainCount));
@@ -842,6 +842,7 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
         if (r < 0 && all >= 0)
             all = r;
     }
+    vkf_queue_unlock(&k);
     c->x[0] = (uint32_t)all;
     return vkf_end(&k);
 }

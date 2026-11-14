@@ -874,3 +874,86 @@ TEST(vk_bad_handles_and_unknown_structs)
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
+
+static void check_switch_family(const VkQueueFamilyProperties *p)
+{
+    CHECK_EQ(p->queueFlags, VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT);
+    CHECK_EQ(p->queueCount, 16);
+    CHECK_EQ(p->timestampValidBits, 64);
+    CHECK_EQ(p->minImageTransferGranularity.width, 1);
+    CHECK_EQ(p->minImageTransferGranularity.height, 1);
+    CHECK_EQ(p->minImageTransferGranularity.depth, 1);
+}
+
+TEST(vk_queue_families_are_the_switch_layout)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    uint32_t n = physical_devices(pds, 8);
+    CHECK(n > 0);
+    for (uint32_t d = 0; d < n; d++) {
+        char name[256];
+        if (!device_wanted(pds[d], name))
+            continue;
+        uint64_t gn = galloc(4);
+        G("vkGetPhysicalDeviceQueueFamilyProperties", pds[d], gn, 0);
+        CHECK_EQ(g32(gn), 1);
+        uint64_t arr = galloc(4 * sizeof(VkQueueFamilyProperties));
+        rl_st32(g_mem, gn, 4);
+        G("vkGetPhysicalDeviceQueueFamilyProperties", pds[d], gn, arr);
+        CHECK_EQ(g32(gn), 1);
+        VkQueueFamilyProperties p;
+        memcpy(&p, g_mem + arr, sizeof p);
+        check_switch_family(&p);
+        VkQueueFamilyProperties2 p2[2] = {
+            { .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2 },
+            { .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2 },
+        };
+        uint64_t g2 = gput(p2, sizeof p2);
+        rl_st32(g_mem, gn, 2);
+        G("vkGetPhysicalDeviceQueueFamilyProperties2KHR", pds[d], gn, g2);
+        CHECK_EQ(g32(gn), 1);
+        memcpy(&p, g_mem + g2 + offsetof(VkQueueFamilyProperties2, queueFamilyProperties), sizeof p);
+        check_switch_family(&p);
+        float prio[16];
+        for (unsigned i = 0; i < 16; i++)
+            prio[i] = 1.0f;
+        VkDeviceQueueCreateInfo qci = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueCount = 16,
+            .pQueuePriorities = GP(gput(prio, sizeof prio)),
+        };
+        VkDeviceCreateInfo dci = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .queueCreateInfoCount = 1,
+            .pQueueCreateInfos = GP(gput(&qci, sizeof qci)),
+        };
+        uint64_t out = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateDevice", pds[d], gput(&dci, sizeof dci), 0, out)), VK_SUCCESS);
+        uint64_t dev = g64(out);
+        uint64_t gq = galloc(8);
+        for (unsigned i = 0; i < 16; i++) {
+            rl_st64(g_mem, gq, 0);
+            G("vkGetDeviceQueue", dev, 0, i, gq);
+            CHECK(g64(gq) != 0);
+            CHECK_EQ(VKR(G("vkQueueSubmit", g64(gq), 0, 0, 0)), VK_SUCCESS);
+            CHECK_EQ(VKR(G("vkQueueWaitIdle", g64(gq))), VK_SUCCESS);
+        }
+        VkDeviceQueueInfo2 qi2 = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2, .queueIndex = 15 };
+        rl_st64(g_mem, gq, 0);
+        G("vkGetDeviceQueue2", dev, gput(&qi2, sizeof qi2), gq);
+        CHECK(g64(gq) != 0);
+        rl_st64(g_mem, gq, 1);
+        G("vkGetDeviceQueue", dev, 0, 16, gq);
+        CHECK_EQ(g64(gq), 0);
+        CHECK_EQ(VKR(G("vkDeviceWaitIdle", dev)), VK_SUCCESS);
+        G("vkDestroyDevice", dev, 0);
+        qci.queueFamilyIndex = 1;
+        qci.queueCount = 1;
+        dci.pQueueCreateInfos = GP(gput(&qci, sizeof qci));
+        CHECK_EQ(VKR(G("vkCreateDevice", pds[d], gput(&dci, sizeof dci), 0, out)), VK_ERROR_INITIALIZATION_FAILED);
+    }
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}

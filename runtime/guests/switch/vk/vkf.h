@@ -104,6 +104,10 @@ struct vkf_dev {
     struct vkf_map *mems;
     /** @brief Protects mems and the shadow state. */
     pthread_mutex_t lock;
+    /** @brief Queues of the Switch family the guest created, and the host family 0 queues behind them. */
+    uint32_t guest_queues, host_queues;
+    /** @brief Held by every queue operation while guest queues share host queues. */
+    pthread_mutex_t queue_lock;
     /** @brief Queue families the device was created with, and the queue count of each. */
     uint32_t queue_families[16], queue_counts[16];
     /** @brief Number of entries in queue_families. */
@@ -217,6 +221,27 @@ void vkf_load_instance(vkf_fns *fns, void *host_instance);
 void vkf_load_device(vkf_fns *fns, const vkf_fns *inst, void *host_device);
 /** @brief The host function of cmd in a table, typed. */
 #define VKF_FN(fns, name) ((PFN_##name)(fns)->f[VKG_##name])
+
+/** @brief The one queue family the Switch's driver always reports. */
+#define VKF_SWITCH_QUEUE_FLAGS                                                                                         \
+    (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT)
+#define VKF_SWITCH_QUEUE_COUNT 16u
+#define VKF_SWITCH_TIMESTAMP_BITS 64u
+
+/** @brief Points ci at host family 0 queues for the guest's Switch family ones and records the counts in d. */
+VkResult vkf_queue_create_infos(vkf_call *k, VkPhysicalDevice pd, VkDeviceCreateInfo *ci, vkf_dev *d);
+
+/** @brief Takes the device's queue lock when guest queues share host queues. */
+void vkf_queue_lock(vkf_call *k);
+
+/** @brief Releases what vkf_queue_lock took. */
+void vkf_queue_unlock(vkf_call *k);
+
+/** @brief vkf_queue_lock, then vkf_shadow_flush: before a submit. */
+void vkf_queue_enter(vkf_call *k);
+
+/** @brief vkf_shadow_pull, then vkf_queue_unlock: after a queue wait. */
+void vkf_queue_pull_leave(vkf_call *k);
 
 /** @brief Copies bytes to a fresh area below the guest stack pointer *sp; returns its guest address. */
 uint64_t vkf_push(vkf_call *k, uint64_t *sp, const void *src, size_t n);
