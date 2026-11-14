@@ -128,6 +128,7 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
 | `RELIFT_VK_DEVICE=<name part>` | Host physical device the guest sees (default: the first that has graphics and compute and can present) |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
+| `RELIFT_SCHED=free\|stats` | Debugging only. `free`: Switch guest threads run freely on host threads, ignoring priorities and cores (the old behavior, for comparisons). `stats`: log scheduler hand-overs, preemptions and the longest preemption delay once a second |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
 | `RELIFT_SAVE=<dir>` | Host directory that holds save data (`./save`): `<program id>/user-<uid>` for account saves, `device`, `bcat`, `temporary` and `cache-<index>` for the other kinds, each created on first open. A mount works on a copy; `Commit` swaps the copy in atomically, and a mount closed without `Commit` loses its writes |
@@ -165,5 +166,13 @@ any storage with no tree.
   first view, so a second view at another offset is refused while the first
   is mapped.
 - The Switch guest does not support 32-bit address spaces (the core does).
-- Guest threads run on host threads at host priority; guest priorities order
-  the kernel's wait queues only.
+- Guest threads run on host threads, scheduled the way Horizon schedules
+  them (`guests/switch/ksched.c`, a port of the logic of Ryujinx's
+  KScheduler): each of the four cores runs one guest thread at a time, the
+  highest-priority ready thread whose affinity mask allows that core, and
+  threads of equal priority take turns only when one blocks or yields
+  (svcSleepThread 0, -1 and -2). A thread waiting in an svc, an IPC request
+  or a blocking Vulkan call gives its core up. Where Horizon preempts a
+  thread at any instruction when a better one becomes ready, the runtime
+  preempts it at its next svc; the round robin of priorities 59 and 63 also
+  runs at svcs. A mutex owner inherits the priority of its waiters.
