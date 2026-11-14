@@ -24,7 +24,11 @@ RL_RUNTIME_API void rl_hos_fs_init(const char *sdmc_host_dir);
  * string selects "./save". OpenSaveDataFileSystem serves
  * <dir>/<program id>/user-<uid> for account saves (device, bcat, temporary
  * and cache-<index> for the other kinds, system/<id> for system saves) and
- * creates it on first open. rl_srv_install_fs reads it from $RELIFT_SAVE.
+ * creates it on first open. Save data is journaled as on the console: a
+ * mount works on a copy, IFileSystem::Commit makes the copy the saved state
+ * atomically (a crash at any point leaves the old or the new state), and a
+ * mount closed without Commit discards its writes. The saved state stays a
+ * plain directory tree. rl_srv_install_fs reads it from $RELIFT_SAVE.
  */
 RL_RUNTIME_API void rl_hos_fs_set_save(const char *dir);
 
