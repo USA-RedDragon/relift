@@ -1,0 +1,25 @@
+[package]
+name = "relift"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-analyze = { workspace = true }
+relift-build = { workspace = true }
+relift-cache = { workspace = true }
+relift-cpu-a64 = { workspace = true }
+relift-emit = { workspace = true }
+relift-guest = { workspace = true }
+relift-host = { workspace = true }
+relift-ir = { workspace = true }
+relift-manifest = { workspace = true }
+relift-proc = { workspace = true }
+relift-switch = { workspace = true }
+relift-switch-formats = { workspace = true }
+relift-testguest = { workspace = true }
+
+[lints]
+workspace = true

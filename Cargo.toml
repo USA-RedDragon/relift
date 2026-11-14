@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = ["core/*", "cpus/*", "guests/*/*", "override/*", "relift", "testguest"]
+exclude = ["check"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/USA-RedDragon/relift"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+relift-analyze = { path = "core/analyze" }
+relift-build = { path = "core/build" }
+relift-cache = { path = "core/cache" }
+relift-cpu-a64 = { path = "cpus/a64" }
+relift-emit = { path = "core/emit" }
+relift-guest = { path = "core/guest" }
+relift-host = { path = "core/host" }
+relift-ir = { path = "core/ir" }
+relift-manifest = { path = "core/manifest" }
+relift-override = { path = "override/api" }
+relift-override-macros = { path = "override/macros" }
+relift-proc = { path = "core/proc" }
+relift-switch = { path = "guests/switch/guest" }
+relift-switch-formats = { path = "guests/switch/formats" }
+relift-testguest = { path = "testguest" }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+strip = true
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

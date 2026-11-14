@@ -1,0 +1,15 @@
+[package]
+name = "relift-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-cache = { workspace = true }
+relift-host = { workspace = true }
+relift-proc = { workspace = true }
+
+[lints]
+workspace = true
