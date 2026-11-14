@@ -242,6 +242,55 @@ TEST(condvar_broadcast)
     CHECK_EQ(*word(S.mutex), 0);
 }
 
+static int cv_waiter_count(void)
+{
+    int n = 0;
+    hos_lock();
+    for (hos_thread *t = hos.cv_waiters; t; t = t->next_wait)
+        n++;
+    hos_unlock();
+    return n;
+}
+
+static bool wait_counter(uint32_t want)
+{
+    for (int spin = 0; spin < 2000; spin++) {
+        if (__atomic_load_n(word(S.counter), __ATOMIC_SEQ_CST) == want)
+            return true;
+        rl_sleep_ns(1000000);
+    }
+    return false;
+}
+
+TEST(condvar_signal_one_at_a_time)
+{
+    uint64_t heap;
+    rl_ctx *c = setup(&heap);
+    uint32_t me = self_handle();
+    uint32_t hs[4];
+    for (int i = 0; i < 4; i++) {
+        hs[i] = spawn(c, 0x8000300, i, heap);
+        CHECK_EQ(start(c, hs[i]), 0);
+    }
+    for (int spin = 0; spin < 2000 && cv_waiter_count() != 4; spin++)
+        rl_sleep_ns(1000000);
+    CHECK_EQ(cv_waiter_count(), 4);
+    mutex_lock(c, S.mutex, me);
+    *word(S.flag) = 1;
+    mutex_unlock(c, S.mutex, me);
+    for (uint32_t k = 1; k <= 4; k++) {
+        CHECK_EQ(t_svc(c, SVC_SIGNAL_PROCESS_WIDE_KEY, S.cv, 1, 0, 0, 0, 0), 0);
+        CHECK(wait_counter(k));
+        rl_sleep_ns(5000000);
+        CHECK_EQ(*word(S.counter), k);
+        CHECK_EQ(cv_waiter_count(), (int)(4 - k));
+    }
+    CHECK_EQ(*word(S.cv), 0);
+    for (int i = 0; i < 4; i++)
+        CHECK_EQ(join(c, heap, hs[i]), 0);
+    CHECK_EQ(*word(S.mutex), 0);
+}
+
 TEST(condvar_timeout)
 {
     uint64_t heap;
