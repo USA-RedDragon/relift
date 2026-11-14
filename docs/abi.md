@@ -305,9 +305,16 @@ no one function or file grows past what clang can compile in a few GB.
   `lp_dispatch`, which reaches a resume point in another piece by the same
   transfer.
 - Pieces go in shards of their own (`emit.shard-kib`, 4 MiB by default, the
-  byte budget for every shard). Each such shard's function map names the
-  guest function once, with the first piece it holds as `fn`; the map of
-  the shard holding the stub names the stub.
+  byte budget for every shard).
+- **Maps.** Every piece has its own `rl_fn_info` in the map of the shard
+  that holds it: `fn` is the piece, `guest_addr` its lowest instruction,
+  `guest_size` up to the next piece (the last piece to the end of the
+  function), and `fn_addr` the entry of the guest function. The stub has an
+  entry with `guest_size` 0 at the `guest_addr` of the first piece, which
+  keeps the table sorted; guest lookup never selects it. Host lookup goes by
+  the start of each host function, so a pc inside a piece resolves to the
+  right guest function in whatever order clang places the pieces; guest
+  lookup finds the piece that holds an address.
 
 ## 5. Calls
 
@@ -1071,12 +1078,14 @@ the shards lists them in `rl_unit.maps` and `rl_unit.map_count`.
 `rl_units_register` registers them for crash reports; a program without
 units may call `rl_fn_maps_register` itself.
 
-- `rl_fn_map`: `version` (`RL_FN_MAP_VERSION`, 1), `count`, `fns` sorted by
+- `rl_fn_map`: `version` (`RL_FN_MAP_VERSION`, 2), `count`, `fns` sorted by
   guest address with ranges that do not overlap, the guest `module` name,
   the `shard` name, the module's guest load address `module_base` (reports
   print `module+offset`), and `text_lo`/`text_hi`, the bounds of the host
   section that holds only lifted functions, or NULL when unknown.
-- `rl_fn_info` (40 bytes): `guest_addr`, `guest_size`, `flags` (as in the
+- `rl_fn_info` (48 bytes): `guest_addr`, `fn_addr` (the entry of the guest
+  function, equal to `guest_addr` unless the entry is a piece of a split
+  function, section 4), `guest_size`, `flags` (as in the
   dispatch entry), `fn` (the host function), `host_sym` (the identifier the
   emitter gave it, as above) and `guest_name` (the readable guest name,
   the demangled guest symbol, or NULL to print `host_sym`). The runtime has
@@ -1178,7 +1187,9 @@ only on the C library and the host OS.
 - Version 2 added the function maps (`rl_fn_info`, `rl_fn_map`,
   `rl_unit.map_count` and `rl_unit.maps` at the end of `rl_unit`) and the
   `RL_TEXT` placement of lifted functions (section 11). A unit written with
-  designated initializers and no maps still compiles unchanged.
+  designated initializers and no maps still compiles unchanged. The map
+  has its own `RL_FN_MAP_VERSION`; the entry for each piece of a split
+  function added `fn_addr` and made it 2.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a

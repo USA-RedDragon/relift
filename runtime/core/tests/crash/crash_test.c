@@ -35,6 +35,7 @@ enum {
     G_ILL = MODULE_BASE + 0x1300,
     G_CALLS_HOST = MODULE_BASE + 0x1400,
     G_RECURSE = MODULE_BASE + 0x1500,
+    G_PIECED = MODULE_BASE + 0x1600,
     WILD_ADDR = 0x40001230ull,
     SPACE = 1ull << 31,
 };
@@ -54,6 +55,9 @@ __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test9callshostEv);
 __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test5innerEv);
 __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test5outerEv);
 __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test7recurseEv);
+__attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test6piecedEv);
+__attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test11pieced_partE1);
+__attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test11pieced_partE2);
 
 RL_LIFTED(_ZN5guest4test4wildEv)
 {
@@ -122,13 +126,37 @@ RL_LIFTED(_ZN5guest4test7recurseEv)
     return rc;
 }
 
+RL_LIFTED(_ZN5guest4test11pieced_partE2)
+{
+    (void)c;
+    uint32_t v = 0x77;
+    memcpy(mem + WILD_ADDR, &v, 4);
+    g_sink += (int)v;
+    return RL_OK;
+}
+
+RL_LIFTED(_ZN5guest4test11pieced_partE1)
+{
+    int rc = _ZN5guest4test11pieced_partE2(c, mem);
+    g_sink++;
+    return rc;
+}
+
+RL_LIFTED(_ZN5guest4test6piecedEv)
+{
+    return _ZN5guest4test11pieced_partE1(c, mem);
+}
+
 static const rl_fn_info g_fns[] = {
-    { G_OUTER, 0x100, 0, _ZN5guest4test5outerEv, "_ZN5guest4test5outerEv", "guest::test::outer()" },
-    { G_INNER, 0x100, 0, _ZN5guest4test5innerEv, "_ZN5guest4test5innerEv", "guest::test::inner()" },
-    { G_WILD, 0x100, 0, _ZN5guest4test4wildEv, "_ZN5guest4test4wildEv", "guest::test::wild()" },
-    { G_ILL, 0x100, 0, _ZN5guest4test3illEv, "_ZN5guest4test3illEv", "guest::test::ill()" },
-    { G_CALLS_HOST, 0x100, 0, _ZN5guest4test9callshostEv, "_ZN5guest4test9callshostEv", "guest::test::callshost()" },
-    { G_RECURSE, 0x100, 0, _ZN5guest4test7recurseEv, "_ZN5guest4test7recurseEv", "guest::test::recurse()" },
+    { G_OUTER, G_OUTER, 0x100, 0, _ZN5guest4test5outerEv, "_ZN5guest4test5outerEv", "guest::test::outer()" },
+    { G_INNER, G_INNER, 0x100, 0, _ZN5guest4test5innerEv, "_ZN5guest4test5innerEv", "guest::test::inner()" },
+    { G_WILD, G_WILD, 0x100, 0, _ZN5guest4test4wildEv, "_ZN5guest4test4wildEv", "guest::test::wild()" },
+    { G_ILL, G_ILL, 0x100, 0, _ZN5guest4test3illEv, "_ZN5guest4test3illEv", "guest::test::ill()" },
+    { G_CALLS_HOST, G_CALLS_HOST, 0x100, 0, _ZN5guest4test9callshostEv, "_ZN5guest4test9callshostEv", "guest::test::callshost()" },
+    { G_RECURSE, G_RECURSE, 0x100, 0, _ZN5guest4test7recurseEv, "_ZN5guest4test7recurseEv", "guest::test::recurse()" },
+    { G_PIECED, G_PIECED, 0, 0, _ZN5guest4test6piecedEv, "_ZN5guest4test6piecedEv", "guest::test::pieced()" },
+    { G_PIECED, G_PIECED, 0x80, 0, _ZN5guest4test11pieced_partE1, "_ZN5guest4test11pieced_partE1", "guest::test::pieced()" },
+    { G_PIECED + 0x80, G_PIECED, 0x80, 0, _ZN5guest4test11pieced_partE2, "_ZN5guest4test11pieced_partE2", "guest::test::pieced()" },
 };
 
 static rl_fn_map g_map = {
@@ -196,6 +224,13 @@ static int child(const char *mode)
     rl_crash_install();
     g_mode = !strcmp(mode, "ill") ? 1 : !strcmp(mode, "host") ? 2 : 0;
     g_mem = mem;
+    if (!strcmp(mode, "pieces")) {
+        if ((uintptr_t)_ZN5guest4test11pieced_partE2 >= (uintptr_t)_ZN5guest4test11pieced_partE1)
+            return 7;
+        memset(g_ctx, 0, sizeof g_ctx);
+        _ZN5guest4test6piecedEv((rl_ctx *)(void *)g_ctx, mem);
+        return 4;
+    }
     if (!strcmp(mode, "fiber"))
         return on_fibers(0);
     if (!strcmp(mode, "overflow"))
@@ -260,6 +295,16 @@ static int parent(const char *self)
            strstr(r->out, "in guest function guest 0x7100001200 test+0x1200 guest::test::wild(), host _ZN5guest4test4wildEv+0x") != NULL);
     check_backtrace(r, "#0 guest 0x7100001200 test+0x1200 guest::test::wild()");
     expect(r, "wild: no fallback match", strstr(r->out, "(nearest)") == NULL);
+
+    if (spawn(self, "pieces", r) != 0)
+        return 1;
+    printf("--- fault in the second piece of a split function, pieces placed in reverse ---\n%s", r->out);
+    expect(r, "pieces: the child crashed", CRASHED(r));
+    expect(r, "pieces: report names the guest function of the piece",
+           strstr(r->out, "in guest function guest 0x7100001600 test+0x1600 guest::test::pieced(), host _ZN5guest4test11pieced_partE2+0x") != NULL);
+    expect(r, "pieces: the backtrace shows both pieces as the function",
+           strstr(r->out, "#1 guest 0x7100001600 test+0x1600 guest::test::pieced()") != NULL);
+    expect(r, "pieces: no fallback match", strstr(r->out, "(nearest)") == NULL);
 
     if (spawn(self, "ill", r) != 0)
         return 1;

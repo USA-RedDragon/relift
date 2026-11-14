@@ -16,8 +16,8 @@ static rl_fn_map g_m;
 static void setup(const void *lo, const void *hi)
 {
     rl_fn_maps_reset();
-    g_info[0] = (rl_fn_info){ 0x1000, 0x20, 0, fa, "_ZN5guest1m1aEv", "guest::m::a()" };
-    g_info[1] = (rl_fn_info){ 0x1020, 0x40, 0, fb, "_ZN5guest1m1bEv", NULL };
+    g_info[0] = (rl_fn_info){ 0x1000, 0x1000, 0x20, 0, fa, "_ZN5guest1m1aEv", "guest::m::a()" };
+    g_info[1] = (rl_fn_info){ 0x1020, 0x1020, 0x40, 0, fb, "_ZN5guest1m1bEv", NULL };
     g_m = (rl_fn_map){ RL_FN_MAP_VERSION, 2, g_info, "m", "m-0", 0x1000, lo, hi };
 }
 
@@ -101,4 +101,32 @@ TEST(fnmap_report_text)
     CHECK(strstr(buf, "in guest function guest 0x1020 m+0x20 _ZN5guest1m1bEv (nearest), host _ZN5guest1m1bEv+0x3") != NULL);
     CHECK(strstr(buf, "#1 guest 0x1000 m+0x0 guest::m::a() (nearest)") != NULL);
     CHECK(strstr(buf, "_ZN5guest1m1aEv+0x5 (guest::m::a())") != NULL);
+}
+
+static int pa(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 0; }
+static int pb(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 1; }
+static int pc_(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return 2; }
+
+TEST(fnmap_pieces_resolve_to_their_function_in_any_host_order)
+{
+    rl_fn_maps_reset();
+    rl_fn_info info[4];
+    info[0] = (rl_fn_info){ 0x2000, 0x2000, 0, 0, pa, "F_stub", "guest::f()" };
+    info[1] = (rl_fn_info){ 0x2000, 0x2000, 0x10, 0, pa, "F_part1", "guest::f()" };
+    info[2] = (rl_fn_info){ 0x2010, 0x2000, 0x20, 0, pb, "F_part2", "guest::f()" };
+    info[3] = (rl_fn_info){ 0x2030, 0x2000, 0x10, 0, pc_, "F_part3", "guest::f()" };
+    rl_fn_map m = { RL_FN_MAP_VERSION, 4, info, "m", "m-0", 0x2000, NULL, NULL };
+    const rl_fn_map *l[] = { &m };
+    CHECK_EQ(rl_fn_maps_register(l, 1), 0);
+    rl_fn_hit h;
+    CHECK(rl_fn_find_guest(0x2000, &h));
+    CHECK(h.fn == &info[1]);
+    CHECK(rl_fn_find_guest(0x2034, &h));
+    CHECK(h.fn == &info[3]);
+    CHECK_EQ(h.fn->fn_addr, 0x2000);
+    CHECK(!rl_fn_find_guest(0x2040, &h));
+    uintptr_t b = (uintptr_t)pb;
+    CHECK(rl_fn_find_host(b + 1, &h));
+    CHECK(h.fn == &info[2]);
+    CHECK_EQ(h.fn->fn_addr, 0x2000);
 }

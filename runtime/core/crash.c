@@ -181,8 +181,8 @@ static const char *fn_name(const rl_fn_info *f)
 static void put_guest_fn(out_buf *o, const rl_fn_hit *h)
 {
     const rl_fn_map *m = h->map;
-    put(o, "guest 0x%llx %s+0x%llx %s%s", (unsigned long long)h->fn->guest_addr, m->module ? m->module : "?",
-        (unsigned long long)(h->fn->guest_addr - m->module_base), fn_name(h->fn), h->exact ? "" : " (nearest)");
+    put(o, "guest 0x%llx %s+0x%llx %s%s", (unsigned long long)h->fn->fn_addr, m->module ? m->module : "?",
+        (unsigned long long)(h->fn->fn_addr - m->module_base), fn_name(h->fn), h->exact ? "" : " (nearest)");
 }
 
 static uintptr_t lookup_pc(const rl_crash_info *ci, int i)

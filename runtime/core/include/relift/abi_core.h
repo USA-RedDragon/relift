@@ -236,13 +236,20 @@ typedef struct rl_line_entry {
 } rl_line_entry;
 
 /** @brief rl_fn_map.version of this contract. */
-#define RL_FN_MAP_VERSION 1u
+#define RL_FN_MAP_VERSION 2u
 
-/** @brief One lifted function in a function map: its guest range, host code and names. */
+/**
+ * @brief One host function in a function map: its guest range, the guest
+ * function it belongs to, host code and names. A split function has an entry
+ * per piece, each over the guest range the piece holds; its stub has an
+ * entry with guest_size 0.
+ */
 typedef struct rl_fn_info {
-    /** @brief Guest entry address. */
+    /** @brief First guest address the host function covers. */
     uint64_t guest_addr;
-    /** @brief Guest bytes the function covers; [guest_addr, guest_addr + guest_size). */
+    /** @brief Guest entry address of the guest function (guest_addr for a function that is not split). */
+    uint64_t fn_addr;
+    /** @brief Guest bytes it covers; [guest_addr, guest_addr + guest_size). */
     uint32_t guest_size;
     /** @brief enum rl_fn_flags, as in the function's rl_fn_entry. */
     uint32_t flags;
@@ -469,7 +476,7 @@ typedef struct rl_dev_reply {
 } rl_dev_reply;
 
 _Static_assert(sizeof(rl_fn_entry) == 24, "rl_fn_entry size");
-_Static_assert(sizeof(rl_fn_info) == 40, "rl_fn_info size");
+_Static_assert(sizeof(rl_fn_info) == 48, "rl_fn_info size");
 _Static_assert(sizeof(rl_fn_map) == 56, "rl_fn_map size");
 _Static_assert(sizeof(rl_dev_hdr) == 16, "rl_dev_hdr size");
 _Static_assert(sizeof(rl_dev_hello) == 48, "rl_dev_hello size");

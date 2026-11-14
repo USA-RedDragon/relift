@@ -26,6 +26,8 @@ pub(crate) struct Piece {
     pub(crate) name: String,
     /// The C definition.
     pub(crate) text: String,
+    /// The lowest guest address of the instructions it holds; none for a stub.
+    pub(crate) first_pc: Option<u64>,
 }
 
 /// What one function emitted.
@@ -312,6 +314,7 @@ pub(crate) fn emit_function(
             pieces: vec![Piece {
                 name: f.name.clone(),
                 text: whole.text,
+                first_pc: None,
             }],
             callees: whole.callees,
             undefined: whole.undefined,
@@ -343,6 +346,7 @@ pub(crate) fn emit_function(
             "\nRL_TEXT RL_LIFTED({})\n{{\n    c->pc = UINT64_C({:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
             f.name, f.entry, split.names[split.piece_of[&f.entry]]
         ),
+        first_pc: None,
     }];
     let mut callees = BTreeSet::new();
     let mut undefined = 0;
@@ -360,6 +364,7 @@ pub(crate) fn emit_function(
         pieces.push(Piece {
             name: name.clone(),
             text: p.text,
+            first_pc: pcs.first().copied(),
         });
     }
     Emitted1 {

@@ -265,6 +265,7 @@ pub fn emit_with(
             .map_or(f.span, |n| f.span.min(n.entry.saturating_sub(f.entry)));
         let entry = MapEntry {
             entry: f.entry,
+            fn_addr: f.entry,
             span,
             flags: e.flags,
             host: String::new(),
@@ -292,14 +293,20 @@ pub fn emit_with(
             });
             continue;
         }
-        // A split function: its pieces fill shards of their own, each
-        // mapping the guest function to the first piece it holds.
+        // A split function: its pieces fill shards of their own, and each
+        // piece has a map entry over the guest range it holds. The stub
+        // has an empty range at the lowest address, so the table stays
+        // sorted.
         if !w.cur.fns.is_empty() {
             w.flush();
             on(k, fns.len());
         }
         let names: Vec<String> = e.pieces.iter().map(|p| p.name.clone()).collect();
         let callees = e.callees;
+        let end = f.entry.saturating_add(span);
+        let starts: Vec<u64> = e.pieces.iter().filter_map(|p| p.first_pc).collect();
+        let lo = starts.first().map_or(f.entry, |&s| s.min(f.entry));
+        let mut held = 0;
         for p in e.pieces {
             if !w.cur.fns.is_empty() && w.cur.body.len() + p.text.len() > budget {
                 w.flush();
@@ -307,13 +314,24 @@ pub fn emit_with(
             if w.cur.fns.is_empty() {
                 w.cur.callees.extend(callees.iter().copied());
                 w.cur.declared.extend(names.iter().cloned());
-                w.cur.fns.push(MapEntry {
-                    host: p.name.clone(),
-                    sym: p.name.clone(),
-                    ..entry.clone()
-                });
             }
+            let (start, size) = match p.first_pc {
+                None => (lo, 0),
+                Some(pc) => {
+                    let start = if held == 0 { lo } else { pc };
+                    held += 1;
+                    let stop = starts.get(held).copied().unwrap_or(end).min(end);
+                    (start, stop.saturating_sub(start))
+                }
+            };
             w.push(&f.name, &p.text);
+            w.cur.fns.push(MapEntry {
+                entry: start,
+                span: size,
+                host: p.name.clone(),
+                sym: p.name.clone(),
+                ..entry.clone()
+            });
             w.cur.defined.push(p.name);
         }
         w.flush();
@@ -336,7 +354,10 @@ pub fn emit_with(
 /// One function-map entry of a shard.
 #[derive(Clone)]
 struct MapEntry {
+    /// The first guest address the entry covers.
     entry: u64,
+    /// The entry of the guest function, which a piece belongs to.
+    fn_addr: u64,
     span: u64,
     flags: &'static str,
     /// The host function the entry names.
@@ -422,8 +443,9 @@ impl Shards<'_> {
             }
             let _ = writeln!(
                 infos,
-                "    {{ UINT64_C({:#x}), {}u, {}, {}, {:?}, {} }},",
+                "    {{ UINT64_C({:#x}), UINT64_C({:#x}), {}u, {}, {}, {:?}, {} }},",
                 f.entry,
+                f.fn_addr,
                 u32::try_from(size).unwrap_or(u32::MAX),
                 f.flags,
                 f.host,
@@ -438,7 +460,13 @@ impl Shards<'_> {
         }
         let shard = format!("shard{i:04}");
         let map = format!("{}_map{i}", opts.unit_symbol);
-        let owners: Vec<(u64, String)> = sh.fns.iter().map(|f| (f.entry, f.part.clone())).collect();
+        let mut owners: Vec<(u64, String)> = Vec::new();
+        for f in &sh.fns {
+            let o = (f.fn_addr, f.part.clone());
+            if !owners.contains(&o) {
+                owners.push(o);
+            }
+        }
         if opts.parts {
             // Each part maps the functions it defines; a zero entry ends
             // the table so that it is never empty.

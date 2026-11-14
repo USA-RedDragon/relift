@@ -243,7 +243,7 @@ fn shards_carry_a_function_map_and_the_unit_lists_them() {
     let s = shard(&out);
     assert!(s.contains("RL_TEXT_BOUNDS_DECLARE();"), "{s}");
     assert!(
-        s.contains("{ UINT64_C(0x100), 4u, RL_FN_MAY_UNWIND, F_100, \"F_100\", \"main\" },"),
+        s.contains("{ UINT64_C(0x100), UINT64_C(0x100), 4u, RL_FN_MAY_UNWIND, F_100, \"F_100\", \"main\" },"),
         "{s}"
     );
     assert!(s.contains("const rl_fn_map rl_unit_module_map0 = { RL_FN_MAP_VERSION, 1u, fns, \"module\", \"shard0000\", UINT64_C(0x0), RL_TEXT_LO, RL_TEXT_HI };"), "{s}");
@@ -302,7 +302,7 @@ fn map_ranges_stop_at_the_next_function() {
     let out = emit(&Toy, &[a, b], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("{ UINT64_C(0x100), 4u, RL_FN_MAY_UNWIND, F_100,"),
+        s.contains("{ UINT64_C(0x100), UINT64_C(0x100), 4u, RL_FN_MAY_UNWIND, F_100,"),
         "{s}"
     );
     let unit = &out.files.last().expect("unit").text;
@@ -385,29 +385,30 @@ fn a_large_function_is_split_into_pieces_in_shards_of_their_own() {
         all.contains("if (v2) { RL_STORE(); c->pc = UINT64_C(0x10c); RL_MUSTTAIL return F_100_part4(c, mem); }"),
         "{all}"
     );
-    // Every shard holding pieces maps the guest function once, to its
-    // first C function there; the dispatch entry is the stub.
     let shards: Vec<&File> = out
         .files
         .iter()
         .filter(|f| f.name.starts_with("shard"))
         .collect();
     assert!(shards.len() >= 3, "{}", shards.len());
-    for s in &shards[..shards.len() - 1] {
-        assert_eq!(
-            s.text.matches("{ UINT64_C(0x100), ").count(),
-            1,
-            "{}",
-            s.text
-        );
-        assert!(!s.text.contains("RL_LIFTED(F_110)\n{"), "{}", s.text);
-    }
+    // Every piece has a map entry over the guest range it holds, naming
+    // the guest function; the stub's entry has an empty range.
+    let maps: String = shards.iter().map(|s| s.text.as_str()).collect();
+    let entry = |range: &str, host: &str| {
+        let want = format!("{range}, RL_FN_MAY_UNWIND, {host}, \"{host}\"");
+        assert_eq!(maps.matches(&want).count(), 1, "{want}\n{maps}");
+    };
+    entry("{ UINT64_C(0x100), UINT64_C(0x100), 0u", "F_100");
+    entry("{ UINT64_C(0x100), UINT64_C(0x100), 4u", "F_100_part1");
+    entry("{ UINT64_C(0x104), UINT64_C(0x100), 4u", "F_100_part2");
+    entry("{ UINT64_C(0x108), UINT64_C(0x100), 4u", "F_100_part3");
+    entry("{ UINT64_C(0x10c), UINT64_C(0x100), 4u", "F_100_part4");
+    entry("{ UINT64_C(0x110), UINT64_C(0x110), 4u", "F_110");
     assert!(
         shards[0]
             .text
             .contains("RL_FN_MAY_UNWIND, F_100, \"F_100\"")
     );
-    assert!(shards[1].text.contains("RL_FN_MAY_UNWIND, F_100_part"));
     let unit = &out.files.last().expect("unit").text;
     assert!(
         unit.contains("{ UINT64_C(0x100), 16u, RL_FN_MAY_UNWIND, F_100 },"),
@@ -489,6 +490,33 @@ fn a_shard_in_parts_defines_and_maps_each_function_in_one_part() {
 }
 
 #[test]
+fn a_split_function_entered_above_its_first_instruction_keeps_its_map_sorted() {
+    let code = [
+        word(0x04, 0, 5),
+        word(0x05, 0, 1),
+        word(0x05, 0, 1),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x108, &blocks[0..4])];
+    let opts = Options {
+        shard_bytes: 1200,
+        piece_bytes: 1,
+        ..Options::default()
+    };
+    let out = emit(&Toy, &fns, &[], &opts);
+    let maps: String = out.files.iter().map(|f| f.text.as_str()).collect();
+    let want = |range: &str, host: &str| {
+        let line = format!("{range}, RL_FN_MAY_UNWIND, {host}, \"{host}\"");
+        assert_eq!(maps.matches(&line).count(), 1, "{line}\n{maps}");
+    };
+    want("{ UINT64_C(0x100), UINT64_C(0x108), 0u", "F_108");
+    want("{ UINT64_C(0x100), UINT64_C(0x108), 4u", "F_108_part1");
+    want("{ UINT64_C(0x104), UINT64_C(0x108), 4u", "F_108_part2");
+    want("{ UINT64_C(0x10c), UINT64_C(0x108), 12u", "F_108_part4");
+}
+
+#[test]
 fn a_split_function_in_parts_lands_whole_in_its_part() {
     let code = [
         word(0x04, 0, 5),
@@ -525,7 +553,7 @@ fn a_split_function_in_parts_lands_whole_in_its_part() {
         assert!(f.fns.contains(&(0x100, "F_100".into())), "{:?}", f.fns);
         let lines: Vec<&str> = f.text.lines().collect();
         for (i, l) in lines.iter().enumerate() {
-            if l.starts_with("RL_TEXT RL_LIFTED(F_100") || l.starts_with("    { UINT64_C(0x100),") {
+            if l.starts_with("RL_TEXT RL_LIFTED(F_100") || l.starts_with("    { UINT64_C(0x1") {
                 let guard = lines[..i]
                     .iter()
                     .rev()
@@ -540,8 +568,8 @@ fn a_split_function_in_parts_lands_whole_in_its_part() {
             }
         }
     }
-    // The stub, four pieces and one map entry per shard holding them.
-    assert_eq!(defs, 5 + holding.len());
+    // The stub, four pieces and one map entry for each of them.
+    assert_eq!(defs, 10);
     let header = parts_header(
         &holding
             .iter()
