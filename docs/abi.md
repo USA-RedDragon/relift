@@ -596,7 +596,11 @@ Mac unless marked]:
     `rl_resume` with the block's x0-x29, sp and pc (x30 is the pc, as on
     hardware). The jump to the pad is then the same table entry as in the
     libgcc shape. [verified: the SDK module's routine has exactly this
-    code; the synthetic unwinder in `relift/tests/tiny/eh.s` ends in it]
+    code, and in a game's build the table holds the override at it; the
+    synthetic unwinder in `relift/tests/tiny/eh.s` ends in it]. The
+    routine is reached by a tail branch only, so the guest layer also scans
+    the text for such routines and roots them (`known_routines`);
+    otherwise it would be folded into its caller and never replaced.
   Another unwinder needs the same only if its install step is not a
   computed jump: write its recognizer in `program::known` and a host
   function that converts its register layout to `rl_resume_regs`.
