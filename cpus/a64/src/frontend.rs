@@ -1,11 +1,20 @@
 //! The A64 [`Frontend`]: lifting through [`crate::lift`] and the A64 half of
 //! the lifted-code ABI (`runtime/cpus/a64/include/relift/a64/abi.h`).
 
-use relift_guest::{Frontend, Home, LiftFailure};
+use relift_guest::{Frontend, Home, LiftFailure, WasmIntrinsic};
 use relift_ir::{Block, FpOp, FpRound, Reg, RegFile, Width};
 
 use crate::lift::{self, sail, system};
 use crate::regs;
+
+/// `CNTFRQ_EL0`, `RL_CNTFRQ` in `abi.h`.
+const CNTFRQ: u128 = 19_200_000;
+/// `CTR_EL0`, `RL_CTR_EL0` in `abi.h`.
+const CTR_EL0: u128 = 0x8444_c004;
+/// `DCZID_EL0`, `RL_DCZID_EL0` in `abi.h`.
+const DCZID_EL0: u128 = 0x4;
+/// The `DC ZVA` block size, `RL_DC_ZVA_BYTES` in `abi.h`.
+const DC_ZVA_BYTES: u32 = 64;
 
 /// The A64 frontend.
 #[derive(Clone, Copy, Debug, Default)]
@@ -78,6 +87,18 @@ impl Frontend for A64 {
             system::MRS_FPSR => format!("rl_mrs_fpsr_flags({})", arg(0)),
             system::MSR_FPSR => "rl_msr_fpsr_flags()".into(),
             system::FP_RAISE => format!("rl_fp_raise({})", arg(0)),
+            _ => return None,
+        })
+    }
+
+    fn wasm_intrinsic(&self, name: &str) -> Option<WasmIntrinsic> {
+        Some(match name {
+            system::CNTPCT | system::WFE => WasmIntrinsic::Import,
+            system::CNTFRQ => WasmIntrinsic::Const(CNTFRQ),
+            system::CTR => WasmIntrinsic::Const(CTR_EL0),
+            system::DCZID => WasmIntrinsic::Const(DCZID_EL0),
+            system::DC_ZVA => WasmIntrinsic::ZeroBlock(DC_ZVA_BYTES),
+            system::CACHE_MAINT | system::SEV => WasmIntrinsic::Nop,
             _ => return None,
         })
     }
@@ -194,6 +215,44 @@ mod tests {
             Home::Field("c->tpidrro_el0".into())
         );
         assert_eq!(f.regs().len(), 73);
+    }
+
+    #[test]
+    fn wasm_intrinsics_match_the_c_header() {
+        let h = include_str!("../../../runtime/cpus/a64/include/relift/a64/abi.h");
+        let define = |name: &str| -> u128 {
+            let line = h
+                .lines()
+                .find(|l| l.starts_with(&format!("#define {name} ")))
+                .unwrap_or_else(|| panic!("abi.h defines {name}"));
+            let v = line[format!("#define {name} ").len()..]
+                .trim()
+                .trim_end_matches('u');
+            match v.strip_prefix("0x") {
+                Some(hex) => u128::from_str_radix(hex, 16).expect("hex"),
+                None => v.parse().expect("decimal"),
+            }
+        };
+        assert_eq!(CNTFRQ, define("RL_CNTFRQ"));
+        assert_eq!(CTR_EL0, define("RL_CTR_EL0"));
+        assert_eq!(DCZID_EL0, define("RL_DCZID_EL0"));
+        assert_eq!(u128::from(DC_ZVA_BYTES), define("RL_DC_ZVA_BYTES"));
+        assert_eq!(4u128 << (DCZID_EL0 & 0xf), u128::from(DC_ZVA_BYTES));
+        let f = A64;
+        for name in [
+            system::CNTPCT,
+            system::CNTFRQ,
+            system::CTR,
+            system::DCZID,
+            system::DC_ZVA,
+            system::CACHE_MAINT,
+            system::WFE,
+            system::SEV,
+        ] {
+            assert!(f.intrinsic(name, &["a".into()]).is_some(), "{name} in C");
+            assert!(f.wasm_intrinsic(name).is_some(), "{name} in wasm");
+        }
+        assert_eq!(f.wasm_intrinsic("a64.none"), None);
     }
 
     #[test]
