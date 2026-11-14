@@ -50,6 +50,8 @@ static const rl_setting_def g_runtime_defs[] = {
     },
 };
 
+static char *g_mods[RL_MODS_MAX];
+static size_t g_nmods;
 static slot g_slots[RL_SETTINGS_MAX];
 static size_t g_nslots;
 static char *g_app;
@@ -398,6 +400,51 @@ bad:
     return NULL;
 }
 
+static bool add_mod(const char *path)
+{
+    if (!path || !*path)
+        return false;
+    if (g_nmods >= RL_MODS_MAX) {
+        rl_log(RL_LOG_WARN, "settings", "more than %u mods; %s ignored", RL_MODS_MAX, path);
+        return false;
+    }
+    char *p = dup(path);
+    if (!p)
+        return false;
+    g_mods[g_nmods++] = p;
+    return true;
+}
+
+/** @brief Reads a JSON array of strings at j into the mod list; false when malformed. */
+static bool jmods(jp *j, int *applied)
+{
+    j->p++;
+    skip_ws(j);
+    if (*j->p == ']') {
+        j->p++;
+        return true;
+    }
+    for (;;) {
+        skip_ws(j);
+        char *s = jstring(j);
+        if (!s)
+            return false;
+        pthread_mutex_lock(&g_lock);
+        if (add_mod(s))
+            ++*applied;
+        pthread_mutex_unlock(&g_lock);
+        free(s);
+        skip_ws(j);
+        if (*j->p == ',') {
+            j->p++;
+            continue;
+        }
+        if (*j->p++ == ']')
+            return true;
+        return false;
+    }
+}
+
 int rl_settings_load_json(const char *text, const char *origin)
 {
     jp j = { text };
@@ -422,6 +469,20 @@ int rl_settings_load_json(const char *text, const char *origin)
             skip_ws(&j);
             char *val = NULL;
             bool null = false;
+            if (!strcmp(key, "mods") && *j.p == '[') {
+                bool ok = jmods(&j, &applied);
+                free(key);
+                if (!ok)
+                    goto bad;
+                skip_ws(&j);
+                if (*j.p == ',') {
+                    j.p++;
+                    continue;
+                }
+                if (*j.p++ != '}')
+                    goto bad;
+                break;
+            }
             if (*j.p == '"') {
                 val = jstring(&j);
             } else {
@@ -552,6 +613,18 @@ int rl_settings_args(int argc, char *const *argv)
     }
     for (int i = 1; i < argc; i++) {
         bool missing = false;
+        const char *v = flag_value(argc, argv, &i, "--relift-mods", &missing);
+        if (missing)
+            rl_log(RL_LOG_WARN, "settings", "--relift-mods needs a path; ignored");
+        if (!v)
+            continue;
+        pthread_mutex_lock(&g_lock);
+        if (add_mod(v))
+            applied++;
+        pthread_mutex_unlock(&g_lock);
+    }
+    for (int i = 1; i < argc; i++) {
+        bool missing = false;
         const char *v = flag_value(argc, argv, &i, "--relift-set", &missing);
         if (missing)
             rl_log(RL_LOG_WARN, "settings", "--relift-set needs key=value; ignored");
@@ -590,6 +663,9 @@ void rl_settings_reset(void)
         free(g_slots[i].env_text);
         free(g_slots[i].port);
     }
+    for (size_t i = 0; i < g_nmods; i++)
+        free(g_mods[i]);
+    g_nmods = 0;
     memset(g_slots, 0, sizeof g_slots);
     g_nslots = 0;
     free(g_app);
@@ -918,4 +994,20 @@ const char *relift_setting_str(const char *key) { return rl_setting_str(key); }
 bool relift_setting_binding(const char *key, const char **port, const char **control)
 {
     return rl_setting_binding(key, port, control);
+}
+
+size_t rl_settings_mod_count(void)
+{
+    pthread_mutex_lock(&g_lock);
+    size_t n = g_nmods;
+    pthread_mutex_unlock(&g_lock);
+    return n;
+}
+
+const char *rl_settings_mod(size_t index)
+{
+    pthread_mutex_lock(&g_lock);
+    const char *p = index < g_nmods ? g_mods[index] : NULL;
+    pthread_mutex_unlock(&g_lock);
+    return p;
 }

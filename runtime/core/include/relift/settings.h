@@ -135,6 +135,18 @@ RL_RUNTIME_API int rl_settings_load_file(const char *path);
  */
 RL_RUNTIME_API int rl_settings_args(int argc, char *const *argv);
 
+/** @brief Most mods a run can list. */
+#define RL_MODS_MAX 256u
+/**
+ * @brief The ordered mod list: the `mods` array of each settings file (user
+ * file first, then each --relift-settings in order), then every
+ * `--relift-mods <path>` flag in order. Later wins. The runtime only
+ * collects the paths.
+ */
+RL_RUNTIME_API size_t rl_settings_mod_count(void);
+/** @brief The path of mod `index`, or NULL past the end. */
+RL_RUNTIME_API const char *rl_settings_mod(size_t index);
+
 /** @brief Forgets every value set so far, and every declaration (tests). */
 RL_RUNTIME_API void rl_settings_reset(void);
 

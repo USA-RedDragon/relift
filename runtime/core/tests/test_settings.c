@@ -287,3 +287,19 @@ TEST(override_api_reads_the_same_values)
     CHECK_EQ(rl_settings_set("scale", "5"), RL_SETTING_OK);
     CHECK_EQ(relift_setting_int("scale"), 5);
 }
+
+TEST(settings_mod_list_orders_file_then_flags)
+{
+    fresh();
+    char *f = write_tmp("{\"mods\": [\"a\", \"b\"], \"scale\": 3}");
+    CHECK(f != NULL);
+    char *argv[] = { "x", "--relift-mods", "c", "--relift-settings", f, "--relift-mods=d", NULL };
+    CHECK_EQ(rl_settings_args(6, argv), 5);
+    unlink(f);
+    CHECK_EQ(rl_settings_mod_count(), 4);
+    CHECK(!strcmp(rl_settings_mod(0), "a") && !strcmp(rl_settings_mod(1), "b"));
+    CHECK(!strcmp(rl_settings_mod(2), "c") && !strcmp(rl_settings_mod(3), "d"));
+    CHECK(rl_settings_mod(4) == NULL);
+    CHECK_EQ(rl_settings_load_json("{\"mods\": [1]}", "t"), -1);
+    CHECK_EQ(rl_settings_load_json("{\"mods\": []}", "t"), 0);
+}
