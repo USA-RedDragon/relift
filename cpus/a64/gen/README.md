@@ -30,10 +30,14 @@ at lift time, and guest state becomes `relift-ir` builder calls. A value that
 must be known while generating (a width, a loop bound, the choice of decode
 clause) splits the template on the bits it depends on. The functions in
 `src/cut.rs` are not translated but written by hand: register access, the PC
-and branches, memory and the exclusive monitor, configuration checks that are
-no-ops at EL0 in the fixed Armv8.0-A configuration, `DecodeBitMasks`, and the
+and branches, memory, the exclusive monitor and the LSE atomics, configuration
+checks that are no-ops at EL0, `IsFeatureImplemented` (a lift-time
+`St::has` test for the extensions in `eval::LIFT_TIME_FEATURES`), the AES
+and SM4 table steps (`relift_ir::CryptoOp`, checked against the Sail tables
+on every run), the floating-point primitives, `DecodeBitMasks`, and the
 integer quotient of `SDIV` and `UDIV`. Their lift-time side is
-`src/lift/sail/rt.rs`.
+`src/lift/sail/rt.rs`, `half.rs` and `align.rs`. A run-time index into a
+value wider than 128 bits (TBL, TBX) becomes shifts of its 128-bit parts.
 
 Regenerate from the repository root:
 

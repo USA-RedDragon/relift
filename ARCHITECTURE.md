@@ -49,7 +49,7 @@ list of hard rules; read it before changing anything.
   `generated templates are current` job fetches the pinned sail-arm files,
   reruns the generator and fails on any difference. A form joins
   `cpus/a64/gen/forms.txt` only after `relift-check forms` passes it and its
-  mutation control.
+  mutation control on an oracle that implements its features.
 - **`unsafe` is forbidden** outside the roster in
   `relift/tests/unsafe_roster.rs`. Ceilings only fall.
 - **The CI gate** is `cargo clippy --workspace --all-targets --all-features
@@ -99,9 +99,16 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 
 `check/` is a separate Cargo workspace holding `relift-check`, the
 differential runner: it lifts A64 words, runs them in the `relift-ir`
-interpreter and in Unicorn (GPL-2) on random states, and compares the
+interpreter and on an oracle on random states, and compares the
 registers, flags, next PC and a data window; `--mutate` breaks the first
 live operation of each lifted block and expects the comparison to catch it.
+The oracles (`--oracle`, `check/src/oracle.rs`): Unicorn (GPL-2, linked,
+every feature, the CI default), `qemu` and `qemu-max` (the native harness
+`check/oracle/harness.c` under `qemu-aarch64 -cpu cortex-a57` or `max`,
+run as a separate program) and `m2` (the same harness on an Apple M2 over
+ssh). Words decode and lift for the oracle's feature set; `--undef` checks
+that words of features the oracle lacks lift to an undefined-instruction
+trap and fault there.
 Nothing in the main workspace may link it; `relift check` runs it as a
 subprocess. The root manifest excludes it. `--oracle rustyboi` swaps in a
 Game Boy SM83 reference built on the rustyboi-core emulator (pinned by git
@@ -110,7 +117,16 @@ names raw opcode bytes and a plain register struct, so the lifted-IR
 comparison can plug in later.
 
 `relift-cpu-a64` lifts each encoding with its Sail-generated template when it
-has one, else with a hand-written lifter. Templates that use the
+has one, else with a hand-written lifter, always for a CPU feature set
+(`decode::Features`, from the guest descriptor: `relift_switch::CPU_FEATURES`
+is the Cortex-A57, Armv8.0-A plus AES, PMULL, SHA1, SHA256 and CRC32). The
+decoder refuses encodings whose AARCHMRS feature condition fails, so they
+lift to UNDEFINED as on that CPU; where the Sail semantics test a feature
+the template tests `St::has` at lift time (one template for every level),
+and a template that assumed a feature absent refuses CPUs that have it.
+For the emitter, the cryptographic instructions lift to one `a64.*`
+intrinsic each (`lift/native.rs`), which the runtime runs on the host's own
+AES, SHA and PMULL instructions when it has them (docs/abi.md 10.2). Templates that use the
 floating-point cut assume FPCR zero and start with an `Op::Guard` that sends
 any other FPCR to the runtime's slow path; `relift-check --fpcr` checks that
 the guard trips (see `relift_ir::FpOp` for the contract). The hand-written lifters cover only

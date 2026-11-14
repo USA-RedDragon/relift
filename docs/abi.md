@@ -865,6 +865,12 @@ are also call boundaries. [inferred]
     on the frontend's `FP_FLAGS` slot, homed at the constant
     `RL_FP_FLAGS_ON`) and run on the slow path in flag-producing programs
     only.
+  - Binary16 arithmetic, square root, rounding to integral and every
+    conversion from or to binary16: the section 10.3 helpers compute in
+    software and raise no host flags, so these blocks carry the
+    `SLOW_FLAGS` guard too. The slow path runs them in the exact layer at
+    16 bits, which also applies FZ16, DN and AHP (AHP only in conversions,
+    as Arm's `FPUnpack` ignores it elsewhere).
   - Non-default FPCR (RMode, FZ, DN, AHP, FZ16) runs on the slow path in
     every program, which produces exact flags.
 - The reference mode `RELIFT_FP_EXACT=1` sets `RL_FPCR_EXACT` (FPCR bit 31,
@@ -993,7 +999,9 @@ for a NaN). Arithmetic rounds to nearest even, sets no flags and does not
 flush subnormals. A NaN result is the first NaN operand quieted (sign and
 payload kept, bit 9 set), else the default NaN 0x7e00; the IR leaves Arm's
 NaN selection, FZ16 and AHP to the frontend (as for binary32 and binary64,
-section 10.1). Every result is computed exactly in integers and rounded
+section 10.1): a block with a binary16 operation runs on the slow path
+under non-default FPCR (`SLOW_FPCR`) and in flag-producing programs
+(`SLOW_FLAGS`), where `rl_fp_slow` runs it in the exact layer. Every result is computed exactly in integers and rounded
 once, so it does not depend on the host FPU or on `_Float16` support.
 The reference is `core/ir/src/half.rs`. [verified: `tests/test_fp16.c`,
 exhaustive round trips through binary32 and binary64, exhaustive square
