@@ -1,0 +1,180 @@
+# relift architecture
+
+relift recompiles a console game's machine code ahead of time into portable
+C11 and builds it, with a C runtime that replaces the console's operating
+system, into a native program for the host.
+
+This file describes the **shape** of the workspace and the rules that hold it
+in that shape. Every structural claim names the file or test that enforces
+it. A rule with no test is marked as a convention. Section 0 is the short
+list of what bites; read it before changing anything.
+
+---
+
+## 0. What bites
+
+- **No game data in the repo, ever.** No dumps, keys, extracted files,
+  symbol lists, offsets or anything else derived from a game, and no game
+  names. CI never sees game data; tests use `relift-testguest` and synthetic
+  input.
+- **No GPL, AGPL or LGPL code.** Never copy from GPL projects (other
+  recompilers, emulators, QEMU). MIT, Apache-2.0, BSD, ISC and 0BSD sources
+  are fine with their notices kept. `cargo deny check` rejects GPL crates;
+  GPL code may only live in the separate `check/` workspace.
+- **The funnels.** `std::process::Command::new` goes through
+  `relift_proc::command`; file writes (`fs::write`, `File::create`,
+  `OpenOptions::open`, `fs::copy`, `io::copy`) go through `relift-cache`.
+  clippy fails anything else, and `relift/tests/funnels.rs` fails a second
+  opt-out.
+- **The charter.** `relift/tests/workspace_charter.rs` lists every crate's
+  band and exact dependencies, so a new crate or dependency needs a row
+  edit. The core never reaches a CPU or a guest, CPUs reach only `core/ir`
+  and `core/guest`, guests never reach each other, `override/` reaches
+  nothing in the tool, and nothing reaches `check/`.
+- **`unsafe` is forbidden** outside the roster in
+  `relift/tests/unsafe_roster.rs`. Ceilings only fall.
+- **The CI gate** is `cargo clippy --workspace --all-targets --all-features
+  -- -D warnings`. Writes (`cargo fmt`, `clippy --fix`) are package-scoped
+  with `-p`.
+
+## 1. The crate graph
+
+One Cargo workspace (`Cargo.toml`), `resolver = "2"`, edition 2024,
+toolchain pinned exactly in `rust-toolchain.toml`. Crates are grouped in
+folders by kind; package names stay flat (`relift-<area>`). `members` uses
+globs (`core/*`, `cpus/*`, `guests/*/*`, `override/*`) plus `relift` and
+`testguest`. No crate sits at the root of a folder that also holds nested
+crates, because a glob such as `guests/*/*` would then match that crate's
+`src/` and `cargo metadata` fails. So the Switch guest lives at
+`guests/switch/guest`.
+
+Read the graph bottom-up. Nothing in a lower band depends on a higher one.
+
+| Band | Crate | Folder | Role |
+|---|---|---|---|
+| 0 | `relift-ir` | `core/ir` | Guest-neutral IR: values, ops, explicit flags, memory ops with width, endianness and ordering |
+| 0 | `relift-cache` | `core/cache` | Content-addressed store, stage keys, and the one file writer |
+| 0 | `relift-host` | `core/host` | The host target list that emit and build share |
+| 0 | `relift-proc` | `core/proc` | The one subprocess runner |
+| 1 | `relift-guest` | `core/guest` | The guest contract and vocabulary, including the `Naming` trait a guest implements for its symbol scheme |
+| 2 | `relift-analyze` | `core/analyze` | Function boundaries, CFG, jump tables, indirect targets, generic over a CPU frontend |
+| 2 | `relift-emit` | `core/emit` | IR to C, shards, `#line` and listings, memory strategy per host target |
+| 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
+| 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
+| 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
+| 2 | `relift-switch-formats` | `guests/switch/formats` | NSP, NCA, BKTR, NSO, NPDM, tickets, keys |
+| 2 | `relift-switch` | `guests/switch/guest` | The Switch guest, over its formats and `relift-cpu-a64` |
+| 2 | `relift-testguest` | `testguest` | Tiny synthetic guest the core is tested against |
+| 3 | `relift` | `relift` | The binary: settings, command dispatch, guest registry |
+| apart 0 | `relift-override-macros` | `override/macros` | Override attribute macros for game repos |
+| apart 1 | `relift-override` | `override/api` | The Rust override API for game repos |
+
+`check/` is a separate Cargo workspace holding `relift-check`, the reference
+interpreter runner. It will link a GPL-2 emulator, so nothing in the main
+workspace may link it; `relift check` runs it as a subprocess. The root
+manifest excludes it.
+
+There is no core names crate: Itanium remangling is the Switch guest's
+business, and the core sees only `relift_guest::Naming`.
+
+The C runtime (`runtime/core`, `runtime/switch`) and the public override
+header (`include/relift/override.h`) sit outside Cargo and do not exist yet.
+
+## 2. Structural rules and the tests that enforce them
+
+All of these run in `cargo test` and in CI's checks job.
+
+| Rule | Enforced by |
+|---|---|
+| Every member has a charter row with a band and an exact list of declared normal, dev and build dependencies | `relift/tests/workspace_charter.rs`: `every_member_has_a_charter_row`, `every_declared_ceiling_holds` |
+| No member declares a member in a higher band, by any kind of edge | `workspace_charter.rs`: `the_band_order_holds` |
+| Nothing under `core/` reaches anything under `cpus/`, `guests/` or `testguest/` by any route | `workspace_charter.rs`: `core_reaches_no_cpu_and_no_guest` |
+| `cpus/` crates reach only `core/ir` and `core/guest` | `workspace_charter.rs`: `cpus_reach_only_ir_and_guest` |
+| No guest reaches another guest (each `guests/<name>/` is one guest, `testguest/` another) | `workspace_charter.rs`: `no_guest_reaches_another_guest` |
+| `override/` crates reach no tool crate | `workspace_charter.rs`: `override_reaches_no_tool_crate` |
+| Nothing reaches `check/`; it stays its own workspace and is excluded | `workspace_charter.rs`: `nothing_reaches_check` |
+| The charter reads this tree and its walk recurses | `workspace_charter.rs`: `the_reader_reads_this_workspace` |
+| `unsafe_code = "forbid"` for the workspace; every member inherits it or is on the roster with its own `deny` pair | `relift/tests/unsafe_roster.rs`: `the_workspace_lint_table_forbids_unsafe_code`, `every_member_inherits_the_forbid_or_is_rostered` |
+| No `unsafe` outside the roster; each rostered crate reads exactly its ceiling | `unsafe_roster.rs`: `no_unrostered_member_spells_unsafe`, `each_rostered_crate_holds_its_unsafe_ceiling` |
+| `std::process::Command::new` only in `relift-proc`; `fs::write`, `File::create`, `OpenOptions::open`, `fs::copy`, `io::copy` only in `relift-cache` | `clippy.toml` (clippy, `-D warnings` in CI) |
+| The funnel opt-out appears once per owning crate and nowhere else; no crate has its own `clippy.toml` | `relift/tests/funnels.rs` |
+| No GPL, AGPL or LGPL crate; crates.io only | `deny.toml` (`cargo deny check` in CI) |
+| The generated config table in `README.md` and `relift.example.toml` match the settings struct | CI step "generated config docs are current"; `relift/tests/cli.rs`: `the_example_config_loads` |
+
+The cut edges are folder rules read from each member's manifest path, so a
+new crate under `core/` or `guests/` is covered without editing the test.
+They walk the resolved graph from `cargo metadata` over every target: the
+first hop may be any kind (a crate's tests compile what its dev-dependencies
+reach), later hops are normal or build. A direct-name check would miss an
+indirect route. Each absence rule asserts a presence control, so an empty
+walk cannot pass.
+
+Negative control: adding `relift-switch` as a dev-dependency of `relift-ir`
+fails `every_declared_ceiling_holds`, `the_band_order_holds`,
+`core_reaches_no_cpu_and_no_guest` (with the route
+`relift-ir -> (dev) relift-switch -> (normal) relift-cpu-a64`) and
+`the_reader_reads_this_workspace`. As a normal dependency Cargo refuses it
+outright as a cycle.
+
+### Ratchets
+
+A ceiling equals the count it measures. The change that sheds an occurrence
+lowers the constant in the same commit; a ceiling is never raised without a
+written plan amendment, and a needle is never hidden by re-spelling it.
+`relift-override` holds its roster seat at a ceiling of 0 because overrides
+will export symbols with `#[unsafe(export_name)]`, which `forbid` rejects.
+
+### The funnels
+
+`clippy.toml` disallows the subprocess and file-write APIs everywhere. The
+owning crate's single funnel function opts out with
+`#[expect(clippy::disallowed_methods, reason = ...)]`: `relift_proc::command`
+and `relift_cache::write_if_changed`. `expect` rather than `allow`, so a
+funnel that stops calling the API fails the lint. Tests use the funnels too.
+
+## 3. Conventions (not enforced by a test)
+
+- Every registry dependency is pinned exactly (`=x.y.z`) in
+  `[workspace.dependencies]`; members write `{ workspace = true }`. Patched
+  upstream crates go in `vendor/` behind `[patch.crates-io]`.
+- `cfg(target_*)` may select a value, dependency or type alias, never fork
+  behavior inside a function body.
+- No comments by default; rustdoc instead. At most six `//` comments per
+  crate (`// SAFETY:` exempt). ASCII only.
+- `cargo fmt` and clippy fixes are package-scoped (`-p`); only checks run
+  workspace-wide.
+- No game data, keys or anything derived from them (symbol lists included)
+  in this repository. CI runs synthetic equivalents.
+
+## 4. Builds and CI
+
+`.github/workflows/ci.yaml`, GitHub-hosted runners only:
+
+- **checks** (ubuntu-latest, the pinned toolchain through rustup): fmt,
+  clippy `--all-targets --all-features -D warnings` (main and `check/`
+  workspaces), the structural tests, all tests, the generated config docs,
+  `cargo deny check`.
+- **macos** (macos-latest): all tests.
+- **cross**: `relift` built for `x86_64-unknown-linux-gnu`,
+  `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-gnullvm`,
+  `aarch64-pc-windows-gnullvm`, `aarch64-apple-darwin` and
+  `x86_64-apple-darwin` inside `ghcr.io/usa-reddragon/rust-cross`, pinned by
+  digest. The job frees disk first and then uses `docker run`, since a
+  job-level `container:` is pulled before any step can free space. It fails
+  if the image's `RUST_VERSION` differs from `rust-toolchain.toml`.
+
+Profiles: dev with `debug = "line-tables-only"` and dependencies at
+`opt-level = 2`; release with `lto = true`, `codegen-units = 1`,
+`panic = "abort"`, `strip = true`.
+
+## 5. Before landing
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+cargo deny check
+```
+
+`git config core.hooksPath .githooks` turns on the tracked hooks: pre-commit
+rustfmt-checks staged `.rs` files, pre-push runs the clippy gate.
