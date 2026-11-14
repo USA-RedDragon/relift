@@ -18,7 +18,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use relift_guest::Module;
-use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
+use relift_ir::interp::{self, Fault, GuestMemory, NoIntrinsics, State};
 use relift_ir::{Block, Flow, Next, Op, Reg};
 
 /// The most instructions between the conditional branch and the jump.
@@ -56,15 +56,52 @@ fn has_memory(b: &Block) -> bool {
     })
 }
 
-/// Runs `blocks` in order from `state`; the address after the last one, or
+/// The module's bytes, read in place: table code only loads (the body is
+/// refused when it stores), so a write faults rather than copying the image.
+struct Image<'a> {
+    base: u64,
+    bytes: &'a [u8],
+}
+
+impl GuestMemory for Image<'_> {
+    fn read(&mut self, addr: u64, buf: &mut [u8]) -> Result<(), Fault> {
+        let fault = Fault {
+            addr,
+            size: u32::try_from(buf.len()).unwrap_or(u32::MAX),
+            write: false,
+        };
+        let off = addr
+            .checked_sub(self.base)
+            .and_then(|o| usize::try_from(o).ok())
+            .ok_or(fault)?;
+        let src = off
+            .checked_add(buf.len())
+            .and_then(|end| self.bytes.get(off..end))
+            .ok_or(fault)?;
+        buf.copy_from_slice(src);
+        Ok(())
+    }
+
+    fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), Fault> {
+        Err(Fault {
+            addr,
+            size: u32::try_from(data.len()).unwrap_or(u32::MAX),
+            write: true,
+        })
+    }
+}
+
+/// Runs `blocks` (lifted, so verified when built) in order from `state`; the address after the last one, or
 /// `None` when the path leaves the sequence or an instruction faults.
-fn run(blocks: &[Block], state: &mut State, mem: &mut FlatMemory) -> Option<u64> {
+fn run(blocks: &[Block], state: &mut State, mem: &mut Image<'_>) -> Option<u64> {
     let mut next = blocks.first()?.pc;
     for b in blocks {
         if b.pc != next {
             return None;
         }
-        next = interp::run(b, state, mem, &mut NoIntrinsics).ok()?.next;
+        next = interp::run_verified(b, state, mem, &mut NoIntrinsics)
+            .ok()?
+            .next;
     }
     Some(next)
 }
@@ -131,9 +168,9 @@ pub(crate) fn resolve(
             }
         }
     }
-    let mut mem = FlatMemory {
+    let mut mem = Image {
         base: module.base,
-        bytes: module.image.clone(),
+        bytes: &module.image,
     };
     let fresh = |seeds: &HashMap<Reg, u128>, r: Reg, idx: u64| {
         let mut st = State::new(body[0].regs.len());
