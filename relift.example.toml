@@ -7,3 +7,7 @@ color = "auto"
 clang = ""
 zig = ""
 ninja = ""
+
+[emit]
+shard-kib = 4096
+piece-kib = 1024

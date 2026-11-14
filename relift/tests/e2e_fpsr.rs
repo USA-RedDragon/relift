@@ -61,11 +61,12 @@ fn scratch(name: &str) -> PathBuf {
     d
 }
 
-fn relift(dir: &Path, args: &[&str]) -> std::process::Output {
+fn relift(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
     relift_proc::command(env!("CARGO_BIN_EXE_relift"))
         .args(args)
         .env_remove("RELIFT_JOBS")
         .env_remove("RELIFT_FP_EXACT")
+        .envs(env.iter().copied())
         .current_dir(dir)
         .output()
         .expect("the relift binary runs")
@@ -121,6 +122,16 @@ fn build_and_run(name: &str, read: bool) -> (String, String, String) {
 
 /// Builds and runs `text` with `rodata`; gives stdout, stderr and program.c.
 fn build_and_run_text(name: &str, text: Vec<u8>, rodata: Vec<u8>) -> (String, String, String) {
+    build_and_run_env(name, text, rodata, &[])
+}
+
+/// As [`build_and_run_text`], with more environment for `relift run`.
+fn build_and_run_env(
+    name: &str,
+    text: Vec<u8>,
+    rodata: Vec<u8>,
+    env: &[(&str, &str)],
+) -> (String, String, String) {
     let root = scratch(name);
     let exefs = root.join("dump/exefs");
     std::fs::create_dir_all(&exefs).expect("the dump dir is creatable");
@@ -138,13 +149,13 @@ fn build_and_run_text(name: &str, text: Vec<u8>, rodata: Vec<u8>) -> (String, St
     let project = root.join("fpsr");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     let cache = root.join("cache").display().to_string();
-    let out = relift(&project, &["--cache-dir", &cache, "import", "../dump"]);
+    let out = relift(&project, &["--cache-dir", &cache, "import", "../dump"], &[]);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = relift(&project, &["--cache-dir", &cache, "-j", "4", "run"]);
+    let out = relift(&project, &["--cache-dir", &cache, "-j", "4", "run"], env);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "{stderr}");
@@ -211,4 +222,67 @@ fn only_the_function_whose_fp_reaches_a_read_produces_flags() {
     assert!(parts.contains("#define RL_PART1_shard0000 1"), "{parts}");
     assert!(root.join("obj/lifted/0_main/shard0000.p1.o").exists());
     assert!(root.join("obj/lifted/0_main/shard0000.o").exists());
+}
+
+#[test]
+fn a_flagged_function_split_into_pieces_is_all_in_part_1() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let mut rodata = MSG.to_vec();
+    rodata.resize(0x20, 0);
+    rodata.extend_from_slice(MSG2);
+    let (stdout, stderr, _) = build_and_run_env(
+        "e2e-fpsr-split",
+        two_functions(),
+        rodata,
+        &[
+            ("RELIFT_EMIT_PIECE_KIB", "0"),
+            ("RELIFT_EMIT_SHARD_KIB", "0"),
+        ],
+    );
+    assert_eq!(stdout, "fp ok\ndivide by zero seen\n", "{stderr}");
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("e2e-fpsr-split/cache/projects/fpsr/build/host");
+    let c = root.join("c/0_main");
+    let parts =
+        std::fs::read_to_string(c.join("relift_parts.h")).expect("the parts header is readable");
+    // One name, defined again (identically) for each shard holding it.
+    let defs: std::collections::BTreeSet<&str> = parts
+        .lines()
+        .filter(|l| l.starts_with("#define RL_PART_"))
+        .collect();
+    assert_eq!(defs.len(), 1, "{parts}");
+    assert!(defs.iter().all(|d| d.contains("fn_00000038")), "{parts}");
+    // Every shard that defines a piece of A (its stub or a part) compiles
+    // a part 1.
+    let mut holding = 0;
+    for e in std::fs::read_dir(&c).expect("the C dir is readable") {
+        let path = e.expect("an entry").path();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !name.starts_with("shard") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("a shard is readable");
+        if !text.contains("fn_00000038E") {
+            continue;
+        }
+        let stem = name.trim_end_matches(".c");
+        if text.contains("RL_TEXT RL_LIFTED(_ZN5guest4main11fn_00000038E") {
+            holding += 1;
+            assert!(
+                parts.contains(&format!("#define RL_PART1_{stem} 1")),
+                "{stem}: {parts}"
+            );
+            assert!(
+                root.join(format!("obj/lifted/0_main/{stem}.p1.o")).exists(),
+                "{stem}"
+            );
+        }
+    }
+    assert!(holding >= 2, "{holding} shards hold pieces of A");
 }

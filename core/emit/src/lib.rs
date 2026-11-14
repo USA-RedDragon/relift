@@ -80,11 +80,25 @@ pub struct Override {
     pub resume_point: bool,
 }
 
+/// The default [`Options::shard_bytes`]: clang at `-O2` needs about 100 MB
+/// of memory plus 120 bytes per byte of C, so a 4 MiB shard compiles in
+/// well under 1 GB.
+pub const SHARD_BYTES: usize = 4 << 20;
+
+/// The default [`Options::piece_bytes`].
+pub const PIECE_BYTES: usize = 1 << 20;
+
 /// Emitter options.
 #[derive(Clone, Debug)]
 pub struct Options {
-    /// The most functions per shard file.
-    pub shard_size: usize,
+    /// The most bytes of C per shard file. A shard closes before the
+    /// function that would take it past this; a function larger on its own
+    /// gets shards of its own.
+    pub shard_bytes: usize,
+    /// The most bytes of C per C function: a guest function whose C is
+    /// longer is split into pieces of about this size, packed into shards
+    /// of their own.
+    pub piece_bytes: usize,
     /// The unit's name, for reports.
     pub unit_name: String,
     /// The C symbol of the unit table (`const rl_unit`), which the program
@@ -99,7 +113,8 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Options {
         Options {
-            shard_size: 256,
+            shard_bytes: SHARD_BYTES,
+            piece_bytes: PIECE_BYTES,
             unit_name: "module".into(),
             unit_symbol: "rl_unit_module".into(),
             module_base: 0,
@@ -183,11 +198,8 @@ pub fn emit(
     emit_with(fe, fns, overrides, opts, &mut |_, _| {})
 }
 
-fn shard_count(functions: usize, opts: &Options) -> usize {
-    functions.div_ceil(opts.shard_size.max(1))
-}
-
-/// As [`emit`], calling `on(done, total)` after every shard.
+/// As [`emit`], calling `on(done, total)` with the functions emitted so far
+/// and the total after every shard.
 pub fn emit_with(
     fe: &dyn Frontend,
     fns: &[Function<'_>],
@@ -228,66 +240,196 @@ pub fn emit_with(
         text: PRELUDE.into(),
         fns: Vec::new(),
     });
-    let header = format!("{}#include \"{PRELUDE_NAME}\"\n", includes(fe));
-    let mut maps = Vec::new();
+    let mut w = Shards {
+        header: format!("{}#include \"{PRELUDE_NAME}\"\n", includes(fe)),
+        opts,
+        targets: &targets,
+        maps: Vec::new(),
+        files: Vec::new(),
+        cur: Shard::default(),
+    };
     let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
-    let shards = shard_count(fns.len(), opts);
-    for (i, chunk) in fns.chunks(opts.shard_size.max(1)).enumerate() {
-        let mut body = String::new();
-        let mut callees = BTreeSet::new();
-        let mut infos = String::new();
-        let mut defined = Vec::new();
-        for (k, f) in chunk.iter().enumerate() {
-            let size = chunk
-                .get(k + 1)
-                .map_or(f.span, |n| f.span.min(n.entry - f.entry));
-            let e = func::emit_function(fe, f, &targets);
-            out.undefined += e.undefined;
-            callees.extend(e.callees);
-            defined.push((f.entry, f.name.clone()));
-            let part = format!("#if defined(RL_PART_{}) == RL_PART\n", f.name);
-            if opts.parts {
-                body.push_str(&part);
-                infos.push_str(&part);
+    let budget = opts.shard_bytes.max(1);
+    for (k, f) in fns.iter().enumerate() {
+        let e = func::emit_function(fe, f, &targets, opts.piece_bytes.max(1));
+        out.undefined += e.undefined;
+        flags.insert(f.entry, e.flags);
+        let entry = MapEntry {
+            entry: f.entry,
+            span: f.span,
+            flags: e.flags,
+            host: String::new(),
+            guest_name: f.guest_name.clone(),
+            sym: f.name.clone(),
+            part: f.name.clone(),
+        };
+        if e.pieces.len() == 1 {
+            if !w.cur.fns.is_empty() && w.cur.body.len() + e.len() > budget {
+                w.flush();
+                on(k, fns.len());
             }
-            body.push_str(&e.text);
-            flags.insert(f.entry, e.flags);
-            let _ = writeln!(
-                infos,
-                "    {{ UINT64_C({:#x}), {}u, {}, {}, {:?}, {} }},",
-                f.entry,
-                u32::try_from(size).unwrap_or(u32::MAX),
-                e.flags,
-                f.name,
-                f.name,
-                f.guest_name
-                    .as_ref()
-                    .map_or_else(|| "0".to_string(), |g| format!("{g:?}"))
-            );
-            if opts.parts {
-                body.push_str("#endif\n");
-                infos.push_str("#endif\n");
-            }
+            w.cur.callees.extend(e.callees);
+            let p = e
+                .pieces
+                .into_iter()
+                .next()
+                .map(|p| p.text)
+                .unwrap_or_default();
+            w.push(&f.name, &p);
+            w.cur.defined.push(f.name.clone());
+            w.cur.fns.push(MapEntry {
+                host: f.name.clone(),
+                ..entry
+            });
+            continue;
         }
-        let own: BTreeSet<u64> = chunk.iter().map(|f| f.entry).collect();
-        let mut text = header.clone();
+        // A split function: its pieces fill shards of their own, each
+        // mapping the guest function to the first piece it holds.
+        if !w.cur.fns.is_empty() {
+            w.flush();
+            on(k, fns.len());
+        }
+        let names: Vec<String> = e.pieces.iter().map(|p| p.name.clone()).collect();
+        let callees = e.callees;
+        for p in e.pieces {
+            if !w.cur.fns.is_empty() && w.cur.body.len() + p.text.len() > budget {
+                w.flush();
+            }
+            if w.cur.fns.is_empty() {
+                w.cur.callees.extend(callees.iter().copied());
+                w.cur.declared.extend(names.iter().cloned());
+                w.cur.fns.push(MapEntry {
+                    host: p.name.clone(),
+                    sym: p.name.clone(),
+                    ..entry.clone()
+                });
+            }
+            w.push(&f.name, &p.text);
+            w.cur.defined.push(p.name);
+        }
+        w.flush();
+        on(k + 1, fns.len());
+    }
+    if !w.cur.fns.is_empty() {
+        w.flush();
+        on(fns.len(), fns.len());
+    }
+    let maps = std::mem::take(&mut w.maps);
+    out.files.extend(w.files);
+    out.files.push(File {
+        name: "unit.c".into(),
+        text: unit_table(fe, &fns, overrides, &flags, &maps, opts),
+        fns: Vec::new(),
+    });
+    out
+}
+
+/// One function-map entry of a shard.
+#[derive(Clone)]
+struct MapEntry {
+    entry: u64,
+    span: u64,
+    flags: &'static str,
+    /// The host function the entry names.
+    host: String,
+    /// Its symbol name, for reports.
+    sym: String,
+    guest_name: Option<String>,
+    /// The C name of the guest function, which names its part macro.
+    part: String,
+}
+
+/// The shard being filled.
+#[derive(Default)]
+struct Shard {
+    body: String,
+    callees: BTreeSet<u64>,
+    /// The C functions it defines.
+    defined: Vec<String>,
+    /// More C functions it declares (the pieces of a split function).
+    declared: Vec<String>,
+    fns: Vec<MapEntry>,
+}
+
+/// The shards written so far.
+struct Shards<'a> {
+    header: String,
+    opts: &'a Options,
+    targets: &'a BTreeMap<u64, Target>,
+    maps: Vec<String>,
+    files: Vec<File>,
+    cur: Shard,
+}
+
+impl Shards<'_> {
+    /// Adds C of the guest function named `part` to the current shard,
+    /// inside its part guard when the module is emitted in parts.
+    fn push(&mut self, part: &str, text: &str) {
+        if self.opts.parts {
+            let _ = writeln!(self.cur.body, "#if defined(RL_PART_{part}) == RL_PART");
+        }
+        self.cur.body.push_str(text);
+        if self.opts.parts {
+            self.cur.body.push_str("#endif\n");
+        }
+    }
+
+    /// Closes the current shard into a file.
+    fn flush(&mut self) {
+        let sh = std::mem::take(&mut self.cur);
+        let i = self.files.len();
+        let opts = self.opts;
+        let own: BTreeSet<&str> = sh.defined.iter().map(String::as_str).collect();
+        let mut text = self.header.clone();
         if opts.parts {
             let _ = writeln!(
                 text,
                 "#include \"{PARTS_NAME}\"\n#ifndef RL_PART\n#define RL_PART 0\n#endif"
             );
         }
-        for c in callees.difference(&own) {
-            if let Some(t) = targets.get(c).filter(|t| t.lifted) {
+        let mut decl: BTreeSet<&str> = BTreeSet::new();
+        for c in &sh.callees {
+            if let Some(t) = self.targets.get(c).filter(|t| t.lifted)
+                && !own.contains(t.name.as_str())
+                && decl.insert(&t.name)
+            {
                 let _ = writeln!(text, "RL_LIFTED({});", t.name);
             }
         }
-        for f in chunk {
-            let _ = writeln!(text, "RL_LIFTED({});", f.name);
+        for d in sh.declared.iter().chain(&sh.defined) {
+            if decl.insert(d) {
+                let _ = writeln!(text, "RL_LIFTED({d});");
+            }
         }
-        text.push_str(&body);
+        text.push_str(&sh.body);
+        let mut infos = String::new();
+        for (k, f) in sh.fns.iter().enumerate() {
+            let size = sh
+                .fns
+                .get(k + 1)
+                .map_or(f.span, |n| f.span.min(n.entry - f.entry));
+            if opts.parts {
+                let _ = writeln!(infos, "#if defined(RL_PART_{}) == RL_PART", f.part);
+            }
+            let _ = writeln!(
+                infos,
+                "    {{ UINT64_C({:#x}), {}u, {}, {}, {:?}, {} }},",
+                f.entry,
+                u32::try_from(size).unwrap_or(u32::MAX),
+                f.flags,
+                f.host,
+                f.sym,
+                f.guest_name
+                    .as_ref()
+                    .map_or_else(|| "0".to_string(), |g| format!("{g:?}"))
+            );
+            if opts.parts {
+                infos.push_str("#endif\n");
+            }
+        }
         let shard = format!("shard{i:04}");
         let map = format!("{}_map{i}", opts.unit_symbol);
+        let owners: Vec<(u64, String)> = sh.fns.iter().map(|f| (f.entry, f.part.clone())).collect();
         if opts.parts {
             // Each part maps the functions it defines; a zero entry ends
             // the table so that it is never empty.
@@ -296,35 +438,28 @@ pub fn emit_with(
                 "\nRL_TEXT_BOUNDS_DECLARE();\nstatic const rl_fn_info fns[] = {{\n{infos}    {{ 0 }},\n}};\n#if RL_PART == 0\n#define RL_PART_MAP {map}\n#else\n#define RL_PART_MAP {map}_p1\n#endif\nconst rl_fn_map RL_PART_MAP;\nconst rl_fn_map RL_PART_MAP = {{ RL_FN_MAP_VERSION, (uint32_t)(sizeof fns / sizeof fns[0]) - 1u, fns, {:?}, {shard:?}, UINT64_C({:#x}), RL_TEXT_LO, RL_TEXT_HI }};\n",
                 opts.unit_name, opts.module_base
             );
-            maps.push(map);
-            out.files.push(File {
+            self.maps.push(map);
+            self.files.push(File {
                 name: format!("{shard}.c"),
                 text,
-                fns: defined,
+                fns: owners,
             });
-            continue;
+            return;
         }
         let _ = write!(
             text,
             "\nRL_TEXT_BOUNDS_DECLARE();\nstatic const rl_fn_info fns[] = {{\n{infos}}};\nconst rl_fn_map {map};\nconst rl_fn_map {map} = {{ RL_FN_MAP_VERSION, {}u, fns, {:?}, {shard:?}, UINT64_C({:#x}), RL_TEXT_LO, RL_TEXT_HI }};\n",
-            chunk.len(),
+            sh.fns.len(),
             opts.unit_name,
             opts.module_base
         );
-        maps.push(map);
-        out.files.push(File {
+        self.maps.push(map);
+        self.files.push(File {
             name: format!("{shard}.c"),
             text,
-            fns: defined,
+            fns: owners,
         });
-        on(i + 1, shards);
     }
-    out.files.push(File {
-        name: "unit.c".into(),
-        text: unit_table(fe, &fns, overrides, &flags, &maps, opts),
-        fns: Vec::new(),
-    });
-    out
 }
 
 fn includes(fe: &dyn Frontend) -> String {

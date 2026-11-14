@@ -35,3 +35,46 @@ fn a_tiny_program_builds_and_runs() {
         "{stderr}"
     );
 }
+
+/// The same program with every function split into one C function per
+/// instruction and one file per piece: the loop's back edge, the call and
+/// its return cross pieces through the context, and the output is the same.
+#[test]
+fn a_tiny_program_split_into_pieces_runs_the_same() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let root = tiny::scratch("e2e-tiny-split");
+    let project = tiny::dump(&root);
+    let cache = root.join("cache").display().to_string();
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "import", "../dump"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
+        .args(["--cache-dir", &cache, "-j", "4", "run"])
+        .env_remove("RELIFT_JOBS")
+        .env("RELIFT_EMIT_PIECE_KIB", "0")
+        .env("RELIFT_EMIT_SHARD_KIB", "0")
+        .current_dir(&project)
+        .output()
+        .expect("the relift binary runs");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert_eq!(stdout, "hello from relift\n".repeat(3), "{stderr}");
+    let c = root.join("cache/projects/tiny/build/host/c/0_main");
+    let shards = std::fs::read_dir(&c)
+        .expect("the C dir exists")
+        .filter(|e| {
+            e.as_ref()
+                .is_ok_and(|e| e.file_name().to_string_lossy().starts_with("shard"))
+        })
+        .count();
+    let text = std::fs::read_to_string(c.join("shard0000.c")).expect("shard0000.c");
+    assert!(text.contains("_part1(c, mem);"), "{text}");
+    assert!(shards > 4, "{shards} shards");
+}

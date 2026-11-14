@@ -88,15 +88,17 @@ Per-game data lives in each game project's `game.toml`, not here.
 
 <!-- configulator:begin -->
 
-| Key               | Type    | Default | Environment              | Flag                | Description                                                                           |
-|-------------------|---------|---------|--------------------------|---------------------|---------------------------------------------------------------------------------------|
-| `cache-dir`       | string  |         | `RELIFT_CACHE_DIR`       | `--cache-dir`       | where lifted, emitted and built artifacts are cached (empty: the user cache dir)      |
-| `jobs`            | integer | `0`     | `RELIFT_JOBS`            | `-j`, `--jobs`      | parallel compile jobs (0: one per CPU)                                                |
-| `runtime-dir`     | string  |         | `RELIFT_RUNTIME_DIR`     | `--runtime-dir`     | the C runtime sources to build against (empty: the ones beside this relift's source)  |
-| `color`           | string  | `auto`  | `RELIFT_COLOR`           | `--color`           | color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never |
-| `toolchain.clang` | string  |         | `RELIFT_TOOLCHAIN_CLANG` | `--toolchain.clang` | the clang driver                                                                      |
-| `toolchain.zig`   | string  |         | `RELIFT_TOOLCHAIN_ZIG`   | `--toolchain.zig`   | zig, for `zig cc` player builds                                                       |
-| `toolchain.ninja` | string  |         | `RELIFT_TOOLCHAIN_NINJA` | `--toolchain.ninja` | the ninja build tool                                                                  |
+| Key               | Type    | Default | Environment              | Flag                | Description                                                                             |
+|-------------------|---------|---------|--------------------------|---------------------|-----------------------------------------------------------------------------------------|
+| `cache-dir`       | string  |         | `RELIFT_CACHE_DIR`       | `--cache-dir`       | where lifted, emitted and built artifacts are cached (empty: the user cache dir)        |
+| `jobs`            | integer | `0`     | `RELIFT_JOBS`            | `-j`, `--jobs`      | parallel compile jobs (0: one per CPU)                                                  |
+| `runtime-dir`     | string  |         | `RELIFT_RUNTIME_DIR`     | `--runtime-dir`     | the C runtime sources to build against (empty: the ones beside this relift's source)    |
+| `color`           | string  | `auto`  | `RELIFT_COLOR`           | `--color`           | color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never   |
+| `toolchain.clang` | string  |         | `RELIFT_TOOLCHAIN_CLANG` | `--toolchain.clang` | the clang driver                                                                        |
+| `toolchain.zig`   | string  |         | `RELIFT_TOOLCHAIN_ZIG`   | `--toolchain.zig`   | zig, for `zig cc` player builds                                                         |
+| `toolchain.ninja` | string  |         | `RELIFT_TOOLCHAIN_NINJA` | `--toolchain.ninja` | the ninja build tool                                                                    |
+| `emit.shard-kib`  | integer | `4096`  | `RELIFT_EMIT_SHARD_KIB`  | `--emit.shard-kib`  | the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C |
+| `emit.piece-kib`  | integer | `1024`  | `RELIFT_EMIT_PIECE_KIB`  | `--emit.piece-kib`  | the most KiB of C per C function; a larger guest function is split into several         |
 
 <!-- configulator:end -->
 

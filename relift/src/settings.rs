@@ -40,6 +40,27 @@ pub struct Settings {
 
     #[configulator(name = "toolchain", nested)]
     pub toolchain: Toolchain,
+
+    #[configulator(name = "emit", nested)]
+    pub emit: Emit,
+}
+
+/// How lifted code is written as C.
+#[derive(Config, Debug)]
+pub struct Emit {
+    #[configulator(
+        name = "shard-kib",
+        default = "4096",
+        description = "the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C"
+    )]
+    pub shard_kib: u32,
+
+    #[configulator(
+        name = "piece-kib",
+        default = "1024",
+        description = "the most KiB of C per C function; a larger guest function is split into several"
+    )]
+    pub piece_kib: u32,
 }
 
 /// Host tools relift drives. An empty path means look it up on `PATH`.

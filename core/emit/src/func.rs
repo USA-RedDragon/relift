@@ -1,4 +1,14 @@
-//! One guest function as one C function.
+//! One guest function as one C function, or as several when its C would
+//! be too large for one.
+//!
+//! A split function keeps its own name as a stub that sets `c->pc` to the
+//! guest entry and tail-calls the first piece. Each piece is a C function
+//! with the lifted signature over a run of the function's instructions: it
+//! loads the registers it uses from the context, switches on `c->pc` to the
+//! instruction it is entered at, and leaves for another piece by storing the
+//! registers it wrote, setting `c->pc` to the target and tail-calling that
+//! piece. The context then holds the full state at every transfer, as at a
+//! call boundary, so a piece is entered like a function.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -9,17 +19,42 @@ use relift_ir::{Block, Flow, Next, Op, Reg};
 use crate::value::{Emitted, cty, emit_op, reg, val};
 use crate::{Function, Insn, Target};
 
+/// One C function of an emitted guest function.
+pub(crate) struct Piece {
+    /// The C name.
+    pub(crate) name: String,
+    /// The C definition.
+    pub(crate) text: String,
+}
+
 /// What one function emitted.
 pub(crate) struct Emitted1 {
-    pub(crate) text: String,
+    /// The C functions, the guest function's own name first; more than one
+    /// when the function was split.
+    pub(crate) pieces: Vec<Piece>,
     pub(crate) callees: BTreeSet<u64>,
     pub(crate) undefined: usize,
     /// The C expression of the function's `rl_fn_flags`.
     pub(crate) flags: &'static str,
 }
 
+impl Emitted1 {
+    /// The bytes of C of all pieces.
+    pub(crate) fn len(&self) -> usize {
+        self.pieces.iter().map(|p| p.text.len()).sum()
+    }
+}
+
 fn label(pc: u64) -> String {
     format!("L_{pc:x}")
+}
+
+/// How the instructions of a split function are divided.
+struct Split {
+    /// The piece of each instruction.
+    piece_of: BTreeMap<u64, usize>,
+    /// The C name of each piece.
+    names: Vec<String>,
 }
 
 struct Ctx<'a> {
@@ -30,6 +65,8 @@ struct Ctx<'a> {
     hoisted: BTreeSet<Reg>,
     /// The landing-pad check's sp local, when the function has resume points.
     lp_sp: Option<String>,
+    /// The division into pieces and the piece being written, when split.
+    split: Option<(&'a Split, usize)>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -37,14 +74,27 @@ fn flag(r: Reg) -> String {
     format!("g{}", reg(r))
 }
 
+fn inside(f: &Function<'_>, targets: &BTreeMap<u64, Target>, t: u64) -> bool {
+    f.insts.contains_key(&t) && (t == f.entry || !targets.contains_key(&t))
+}
+
 impl Ctx<'_> {
     fn inside(&self, t: u64) -> bool {
-        self.f.insts.contains_key(&t) && (t == self.f.entry || !self.targets.contains_key(&t))
+        inside(self.f, self.targets, t)
     }
 
     /// A transfer to the constant `t` that leaves no frame behind.
     fn jump(&mut self, t: u64) -> String {
         if self.inside(t) {
+            if let Some((s, k)) = self.split {
+                let to = s.piece_of[&t];
+                if to != k {
+                    return format!(
+                        "RL_STORE(); c->pc = UINT64_C({t:#x}); RL_MUSTTAIL return {}(c, mem);",
+                        s.names[to]
+                    );
+                }
+            }
             return format!("goto {};", label(t));
         }
         if let Some(target) = self.targets.get(&t) {
@@ -79,14 +129,35 @@ fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<
         .collect()
 }
 
-/// Emits `f`; `targets` are every direct-call target of the module.
+/// The constant addresses the instruction at `pc` may continue at.
+fn successors(f: &Function<'_>, pc: u64, b: Option<&Block>) -> Vec<u64> {
+    let Some(b) = b else {
+        return Vec::new();
+    };
+    let mut out = vec![b.pc + u64::from(b.len)];
+    match b.exit.next {
+        Next::Const(t) => out.push(t),
+        Next::Select {
+            taken, not_taken, ..
+        } => out.extend([taken, not_taken]),
+        Next::Dynamic(_) => out.extend(f.tables.get(&pc).into_iter().flatten().copied()),
+    }
+    if let Flow::Call { ret } = b.exit.flow {
+        out.push(ret);
+    }
+    out
+}
+
+/// Emits `f`; `targets` are every direct-call target of the module. A
+/// function whose C is longer than `piece_bytes` is split into pieces of
+/// about that size.
 pub(crate) fn emit_function(
     fe: &dyn Frontend,
     f: &Function<'_>,
     targets: &BTreeMap<u64, Target>,
+    piece_bytes: usize,
 ) -> Emitted1 {
     let resumes = resume_points(f, targets);
-    let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let blocks: BTreeMap<u64, Block> = f
         .insts
         .iter()
@@ -95,11 +166,96 @@ pub(crate) fn emit_function(
             Insn::Failed(_) => None,
         })
         .collect();
+    let all: Vec<u64> = f.insts.keys().copied().collect();
+    let whole = emit_piece(fe, f, targets, &blocks, &resumes, &all, None);
+    if whole.text.len() <= piece_bytes || all.len() < 2 {
+        return Emitted1 {
+            pieces: vec![Piece {
+                name: f.name.clone(),
+                text: whole.text,
+            }],
+            callees: whole.callees,
+            undefined: whole.undefined,
+            flags: whole.flags,
+        };
+    }
+    // Divide in address order at instruction boundaries, by the size each
+    // instruction took in the whole function.
+    let mut piece_of = BTreeMap::new();
+    let (mut k, mut size) = (0, 0);
+    for pc in &all {
+        let n = whole.sizes.get(pc).copied().unwrap_or(0);
+        if size > 0 && size + n > piece_bytes {
+            k += 1;
+            size = 0;
+        }
+        size += n;
+        piece_of.insert(*pc, k);
+    }
+    let split = Split {
+        piece_of,
+        names: (0..=k)
+            .map(|i| format!("{}_part{}", f.name, i + 1))
+            .collect(),
+    };
+    let mut pieces = vec![Piece {
+        name: f.name.clone(),
+        text: format!(
+            "\nRL_TEXT RL_LIFTED({})\n{{\n    c->pc = UINT64_C({:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
+            f.name, f.entry, split.names[split.piece_of[&f.entry]]
+        ),
+    }];
+    let mut callees = BTreeSet::new();
+    let mut undefined = 0;
+    let mut flags = whole.flags;
+    for (i, name) in split.names.iter().enumerate() {
+        let pcs: Vec<u64> = all
+            .iter()
+            .copied()
+            .filter(|pc| split.piece_of[pc] == i)
+            .collect();
+        let p = emit_piece(fe, f, targets, &blocks, &resumes, &pcs, Some((&split, i)));
+        callees.extend(p.callees);
+        undefined += p.undefined;
+        flags = p.flags;
+        pieces.push(Piece {
+            name: name.clone(),
+            text: p.text,
+        });
+    }
+    Emitted1 {
+        pieces,
+        callees,
+        undefined,
+        flags,
+    }
+}
+
+/// One emitted C function over the instructions `pcs` of `f`.
+struct Written {
+    text: String,
+    callees: BTreeSet<u64>,
+    undefined: usize,
+    flags: &'static str,
+    /// The bytes each instruction took.
+    sizes: BTreeMap<u64, usize>,
+}
+
+fn emit_piece(
+    fe: &dyn Frontend,
+    f: &Function<'_>,
+    targets: &BTreeMap<u64, Target>,
+    blocks: &BTreeMap<u64, Block>,
+    resumes: &BTreeSet<u64>,
+    pcs: &[u64],
+    split: Option<(&Split, usize)>,
+) -> Written {
+    let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let mut used: BTreeSet<Reg> = BTreeSet::new();
     let mut written: BTreeSet<Reg> = BTreeSet::new();
     let mut has_fp = false;
     let mut hoisted: BTreeSet<Reg> = BTreeSet::new();
-    for b in blocks.values() {
+    for b in pcs.iter().filter_map(|pc| blocks.get(pc)) {
         for inst in &b.insts {
             match inst.op {
                 Op::Get(r) => {
@@ -125,8 +281,9 @@ pub(crate) fn emit_function(
     used.extend(hoisted.iter().copied());
     used.extend(lp_reg);
     let regs = fe.regs();
+    let name = split.map_or(f.name.as_str(), |(s, k)| s.names[k].as_str());
     let mut t = String::new();
-    let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({})\n{{", f.name);
+    let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({name})\n{{");
     for &r in &used {
         let ty = cty(regs.width(r));
         let _ = match fe.home(r) {
@@ -165,7 +322,42 @@ pub(crate) fn emit_function(
         let _ = write!(t, " {} = {} != 0;", flag(r), reg(r));
     }
     t.push_str(" } while (0)\n");
-    let _ = writeln!(t, "    goto {};", label(f.entry));
+    match split {
+        None => {
+            let _ = writeln!(t, "    goto {};", label(f.entry));
+        }
+        Some((s, k)) => {
+            // The instructions other pieces (and the stub) enter this one at.
+            let own: BTreeSet<u64> = pcs.iter().copied().collect();
+            let mut entries: BTreeSet<u64> = BTreeSet::new();
+            for (&pc, &p) in &s.piece_of {
+                let from = if p == k {
+                    Vec::new()
+                } else {
+                    successors(f, pc, blocks.get(&pc))
+                };
+                entries.extend(
+                    from.into_iter()
+                        .filter(|t| own.contains(t) && inside(f, targets, *t)),
+                );
+            }
+            if own.contains(&f.entry) {
+                entries.insert(f.entry);
+            }
+            if s.piece_of.len() > own.len() {
+                entries.extend(resumes.iter().filter(|r| own.contains(r)));
+            }
+            let first = entries.first().copied().or(pcs.first().copied());
+            t.push_str("    switch (c->pc) {\n");
+            for e in &entries {
+                let _ = writeln!(t, "    case UINT64_C({e:#x}): goto {};", label(*e));
+            }
+            if let Some(e) = first {
+                let _ = writeln!(t, "    default: goto {};", label(e));
+            }
+            t.push_str("    }\n");
+        }
+    }
     let mut cx = Ctx {
         fe,
         f,
@@ -173,11 +365,14 @@ pub(crate) fn emit_function(
         callees: BTreeSet::new(),
         hoisted,
         lp_sp: lp_reg.map(reg),
+        split,
     };
     let mut undefined = 0;
-    for (&pc, i) in &f.insts {
+    let mut sizes = BTreeMap::new();
+    for &pc in pcs {
+        let start = t.len();
         let _ = writeln!(t, "{}: {{", label(pc));
-        let body = match (i, blocks.get(&pc)) {
+        let body = match (&f.insts[&pc], blocks.get(&pc)) {
             (Insn::Lifted { raw, .. }, Some(b)) => block(&mut cx, b, *raw),
             (Insn::Failed(e), _) => Err((e.insn, e.message.clone())),
             (Insn::Lifted { raw, .. }, None) => Err((*raw, "no block".into())),
@@ -190,10 +385,11 @@ pub(crate) fn emit_function(
             }
         }
         t.push_str("}\n");
+        sizes.insert(pc, t.len() - start);
     }
     if lp_reg.is_some() {
         t.push_str("lp_dispatch:\n    switch (c->pend.pc) {\n");
-        for r in &resumes {
+        for r in resumes {
             let next = cx.jump(*r);
             let _ = writeln!(
                 t,
@@ -207,7 +403,7 @@ pub(crate) fn emit_function(
         );
     }
     t.push_str("#undef RL_STORE\n#undef RL_RELOAD\n}\n");
-    Emitted1 {
+    Written {
         text: t,
         callees: cx.callees,
         undefined,
@@ -216,6 +412,7 @@ pub(crate) fn emit_function(
         } else {
             "RL_FN_MAY_UNWIND"
         },
+        sizes,
     }
 }
 
@@ -314,7 +511,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 if !known.is_empty() {
                     let _ = writeln!(s, "    switch ({}) {{", val(v));
                     for t in known.iter().collect::<BTreeSet<_>>() {
-                        let _ = writeln!(s, "    case UINT64_C({t:#x}): goto {};", label(*t));
+                        let _ = writeln!(s, "    case UINT64_C({t:#x}): {}", cx.jump(*t));
                     }
                     s.push_str("    default: break;\n    }\n");
                 }

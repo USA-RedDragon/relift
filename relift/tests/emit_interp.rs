@@ -25,8 +25,8 @@ const WORDS: usize = 2;
 const STATES: usize = 12;
 /// `u64`s of the context block in the harness records.
 const CTX: usize = 105;
-/// Functions per emitted shard.
-const SHARD: usize = 128;
+/// Bytes of C per emitted shard.
+const SHARD: usize = 256 << 10;
 
 /// A small xorshift generator.
 struct Rng(u64);
@@ -470,7 +470,7 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
         &fns,
         &[],
         &Options {
-            shard_size: SHARD,
+            shard_bytes: SHARD,
             ..Options::default()
         },
     );

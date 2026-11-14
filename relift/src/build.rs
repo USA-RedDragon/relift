@@ -104,6 +104,7 @@ fn unlifted_line(module: &str, pc: u64, word: u64, message: &str) -> String {
 /// Lifts and emits `placed` into `cdir`, one directory per module; returns
 /// the emitted C files and the unit symbols.
 fn emit_modules(
+    settings: &Settings,
     placed: &[Placed],
     cdir: &Path,
     ui: &mut Ui,
@@ -227,31 +228,35 @@ fn emit_modules(
         fpsr.add_module(i, p, &module, &analysis, &overrides);
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         ui.begin(row, "emit");
-        let mut shards = 0;
         let out = relift_emit::emit_with(
             &A64,
             &fns,
             &overrides,
             &relift_emit::Options {
-                shard_size: 64,
+                shard_bytes: kib(settings.emit.shard_kib),
+                piece_bytes: kib(settings.emit.piece_kib),
                 unit_name: p.name.clone(),
                 unit_symbol: unit.clone(),
                 module_base: p.base,
                 parts: fpsr.parts(),
             },
             &mut |d, total| {
-                shards = total;
                 ui.update(
                     row,
                     Metrics {
                         done: d as u64,
                         total: Some(total as u64),
-                        unit: "shards",
+                        unit: "functions",
                         ..Metrics::default()
                     },
                 );
             },
         );
+        let shards = out
+            .files
+            .iter()
+            .filter(|f| f.name.starts_with("shard"))
+            .count();
         let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
         std::fs::create_dir_all(&dir)?;
         fpsr.add_files(&dir, &out.files);
@@ -274,6 +279,11 @@ fn emit_modules(
     }
     done.fpsr = fpsr.finish()?;
     Ok(done)
+}
+
+/// `n` KiB in bytes, at least one.
+fn kib(n: u32) -> usize {
+    (n as usize).max(1) << 10
 }
 
 fn lift_summary(functions: usize, unlifted: usize) -> Line {
@@ -338,7 +348,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         .join("build")
         .join("host");
     let cdir = out.join("c");
-    let emitted = emit_modules(&placed, &cdir, ui, &rows)?;
+    let emitted = emit_modules(settings, &placed, &cdir, ui, &rows)?;
     let (lifted, units) = (emitted.files, emitted.units);
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;

@@ -274,6 +274,33 @@ int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
   analysis shows no caller reads them before writing. The full-state checker
   build always stores everything. [inferred; open: the analysis]
 
+### Split functions
+
+A guest function whose C would pass the emitter's piece budget
+(`emit.piece-kib`, 1 MiB by default) is written as several C functions, so
+no one function or file grows past what clang can compile in a few GB.
+
+- The guest function keeps its name `F` as a stub with the lifted signature:
+  it sets `c->pc` to the guest entry and tail-calls the piece that holds it.
+  Dispatch, direct calls and the unit table name only `F`.
+- Each piece `F_part<k>` holds a run of the function's instructions in
+  address order, cut at instruction boundaries. It loads the registers it
+  reads from `c` and starts with `switch (c->pc)` over the instructions
+  other pieces enter it at, each a `goto` to that instruction's label.
+- A transfer to an instruction in another piece follows the exit rule: store
+  every register written, set `c->pc` to the target and
+  `RL_MUSTTAIL return F_part<j>(c, mem);`. So `c` holds the full state at
+  every transfer, as at a call boundary, and a piece is entered like a
+  function. Calls, the unwind-flag returns and the pending checks inside a
+  piece are as in an unsplit function.
+- Landing pads: every piece of a function with resume points has its own
+  `lp_dispatch`, which reaches a resume point in another piece by the same
+  transfer.
+- Pieces go in shards of their own (`emit.shard-kib`, 4 MiB by default, the
+  byte budget for every shard). Each such shard's function map names the
+  guest function once, with the first piece it holds as `fn`; the map of
+  the shard holding the stub names the stub.
+
 ## 5. Calls
 
 - **Direct (BL):** store per the boundary rule, set x30 to the guest return
