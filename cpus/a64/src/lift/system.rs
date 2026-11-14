@@ -63,6 +63,20 @@ type SysReg = (u32, u32, u32, u32, u32);
 const NZCV: SysReg = (3, 3, 4, 2, 0);
 const FPCR_R: SysReg = (3, 3, 4, 4, 0);
 const FPSR_R: SysReg = (3, 3, 4, 4, 1);
+
+/// MRS FPSR: the slot value (32 bits) with the host's flags ORed in.
+pub const MRS_FPSR: &str = "a64.mrs_fpsr";
+/// After MSR FPSR: clears the host's flags.
+pub const MSR_FPSR: &str = "a64.msr_fpsr";
+/// Raises FPSR flags (a 32-bit mask) an IR-built FP operation computed.
+pub const FP_RAISE: &str = "a64.fp_raise";
+
+/// The runtime's exact-flags bit of the FPCR slot (`RL_FPCR_EXACT`): RES0
+/// in the architecture, so guest reads and writes never see it.
+pub const FPCR_EXACT: u128 = 1 << 31;
+/// The FPCR bits the guest sees (`RL_FPCR_GUEST`): AHP, DN, FZ, RMode and
+/// FZ16. The Cortex-A57 implements no FP trap enables, so they read as 0.
+const FPCR_GUEST: u128 = 0x07c8_0000;
 const TPIDR: SysReg = (3, 3, 13, 0, 2);
 const TPIDRRO: SysReg = (3, 3, 13, 0, 3);
 const CNTFRQ_R: SysReg = (3, 3, 14, 0, 0);
@@ -94,11 +108,17 @@ fn mrs(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
             b.zext(w, Width::W64)
         }
         FPCR_R => {
+            // The runtime's exact-flags bit (31, RES0) never reaches the guest.
             let v = b.get(FPCR);
+            let m = b.konst(Width::W32, FPCR_GUEST);
+            let v = b.and(v, m);
             b.zext(v, Width::W64)
         }
         FPSR_R => {
+            // The slot holds what IR wrote (QC, MSR, slow paths); the
+            // runtime ORs in the flags host FP operations raised.
             let v = b.get(FPSR);
+            let v = b.intrinsic(MRS_FPSR, &[v], Some(Width::W32));
             b.zext(v, Width::W64)
         }
         TPIDR => b.get(TPIDR_EL0),
@@ -123,7 +143,14 @@ fn msr(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
             }
         }
         FPCR_R => {
+            // Guest bits from the write, the exact-flags bit kept.
             let w = b.trunc(v, Width::W32);
+            let m = b.konst(Width::W32, FPCR_GUEST);
+            let w = b.and(w, m);
+            let old = b.get(FPCR);
+            let e = b.konst(Width::W32, FPCR_EXACT);
+            let keep = b.and(old, e);
+            let w = b.or(w, keep);
             b.set(FPCR, w);
         }
         FPSR_R => {
@@ -131,6 +158,7 @@ fn msr(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
             let m = b.konst(Width::W32, 0x0800_009f);
             let w = b.and(w, m);
             b.set(FPSR, w);
+            b.intrinsic(MSR_FPSR, &[], None);
         }
         TPIDR => b.set(TPIDR_EL0, v),
         TPIDRRO => return Err(LiftError::Undefined(insn.encoding)),

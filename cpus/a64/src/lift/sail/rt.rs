@@ -36,6 +36,7 @@ pub struct St {
     cur: Vec<Option<Value>>,
     exit: Option<(Next, Kind)>,
     fp: bool,
+    flags_slow: bool,
     qc: Option<Value>,
 }
 
@@ -48,6 +49,17 @@ impl St {
     /// Records that the instruction's semantics assume FPCR zero.
     pub fn assume_default_fpcr(&mut self) {
         self.fp = true;
+    }
+
+    /// Records that the host cannot give the instruction's FPSR flags, so in
+    /// a program that produces them it runs on the slow path.
+    pub fn assume_flags_slow(&mut self) {
+        self.flags_slow = true;
+    }
+
+    /// Whether the instruction's flags need the slow path.
+    pub fn flags_need_slow(&self) -> bool {
+        self.flags_slow
     }
 
     /// Whether the instruction assumes FPCR zero.
@@ -342,12 +354,16 @@ pub fn decode_bit_masks(
 /// The floating-point cut: arithmetic, comparisons and min/max on 32- and
 /// 64-bit values with FPCR zero (round to nearest, no flush, NaNs
 /// propagated), as Arm's `FPProcessNaNs` and `FPDefaultNaN` describe.
-/// Exception flags (FPSR) are not produced.
+/// FPSR flags: the IEEE operations raise them on the host; compares and
+/// min/max raise IOC through `system::FP_RAISE`, under the condition the
+/// instruction runs them in ([`Fp::guarded`]); the estimates, steps and
+/// fixed-point scalings leave for the slow path in flag-producing programs.
 pub struct Fp {
     w: Width,
     sign: u128,
     inf: u128,
     quiet: u128,
+    guard: Option<Value>,
 }
 
 impl Fp {
@@ -359,7 +375,15 @@ impl Fp {
             sign: 1u128 << (w - 1),
             inf: mask(e) << f,
             quiet: 1u128 << (f - 1),
+            guard: None,
         }
+    }
+
+    /// The same format, for an operation the instruction runs only when `g`
+    /// is 1 (a conditional compare): its flags are raised only then.
+    pub fn guarded(mut self, g: Option<Value>) -> Fp {
+        self.guard = g;
+        self
     }
 
     fn k(&self, b: &mut Builder, v: u128) -> Value {
@@ -492,9 +516,43 @@ impl Fp {
         (un, eq, lt)
     }
 
-    /// `FPCompare`: NZCV as four bits.
-    pub fn compare(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+    /// Raises IOC (FPSR bit 0) when `cond` is 1, in programs that produce
+    /// FPSR flags (`system::FP_RAISE`; free in the others).
+    fn raise_ioc(&self, b: &mut Builder, cond: Value) {
+        let cond = match self.guard {
+            Some(g) => b.and(cond, g),
+            None => cond,
+        };
+        let one = b.konst(Width::W32, 1);
+        let zero = b.konst(Width::W32, 0);
+        let m = b.select(cond, one, zero);
+        b.intrinsic(crate::lift::system::FP_RAISE, &[m], None);
+    }
+
+    /// IOC for a signaling NaN among `ops`.
+    fn raise_snan(&self, b: &mut Builder, ops: &[Value]) {
+        let mut any = None;
+        for x in ops {
+            let s = self.is_snan(b, *x);
+            any = Some(match any {
+                Some(a) => b.or(a, s),
+                None => s,
+            });
+        }
+        if let Some(a) = any {
+            self.raise_ioc(b, a);
+        }
+    }
+
+    /// `FPCompare`: NZCV as four bits; `signal` (FCMPE) raises IOC for any
+    /// NaN, else only for a signaling one.
+    pub fn compare(&self, b: &mut Builder, x: Value, y: Value, signal: bool) -> Value {
         let (un, eq, lt) = self.order(b, x, y);
+        if signal {
+            self.raise_ioc(b, un);
+        } else {
+            self.raise_snan(b, &[x, y]);
+        }
         let w4 = Width::new(4);
         let gt = b.konst(w4, 0b0010);
         let l = b.konst(w4, 0b1000);
@@ -508,6 +566,11 @@ impl Fp {
     /// `FPCompareEQ`, `FPCompareGE` or `FPCompareGT` (`kind` 0, 1, 2).
     pub fn compare_bool(&self, b: &mut Builder, x: Value, y: Value, kind: u32) -> Value {
         let (un, eq, lt) = self.order(b, x, y);
+        if kind == 0 {
+            self.raise_snan(b, &[x, y]);
+        } else {
+            self.raise_ioc(b, un);
+        }
         let ord = b.not(un);
         match kind {
             0 => eq,
@@ -526,6 +589,7 @@ impl Fp {
 
     /// `FPMax` or `FPMin` without the alternative behaviors.
     pub fn max_min(&self, b: &mut Builder, x: Value, y: Value, max: bool) -> Value {
+        self.raise_snan(b, &[x, y]);
         let (_, _, lt) = self.order(b, x, y);
         let (_, eq, _) = self.order(b, x, y);
         let r = if max {

@@ -190,7 +190,7 @@ pub(super) fn FCCMPE_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v89 = b.not(v82);
     let v92 = if s87 { v89 } else { v82 };
     st.assume_default_fpcr();
-    let v93 = rt::Fp::new(64).compare(b, v7, v8);
+    let v93 = rt::Fp::new(64).guarded(Some(v92)).compare(b, v7, v8, true);
     let v95 = b.konst(Width::new(4), s1);
     let v96 = b.select(v92, v93, v95);
     let v100 = b.extract(v96, 3, Width::new(1));
@@ -271,7 +271,7 @@ pub(super) fn FCCMPE_S_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v89 = b.not(v82);
     let v92 = if s87 { v89 } else { v82 };
     st.assume_default_fpcr();
-    let v93 = rt::Fp::new(32).compare(b, v7, v8);
+    let v93 = rt::Fp::new(32).guarded(Some(v92)).compare(b, v7, v8, true);
     let v95 = b.konst(Width::new(4), s1);
     let v96 = b.select(v92, v93, v95);
     let v100 = b.extract(v96, 3, Width::new(1));
@@ -352,7 +352,7 @@ pub(super) fn FCCMP_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v89 = b.not(v82);
     let v92 = if s87 { v89 } else { v82 };
     st.assume_default_fpcr();
-    let v93 = rt::Fp::new(64).compare(b, v7, v8);
+    let v93 = rt::Fp::new(64).guarded(Some(v92)).compare(b, v7, v8, false);
     let v95 = b.konst(Width::new(4), s1);
     let v96 = b.select(v92, v93, v95);
     let v100 = b.extract(v96, 3, Width::new(1));
@@ -433,7 +433,7 @@ pub(super) fn FCCMP_S_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v89 = b.not(v82);
     let v92 = if s87 { v89 } else { v82 };
     st.assume_default_fpcr();
-    let v93 = rt::Fp::new(32).compare(b, v7, v8);
+    let v93 = rt::Fp::new(32).guarded(Some(v92)).compare(b, v7, v8, false);
     let v95 = b.konst(Width::new(4), s1);
     let v96 = b.select(v92, v93, v95);
     let v100 = b.extract(v96, 3, Width::new(1));
@@ -459,7 +459,7 @@ pub(super) fn FCMPE_DZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v3 = st.v_read(b, s2 as u32, 64);
     let v4 = b.konst(Width::new(64), 0x0);
     st.assume_default_fpcr();
-    let v5 = rt::Fp::new(64).compare(b, v3, v4);
+    let v5 = rt::Fp::new(64).compare(b, v3, v4, true);
     let v6 = b.extract(v5, 3, Width::new(1));
     st.set(b, regs::N, v6, None);
     let v7 = b.extract(v5, 2, Width::new(1));
@@ -485,7 +485,7 @@ pub(super) fn FCMPE_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v5 = st.v_read(b, s3 as u32, 64);
     let v6 = st.v_read(b, s4 as u32, 64);
     st.assume_default_fpcr();
-    let v7 = rt::Fp::new(64).compare(b, v5, v6);
+    let v7 = rt::Fp::new(64).compare(b, v5, v6, true);
     let v8 = b.extract(v7, 3, Width::new(1));
     st.set(b, regs::N, v8, None);
     let v9 = b.extract(v7, 2, Width::new(1));
@@ -509,7 +509,7 @@ pub(super) fn FCMPE_SZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v3 = st.v_read(b, s2 as u32, 32);
     let v4 = b.konst(Width::new(32), 0x0);
     st.assume_default_fpcr();
-    let v5 = rt::Fp::new(32).compare(b, v3, v4);
+    let v5 = rt::Fp::new(32).compare(b, v3, v4, true);
     let v6 = b.extract(v5, 3, Width::new(1));
     st.set(b, regs::N, v6, None);
     let v7 = b.extract(v5, 2, Width::new(1));
@@ -535,7 +535,7 @@ pub(super) fn FCMPE_S_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v5 = st.v_read(b, s3 as u32, 32);
     let v6 = st.v_read(b, s4 as u32, 32);
     st.assume_default_fpcr();
-    let v7 = rt::Fp::new(32).compare(b, v5, v6);
+    let v7 = rt::Fp::new(32).compare(b, v5, v6, true);
     let v8 = b.extract(v7, 3, Width::new(1));
     st.set(b, regs::N, v8, None);
     let v9 = b.extract(v7, 2, Width::new(1));
@@ -559,7 +559,7 @@ pub(super) fn FCMP_DZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v3 = st.v_read(b, s2 as u32, 64);
     let v4 = b.konst(Width::new(64), 0x0);
     st.assume_default_fpcr();
-    let v5 = rt::Fp::new(64).compare(b, v3, v4);
+    let v5 = rt::Fp::new(64).compare(b, v3, v4, false);
     let v6 = b.extract(v5, 3, Width::new(1));
     st.set(b, regs::N, v6, None);
     let v7 = b.extract(v5, 2, Width::new(1));
@@ -585,7 +585,7 @@ pub(super) fn FCMP_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v5 = st.v_read(b, s3 as u32, 64);
     let v6 = st.v_read(b, s4 as u32, 64);
     st.assume_default_fpcr();
-    let v7 = rt::Fp::new(64).compare(b, v5, v6);
+    let v7 = rt::Fp::new(64).compare(b, v5, v6, false);
     let v8 = b.extract(v7, 3, Width::new(1));
     st.set(b, regs::N, v8, None);
     let v9 = b.extract(v7, 2, Width::new(1));
@@ -609,7 +609,7 @@ pub(super) fn FCMP_SZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v3 = st.v_read(b, s2 as u32, 32);
     let v4 = b.konst(Width::new(32), 0x0);
     st.assume_default_fpcr();
-    let v5 = rt::Fp::new(32).compare(b, v3, v4);
+    let v5 = rt::Fp::new(32).compare(b, v3, v4, false);
     let v6 = b.extract(v5, 3, Width::new(1));
     st.set(b, regs::N, v6, None);
     let v7 = b.extract(v5, 2, Width::new(1));
@@ -635,7 +635,7 @@ pub(super) fn FCMP_S_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v5 = st.v_read(b, s3 as u32, 32);
     let v6 = st.v_read(b, s4 as u32, 32);
     st.assume_default_fpcr();
-    let v7 = rt::Fp::new(32).compare(b, v5, v6);
+    let v7 = rt::Fp::new(32).compare(b, v5, v6, false);
     let v8 = b.extract(v7, 3, Width::new(1));
     st.set(b, regs::N, v8, None);
     let v9 = b.extract(v7, 2, Width::new(1));
@@ -1715,6 +1715,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1726,6 +1727,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1737,6 +1739,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1748,6 +1751,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1759,6 +1763,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1770,6 +1775,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1781,6 +1787,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1792,6 +1799,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1803,6 +1811,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1814,6 +1823,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1825,6 +1835,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1836,6 +1847,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1847,6 +1859,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1858,6 +1871,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1869,6 +1883,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1880,6 +1895,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1891,6 +1907,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1902,6 +1919,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1913,6 +1931,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1924,6 +1943,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1935,6 +1955,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1946,6 +1967,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1957,6 +1979,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1968,6 +1991,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1979,6 +2003,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -1990,6 +2015,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2001,6 +2027,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2012,6 +2039,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2023,6 +2051,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2034,6 +2063,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2045,6 +2075,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2056,6 +2087,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2235,6 +2267,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2246,6 +2279,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2257,6 +2291,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2268,6 +2303,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2279,6 +2315,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2290,6 +2327,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2301,6 +2339,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2312,6 +2351,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2323,6 +2363,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2334,6 +2375,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2345,6 +2387,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2356,6 +2399,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2367,6 +2411,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2378,6 +2423,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2389,6 +2435,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2400,6 +2447,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2411,6 +2459,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2422,6 +2471,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2433,6 +2483,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2444,6 +2495,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2455,6 +2507,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2466,6 +2519,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2477,6 +2531,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2488,6 +2543,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2499,6 +2555,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2510,6 +2567,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2521,6 +2579,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2532,6 +2591,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2543,6 +2603,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2554,6 +2615,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2565,6 +2627,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2576,6 +2639,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -2627,6 +2691,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 64, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2638,6 +2703,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 63, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2649,6 +2715,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 62, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2660,6 +2727,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 61, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2671,6 +2739,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 60, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2682,6 +2751,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 59, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2693,6 +2763,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 58, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2704,6 +2775,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 57, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2715,6 +2787,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 56, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2726,6 +2799,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 55, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2737,6 +2811,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 54, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2748,6 +2823,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 53, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2759,6 +2835,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 52, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2770,6 +2847,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 51, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2781,6 +2859,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 50, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2792,6 +2871,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 49, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2803,6 +2883,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 48, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2814,6 +2895,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 47, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2825,6 +2907,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 46, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2836,6 +2919,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 45, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2847,6 +2931,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 44, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2858,6 +2943,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 43, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2869,6 +2955,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 42, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2880,6 +2967,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 41, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2891,6 +2979,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 40, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2902,6 +2991,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 39, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2913,6 +3003,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 38, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2924,6 +3015,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 37, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2935,6 +3027,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 36, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2946,6 +3039,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 35, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2957,6 +3051,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 34, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2968,6 +3063,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 33, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2979,6 +3075,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -2990,6 +3087,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3001,6 +3099,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3012,6 +3111,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3023,6 +3123,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3034,6 +3135,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3045,6 +3147,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3056,6 +3159,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3067,6 +3171,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3078,6 +3183,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3089,6 +3195,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3100,6 +3207,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3111,6 +3219,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3122,6 +3231,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3133,6 +3243,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3144,6 +3255,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3155,6 +3267,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3166,6 +3279,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3177,6 +3291,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3188,6 +3303,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3199,6 +3315,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3210,6 +3327,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3221,6 +3339,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3232,6 +3351,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3243,6 +3363,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3254,6 +3375,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3265,6 +3387,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3276,6 +3399,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3287,6 +3411,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3298,6 +3423,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3309,6 +3435,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3320,6 +3447,7 @@ pub(super) fn FCVTZS_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3371,6 +3499,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 64, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3382,6 +3511,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 63, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3393,6 +3523,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 62, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3404,6 +3535,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 61, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3415,6 +3547,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 60, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3426,6 +3559,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 59, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3437,6 +3571,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 58, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3448,6 +3583,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 57, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3459,6 +3595,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 56, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3470,6 +3607,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 55, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3481,6 +3619,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 54, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3492,6 +3631,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 53, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3503,6 +3643,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 52, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3514,6 +3655,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 51, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3525,6 +3667,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 50, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3536,6 +3679,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 49, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3547,6 +3691,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 48, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3558,6 +3703,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 47, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3569,6 +3715,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 46, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3580,6 +3727,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 45, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3591,6 +3739,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 44, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3602,6 +3751,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 43, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3613,6 +3763,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 42, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3624,6 +3775,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 41, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3635,6 +3787,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 40, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3646,6 +3799,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 39, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3657,6 +3811,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 38, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3668,6 +3823,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 37, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3679,6 +3835,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 36, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3690,6 +3847,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 35, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3701,6 +3859,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 34, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3712,6 +3871,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 33, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3723,6 +3883,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3734,6 +3895,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3745,6 +3907,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3756,6 +3919,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3767,6 +3931,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3778,6 +3943,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3789,6 +3955,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3800,6 +3967,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3811,6 +3979,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3822,6 +3991,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3833,6 +4003,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3844,6 +4015,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3855,6 +4027,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3866,6 +4039,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3877,6 +4051,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3888,6 +4063,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3899,6 +4075,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3910,6 +4087,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3921,6 +4099,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3932,6 +4111,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3943,6 +4123,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3954,6 +4135,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3965,6 +4147,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3976,6 +4159,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3987,6 +4171,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -3998,6 +4183,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4009,6 +4195,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4020,6 +4207,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4031,6 +4219,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4042,6 +4231,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4053,6 +4243,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4064,6 +4255,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -4243,6 +4435,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4254,6 +4447,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4265,6 +4459,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4276,6 +4471,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4287,6 +4483,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4298,6 +4495,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4309,6 +4507,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4320,6 +4519,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4331,6 +4531,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4342,6 +4543,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4353,6 +4555,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4364,6 +4567,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4375,6 +4579,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4386,6 +4591,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4397,6 +4603,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4408,6 +4615,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4419,6 +4627,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4430,6 +4639,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4441,6 +4651,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4452,6 +4663,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4463,6 +4675,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4474,6 +4687,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4485,6 +4699,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4496,6 +4711,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4507,6 +4723,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4518,6 +4735,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4529,6 +4747,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4540,6 +4759,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4551,6 +4771,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4562,6 +4783,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4573,6 +4795,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4584,6 +4807,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4763,6 +4987,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4774,6 +4999,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4785,6 +5011,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4796,6 +5023,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4807,6 +5035,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4818,6 +5047,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4829,6 +5059,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4840,6 +5071,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4851,6 +5083,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4862,6 +5095,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4873,6 +5107,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4884,6 +5119,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4895,6 +5131,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4906,6 +5143,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4917,6 +5155,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4928,6 +5167,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4939,6 +5179,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4950,6 +5191,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4961,6 +5203,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4972,6 +5215,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4983,6 +5227,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -4994,6 +5239,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5005,6 +5251,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5016,6 +5263,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5027,6 +5275,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5038,6 +5287,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5049,6 +5299,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5060,6 +5311,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5071,6 +5323,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5082,6 +5335,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5093,6 +5347,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5104,6 +5359,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
@@ -5155,6 +5411,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 64, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5166,6 +5423,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 63, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5177,6 +5435,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 62, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5188,6 +5447,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 61, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5199,6 +5459,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 60, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5210,6 +5471,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 59, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5221,6 +5483,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 58, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5232,6 +5495,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 57, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5243,6 +5507,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 56, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5254,6 +5519,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 55, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5265,6 +5531,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 54, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5276,6 +5543,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 53, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5287,6 +5555,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 52, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5298,6 +5567,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 51, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5309,6 +5579,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 50, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5320,6 +5591,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 49, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5331,6 +5603,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 48, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5342,6 +5615,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 47, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5353,6 +5627,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 46, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5364,6 +5639,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 45, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5375,6 +5651,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 44, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5386,6 +5663,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 43, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5397,6 +5675,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 42, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5408,6 +5687,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 41, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5419,6 +5699,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 40, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5430,6 +5711,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 39, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5441,6 +5723,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 38, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5452,6 +5735,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 37, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5463,6 +5747,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 36, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5474,6 +5759,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 35, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5485,6 +5771,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 34, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5496,6 +5783,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 33, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5507,6 +5795,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5518,6 +5807,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5529,6 +5819,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5540,6 +5831,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5551,6 +5843,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5562,6 +5855,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5573,6 +5867,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5584,6 +5879,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5595,6 +5891,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5606,6 +5903,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5617,6 +5915,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5628,6 +5927,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5639,6 +5939,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5650,6 +5951,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5661,6 +5963,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5672,6 +5975,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5683,6 +5987,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5694,6 +5999,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5705,6 +6011,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5716,6 +6023,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5727,6 +6035,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5738,6 +6047,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5749,6 +6059,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5760,6 +6071,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5771,6 +6083,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5782,6 +6095,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5793,6 +6107,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5804,6 +6119,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5815,6 +6131,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5826,6 +6143,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5837,6 +6155,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5848,6 +6167,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5899,6 +6219,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 64, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5910,6 +6231,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 63, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5921,6 +6243,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 62, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5932,6 +6255,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 61, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5943,6 +6267,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 60, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5954,6 +6279,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 59, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5965,6 +6291,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 58, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5976,6 +6303,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 57, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5987,6 +6315,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 56, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -5998,6 +6327,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 55, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6009,6 +6339,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 54, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6020,6 +6351,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 53, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6031,6 +6363,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 52, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6042,6 +6375,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 51, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6053,6 +6387,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 50, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6064,6 +6399,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 49, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6075,6 +6411,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 48, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6086,6 +6423,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 47, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6097,6 +6435,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 46, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6108,6 +6447,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 45, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6119,6 +6459,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 44, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6130,6 +6471,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 43, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6141,6 +6483,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 42, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6152,6 +6495,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 41, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6163,6 +6507,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 40, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6174,6 +6519,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 39, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6185,6 +6531,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 38, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6196,6 +6543,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 37, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6207,6 +6555,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 36, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6218,6 +6567,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 35, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6229,6 +6579,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 34, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6240,6 +6591,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 33, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6251,6 +6603,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6262,6 +6615,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6273,6 +6627,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6284,6 +6639,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6295,6 +6651,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6306,6 +6663,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6317,6 +6675,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6328,6 +6687,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6339,6 +6699,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6350,6 +6711,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6361,6 +6723,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6372,6 +6735,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6383,6 +6747,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6394,6 +6759,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6405,6 +6771,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6416,6 +6783,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6427,6 +6795,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6438,6 +6807,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6449,6 +6819,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6460,6 +6831,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6471,6 +6843,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6482,6 +6855,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6493,6 +6867,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6504,6 +6879,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6515,6 +6891,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6526,6 +6903,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6537,6 +6915,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6548,6 +6927,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6559,6 +6939,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6570,6 +6951,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6581,6 +6963,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -6592,6 +6975,7 @@ pub(super) fn FCVTZU_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
@@ -8132,6 +8516,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8143,6 +8528,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8154,6 +8540,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8165,6 +8552,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8176,6 +8564,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8187,6 +8576,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8198,6 +8588,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8209,6 +8600,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8220,6 +8612,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8231,6 +8624,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8242,6 +8636,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8253,6 +8648,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8264,6 +8660,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8275,6 +8672,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8286,6 +8684,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8297,6 +8696,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8308,6 +8708,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8319,6 +8720,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8330,6 +8732,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8341,6 +8744,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8352,6 +8756,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8363,6 +8768,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8374,6 +8780,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8385,6 +8792,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8396,6 +8804,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8407,6 +8816,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8418,6 +8828,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8429,6 +8840,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8440,6 +8852,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8451,6 +8864,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8462,6 +8876,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8473,6 +8888,7 @@ pub(super) fn SCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8524,6 +8940,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 64, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8535,6 +8952,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 63, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8546,6 +8964,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 62, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8557,6 +8976,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 61, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8568,6 +8988,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 60, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8579,6 +9000,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 59, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8590,6 +9012,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 58, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8601,6 +9024,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 57, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8612,6 +9036,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 56, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8623,6 +9048,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 55, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8634,6 +9060,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 54, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8645,6 +9072,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 53, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8656,6 +9084,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 52, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8667,6 +9096,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 51, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8678,6 +9108,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 50, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8689,6 +9120,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 49, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8700,6 +9132,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 48, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8711,6 +9144,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 47, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8722,6 +9156,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 46, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8733,6 +9168,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 45, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8744,6 +9180,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 44, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8755,6 +9192,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 43, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8766,6 +9204,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 42, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8777,6 +9216,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 41, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8788,6 +9228,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 40, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8799,6 +9240,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 39, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8810,6 +9252,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 38, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8821,6 +9264,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 37, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8832,6 +9276,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 36, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8843,6 +9288,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 35, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8854,6 +9300,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 34, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8865,6 +9312,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 33, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8876,6 +9324,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8887,6 +9336,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8898,6 +9348,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8909,6 +9360,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8920,6 +9372,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8931,6 +9384,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8942,6 +9396,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8953,6 +9408,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8964,6 +9420,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8975,6 +9432,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8986,6 +9444,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -8997,6 +9456,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9008,6 +9468,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9019,6 +9480,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9030,6 +9492,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9041,6 +9504,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9052,6 +9516,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9063,6 +9528,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9074,6 +9540,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9085,6 +9552,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9096,6 +9564,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9107,6 +9576,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9118,6 +9588,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9129,6 +9600,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9140,6 +9612,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9151,6 +9624,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9162,6 +9636,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9173,6 +9648,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9184,6 +9660,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9195,6 +9672,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9206,6 +9684,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9217,6 +9696,7 @@ pub(super) fn SCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9396,6 +9876,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9407,6 +9888,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9418,6 +9900,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9429,6 +9912,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9440,6 +9924,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9451,6 +9936,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9462,6 +9948,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9473,6 +9960,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9484,6 +9972,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9495,6 +9984,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9506,6 +9996,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9517,6 +10008,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9528,6 +10020,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9539,6 +10032,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9550,6 +10044,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9561,6 +10056,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9572,6 +10068,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9583,6 +10080,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9594,6 +10092,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9605,6 +10104,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9616,6 +10116,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9627,6 +10128,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9638,6 +10140,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9649,6 +10152,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9660,6 +10164,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9671,6 +10176,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9682,6 +10188,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9693,6 +10200,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9704,6 +10212,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9715,6 +10224,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9726,6 +10236,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9737,6 +10248,7 @@ pub(super) fn SCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9788,6 +10300,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 64, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9799,6 +10312,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 63, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9810,6 +10324,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 62, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9821,6 +10336,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 61, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9832,6 +10348,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 60, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9843,6 +10360,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 59, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9854,6 +10372,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 58, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9865,6 +10384,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 57, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9876,6 +10396,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 56, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9887,6 +10408,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 55, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9898,6 +10420,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 54, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9909,6 +10432,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 53, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9920,6 +10444,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 52, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9931,6 +10456,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 51, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9942,6 +10468,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 50, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9953,6 +10480,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 49, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9964,6 +10492,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 48, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9975,6 +10504,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 47, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9986,6 +10516,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 46, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -9997,6 +10528,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 45, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10008,6 +10540,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 44, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10019,6 +10552,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 43, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10030,6 +10564,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 42, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10041,6 +10576,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 41, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10052,6 +10588,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 40, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10063,6 +10600,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 39, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10074,6 +10612,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 38, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10085,6 +10624,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 37, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10096,6 +10636,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 36, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10107,6 +10648,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 35, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10118,6 +10660,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 34, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10129,6 +10672,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 33, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10140,6 +10684,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10151,6 +10696,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10162,6 +10708,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10173,6 +10720,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10184,6 +10732,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10195,6 +10744,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10206,6 +10756,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10217,6 +10768,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10228,6 +10780,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10239,6 +10792,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10250,6 +10804,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10261,6 +10816,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10272,6 +10828,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10283,6 +10840,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10294,6 +10852,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10305,6 +10864,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10316,6 +10876,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10327,6 +10888,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10338,6 +10900,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10349,6 +10912,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10360,6 +10924,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10371,6 +10936,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10382,6 +10948,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10393,6 +10960,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10404,6 +10972,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10415,6 +10984,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10426,6 +10996,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10437,6 +11008,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10448,6 +11020,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10459,6 +11032,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10470,6 +11044,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10481,6 +11056,7 @@ pub(super) fn SCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, true);
             st.v_set(b, s3 as u32, v6, None);
@@ -10660,6 +11236,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10671,6 +11248,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10682,6 +11260,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10693,6 +11272,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10704,6 +11284,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10715,6 +11296,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10726,6 +11308,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10737,6 +11320,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10748,6 +11332,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10759,6 +11344,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10770,6 +11356,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10781,6 +11368,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10792,6 +11380,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10803,6 +11392,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10814,6 +11404,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10825,6 +11416,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10836,6 +11428,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10847,6 +11440,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10858,6 +11452,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10869,6 +11464,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10880,6 +11476,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10891,6 +11488,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10902,6 +11500,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10913,6 +11512,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10924,6 +11524,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10935,6 +11536,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10946,6 +11548,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10957,6 +11560,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10968,6 +11572,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10979,6 +11584,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -10990,6 +11596,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11001,6 +11608,7 @@ pub(super) fn UCVTF_D32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11052,6 +11660,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 64, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11063,6 +11672,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 63, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11074,6 +11684,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 62, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11085,6 +11696,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 61, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11096,6 +11708,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 60, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11107,6 +11720,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 59, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11118,6 +11732,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 58, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11129,6 +11744,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 57, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11140,6 +11756,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 56, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11151,6 +11768,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 55, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11162,6 +11780,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 54, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11173,6 +11792,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 53, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11184,6 +11804,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 52, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11195,6 +11816,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 51, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11206,6 +11828,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 50, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11217,6 +11840,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 49, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11228,6 +11852,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 48, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11239,6 +11864,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 47, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11250,6 +11876,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 46, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11261,6 +11888,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 45, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11272,6 +11900,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 44, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11283,6 +11912,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 43, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11294,6 +11924,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 42, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11305,6 +11936,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 41, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11316,6 +11948,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 40, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11327,6 +11960,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 39, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11338,6 +11972,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 38, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11349,6 +11984,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 37, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11360,6 +11996,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 36, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11371,6 +12008,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 35, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11382,6 +12020,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 34, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11393,6 +12032,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 33, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11404,6 +12044,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11415,6 +12056,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11426,6 +12068,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11437,6 +12080,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11448,6 +12092,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11459,6 +12104,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11470,6 +12116,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11481,6 +12128,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11492,6 +12140,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11503,6 +12152,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11514,6 +12164,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11525,6 +12176,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11536,6 +12188,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11547,6 +12200,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11558,6 +12212,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11569,6 +12224,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11580,6 +12236,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11591,6 +12248,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11602,6 +12260,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11613,6 +12272,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11624,6 +12284,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11635,6 +12296,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11646,6 +12308,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11657,6 +12320,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11668,6 +12332,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11679,6 +12344,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11690,6 +12356,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11701,6 +12368,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11712,6 +12380,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11723,6 +12392,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11734,6 +12404,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11745,6 +12416,7 @@ pub(super) fn UCVTF_D64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11924,6 +12596,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11935,6 +12608,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11946,6 +12620,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11957,6 +12632,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11968,6 +12644,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11979,6 +12656,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -11990,6 +12668,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12001,6 +12680,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12012,6 +12692,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12023,6 +12704,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12034,6 +12716,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12045,6 +12728,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12056,6 +12740,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12067,6 +12752,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12078,6 +12764,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12089,6 +12776,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12100,6 +12788,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12111,6 +12800,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12122,6 +12812,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12133,6 +12824,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12144,6 +12836,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12155,6 +12848,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12166,6 +12860,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12177,6 +12872,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12188,6 +12884,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12199,6 +12896,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12210,6 +12908,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12221,6 +12920,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12232,6 +12932,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12243,6 +12944,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12254,6 +12956,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12265,6 +12968,7 @@ pub(super) fn UCVTF_S32_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12316,6 +13020,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 64, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12327,6 +13032,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 63, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12338,6 +13044,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 62, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12349,6 +13056,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 61, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12360,6 +13068,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 60, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12371,6 +13080,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 59, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12382,6 +13092,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 58, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12393,6 +13104,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 57, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12404,6 +13116,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 56, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12415,6 +13128,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 55, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12426,6 +13140,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 54, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12437,6 +13152,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 53, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12448,6 +13164,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 52, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12459,6 +13176,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 51, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12470,6 +13188,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 50, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12481,6 +13200,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 49, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12492,6 +13212,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 48, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12503,6 +13224,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 47, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12514,6 +13236,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 46, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12525,6 +13248,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 45, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12536,6 +13260,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 44, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12547,6 +13272,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 43, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12558,6 +13284,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 42, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12569,6 +13296,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 41, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12580,6 +13308,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 40, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12591,6 +13320,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 39, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12602,6 +13332,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 38, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12613,6 +13344,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 37, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12624,6 +13356,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 36, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12635,6 +13368,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 35, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12646,6 +13380,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 34, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12657,6 +13392,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 33, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12668,6 +13404,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12679,6 +13416,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12690,6 +13428,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12701,6 +13440,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12712,6 +13452,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12723,6 +13464,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12734,6 +13476,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12745,6 +13488,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12756,6 +13500,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12767,6 +13512,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12778,6 +13524,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12789,6 +13536,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12800,6 +13548,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12811,6 +13560,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12822,6 +13572,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12833,6 +13584,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12844,6 +13596,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12855,6 +13608,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12866,6 +13620,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12877,6 +13632,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12888,6 +13644,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12899,6 +13656,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12910,6 +13668,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12921,6 +13680,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12932,6 +13692,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12943,6 +13704,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12954,6 +13716,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12965,6 +13728,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12976,6 +13740,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12987,6 +13752,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -12998,6 +13764,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, false);
             st.v_set(b, s3 as u32, v6, None);
@@ -13009,6 +13776,7 @@ pub(super) fn UCVTF_S64_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, false);
             st.v_set(b, s3 as u32, v6, None);

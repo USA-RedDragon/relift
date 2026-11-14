@@ -59,6 +59,7 @@ impl Frontend for A64 {
             _ if reg == regs::FPCR => Home::Field("c->fpcr".into()),
             _ if reg == regs::FPSR => Home::Field("c->fpsr".into()),
             _ if reg == regs::TPIDR_EL0 => Home::Field("c->tpidr_el0".into()),
+            _ if reg == regs::FP_FLAGS => Home::Field("RL_FP_FLAGS_ON".into()),
             _ => Home::Field("c->tpidrro_el0".into()),
         }
     }
@@ -74,6 +75,9 @@ impl Frontend for A64 {
             system::CACHE_MAINT => format!("rl_cache_maint({})", arg(0)),
             system::WFE => "rl_wfe(c)".into(),
             system::SEV => "rl_sev()".into(),
+            system::MRS_FPSR => format!("rl_mrs_fpsr_flags({})", arg(0)),
+            system::MSR_FPSR => "rl_msr_fpsr_flags()".into(),
+            system::FP_RAISE => format!("rl_fp_raise({})", arg(0)),
             _ => return None,
         })
     }
@@ -101,28 +105,17 @@ impl Frontend for A64 {
         let fpcr = reg(regs::FPCR);
         let (f, t) = (from.bits(), to.bits());
         let arg = |i: usize| args.get(i).cloned().unwrap_or_default();
-        let host = |sym: &str| {
-            let (val, bits) = if t == 32 {
-                ("rl_e_f32", "rl_e_b32")
-            } else {
-                ("rl_e_f64", "rl_e_b64")
-            };
-            format!("{bits}({val}({}) {sym} {val}({}))", arg(0), arg(1))
-        };
-        let fast =
-            |host: String, slow: String| format!("(rl_fp_fast({fpcr}, 0) ? {host} : {slow})");
         Some(match op {
             FpOp::Add | FpOp::Sub | FpOp::Mul | FpOp::Div => {
-                let (name, sym) = match op {
-                    FpOp::Add => ("add", "+"),
-                    FpOp::Sub => ("sub", "-"),
-                    FpOp::Mul => ("mul", "*"),
-                    _ => ("div", "/"),
+                // The inline host operation with its NaN and (in programs
+                // that produce FPSR flags) tininess fix-ups, abi.h.
+                let name = match op {
+                    FpOp::Add => "add",
+                    FpOp::Sub => "sub",
+                    FpOp::Mul => "mul",
+                    _ => "div",
                 };
-                fast(
-                    host(sym),
-                    format!("rl_fp{t}_{name}({}, {}, {fpcr}, 0)", arg(0), arg(1)),
-                )
+                format!("rl_f{name}{t}({}, {}, {fpcr}, 0)", arg(0), arg(1))
             }
             FpOp::Sqrt => format!("rl_fp{t}_sqrt({}, {fpcr}, 0)", arg(0)),
             FpOp::MulAdd => format!(
@@ -155,11 +148,15 @@ impl Frontend for A64 {
     }
 
     fn guard_state(&self, code: u32) -> Option<Reg> {
-        (code == sail::SLOW_FPCR).then_some(regs::FPCR)
+        match code {
+            sail::SLOW_FPCR => Some(regs::FPCR),
+            sail::SLOW_FLAGS => Some(regs::FP_FLAGS),
+            _ => None,
+        }
     }
 
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
-        (code == sail::SLOW_FPCR)
+        matches!(code, sail::SLOW_FPCR | sail::SLOW_FLAGS)
             .then(|| format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
     }
 }
@@ -196,7 +193,7 @@ mod tests {
             f.home(regs::TPIDRRO_EL0),
             Home::Field("c->tpidrro_el0".into())
         );
-        assert_eq!(f.regs().len(), 72);
+        assert_eq!(f.regs().len(), 73);
     }
 
     #[test]
@@ -227,7 +224,7 @@ mod tests {
         let add = f
             .fp(FpOp::Add, Width::W64, Width::W64, &args, &name)
             .expect("add");
-        assert!(add.contains("rl_fp_fast(r68, 0)") && add.contains("rl_fp64_add(a, b, r68, 0)"));
+        assert_eq!(add, "rl_fadd64(a, b, r68, 0)");
         let fma = f
             .fp(FpOp::MulAdd, Width::W32, Width::W32, &args, &name)
             .expect("fma");

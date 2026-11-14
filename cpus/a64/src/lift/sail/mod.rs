@@ -25,6 +25,10 @@ pub fn has_template(enc: Encoding) -> bool {
 /// The slow-path code of a block that needs a non-default FPCR.
 pub const SLOW_FPCR: u32 = 0x4650_4352;
 
+/// The slow-path code of a block whose FPSR flags the host cannot give, in a
+/// program that produces them (`regs::FP_FLAGS` is 1).
+pub const SLOW_FLAGS: u32 = 0x4650_5352;
+
 /// Lifts `insn` at `pc` with its generated template.
 ///
 /// The templates' floating-point semantics hold for FPCR zero only (see
@@ -33,7 +37,7 @@ pub const SLOW_FPCR: u32 = 0x4650_4352;
 /// that leaves it for slow path [`SLOW_FPCR`] when FPCR is not zero.
 pub fn lift_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
     let f = generated::template(insn.encoding).ok_or(LiftError::Unsupported(insn.encoding))?;
-    let run = |guard: bool| -> Result<(Block, bool), LiftError> {
+    let run = |guard: bool, flags: bool| -> Result<(Block, bool, bool), LiftError> {
         let mut b = Builder::new(regs::regs(), Width::W64, pc);
         if guard {
             let fpcr = b.get(regs::FPCR);
@@ -41,15 +45,20 @@ pub fn lift_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
             let ne = b.cmp(CmpOp::Ne, fpcr, zero);
             b.guard(ne, SLOW_FPCR);
         }
+        if flags {
+            let on = b.get(regs::FP_FLAGS);
+            b.guard(on, SLOW_FLAGS);
+        }
         let mut st = St::new();
         f(insn.word, &mut b, &mut st)?;
         let fp = st.assumes_default_fpcr();
+        let slow_flags = st.flags_need_slow();
         let exit = st.finish(&mut b);
-        Ok((b.finish(4, exit), fp))
+        Ok((b.finish(4, exit), fp, slow_flags))
     };
-    let (block, fp) = run(false)?;
-    if fp {
-        return Ok(run(true)?.0);
+    let (block, fp, flags) = run(false, false)?;
+    if fp || flags {
+        return Ok(run(fp, flags)?.0);
     }
     Ok(block)
 }

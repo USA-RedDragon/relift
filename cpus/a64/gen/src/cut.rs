@@ -200,7 +200,10 @@ impl Gen<'_> {
             let v = self.bitify(v)?;
             xs.push(self.dx(&v)?.to_string());
         }
-        let f = format!("rt::Fp::new({w})");
+        let f = match self.gd().as_str() {
+            "None" => format!("rt::Fp::new({w})"),
+            g => format!("rt::Fp::new({w}).guarded({g})"),
+        };
         let two = |m: &str| format!("{f}.{m}(b, {}, {})", xs[0], xs[1]);
         let (k, call) = match name {
             "FPAdd" | "FPAdd__1" => (K::Bits(w), two("bin").replace("(b, ", "(b, FpOp::Add, ")),
@@ -212,7 +215,17 @@ impl Gen<'_> {
                 K::Bits(w),
                 format!("{f}.mul_add(b, {}, {}, {})", xs[0], xs[1], xs[2]),
             ),
-            "FPCompare" => (K::Bits(4), two("compare")),
+            "FPCompare" => {
+                let signal = match &a[2] {
+                    V::Bool(s) => *s,
+                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    v => return fail(format!("FPCompare signal {v:?}")),
+                };
+                (
+                    K::Bits(4),
+                    format!("{f}.compare(b, {}, {}, {signal})", xs[0], xs[1]),
+                )
+            }
             "FPCompareEQ" => (K::Bool, two("compare_eq")),
             "FPCompareGE" => (K::Bool, two("compare_ge")),
             "FPCompareGT" => (K::Bool, two("compare_gt")),
@@ -252,6 +265,8 @@ impl Gen<'_> {
             }
         };
         self.line("st.assume_default_fpcr();".into());
+        // The estimates' and steps' flags are built in no IR yet.
+        self.line("st.assume_flags_slow();".into());
         Ok(self.dy(K::Bits(w), call))
     }
 
@@ -309,6 +324,11 @@ impl Gen<'_> {
                 let r = self.fp_round(&a[4])?;
                 let ow = fpw(self.cint(&a[5])? as u32)?;
                 let signed = !unsigned;
+                if fbits != 0 {
+                    // The scaling multiply or divide raises flags Arm's
+                    // exact scaling does not.
+                    self.line("st.assume_flags_slow();".into());
+                }
                 if name == "FPToFixed" {
                     (
                         K::Bits(ow),

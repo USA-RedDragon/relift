@@ -10,7 +10,7 @@ const fn decl(name: &'static str, width: Width) -> RegDecl {
     RegDecl { name, width }
 }
 
-static DECLS: [RegDecl; 72] = [
+static DECLS: [RegDecl; 73] = [
     decl("x0", Width::W64),
     decl("x1", Width::W64),
     decl("x2", Width::W64),
@@ -83,6 +83,7 @@ static DECLS: [RegDecl; 72] = [
     decl("fpsr", Width::W32),
     decl("tpidr_el0", Width::W64),
     decl("tpidrro_el0", Width::W64),
+    decl("fp_flags", Width::W1),
 ];
 
 /// The A64 register file.
@@ -121,3 +122,7 @@ pub const FPSR: Reg = Reg(69);
 pub const TPIDR_EL0: Reg = Reg(70);
 /// The read-only thread pointer.
 pub const TPIDRRO_EL0: Reg = Reg(71);
+/// Not guest state: 1 in a program that produces FPSR flags (the build's
+/// FPSR census found a read that can be used), else 0. Read-only; blocks
+/// whose flags the host cannot give leave for the slow path while it is 1.
+pub const FP_FLAGS: Reg = Reg(72);
