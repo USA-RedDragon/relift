@@ -779,6 +779,231 @@ TEST(sched_sync_propagates_a_pending_handler)
     rl_thread_free(t);
 }
 
+/** @brief State of the redirect tests: where the synthetic handler says it returned. */
+static struct {
+    uint64_t returns_to;
+    int hook_calls;
+    int landed;
+    uint64_t landed_pc;
+    int tasks;
+} rd;
+
+static uint64_t ret_hook(rl_ctx *c, uint8_t *mem, uint64_t expected)
+{
+    (void)c;
+    (void)mem;
+    (void)expected;
+    rd.hook_calls++;
+    return rd.returns_to;
+}
+
+static int task_fn(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    rd.landed++;
+    rd.landed_pc = 0x3000;
+    c->r[1] = 77;
+    return RL_OK;
+}
+
+static int boot_redirect(struct rl_thread **out, rl_sched **sout, uint32_t depth)
+{
+    if (rl_core_init(&clock_guest, &clock_cpu) != 0)
+        return -1;
+    rl_units_reset();
+    static const rl_fn_entry fns[] = {{0x2000, 4, 0, irq_handler}, {0x3000, 4, 0, task_fn}};
+    static rl_unit u;
+    memset(&u, 0, sizeof u);
+    u.abi_version = RL_ABI_VERSION;
+    u.ctx_size = sizeof(struct rl_ctx);
+    u.fn_count = 2;
+    u.fns = fns;
+    u.name = "redirect";
+    const rl_unit *list[] = {&u};
+    if (rl_units_register(list, 1) != 0)
+        return -1;
+    rl_sched_config cfg = {.irq_depth = depth};
+    struct rl_thread *t = rl_thread_alloc();
+    rl_sched *s = rl_sched_create(&cfg);
+    gs.k = rl_sched_add_cpu(s, 1);
+    if (!t || rl_sched_attach(gs.k, t) != 0)
+        return -1;
+    gs.entries = 0;
+    gs.handler_runs = 0;
+    gs.handler_result = RL_OK;
+    memset(&rd, 0, sizeof rd);
+    rl_sched_set_irq(gs.k, irq_hook);
+    rl_sched_set_irq_return(gs.k, ret_hook);
+    rl_sched_set_mask(gs.k, 1);
+    *out = t;
+    *sout = s;
+    return 0;
+}
+
+TEST(sched_sync_returning_to_next_does_not_redirect)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    CHECK_EQ(boot_redirect(&t, &s, 0), 0);
+    rd.returns_to = 0x300;
+    rl_sched_raise(s, 0);
+    CHECK_EQ(rl_sync(t->ctx, NULL, 0x300), RL_OK);
+    CHECK_EQ(rd.hook_calls, 1);
+    CHECK_EQ(rl_sched_get_stats(s)->redirects, 0);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sched_sync_redirects_a_handler_that_returns_elsewhere)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    CHECK_EQ(boot_redirect(&t, &s, 0), 0);
+    rd.returns_to = 0x3000;
+    rl_sched_raise(s, 0);
+    CHECK_EQ(rl_sync(t->ctx, NULL, 0x300), RL_PENDING);
+    CHECK_EQ(rl_common(t->ctx)->pend.kind, RL_PEND_REDIRECT);
+    CHECK_EQ(rl_common(t->ctx)->pend.pc, 0x3000);
+    CHECK_EQ(rl_common(t->ctx)->pend.sp, RL_SP_NONE);
+    CHECK_EQ(rl_sched_get_stats(s)->redirects, 1);
+    rl_common(t->ctx)->pend.kind = RL_PEND_NONE;
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+static int nest_fn(rl_ctx *c, uint8_t *mem)
+{
+    rd.tasks++;
+    rl_sched_raise(rl_sched_of(gs.k), 0);
+    return rl_sync(c, mem, 0x500);
+}
+
+TEST(sched_sync_nested_entries_are_bounded)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    CHECK_EQ(boot_redirect(&t, &s, 8), 0);
+    rl_fn_entry e = {0x2000, 4, 0, nest_fn};
+    rl_unit u;
+    memset(&u, 0, sizeof u);
+    u.abi_version = RL_ABI_VERSION;
+    u.ctx_size = sizeof(struct rl_ctx);
+    u.fn_count = 1;
+    u.fns = &e;
+    u.name = "nest";
+    const rl_unit *list[] = {&u};
+    rl_units_reset();
+    CHECK_EQ(rl_units_register(list, 1), 0);
+    rd.returns_to = 0x500;
+    rl_sched_raise(s, 0);
+    CHECK_EQ(rl_sync(t->ctx, NULL, 0x500), RL_PENDING);
+    CHECK_EQ(rl_common(t->ctx)->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK_EQ(rd.tasks, 8);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+static uintptr_t stack_lo, stack_hi;
+
+static void note_stack(void)
+{
+    int here;
+    uintptr_t p = (uintptr_t)&here;
+    if (!stack_lo || p < stack_lo)
+        stack_lo = p;
+    if (p > stack_hi)
+        stack_hi = p;
+}
+
+static int switch_fn(rl_ctx *c, uint8_t *mem)
+{
+    note_stack();
+    if (rd.landed++ < 1000) {
+        rl_sched_raise(rl_sched_of(gs.k), 0);
+        return rl_sync(c, mem, 0x3100);
+    }
+    return RL_OK;
+}
+
+TEST(sched_sync_run_from_keeps_the_host_stack_flat_across_redirects)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    CHECK_EQ(boot_redirect(&t, &s, 0), 0);
+    rl_fn_entry e[] = {{0x2000, 4, 0, irq_handler}, {0x3000, 4, 0, switch_fn}};
+    rl_unit u;
+    memset(&u, 0, sizeof u);
+    u.abi_version = RL_ABI_VERSION;
+    u.ctx_size = sizeof(struct rl_ctx);
+    u.fn_count = 2;
+    u.fns = e;
+    u.name = "switch";
+    const rl_unit *list[] = {&u};
+    rl_units_reset();
+    CHECK_EQ(rl_units_register(list, 1), 0);
+    rd.returns_to = 0x3000;
+    stack_lo = stack_hi = 0;
+    CHECK_EQ(rl_run_from(t->ctx, NULL, 0x3000), RL_OK);
+    CHECK_EQ(rd.landed, 1001);
+    CHECK_EQ(gs.handler_runs, 1000);
+    CHECK_EQ(rl_sched_get_stats(s)->redirects, 1000);
+    CHECK_EQ(rl_common(t->ctx)->pend.kind, RL_PEND_NONE);
+    CHECK(stack_hi - stack_lo < 256);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+static int sync_block(rl_ctx *c, uint8_t *mem)
+{
+    rl_sched_raise(rl_sched_of(gs.k), 0);
+    return rl_sync(c, mem, 0x1100);
+}
+
+TEST(sched_sync_run_from_restarts_at_the_redirect_target)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    CHECK_EQ(boot_redirect(&t, &s, 0), 0);
+    rl_fn_entry e[] = {{0x1000, 4, 0, sync_block}, {0x2000, 4, 0, irq_handler}, {0x3000, 4, 0, task_fn}};
+    rl_unit u;
+    memset(&u, 0, sizeof u);
+    u.abi_version = RL_ABI_VERSION;
+    u.ctx_size = sizeof(struct rl_ctx);
+    u.fn_count = 3;
+    u.fns = e;
+    u.name = "blocks";
+    const rl_unit *list[] = {&u};
+    rl_units_reset();
+    CHECK_EQ(rl_units_register(list, 1), 0);
+    rd.returns_to = 0x3000;
+    CHECK_EQ(rl_run_from(t->ctx, NULL, 0x1000), RL_OK);
+    CHECK_EQ(gs.handler_runs, 1);
+    CHECK_EQ(rd.landed, 1);
+    CHECK_EQ(t->ctx->r[1], 77);
+    CHECK_EQ(rl_common(t->ctx)->pend.kind, RL_PEND_NONE);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sched_set_irq_mask_from_the_cpu_layer_gates_the_entry)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    CHECK_EQ(boot_redirect(&t, &s, 0), 0);
+    rd.returns_to = 0x300;
+    rl_set_irq_mask(t->ctx, 0);
+    rl_sched_raise(s, 0);
+    CHECK_EQ(rl_sync(t->ctx, NULL, 0x300), RL_OK);
+    CHECK_EQ(gs.handler_runs, 0);
+    rl_set_irq_mask(t->ctx, 1);
+    CHECK(rl_ctx_time(t->ctx)->budget <= 0);
+    CHECK_EQ(rl_sync(t->ctx, NULL, 0x300), RL_OK);
+    CHECK_EQ(gs.handler_runs, 1);
+    rl_set_irq_mask(t->ctx, 0);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
 TEST(sched_core_init_checks_the_clock_offset)
 {
     rl_cpu_desc bad = clock_cpu;

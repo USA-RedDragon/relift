@@ -53,6 +53,8 @@
 #define RL_LINE_NONE UINT32_MAX
 /** @brief Default longest budget in ticks when no event is nearer (rl_sched_config.slice). */
 #define RL_SCHED_SLICE_DEFAULT (1ull << 20)
+/** @brief Default most nested interrupt entries per CPU (rl_sched_config.irq_depth). */
+#define RL_SCHED_IRQ_DEPTH_DEFAULT 32u
 /** @brief Default host stack of a spawned CPU in bytes (rl_sched_config.stack), reserved, with a guard below. */
 #define RL_SCHED_STACK_DEFAULT (16ull << 20)
 
@@ -125,6 +127,15 @@ struct rl_event {
  */
 typedef uint64_t rl_irq_hook(rl_ctx *c, uint8_t *mem, uint64_t next);
 
+/**
+ * @brief The return hook of a CPU layer, called by rl_sync after an
+ * interrupt handler returns. expected is the pc the entry was given as next.
+ * Returns the guest pc the handler's return actually goes to (the layer reads
+ * it from where its return instruction put it), which differs from expected
+ * when the handler rewrote the return address.
+ */
+typedef uint64_t rl_irq_return_hook(rl_ctx *c, uint8_t *mem, uint64_t expected);
+
 /** @brief Scheduler settings for rl_sched_create. */
 typedef struct rl_sched_config {
     /** @brief Longest budget in ticks when no event is nearer; 0 means RL_SCHED_SLICE_DEFAULT. */
@@ -133,6 +144,8 @@ typedef struct rl_sched_config {
     uint64_t quantum;
     /** @brief Host stack bytes of each spawned CPU; 0 means RL_SCHED_STACK_DEFAULT. */
     uint64_t stack;
+    /** @brief Most interrupt entries of one CPU open at once in rl_sync; 0 means RL_SCHED_IRQ_DEPTH_DEFAULT. */
+    uint32_t irq_depth;
 } rl_sched_config;
 
 /** @brief Counters for tests and benchmarks. */
@@ -151,6 +164,8 @@ typedef struct rl_sched_stats {
     uint64_t switches;
     /** @brief Interrupts entered by rl_sync. */
     uint64_t irqs;
+    /** @brief Handler returns that went somewhere else than the entry's next (RL_PEND_REDIRECT). */
+    uint64_t redirects;
 } rl_sched_stats;
 
 /** @brief Creates a scheduler at tick 0, or NULL (out of memory). cfg may be NULL for the defaults. */
@@ -178,6 +193,8 @@ RL_RUNTIME_API int rl_sched_attach(rl_sched_cpu *c, struct rl_thread *t);
 RL_RUNTIME_API rl_time *rl_sched_clock(rl_sched_cpu *c);
 /** @brief Sets the hook rl_sync asks about interrupts, or NULL for none. */
 RL_RUNTIME_API void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook);
+/** @brief Sets the hook rl_sync asks where a handler returned to, or NULL when handlers always return to the pc the entry gave. */
+RL_RUNTIME_API void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook *hook);
 /** @brief The scheduler of c. */
 RL_RUNTIME_API rl_sched *rl_sched_of(const rl_sched_cpu *c);
 /** @brief The CPU that holds the run (the one whose access or sync is being served), or NULL. */

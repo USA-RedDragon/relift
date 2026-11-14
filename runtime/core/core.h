@@ -379,6 +379,15 @@ RL_RUNTIME_API int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, .
 /** @brief The shipped-build miss path: reports that no function exists at guest target and stops (rl_guest_fatal). */
 RL_RUNTIME_API int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target);
 
+/**
+ * @brief The thread entry of a guest that uses RL_PEND_REDIRECT: runs the
+ * function at guest pc and, each time the host frames unwind with a redirect
+ * record, runs the function at its target in a fresh frame. Returns RL_OK
+ * when a function returns normally, or RL_PENDING with any other record
+ * set.
+ */
+RL_RUNTIME_API int rl_run_from(rl_ctx *c, uint8_t *mem, uint64_t pc);
+
 /** @brief Registers units into the dispatch table. Call after rl_core_init and before any guest thread starts. Returns 0 or -1 (a unit failed its checks). */
 RL_RUNTIME_API int rl_units_register(const rl_unit *const *units, uint32_t count);
 /** @brief Drops the dispatch table (tests). */

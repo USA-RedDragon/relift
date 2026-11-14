@@ -23,6 +23,8 @@ rl_sched *rl_sched_create(const rl_sched_config *cfg)
         s->cfg = *cfg;
     if (s->cfg.slice == 0)
         s->cfg.slice = RL_SCHED_SLICE_DEFAULT;
+    if (s->cfg.irq_depth == 0)
+        s->cfg.irq_depth = RL_SCHED_IRQ_DEPTH_DEFAULT;
     if (s->cfg.quantum == 0)
         s->cfg.quantum = 1;
     s->holder = NO_HOLDER;
@@ -52,6 +54,7 @@ const rl_sched_stats *rl_sched_get_stats(const rl_sched *s) { return &s->stats; 
 uint64_t rl_sched_time(const rl_sched *s) { return s->time; }
 rl_time *rl_sched_clock(rl_sched_cpu *c) { return c->time; }
 void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook) { c->irq = hook; }
+void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook *hook) { c->irq_ret = hook; }
 rl_sched *rl_sched_of(const rl_sched_cpu *c) { return c->sched; }
 uint64_t rl_sched_pending(const rl_sched_cpu *c) { return c->lines & c->mask; }
 

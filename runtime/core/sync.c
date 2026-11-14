@@ -38,11 +38,48 @@ int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
         if (pc == RL_NO_IRQ)
             return RL_OK;
         k->sched->stats.irqs++;
+        if (k->irq_depth >= k->sched->cfg.irq_depth)
+            return rl_guest_fatal(c, "sched", "%u interrupt entries are open at once; a handler neither returns nor leaves the interrupt state", k->irq_depth);
         rl_fn fn = rl_dispatch_find(pc);
+        k->irq_depth++;
         int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc);
+        k->irq_depth--;
         if (r != RL_OK)
             return RL_PENDING;
+        if (k->irq_ret) {
+            uint64_t to = k->irq_ret(c, mem, next);
+            if (to != next) {
+                k->sched->stats.redirects++;
+                rl_pending *p = &rl_common(c)->pend;
+                p->kind = RL_PEND_REDIRECT;
+                p->pc = to;
+                p->sp = RL_SP_NONE;
+                p->code = 0;
+                return RL_PENDING;
+            }
+        }
     }
+}
+
+int rl_run_from(rl_ctx *c, uint8_t *mem, uint64_t pc)
+{
+    for (;;) {
+        rl_fn fn = rl_dispatch_find(pc);
+        int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc);
+        rl_pending *p = &rl_common(c)->pend;
+        if (r == RL_OK || p->kind != RL_PEND_REDIRECT)
+            return r;
+        pc = p->pc;
+        p->kind = RL_PEND_NONE;
+        p->sp = RL_SP_NONE;
+    }
+}
+
+void rl_set_irq_mask(rl_ctx *c, uint64_t mask)
+{
+    rl_sched_cpu *k = ctx_clock(c);
+    if (k)
+        rl_sched_set_mask(k, mask);
 }
 
 uint64_t rl_io_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)

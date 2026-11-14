@@ -1307,6 +1307,34 @@ checked by `core/emit-wasm/tests/diff/` (section 15)]
   nested call through dispatch, and when the handler returns `rl_sync`
   asks again, so several pending interrupts are entered one after another.
   `rl_sync` returns `RL_OK`, or `RL_PENDING` to propagate a pending record.
+- **Where a handler returns to.** The CPU layer may set a return hook
+  (`rl_irq_return_hook`, `rl_sched_set_irq_return`). After each handler
+  returns, `rl_sync` calls it with `next`; the hook returns the guest pc
+  the handler's return instruction actually went to (the layer reads it
+  from the stack or register the return used). If that is `next`, `rl_sync`
+  asks for another interrupt and finally returns `RL_OK`. If not, `rl_sync`
+  sets `pend = {RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}` and
+  returns `RL_PENDING`; every frame passes it up, so the host stack above
+  the thread entry is gone. A guest whose handlers can leave this way
+  starts its threads with `rl_run_from(c, mem, pc)`, which runs the
+  function at pc and, on a redirect record, clears it and runs the function
+  at the target in a fresh frame. A handler that never returns to its caller
+  and never redirects (it jumps away without the layer noticing) leaves
+  entries open: `rl_sync` stops the process with a fatal report once
+  `rl_sched_config.irq_depth` (default 32) entries of one CPU are open at
+  once, so the host stack stays bounded.
+- **Interrupt enable in a register.** A CPU layer whose enable lives in a
+  register tells the scheduler with `rl_set_irq_mask(c, mask)` (the lines
+  the new state allows; `rl_sched_set_mask` on the CPU's clock). The IR
+  frontend spells it as an intrinsic `irq_mask(mask)` that an emitter lowers
+  to this call; a plain `Set` of the register alone does not reach the
+  scheduler. The call takes effect at the CPU's current cycle: if a line in
+  the new mask is already raised, the budget ends and the next `rl_sync`
+  enters it. A delay between the enable instruction and its effect (the
+  Game Boy's EI takes hold after the next instruction) is the frontend's
+  job: it places the `irq_mask` after that instruction, or sets the mask
+  and keeps the entry hook returning `RL_NO_IRQ` for that one instruction.
+  The runtime applies no delay. [open: emitters lower `irq_mask`]
 - In IR terms (the interpreter's `Devices::sync`): the outcome of a block
   whose sync took an interrupt has `next` equal to the handler entry and
   `resume` equal to the exit's target. The nested call is the runtime's
@@ -1685,11 +1713,6 @@ committed.
 9. Guard sizes against real wild-pointer patterns (2).
 10. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
-11. Interrupt handlers that do not return to the address the entry pushed
-    (they rewrite the return address on the stack, or never return): the
-    nested call of `rl_sync` then returns to the wrong place or grows the
-    host stack. A check after the handler's return against `next`, with a
-    dispatch to the real target, is the likely fix (13).
 13. The dispatch table shape for banked code regions (13).
 14. The JavaScript runtime for WebAssembly modules, and an exact `fma64`
     for it (15).

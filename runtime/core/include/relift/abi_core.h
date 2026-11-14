@@ -77,7 +77,12 @@ enum rl_pending_kind {
     /** @brief The guest thread exits (the guest OS's thread exit call); pend.code is unused. */
     RL_PEND_EXIT_THREAD = 2,
     /** @brief The process exits or stopped on a fatal guest error; pend.code is the exit status. */
-    RL_PEND_EXIT_PROCESS = 3
+    RL_PEND_EXIT_PROCESS = 3,
+    /**
+     * @brief Control goes to pend.pc with every host frame gone: frames pass the record up
+     * (pend.sp is RL_SP_NONE) to the thread entry, which restarts at pend.pc (rl_run_from).
+     */
+    RL_PEND_REDIRECT = 4
 };
 
 /** @brief pend.sp value that no guest frame can match (the CPU layers keep guest stack pointers aligned). */
@@ -163,12 +168,24 @@ _Static_assert(sizeof(rl_time) == 16, "rl_time size");
 
 /**
  * @brief Runs devices and events up to the CPU's cycle, sets a new budget
- * and enters any interrupt the guest takes, as a nested call that returns to
- * next. Called at a sync point when budget is zero or below, after the exit's
+ * and enters any interrupt the guest takes, as a nested call. When the handler
+ * returns somewhere other than next (the CPU layer's return hook says so), the
+ * record is RL_PEND_REDIRECT and this returns RL_PENDING. Called at a sync point when budget is zero or below, after the exit's
  * register stores; next is the guest pc the block goes to. Returns RL_OK, or
  * RL_PENDING to propagate the pending record.
  */
 RL_RUNTIME_API int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next);
+/**
+ * @brief Tells the scheduler which interrupt lines may interrupt the CPU
+ * from its current cycle on (rl_sched_set_mask on the CPU's clock). A CPU
+ * layer whose interrupt enable lives in a register calls this wherever the
+ * enable changes, with the lines the new state allows: all of them or none
+ * for one master enable, the enabled lines for a per-line enable. When a
+ * line in the new mask is already raised, the budget ends so the next sync
+ * point sees it. Any delay between an enable instruction and its effect
+ * is the caller's: call at the cycle the enable takes hold.
+ */
+RL_RUNTIME_API void rl_set_irq_mask(rl_ctx *c, uint64_t mask);
 /** @brief A guest read of size bytes (1, 2, 4 or 8) at an address that may be a device register, at the CPU's current cycle. */
 RL_RUNTIME_API uint64_t rl_io_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size);
 /** @brief A guest write of size bytes of value (little-endian) at an address that may be a device register, at the CPU's current cycle. */

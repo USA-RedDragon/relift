@@ -39,6 +39,8 @@ struct rl_sched_cpu {
     uint64_t lines;
     uint64_t mask;
     rl_irq_hook *irq;
+    rl_irq_return_hook *irq_ret;
+    uint32_t irq_depth;
     rl_sched *sched;
     struct rl_thread *thread;
     rl_fiber *fiber;
