@@ -92,3 +92,22 @@ fn relift_toml_in_the_working_dir_is_read() {
         stderr(&out)
     );
 }
+
+#[test]
+fn the_example_config_loads() {
+    let example =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../relift.example.toml");
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("relift-example");
+    std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
+    relift_cache::write_if_changed(
+        &dir.join("relift.toml"),
+        &std::fs::read(&example).expect("relift.example.toml reads"),
+    )
+    .expect("the config file is writable");
+    let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
+        .arg("check")
+        .current_dir(&dir)
+        .output()
+        .expect("the relift binary runs");
+    assert_eq!(stderr(&out).trim(), "relift check: not implemented");
+}
