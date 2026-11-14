@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use relift_cpu_a64::lift::sail::SLOW_FPCR;
 use relift_cpu_a64::lift::{self, LiftError};
 use relift_cpu_a64::regs;
-use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
+use relift_ir::interp::{self, Fault, FlatMemory, GuestMemory, NoIntrinsics, State};
 use relift_ir::{Block, Flow};
 use unicorn_engine::RegisterARM64 as R;
 use unicorn_engine::Unicorn;
@@ -97,7 +97,7 @@ impl Emu {
     pub fn new() -> Result<Emu, uc_error> {
         let mut uc = Unicorn::new(Arch::ARM64, Mode::ARM)?;
         uc.ctl_set_cpu_model(CPU_ARM64_MAX)?;
-        uc.mem_map(CODE_MAP, CODE_SIZE, Prot::ALL)?;
+        uc.mem_map(CODE_MAP, CODE_SIZE, Prot::READ | Prot::EXEC)?;
         uc.mem_map(DATA, DATA_SIZE as u64, Prot::READ | Prot::WRITE)?;
         uc.reg_write(R::CPACR_EL1, 3 << 20)?;
         Ok(Emu {
@@ -110,6 +110,8 @@ impl Emu {
         if self.loaded == words {
             return Ok(());
         }
+        let old = vec![0u8; 4 * self.loaded.len()];
+        self.uc.mem_write(CODE, &old)?;
         let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
         self.uc.mem_write(CODE, &bytes)?;
         self.uc
@@ -211,8 +213,55 @@ pub fn lift_all(words: &[u32]) -> Result<Vec<Block>, String> {
         .collect()
 }
 
+/// The interpreter's view of what Unicorn maps: the data window, and the
+/// read-only code region holding the words at [`CODE`] and zeros elsewhere.
+struct Memory {
+    data: FlatMemory,
+    code: Vec<u8>,
+}
+
+fn code_image(words: &[u32]) -> Vec<u8> {
+    words.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
+impl Memory {
+    fn in_code(addr: u64, n: usize) -> bool {
+        addr >= CODE_MAP
+            && addr
+                .checked_add(n as u64)
+                .is_some_and(|e| e <= CODE_MAP + CODE_SIZE)
+    }
+}
+
+impl GuestMemory for Memory {
+    fn read(&mut self, addr: u64, buf: &mut [u8]) -> Result<(), Fault> {
+        if !Memory::in_code(addr, buf.len()) {
+            return self.data.read(addr, buf);
+        }
+        for (i, b) in buf.iter_mut().enumerate() {
+            let a = addr + i as u64;
+            *b = a
+                .checked_sub(CODE)
+                .and_then(|o| self.code.get(o as usize).copied())
+                .unwrap_or(0);
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), Fault> {
+        if Memory::in_code(addr, data.len()) {
+            return Err(Fault {
+                addr,
+                size: data.len() as u32,
+                write: true,
+            });
+        }
+        self.data.write(addr, data)
+    }
+}
+
 /// Runs lifted blocks in the interpreter on `input`.
-pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
+pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
     let file = regs::regs();
     let mut st = State::new(file.len());
     for (i, v) in input.x.iter().enumerate() {
@@ -226,9 +275,12 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
     }
-    let mut mem = FlatMemory {
-        base: DATA,
-        bytes: input.mem.clone(),
+    let mut mem = Memory {
+        data: FlatMemory {
+            base: DATA,
+            bytes: input.mem.clone(),
+        },
+        code: code_image(words),
     };
     let mut pc = CODE;
     for b in blocks {
@@ -254,7 +306,7 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
         v: [0; 32],
         fpcr: input.fpcr,
         pc,
-        mem: mem.bytes,
+        mem: mem.data.bytes,
     };
     for (i, x) in out.x.iter_mut().enumerate() {
         *x = st.regs[i] as u64;

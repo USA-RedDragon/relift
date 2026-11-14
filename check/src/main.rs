@@ -67,7 +67,7 @@ fn run_one(emu: &mut Emu, words: &[u32], g: &emu::Guest, opts: &Opts, rep: &mut 
         let m = mutate::mutate(last);
         rep.mutation.get_or_insert(m);
     }
-    let ir = interpret(&blocks, g);
+    let ir = interpret(&blocks, words, g);
     rep.states += 1;
     let guarded = blocks.iter().any(|b| {
         b.insts
