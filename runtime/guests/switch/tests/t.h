@@ -24,6 +24,11 @@ rl_ctx *t_boot(const rl_hos_config *cfg);
 uint32_t t_svc(rl_ctx *c, uint32_t imm, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5);
 /** @brief rl_svc return code of the last t_svc call. */
 extern int t_svc_rc;
+/**
+ * @brief svcSleepThread(ns) on the calling guest thread, keeping x0..x5 and
+ * t_svc_rc: a wait that gives the core to the threads the test started.
+ */
+void t_sleep(uint64_t ns);
 /** @brief Grows the heap to size with svcSetHeapSize and returns its guest address (0 on failure). */
 uint64_t t_heap(rl_ctx *c, uint64_t size);
 /** @brief Registers lifted-signature host functions at guest addresses (one unit). */

@@ -246,9 +246,10 @@ void hos_wake(hos_thread *t, rl_result r)
     t->wait_result = r;
     t->woken = true;
     pthread_cond_signal(&t->cv);
+    hos_sched_ready(t);
 }
 
-bool hos_block(hos_thread *t, int64_t timeout_ns)
+static bool wait_woken(hos_thread *t, int64_t timeout_ns)
 {
     if (timeout_ns < 0) {
         while (!t->woken)
@@ -270,6 +271,15 @@ bool hos_block(hos_thread *t, int64_t timeout_ns)
 #endif
     }
     return true;
+}
+
+bool hos_block(hos_thread *t, int64_t timeout_ns)
+{
+    hos_sched_unready(t);
+    bool woken = wait_woken(t, timeout_ns);
+    hos_sched_ready(t);
+    hos_sched_run(t);
+    return woken;
 }
 
 rl_result hos_wait_sync(int32_t *index, uint64_t handles_addr, int32_t count, int64_t timeout)

@@ -68,6 +68,17 @@ uint32_t t_svc(rl_ctx *c, uint32_t imm, uint64_t a0, uint64_t a1, uint64_t a2, u
     return (uint32_t)c->x[0];
 }
 
+void t_sleep(uint64_t ns)
+{
+    rl_ctx *c = rl_thread_current()->ctx;
+    uint64_t x[6];
+    memcpy(x, c->x, sizeof x);
+    int rc = t_svc_rc;
+    t_svc(c, SVC_SLEEP_THREAD, ns, 0, 0, 0, 0, 0);
+    memcpy(c->x, x, sizeof x);
+    t_svc_rc = rc;
+}
+
 uint64_t t_heap(rl_ctx *c, uint64_t size)
 {
     if (t_svc(c, SVC_SET_HEAP_SIZE, 0, size, 0, 0, 0, 0) != 0)

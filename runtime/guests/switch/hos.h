@@ -213,6 +213,50 @@ enum hos_wait_kind {
 
 typedef struct hos_thread hos_thread;
 
+/** @brief Horizon's CPU cores (applications get the ones in rl_hos_config.core_mask). */
+#define HOS_CORES 4
+/** @brief Horizon's thread priorities, 0 (highest) to 63. */
+#define HOS_PRIOS 64
+
+/** @brief Per-core, per-priority FIFO lists of threads (KPriorityQueue). */
+typedef struct hos_runq {
+    hos_thread *head[HOS_CORES][HOS_PRIOS];
+    hos_thread *tail[HOS_CORES][HOS_PRIOS];
+    /** @brief Per core, bit p set when the priority p list is not empty. */
+    uint64_t mask[HOS_CORES];
+} hos_runq;
+
+/** @brief One emulated core: the thread chosen to run there and the thread that runs there. */
+typedef struct hos_core {
+    /** @brief The thread the scheduler chose for this core, or NULL. */
+    hos_thread *selected;
+    /** @brief The thread that holds the core and runs guest code on it, or NULL. */
+    hos_thread *holder;
+    /** @brief The previous holder, to count hand-overs. */
+    hos_thread *last;
+    /** @brief When the holder was asked to give the core up (ns), 0 when not. */
+    uint64_t preempt_ns;
+} hos_core;
+
+/** @brief Scheduler state (KScheduler); guarded by hos.lock. */
+typedef struct hos_sched {
+    /** @brief Threads in their active core's queue. */
+    hos_runq scheduled;
+    /** @brief Threads in the queues of the other cores of their affinity mask. */
+    hos_runq suggested;
+    hos_core cores[HOS_CORES];
+    /** @brief A queue changed since the last selection. */
+    bool reselect;
+    /** @brief RELIFT_SCHED=free: guest threads run freely on host threads, a debug comparison. */
+    bool free;
+    /** @brief RELIFT_SCHED=stats: log hand-overs and preemption delays each second. */
+    bool stats;
+    /** @brief Statistics of the current second. */
+    uint64_t stat_start_ns, handovers, preempts, late_ns;
+    /** @brief Longest preemption delay seen (ns). */
+    uint64_t late_max_ns;
+} hos_sched;
+
 /** @brief Guest thread (KThread). */
 struct hos_thread {
     /** @brief Base; waitable, signaled when the thread has exited. */
@@ -221,12 +265,28 @@ struct hos_thread {
     struct rl_thread *rt;
     /** @brief Thread id (svcGetThreadId). */
     uint64_t id;
-    /** @brief Priority 0 (highest) to 63. */
+    /** @brief Dynamic priority 0 (highest) to 63: base_prio, raised by the mutex waiters it inherits from. */
     int32_t prio;
-    /** @brief Ideal core. */
+    /** @brief Priority set by svcCreateThread and svcSetThreadPriority. */
+    int32_t base_prio;
+    /** @brief Preferred (ideal) core, -1 for none. */
     int32_t core;
     /** @brief Affinity mask. */
     uint64_t affinity;
+    /** @brief Core whose scheduled queue holds the thread, -1 for none (Horizon's active core). */
+    int32_t active_core;
+    /** @brief Core the thread holds and runs guest code on, -1 while it holds none. */
+    int32_t cur_core;
+    /** @brief In the scheduler's queues: started and not blocked. */
+    bool runnable;
+    /** @brief Set when the thread must give up its core at its next svc; read without the lock. */
+    int preempt;
+    /** @brief When the thread last stopped being selected on a core (ns). */
+    uint64_t last_sched_ns;
+    /** @brief When the thread got its core (ns), for the round robin of the preemption priorities. */
+    uint64_t slice_ns;
+    /** @brief Neighbors in the one scheduled or suggested queue of each core the thread is in. */
+    hos_thread *qnext[HOS_CORES], *qprev[HOS_CORES];
     /** @brief Guest address of the 0x200-byte TLS slot (tpidrro_el0). */
     uint64_t tls;
     /** @brief Entry, argument and stack top from svcCreateThread. */
@@ -407,6 +467,8 @@ typedef struct hos_process {
     hos_thread *arb_waiters;
     /** @brief Next thread id. */
     uint64_t next_thread_id;
+    /** @brief The scheduler. */
+    hos_sched sched;
     /** @brief TLS page addresses. */
     uint64_t tls_pages[HOS_TLS_PAGES];
     /** @brief Used-slot bit masks per TLS page. */
@@ -504,6 +566,29 @@ void hos_sync_signal(hos_kobj *o);
 bool hos_block(hos_thread *t, int64_t timeout_ns);
 /** @brief Wakes t with result r. Lock held. */
 void hos_wake(hos_thread *t, rl_result r);
+
+/** @brief Reads RELIFT_SCHED (strict by default; free or stats). Called by rl_hos_init. */
+void hos_sched_init(void);
+/** @brief Puts t in the scheduler's queues (started or woken). Lock held. */
+void hos_sched_ready(hos_thread *t);
+/** @brief Takes t out of the queues (blocked or exited) and frees its core. Lock held. */
+void hos_sched_unready(hos_thread *t);
+/** @brief Waits until t, runnable, holds its core. Lock held once (it waits on t->cv). */
+void hos_sched_run(hos_thread *t);
+/** @brief The svc exit check: gives the core up when asked to, and runs the round robin. Lock not held. */
+void hos_sched_point(void);
+/** @brief The calling guest thread blocks in host code (IPC, a Vulkan wait): frees its core. Lock and host locks not held. */
+void hos_sched_leave(void);
+/** @brief Ends hos_sched_leave: queues the thread again and waits for its core. Lock and host locks not held. */
+void hos_sched_return(void);
+/** @brief svcSleepThread with ns 0 (yield), -1 (yield with migration) or -2 (yield to any thread). */
+void hos_sched_yield(int64_t ns);
+/** @brief Sets t's dynamic priority and moves it in the queues. Lock held. */
+void hos_sched_set_prio(hos_thread *t, int32_t prio);
+/** @brief Sets t's preferred core and affinity mask, moving it as Horizon does. Lock held. */
+rl_result hos_sched_set_affinity(hos_thread *t, int32_t core, uint64_t mask);
+/** @brief svcGetCurrentProcessorNumber for t. Lock held. */
+int32_t hos_sched_processor(const hos_thread *t);
 
 /** @brief Memory svcs. */
 rl_result hos_set_heap_size(uint64_t size, uint64_t *out);

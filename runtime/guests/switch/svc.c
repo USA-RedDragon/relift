@@ -327,7 +327,9 @@ static int dispatch(rl_ctx *c, uint32_t imm)
     case 0x0F: rc = hos_set_thread_core_mask(w0, (int32_t)w1, x[2]); break;
     case 0x10: {
         hos_thread *t = hos_current();
-        x[0] = t ? (uint32_t)t->core : 0;
+        hos_lock();
+        x[0] = t ? (uint32_t)hos_sched_processor(t) : 0;
+        hos_unlock();
         return RL_OK;
     }
     case 0x11: rc = hos_signal_event(w0); break;
@@ -450,6 +452,7 @@ int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
     /* The guest's FP flags stay out of the runtime's own FP work. */
     uint32_t flags = rl_a64_flags_enter();
     int r = rl_cfg()->trace_os ? svc_traced(c, imm) : dispatch(c, imm);
+    hos_sched_point();
     rl_a64_flags_leave(flags);
     return r;
 }
@@ -517,6 +520,7 @@ int rl_hos_init(const rl_hos_config *cfg)
     else
         rl_hos_default_config(&hos.cfg);
     hos.next_thread_id = 1;
+    hos_sched_init();
     if (hos_mem_init() != 0)
         return -1;
     hos.reslimit = calloc(1, sizeof *hos.reslimit);

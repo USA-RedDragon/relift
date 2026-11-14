@@ -66,8 +66,11 @@ static hos_thread *new_thread(int32_t prio, int32_t core)
     t->rt->guest = t;
     t->rt->ctx->tpidrro_el0 = t->tls;
     t->prio = prio;
+    t->base_prio = prio;
     t->core = core;
     t->affinity = 1ull << core;
+    t->active_core = core;
+    t->cur_core = -1;
     t->id = hos.next_thread_id++;
     t->next_all = hos.threads;
     hos.threads = t;
@@ -147,6 +150,9 @@ static void thread_body(struct rl_thread *rt)
     c->sp = t->stack_top;
     c->x[30] = 0;
     c->tpidrro_el0 = t->tls;
+    hos_lock();
+    hos_sched_run(t);
+    hos_unlock();
     finish_guest(c, rl_call_guest(c, rl_mem_base(), t->entry));
     hos_thread_exited(t);
     rl_thread_bind(NULL);
@@ -171,6 +177,7 @@ rl_result hos_start_thread(uint32_t h)
             rc = KR_OUT_OF_RESOURCE;
         } else {
             rl_thread_detach(t->rt);
+            hos_sched_ready(t);
         }
     }
     hos_unlock();
@@ -182,6 +189,7 @@ rl_result hos_start_thread(uint32_t h)
 void hos_thread_exited(hos_thread *t)
 {
     hos_lock();
+    hos_sched_unready(t);
     if (t->state != HT_EXITED) {
         t->state = HT_EXITED;
         hos.live_threads--;
@@ -192,10 +200,22 @@ void hos_thread_exited(hos_thread *t)
 
 void hos_sleep_thread(int64_t ns)
 {
-    if (ns <= 0)
-        rl_host_yield();
-    else
+    hos_thread *t = hos_current();
+    if (ns <= 0) {
+        hos_sched_yield(ns);
+        return;
+    }
+    if (!t || hos.sched.free) {
         rl_sleep_ns((uint64_t)ns);
+        return;
+    }
+    hos_lock();
+    t->woken = false;
+    t->wait_kind = HW_SLEEP;
+    hos_block(t, ns);
+    t->wait_kind = HW_NONE;
+    t->woken = false;
+    hos_unlock();
 }
 
 rl_result hos_get_thread_priority(uint32_t h, int32_t *out)
@@ -203,7 +223,7 @@ rl_result hos_get_thread_priority(uint32_t h, int32_t *out)
     hos_lock();
     hos_thread *t = hos_thread_get(h);
     if (t)
-        *out = t->prio;
+        *out = t->base_prio;
     hos_unlock();
     if (!t)
         return KR_INVALID_HANDLE;
@@ -217,8 +237,10 @@ rl_result hos_set_thread_priority(uint32_t h, int32_t prio)
         return KR_INVALID_PRIORITY;
     hos_lock();
     hos_thread *t = hos_thread_get(h);
-    if (t)
-        t->prio = prio;
+    if (t) {
+        t->base_prio = prio;
+        hos_sched_set_prio(t, prio);
+    }
     hos_unlock();
     if (!t)
         return KR_INVALID_HANDLE;
@@ -251,23 +273,20 @@ rl_result hos_set_thread_core_mask(uint32_t h, int32_t core, uint64_t mask)
             return KR_INVALID_CPU_CORE;
         if (mask == 0)
             return KR_INVALID_COMBINATION;
-        if (core >= 0 && !((mask >> core) & 1))
+        if (core < 0 || core >= HOS_CORES) {
+            if (core != -1 && core != -3)
+                return KR_INVALID_CPU_CORE;
+        } else if (!((mask >> core) & 1)) {
             return KR_INVALID_COMBINATION;
-        if (core < -1)
-            return KR_INVALID_COMBINATION;
+        }
     }
     hos_lock();
     hos_thread *t = hos_thread_get(h);
-    if (t) {
-        if (core >= 0)
-            t->core = core;
-        t->affinity = mask;
-    }
+    rl_result rc = t ? hos_sched_set_affinity(t, core, mask) : KR_INVALID_HANDLE;
     hos_unlock();
-    if (!t)
-        return KR_INVALID_HANDLE;
-    hos_kobj_unref(&t->obj);
-    return KR_SUCCESS;
+    if (t)
+        hos_kobj_unref(&t->obj);
+    return rc;
 }
 
 rl_result hos_get_thread_id(uint32_t h, uint64_t *out)
@@ -296,6 +315,10 @@ rl_ctx *rl_hos_attach_thread(int32_t prio, int32_t core)
     if (!t)
         return NULL;
     rl_thread_bind(t->rt);
+    hos_lock();
+    hos_sched_ready(t);
+    hos_sched_run(t);
+    hos_unlock();
     return t->rt->ctx;
 }
 
