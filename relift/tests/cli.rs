@@ -36,7 +36,7 @@ fn every_stub_subcommand_fails_as_not_implemented() {
         (&["build"][..], "build"),
         (&["build", "--target", "a", "--target", "b"], "build"),
         (
-            &["run", "--target", "linux-x64", "--trace-svc", "--strict"],
+            &["run", "--target", "linux-x64", "--trace-os", "--strict"],
             "run",
         ),
         (&["check", "0x7100"], "check"),
