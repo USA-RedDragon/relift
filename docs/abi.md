@@ -657,7 +657,7 @@ uses LDAXR/STLXR loops.
 | `MRS CNTFRQ_EL0` | `rl_mrs_cntfrq_el0()` | inline | `RL_CNTFRQ`, 19,200,000 unless relift defines another rate for the guest; it must equal the guest's tick rate [inferred: a libnx sleep test program expects 19.2 MHz; not run on hardware] |
 | `MRS FPCR` | `rl_mrs_fpcr(c)` | inline | |
 | `MSR FPCR` | `void rl_msr_fpcr(rl_ctx *c, uint64_t v)` | runtime | section 10.1 |
-| `MRS FPSR`, `MSR FPSR` | `rl_mrs_fpsr(c)`, `rl_msr_fpsr(c, v)` | inline | |
+| `MRS FPSR`, `MSR FPSR` | `rl_mrs_fpsr_flags(slot)`, slot write and `rl_msr_fpsr_flags()` | inline | section 10.1 |
 | `MRS NZCV`, `MSR NZCV` | none | emitter | packs or unpacks the flag locals |
 | `MRS CTR_EL0` | `rl_mrs_ctr_el0()` | inline | Cortex-A57 value [inferred from the A57 manual; open: confirm on hardware] |
 | `MRS DCZID_EL0` | `rl_mrs_dczid_el0()` | inline | 64-byte DC ZVA [inferred, same] |
@@ -691,11 +691,54 @@ are also call boundaries. [inferred]
   No per-mode function variants are needed while the default is 0.
   [verified: static scan of SDK-based guest code; open: Horizon's initial
   FPCR]
-- **FPSR cumulative flags** are not tracked in the default build: `fpsr`
-  arguments are NULL and MRS FPSR returns the last MSR value. The
-  `fp-exact` build passes the FPSR local and every operation takes the slow
-  path, so the checker can compare flags. [inferred; open: check that no
-  guest logic reads exception flags]
+- **FPSR cumulative flags** (IOC, DZC, OFC, UFC, IXC, IDC, QC) are produced
+  only for a program that can observe them. The build's FPSR census
+  (`cpus/a64/src/flags.rs`) looks at every reachable `MRS Xt, FPSR`: it
+  counts when some path uses `Xt` before overwriting it, a call uses
+  `x0` to `x7`, a computed jump uses everything, and a value returned in
+  `x0` counts when a caller uses `x0` after the call. libgcc's soft-float
+  `__sfp_handle_exceptions`, linked into every libnx program, reads FPSR
+  only to raise exceptions and does not count. Without a usable read the
+  program is built flag-free and pays nothing.
+- With one, the build compiles lifted code with `-DRL_FP_FLAGS
+  -ffp-exception-behavior=strict` and `program.c` calls
+  `rl_a64_set_fp_flags(1)`. The flags then live in two places: the FPSR
+  slot (`c->fpsr`: QC, MSR values, the FPCR slow paths) and the host's
+  sticky flags (MXCSR on x86-64, FPSR on arm64), which host FP operations
+  raise and the exact layer (`fp.c`, called with a NULL `fpsr`) and
+  IR-built compares and min/max (`rl_fp_raise`) raise too. `MRS FPSR` is
+  `rl_mrs_fpsr_flags(slot)`, the slot ORed with the host flags mapped to
+  Arm bits (IE, ZE, OE, UE, PE to IOC, DZC, OFC, UFC, IXC); `MSR FPSR` sets
+  the slot and clears the host flags. Threads are host threads, so the
+  host flags follow the guest thread; `bind` clears them, and `rl_svc`
+  saves and restores them around the runtime's own FP work
+  (`rl_a64_flags_enter`, `rl_a64_flags_leave`).
+- Where x86-64 and Arm differ at FPCR zero, and what covers it:
+  - Tininess: Arm detects underflow before rounding, x86 after. They differ
+    only for a result that rounds up to the smallest normal magnitude;
+    `rl_fp_tiny_fixup` sends exactly those results to the exact layer
+    (`test_fp_flags.c`, values from an Apple M2).
+  - x86 DE (denormal operand) has no Arm meaning at FZ 0 and is not mapped;
+    IDC arises only with FZ set, which runs on the slow path.
+  - NaN results: the x86 operation raised the same IE as Arm (signaling
+    operands, invalid operations); the NaN bits come from the exact layer.
+  - FMA, square root, conversions to and from integers and between
+    formats, rounding to integral: always the exact layer, exact flags.
+  - Compares (IOC for signaling NaNs, and for any NaN in FCMPE, FCMGE and
+    FCMGT), FMAX/FMIN and their NUM, pairwise and across-lanes forms (IOC
+    for signaling NaNs): flags built in IR and raised under the
+    instruction's condition (FCCMP raises nothing when the condition fails).
+  - FRECPE, FRSQRTE, FRECPS, FRSQRTS and fixed-point conversions with
+    fraction bits (whose scaling multiply would raise flags Arm's exact
+    scaling does not): their blocks carry a second guard (`SLOW_FLAGS`,
+    on the frontend's `FP_FLAGS` slot, homed at the constant
+    `RL_FP_FLAGS_ON`) and run on the slow path in flag-producing programs
+    only.
+  - Non-default FPCR (RMode, FZ, DN, AHP, FZ16) runs on the slow path in
+    every program, which produces exact flags.
+- The reference mode `RELIFT_FP_EXACT=1` sets `RL_FPCR_EXACT` (FPCR bit 31,
+  RES0, never visible to the guest or the host FPCR) so every guarded block
+  runs on the slow path; it exists to check the host-flag path against.
 - **FP cut layer** (the Sail prototype's option (b), 11 operations): FPAdd, FPSub,
   FPMul, FPDiv, FPMulAdd, FPSqrt, FPRoundInt, FPRSqrtEstimate (each for
   single and double), FPConvert, FPToFixed, FixedToFP. Every one has an
