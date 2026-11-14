@@ -390,6 +390,27 @@ RL_RUNTIME_API int rl_run_from(rl_ctx *c, uint8_t *mem, uint64_t pc);
 
 /** @brief Registers units into the dispatch table. Call after rl_core_init and before any guest thread starts. Returns 0 or -1 (a unit failed its checks). */
 RL_RUNTIME_API int rl_units_register(const rl_unit *const *units, uint32_t count);
+/** @brief Widens the dispatch table to cover guest code [lo, hi), so units loaded later fit without moving it. Call before any guest thread starts. Returns 0 or -1. */
+RL_RUNTIME_API int rl_dispatch_reserve(uint64_t lo, uint64_t hi);
+/**
+ * @brief Registers a hot-loaded unit (docs/abi.md section 6, step 5): checks
+ * its ABI version, context size, image id and entries, adds its function
+ * maps, then stores each entry into an empty table slot with a release
+ * store (an RL_FN_OVERRIDE entry replaces). The table never moves. Returns
+ * 0, or -1 with the reason in why. Callers hold the miss lock.
+ */
+RL_RUNTIME_API int rl_unit_add(const rl_unit *u, char *why, size_t n);
+/** @brief The image id of the registered static units, or NULL when none carries one. */
+RL_RUNTIME_API const uint8_t *rl_dispatch_image(void);
+/**
+ * @brief The dev-build miss path (docs/abi.md section 6, steps 1 to 5): under
+ * the miss lock, asks relift over RELIFT_DEV_SOCKET for the code at target,
+ * loads and registers the library it builds, and returns the function now
+ * registered at target. fp_mode is the CPU layer's floating-point control
+ * value for the request. Returns NULL after logging why when the dev path
+ * fails, and always in a build without RL_HOTLOAD.
+ */
+RL_RUNTIME_API rl_fn rl_core_miss_load(rl_ctx *c, uint64_t target, uint32_t fp_mode);
 /** @brief Drops the dispatch table (tests). */
 RL_RUNTIME_API void rl_units_reset(void);
 /** @brief Copies the dispatch view into c. */

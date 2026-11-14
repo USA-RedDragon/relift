@@ -84,6 +84,9 @@ int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry)
 
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
+    rl_fn f = rl_core_miss_load(c, c->pc, c->fpcr);
+    if (f)
+        RL_MUSTTAIL return f(c, mem);
     return rl_core_miss(c, mem, c->pc);
 }
 

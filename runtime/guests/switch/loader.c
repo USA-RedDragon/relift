@@ -406,6 +406,10 @@ static int run_program(void *arg)
             rl_log(RL_LOG_ERROR, "loader", "hook %s failed to start", g_hooks[h]->name ? g_hooks[h]->name : "?");
             return 1;
         }
+    if (rl_dispatch_reserve(lo, hi) != 0) {
+        rl_log(RL_LOG_ERROR, "loader", "cannot allocate the dispatch table");
+        return 1;
+    }
     if (p->units && p->unit_count) {
         if (rl_units_register(p->units, p->unit_count) != 0) {
             rl_log(RL_LOG_ERROR, "loader", "a static unit was refused");

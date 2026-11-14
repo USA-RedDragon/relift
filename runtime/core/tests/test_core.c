@@ -300,6 +300,65 @@ TEST(core_dispatch_uses_the_code_granule)
     rl_thread_free(t);
 }
 
+TEST(core_hot_units_fill_a_fixed_table)
+{
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    CHECK_EQ(rl_dispatch_reserve(0x1000, 0x1010), 0);
+    static const rl_fn_entry base[] = { { 0x1000, 2, 0, fn_a } };
+    rl_unit u = unit_of(base, 1, sizeof(struct rl_ctx));
+    memset(u.image_id, 0x5A, sizeof u.image_id);
+    const rl_unit *list[] = { &u };
+    CHECK_EQ(rl_units_register(list, 1), 0);
+    CHECK(rl_dispatch_image() != NULL);
+    struct rl_thread *t = rl_thread_alloc();
+    CHECK(t != NULL);
+    rl_fn *table = t->ctx->k.disp_table;
+    CHECK_EQ(t->ctx->k.disp_count, 8);
+    char why[256];
+    static const rl_fn_entry hot[] = { { 0x1000, 2, 0, fn_b }, { 0x100a, 2, 0, fn_b } };
+    rl_unit h = unit_of(hot, 2, sizeof(struct rl_ctx));
+    CHECK_EQ(rl_unit_add(&h, why, sizeof why), -1);
+    CHECK(strstr(why, "different image set") != NULL);
+    memcpy(h.image_id, u.image_id, sizeof h.image_id);
+    h.ctx_size = 896;
+    CHECK_EQ(rl_unit_add(&h, why, sizeof why), -1);
+    CHECK(strstr(why, "ABI version") != NULL);
+    static const rl_fn_entry outside[] = { { 0x1010, 2, 0, fn_b } };
+    rl_unit o = h;
+    o.ctx_size = sizeof(struct rl_ctx);
+    o.fns = outside;
+    o.fn_count = 1;
+    CHECK_EQ(rl_unit_add(&o, why, sizeof why), -1);
+    CHECK(strstr(why, "outside the code range") != NULL);
+    h.ctx_size = sizeof(struct rl_ctx);
+    CHECK_EQ(rl_unit_add(&h, why, sizeof why), 0);
+    CHECK(rl_dispatch_find(0x1000) == fn_a);
+    CHECK(rl_dispatch_find(0x100a) == fn_b);
+    CHECK(t->ctx->k.disp_table == table);
+    CHECK(table[5] == fn_b);
+    rl_thread_free(t);
+}
+
+TEST(core_dev_miss_without_a_server_says_why)
+{
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    struct rl_thread *t = rl_thread_alloc();
+    CHECK(t != NULL);
+    int fds[2];
+    char out[2048];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    rl_fn f = rl_core_miss_load(t->ctx, 0x4444, 0);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK(f == NULL);
+#if defined(RL_HOTLOAD)
+    CHECK(strstr(out, "hotload") != NULL);
+#else
+    CHECK_EQ(out[0], 0);
+#endif
+    rl_thread_free(t);
+}
+
 TEST(core_pending_and_fatal_reports)
 {
     CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);

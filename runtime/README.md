@@ -127,6 +127,7 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
 | `RELIFT_ROMFS=<dir>` | Extracted romfs tree served as the program's data storage (`relift run` sets it from the import) |
 | `RELIFT_DLC=<dir>` | Add-on content trees, `<16 hex digit add-on id>/<index>/romfs` (`relift run` sets it from the import) |
+| `RELIFT_DEV_SOCKET=<path>` | Dev builds (`-DRL_HOTLOAD`, made by `relift run`): the socket of relift's dev server, which builds a library for each missed address (docs/abi.md section 6). `relift run` sets it; a dev build without it stops at the first miss with exit status 70 |
 | `RELIFT_ADDRESS_BITS=36` | Ask the guest layer for this address width. The Switch guest accepts 36 and 39 and uses the 36-bit layout even when the NPDM asks for 39 bits (the fallback when the host cannot reserve 2^39 bytes) |
 
 ## Data storage
