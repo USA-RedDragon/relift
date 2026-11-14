@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::{BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, Next, Op, UnOp, Width};
+use crate::{BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, FpRound, Next, Op, UnOp, Width};
 
 /// A failed guest memory access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -208,8 +208,74 @@ pub fn eval_cmp(op: CmpOp, a: u128, b: u128, w: Width) -> bool {
     }
 }
 
-/// Evaluates a floating-point operation on `w`-bit (32 or 64) patterns.
-pub fn eval_fp(op: FpOp, args: &[u128], w: Width) -> u128 {
+/// Evaluates a floating-point operation on `arg_w`-bit operands (32 or 64)
+/// giving a `w`-bit result; the two differ only for conversions.
+pub fn eval_fp(op: FpOp, args: &[u128], arg_w: Width, w: Width) -> u128 {
+    let f = |i: usize| -> f64 {
+        if arg_w == Width::W32 {
+            f64::from(f32::from_bits(args[i] as u32))
+        } else {
+            f64::from_bits(args[i] as u64)
+        }
+    };
+    let round = |x: f64, r: FpRound| match r {
+        FpRound::TiesEven => x.round_ties_even(),
+        FpRound::TiesAway => x.round(),
+        FpRound::Floor => x.floor(),
+        FpRound::Ceil => x.ceil(),
+        FpRound::Zero => x.trunc(),
+    };
+    let to_bits = |x: f64| -> u128 {
+        if w == Width::W32 {
+            u128::from((x as f32).to_bits())
+        } else {
+            u128::from(x.to_bits())
+        }
+    };
+    match op {
+        FpOp::ToSInt(r) => {
+            let x = round(f(0), r);
+            return if w == Width::W32 {
+                u128::from(x as i32 as u32)
+            } else {
+                u128::from(x as i64 as u64)
+            };
+        }
+        FpOp::ToUInt(r) => {
+            let x = round(f(0), r);
+            return if w == Width::W32 {
+                u128::from(x as u32)
+            } else {
+                u128::from(x as u64)
+            };
+        }
+        FpOp::FromSInt => {
+            let i = if arg_w == Width::W32 {
+                i64::from(args[0] as u32 as i32)
+            } else {
+                args[0] as u64 as i64
+            };
+            return if w == Width::W32 {
+                u128::from((i as f32).to_bits())
+            } else {
+                u128::from((i as f64).to_bits())
+            };
+        }
+        FpOp::FromUInt => {
+            let i = if arg_w == Width::W32 {
+                u64::from(args[0] as u32)
+            } else {
+                args[0] as u64
+            };
+            return if w == Width::W32 {
+                u128::from((i as f32).to_bits())
+            } else {
+                u128::from((i as f64).to_bits())
+            };
+        }
+        FpOp::Convert => return to_bits(f(0)),
+        _ => {}
+    }
     if w == Width::W32 {
         let f = |i: usize| f32::from_bits(args[i] as u32);
         let r = match op {
@@ -221,6 +287,17 @@ pub fn eval_fp(op: FpOp, args: &[u128], w: Width) -> u128 {
             FpOp::MulAdd => f(0).mul_add(f(1), f(2)),
             FpOp::Neg => return args[0] ^ (1 << 31),
             FpOp::Abs => return args[0] & !(1 << 31),
+            FpOp::RoundInt(r) => {
+                let x = f(0);
+                match r {
+                    FpRound::TiesEven => x.round_ties_even(),
+                    FpRound::TiesAway => x.round(),
+                    FpRound::Floor => x.floor(),
+                    FpRound::Ceil => x.ceil(),
+                    FpRound::Zero => x.trunc(),
+                }
+            }
+            _ => unreachable!("conversions return above"),
         };
         u128::from(r.to_bits())
     } else {
@@ -234,6 +311,8 @@ pub fn eval_fp(op: FpOp, args: &[u128], w: Width) -> u128 {
             FpOp::MulAdd => f(0).mul_add(f(1), f(2)),
             FpOp::Neg => return args[0] ^ (1 << 63),
             FpOp::Abs => return args[0] & !(1 << 63),
+            FpOp::RoundInt(r) => round(f(0), r),
+            _ => unreachable!("conversions return above"),
         };
         u128::from(r.to_bits())
     }
@@ -367,7 +446,8 @@ pub fn run(
             Op::Fence(_) => 0,
             Op::Fp(op, args) => {
                 let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
-                eval_fp(*op, &a, width)
+                let aw = block.insts[args[0].index()].width.unwrap_or(width);
+                eval_fp(*op, &a, aw, width)
             }
             Op::Intrinsic(name, args) => {
                 let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
