@@ -53,7 +53,8 @@ bool rl_gb_color_mode(const rl_gb *g) { return g->color; }
 
 static uint8_t read_slow(rl_gb *g, rl_sched_cpu *c, uint16_t addr)
 {
-    (void)c;
+    if (gb_is_io(addr))
+        return g->sched && c ? (uint8_t)rl_sched_read(c, addr, 1) : 0xFF;
     if (addr >= 0xA000 && addr < 0xC000)
         return gb_ram_read(g, addr);
     if (addr < 0xFE00)
@@ -83,7 +84,6 @@ uint8_t rl_gb_peek(const rl_gb *g, uint16_t addr) { return rl_gb_read((rl_gb *)(
 
 void rl_gb_write(rl_gb *g, rl_sched_cpu *c, uint16_t addr, uint8_t value)
 {
-    (void)c;
     switch (addr >> 12) {
     case 0x0:
     case 0x1:
@@ -120,6 +120,9 @@ void rl_gb_write(rl_gb *g, rl_sched_cpu *c, uint16_t addr, uint8_t value)
     else if (addr < 0xFF00) {
         if (g->color)
             g->unusable[(unsigned)(addr & 0xE7) - 0xA0u] = value;
+    } else if (gb_is_io(addr)) {
+        if (g->sched && c)
+            rl_sched_write(c, addr, 1, value);
     } else if (addr >= 0xFF80 && addr != 0xFFFF)
         g->hram[addr - 0xFF80] = value;
     else if (addr == 0xFF4F && g->color) {

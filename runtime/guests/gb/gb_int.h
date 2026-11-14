@@ -30,6 +30,14 @@ typedef struct gb_rtc {
     uint8_t latch_last;
 } gb_rtc;
 
+/** @brief The built-in stand-in for a device: a register file. */
+typedef struct gb_stub {
+    /** @brief The device the scheduler holds. */
+    rl_device dev;
+    /** @brief Registers indexed by the low byte of the address ($FFFF is index 255). */
+    uint8_t regs[256];
+} gb_stub;
+
 /** @brief The machine. */
 struct rl_gb {
     /** @brief The model. */
@@ -86,9 +94,18 @@ struct rl_gb {
     uint32_t bank1;
     /** @brief External RAM bank at $A000. */
     uint32_t rambank;
+    /** @brief The scheduler, once attached. */
+    rl_sched *sched;
+    /** @brief The device of each slot. */
+    rl_device *dev[RL_GB_SLOTS];
+    /** @brief The stubs, used where the caller gave no device. */
+    gb_stub stub[RL_GB_SLOTS];
     /** @brief Read pages of 4 KiB; NULL sends the access to the slow path. */
     const uint8_t *rd[16];
 };
+
+/** @brief True for the addresses the scheduler's devices own, besides $FF4F and $FF70. */
+static inline bool gb_is_io(uint16_t addr) { return (addr >= 0xFF00 && addr < 0xFF80 && addr != 0xFF4F && addr != 0xFF70) || addr == 0xFFFF; }
 
 /** @brief The work RAM bank at $D000-$DFFF: 1 on monochrome hardware, SVBK with 0 read as 1 on color. */
 static inline unsigned gb_wram_bank(const rl_gb *g)

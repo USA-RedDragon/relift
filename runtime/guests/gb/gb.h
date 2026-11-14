@@ -135,6 +135,19 @@ extern const rl_gb_io_range rl_gb_io_ranges[];
 /** @brief The Game Boy memory. */
 typedef struct rl_gb rl_gb;
 
+/**
+ * @brief Adds the device of every slot to s, in slot order (the order the
+ * scheduler catches devices up in), and maps the I/O ranges to them. A NULL
+ * entry of devs gets a built-in stub that stores what is written to its
+ * registers and reads it back (seeded with the post-boot values, see
+ * rl_gb_reset); devs itself may be NULL for stubs everywhere. The devices
+ * must not have been added to s yet, and they stay the caller's. Returns 0,
+ * or -1 when s cannot take them or g is attached already.
+ */
+int rl_gb_attach(rl_gb *g, rl_sched *s, rl_device *const devs[RL_GB_SLOTS]);
+/** @brief The device that owns slot (the stub when the caller gave none), or NULL before rl_gb_attach. */
+rl_device *rl_gb_device(rl_gb *g, rl_gb_slot slot);
+
 /** @brief The result of creating a machine. */
 typedef enum rl_gb_status {
     /** @brief Success. */
