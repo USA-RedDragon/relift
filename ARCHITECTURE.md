@@ -17,11 +17,16 @@ list of hard rules; read it before changing anything.
   symbol lists, offsets or anything else derived from a game, and no game
   names. CI never sees game data; tests use `relift-testguest` and synthetic
   input.
-- **Decrypted dumps only.** relift reads decrypted dumps only (a `.nup` or
-  an extracted `exefs`/`romfs` tree); there are no keys or crypto code in
-  this repo, and conversion of encrypted dumps lives in a separate tool.
-  `relift/tests/workspace_charter.rs` (`no_crypto_crate_is_in_the_graph`)
-  fails any cipher crate in the graph.
+- **Decrypted dumps only.** relift reads and ships decrypted inputs only (a
+  `.nup` or an extracted `exefs`/`romfs` tree). It holds no key files, title
+  keys or tickets, and it has no NCA, NSP, XCI or NCZ decryption; conversion
+  of encrypted dumps lives in a separate tool that relift does not depend on.
+  This is held by behavior and by names, not by a ban on crates: import
+  refuses encrypted containers and encrypted headers, no source names key
+  material or the NCA, ticket and BKTR structures, and no crate of the
+  separate tool is in the graph. A crypto crate is allowed where its charter
+  row states why (guest crypto instructions, SDK `nn::crypto` replacements,
+  save data hashing). The tests are in section 2.
 - **No GPL, AGPL or LGPL code.** Never copy from GPL projects (other
   recompilers, emulators, QEMU). MIT, Apache-2.0, BSD, ISC and 0BSD sources
   are fine with their notices kept. `cargo deny check` rejects GPL crates;
@@ -148,7 +153,9 @@ All of these run in `cargo test` and in CI's checks job.
 | No guest reaches another guest (each `guests/<name>/` is one guest, `testguest/` another) | `workspace_charter.rs`: `no_guest_reaches_another_guest` |
 | `override/` crates reach no tool crate | `workspace_charter.rs`: `override_reaches_no_tool_crate` |
 | Nothing reaches `check/`; it stays its own workspace and is excluded | `workspace_charter.rs`: `nothing_reaches_check` |
-| No cipher crate (`aes`, `ctr`, `xts-mode`, `cipher`, ...) is anywhere in the resolved graph; control: `sha2` and `digest` are found | `workspace_charter.rs`: `no_crypto_crate_is_in_the_graph` |
+| No crate of the separate conversion tool (`switch-formats`, `switch-io`, `switch-tools`) is in the resolved graph or declared by a member; controls: `sha2`, `digest` and `relift-switch-formats` are found. Crypto crates are not banned: a charter row states why one is allowed | `workspace_charter.rs`: `no_crate_of_the_separate_tool_is_in_the_graph` |
+| No workspace source names key files or key material (`prod.keys`, `title.keys`, title keys, header keys, key area keys, `titlekek`, `eticket`, master keys) or the NCA, ticket and BKTR structures; the allow list is empty; controls: a fixture built at run time with each kind of word is found, a clean one is not | `relift/tests/decrypted_only.rs`: `no_workspace_source_handles_key_material`, `the_scan_finds_planted_words`, `the_allow_list_is_empty_or_names_real_files` |
+| Import refuses NSP, NSZ, XCI, XCZ, NCA and NCZ by extension and by magic, an NCA with an encrypted header, and the removed `--keys` setting | `guests/switch/formats/tests/import.rs`: `encrypted_inputs_are_refused`, `an_encrypted_header_is_refused_without_a_key`; `relift/tests/cli.rs`: `import_refuses_encrypted_dumps_pointing_to_a_separate_tool` |
 | No member reaches a generator (`cpus/*/gen`) | `workspace_charter.rs`: `no_member_reaches_a_generator` |
 | The charter reads this tree and its walk recurses | `workspace_charter.rs`: `the_reader_reads_this_workspace` |
 | `unsafe_code = "forbid"` for the workspace; every member inherits it or is on the roster with its own `deny` pair | `relift/tests/unsafe_roster.rs`: `the_workspace_lint_table_forbids_unsafe_code`, `every_member_inherits_the_forbid_or_is_rostered` |
