@@ -76,6 +76,7 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(code),
             Err(e) => Err(e),
         },
+        Command::Info { binary } => relift::build::run_info(&settings, binary.as_deref()),
         _ => Err("not implemented".into()),
     };
     match result {

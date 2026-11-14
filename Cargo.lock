@@ -886,6 +886,7 @@ dependencies = [
  "relift-switch-names",
  "relift-testguest",
  "serde_json",
+ "sha2 0.11.1",
  "toml",
  "uds_windows",
 ]

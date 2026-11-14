@@ -647,6 +647,11 @@ fn lift_and_emit(
         ui.note(&Line::new().text(l));
     }
     let mut prog = Vec::new();
+    let game = read_toml(Path::new("game.toml"))?;
+    let doc = crate::info::switch_document(&import, &game, &placed, name)?;
+    let info_c = cdir.join(crate::info::C_FILE);
+    relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
+    prog.push(info_c);
     for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
@@ -1096,6 +1101,19 @@ fn summarize(ui: &mut Ui, functions: usize, unlifted: usize, list: &Path, exe: &
         ui.summary(&Line::new().text(format!("  not lifted, with addresses: {}", list.display())));
     }
     ui.summary(&Line::new().text(format!("  output: {}", exe.display())));
+}
+
+/// `relift info`.
+///
+/// # Errors
+///
+/// No binary to read, or it holds no self-description.
+pub fn run_info(settings: &Settings, binary: Option<&Path>) -> Result<(), BoxError> {
+    let exes = match project_out(settings) {
+        Ok((_, out)) => vec![out.join("game"), out.join("dev").join("game")],
+        Err(_) => Vec::new(),
+    };
+    crate::info::run(binary, &exes)
 }
 
 /// `relift build`.

@@ -12,6 +12,7 @@ pub mod fpflags;
 pub mod hints;
 pub mod identity;
 pub mod import;
+pub mod info;
 pub mod paths;
 pub mod runtime_link;
 pub mod settings;

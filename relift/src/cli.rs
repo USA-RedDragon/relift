@@ -106,6 +106,12 @@ pub enum Command {
         /// A host address, guest address or symbol.
         what: String,
     },
+    /// Print the self-description of a built game binary, without running
+    /// it: the JSON document its `--relift-info` flag prints.
+    Info {
+        /// The binary to read. Default: the project's last build.
+        binary: Option<PathBuf>,
+    },
     /// List what discovery could not resolve: per module, functions,
     /// instructions not lifted and every unresolved indirect call or jump,
     /// with hints from earlier hot-load runs.
@@ -130,6 +136,7 @@ impl Command {
             Command::Diff { .. } => "diff",
             Command::Where { .. } => "where",
             Command::Coverage { .. } => "coverage",
+            Command::Info { .. } => "info",
         }
     }
 }
