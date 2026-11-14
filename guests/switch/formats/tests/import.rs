@@ -244,6 +244,10 @@ fn encrypted_inputs_are_refused() {
     nsp[..4].copy_from_slice(b"PFS0");
     let mut xci = vec![0u8; 0x400];
     xci[0x100..0x104].copy_from_slice(b"HEAD");
+    let mut nca3 = vec![0u8; 0x400];
+    nca3[0x200..0x204].copy_from_slice(b"NCA3");
+    let mut nca0 = vec![0u8; 0x400];
+    nca0[0x200..0x204].copy_from_slice(b"NCA0");
     let noise: Vec<u8> = (0..0x400u32).map(|i| (i * 37 % 251) as u8).collect();
     for (name, bytes) in [
         ("game.nsp", &nsp),
@@ -251,8 +255,12 @@ fn encrypted_inputs_are_refused() {
         ("card.xci", &xci),
         ("card.dat", &xci),
         ("game.nsz", &noise),
+        ("card.xcz", &noise),
         ("program.nca", &noise),
+        ("program.ncz", &noise),
         ("PROGRAM.NCA", &noise),
+        ("renamed.dat", &nca3),
+        ("old.bin", &nca0),
     ] {
         let file = put(&d, name, bytes);
         let err = import(&file, &d.join("o"), &Options::default()).expect_err(name);
@@ -275,4 +283,23 @@ fn encrypted_inputs_are_refused() {
         matches!(err, Error::Format(_)) && err.to_string().contains("not a .nup file"),
         "{err}"
     );
+}
+
+/// An NCA whose header is still encrypted shows no magic, whatever its name:
+/// it is not read as anything, nothing is written, and the message tells the
+/// user that relift takes decrypted dumps only.
+#[test]
+fn an_encrypted_header_is_refused_without_a_key() {
+    let d = scratch("import-encrypted-header");
+    let noise: Vec<u8> = (0..0x4000u32).map(|i| (i * 37 % 251) as u8).collect();
+    for name in ["blob.bin", "0123456789abcdef.cnmt", "noext"] {
+        let file = put(&d, name, &noise);
+        let err = import(&file, &d.join("o"), &Options::default()).expect_err(name);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("decrypted dumps only") && msg.contains("separate tool"),
+            "{name}: {msg}"
+        );
+    }
+    assert!(!d.join("o").exists(), "nothing is written");
 }
