@@ -415,6 +415,25 @@ fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
     Ok(out)
 }
 
+/// The C compiler command: the configured or `PATH` clang, else `zig cc`
+/// from the configured or `PATH` zig.
+fn c_compiler(t: &crate::settings::Toolchain) -> Result<Vec<String>, BoxError> {
+    if let Some(clang) = tool(&t.clang, "clang") {
+        return Ok(vec![clang.display().to_string()]);
+    }
+    let zig = tool(&t.zig, "zig").ok_or("no clang or zig on PATH")?;
+    Ok(vec![zig.display().to_string(), "cc".into()])
+}
+
+fn cc_name(cc: &[String]) -> String {
+    let stem = |s: &String| {
+        Path::new(s)
+            .file_stem()
+            .map_or_else(|| s.clone(), |f| f.to_string_lossy().into_owned())
+    };
+    cc.iter().map(stem).collect::<Vec<_>>().join(" ")
+}
+
 fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
     if setting.as_os_str().is_empty() {
         relift_build::find_tool(name)
@@ -603,7 +622,9 @@ pub(crate) enum Mode {
 
 /// The link flags that make a shared library on this host.
 fn shlib_flags(name: &str) -> Vec<String> {
-    if cfg!(target_os = "macos") {
+    if cfg!(windows) {
+        vec!["-shared".into()]
+    } else if cfg!(target_os = "macos") {
         vec![
             "-dynamiclib".into(),
             format!("-Wl,-install_name,@rpath/{name}"),
@@ -619,7 +640,9 @@ fn shlib_flags(name: &str) -> Vec<String> {
 
 /// The file name of the runtime library on this host.
 pub(crate) fn runtime_lib_name() -> &'static str {
-    if cfg!(target_os = "macos") {
+    if cfg!(windows) {
+        "relift_rt.dll"
+    } else if cfg!(target_os = "macos") {
         "librelift_rt.dylib"
     } else {
         "librelift_rt.so"
@@ -629,8 +652,8 @@ pub(crate) fn runtime_lib_name() -> &'static str {
 /// How to compile and link code for this build, kept for the dev server.
 #[derive(Clone, Debug)]
 pub struct Toolchain {
-    /// The C compiler.
-    pub cc: PathBuf,
+    /// The C compiler command: clang, or `zig cc`.
+    pub cc: Vec<String>,
     /// Ninja, when found.
     pub ninja: Option<PathBuf>,
     /// Compile jobs.
@@ -726,19 +749,24 @@ pub(crate) fn build_project(
     let dev = mode == Mode::Dev;
     let hotload: Vec<String> = if dev {
         vec!["-DRL_HOTLOAD".into()]
+    } else if cfg!(windows) {
+        vec!["-DRL_STATIC_RUNTIME".into()]
     } else {
         Vec::new()
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
+    let cc = c_compiler(&settings.toolchain)?;
     let arch: Vec<String> = if cfg!(target_arch = "x86_64") {
         vec!["-mcx16".into()]
     } else {
         Vec::new()
     };
+    let zig = cc.len() > 1;
     let base: Vec<String> = ["-std=c11", "-O2", "-g", "-ffp-contract=off"]
         .iter()
         .map(|s| s.to_string())
         .chain(arch)
+        .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
         .collect();
     // Lifted code gets line tables only: full -g makes clang track every
     // local of functions with tens of thousands of them, which made one
@@ -761,7 +789,11 @@ pub(crate) fn build_project(
     // which the compiler must then neither fold nor reorder.
     let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
     let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
-    let pic = ["-fPIC", "-fvisibility=hidden"].map(String::from);
+    let pic: Vec<String> = if cfg!(windows) {
+        Vec::new()
+    } else {
+        ["-fPIC", "-fvisibility=hidden"].map(String::from).into()
+    };
     let hot_flags: Vec<String> = if emitted.fp_flags {
         flag_flags.clone()
     } else {
@@ -840,11 +872,16 @@ pub(crate) fn build_project(
             stage: 0,
         });
     }
+    let prog_flags: Vec<String> = rt_flags
+        .iter()
+        .filter(|f| !dev || *f != "-DRL_BUILDING_RUNTIME")
+        .cloned()
+        .collect();
     for s in &prog {
         compiles.push(Compile {
             src: s.clone(),
             obj: obj(s, "lifted"),
-            flags: rt_flags.clone(),
+            flags: prog_flags.clone(),
             pool: None,
             stage: 0,
         });
@@ -860,22 +897,29 @@ pub(crate) fn build_project(
         })
         .collect();
     rt_compiles.extend(extras.compiles(&rt, &lib_flags, &|s| obj(s, "rt")));
-    let clang = tool(&settings.toolchain.clang, "clang").ok_or("no clang on PATH")?;
-    let exe = bdir.join("game");
+    let exe = bdir.join(format!("game{}", std::env::consts::EXE_SUFFIX));
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = if ninja.is_some() {
         relift_build::job_count(settings.jobs)
     } else {
         1
     };
-    let libs: Vec<String> = ["-lpthread", "-lm"].map(String::from).into();
-    let rt_lib = bdir.join("rt").join(runtime_lib_name());
+    let libs: Vec<String> = if cfg!(windows) {
+        ["-lpthread", "-lm", "-lws2_32"].map(String::from).into()
+    } else {
+        ["-lpthread", "-lm"].map(String::from).into()
+    };
+    let rt_lib = if cfg!(windows) {
+        bdir.join(runtime_lib_name())
+    } else {
+        bdir.join("rt").join(runtime_lib_name())
+    };
     let mut plans = Vec::new();
     if dev {
         let pools = memory_pools(&mut rt_compiles, jobs);
         plans.push((
             Plan {
-                cc: vec![clang.display().to_string()],
+                cc: cc.clone(),
                 compiles: rt_compiles,
                 output: rt_lib.clone(),
                 link_flags: shlib_flags(runtime_lib_name())
@@ -890,16 +934,17 @@ pub(crate) fn build_project(
         let pools = memory_pools(&mut compiles, jobs);
         plans.push((
             Plan {
-                cc: vec![clang.display().to_string()],
+                cc: cc.clone(),
                 compiles,
                 output: exe.clone(),
-                link_flags: [
-                    rt_lib.display().to_string(),
-                    format!("-Wl,-rpath,{}", bdir.join("rt").display()),
-                ]
-                .into_iter()
-                .chain(libs.iter().cloned())
-                .collect(),
+                link_flags: [rt_lib.display().to_string()]
+                    .into_iter()
+                    .chain(
+                        (!cfg!(windows))
+                            .then(|| format!("-Wl,-rpath,{}", bdir.join("rt").display())),
+                    )
+                    .chain(libs.iter().cloned())
+                    .collect(),
                 pools,
             },
             bdir.clone(),
@@ -909,7 +954,7 @@ pub(crate) fn build_project(
         let pools = memory_pools(&mut compiles, jobs);
         plans.push((
             Plan {
-                cc: vec![clang.display().to_string()],
+                cc: cc.clone(),
                 compiles,
                 output: exe.clone(),
                 link_flags: libs.iter().cloned().chain(extras.libs()).collect(),
@@ -920,9 +965,7 @@ pub(crate) fn build_project(
     }
     let note = format!(
         "{} {}, -j{jobs}",
-        clang
-            .file_stem()
-            .map_or_else(|| "clang".to_string(), |s| s.to_string_lossy().into_owned()),
+        cc_name(&cc),
         lifted_flags
             .iter()
             .find(|f| f.starts_with("-O"))
@@ -949,7 +992,7 @@ pub(crate) fn build_project(
         exe,
         out,
         toolchain: Toolchain {
-            cc: clang,
+            cc,
             ninja,
             jobs,
             hot_flags,

@@ -340,7 +340,7 @@ impl Server {
         srcs.push(export);
         let lib = dir.join(format!("hot{seq}{}", lib_suffix()));
         let plan = Plan {
-            cc: vec![self.tools.cc.display().to_string()],
+            cc: self.tools.cc.clone(),
             compiles: srcs
                 .iter()
                 .map(|s| Compile {
@@ -450,7 +450,9 @@ fn export_c(symbol: &str) -> String {
 }
 
 fn lib_suffix() -> &'static str {
-    if cfg!(target_os = "macos") {
+    if cfg!(windows) {
+        ".dll"
+    } else if cfg!(target_os = "macos") {
         ".dylib"
     } else {
         ".so"

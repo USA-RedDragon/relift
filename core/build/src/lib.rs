@@ -422,11 +422,13 @@ pub fn build_with(
     Ok(())
 }
 
-/// Finds `name` on `PATH`.
+/// Finds `name` on `PATH`, with the host's executable suffix when it has
+/// one (`.exe` on Windows).
 pub fn find_tool(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     std::env::split_paths(&path)
-        .map(|d| d.join(name))
+        .map(|d| d.join(&file))
         .find(|p| p.is_file())
 }
 

@@ -3,7 +3,7 @@
 //! (`relift build`) stops at the miss with exit status 70; `relift run`
 //! hot-loads the function, runs to the right output and records the
 //! address in `game.toml`; the next `relift build` lifts it and runs with no
-//! miss. Skipped with a note when clang is not on `PATH`.
+//! miss. Skipped with a note when neither clang nor zig is on `PATH`.
 
 mod tiny;
 
@@ -14,7 +14,8 @@ fn game(root: &Path, dev: bool) -> std::process::Output {
         .unwrap()
         .map(|e| {
             let host = e.unwrap().path().join("build").join("host");
-            if dev { host.join("dev") } else { host }.join("game")
+            if dev { host.join("dev") } else { host }
+                .join(format!("game{}", std::env::consts::EXE_SUFFIX))
         })
         .find(|p| p.is_file())
         .expect("a built game");
@@ -27,8 +28,8 @@ fn game(root: &Path, dev: bool) -> std::process::Output {
 
 #[test]
 fn a_missed_call_is_hot_loaded_and_lifted_by_the_next_build() {
-    if relift_build::find_tool("clang").is_none() {
-        eprintln!("skipped: no clang on PATH");
+    if relift_build::find_tool("clang").is_none() && relift_build::find_tool("zig").is_none() {
+        eprintln!("skipped: no clang or zig on PATH");
         return;
     }
     let root = tiny::scratch("e2e-hotload");
