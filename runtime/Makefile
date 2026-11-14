@@ -100,6 +100,7 @@ A64_TEST_SRCS := $(wildcard cpus/a64/tests/*.c)
 SWITCH_TEST_SRCS := $(wildcard guests/switch/tests/*.c)
 SWITCH_TEST_HDRS := $(wildcard guests/switch/tests/*.h)
 VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
+VK_DEMO_SRCS := guests/switch/vk/demo/vk_present.c
 
 obj = $(patsubst %.S,$(BUILD)/obj/%.o,$(patsubst %.c,$(BUILD)/obj/%.o,$(1)))
 CORE_ASM_OBJS := $(call obj,$(CORE_ASM))
@@ -114,6 +115,8 @@ CORE_TEST_OBJS := $(call obj,$(CORE_TEST_SRCS))
 A64_TEST_OBJS := $(call obj,$(A64_TEST_SRCS))
 SWITCH_TEST_OBJS := $(call obj,$(SWITCH_TEST_SRCS))
 VK_TEST_OBJS := $(call obj,$(VK_TEST_SRCS))
+VK_DEMO_OBJS := $(call obj,$(VK_DEMO_SRCS))
+TC_OBJS := $(call obj,guests/switch/tests/tc.c)
 RT_OBJS := $(CORE_OBJS) $(A64_OBJS) $(SWITCH_OBJS) $(VK_OBJS)
 
 CORE_LIB := $(BUILD)/librelift_core.a
@@ -126,7 +129,8 @@ CORE_TESTS := $(BUILD)/core_tests
 A64_TESTS := $(BUILD)/a64_tests
 SWITCH_TESTS := $(BUILD)/switch_tests
 VK_TESTS := $(BUILD)/switch_vk_tests
-TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
+VK_PRESENT := $(BUILD)/vk_present
+TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(VK_PRESENT)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
 CRASH_TEST := $(BUILD)/crash_test$(EXE)
@@ -136,7 +140,7 @@ SCHED_BENCH_OBJS := $(call obj,core/tests/bench/sched_bench.c)
 SCHED_BENCH := $(BUILD)/sched_bench$(EXE)
 PORTABLE := $(CRASH_TEST) $(FIBER_TESTS) $(SCHED_BENCH)
 
-.PHONY: all test portable test-portable charter gdb-test sched-bench clean
+.PHONY: all test portable test-portable charter gdb-test sched-bench vk-present clean
 all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
 portable: $(PORTABLE)
 
@@ -163,6 +167,10 @@ $(VK_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS)
 $(VK_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(VK_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
+
+$(VK_DEMO_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS) $(SWITCH_TEST_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(VK_INC) $(RUNNER_INC) -Iguests/switch/tests $(CFLAGS) -c $< -o $@
 
 $(RUNNER_OBJS) $(CORE_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
@@ -193,6 +201,7 @@ $(CORE_TESTS): $(CORE_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS)
 $(A64_TESTS): $(A64_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(A64_OBJS)
 $(SWITCH_TESTS): $(SWITCH_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
+$(VK_PRESENT): $(VK_DEMO_OBJS) $(TC_OBJS) $(RT_OBJS)
 $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
@@ -229,6 +238,14 @@ test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
 	$(abspath $(A64_TESTS))
 	$(abspath $(SWITCH_TESTS))
 	$(abspath $(VK_TESTS))
+	RELIFT_VIDEO=none $(MAKE) --no-print-directory vk-present
+
+# The synthetic Vulkan program: a window with VIDEO=sdl3 and a display,
+# headless surfaces otherwise. Exit 77 means no host Vulkan (skipped).
+vk-present: $(VK_PRESENT)
+	@mkdir -p $(BUILD)/vk_present-sdmc
+	RELIFT_SDMC=$(abspath $(BUILD))/vk_present-sdmc $(abspath $(VK_PRESENT)); rc=$$?; \
+		if [ $$rc -eq 77 ]; then echo "vk_present skipped: no host Vulkan"; else exit $$rc; fi
 
 charter:
 	$(PYTHON) charter/check.py
