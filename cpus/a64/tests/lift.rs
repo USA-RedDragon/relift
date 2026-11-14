@@ -96,6 +96,14 @@ fn adrp_and_branches_compute_targets() {
     let bl = lift(0x9400_0000 | 0x3ff_ffff, PC, &Features::ALL).expect("lifts");
     assert_eq!(bl.exit.next, Next::Const(PC - 4));
     assert_eq!(bl.exit.flow, Flow::Call { ret: PC + 4 });
+    // `bl .+8` steps over an inline literal: a jump that sets x30.
+    let lit = lift(0x9400_0002, PC, &Features::ALL).expect("lifts");
+    assert_eq!(lit.exit.next, Next::Const(PC + 8));
+    assert_eq!(lit.exit.flow, Flow::Jump);
+    let mut s = state();
+    let mut m = mem();
+    assert_eq!(step(0x9400_0002, &mut s, &mut m), PC + 8);
+    assert_eq!(x(&s, 30), PC + 4);
 
     let beq = 0x5400_0000 | (4 << 5);
     s.regs[Z.index()] = 1;

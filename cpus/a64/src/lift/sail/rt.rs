@@ -208,6 +208,14 @@ impl St {
                 next: Next::Const(fall),
                 flow: Flow::Jump,
             },
+            // A BL over one word (`bl .+8`) is the inline-literal idiom of
+            // code that runs before relocation: the "callee" reads the word
+            // through x30 and never returns to it, so it is a jump that sets
+            // x30 rather than a call with a return point at the word.
+            Some((next @ Next::Const(t), Kind::Call)) if t == fall.wrapping_add(4) => Exit {
+                next,
+                flow: Flow::Jump,
+            },
             Some((next, k)) => Exit {
                 next,
                 flow: match k {
