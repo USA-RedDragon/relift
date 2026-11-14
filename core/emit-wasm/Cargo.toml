@@ -1,0 +1,18 @@
+[package]
+name = "relift-emit-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-guest = { workspace = true }
+relift-ir = { workspace = true }
+wasm-encoder = { workspace = true }
+
+[dev-dependencies]
+wasmtime = { workspace = true }
+
+[lints]
+workspace = true
