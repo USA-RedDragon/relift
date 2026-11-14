@@ -180,9 +180,9 @@ pub enum Kind {
 /// The kind of `enc`.
 pub fn kind(enc: Encoding) -> Kind {
     let n = enc.name();
-    if n.contains("_ldstexclr") || n.contains("_ldstord") {
+    if n.contains("_ldstexcl") || n.contains("_ldstord") || n.ends_with("_memop") {
         Kind::Mem { aligned: true }
-    } else if n.contains("_ldst") || n.contains("_asisdls") {
+    } else if n.contains("_ldst") || n.contains("_asisdls") || n.contains("_ldapstl") {
         Kind::Mem { aligned: false }
     } else if n.ends_with("_branch_reg") {
         Kind::BranchReg
@@ -214,7 +214,10 @@ fn mem_offset(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<i64> {
     let size = || scale.unwrap_or_else(|| f("size"));
     if n.ends_with("_ldst_pos") {
         Some(i64::from(f("imm12")) << size())
-    } else if n.ends_with("_ldst_immpre") || n.ends_with("_ldst_unscaled") {
+    } else if n.ends_with("_ldst_immpre")
+        || n.ends_with("_ldst_unscaled")
+        || n.ends_with("_ldapstl_unscaled")
+    {
         Some(sext(f("imm9"), 9))
     } else if n.ends_with("_ldstpair_off") || n.ends_with("_ldstpair_pre") {
         let pair = match scale {
@@ -289,6 +292,7 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
         sp: DATA + 0x2000 - 16 * r.below(0x40),
         nzcv: [false; 4],
         v: [0; 32],
+        fpcr: 0,
         pc: 0,
         mem: (0..DATA_SIZE).map(|_| r.next() as u8).collect(),
     };
@@ -317,7 +321,8 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
             let off = mem_offset(insn, &mut g, r)?;
             let mut target = DATA as i64 + 0x2000 + r.range(-0x800, 0x800);
             if aligned {
-                target &= !7;
+                let pair = insn.encoding.name().contains("_ldstexclp");
+                target &= if pair { !15 } else { !7 };
             }
             let n = insn.get("Rn");
             let base = (target - off) as u64;

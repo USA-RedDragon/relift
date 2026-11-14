@@ -2,10 +2,11 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use relift_cpu_a64::lift::sail::SLOW_FPCR;
 use relift_cpu_a64::lift::{self, LiftError};
 use relift_cpu_a64::regs;
-use relift_ir::Block;
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
+use relift_ir::{Block, Flow};
 use unicorn_engine::RegisterARM64 as R;
 use unicorn_engine::Unicorn;
 use unicorn_engine::unicorn_const::{Arch, Mode, Prot, uc_error};
@@ -32,6 +33,8 @@ pub struct Guest {
     pub nzcv: [bool; 4],
     /// `v0` to `v31`.
     pub v: [u128; 32],
+    /// FPCR; the lifted FP blocks run only while it is zero.
+    pub fpcr: u64,
     /// The program counter after the run.
     pub pc: u64,
     /// The data window.
@@ -45,6 +48,8 @@ pub enum Outcome {
     Done(Box<Guest>),
     /// Faulted, with a description.
     Fault(String),
+    /// Left a block through a guard for the runtime's slow path (IR only).
+    Slow(u32),
 }
 
 const XREGS: [R; 31] = [
@@ -91,6 +96,7 @@ impl Emu {
     /// A fresh emulator.
     pub fn new() -> Result<Emu, uc_error> {
         let mut uc = Unicorn::new(Arch::ARM64, Mode::ARM)?;
+        uc.ctl_set_cpu_model(CPU_ARM64_MAX)?;
         uc.mem_map(CODE_MAP, CODE_SIZE, Prot::ALL)?;
         uc.mem_map(DATA, DATA_SIZE as u64, Prot::READ | Prot::WRITE)?;
         uc.reg_write(R::CPACR_EL1, 3 << 20)?;
@@ -130,6 +136,7 @@ impl Emu {
             .enumerate()
             .fold(0u64, |acc, (i, f)| acc | (u64::from(*f) << (31 - i)));
         uc.reg_write(R::NZCV, n)?;
+        uc.reg_write(R::FPCR, input.fpcr)?;
         for (i, v) in input.v.iter().enumerate() {
             uc.reg_write_long(qreg(i), &v.to_le_bytes())?;
         }
@@ -145,6 +152,7 @@ impl Emu {
             sp: uc.reg_read(R::SP)?,
             nzcv: [false; 4],
             v: [0; 32],
+            fpcr: input.fpcr,
             pc: uc.reg_read(R::PC)?,
             mem: vec![0; DATA_SIZE],
         };
@@ -165,6 +173,10 @@ impl Emu {
         Ok(Outcome::Done(Box::new(out)))
     }
 }
+
+/// `UC_CPU_ARM64_MAX`: every feature Unicorn's QEMU implements, so forms
+/// beyond Armv8.0 run instead of raising an exception.
+const CPU_ARM64_MAX: i32 = 3;
 
 fn qreg(i: usize) -> i32 {
     R::Q0 as i32 + i as i32
@@ -210,6 +222,7 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
     for (i, v) in input.v.iter().enumerate() {
         st.regs[regs::vreg(i as u32).index()] = *v;
     }
+    st.regs[regs::FPCR.index()] = u128::from(input.fpcr);
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
     }
@@ -223,7 +236,14 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
             return Outcome::Fault(format!("control left the sequence at {pc:#x}"));
         }
         match interp::run(b, &mut st, &mut mem, &mut NoIntrinsics) {
-            Ok(o) => pc = o.next,
+            Ok(o) => {
+                if let Flow::Trap(code) = o.flow
+                    && code == SLOW_FPCR
+                {
+                    return Outcome::Slow(code);
+                }
+                pc = o.next;
+            }
             Err(e) => return Outcome::Fault(e.to_string()),
         }
     }
@@ -232,6 +252,7 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
         sp: st.regs[regs::SP.index()] as u64,
         nzcv: [false; 4],
         v: [0; 32],
+        fpcr: input.fpcr,
         pc,
         mem: mem.bytes,
     };
@@ -252,6 +273,8 @@ pub fn interpret(blocks: &[Block], input: &Guest) -> Outcome {
 pub fn compare(ir: &Outcome, uc: &Outcome) -> Vec<String> {
     match (ir, uc) {
         (Outcome::Fault(_), Outcome::Fault(_)) => Vec::new(),
+        (Outcome::Slow(_), _) => vec!["ir left for the slow path".to_string()],
+        (_, Outcome::Slow(_)) => vec!["unicorn has no slow path".to_string()],
         (Outcome::Fault(e), Outcome::Done(_)) => vec![format!("ir faulted: {e}")],
         (Outcome::Done(_), Outcome::Fault(e)) => vec![format!("unicorn faulted: {e}")],
         (Outcome::Done(a), Outcome::Done(b)) => {

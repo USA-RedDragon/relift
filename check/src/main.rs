@@ -7,8 +7,8 @@
 //! window.
 //!
 //! ```text
-//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce]
-//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce]
+//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]
+//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -17,7 +17,10 @@
 //! (see `mutate.rs`); then a form passes when the run catches it. `--hand`
 //! lifts with the hand-written lifter instead of the generated templates, and
 //! `all` then means every encoding that has one. `--dce` runs every lifted
-//! block through `relift_ir::dce` first.
+//! block through `relift_ir::dce` first. `--fpcr` runs with that FPCR: a
+//! block that uses floating point must then leave through its FPCR guard
+//! for the runtime's slow path (counted, not compared, since Unicorn has no
+//! slow path), and every other block must still match.
 
 mod emu;
 mod mutate;
@@ -35,12 +38,14 @@ struct Opts {
     n: u64,
     seed: u64,
     mutate: bool,
+    fpcr: u64,
 }
 
 #[derive(Default)]
 struct Report {
     states: u64,
     matched: u64,
+    slow: u64,
     both_faulted: u64,
     unplaced: u64,
     mutation: Option<String>,
@@ -63,11 +68,28 @@ fn run_one(emu: &mut Emu, words: &[u32], g: &emu::Guest, opts: &Opts, rep: &mut 
         rep.mutation.get_or_insert(m);
     }
     let ir = interpret(&blocks, g);
+    rep.states += 1;
+    let guarded = blocks.iter().any(|b| {
+        b.insts
+            .iter()
+            .any(|i| matches!(i.op, relift_ir::Op::Guard(..)))
+    });
+    if g.fpcr != 0 && guarded {
+        if matches!(ir, emu::Outcome::Slow(_)) {
+            rep.slow += 1;
+            rep.matched += 1;
+        } else {
+            rep.first.get_or_insert(format!(
+                "[{:08x}] the FPCR guard did not leave the block",
+                words.last().copied().unwrap_or(0)
+            ));
+        }
+        return;
+    }
     let uc = match emu.run(words, g) {
         Ok(o) => o,
         Err(e) => emu::Outcome::Fault(format!("unicorn: {e:?}")),
     };
-    rep.states += 1;
     if matches!((&ir, &uc), (emu::Outcome::Fault(_), emu::Outcome::Fault(_))) {
         rep.both_faulted += 1;
     }
@@ -95,6 +117,7 @@ fn check_form(emu: &mut Emu, enc: Encoding, opts: &Opts) -> Report {
             rep.unplaced += 1;
             continue;
         };
+        g.fpcr = opts.fpcr;
         let mut words = states::prelude(&insn, &mut g, &mut r);
         words.push(word);
         run_one(emu, &words, &g, opts, &mut rep);
@@ -108,10 +131,11 @@ fn check_words(emu: &mut Emu, words: &[u32], opts: &Opts) -> Result<Report, Stri
     let mut r = Rng::new(&format!("{words:?}"), opts.seed);
     let mut rep = Report::default();
     while rep.states < opts.n && rep.unplaced < opts.n * 10 {
-        let Some(g) = states::state(&insn, &mut r) else {
+        let Some(mut g) = states::state(&insn, &mut r) else {
             rep.unplaced += 1;
             continue;
         };
+        g.fpcr = opts.fpcr;
         run_one(emu, words, &g, opts, &mut rep);
     }
     Ok(rep)
@@ -130,11 +154,16 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
         (true, false) => "MISSED",
     };
     println!(
-        "{verdict:6} {name:28} {}/{} matched, {} both faulted, {} unplaced{}{}",
+        "{verdict:6} {name:28} {}/{} matched, {} both faulted, {} unplaced{}{}{}",
         rep.matched,
         rep.states,
         rep.both_faulted,
         rep.unplaced,
+        if rep.slow > 0 {
+            format!(", {} to the slow path", rep.slow)
+        } else {
+            String::new()
+        },
         rep.mutation
             .as_ref()
             .map(|m| format!(", mutation: {m}"))
@@ -149,7 +178,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce]"
+        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]"
     );
     ExitCode::from(2)
 }
@@ -163,10 +192,21 @@ fn main() -> ExitCode {
         n: 10_000,
         seed: 1,
         mutate: false,
+        fpcr: 0,
     };
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
+            "--fpcr" => {
+                let Some(v) = args
+                    .get(i + 1)
+                    .and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+                else {
+                    return usage();
+                };
+                opts.fpcr = v;
+                i += 1;
+            }
             "-n" | "--seed" => {
                 let Some(v) = args.get(i + 1).and_then(|v| v.parse().ok()) else {
                     return usage();
