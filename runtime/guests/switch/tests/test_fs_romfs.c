@@ -511,3 +511,18 @@ TEST(romfs_absent)
     }
     tree_remove(root);
 }
+
+TEST(fs_has_a_pointer_buffer_for_its_paths)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    tc_obj fs = tc_open_service(c, heap, "fsp-srv");
+    CHECK(fs.handle);
+    tc_req q = tc_new(3);
+    q.type = HIPC_CONTROL;
+    tc_res r = tc_call(c, fs.handle, &q, false);
+    CHECK_EQ(r.result, 0);
+    uint16_t pbs;
+    memcpy(&pbs, r.data, 2);
+    CHECK(pbs >= 0x301);
+}
