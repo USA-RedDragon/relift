@@ -399,3 +399,13 @@ fn lift_one(code: u8, cases: u32) -> bool {
 fn halt_bug_store_through_echo_ram_matches_the_oracle() {
     assert!(lift_one(0x76, 64));
 }
+
+#[test]
+fn ei_before_stop_leaves_the_cpu_stopped_with_an_interrupt_pending() {
+    assert!(lift_one(0xFB, 64));
+}
+
+#[test]
+fn stop_with_an_interrupt_pending_matches_the_oracle() {
+    assert!(lift_one(0x10, 400));
+}

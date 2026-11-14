@@ -424,6 +424,7 @@ struct Machine {
     iff: u8,
     late: Option<(u8, u8)>,
     armed: bool,
+    stopped: bool,
     switched: u32,
     dispatched: bool,
     skip: bool,
@@ -445,6 +446,7 @@ impl Intrinsics for Hooks {
                     m.switched += 1;
                     return Ok(0);
                 }
+                m.stopped = true;
                 return Ok(u128::from(m.ie & m.iff & 0x1F != 0));
             }
             _ => {
@@ -515,7 +517,7 @@ impl Devices for Dev {
             m.iff = iff;
             m.late = None;
         }
-        if !m.ime {
+        if !m.ime || m.stopped {
             return Ok(None);
         }
         let Some((line, vector)) = irq::take(m.ie & m.iff) else {
@@ -745,6 +747,9 @@ fn compare(
         return Ok((Verdict::Skip, mutated));
     }
     let mut seq = case.seq;
+    if ir.machine.stopped {
+        seq.late = None;
+    }
     let mut deferred = false;
     if ir.machine.dispatched && seq.late.is_none() {
         seq.steps += 1;
