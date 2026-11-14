@@ -227,7 +227,9 @@ static void debug_string(uint64_t addr, uint64_t size)
     buf[size] = 0;
     while (size && (buf[size - 1] == '\n' || buf[size - 1] == '\r'))
         buf[--size] = 0;
-    rl_log(RL_LOG_INFO, "guest", "%s", buf);
+    buf[size] = '\n';
+    fwrite(buf, 1, size + 1, stdout);
+    fflush(stdout);
 }
 
 static rl_result close_handle(uint32_t h)
