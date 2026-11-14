@@ -3592,6 +3592,26 @@ pub(super) fn LDRSW_64_ldst_regoff(
     }
 }
 
+/// `LDRSW_64_loadlit`.
+///
+/// Cut: IsFeatureImplemented, Mem_read, PC_read, X_set.
+pub(super) fn LDRSW_64_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDRSW_64_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 << 2) | 0x0u128;
+    let s5: u128 = rt::sext(s4, 21, 64);
+    let s6: u128 = pc.wrapping_add(s5) & 0xffffffffffffffff;
+    let v7 = b.konst(Width::new(64), s6);
+    let v8 = b.load(v7, Width::new(32), Endian::Little, Order::Plain);
+    let v9 = b.sext(v8, Width::new(64));
+    st.x_set(b, s3 as u32, v9, None);
+    Ok(())
+}
+
 /// `LDR_32_ldst_immpost`.
 ///
 /// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, X_read, X_set.
@@ -3914,6 +3934,25 @@ pub(super) fn LDR_32_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Res
     }
 }
 
+/// `LDR_32_loadlit`.
+///
+/// Cut: IsFeatureImplemented, Mem_read, PC_read, X_set.
+pub(super) fn LDR_32_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_32_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 << 2) | 0x0u128;
+    let s5: u128 = rt::sext(s4, 21, 64);
+    let s6: u128 = pc.wrapping_add(s5) & 0xffffffffffffffff;
+    let v7 = b.konst(Width::new(64), s6);
+    let v8 = b.load(v7, Width::new(32), Endian::Little, Order::Plain);
+    st.x_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
 /// `LDR_64_ldst_immpost`.
 ///
 /// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, X_read, X_set.
@@ -4234,6 +4273,25 @@ pub(super) fn LDR_64_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Res
         }
         _ => unreachable!(),
     }
+}
+
+/// `LDR_64_loadlit`.
+///
+/// Cut: IsFeatureImplemented, Mem_read, PC_read, X_set.
+pub(super) fn LDR_64_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_64_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 << 2) | 0x0u128;
+    let s5: u128 = rt::sext(s4, 21, 64);
+    let s6: u128 = pc.wrapping_add(s5) & 0xffffffffffffffff;
+    let v7 = b.konst(Width::new(64), s6);
+    let v8 = b.load(v7, Width::new(64), Endian::Little, Order::Plain);
+    st.x_set(b, s3 as u32, v8, None);
+    Ok(())
 }
 
 /// `LDR_BL_ldst_regoff`.
@@ -4723,6 +4781,25 @@ pub(super) fn LDR_D_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Resu
         }
         _ => unreachable!(),
     }
+}
+
+/// `LDR_D_loadlit`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, PC_read, V_set.
+pub(super) fn LDR_D_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_D_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 << 2) | 0x0u128;
+    let s5: u128 = rt::sext(s4, 21, 64);
+    let s6: u128 = pc.wrapping_add(s5) & 0xffffffffffffffff;
+    let v7 = b.konst(Width::new(64), s6);
+    let v8 = b.load(v7, Width::new(64), Endian::Little, Order::Plain);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
 }
 
 /// `LDR_H_ldst_immpost`.
@@ -5301,6 +5378,25 @@ pub(super) fn LDR_Q_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `LDR_Q_loadlit`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, PC_read, V_set.
+pub(super) fn LDR_Q_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_Q_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 << 2) | 0x0u128;
+    let s5: u128 = rt::sext(s4, 21, 64);
+    let s6: u128 = pc.wrapping_add(s5) & 0xffffffffffffffff;
+    let v7 = b.konst(Width::new(64), s6);
+    let v8 = b.load(v7, Width::new(128), Endian::Little, Order::Plain);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
 /// `LDR_S_ldst_immpost`.
 ///
 /// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, V_set, X_read, X_set.
@@ -5587,6 +5683,25 @@ pub(super) fn LDR_S_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Resu
         }
         _ => unreachable!(),
     }
+}
+
+/// `LDR_S_loadlit`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, PC_read, V_set.
+pub(super) fn LDR_S_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_S_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 << 2) | 0x0u128;
+    let s5: u128 = rt::sext(s4, 21, 64);
+    let s6: u128 = pc.wrapping_add(s5) & 0xffffffffffffffff;
+    let v7 = b.konst(Width::new(64), s6);
+    let v8 = b.load(v7, Width::new(32), Endian::Little, Order::Plain);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
 }
 
 /// `LDTRB_32_ldst_unpriv`.
@@ -6759,6 +6874,16 @@ pub(super) fn PRFM_P_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Res
         }
         _ => unreachable!(),
     }
+}
+
+/// `PRFM_P_loadlit`.
+///
+/// Cut: ENV, IsFeatureImplemented, PC_read.
+pub(super) fn PRFM_P_loadlit(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PRFM_P_loadlit;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    Ok(())
 }
 
 /// `PRFUM_P_ldst_unscaled`.
@@ -10823,14 +10948,17 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDRSW_64_ldst_immpre => LDRSW_64_ldst_immpre,
         Encoding::LDRSW_64_ldst_pos => LDRSW_64_ldst_pos,
         Encoding::LDRSW_64_ldst_regoff => LDRSW_64_ldst_regoff,
+        Encoding::LDRSW_64_loadlit => LDRSW_64_loadlit,
         Encoding::LDR_32_ldst_immpost => LDR_32_ldst_immpost,
         Encoding::LDR_32_ldst_immpre => LDR_32_ldst_immpre,
         Encoding::LDR_32_ldst_pos => LDR_32_ldst_pos,
         Encoding::LDR_32_ldst_regoff => LDR_32_ldst_regoff,
+        Encoding::LDR_32_loadlit => LDR_32_loadlit,
         Encoding::LDR_64_ldst_immpost => LDR_64_ldst_immpost,
         Encoding::LDR_64_ldst_immpre => LDR_64_ldst_immpre,
         Encoding::LDR_64_ldst_pos => LDR_64_ldst_pos,
         Encoding::LDR_64_ldst_regoff => LDR_64_ldst_regoff,
+        Encoding::LDR_64_loadlit => LDR_64_loadlit,
         Encoding::LDR_BL_ldst_regoff => LDR_BL_ldst_regoff,
         Encoding::LDR_B_ldst_immpost => LDR_B_ldst_immpost,
         Encoding::LDR_B_ldst_immpre => LDR_B_ldst_immpre,
@@ -10840,6 +10968,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDR_D_ldst_immpre => LDR_D_ldst_immpre,
         Encoding::LDR_D_ldst_pos => LDR_D_ldst_pos,
         Encoding::LDR_D_ldst_regoff => LDR_D_ldst_regoff,
+        Encoding::LDR_D_loadlit => LDR_D_loadlit,
         Encoding::LDR_H_ldst_immpost => LDR_H_ldst_immpost,
         Encoding::LDR_H_ldst_immpre => LDR_H_ldst_immpre,
         Encoding::LDR_H_ldst_pos => LDR_H_ldst_pos,
@@ -10848,10 +10977,12 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDR_Q_ldst_immpre => LDR_Q_ldst_immpre,
         Encoding::LDR_Q_ldst_pos => LDR_Q_ldst_pos,
         Encoding::LDR_Q_ldst_regoff => LDR_Q_ldst_regoff,
+        Encoding::LDR_Q_loadlit => LDR_Q_loadlit,
         Encoding::LDR_S_ldst_immpost => LDR_S_ldst_immpost,
         Encoding::LDR_S_ldst_immpre => LDR_S_ldst_immpre,
         Encoding::LDR_S_ldst_pos => LDR_S_ldst_pos,
         Encoding::LDR_S_ldst_regoff => LDR_S_ldst_regoff,
+        Encoding::LDR_S_loadlit => LDR_S_loadlit,
         Encoding::LDTRB_32_ldst_unpriv => LDTRB_32_ldst_unpriv,
         Encoding::LDTRH_32_ldst_unpriv => LDTRH_32_ldst_unpriv,
         Encoding::LDTRSB_32_ldst_unpriv => LDTRSB_32_ldst_unpriv,
@@ -10878,6 +11009,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDXP_LP32_ldstexclp => LDXP_LP32_ldstexclp,
         Encoding::PRFM_P_ldst_pos => PRFM_P_ldst_pos,
         Encoding::PRFM_P_ldst_regoff => PRFM_P_ldst_regoff,
+        Encoding::PRFM_P_loadlit => PRFM_P_loadlit,
         Encoding::PRFUM_P_ldst_unscaled => PRFUM_P_ldst_unscaled,
         Encoding::STLXP_SP32_ldstexclp => STLXP_SP32_ldstexclp,
         Encoding::STLXP_SP64_ldstexclp => STLXP_SP64_ldstexclp,

@@ -493,10 +493,12 @@ LDR_32_ldst_immpost
 LDR_32_ldst_immpre
 LDR_32_ldst_pos
 LDR_32_ldst_regoff
+LDR_32_loadlit
 LDR_64_ldst_immpost
 LDR_64_ldst_immpre
 LDR_64_ldst_pos
 LDR_64_ldst_regoff
+LDR_64_loadlit
 LDRB_32B_ldst_regoff
 LDRB_32BL_ldst_regoff
 LDRB_32_ldst_immpost
@@ -511,6 +513,7 @@ LDR_D_ldst_immpost
 LDR_D_ldst_immpre
 LDR_D_ldst_pos
 LDR_D_ldst_regoff
+LDR_D_loadlit
 LDRH_32_ldst_immpost
 LDRH_32_ldst_immpre
 LDRH_32_ldst_pos
@@ -523,6 +526,7 @@ LDR_Q_ldst_immpost
 LDR_Q_ldst_immpre
 LDR_Q_ldst_pos
 LDR_Q_ldst_regoff
+LDR_Q_loadlit
 LDRSB_32B_ldst_regoff
 LDRSB_32BL_ldst_regoff
 LDRSB_32_ldst_immpost
@@ -545,10 +549,12 @@ LDR_S_ldst_immpost
 LDR_S_ldst_immpre
 LDR_S_ldst_pos
 LDR_S_ldst_regoff
+LDR_S_loadlit
 LDRSW_64_ldst_immpost
 LDRSW_64_ldst_immpre
 LDRSW_64_ldst_pos
 LDRSW_64_ldst_regoff
+LDRSW_64_loadlit
 LDTR_32_ldst_unpriv
 LDTR_64_ldst_unpriv
 LDTRB_32_ldst_unpriv
@@ -624,6 +630,7 @@ PMUL_asimdsame_only
 PMULL_asimddiff_L
 PRFM_P_ldst_pos
 PRFM_P_ldst_regoff
+PRFM_P_loadlit
 PRFUM_P_ldst_unscaled
 RADDHN_asimddiff_N
 RBIT_32_dp_1src
