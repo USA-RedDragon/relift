@@ -4,6 +4,7 @@
 pub mod build;
 pub mod cli;
 pub mod fpflags;
+pub mod hints;
 pub mod import;
 pub mod runtime_link;
 pub mod settings;
