@@ -36,8 +36,8 @@ pub fn tool_hash() -> Result<[u8; 32], BoxError> {
 /// The cached analysis at `path` when its key is `key`.
 pub fn read(path: &Path, key: &str, files: &[RegFile]) -> Option<Analysis> {
     let z = std::fs::read(path).ok()?;
-    let text = zstd::decode_all(z.as_slice()).ok()?;
-    let (k, a) = relift_analyze::from_text(std::str::from_utf8(&text).ok()?, files).ok()?;
+    let bytes = zstd::decode_all(z.as_slice()).ok()?;
+    let (k, a) = relift_analyze::from_bytes(&bytes, files).ok()?;
     (k == key).then_some(a)
 }
 
@@ -46,9 +46,9 @@ pub fn read(path: &Path, key: &str, files: &[RegFile]) -> Option<Analysis> {
 /// # Errors
 ///
 /// The file cannot be written.
-pub fn write(path: &Path, key: &str, a: &Analysis) -> Result<(), BoxError> {
-    let text = relift_analyze::to_text(a, key);
-    let z = zstd::encode_all(text.as_bytes(), 3)?;
+pub fn write(path: &Path, key: &str, a: &Analysis, files: &[RegFile]) -> Result<(), BoxError> {
+    let bytes = relift_analyze::to_bytes(a, key, files);
+    let z = zstd::encode_all(bytes.as_slice(), 3)?;
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }

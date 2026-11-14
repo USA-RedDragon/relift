@@ -178,7 +178,7 @@ impl Stage {
                 Some(a) => a,
                 None => {
                     let a = relift_analyze::discover(fe, orig);
-                    cache::write(&path, &key, &a)?;
+                    cache::write(&path, &key, &a, &files)?;
                     relift_cache::write_if_changed(&key_path, key.as_bytes())?;
                     a
                 }
@@ -209,7 +209,7 @@ impl Stage {
         let plan = self.needs_analysis(i);
         let analysis = (stale || plan).then(|| layout.lift(fe, module));
         if let (true, Some(a)) = (stale, &analysis) {
-            cache::write(&path, &key, a)?;
+            cache::write(&path, &key, a, &files)?;
             relift_cache::write_if_changed(&key_path, key.as_bytes())?;
         }
         Ok(Analyzed {

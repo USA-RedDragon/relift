@@ -15,13 +15,15 @@
 //! the indirect calls, for coverage reports. [`rediscover`] lifts again only
 //! the functions a change to the module's bytes touches.
 
+mod binary;
 mod consts;
 mod incremental;
 mod slots;
 mod tables;
 mod transfers;
 
-pub use incremental::{Reuse, from_text, rediscover, stale, to_text};
+pub use binary::{FORMAT, from_bytes, to_bytes};
+pub use incremental::{Reuse, rediscover, stale};
 pub use slots::{SlotUses, slot_uses};
 pub use transfers::{Source, Transfer, TransferKind, unresolved_transfers};
 

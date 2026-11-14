@@ -71,7 +71,7 @@ fn a_new_call_in_changed_code_adds_its_callee() {
 }
 
 #[test]
-fn the_text_form_round_trips() {
+fn the_binary_form_round_trips() {
     let m = module(&program(7, true));
     let mut a = discover(&Toy, &m);
     a.functions
@@ -79,11 +79,14 @@ fn the_text_form_round_trips() {
         .expect("main")
         .tables
         .insert(BASE + 4, vec![BASE + 8]);
-    let t = to_text(&a, "k 1");
-    let (key, back) = from_text(&t, &[Toy.regs()]).expect("parses");
+    let t = to_bytes(&a, "k 1", &[Toy.regs()]);
+    let (key, back) = from_bytes(&t, &[Toy.regs()]).expect("reads");
     assert_eq!(key, "k 1");
     assert_eq!(back, a);
-    assert!(from_text("nope", &[Toy.regs()]).is_err());
+    assert!(from_bytes(b"nope", &[Toy.regs()]).is_err());
+    for cut in 0..t.len() {
+        assert!(from_bytes(&t[..cut], &[Toy.regs()]).is_err());
+    }
 }
 
 fn changed_bytes(a: &[u8], b: &[u8]) -> Vec<std::ops::Range<u64>> {
