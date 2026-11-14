@@ -23,6 +23,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::bytes::sha256;
 use crate::bytes::{array, slice, to_usize, u8_at, u16_at, u32_at, u64_at};
 use crate::error::{Error, Result, malformed};
+use crate::import::Event;
 use crate::npdm::Npdm;
 use crate::storage::{Shared, Storage, check_range, read_vec};
 
@@ -1006,6 +1007,7 @@ impl Nup {
         files: &[(String, NupEntry)],
         dirs: &[String],
         dir: &Path,
+        on: &mut dyn FnMut(Event),
     ) -> Result<usize> {
         std::fs::create_dir_all(dir)?;
         for d in dirs {
@@ -1019,11 +1021,15 @@ impl Nup {
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            let mut w = relift_cache::StreamWriter::new(&target)?;
+            let mut w = Counted {
+                inner: relift_cache::StreamWriter::new(&target)?,
+                on: &mut *on,
+            };
             self.copy(e, &mut w)?;
-            if w.finish()? {
+            if w.inner.finish()? {
                 written += 1;
             }
+            on(Event::File);
         }
         Ok(written)
     }
@@ -1036,7 +1042,21 @@ impl Nup {
     ///
     /// A read, hash check or write fails, or a path is unsafe.
     pub fn extract_romfs(&self, t: &NupTitle, dir: &Path) -> Result<usize> {
-        self.extract_files(&t.romfs, &t.romfs_dirs, dir)
+        self.extract_romfs_with(t, dir, &mut |_| {})
+    }
+
+    /// As [`Nup::extract_romfs`], telling `on` about every chunk and file.
+    ///
+    /// # Errors
+    ///
+    /// As [`Nup::extract_romfs`].
+    pub fn extract_romfs_with(
+        &self,
+        t: &NupTitle,
+        dir: &Path,
+        on: &mut dyn FnMut(Event),
+    ) -> Result<usize> {
+        self.extract_files(&t.romfs, &t.romfs_dirs, dir, on)
     }
 
     /// Extract the effective ExeFS files under `dir`, as
@@ -1046,7 +1066,7 @@ impl Nup {
     ///
     /// As [`Nup::extract_romfs`].
     pub fn extract_exefs(&self, t: &NupTitle, dir: &Path) -> Result<usize> {
-        self.extract_files(&t.exefs, &[], dir)
+        self.extract_files(&t.exefs, &[], dir, &mut |_| {})
     }
 
     /// Extract every file of one package (`exefs/`, `romfs/`, `data/`, ...)
@@ -1059,7 +1079,24 @@ impl Nup {
         let Some(p) = self.packages.get(index) else {
             return malformed(format!("NUP: no package {index}"));
         };
-        self.extract_files(&p.files, &p.dirs, dir)
+        self.extract_files(&p.files, &p.dirs, dir, &mut |_| {})
+    }
+}
+
+struct Counted<'a, W: Write> {
+    inner: W,
+    on: &'a mut dyn FnMut(Event),
+}
+
+impl<W: Write> Write for Counted<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        (self.on)(Event::Chunk(n as u64));
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
