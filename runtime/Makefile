@@ -6,6 +6,7 @@
 #
 #   make                       clang, host target, into build/host
 #   make test                  build and run every layer's tests
+#   make charter               check that core names no guest and no CPU
 #   make CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 #
 # TARGET is passed as -target; leave it empty for the compiler's default.
@@ -14,6 +15,7 @@ ifeq ($(origin CC),default)
 CC := clang
 endif
 AR ?= ar
+PYTHON ?= python3
 BUILD ?= build/host
 TARGET ?=
 OPT ?= -O2
@@ -80,7 +82,7 @@ A64_TESTS := $(BUILD)/a64_tests
 SWITCH_TESTS := $(BUILD)/switch_tests
 TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS)
 
-.PHONY: all test clean
+.PHONY: all test charter clean
 all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(STATIC) $(SHARED) $(TESTS)
 
 $(CORE_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -129,6 +131,9 @@ test: $(TESTS)
 	./$(CORE_TESTS)
 	./$(A64_TESTS)
 	./$(SWITCH_TESTS)
+
+charter:
+	$(PYTHON) charter/check.py
 
 clean:
 	rm -rf $(BUILD)
