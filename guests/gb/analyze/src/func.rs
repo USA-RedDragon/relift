@@ -9,7 +9,7 @@ use crate::bankmodel::{BankModel, BankReg};
 use crate::image::Image;
 use crate::loc::Loc;
 use crate::report::{Unresolved, UnresolvedKind};
-use crate::state::{self, BankWrite, H, L, State, Val};
+use crate::state::{self, BankWrite, H, L, State, Val, Write};
 
 /// How a callee acts on the bank registers and where it goes, found by
 /// running it with symbolic registers.
@@ -21,11 +21,14 @@ pub(crate) struct Summary {
     /// The entry registers (high, low) of the address the callee jumps to
     /// with `jp hl`.
     pub target: Option<(usize, usize)>,
+    /// The callee pops its return address, reads a code address from a
+    /// table that follows the call and jumps to it.
+    pub inline_table: bool,
 }
 
 impl Summary {
     pub(crate) fn is_empty(&self) -> bool {
-        self.bank.is_none() && self.target.is_none()
+        self.bank.is_none() && self.target.is_none() && !self.inline_table
     }
 }
 
@@ -74,7 +77,24 @@ pub struct CopyLoop {
     pub counts: Vec<u8>,
 }
 
+/// A constant loaded into a register pair that may be a code address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AddressTaken {
+    /// The instruction.
+    pub site: Loc,
+    /// The constant.
+    pub value: u16,
+    /// Where the constant points, when the bank is known. A pointer stored
+    /// to RAM gets the bank of the code that stores it when that code is in
+    /// the switchable window, which is a guess about where it is used.
+    pub target: Option<Loc>,
+    /// The RAM address of the low byte when two constant bytes were stored
+    /// there, which makes the constant a stored pointer.
+    pub stored_at: Option<u16>,
+}
+
 pub(crate) struct FnRun {
+    pub taken: Vec<AddressTaken>,
     pub body: BTreeMap<Loc, u8>,
     pub calls: Vec<CallSite>,
     pub unresolved: Vec<Unresolved>,
@@ -101,6 +121,9 @@ struct Run<'a> {
     consts_c: Vec<u8>,
     consts_b: Vec<u8>,
     branches: Vec<(Loc, Loc)>,
+    no_fall: bool,
+    cur_len: u8,
+    stores: Vec<(Loc, u16, u8)>,
 }
 
 fn is_ram(addr: u16) -> bool {
@@ -125,6 +148,7 @@ pub(crate) fn run(env: &Env<'_>, entry: Loc, entry_state: State) -> FnRun {
         entry,
         own_bank,
         out: FnRun {
+            taken: Vec::new(),
             body: BTreeMap::new(),
             calls: Vec::new(),
             unresolved: Vec::new(),
@@ -138,6 +162,9 @@ pub(crate) fn run(env: &Env<'_>, entry: Loc, entry_state: State) -> FnRun {
         consts_c: Vec::new(),
         consts_b: Vec::new(),
         branches: Vec::new(),
+        no_fall: false,
+        cur_len: 0,
+        stores: Vec::new(),
     };
     let mut st0 = entry_state;
     r.pin_window(&mut st0);
@@ -186,10 +213,11 @@ impl Run<'_> {
             }
             let len = ins.length();
             self.out.body.insert(loc, len);
+            self.cur_len = len;
             let next_addr = loc.addr.wrapping_add(u16::from(len));
             let mut succ: Vec<(Loc, State)> = Vec::new();
             let mut fall = true;
-            self.record_consts(&ins);
+            self.record_consts(loc, &st, &ins);
             let mut events = Vec::new();
             match ins.opcode.mnemonic {
                 Mnemonic::Jr | Mnemonic::Jp | Mnemonic::Call | Mnemonic::Rst => {
@@ -197,6 +225,9 @@ impl Run<'_> {
                     fall = conditional
                         || matches!(ins.opcode.mnemonic, Mnemonic::Call | Mnemonic::Rst);
                     self.branch(loc, &ins, &mut st, &mut succ);
+                    if std::mem::take(&mut self.no_fall) {
+                        fall = false;
+                    }
                 }
                 Mnemonic::Ret | Mnemonic::Reti => {
                     fall = matches!(ins.opcode.dst, Operand::Cond(_));
@@ -204,7 +235,10 @@ impl Run<'_> {
                 _ => {
                     state::step(self.env.model, &mut st, &ins, &mut events);
                     for w in events {
-                        self.bank_write(loc, w);
+                        match w {
+                            Write::Bank(b) => self.bank_write(loc, b),
+                            Write::Ram { addr, val } => self.ram_store(loc, &st, addr, val),
+                        }
                     }
                 }
             }
@@ -253,6 +287,38 @@ impl Run<'_> {
         st
     }
 
+    fn ram_store(&mut self, at: Loc, st: &State, addr: u16, val: Val) {
+        let Val::Const(v) = val else { return };
+        let near = |s: &(Loc, u16, u8)| {
+            s.0.bank == at.bank && s.0.addr < at.addr && at.addr - s.0.addr <= 16
+        };
+        let lo = self
+            .stores
+            .iter()
+            .rev()
+            .find(|s| near(s) && s.1.wrapping_add(1) == addr)
+            .copied();
+        self.stores.push((at, addr, v));
+        if let Some((_, _, l)) = lo {
+            let value = u16::from_le_bytes([l, v]);
+            if (0x150..0x8000).contains(&value) {
+                let target = if value < 0x4000 {
+                    Some(Loc::fixed(value))
+                } else {
+                    self.own_bank
+                        .or_else(|| st.window_bank(self.env.model).and_then(Result::ok))
+                        .map(|bank| Loc { bank, addr: value })
+                };
+                self.out.taken.push(AddressTaken {
+                    site: at,
+                    value,
+                    target,
+                    stored_at: Some(addr.wrapping_sub(1)),
+                });
+            }
+        }
+    }
+
     fn bank_write(&mut self, at: Loc, w: BankWrite) {
         self.out.touches = true;
         self.out.parametric = true;
@@ -273,7 +339,7 @@ impl Run<'_> {
         }
     }
 
-    fn record_consts(&mut self, ins: &Instruction) {
+    fn record_consts(&mut self, loc: Loc, st: &State, ins: &Instruction) {
         match (
             ins.opcode.mnemonic,
             ins.opcode.dst,
@@ -282,6 +348,14 @@ impl Run<'_> {
         ) {
             (Mnemonic::Ld, Operand::R16(p), Operand::Imm16, Immediate::U16(v)) => {
                 self.consts16.push((v, p));
+                if (0x150..0x8000).contains(&v) && p != Reg16::Sp {
+                    self.out.taken.push(AddressTaken {
+                        site: loc,
+                        value: v,
+                        target: flow(self.env, st, v).ok(),
+                        stored_at: None,
+                    });
+                }
             }
             (
                 Mnemonic::Ld,
@@ -366,8 +440,13 @@ impl Run<'_> {
             }
             (None, Val::Entry(h), Val::Entry(l)) => {
                 self.out.summary.target.get_or_insert((h, l));
-                self.out.parametric = true;
             }
+            (None, Val::Popped, Val::Popped) => self.unresolved(
+                loc,
+                UnresolvedKind::IndirectJump,
+                "jp hl to an address the caller pushed".to_owned(),
+            ),
+            (None, _, _) if st.popped => self.out.summary.inline_table = true,
             _ => self.unresolved(
                 loc,
                 UnresolvedKind::IndirectJump,
@@ -397,6 +476,24 @@ impl Run<'_> {
             }
             return;
         }
+        if sum.inline_table {
+            self.unresolved(
+                site,
+                UnresolvedKind::InlineTable,
+                format!(
+                    "jump table at ${:04X}, reached through {target}",
+                    site.addr.wrapping_add(u16::from(self.cur_len))
+                ),
+            );
+            self.out.calls.push(CallSite {
+                site,
+                target,
+                kind,
+                state: *st,
+            });
+            self.no_fall = true;
+            return;
+        }
         self.out.touches = true;
         let mut sub = *st;
         if let Some(r) = sum.bank {
@@ -409,7 +506,7 @@ impl Run<'_> {
                     self.out.parametric = true;
                     sub.lo = None;
                 }
-                Val::Top => {
+                Val::Top | Val::Popped => {
                     self.out.parametric = true;
                     self.unresolved(
                         site,

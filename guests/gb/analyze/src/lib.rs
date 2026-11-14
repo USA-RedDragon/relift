@@ -24,7 +24,7 @@ mod state;
 
 pub use analysis::{AnalyzeError, analyze};
 pub use bankmodel::{BankModel, BankReg, OutOfRange};
-pub use func::{CallKind, CopyLoop, RamTransfer};
+pub use func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 pub use loc::Loc;
 pub use report::{
     BankCoverage, Edge, Function, Origin, RamCode, Report, Trampoline, Unresolved, UnresolvedKind,

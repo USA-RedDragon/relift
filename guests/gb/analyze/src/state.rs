@@ -18,6 +18,7 @@ pub(crate) enum Val {
     Top,
     Const(u8),
     Entry(usize),
+    Popped,
 }
 
 /// What is known on one path.
@@ -26,6 +27,8 @@ pub(crate) struct State {
     pub regs: [Val; 7],
     pub lo: Option<u16>,
     pub hi: Option<u8>,
+    pub depth: Option<i16>,
+    pub popped: bool,
 }
 
 impl State {
@@ -35,6 +38,8 @@ impl State {
             regs: [Val::Top; 7],
             lo: Some(lo),
             hi: Some(hi),
+            depth: Some(0),
+            popped: false,
         }
     }
 
@@ -47,6 +52,8 @@ impl State {
             regs,
             lo: None,
             hi: None,
+            depth: Some(0),
+            popped: false,
         }
     }
 
@@ -63,6 +70,10 @@ impl State {
         if self.hi != other.hi {
             self.hi = None;
         }
+        if self.depth != other.depth {
+            self.depth = None;
+        }
+        self.popped |= other.popped;
         *self != before
     }
 
@@ -127,6 +138,13 @@ pub(crate) struct BankWrite {
     pub val: Val,
 }
 
+/// A store the analysis records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Write {
+    Bank(BankWrite),
+    Ram { addr: u16, val: Val },
+}
+
 fn address(st: &State, op: Operand, ins: &Instruction) -> Option<u16> {
     match op {
         Operand::Indirect(p) => st.pair(p),
@@ -179,17 +197,17 @@ fn kill_operand(st: &mut State, op: Operand) {
 }
 
 /// Apply `ins` (not a branch) to `st`, pushing events.
-pub(crate) fn step(
-    model: &BankModel,
-    st: &mut State,
-    ins: &Instruction,
-    events: &mut Vec<BankWrite>,
-) {
+pub(crate) fn step(model: &BankModel, st: &mut State, ins: &Instruction, events: &mut Vec<Write>) {
     let op = ins.opcode;
     match op.mnemonic {
         Mnemonic::Ld => step_ld(model, st, ins, events),
         Mnemonic::Inc | Mnemonic::Dec => kill_operand(st, op.dst),
-        Mnemonic::Add => kill_operand(st, op.dst),
+        Mnemonic::Add => {
+            if op.dst == Operand::R16(Reg16::Sp) {
+                st.depth = None;
+            }
+            kill_operand(st, op.dst);
+        }
         Mnemonic::Xor | Mnemonic::Sub if op.src == Operand::R8(Reg8::A) => {
             st.regs[A] = Val::Const(0);
         }
@@ -206,7 +224,8 @@ pub(crate) fn step(
         | Mnemonic::Rra
         | Mnemonic::Daa
         | Mnemonic::Cpl => st.regs[A] = Val::Top,
-        Mnemonic::Pop => kill_operand(st, op.dst),
+        Mnemonic::Pop => step_pop(st, op.dst),
+        Mnemonic::Push => st.depth = st.depth.map(|d| d + 1),
         Mnemonic::Rlc
         | Mnemonic::Rrc
         | Mnemonic::Rl
@@ -220,7 +239,22 @@ pub(crate) fn step(
     }
 }
 
-fn step_ld(model: &BankModel, st: &mut State, ins: &Instruction, events: &mut Vec<BankWrite>) {
+fn step_pop(st: &mut State, dst: Operand) {
+    let own = st.depth == Some(0);
+    st.depth = st.depth.map(|d| d - 1);
+    kill_operand(st, dst);
+    if own {
+        st.popped = true;
+        if let Operand::R16(p) = dst
+            && let Some((h, l)) = pair_regs(p)
+        {
+            st.regs[h] = Val::Popped;
+            st.regs[l] = Val::Popped;
+        }
+    }
+}
+
+fn step_ld(model: &BankModel, st: &mut State, ins: &Instruction, events: &mut Vec<Write>) {
     let op = ins.opcode;
     let (dst, src) = (op.dst, op.src);
     if is_memory(dst) {
@@ -241,7 +275,11 @@ fn step_ld(model: &BankModel, st: &mut State, ins: &Instruction, events: &mut Ve
                 (BankReg::Lo, _) => st.lo = None,
                 (BankReg::Hi, _) => st.hi = None,
             }
-            events.push(BankWrite { reg, val: value });
+            events.push(Write::Bank(BankWrite { reg, val: value }));
+        } else if let Some(addr) = address(st, dst, ins)
+            && addr >= 0x8000
+        {
+            events.push(Write::Ram { addr, val: value });
         }
         post_adjust(st, dst);
         return;
@@ -255,7 +293,7 @@ fn step_ld(model: &BankModel, st: &mut State, ins: &Instruction, events: &mut Ve
         (Operand::R8(d), Operand::Imm8, Immediate::U8(v)) => st.regs[reg_index(d)] = Val::Const(v),
         (Operand::R8(d), Operand::R8(s), _) => st.regs[reg_index(d)] = st.regs[reg_index(s)],
         (Operand::R16(p), Operand::Imm16, Immediate::U16(v)) => st.set_pair(p, Some(v)),
-        (Operand::R16(Reg16::Sp), _, _) => {}
+        (Operand::R16(Reg16::Sp), _, _) => st.depth = None,
         (Operand::R16(p), _, _) => st.set_pair(p, None),
         _ => {}
     }

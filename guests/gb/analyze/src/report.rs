@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::func::{CallKind, CopyLoop, RamTransfer};
+use crate::func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 use crate::loc::Loc;
 
 /// Why a transfer could not be followed.
@@ -23,6 +23,10 @@ pub enum UnresolvedKind {
     /// A call through a routine that jumps to `hl`, with an address that is
     /// not constant.
     IndirectCall,
+    /// A call to a routine that jumps through a table placed right after
+    /// the call. The table's length is not known, so its targets are not
+    /// followed.
+    InlineTable,
     /// An unused opcode.
     Illegal,
     /// An instruction runs past the end of its bank window.
@@ -42,6 +46,7 @@ impl UnresolvedKind {
             UnresolvedKind::DynamicBankWrite => "dynamic-bank-write",
             UnresolvedKind::TrampolineBank => "trampoline-bank",
             UnresolvedKind::IndirectCall => "indirect-call",
+            UnresolvedKind::InlineTable => "inline-table",
             UnresolvedKind::Illegal => "illegal-opcode",
             UnresolvedKind::RunsOffWindow => "runs-off-window",
             UnresolvedKind::OutsideRom => "outside-rom",
@@ -149,4 +154,8 @@ pub struct Report {
     pub dynamic_writes: Vec<Loc>,
     /// Transfers into RAM.
     pub ram_code: Vec<RamCode>,
+    /// Constants loaded into a register pair that point into ROM, outside
+    /// every instruction found. Some are data; some are code that is only
+    /// reached through a pointer. They are not followed.
+    pub unreached_pointers: Vec<AddressTaken>,
 }

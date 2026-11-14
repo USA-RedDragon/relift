@@ -135,6 +135,7 @@ impl Driver<'_> {
             let merged = Summary {
                 bank: sym.summary.bank.or(old.bank),
                 target: sym.summary.target.or(old.target),
+                inline_table: sym.summary.inline_table || old.inline_table,
             };
             if merged != old {
                 self.summaries.insert(e, merged);
@@ -184,6 +185,7 @@ impl Driver<'_> {
         let mut dynamic_writes = BTreeSet::new();
         let mut copies: Vec<(Loc, CopyLoop)> = Vec::new();
         let mut ram_sites = Vec::new();
+        let mut taken = BTreeSet::new();
         for (loc, entry) in &self.entries {
             let Some((run, unres)) = self.results.get(loc) else {
                 continue;
@@ -234,6 +236,7 @@ impl Driver<'_> {
             for c in &run.copies {
                 copies.push((*loc, c.clone()));
             }
+            taken.extend(run.taken.iter().copied());
             for t in &run.ram {
                 ram_sites.push((*loc, *t));
             }
@@ -287,7 +290,16 @@ impl Driver<'_> {
                 }
             })
             .collect();
+        let known: HashSet<Loc> = functions
+            .values()
+            .flat_map(|f| f.body.keys().copied())
+            .collect();
+        let unreached_pointers = taken
+            .into_iter()
+            .filter(|t| t.target.is_none_or(|l| !known.contains(&l)))
+            .collect();
         Report {
+            unreached_pointers,
             mapper: kind.name(),
             banks,
             functions,

@@ -149,6 +149,82 @@ fn a_call_through_a_jump_helper_with_a_variable_address_is_listed() {
     assert_eq!(kinds(&r), vec![UnresolvedKind::IndirectCall]);
 }
 
+fn dispatch_cart() -> Cart {
+    Cart::new(0x19, 0x02).put(
+        0,
+        0x300,
+        &[0xE1, 0x5F, 0x16, 0x00, 0x19, 0x19, 0x2A, 0x66, 0x6F, 0xE9],
+    )
+}
+
+#[test]
+fn a_call_to_an_inline_table_dispatcher_ends_the_path_and_is_listed() {
+    let r = dispatch_cart()
+        .put(0, 0x150, &[0xCD, 0x00, 0x03, 0x00, 0x04, 0x00, 0x05, 0x00])
+        .analyze();
+    assert_eq!(kinds(&r), vec![UnresolvedKind::InlineTable]);
+    assert_eq!(r.unresolved[0].at, Loc::fixed(0x150));
+    assert!(
+        r.unresolved[0].detail.contains("$0153"),
+        "{:?}",
+        r.unresolved
+    );
+    let entry = &r.functions[&Loc::fixed(0x100)];
+    assert!(!entry.body.contains_key(&Loc::fixed(0x153)));
+}
+
+#[test]
+fn a_jump_to_a_pushed_address_is_listed_as_indirect() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x300, &[0xE1, 0xE9])
+        .put(0, 0x150, &[0x21, 0x00, 0x03, 0xE5, 0xCD, 0x00, 0x03, 0xC9])
+        .analyze();
+    assert_eq!(kinds(&r), vec![UnresolvedKind::IndirectJump]);
+}
+
+#[test]
+fn a_constant_pointer_to_unreached_rom_is_listed_not_followed() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x150, &[0x21, 0x00, 0x03, 0xC9])
+        .put(0, 0x300, &[0xC9])
+        .analyze();
+    assert!(!has(&r, 0, 0x300));
+    assert_eq!(r.unreached_pointers.len(), 1);
+    assert_eq!(r.unreached_pointers[0].target, Some(Loc::fixed(0x300)));
+    assert_eq!(r.unreached_pointers[0].stored_at, None);
+}
+
+#[test]
+fn a_pointer_stored_as_two_constant_bytes_is_listed_with_its_ram_address() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x00, 0xEA, 0x9B, 0xCD, 0x3E, 0x03, 0xEA, 0x9C, 0xCD, 0xC9,
+            ],
+        )
+        .put(0, 0x300, &[0xC9])
+        .analyze();
+    let stored: Vec<_> = r
+        .unreached_pointers
+        .iter()
+        .filter(|p| p.stored_at == Some(0xCD9B))
+        .collect();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].value, 0x300);
+    assert_eq!(stored[0].target, Some(Loc::fixed(0x300)));
+}
+
+#[test]
+fn a_pointer_into_found_code_is_not_listed() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x150, &[0x21, 0x00, 0x03, 0xCD, 0x00, 0x03, 0xC9])
+        .put(0, 0x300, &[0xC9])
+        .analyze();
+    assert!(r.unreached_pointers.is_empty());
+}
+
 #[test]
 fn an_unused_vector_is_not_a_root() {
     let r = Cart::new(0x19, 0x02)

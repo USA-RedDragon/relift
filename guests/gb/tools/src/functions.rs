@@ -111,6 +111,9 @@ fn to_json(report: &Report, summary: bool) -> Value {
         "banks": banks,
         "functions": functions,
         "unresolved_by_kind": kinds,
+        "unreached_pointers": report.unreached_pointers.iter().map(|t| json!({
+            "site": loc_json(t.site), "value": t.value, "target": t.target.map(loc_json), "stored_at": t.stored_at,
+        })).collect::<Vec<_>>(),
         "dynamic_bank_writes": report.dynamic_writes.iter().map(|l| loc_json(*l)).collect::<Vec<_>>(),
         "unresolved": report.unresolved.iter().map(|u| json!({
             "at": loc_json(u.at), "kind": u.kind.name(), "detail": u.detail,
@@ -189,6 +192,22 @@ fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
     if !summary {
         for l in &report.dynamic_writes {
             writeln!(out, "  {l}")?;
+        }
+    }
+    writeln!(
+        out,
+        "constants that point into ROM outside the code found: {}",
+        report.unreached_pointers.len()
+    )?;
+    if !summary {
+        for t in &report.unreached_pointers {
+            let to = t
+                .target
+                .map_or_else(|| "bank unknown".to_owned(), |l| l.to_string());
+            let how = t
+                .stored_at
+                .map_or_else(String::new, |a| format!(", stored at ${a:04X}"));
+            writeln!(out, "  {} -> ${:04X} ({to}{how})", t.site, t.value)?;
         }
     }
     writeln!(out, "code run from RAM: {}", report.ram_code.len())?;
