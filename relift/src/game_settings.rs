@@ -1,0 +1,742 @@
+//! The game's own settings: the `[settings.<key>]` tables of `game.toml`,
+//! the C that declares them to the runtime, and the build-time check that
+//! every `relift_setting_*` read in an override names a declared key of the
+//! matching type (design 006).
+//!
+//! ```toml
+//! [settings.fast_text]
+//! type = "bool"          # bool, int, float, enum, string, key_binding
+//! label = "Fast text"
+//! description = "Skips the text scroll."
+//! default = false
+//!
+//! [settings.scale]
+//! type = "int"
+//! default = 2
+//! min = 1
+//! max = 4
+//! step = 1
+//! ```
+//!
+//! A key binding's default is `"<port>:<control>"`.
+
+use std::collections::BTreeSet;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use relift_info::{Apply, Setting, SettingKind};
+use serde_json::Value;
+
+use crate::import::BoxError;
+
+/// The reads an override can make, with the setting type each needs.
+const READS: [(&str, &str); 6] = [
+    ("relift_setting_bool", "bool"),
+    ("relift_setting_int", "int"),
+    ("relift_setting_float", "float"),
+    ("relift_setting_enum", "enum"),
+    ("relift_setting_str", "string"),
+    ("relift_setting_binding", "key_binding"),
+];
+
+/// Whether `key` is a valid setting key: lowercase letters, digits, `_` and
+/// `.`, starting with a letter.
+#[must_use]
+pub fn key_ok(key: &str) -> bool {
+    key.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.')
+}
+
+/// The name of a setting's type.
+#[must_use]
+pub fn type_name(kind: &SettingKind) -> &'static str {
+    match kind {
+        SettingKind::Bool => "bool",
+        SettingKind::Int { .. } => "int",
+        SettingKind::Float { .. } => "float",
+        SettingKind::Enum { .. } => "enum",
+        SettingKind::String => "string",
+        SettingKind::KeyBinding => "key_binding",
+    }
+}
+
+fn text(t: &toml::Table, key: &str, what: &str) -> Result<String, BoxError> {
+    match t.get(key) {
+        None => Ok(String::new()),
+        Some(toml::Value::String(s)) => Ok(s.clone()),
+        Some(_) => Err(format!("{what}: {key} must be a string").into()),
+    }
+}
+
+fn int(t: &toml::Table, key: &str, what: &str) -> Result<Option<i64>, BoxError> {
+    match t.get(key) {
+        None => Ok(None),
+        Some(toml::Value::Integer(i)) => Ok(Some(*i)),
+        Some(_) => Err(format!("{what}: {key} must be an integer").into()),
+    }
+}
+
+fn float(t: &toml::Table, key: &str, what: &str) -> Result<Option<f64>, BoxError> {
+    match t.get(key) {
+        None => Ok(None),
+        Some(toml::Value::Float(f)) if f.is_finite() => Ok(Some(*f)),
+        Some(toml::Value::Integer(i)) => Ok(Some(*i as f64)),
+        Some(_) => Err(format!("{what}: {key} must be a finite number").into()),
+    }
+}
+
+fn setting(key: &str, t: &toml::Table) -> Result<Setting, BoxError> {
+    let what = format!("settings.{key}");
+    if !key_ok(key) {
+        return Err(format!(
+            "{what}: a key is lowercase letters, digits, '_' and '.', starting with a letter"
+        )
+        .into());
+    }
+    let known: &[&str] = &[
+        "type",
+        "label",
+        "description",
+        "apply",
+        "default",
+        "min",
+        "max",
+        "step",
+        "choices",
+    ];
+    if let Some(k) = t.keys().find(|k| !known.contains(&k.as_str())) {
+        return Err(format!("{what}: unknown field {k}").into());
+    }
+    let apply = match text(t, "apply", &what)?.as_str() {
+        "" | "start" => Apply::Start,
+        "live" => return Err(format!("{what}: apply = \"live\" is not supported yet").into()),
+        o => return Err(format!("{what}: apply must be \"start\", not {o:?}").into()),
+    };
+    let ty = text(t, "type", &what)?;
+    let (kind, default) = match ty.as_str() {
+        "bool" => match t.get("default") {
+            None => (SettingKind::Bool, Value::Bool(false)),
+            Some(toml::Value::Boolean(b)) => (SettingKind::Bool, Value::Bool(*b)),
+            Some(_) => return Err(format!("{what}: the default of a bool is true or false").into()),
+        },
+        "int" => {
+            let (min, max) = (int(t, "min", &what)?, int(t, "max", &what)?);
+            let (Some(min), Some(max)) = (min, max) else {
+                return Err(format!("{what}: an int needs min and max").into());
+            };
+            let step = int(t, "step", &what)?.unwrap_or(0);
+            let d = int(t, "default", &what)?.unwrap_or(min);
+            if min > max || step < 0 || d < min || d > max {
+                return Err(format!(
+                    "{what}: the range {min}..{max} is empty, the step is negative or the default {d} is outside it"
+                )
+                .into());
+            }
+            if step > 0 && (d - min) % step != 0 {
+                return Err(format!("{what}: the default {d} is not on the step {step}").into());
+            }
+            (SettingKind::Int { min, max, step }, Value::from(d))
+        }
+        "float" => {
+            let (min, max) = (float(t, "min", &what)?, float(t, "max", &what)?);
+            let (Some(min), Some(max)) = (min, max) else {
+                return Err(format!("{what}: a float needs min and max").into());
+            };
+            let step = float(t, "step", &what)?.unwrap_or(0.0);
+            let d = float(t, "default", &what)?.unwrap_or(min);
+            if min > max || step < 0.0 || d < min || d > max {
+                return Err(format!(
+                    "{what}: the range {min}..{max} is empty, the step is negative or the default {d} is outside it"
+                )
+                .into());
+            }
+            (
+                SettingKind::Float { min, max, step },
+                serde_json::Number::from_f64(d).map_or(Value::Null, Value::Number),
+            )
+        }
+        "enum" => {
+            let Some(toml::Value::Array(a)) = t.get("choices") else {
+                return Err(format!("{what}: an enum needs a list of choices").into());
+            };
+            let choices: Vec<String> = a
+                .iter()
+                .map(|v| v.as_str().map(str::to_string))
+                .collect::<Option<_>>()
+                .ok_or_else(|| format!("{what}: choices are strings"))?;
+            if choices.is_empty() || choices.iter().collect::<BTreeSet<_>>().len() != choices.len()
+            {
+                return Err(format!("{what}: choices are not empty and not repeated").into());
+            }
+            let d = if t.contains_key("default") {
+                text(t, "default", &what)?
+            } else {
+                choices[0].clone()
+            };
+            if !choices.contains(&d) {
+                return Err(format!("{what}: the default {d:?} is not one of the choices").into());
+            }
+            (SettingKind::Enum { choices }, Value::String(d))
+        }
+        "string" => (
+            SettingKind::String,
+            Value::String(text(t, "default", &what)?),
+        ),
+        "key_binding" => {
+            let d = text(t, "default", &what)?;
+            let v = if d.is_empty() {
+                Value::Null
+            } else {
+                let Some((p, c)) = d
+                    .split_once(':')
+                    .filter(|(p, c)| !p.is_empty() && !c.is_empty() && !c.contains(':'))
+                else {
+                    return Err(format!("{what}: the default {d:?} is not <port>:<control>").into());
+                };
+                serde_json::json!({ "port": p, "control": c })
+            };
+            (SettingKind::KeyBinding, v)
+        }
+        "" => return Err(format!("{what}: no type").into()),
+        o => {
+            return Err(format!(
+                "{what}: type {o:?} is not bool, int, float, enum, string or key_binding"
+            )
+            .into());
+        }
+    };
+    Ok(Setting {
+        key: key.to_string(),
+        label: text(t, "label", &what)?,
+        description: text(t, "description", &what)?,
+        apply,
+        default,
+        kind,
+    })
+}
+
+/// The settings of a game.toml text, in key order.
+///
+/// # Errors
+///
+/// The text is not TOML, or a `[settings.<key>]` table is malformed.
+pub fn parse(game_toml: &str) -> Result<Vec<Setting>, BoxError> {
+    let doc: toml::Table = game_toml.parse().map_err(|e| format!("game.toml: {e}"))?;
+    let Some(settings) = doc.get("settings") else {
+        return Ok(Vec::new());
+    };
+    let toml::Value::Table(settings) = settings else {
+        return Err("game.toml: settings must be a table of settings".into());
+    };
+    settings
+        .iter()
+        .map(|(k, v)| match v {
+            toml::Value::Table(t) => setting(k, t),
+            _ => Err(format!("settings.{k} must be a table").into()),
+        })
+        .collect()
+}
+
+/// The settings of the game.toml at `path`; none when the file is absent.
+///
+/// # Errors
+///
+/// The file cannot be read or [`parse`] fails.
+pub fn read(path: &Path) -> Result<Vec<Setting>, BoxError> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => parse(&t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("{}: {e}", path.display()).into()),
+    }
+}
+
+fn c_str(s: &str) -> String {
+    let mut o = String::from("\"");
+    for b in s.bytes() {
+        match b {
+            b'"' => o.push_str("\\\""),
+            b'\\' => o.push_str("\\\\"),
+            b'\n' => o.push_str("\\n"),
+            0x20..=0x7e => o.push(b as char),
+            _ => {
+                let _ = write!(o, "\\{b:03o}");
+            }
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// The C file that declares `settings` to the runtime before `main` runs.
+#[must_use]
+pub fn generate_c(settings: &[Setting]) -> String {
+    let mut s = String::from(
+        "/* Generated by relift: the game's settings. */\n#include <relift/settings.h>\n\n",
+    );
+    for (i, d) in settings.iter().enumerate() {
+        if let SettingKind::Enum { choices } = &d.kind {
+            let names: Vec<String> = choices.iter().map(|c| c_str(c)).collect();
+            let _ = writeln!(
+                s,
+                "static const char *const rl_game_choices_{i}[] = {{ {} }};",
+                names.join(", ")
+            );
+        }
+    }
+    s.push_str("\nstatic const rl_setting_def rl_game_settings[] = {\n");
+    for (i, d) in settings.iter().enumerate() {
+        let ty = match d.kind {
+            SettingKind::Bool => "RL_SETTING_BOOL",
+            SettingKind::Int { .. } => "RL_SETTING_INT",
+            SettingKind::Float { .. } => "RL_SETTING_FLOAT",
+            SettingKind::Enum { .. } => "RL_SETTING_ENUM",
+            SettingKind::String => "RL_SETTING_STRING",
+            SettingKind::KeyBinding => "RL_SETTING_BINDING",
+        };
+        let _ = write!(
+            s,
+            "    {{ .key = {}, .type = {ty}, .label = {}, .description = {}",
+            c_str(&d.key),
+            c_str(&d.label),
+            c_str(&d.description)
+        );
+        match &d.kind {
+            SettingKind::Bool => {
+                let _ = write!(
+                    s,
+                    ", .def_int = {}",
+                    i32::from(d.default == Value::Bool(true))
+                );
+            }
+            SettingKind::Int { min, max, step } => {
+                let _ = write!(
+                    s,
+                    ", .def_int = {}, .min_int = {min}, .max_int = {max}, .step_int = {step}",
+                    d.default.as_i64().unwrap_or(*min)
+                );
+            }
+            SettingKind::Float { min, max, step } => {
+                let _ = write!(
+                    s,
+                    ", .def_float = {:?}, .min_float = {min:?}, .max_float = {max:?}, .step_float = {step:?}",
+                    d.default.as_f64().unwrap_or(*min)
+                );
+            }
+            SettingKind::Enum { choices } => {
+                let idx = choices
+                    .iter()
+                    .position(|c| Some(c.as_str()) == d.default.as_str())
+                    .unwrap_or(0);
+                let _ = write!(
+                    s,
+                    ", .def_int = {idx}, .choices = rl_game_choices_{i}, .nchoices = {}",
+                    choices.len()
+                );
+            }
+            SettingKind::String => {
+                let _ = write!(
+                    s,
+                    ", .def_str = {}",
+                    c_str(d.default.as_str().unwrap_or(""))
+                );
+            }
+            SettingKind::KeyBinding => {
+                if let (Some(p), Some(c)) =
+                    (d.default["port"].as_str(), d.default["control"].as_str())
+                {
+                    let _ = write!(s, ", .def_str = {}", c_str(&format!("{p}:{c}")));
+                }
+            }
+        }
+        s.push_str(" },\n");
+    }
+    if settings.is_empty() {
+        s.push_str("    { .key = \"\" },\n");
+    }
+    let _ = write!(
+        s,
+        "}};\n\n__attribute__((constructor)) static void rl_game_declare_settings(void)\n{{\n    rl_settings_declare(rl_game_settings, {});\n}}\n",
+        settings.len()
+    );
+    s
+}
+
+/// A `relift_setting_*` read in an override source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Read {
+    /// The 1-based line.
+    pub line: usize,
+    /// The function name.
+    pub func: String,
+    /// The key literal, or `None` when the argument is not a string literal.
+    pub key: Option<String>,
+}
+
+/// Every `relift_setting_*` call in `source`, skipping comments.
+#[must_use]
+pub fn reads_in(source: &str) -> Vec<Read> {
+    let b = source.as_bytes();
+    let mut out = Vec::new();
+    let (mut i, mut line) = (0, 1);
+    while i < b.len() {
+        match b[i] {
+            b'\n' => {
+                line += 1;
+                i += 1;
+            }
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    line += usize::from(b[i] == b'\n');
+                    i += 1;
+                }
+                i += 2;
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' && b[i] != b'\n' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            c if c == b'_' || c.is_ascii_alphabetic() => {
+                let start = i;
+                while i < b.len() && (b[i] == b'_' || b[i].is_ascii_alphanumeric()) {
+                    i += 1;
+                }
+                let word = &source[start..i];
+                if !word.starts_with("relift_setting_") || !READS.iter().any(|(n, _)| *n == word) {
+                    continue;
+                }
+                let mut j = i;
+                while j < b.len() && b[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if b.get(j) != Some(&b'(') {
+                    continue;
+                }
+                j += 1;
+                while j < b.len() && b[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let key = if b.get(j) == Some(&b'"') {
+                    let k = j + 1;
+                    let mut e = k;
+                    while e < b.len() && b[e] != b'"' && b[e] != b'\\' && b[e] != b'\n' {
+                        e += 1;
+                    }
+                    let mut after = e + 1;
+                    while after < b.len() && b[after].is_ascii_whitespace() {
+                        after += 1;
+                    }
+                    let plain =
+                        b.get(e) == Some(&b'"') && matches!(b.get(after), Some(b',' | b')'));
+                    plain.then(|| source[k..e].to_string())
+                } else {
+                    None
+                };
+                out.push(Read {
+                    line,
+                    func: word.to_string(),
+                    key,
+                });
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// Checks the reads of one source against `settings`; returns one message
+/// per problem, each starting `file:line`.
+#[must_use]
+pub fn check_source(file: &str, source: &str, settings: &[Setting]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for r in reads_in(source) {
+        let Some(key) = &r.key else {
+            errors.push(format!(
+                "{file}:{}: {} needs a string literal key, so the build can check it",
+                r.line, r.func
+            ));
+            continue;
+        };
+        let want = READS
+            .iter()
+            .find(|(n, _)| *n == r.func)
+            .map_or("", |(_, t)| *t);
+        match settings.iter().find(|s| &s.key == key) {
+            None => {
+                let near = settings
+                    .iter()
+                    .map(|s| s.key.as_str())
+                    .min_by_key(|k| distance(k, key))
+                    .filter(|k| distance(k, key) <= 2);
+                let hint = near.map_or(String::new(), |k| format!("; did you mean {k:?}?"));
+                errors.push(format!(
+                    "{file}:{}: {} reads {key:?}, which game.toml does not declare{hint}",
+                    r.line, r.func
+                ));
+            }
+            Some(s) if type_name(&s.kind) != want => errors.push(format!(
+                "{file}:{}: {} reads {key:?}, which game.toml declares as {}",
+                r.line,
+                r.func,
+                type_name(&s.kind)
+            )),
+            Some(_) => {}
+        }
+    }
+    errors
+}
+
+fn distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cur = row[j + 1];
+            row[j + 1] = (prev + usize::from(ca != cb)).min(row[j] + 1).min(cur + 1);
+            prev = cur;
+        }
+    }
+    row[b.len()]
+}
+
+fn sources_under(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    let mut entries: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    entries.sort();
+    for p in entries {
+        if p.is_dir() {
+            sources_under(&p, out)?;
+        } else if p
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e, "c" | "h" | "cc" | "cpp" | "cxx" | "hpp"))
+        {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
+/// Checks every C and C++ source under `dir` (the game's overrides folder);
+/// a missing folder has nothing to check.
+///
+/// # Errors
+///
+/// One error listing every misspelled, undeclared or mistyped key.
+pub fn check_dir(dir: &Path, settings: &[Setting]) -> Result<(), BoxError> {
+    let mut files = Vec::new();
+    sources_under(dir, &mut files)?;
+    let mut errors = Vec::new();
+    for f in &files {
+        let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
+        errors.extend(check_source(&f.display().to_string(), &src, settings));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GOOD: &str = r#"
+[game]
+guest = "switch"
+
+[settings.fast_text]
+type = "bool"
+label = "Fast text"
+default = true
+
+[settings.scale]
+type = "int"
+min = 1
+max = 9
+step = 2
+default = 3
+
+[settings.gain]
+type = "float"
+min = 0
+max = 1
+step = 0.25
+default = 0.5
+
+[settings.mode]
+type = "enum"
+choices = ["off", "low", "high"]
+default = "low"
+
+[settings.name]
+type = "string"
+default = "a\"b"
+
+[settings.jump]
+type = "key_binding"
+default = "p1:a"
+"#;
+
+    fn err(t: &str) -> String {
+        parse(t).expect_err("must fail").to_string()
+    }
+
+    #[test]
+    fn parses_every_type() {
+        let s = parse(GOOD).unwrap();
+        assert_eq!(s.len(), 6);
+        let by = |k: &str| s.iter().find(|x| x.key == k).unwrap();
+        assert_eq!(by("fast_text").default, Value::Bool(true));
+        assert_eq!(
+            by("scale").kind,
+            SettingKind::Int {
+                min: 1,
+                max: 9,
+                step: 2
+            }
+        );
+        assert_eq!(by("gain").default, serde_json::json!(0.5));
+        assert_eq!(by("mode").default, "low");
+        assert_eq!(by("jump").default["port"], "p1");
+        assert_eq!(by("fast_text").label, "Fast text");
+    }
+
+    #[test]
+    fn no_settings_table_is_no_settings() {
+        assert!(parse("[game]\nguest = \"switch\"\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_bad_declarations() {
+        let cases = [
+            ("[settings.A]\ntype = \"bool\"", "lowercase"),
+            ("[settings.a]\n", "no type"),
+            ("[settings.a]\ntype = \"blob\"", "is not bool"),
+            (
+                "[settings.a]\ntype = \"bool\"\ndefault = 1",
+                "true or false",
+            ),
+            ("[settings.a]\ntype = \"int\"\nmin = 1", "needs min and max"),
+            ("[settings.a]\ntype = \"int\"\nmin = 5\nmax = 1", "empty"),
+            (
+                "[settings.a]\ntype = \"int\"\nmin = 1\nmax = 5\ndefault = 6",
+                "outside",
+            ),
+            (
+                "[settings.a]\ntype = \"int\"\nmin = 1\nmax = 9\nstep = 2\ndefault = 2",
+                "not on the step",
+            ),
+            (
+                "[settings.a]\ntype = \"float\"\nmin = 0\nmax = 1\ndefault = 2.0",
+                "outside",
+            ),
+            ("[settings.a]\ntype = \"enum\"", "list of choices"),
+            ("[settings.a]\ntype = \"enum\"\nchoices = []", "not empty"),
+            (
+                "[settings.a]\ntype = \"enum\"\nchoices = [\"x\", \"x\"]",
+                "not repeated",
+            ),
+            (
+                "[settings.a]\ntype = \"enum\"\nchoices = [\"x\"]\ndefault = \"y\"",
+                "not one of",
+            ),
+            (
+                "[settings.a]\ntype = \"key_binding\"\ndefault = \"p1\"",
+                "<port>:<control>",
+            ),
+            (
+                "[settings.a]\ntype = \"bool\"\nlabl = \"x\"",
+                "unknown field labl",
+            ),
+            (
+                "[settings.a]\ntype = \"bool\"\napply = \"live\"",
+                "not supported",
+            ),
+            ("[settings]\na = 1", "must be a table"),
+            ("settings = 1", "table of settings"),
+        ];
+        for (t, want) in cases {
+            let e = err(t);
+            assert!(e.contains(want), "{t:?}: {e}");
+        }
+    }
+
+    #[test]
+    fn generated_c_declares_every_setting() {
+        let c = generate_c(&parse(GOOD).unwrap());
+        for want in [
+            ".key = \"fast_text\", .type = RL_SETTING_BOOL",
+            ".def_int = 3, .min_int = 1, .max_int = 9, .step_int = 2",
+            ".def_float = 0.5, .min_float = 0.0, .max_float = 1.0, .step_float = 0.25",
+            ".def_int = 1, .choices = rl_game_choices_3, .nchoices = 3",
+            ".def_str = \"a\\\"b\"",
+            ".def_str = \"p1:a\"",
+            "rl_settings_declare(rl_game_settings, 6)",
+            "__attribute__((constructor))",
+        ] {
+            assert!(c.contains(want), "{want} not in\n{c}");
+        }
+        assert!(generate_c(&[]).contains("rl_settings_declare(rl_game_settings, 0)"));
+    }
+
+    #[test]
+    fn finds_reads_and_skips_comments_and_strings() {
+        let src = "int a = relift_setting_int(\"scale\");\n// relift_setting_bool(\"no\")\n/* relift_setting_bool(\"no2\") */\nconst char *s = \"relift_setting_bool(\\\"no3\\\")\";\nbool b = relift_setting_bool (\"fast_text\");\nbool c = relift_setting_bool(key);\n";
+        let r = reads_in(src);
+        assert_eq!(r.len(), 3);
+        assert_eq!(r[0].key.as_deref(), Some("scale"));
+        assert_eq!(r[0].line, 1);
+        assert_eq!(r[1].key.as_deref(), Some("fast_text"));
+        assert_eq!(r[1].line, 5);
+        assert_eq!(r[2].key, None);
+    }
+
+    #[test]
+    fn a_misspelled_or_mistyped_key_is_an_error() {
+        let s = parse(GOOD).unwrap();
+        let ok = "relift_setting_bool(\"fast_text\"); relift_setting_int(\"scale\");";
+        assert!(check_source("a.c", ok, &s).is_empty());
+        let e = check_source("a.c", "x = relift_setting_bool(\"fast_txt\");", &s);
+        assert_eq!(e.len(), 1);
+        assert!(e[0].starts_with("a.c:1:") && e[0].contains("did you mean \"fast_text\""));
+        let e = check_source("a.c", "x = relift_setting_int(\"fast_text\");", &s);
+        assert!(e[0].contains("declares as bool"));
+        let e = check_source("a.c", "x = relift_setting_int(k);", &s);
+        assert!(e[0].contains("string literal"));
+        let e = check_source("a.c", "x = relift_setting_bool(\"zzzzzzzz\");", &s);
+        assert!(!e[0].contains("did you mean"));
+    }
+
+    #[test]
+    fn check_dir_walks_the_overrides_folder() {
+        let root = std::env::temp_dir().join(format!("relift-gs-{}", std::process::id()));
+        let sub = root.join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(root.join("a.c"), "relift_setting_bool(\"fast_text\");").unwrap();
+        std::fs::write(sub.join("b.cpp"), "relift_setting_bool(\"fast_tex\");").unwrap();
+        std::fs::write(sub.join("note.txt"), "relift_setting_bool(\"zz\");").unwrap();
+        let s = parse(GOOD).unwrap();
+        let e = check_dir(&root, &s).expect_err("misspelled").to_string();
+        assert!(e.contains("b.cpp:1") && !e.contains("note.txt") && !e.contains("a.c:"));
+        std::fs::remove_file(sub.join("b.cpp")).unwrap();
+        assert!(check_dir(&root, &s).is_ok());
+        assert!(check_dir(&root.join("missing"), &s).is_ok());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+}
