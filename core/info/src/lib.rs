@@ -287,8 +287,17 @@ pub struct Input {
 /// One input port.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Port {
-    /// The port number, from 0.
+    /// The stable id: `p1` to `p8`, `touch`, or an id a mod declares.
+    #[serde(default)]
+    pub id: String,
+    /// The port number, the index into the list, from 0.
     pub port: u32,
+    /// The label a launcher shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Who declared the port: `native`, `game` or `mod:<name>`.
+    #[serde(default)]
+    pub origin: String,
     /// The controller kind (`GBA pad`).
     pub kind: String,
     /// The controls.
@@ -305,6 +314,15 @@ pub struct Control {
     pub id: String,
     /// The label a launcher shows.
     pub label: String,
+    /// `button`, `trigger` or `axis`.
+    #[serde(default)]
+    pub kind: String,
+    /// Who declared the control, as for [`Port::origin`].
+    #[serde(default)]
+    pub origin: String,
+    /// The default host bindings, such as `gamepad:south` or `key:z`.
+    #[serde(default)]
+    pub defaults: Vec<String>,
 }
 
 /// The `link` section: declared only for now.
@@ -417,6 +435,32 @@ mod tests {
         assert_eq!(info.save.kind, "tree");
         assert_eq!(info.other["telemetry"]["a"][1], 2);
         assert!(info.to_bytes().windows(9).any(|w| w == b"telemetry"));
+    }
+
+    #[test]
+    fn ports_and_controls_carry_ids_origins_and_defaults() {
+        let doc =
+            br#"{"input":{"ports":[{"port":0,"kind":"pad","controls":[{"id":"a","label":"A"}]}]}}"#;
+        let info = Info::from_bytes(doc).expect("parses old documents");
+        assert_eq!(info.input.ports[0].id, "");
+        let port = Port {
+            id: "p1".into(),
+            port: 0,
+            label: Some("Player 1".into()),
+            origin: "native".into(),
+            kind: "pad".into(),
+            controls: vec![Control {
+                id: "a".into(),
+                label: "A".into(),
+                kind: "button".into(),
+                origin: "native".into(),
+                defaults: vec!["gamepad:south".into(), "key:z".into()],
+            }],
+            extra: false,
+        };
+        let v = serde_json::to_value(&port).unwrap();
+        assert_eq!(v["controls"][0]["defaults"][1], "key:z");
+        assert_eq!(serde_json::from_value::<Port>(v).unwrap(), port);
     }
 
     #[test]
