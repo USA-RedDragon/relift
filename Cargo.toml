@@ -18,6 +18,7 @@ relift-analyze = { path = "core/analyze" }
 relift-build = { path = "core/build" }
 relift-cache = { path = "core/cache" }
 relift-cpu-a64 = { path = "cpus/a64" }
+relift-gb-formats = { path = "guests/gb/formats" }
 relift-emit = { path = "core/emit" }
 relift-guest = { path = "core/guest" }
 relift-host = { path = "core/host" }

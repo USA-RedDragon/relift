@@ -69,7 +69,11 @@ const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries and that `relift` does not link, so
 /// the reachability control skips them; the absence walks still cover them.
-const STANDALONE: &[&str] = &["relift-switch-tools", "relift-switch-vkgen"];
+const STANDALONE: &[&str] = &[
+    "relift-gb-formats",
+    "relift-switch-tools",
+    "relift-switch-vkgen",
+];
 
 const CHARTERS: &[Charter] = &[
     Charter {
@@ -149,6 +153,14 @@ const CHARTERS: &[Charter] = &[
         band: 2,
         why: "the ARM64 frontend, over the IR and the guest contract only",
         normal: &["relift-guest", "relift-ir"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-gb-formats",
+        band: 2,
+        why: "the Game Boy cartridge format: header, mapper kinds, size codes, checksums and bank layout; reads bytes only",
+        normal: NONE,
         dev: NONE,
         build: NONE,
     },
