@@ -16,7 +16,7 @@
 mod consts;
 mod tables;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use relift_guest::{Frontend, LiftFailure, Module, RootKind};
 use relift_ir::{Block, Flow, Next};
@@ -259,7 +259,8 @@ pub enum Progress {
         done: usize,
         /// Functions in all.
         total: usize,
-        /// Instructions that failed to lift, over the finished functions.
+        /// Distinct addresses that failed to lift, over the finished
+        /// functions.
         unlifted: usize,
     },
 }
@@ -311,20 +312,22 @@ pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Prog
     }
     let entries: BTreeSet<u64> = kinds.keys().copied().collect();
     let total = kinds.len();
-    let mut unlifted = 0;
+    let mut failed: HashSet<u64> = HashSet::new();
     let functions = kinds
         .iter()
         .enumerate()
         .map(|(n, (&e, &kind))| {
             let (insts, tables) = extent(&mut lifter, &entries, e);
-            unlifted += insts
-                .values()
-                .filter(|i| matches!(i, Insn::Failed(_)))
-                .count();
+            failed.extend(
+                insts
+                    .iter()
+                    .filter(|(_, i)| matches!(i, Insn::Failed(_)))
+                    .map(|(&pc, _)| pc),
+            );
             on(Progress::Lifted {
                 done: n + 1,
                 total,
-                unlifted,
+                unlifted: failed.len(),
             });
             (
                 e,
