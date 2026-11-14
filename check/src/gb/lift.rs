@@ -512,7 +512,10 @@ impl Devices for Dev {
             return Ok(None);
         };
         let sp = state.regs[r::SP.index()] as u16;
-        if !is_ram(sp.wrapping_sub(2)) || !is_ram(sp.wrapping_sub(1)) || (0xE000..0xFE00).contains(&sp.wrapping_sub(2)) {
+        if !is_ram(sp.wrapping_sub(2))
+            || !is_ram(sp.wrapping_sub(1))
+            || (0xE000..0xFE00).contains(&sp.wrapping_sub(2))
+        {
             m.skip = true;
             return Ok(None);
         }
@@ -636,7 +639,10 @@ fn run_ir(
     loop {
         blocks += 1;
         if blocks > 6 {
-            return Err("skip: the HALT bug runs HALT again, as it does in the oracle until a pin goes low".into());
+            return Err(
+                "skip: the HALT bug runs HALT again, as it does in the oracle until a pin goes low"
+                    .into(),
+            );
         }
         let low = (pc & 0xFFFF) as usize;
         let window = &mem.mem.bytes[low..(low + 4).min(0x10000)].to_vec();
@@ -698,7 +704,9 @@ fn compare(case: &Case, opts: &LiftOptions, mutation: Mutation) -> Result<(Verdi
     let nop = run_sequence(&case.spec(&[0x00]), Sequence::ONE).map_err(|e| e.to_string())?;
     let mut mutated = false;
     let ir = match run_ir(case, &nop.io, opts, mutation, &mut mutated) {
-        Err(e) if e.starts_with("skip:") || e.contains("is not lifted") => return Ok((Verdict::Skip, mutated)),
+        Err(e) if e.starts_with("skip:") || e.contains("is not lifted") => {
+            return Ok((Verdict::Skip, mutated));
+        }
         r => r?,
     };
     if ir.machine.skip {
@@ -762,7 +770,10 @@ fn compare(case: &Case, opts: &LiftOptions, mutation: Mutation) -> Result<(Verdi
         diffs.push(format!("ram writes: ir {ir_ram:x?} oracle {want:x?}"));
     }
     for (a, v) in &last {
-        if *v != ir.initial[usize::from(*a)] || ir.loads.contains(a) || !(0xC000..0xE000).contains(a) {
+        if *v != ir.initial[usize::from(*a)]
+            || ir.loads.contains(a)
+            || !(0xC000..0xE000).contains(a)
+        {
             continue;
         }
         let mut spec = case.spec(&case.code);
