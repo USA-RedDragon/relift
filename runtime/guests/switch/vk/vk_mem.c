@@ -7,10 +7,11 @@
  * at mem + addr and leaves the range reserved on unmap), host-pointer import
  * (VK_EXT_external_memory_host: a host-visible allocation is backed by guest
  * pages), or a shadow copy (the guest gets its own pages, synchronized at
- * flush, invalidate, submit and wait: every submit copies the guest pages to
- * the host, every completed wait copies the host pages back, so guest writes
- * made between a submit and the wait for it are lost). The guest range for each mapping comes
- * from the map window of rl_vk_config.
+ * flush, invalidate, submit and wait against a third copy holding the bytes
+ * as of the last synchronization: toward the host only the bytes the guest
+ * changed move, toward the guest only the bytes the device changed, so
+ * neither side's writes overwrite the other's). The guest range for each
+ * mapping comes from the map window of rl_vk_config.
  */
 #include "vkf.h"
 
@@ -33,6 +34,8 @@ typedef struct vkf_mem {
     uint64_t va_size;
     /** @brief Shadow: the host mapping. */
     uint8_t *host;
+    /** @brief Shadow: the bytes both sides held at the last synchronization. */
+    uint8_t *base;
     /** @brief True while the guest has it mapped. */
     bool mapped;
 } vkf_mem;
@@ -302,6 +305,37 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
+enum { SYNC_LINE = 64 };
+
+static void merge(const uint8_t *from, uint8_t *to, uint8_t *base, uint64_t size)
+{
+    for (uint64_t at = 0; at < size; at += SYNC_LINE) {
+        uint64_t n = size - at < SYNC_LINE ? size - at : SYNC_LINE;
+        if (!memcmp(from + at, base + at, n))
+            continue;
+        for (uint64_t i = at; i < at + n; i++) {
+            uint8_t v = from[i];
+            if (v != base[i]) {
+                to[i] = v;
+                base[i] = v;
+            }
+        }
+    }
+}
+
+static void sync_range(vkf_mem *r, uint64_t off, uint64_t size, bool to_host)
+{
+    if (r->mode != RL_VK_MAP_SHADOW || !r->mapped || !r->base || off >= r->size)
+        return;
+    if (size == VK_WHOLE_SIZE || off + size > r->size)
+        size = r->size - off;
+    uint8_t *g = vkf.cfg.vm->base + r->va + off;
+    if (to_host)
+        merge(g, r->host + off, r->base + off, size);
+    else
+        merge(r->host + off, g, r->base + off, size);
+}
+
 static void unmap_one(vkf_dev *d, vkf_mem *r, void *dev)
 {
     if (!r->mapped)
@@ -317,9 +351,11 @@ static void unmap_one(vkf_dev *d, vkf_mem *r, void *dev)
         vkf_vm_set(r->va, r->va_size, RL_VM_NONE, RL_VM_KEEP);
     } else if (r->mode == RL_VK_MAP_SHADOW) {
         if (dev) {
-            memcpy(r->host, vkf.cfg.vm->base + r->va, r->size);
+            sync_range(r, 0, VK_WHOLE_SIZE, true);
             VKF_FN(&d->fns, vkUnmapMemory)(dev, (VkDeviceMemory)(uintptr_t)r->handle);
         }
+        free(r->base);
+        r->base = NULL;
         r->host = NULL;
         vkf_vm_set(r->va, r->va_size, RL_VM_NONE, RL_VM_DISCARD);
     }
@@ -335,6 +371,7 @@ static void release_one(vkf_dev *d, vkf_mem *r, bool host_alive, void *dev)
         vkf_vm_set(r->va, r->va_size, RL_VM_NONE, RL_VM_DISCARD);
         vkf_va_free(r->va);
     }
+    free(r->base);
     free(r);
 }
 
@@ -412,12 +449,16 @@ int vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
                 r->va_size = r->size;
                 r->va = vkf_va_alloc(r->size, 0);
             }
-            if (!r->va || vkf_vm_set(r->va, r->va_size, RL_VM_RW, RL_VM_FRESH)) {
+            uint8_t *base = r->va ? malloc(r->size) : NULL;
+            if (!base || vkf_vm_set(r->va, r->va_size, RL_VM_RW, RL_VM_FRESH)) {
+                free(base);
                 VKF_FN(k.fns, vkUnmapMemory)(dev, (VkDeviceMemory)(uintptr_t)r->handle);
                 res = VK_ERROR_MEMORY_MAP_FAILED;
             } else {
                 r->host = p;
-                memcpy(mem + r->va, p, r->size);
+                r->base = base;
+                memcpy(base, p, r->size);
+                memcpy(mem + r->va, base, r->size);
             }
         }
     }
@@ -447,19 +488,6 @@ typedef struct range_op {
     vkf_call *k;
     bool to_host;
 } range_op;
-
-static void sync_range(vkf_mem *r, uint64_t off, uint64_t size, bool to_host)
-{
-    if (r->mode != RL_VK_MAP_SHADOW || !r->mapped || off >= r->size)
-        return;
-    if (size == VK_WHOLE_SIZE || off + size > r->size)
-        size = r->size - off;
-    uint8_t *g = vkf.cfg.vm->base + r->va + off;
-    if (to_host)
-        memcpy(r->host + off, g, size);
-    else
-        memcpy(g, r->host + off, size);
-}
 
 static int ranges(rl_ctx *c, uint8_t *mem, int cmd, bool flush)
 {

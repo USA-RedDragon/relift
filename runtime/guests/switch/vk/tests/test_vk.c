@@ -598,6 +598,91 @@ TEST(vk_mapped_memory_is_guest_memory)
     G("vkDestroyInstance", g_inst, 0);
 }
 
+/**
+ * @brief A shadow allocation keeps the guest's writes made while a submit is in
+ * flight: the device fills one half, the guest rewrites the other half between
+ * the submit and the fence check, and both survive the wait and a second submit.
+ */
+TEST(vk_shadow_keeps_guest_writes_across_waits)
+{
+    setenv(RL_VK_MAP_ENV, "shadow", 1);
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t pd = pds[0];
+    uint32_t qf = queue_family(pd, VK_QUEUE_GRAPHICS_BIT);
+    CHECK(qf != UINT32_MAX);
+    uint64_t dev = make_device(pd, qf, NULL, 0);
+    CHECK(dev != 0);
+    CHECK_EQ(rl_vk_device_map_mode(dev), RL_VK_MAP_SHADOW);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, qf, 0, gq);
+    uint64_t queue = g64(gq);
+
+    enum { HALF = 4096 };
+    mapped_buf b;
+    CHECK_EQ(make_mapped(pd, dev, 2 * HALF, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &b), 0);
+    memset(g_mem + b.ptr, 0x11, 2 * HALF);
+
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 2,
+    };
+    uint64_t gcb = galloc(16);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    for (unsigned i = 0; i < 2; i++) {
+        uint64_t cb = g64(gcb + 8 * i);
+        CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+        if (i == 0)
+            G("vkCmdFillBuffer", cb, b.buf, 0, HALF, 0x22222222u);
+        G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+        CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    }
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    uint64_t gf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFence", dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+    uint64_t fence = g64(gf);
+    uint64_t gfence = gput(&fence, 8);
+
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), fence)), VK_SUCCESS);
+    memset(g_mem + b.ptr + HALF, 0x33, HALF);
+    G("vkGetFenceStatus", dev, fence);
+    CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gfence, VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+    memset(g_mem + b.ptr + HALF, 0x44, 16);
+    CHECK_EQ(VKR(G("vkResetFences", dev, 1, gfence)), VK_SUCCESS);
+    si.pCommandBuffers = GP(gcb + 8);
+    CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), fence)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gfence, VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+
+    unsigned device_bad = 0, guest_bad = 0;
+    for (uint32_t i = 0; i < HALF; i++) {
+        if (g_mem[b.ptr + i] != 0x22)
+            device_bad++;
+        if (g_mem[b.ptr + HALF + i] != (i < 16 ? 0x44 : 0x33))
+            guest_bad++;
+    }
+    fprintf(stderr, "  shadow: %u device bytes and %u guest bytes wrong\n", device_bad, guest_bad);
+    CHECK_EQ(device_bad, 0);
+    CHECK_EQ(guest_bad, 0);
+
+    G("vkDestroyFence", dev, fence, 0);
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyBuffer", dev, b.buf, 0);
+    G("vkFreeMemory", dev, b.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
 static uint64_t g_cb_calls, g_cb_user, g_cb_sev, g_cb_x19;
 static char g_cb_msg[256];
 

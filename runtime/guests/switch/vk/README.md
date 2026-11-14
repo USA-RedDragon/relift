@@ -106,10 +106,14 @@ device (spike 0.5; `RELIFT_VK_MAP=placed|import|shadow` forces one):
    on guest pages, aligned to `minImportedHostPointerAlignment` (16 KiB on Apple
    M2) and the host page; buffers get the matching external-memory flag.
    Dedicated and exported allocations fall back to shadow.
-3. Shadow: the guest gets its own pages. Map copies host to guest; every submit
-   and present copies guest to host; every wait that completes copies host to
-   guest; flush and invalidate copy their ranges. Writes the guest makes between
-   a submit and the wait for it are lost, so shadow is the last resort.
+3. Shadow: the guest gets its own pages, plus a third copy of the bytes both
+   sides held at the last synchronization. Map copies host to guest; every
+   submit and present moves the bytes the guest changed to the host; every
+   completed wait moves the bytes the device changed to the guest; flush and
+   invalidate do the same for their ranges. A write survives unless the other
+   side wrote the same byte before the next synchronization (a race in the
+   guest). Each synchronization compares whole allocations, so shadow is the
+   slowest mode.
 
 The pages are given the configured guest memory tag with `rl_vm_set` (through
 `rl_vk_config.vm_set` when the guest layer wants its own lock), and unmapped
