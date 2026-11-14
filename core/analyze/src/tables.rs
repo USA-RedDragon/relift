@@ -202,6 +202,16 @@ pub(crate) fn resolve(
             check.insert(0, b);
             back = prev;
         }
+        // A check that never reads the candidate decides the same way for
+        // every index: it leaves at index 0 (no targets) or never (more
+        // entries than the largest table). Either way the candidate fails,
+        // so skip the 4097 runs.
+        if !check
+            .iter()
+            .any(|b| b.insts.iter().any(|i| matches!(i.op, Op::Get(x) if x == r)))
+        {
+            continue;
+        }
         let check_seeds = known(check[0].pc);
         let mut targets = Vec::new();
         for idx in 0..=MAX_ENTRIES {
