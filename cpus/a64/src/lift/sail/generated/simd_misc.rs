@@ -17978,11 +17978,13 @@ pub(super) fn FRECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v7 = rt::Fp::new(32).recip_estimate(b, v6);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v11 = rt::Fp::new(32).recip_estimate(b, v10);
             let v12 = b.extract(v9, 64, Width::new(64));
             let v13 = b.concat(v12, v11);
@@ -18003,11 +18005,13 @@ pub(super) fn FRECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v7 = rt::Fp::new(32).recip_estimate(b, v6);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v11 = rt::Fp::new(32).recip_estimate(b, v10);
             let v12 = b.extract(v9, 64, Width::new(64));
             let v13 = b.concat(v12, v11);
@@ -18015,6 +18019,7 @@ pub(super) fn FRECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v17 = rt::Fp::new(32).recip_estimate(b, v16);
             let v18 = b.extract(v15, 96, Width::new(32));
             let v19 = b.concat(v18, v17);
@@ -18022,6 +18027,7 @@ pub(super) fn FRECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v23 = rt::Fp::new(32).recip_estimate(b, v22);
             let v24 = b.extract(v21, 0, Width::new(96));
             let v25 = b.concat(v23, v24);
@@ -18036,11 +18042,13 @@ pub(super) fn FRECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v7 = rt::Fp::new(64).recip_estimate(b, v6);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v11 = rt::Fp::new(64).recip_estimate(b, v10);
             let v12 = b.extract(v9, 0, Width::new(64));
             let v13 = b.concat(v11, v12);
@@ -18068,6 +18076,7 @@ pub(super) fn FRECPE_asisdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v6 = rt::Fp::new(32).recip_estimate(b, v5);
             let v7 = b.konst(Width::new(96), 0x0);
             let v8 = b.concat(v7, v6);
@@ -18081,6 +18090,7 @@ pub(super) fn FRECPE_asisdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v6 = rt::Fp::new(64).recip_estimate(b, v5);
             let v7 = b.konst(Width::new(64), 0x0);
             let v8 = b.concat(v7, v6);
@@ -18736,11 +18746,13 @@ pub(super) fn FRSQRTE_asimdmisc_R(
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v7 = rt::Fp::new(32).rsqrt_estimate(b, v6);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v11 = rt::Fp::new(32).rsqrt_estimate(b, v10);
             let v12 = b.extract(v9, 64, Width::new(64));
             let v13 = b.concat(v12, v11);
@@ -18761,11 +18773,13 @@ pub(super) fn FRSQRTE_asimdmisc_R(
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v7 = rt::Fp::new(32).rsqrt_estimate(b, v6);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v11 = rt::Fp::new(32).rsqrt_estimate(b, v10);
             let v12 = b.extract(v9, 64, Width::new(64));
             let v13 = b.concat(v12, v11);
@@ -18773,6 +18787,7 @@ pub(super) fn FRSQRTE_asimdmisc_R(
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v17 = rt::Fp::new(32).rsqrt_estimate(b, v16);
             let v18 = b.extract(v15, 96, Width::new(32));
             let v19 = b.concat(v18, v17);
@@ -18780,6 +18795,7 @@ pub(super) fn FRSQRTE_asimdmisc_R(
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v23 = rt::Fp::new(32).rsqrt_estimate(b, v22);
             let v24 = b.extract(v21, 0, Width::new(96));
             let v25 = b.concat(v23, v24);
@@ -18794,11 +18810,13 @@ pub(super) fn FRSQRTE_asimdmisc_R(
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v7 = rt::Fp::new(64).rsqrt_estimate(b, v6);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v11 = rt::Fp::new(64).rsqrt_estimate(b, v10);
             let v12 = b.extract(v9, 0, Width::new(64));
             let v13 = b.concat(v11, v12);
@@ -18830,6 +18848,7 @@ pub(super) fn FRSQRTE_asisdmisc_R(
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v6 = rt::Fp::new(32).rsqrt_estimate(b, v5);
             let v7 = b.konst(Width::new(96), 0x0);
             let v8 = b.concat(v7, v6);
@@ -18843,6 +18862,7 @@ pub(super) fn FRSQRTE_asisdmisc_R(
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             st.assume_default_fpcr();
+            st.assume_flags_slow();
             let v6 = rt::Fp::new(64).rsqrt_estimate(b, v5);
             let v7 = b.konst(Width::new(64), 0x0);
             let v8 = b.concat(v7, v6);

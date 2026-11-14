@@ -159,6 +159,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -172,6 +173,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -185,6 +187,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -198,6 +201,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -211,6 +215,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -224,6 +229,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -237,6 +243,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -250,6 +257,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -263,6 +271,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -276,6 +285,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -289,6 +299,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -302,6 +313,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -315,6 +327,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -328,6 +341,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -341,6 +355,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -354,6 +369,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -367,6 +383,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -380,6 +397,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -393,6 +411,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -406,6 +425,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -419,6 +439,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -432,6 +453,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -445,6 +467,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -458,6 +481,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -471,6 +495,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -484,6 +509,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -497,6 +523,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -510,6 +537,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -523,6 +551,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -536,6 +565,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -549,6 +579,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -562,6 +593,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -575,6 +607,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 64, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -588,6 +621,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 63, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -601,6 +635,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 62, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -614,6 +649,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 61, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -627,6 +663,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 60, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -640,6 +677,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 59, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -653,6 +691,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 58, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -666,6 +705,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 57, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -679,6 +719,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 56, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -692,6 +733,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 55, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -705,6 +747,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 54, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -718,6 +761,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 53, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -731,6 +775,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 52, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -744,6 +789,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 51, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -757,6 +803,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 50, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -770,6 +817,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 49, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -783,6 +831,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 48, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -796,6 +845,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 47, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -809,6 +859,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 46, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -822,6 +873,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 45, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -835,6 +887,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 44, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -848,6 +901,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 43, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -861,6 +915,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 42, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -874,6 +929,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 41, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -887,6 +943,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 40, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -900,6 +957,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 39, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -913,6 +971,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 38, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -926,6 +985,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 37, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -939,6 +999,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 36, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -952,6 +1013,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 35, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -965,6 +1027,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 34, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -978,6 +1041,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 33, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -991,6 +1055,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1004,6 +1069,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1017,6 +1083,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1030,6 +1097,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1043,6 +1111,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1056,6 +1125,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1069,6 +1139,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1082,6 +1153,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1095,6 +1167,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1108,6 +1181,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1121,6 +1195,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1134,6 +1209,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1147,6 +1223,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1160,6 +1237,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1173,6 +1251,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1186,6 +1265,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1199,6 +1279,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1212,6 +1293,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1225,6 +1307,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1238,6 +1321,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1251,6 +1335,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1264,6 +1349,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1277,6 +1363,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1290,6 +1377,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1303,6 +1391,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1316,6 +1405,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1329,6 +1419,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1342,6 +1433,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1355,6 +1447,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1368,6 +1461,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1381,6 +1475,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1394,6 +1489,7 @@ pub(super) fn FCVTZS_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1550,6 +1646,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1563,6 +1660,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1576,6 +1674,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1589,6 +1688,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1602,6 +1702,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1615,6 +1716,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1628,6 +1730,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1641,6 +1744,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1654,6 +1758,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1667,6 +1772,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1680,6 +1786,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1693,6 +1800,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1706,6 +1814,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1719,6 +1828,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1732,6 +1842,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1745,6 +1856,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1758,6 +1870,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1771,6 +1884,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1784,6 +1898,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1797,6 +1912,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1810,6 +1926,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1823,6 +1940,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1836,6 +1954,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1849,6 +1968,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1862,6 +1982,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1875,6 +1996,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1888,6 +2010,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1901,6 +2024,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1914,6 +2038,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1927,6 +2052,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1940,6 +2066,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1953,6 +2080,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 32);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -1966,6 +2094,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 64, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1979,6 +2108,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 63, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -1992,6 +2122,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 62, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2005,6 +2136,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 61, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2018,6 +2150,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 60, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2031,6 +2164,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 59, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2044,6 +2178,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 58, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2057,6 +2192,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 57, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2070,6 +2206,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 56, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2083,6 +2220,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 55, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2096,6 +2234,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 54, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2109,6 +2248,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 53, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2122,6 +2262,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 52, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2135,6 +2276,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 51, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2148,6 +2290,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 50, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2161,6 +2304,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 49, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2174,6 +2318,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 48, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2187,6 +2332,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 47, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2200,6 +2346,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 46, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2213,6 +2360,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 45, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2226,6 +2374,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 44, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2239,6 +2388,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 43, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2252,6 +2402,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 42, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2265,6 +2416,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 41, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2278,6 +2430,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 40, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2291,6 +2444,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 39, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2304,6 +2458,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 38, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2317,6 +2472,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 37, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2330,6 +2486,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 36, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2343,6 +2500,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 35, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2356,6 +2514,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 34, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2369,6 +2528,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 33, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2382,6 +2542,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2395,6 +2556,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2408,6 +2570,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2421,6 +2584,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2434,6 +2598,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2447,6 +2612,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2460,6 +2626,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2473,6 +2640,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2486,6 +2654,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2499,6 +2668,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2512,6 +2682,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2525,6 +2696,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2538,6 +2710,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2551,6 +2724,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2564,6 +2738,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2577,6 +2752,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2590,6 +2766,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2603,6 +2780,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2616,6 +2794,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2629,6 +2808,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2642,6 +2822,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2655,6 +2836,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2668,6 +2850,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2681,6 +2864,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2694,6 +2878,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2707,6 +2892,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2720,6 +2906,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2733,6 +2920,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2746,6 +2934,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2759,6 +2948,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2772,6 +2962,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2785,6 +2976,7 @@ pub(super) fn FCVTZU_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resu
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 64);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -2942,11 +3134,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 32, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 32, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -2963,11 +3157,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 31, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 31, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -2984,11 +3180,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 30, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 30, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3005,11 +3203,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 29, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 29, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3026,11 +3226,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 28, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 28, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3047,11 +3249,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 27, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 27, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3068,11 +3272,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 26, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 26, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3089,11 +3295,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 25, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 25, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3110,11 +3318,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 24, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 24, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3131,11 +3341,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 23, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 23, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3152,11 +3364,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 22, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 22, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3173,11 +3387,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 21, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 21, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3194,11 +3410,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 20, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 20, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3215,11 +3433,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 19, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 19, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3236,11 +3456,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 18, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 18, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3257,11 +3479,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 17, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 17, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3278,11 +3502,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 16, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 16, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3299,11 +3525,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 15, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 15, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3320,11 +3548,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 14, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 14, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3341,11 +3571,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 13, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 13, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3362,11 +3594,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 12, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 12, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3383,11 +3617,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 11, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 11, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3404,11 +3640,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 10, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 10, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3425,11 +3663,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 9, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 9, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3446,11 +3686,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 8, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 8, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3467,11 +3709,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 7, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 7, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3488,11 +3732,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 6, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 6, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3509,11 +3755,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 5, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 5, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3530,11 +3778,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 4, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 4, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3551,11 +3801,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 3, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 3, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3572,11 +3824,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 2, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 2, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3593,11 +3847,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 1, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 1, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -3998,11 +4254,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 32, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 32, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4010,6 +4268,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 32, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4017,6 +4276,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 32, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4031,11 +4291,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 31, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 31, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4043,6 +4305,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 31, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4050,6 +4313,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 31, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4064,11 +4328,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 30, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 30, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4076,6 +4342,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 30, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4083,6 +4350,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 30, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4097,11 +4365,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 29, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 29, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4109,6 +4379,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 29, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4116,6 +4387,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 29, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4130,11 +4402,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 28, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 28, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4142,6 +4416,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 28, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4149,6 +4424,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 28, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4163,11 +4439,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 27, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 27, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4175,6 +4453,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 27, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4182,6 +4461,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 27, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4196,11 +4476,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 26, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 26, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4208,6 +4490,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 26, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4215,6 +4498,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 26, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4229,11 +4513,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 25, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 25, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4241,6 +4527,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 25, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4248,6 +4535,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 25, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4262,11 +4550,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 24, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 24, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4274,6 +4564,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 24, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4281,6 +4572,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 24, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4295,11 +4587,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 23, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 23, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4307,6 +4601,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 23, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4314,6 +4609,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 23, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4328,11 +4624,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 22, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 22, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4340,6 +4638,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 22, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4347,6 +4646,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 22, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4361,11 +4661,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 21, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 21, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4373,6 +4675,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 21, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4380,6 +4683,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 21, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4394,11 +4698,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 20, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 20, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4406,6 +4712,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 20, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4413,6 +4720,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 20, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4427,11 +4735,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 19, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 19, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4439,6 +4749,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 19, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4446,6 +4757,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 19, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4460,11 +4772,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 18, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 18, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4472,6 +4786,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 18, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4479,6 +4794,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 18, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4493,11 +4809,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 17, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 17, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4505,6 +4823,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 17, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4512,6 +4831,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 17, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4526,11 +4846,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 16, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 16, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4538,6 +4860,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 16, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4545,6 +4868,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 16, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4559,11 +4883,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 15, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 15, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4571,6 +4897,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 15, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4578,6 +4905,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 15, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4592,11 +4920,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 14, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 14, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4604,6 +4934,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 14, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4611,6 +4942,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 14, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4625,11 +4957,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 13, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 13, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4637,6 +4971,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 13, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4644,6 +4979,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 13, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4658,11 +4994,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 12, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 12, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4670,6 +5008,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 12, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4677,6 +5016,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 12, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4691,11 +5031,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 11, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 11, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4703,6 +5045,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 11, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4710,6 +5053,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 11, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4724,11 +5068,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 10, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 10, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4736,6 +5082,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 10, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4743,6 +5090,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 10, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4757,11 +5105,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 9, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 9, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4769,6 +5119,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 9, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4776,6 +5127,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 9, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4790,11 +5142,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 8, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 8, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4802,6 +5156,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 8, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4809,6 +5164,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 8, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4823,11 +5179,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 7, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 7, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4835,6 +5193,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 7, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4842,6 +5201,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 7, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4856,11 +5216,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 6, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 6, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4868,6 +5230,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 6, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4875,6 +5238,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 6, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4889,11 +5253,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 5, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 5, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4901,6 +5267,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 5, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4908,6 +5275,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 5, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4922,11 +5290,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 4, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 4, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4934,6 +5304,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 4, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4941,6 +5312,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 4, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4955,11 +5327,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 3, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 3, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -4967,6 +5341,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 3, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -4974,6 +5349,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 3, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -4988,11 +5364,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 2, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 2, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -5000,6 +5378,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 2, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -5007,6 +5386,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 2, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -5021,11 +5401,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 1, true);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 1, true);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -5033,6 +5415,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 1, true);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -5040,6 +5423,7 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 1, true);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -5054,11 +5438,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 64, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 64, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5073,11 +5459,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 63, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 63, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5092,11 +5480,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 62, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 62, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5111,11 +5501,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 61, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 61, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5130,11 +5522,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 60, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 60, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5149,11 +5543,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 59, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 59, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5168,11 +5564,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 58, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 58, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5187,11 +5585,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 57, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 57, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5206,11 +5606,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 56, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 56, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5225,11 +5627,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 55, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 55, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5244,11 +5648,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 54, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 54, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5263,11 +5669,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 53, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 53, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5282,11 +5690,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 52, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 52, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5301,11 +5711,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 51, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 51, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5320,11 +5732,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 50, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 50, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5339,11 +5753,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 49, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 49, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5358,11 +5774,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 48, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 48, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5377,11 +5795,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 47, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 47, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5396,11 +5816,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 46, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 46, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5415,11 +5837,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 45, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 45, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5434,11 +5858,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 44, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 44, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5453,11 +5879,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 43, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 43, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5472,11 +5900,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 42, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 42, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5491,11 +5921,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 41, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 41, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5510,11 +5942,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 40, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 40, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5529,11 +5963,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 39, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 39, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5548,11 +5984,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 38, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 38, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5567,11 +6005,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 37, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 37, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5586,11 +6026,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 36, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 36, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5605,11 +6047,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 35, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 35, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5624,11 +6068,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 34, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 34, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5643,11 +6089,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 33, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 33, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5662,11 +6110,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 32, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 32, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5681,11 +6131,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 31, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 31, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5700,11 +6152,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 30, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 30, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5719,11 +6173,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 29, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 29, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5738,11 +6194,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 28, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 28, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5757,11 +6215,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 27, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 27, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5776,11 +6236,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 26, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 26, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5795,11 +6257,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 25, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 25, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5814,11 +6278,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 24, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 24, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5833,11 +6299,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 23, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 23, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5852,11 +6320,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 22, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 22, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5871,11 +6341,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 21, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 21, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5890,11 +6362,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 20, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 20, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5909,11 +6383,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 19, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 19, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5928,11 +6404,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 18, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 18, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5947,11 +6425,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 17, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 17, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5966,11 +6446,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 16, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 16, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -5985,11 +6467,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 15, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 15, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6004,11 +6488,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 14, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 14, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6023,11 +6509,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 13, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 13, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6042,11 +6530,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 12, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 12, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6061,11 +6551,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 11, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 11, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6080,11 +6572,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 10, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 10, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6099,11 +6593,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 9, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 9, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6118,11 +6614,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 8, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 8, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6137,11 +6635,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 7, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 7, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6156,11 +6656,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 6, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 6, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6175,11 +6677,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 5, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 5, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6194,11 +6698,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 4, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 4, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6213,11 +6719,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 3, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 3, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6232,11 +6740,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 2, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 2, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6251,11 +6761,13 @@ pub(super) fn SCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 1, true);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 1, true);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -6412,6 +6924,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6425,6 +6938,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6438,6 +6952,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6451,6 +6966,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6464,6 +6980,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6477,6 +6994,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6490,6 +7008,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6503,6 +7022,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6516,6 +7036,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6529,6 +7050,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6542,6 +7064,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6555,6 +7078,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6568,6 +7092,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6581,6 +7106,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6594,6 +7120,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6607,6 +7134,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6620,6 +7148,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6633,6 +7162,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6646,6 +7176,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6659,6 +7190,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6672,6 +7204,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6685,6 +7218,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6698,6 +7232,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6711,6 +7246,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6724,6 +7260,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6737,6 +7274,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6750,6 +7288,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6763,6 +7302,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6776,6 +7316,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6789,6 +7330,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6802,6 +7344,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6815,6 +7358,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, true);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -6828,6 +7372,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 64, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6841,6 +7386,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 63, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6854,6 +7400,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 62, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6867,6 +7414,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 61, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6880,6 +7428,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 60, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6893,6 +7442,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 59, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6906,6 +7456,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 58, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6919,6 +7470,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 57, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6932,6 +7484,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 56, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6945,6 +7498,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 55, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6958,6 +7512,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 54, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6971,6 +7526,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 53, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6984,6 +7540,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 52, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -6997,6 +7554,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 51, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7010,6 +7568,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 50, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7023,6 +7582,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 49, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7036,6 +7596,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 48, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7049,6 +7610,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 47, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7062,6 +7624,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 46, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7075,6 +7638,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 45, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7088,6 +7652,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 44, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7101,6 +7666,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 43, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7114,6 +7680,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 42, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7127,6 +7694,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 41, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7140,6 +7708,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 40, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7153,6 +7722,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 39, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7166,6 +7736,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 38, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7179,6 +7750,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 37, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7192,6 +7764,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 36, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7205,6 +7778,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 35, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7218,6 +7792,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 34, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7231,6 +7806,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 33, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7244,6 +7820,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7257,6 +7834,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7270,6 +7848,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7283,6 +7862,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7296,6 +7876,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7309,6 +7890,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7322,6 +7904,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7335,6 +7918,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7348,6 +7932,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7361,6 +7946,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7374,6 +7960,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7387,6 +7974,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7400,6 +7988,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7413,6 +8002,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7426,6 +8016,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7439,6 +8030,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7452,6 +8044,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7465,6 +8058,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7478,6 +8072,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7491,6 +8086,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7504,6 +8100,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7517,6 +8114,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7530,6 +8128,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7543,6 +8142,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7556,6 +8156,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7569,6 +8170,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7582,6 +8184,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7595,6 +8198,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7608,6 +8212,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7621,6 +8226,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7634,6 +8240,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -7647,6 +8254,7 @@ pub(super) fn SCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, true);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -26164,11 +26772,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 32, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 32, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26185,11 +26795,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 31, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 31, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26206,11 +26818,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 30, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 30, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26227,11 +26841,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 29, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 29, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26248,11 +26864,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 28, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 28, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26269,11 +26887,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 27, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 27, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26290,11 +26910,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 26, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 26, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26311,11 +26933,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 25, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 25, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26332,11 +26956,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 24, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 24, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26353,11 +26979,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 23, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 23, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26374,11 +27002,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 22, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 22, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26395,11 +27025,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 21, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 21, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26416,11 +27048,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 20, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 20, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26437,11 +27071,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 19, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 19, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26458,11 +27094,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 18, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 18, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26479,11 +27117,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 17, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 17, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26500,11 +27140,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 16, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 16, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26521,11 +27163,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 15, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 15, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26542,11 +27186,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 14, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 14, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26563,11 +27209,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 13, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 13, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26584,11 +27232,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 12, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 12, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26605,11 +27255,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 11, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 11, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26626,11 +27278,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 10, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 10, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26647,11 +27301,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 9, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 9, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26668,11 +27324,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 8, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 8, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26689,11 +27347,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 7, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 7, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26710,11 +27370,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 6, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 6, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26731,11 +27393,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 5, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 5, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26752,11 +27416,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 4, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 4, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26773,11 +27439,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 3, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 3, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26794,11 +27462,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 2, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 2, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -26815,11 +27485,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 1, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 1, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27220,11 +27892,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 32, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 32, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27232,6 +27906,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 32, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27239,6 +27914,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 32, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27253,11 +27929,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 31, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 31, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27265,6 +27943,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 31, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27272,6 +27951,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 31, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27286,11 +27966,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 30, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 30, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27298,6 +27980,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 30, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27305,6 +27988,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 30, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27319,11 +28003,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 29, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 29, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27331,6 +28017,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 29, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27338,6 +28025,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 29, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27352,11 +28040,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 28, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 28, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27364,6 +28054,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 28, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27371,6 +28062,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 28, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27385,11 +28077,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 27, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 27, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27397,6 +28091,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 27, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27404,6 +28099,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 27, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27418,11 +28114,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 26, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 26, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27430,6 +28128,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 26, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27437,6 +28136,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 26, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27451,11 +28151,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 25, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 25, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27463,6 +28165,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 25, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27470,6 +28173,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 25, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27484,11 +28188,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 24, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 24, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27496,6 +28202,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 24, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27503,6 +28210,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 24, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27517,11 +28225,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 23, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 23, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27529,6 +28239,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 23, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27536,6 +28247,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 23, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27550,11 +28262,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 22, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 22, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27562,6 +28276,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 22, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27569,6 +28284,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 22, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27583,11 +28299,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 21, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 21, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27595,6 +28313,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 21, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27602,6 +28321,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 21, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27616,11 +28336,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 20, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 20, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27628,6 +28350,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 20, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27635,6 +28358,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 20, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27649,11 +28373,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 19, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 19, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27661,6 +28387,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 19, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27668,6 +28395,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 19, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27682,11 +28410,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 18, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 18, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27694,6 +28424,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 18, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27701,6 +28432,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 18, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27715,11 +28447,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 17, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 17, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27727,6 +28461,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 17, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27734,6 +28469,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 17, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27748,11 +28484,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 16, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 16, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27760,6 +28498,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 16, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27767,6 +28506,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 16, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27781,11 +28521,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 15, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 15, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27793,6 +28535,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 15, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27800,6 +28543,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 15, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27814,11 +28558,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 14, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 14, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27826,6 +28572,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 14, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27833,6 +28580,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 14, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27847,11 +28595,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 13, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 13, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27859,6 +28609,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 13, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27866,6 +28617,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 13, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27880,11 +28632,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 12, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 12, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27892,6 +28646,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 12, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27899,6 +28654,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 12, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27913,11 +28669,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 11, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 11, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27925,6 +28683,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 11, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27932,6 +28691,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 11, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27946,11 +28706,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 10, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 10, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27958,6 +28720,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 10, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27965,6 +28728,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 10, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -27979,11 +28743,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 9, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 9, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -27991,6 +28757,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 9, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -27998,6 +28765,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 9, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28012,11 +28780,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 8, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 8, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28024,6 +28794,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 8, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28031,6 +28802,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 8, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28045,11 +28817,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 7, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 7, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28057,6 +28831,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 7, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28064,6 +28839,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 7, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28078,11 +28854,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 6, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 6, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28090,6 +28868,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 6, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28097,6 +28876,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 6, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28111,11 +28891,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 5, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 5, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28123,6 +28905,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 5, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28130,6 +28913,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 5, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28144,11 +28928,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 4, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 4, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28156,6 +28942,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 4, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28163,6 +28950,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 4, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28177,11 +28965,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 3, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 3, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28189,6 +28979,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 3, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28196,6 +28987,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 3, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28210,11 +29002,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 2, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 2, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28222,6 +29016,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 2, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28229,6 +29024,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 2, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28243,11 +29039,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 1, false);
             let v8 = b.konst(Width::new(96), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 1, false);
             let v12 = b.extract(v9, 64, Width::new(64));
@@ -28255,6 +29053,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v14 = b.extract(v9, 0, Width::new(32));
             let v15 = b.concat(v13, v14);
             let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 1, false);
             let v18 = b.extract(v15, 96, Width::new(32));
@@ -28262,6 +29061,7 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v20 = b.extract(v15, 0, Width::new(64));
             let v21 = b.concat(v19, v20);
             let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 1, false);
             let v24 = b.extract(v21, 0, Width::new(96));
@@ -28276,11 +29076,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 64, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 64, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28295,11 +29097,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 63, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 63, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28314,11 +29118,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 62, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 62, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28333,11 +29139,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 61, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 61, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28352,11 +29160,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 60, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 60, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28371,11 +29181,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 59, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 59, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28390,11 +29202,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 58, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 58, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28409,11 +29223,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 57, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 57, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28428,11 +29244,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 56, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 56, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28447,11 +29265,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 55, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 55, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28466,11 +29286,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 54, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 54, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28485,11 +29307,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 53, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 53, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28504,11 +29328,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 52, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 52, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28523,11 +29349,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 51, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 51, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28542,11 +29370,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 50, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 50, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28561,11 +29391,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 49, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 49, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28580,11 +29412,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 48, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 48, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28599,11 +29433,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 47, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 47, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28618,11 +29454,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 46, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 46, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28637,11 +29475,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 45, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 45, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28656,11 +29496,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 44, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 44, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28675,11 +29517,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 43, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 43, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28694,11 +29538,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 42, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 42, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28713,11 +29559,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 41, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 41, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28732,11 +29580,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 40, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 40, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28751,11 +29601,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 39, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 39, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28770,11 +29622,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 38, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 38, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28789,11 +29643,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 37, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 37, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28808,11 +29664,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 36, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 36, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28827,11 +29685,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 35, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 35, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28846,11 +29706,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 34, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 34, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28865,11 +29727,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 33, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 33, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28884,11 +29748,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 32, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 32, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28903,11 +29769,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 31, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 31, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28922,11 +29790,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 30, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 30, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28941,11 +29811,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 29, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 29, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28960,11 +29832,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 28, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 28, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28979,11 +29853,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 27, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 27, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -28998,11 +29874,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 26, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 26, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29017,11 +29895,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 25, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 25, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29036,11 +29916,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 24, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 24, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29055,11 +29937,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 23, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 23, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29074,11 +29958,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 22, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 22, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29093,11 +29979,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 21, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 21, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29112,11 +30000,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 20, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 20, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29131,11 +30021,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 19, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 19, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29150,11 +30042,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 18, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 18, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29169,11 +30063,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 17, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 17, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29188,11 +30084,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 16, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 16, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29207,11 +30105,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 15, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 15, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29226,11 +30126,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 14, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 14, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29245,11 +30147,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 13, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 13, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29264,11 +30168,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 12, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 12, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29283,11 +30189,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 11, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 11, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29302,11 +30210,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 10, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 10, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29321,11 +30231,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 9, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 9, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29340,11 +30252,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 8, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 8, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29359,11 +30273,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 7, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 7, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29378,11 +30294,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 6, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 6, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29397,11 +30315,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 5, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 5, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29416,11 +30336,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 4, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 4, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29435,11 +30357,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 3, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 3, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29454,11 +30378,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 2, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 2, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29473,11 +30399,13 @@ pub(super) fn UCVTF_asimdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 128);
             let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 1, false);
             let v8 = b.konst(Width::new(64), 0x0);
             let v9 = b.concat(v8, v7);
             let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 1, false);
             let v12 = b.extract(v9, 0, Width::new(64));
@@ -29634,6 +30562,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29647,6 +30576,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29660,6 +30590,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29673,6 +30604,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29686,6 +30618,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29699,6 +30632,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29712,6 +30646,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29725,6 +30660,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29738,6 +30674,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29751,6 +30688,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29764,6 +30702,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29777,6 +30716,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29790,6 +30730,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29803,6 +30744,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29816,6 +30758,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29829,6 +30772,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29842,6 +30786,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29855,6 +30800,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29868,6 +30814,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29881,6 +30828,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29894,6 +30842,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29907,6 +30856,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29920,6 +30870,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29933,6 +30884,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29946,6 +30898,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29959,6 +30912,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29972,6 +30926,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29985,6 +30940,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -29998,6 +30954,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -30011,6 +30968,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -30024,6 +30982,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -30037,6 +30996,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, false);
             let v7 = b.konst(Width::new(96), 0x0);
@@ -30050,6 +31010,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 64, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30063,6 +31024,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 63, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30076,6 +31038,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 62, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30089,6 +31052,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 61, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30102,6 +31066,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 60, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30115,6 +31080,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 59, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30128,6 +31094,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 58, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30141,6 +31108,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 57, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30154,6 +31122,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 56, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30167,6 +31136,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 55, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30180,6 +31150,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 54, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30193,6 +31164,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 53, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30206,6 +31178,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 52, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30219,6 +31192,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 51, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30232,6 +31206,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 50, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30245,6 +31220,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 49, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30258,6 +31234,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 48, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30271,6 +31248,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 47, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30284,6 +31262,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 46, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30297,6 +31276,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 45, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30310,6 +31290,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 44, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30323,6 +31304,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 43, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30336,6 +31318,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 42, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30349,6 +31332,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 41, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30362,6 +31346,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 40, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30375,6 +31360,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 39, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30388,6 +31374,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 38, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30401,6 +31388,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 37, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30414,6 +31402,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 36, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30427,6 +31416,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 35, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30440,6 +31430,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 34, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30453,6 +31444,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 33, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30466,6 +31458,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30479,6 +31472,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30492,6 +31486,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30505,6 +31500,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30518,6 +31514,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30531,6 +31528,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30544,6 +31542,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30557,6 +31556,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30570,6 +31570,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30583,6 +31584,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30596,6 +31598,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30609,6 +31612,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30622,6 +31626,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30635,6 +31640,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30648,6 +31654,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30661,6 +31668,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30674,6 +31682,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30687,6 +31696,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30700,6 +31710,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30713,6 +31724,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30726,6 +31738,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30739,6 +31752,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30752,6 +31766,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30765,6 +31780,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30778,6 +31794,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30791,6 +31808,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30804,6 +31822,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30817,6 +31836,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30830,6 +31850,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30843,6 +31864,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30856,6 +31878,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, false);
             let v7 = b.konst(Width::new(64), 0x0);
@@ -30869,6 +31892,7 @@ pub(super) fn UCVTF_asisdshf_C(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
             st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, false);
             let v7 = b.konst(Width::new(64), 0x0);
