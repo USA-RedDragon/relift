@@ -924,9 +924,9 @@ are also call boundaries. [inferred]
   - FMA, square root, conversions to and from integers and between
     formats, rounding to integral: always the exact layer, exact flags.
     The exact layer raises its flags on the host with `rl_fp_host_raise`,
-    which on x86-64 runs an SSE operation that raises the same flag
-    (1 + 2^-100 for IXC alone, inline; `rl_fp_host_raise_any` otherwise)
-    instead of writing MXCSR, which costs several nanoseconds per write.
+    which runs a host FP operation that raises the same flag (1 + 2^-100
+    for IXC alone, inline; `rl_fp_host_raise_any` otherwise) instead of
+    writing MXCSR or FPSR, which costs several nanoseconds per write.
   - Compares (IOC for signaling NaNs, and for any NaN in FCMPE, FCMGE and
     FCMGT), FMAX/FMIN and their NUM, pairwise and across-lanes forms (IOC
     for signaling NaNs), FRECPE and FRSQRTE (IOC for a signaling NaN or a

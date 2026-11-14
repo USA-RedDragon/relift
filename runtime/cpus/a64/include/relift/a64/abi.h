@@ -646,37 +646,38 @@ static inline void rl_fp_host_clear(void)
 }
 
 #if defined(__x86_64__)
-/** @brief One SSE operation on a and b (op "divss", "mulss" or "addss") that the compiler keeps, for the flags it raises. */
-#define RL_FP_X86_RAISE(op, a, b)                                 \
-    do {                                                          \
-        float rl_a_ = (a), rl_b_ = (b);                           \
-        __asm__ volatile(op " %1, %0" : "+x"(rl_a_) : "x"(rl_b_)); \
+/** @brief One host FP operation on a and b that the compiler keeps, for the flags it raises: x86 (an SSE instruction) or arm (an A64 one). */
+#define RL_FP_HOST_OP(x86, arm, a, b)                              \
+    do {                                                           \
+        float rl_a_ = (a), rl_b_ = (b);                            \
+        __asm__ volatile(x86 " %1, %0" : "+x"(rl_a_) : "x"(rl_b_)); \
     } while (0)
+#elif defined(__aarch64__)
+#define RL_FP_HOST_OP(x86, arm, a, b)                                       \
+    do {                                                                    \
+        float rl_a_ = (a), rl_b_ = (b);                                     \
+        __asm__ volatile(arm " %s0, %s0, %s1" : "+w"(rl_a_) : "w"(rl_b_)); \
+    } while (0)
+#endif
 
 /** @brief rl_fp_host_raise for any set of flags other than IXC alone. */
 RL_RUNTIME_API void rl_fp_host_raise_any(uint32_t f);
-#endif
 
 /**
  * @brief ORs FPSR bits into the host's sticky FP flags (IDC only on arm64).
- * On x86-64 an SSE operation that raises the same flags is far cheaper than
- * writing MXCSR, so IXC alone, by far the most common, comes from 1 + 2^-100
- * inline and other sets from rl_fp_host_raise_any.
+ * A host FP operation that raises the same flag is far cheaper than writing
+ * MXCSR or FPSR, so IXC alone, by far the most common, comes from 1 +
+ * 2^-100 inline and other sets from rl_fp_host_raise_any.
  */
 static inline void rl_fp_host_raise(uint32_t f)
 {
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
     if (RL_UNLIKELY(f != 0x10u)) {
         if (f)
             rl_fp_host_raise_any(f);
     } else {
-        RL_FP_X86_RAISE("addss", 1.0f, 0x1p-100f);
+        RL_FP_HOST_OP("addss", "fadd", 1.0f, 0x1p-100f);
     }
-#elif defined(__aarch64__)
-    uint64_t v;
-    __asm__ volatile("mrs %0, fpsr" : "=r"(v));
-    v |= f & 0x9Fu;
-    __asm__ volatile("msr fpsr, %0" ::"r"(v) : "memory");
 #else
     (void)f;
 #endif

@@ -117,6 +117,20 @@ TEST(fp_flags_mrs_and_msr_fold_and_clear_the_host)
     rl_fp_host_clear();
 }
 
+TEST(fp_flags_host_raise_sets_exactly_the_flags_asked)
+{
+    unsigned bad = 0;
+    for (uint32_t f = 0; f < 0x20u; f++) {
+        rl_fp_host_clear();
+        rl_fp_host_raise(f);
+        uint32_t got = rl_fp_host_flags() & 0x1Fu;
+        if (got != f && bad++ < 5)
+            fprintf(stderr, "  raise %#x gave %#x\n", f, got);
+    }
+    rl_fp_host_clear();
+    CHECK_EQ(bad, 0);
+}
+
 TEST(fp_flags_runtime_entries_keep_the_guest_flags)
 {
     rl_a64_set_fp_flags(1);
