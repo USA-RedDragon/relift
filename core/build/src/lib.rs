@@ -323,6 +323,97 @@ fn run(
     Err(Error::Failed(msg))
 }
 
+/// Compiles `stale` with up to `workers` compiler processes at once and
+/// tells `on` about each finished file; the first failure stops the
+/// rest and is the error. This is the build without Ninja.
+fn compile_parallel(
+    prog: &str,
+    pre: &[String],
+    stale: &[&Compile],
+    workers: usize,
+    total: usize,
+    on: &mut dyn FnMut(Event),
+) -> Result<(), Error> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let (tx, rx) = channel::<Result<usize, Error>>();
+    std::thread::scope(|sc| {
+        for _ in 0..workers.clamp(1, stale.len().max(1)) {
+            let tx = tx.clone();
+            let (next, stop) = (&next, &stop);
+            sc.spawn(move || {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(c) = stale.get(i) else { break };
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let r = relift_proc::command(prog)
+                        .args(pre)
+                        .args(&c.flags)
+                        .arg("-c")
+                        .arg(&c.src)
+                        .arg("-o")
+                        .arg(&c.obj)
+                        .stdin(std::process::Stdio::null())
+                        .output();
+                    let r = match r {
+                        Ok(o) if o.status.success() => Ok(i),
+                        Ok(o) => {
+                            let mut msg = format!("cc {} failed ({})", c.src.display(), o.status);
+                            for l in String::from_utf8_lossy(&o.stderr)
+                                .lines()
+                                .chain(String::from_utf8_lossy(&o.stdout).lines())
+                                .rev()
+                                .take(TAIL_LINES)
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                            {
+                                msg.push('\n');
+                                msg.push_str(l);
+                            }
+                            Err(Error::Failed(msg))
+                        }
+                        Err(e) => Err(e.into()),
+                    };
+                    let failed = r.is_err();
+                    if tx.send(r).is_err() || failed {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        let mut done = 0;
+        let mut result = Ok(());
+        loop {
+            match rx.recv_timeout(POLL) {
+                Ok(Ok(i)) => {
+                    done += 1;
+                    on(Event::Step {
+                        done,
+                        total,
+                        what: &format!("cc {}", stale[i].src.display()),
+                    });
+                }
+                Ok(Err(e)) => {
+                    stop.store(true, Ordering::Relaxed);
+                    if result.is_ok() {
+                        result = Err(e);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => on(Event::Tick),
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        result
+    })
+}
+
 fn newer(a: &Path, b: &Path) -> bool {
     let m = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     match (m(a), m(b)) {
@@ -388,23 +479,7 @@ pub fn build_with(
         .collect();
     let relink = !stale.is_empty() || !plan.output.exists();
     let total = stale.len() + usize::from(relink);
-    for (i, c) in stale.iter().enumerate() {
-        let mut cmd = relift_proc::command(prog);
-        cmd.args(pre)
-            .args(&c.flags)
-            .arg("-c")
-            .arg(&c.src)
-            .arg("-o")
-            .arg(&c.obj);
-        run(&mut cmd, &format!("cc {}", c.src.display()), on, |_, _| {
-            false
-        })?;
-        on(Event::Step {
-            done: i + 1,
-            total,
-            what: &format!("cc {}", c.src.display()),
-        });
-    }
+    compile_parallel(prog, pre, &stale, job_count(jobs) as usize, total, on)?;
     if relink {
         let mut cmd = relift_proc::command(prog);
         cmd.args(pre)

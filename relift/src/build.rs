@@ -899,11 +899,7 @@ pub(crate) fn build_project(
     rt_compiles.extend(extras.compiles(&rt, &lib_flags, &|s| obj(s, "rt")));
     let exe = bdir.join(format!("game{}", std::env::consts::EXE_SUFFIX));
     let ninja = tool(&settings.toolchain.ninja, "ninja");
-    let jobs = if ninja.is_some() {
-        relift_build::job_count(settings.jobs)
-    } else {
-        1
-    };
+    let jobs = relift_build::job_count(settings.jobs);
     let libs: Vec<String> = if cfg!(windows) {
         ["-lpthread", "-lm", "-lws2_32"].map(String::from).into()
     } else {
