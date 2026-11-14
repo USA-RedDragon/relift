@@ -57,7 +57,8 @@ typedef struct rl_switch_program {
  * settings, registers the static units (p->units), maps every module
  * (text and rodata as CODE_STATIC, data and bss as CODE_MUTABLE) and copies
  * its image, registers fsp-srv on the host directory named by RELIFT_SDMC
- * ("./sdmc" when unset, created when missing), attaches the calling thread
+ * ("./sdmc" when unset, created when missing) with the data storage from
+ * RELIFT_ROMFS and the add-on content from RELIFT_DLC (see hos_fs.h), attaches the calling thread
  * as the main thread and runs the entry on a main stack.
  *
  * The guest ends the process through svcExitProcess or a fatal error, which
