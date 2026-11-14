@@ -5,8 +5,10 @@
  *
  * relift lifts every function a bundled mod patches once per combination of
  * the mods that patch it (the original is combination 0), and routes every
- * call and dispatch entry of such a function through one slot. At start the
- * guest layer calls rl_mods_choose, which reads each mod's setting, refuses
+ * call and dispatch entry of such a function through one slot. Each mod is a
+ * bool game setting (relift/settings.h) the build declares. At start, after
+ * the settings are read, the guest layer calls rl_mods_choose, which reads
+ * each mod's setting, refuses
  * two exclusive mods on together, and points every slot at the variant for
  * the mods that are on; then rl_mods_each_data gives it the bytes the mods
  * that are on write into guest memory, in mod order.
@@ -34,10 +36,8 @@ typedef struct rl_mod_data {
 
 /** @brief One bundled mod. */
 typedef struct rl_mod {
-    /** @brief Its setting key (`mod.<name>`). */
+    /** @brief Its bool setting's key (`mod.<name>`). */
     const char *key;
-    /** @brief Whether it is on when no setting names it. */
-    bool on_by_default;
     /** @brief Number of entries in data. */
     uint32_t data_count;
     /** @brief What it writes, in patch order. */
@@ -78,15 +78,12 @@ typedef struct rl_mods {
 } rl_mods;
 
 /**
- * @brief Chooses which mods are on and points every slot at its variant.
- *
- * A mod is on when `--relift-set <key>=on` (or true, 1, yes) is given, off
- * with off (false, 0, no), and otherwise as its default; later arguments win.
- * on, when not NULL, receives one flag per mod. Returns 0, or -1 after
- * logging why when two exclusive mods are on or a combination has no
- * variant.
+ * @brief Chooses which mods are on, from their settings, and points every
+ * slot at its variant. on, when not NULL, receives one flag per mod. Returns
+ * 0, or -1 after logging why when two exclusive mods are on or a combination
+ * has no variant.
  */
-RL_RUNTIME_API int rl_mods_choose(const rl_mods *m, int argc, char **argv, bool *on);
+RL_RUNTIME_API int rl_mods_choose(const rl_mods *m, bool *on);
 
 /** @brief Called by rl_mods_each_data for each write of a mod that is on. */
 typedef void rl_mod_write_fn(void *user, uint64_t addr, const uint8_t *bytes, uint32_t size);

@@ -379,9 +379,8 @@ pub fn mods_c(
     for (m, b) in list.iter().enumerate() {
         let _ = writeln!(
             t,
-            "    {{ {:?}, {}, {}u, data{m} }},",
+            "    {{ {:?}, {}u, data{m} }},",
             b.key(),
-            b.default,
             data.get(m).map_or(0, Vec::len)
         );
     }
@@ -470,7 +469,7 @@ mod tests {
         );
         assert!(c.contains("variants0[] = { f_m0,f_m1,f_m2,0, }"), "{c}");
         assert!(c.contains("{ UINT64_C(0x80000010), 2u, bytes0_0 },"), "{c}");
-        assert!(c.contains("{ \"mod.a\", false, 1u, data0 },"), "{c}");
+        assert!(c.contains("{ \"mod.a\", 1u, data0 },"), "{c}");
         assert!(c.contains("= { 2u, list, 1u, fns, 1u, exclusive };"), "{c}");
     }
 

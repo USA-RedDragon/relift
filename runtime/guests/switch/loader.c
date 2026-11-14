@@ -356,8 +356,6 @@ static int link_module(const rl_switch_program *p, const rl_switch_module *m)
 
 typedef struct main_args {
     const rl_switch_program *p;
-    int argc;
-    char **argv;
 } main_args;
 
 /** @brief Tells the data mods which module is main: the one named main, else the second (after rtld), else the first. */
@@ -456,7 +454,7 @@ static int run_program(void *arg)
     attach_mods(p);
     if (p->mods) {
         bool on[RL_MODS_MAX];
-        if (rl_mods_choose(p->mods, ((main_args *)arg)->argc, ((main_args *)arg)->argv, on) != 0)
+        if (rl_mods_choose(p->mods, on) != 0)
             return 1;
         rl_mods_each_data(p->mods, on, write_mod, NULL);
     }
@@ -514,7 +512,7 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 #endif
     rl_switch_declare_settings();
     rl_settings_args(argc, argv);
-    main_args a = { p, argc, argv };
+    main_args a = { p };
     uint32_t base = g_nhooks;
     for (uint32_t i = 0; i < g_nauto; i++) {
         const rl_switch_hook *h = g_auto[i];

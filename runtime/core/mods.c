@@ -6,43 +6,9 @@
 #include "core.h"
 
 #include <relift/mods.h>
+#include <relift/settings.h>
 
-#include <string.h>
-
-/** @brief The value of a setting word: 1 on, 0 off, -1 not a bool. */
-static int bool_word(const char *v)
-{
-    static const char *const yes[] = {"on", "true", "1", "yes"};
-    static const char *const no[] = {"off", "false", "0", "no"};
-    for (unsigned i = 0; i < 4; i++) {
-        if (!strcmp(v, yes[i]))
-            return 1;
-        if (!strcmp(v, no[i]))
-            return 0;
-    }
-    return -1;
-}
-
-/** @brief Applies one `key=value` to the mods it names. */
-static void set_one(const rl_mods *m, const char *kv, bool *on)
-{
-    const char *eq = strchr(kv, '=');
-    if (!eq)
-        return;
-    size_t n = (size_t)(eq - kv);
-    for (uint32_t i = 0; i < m->count; i++) {
-        const char *key = m->mods[i].key;
-        if (strlen(key) != n || strncmp(key, kv, n))
-            continue;
-        int v = bool_word(eq + 1);
-        if (v < 0)
-            rl_log(RL_LOG_WARN, "mods", "%s: %s is not on or off; left as it was", key, eq + 1);
-        else
-            on[i] = v;
-    }
-}
-
-int rl_mods_choose(const rl_mods *m, int argc, char **argv, bool *on)
+int rl_mods_choose(const rl_mods *m, bool *on)
 {
     bool local[RL_MODS_MAX];
     if (!m)
@@ -52,13 +18,7 @@ int rl_mods_choose(const rl_mods *m, int argc, char **argv, bool *on)
         return -1;
     }
     for (uint32_t i = 0; i < m->count; i++)
-        local[i] = m->mods[i].on_by_default;
-    for (int a = 1; a < argc; a++) {
-        if (!strcmp(argv[a], "--relift-set") && a + 1 < argc)
-            set_one(m, argv[++a], local);
-        else if (!strncmp(argv[a], "--relift-set=", 13))
-            set_one(m, argv[a] + 13, local);
-    }
+        local[i] = rl_setting_bool(m->mods[i].key);
     for (uint32_t k = 0; k < m->exclusive_count; k++) {
         uint16_t x = m->exclusive[2 * k], y = m->exclusive[2 * k + 1];
         if (x < m->count && y < m->count && local[x] && local[y]) {
