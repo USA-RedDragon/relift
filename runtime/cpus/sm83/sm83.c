@@ -58,6 +58,39 @@ int rl_sm83_halt(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
+int rl_sm83_stop(rl_ctx *c, uint8_t *mem)
+{
+    struct rl_thread *t = rl_common(c)->thread;
+    rl_sched_cpu *k = t ? t->clock : NULL;
+    const rl_sm83_ints *ints = c->ints;
+    if (!k || !ints)
+        return rl_guest_fatal(c, "sm83", "STOP on a thread without a scheduler clock and interrupt registers");
+    if (ints->pending(ints->opaque) & RL_SM83_IRQ_MASK)
+        return 1;
+    rl_sm83_stop_info r = {.kind = RL_SM83_STOP_MODE};
+    if (ints->stop)
+        ints->stop(ints->opaque, &r);
+    switch (r.kind) {
+    case RL_SM83_STOP_SWITCH:
+        rl_sched_set_ratio(k, r.ratio);
+        c->time.budget -= RL_SM83_STOP_STALL;
+        return r.run_operand ? 1 : 0;
+    case RL_SM83_STOP_HALT:
+        (void)rl_sm83_halt(c, mem);
+        return 0;
+    default:
+        rl_sched_set_mask(k, RL_SM83_IRQ_MASK);
+        c->halted = 1;
+        int woke = rl_sched_halt(k);
+        c->halted = 0;
+        apply_mask(c);
+        if (!woke)
+            return rl_guest_fatal(c, "sm83", "STOP with no joypad line that can wake the CPU");
+        c->time.budget -= RL_SM83_STOP_WAKE_CYCLES;
+        return 0;
+    }
+}
+
 static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
 {
     const rl_sm83_ints *ints = c->ints;

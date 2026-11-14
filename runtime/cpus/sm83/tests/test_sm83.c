@@ -26,6 +26,8 @@ static struct {
     uint32_t acks[8];
     int ack_count;
     rl_sched *sched;
+    int stop_calls;
+    rl_sm83_stop_info stop;
 } mc;
 
 static uint8_t mc_pending(void *o)
@@ -42,7 +44,14 @@ static void mc_ack(void *o, uint32_t line)
     mc.acks[mc.ack_count++ & 7] = line;
 }
 
-static const rl_sm83_ints ints = {.pending = mc_pending, .ack = mc_ack};
+static void mc_stop(void *o, rl_sm83_stop_info *r)
+{
+    (void)o;
+    mc.stop_calls++;
+    *r = mc.stop;
+}
+
+static const rl_sm83_ints ints = {.pending = mc_pending, .ack = mc_ack, .stop = mc_stop};
 
 static uint8_t ram[0x10000];
 
@@ -635,6 +644,109 @@ TEST(sm83_a_miss_reports_the_target)
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
     CHECK(strstr(out, "0x4321") != NULL);
+    c->pend.kind = RL_PEND_NONE;
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_with_a_line_pending_skips_nothing_and_asks_nobody)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    mc.ie = 0x04;
+    raise_line(2);
+    int64_t b = c->time.budget;
+    CHECK_EQ(rl_sm83_stop(c, ram), 1);
+    CHECK_EQ(mc.stop_calls, 0);
+    CHECK_EQ(c->time.budget, b);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_speed_switch_changes_the_ratio_and_stalls)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_SWITCH, .ratio = 2, .run_operand = 0};
+    CHECK_EQ(rl_sm83_stop(c, ram), 0);
+    CHECK_EQ(mc.stop_calls, 1);
+    CHECK_EQ(c->time.budget, -RL_SM83_STOP_STALL);
+    uint64_t t0 = rl_sched_now(k);
+    c->time.budget -= 100;
+    CHECK_EQ(rl_sched_now(k) - t0, 200u);
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_SWITCH, .ratio = 4, .run_operand = 1};
+    CHECK_EQ(rl_sm83_stop(c, ram), 1);
+    t0 = rl_sched_now(k);
+    c->time.budget -= 10;
+    CHECK_EQ(rl_sched_now(k) - t0, 40u);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_with_a_button_held_halts_like_halt)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    rl_sm83_set_ie(c, 0x01);
+    mc.ie = 0x01;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_HALT};
+    rl_device dev = {.name = "timer", .line = RL_LINE_NONE};
+    rl_sched_add_device(s, &dev);
+    rl_event ev = {.fire = timer_fire, .dev = &dev, .opaque = (void *)(uintptr_t)0};
+    rl_sched_post(s, &ev, 4000);
+    CHECK_EQ(rl_sm83_stop(c, ram), 0);
+    CHECK(rl_sched_now(k) >= 4000);
+    CHECK_EQ(c->halted, 0);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_mode_waits_for_a_line_even_when_it_is_not_enabled)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    mc.ie = 0;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_MODE};
+    rl_device dev = {.name = "joypad", .line = RL_LINE_NONE};
+    rl_sched_add_device(s, &dev);
+    rl_event ev = {.fire = timer_fire, .dev = &dev, .opaque = (void *)(uintptr_t)4};
+    rl_sched_post(s, &ev, 6000);
+    int rc = rl_sm83_stop(c, ram);
+    CHECK_EQ(rc, 0);
+    CHECK(rl_sched_now(k) >= 6000);
+    CHECK_EQ(c->halted, 0);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_with_nothing_to_wake_it_stops_the_guest)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_MODE};
+    int fds[2];
+    char out[1024];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_sm83_stop(c, ram);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK(strstr(out, "STOP with no joypad line") != NULL);
     c->pend.kind = RL_PEND_NONE;
     rl_sched_destroy(s);
     rl_thread_free(t);

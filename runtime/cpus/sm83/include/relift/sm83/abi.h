@@ -33,6 +33,26 @@
  * layer sees them. The guest layer fills one in and gives it to
  * rl_sm83_attach; it must outlive the thread.
  */
+typedef struct rl_sm83_stop_info {
+    /** @brief One of RL_SM83_STOP_*. */
+    uint32_t kind;
+    /** @brief For RL_SM83_STOP_SWITCH: the new ticks per cycle of the CPU's clock (the machine has already switched its devices). */
+    uint32_t ratio;
+    /** @brief The byte after STOP runs as the next instruction (an HDMA block was prefetched at the STOP). */
+    uint8_t run_operand;
+} rl_sm83_stop_info;
+
+/** @brief STOP enters stop mode: the machine has done its part (the divider reset); the CPU waits for a joypad line. */
+#define RL_SM83_STOP_MODE 0u
+/** @brief STOP did the CGB speed switch; see rl_sm83_stop_info.ratio. */
+#define RL_SM83_STOP_SWITCH 1u
+/** @brief STOP with a selected button held: the CPU halts like HALT. */
+#define RL_SM83_STOP_HALT 2u
+/** @brief Cycles after a speed switch during which no instruction is fetched (rustyboi's stop window, 0x20000). */
+#define RL_SM83_STOP_STALL 0x20000
+/** @brief Cycles the CPU takes to leave stop mode on a joypad line. */
+#define RL_SM83_STOP_WAKE_CYCLES 8
+
 typedef struct rl_sm83_ints {
     /** @brief Passed to both callbacks. */
     void *opaque;
@@ -40,6 +60,13 @@ typedef struct rl_sm83_ints {
     uint8_t (*pending)(void *opaque);
     /** @brief The CPU takes line: the machine clears the request. */
     void (*ack)(void *opaque, uint32_t line);
+    /**
+     * @brief Optional. STOP ran with no interrupt requested and enabled: the machine decides which of RL_SM83_STOP_* applies
+     * (held button, armed speed switch, else stop mode), does its half and fills r. NULL means stop mode.
+     * In stop mode the CPU waits for any raised line of RL_SM83_IRQ_MASK, so the machine must raise the joypad line
+     * when a selected button goes low, whether or not it is enabled.
+     */
+    void (*stop)(void *opaque, rl_sm83_stop_info *r);
 } rl_sm83_ints;
 
 /**
@@ -199,5 +226,15 @@ RL_RUNTIME_API void rl_sm83_set_ie(rl_ctx *c, uint8_t lines);
  * nothing could ever raise a line (the guest is stopped with a report).
  */
 RL_RUNTIME_API int rl_sm83_halt(rl_ctx *c, uint8_t *mem);
+
+/**
+ * @brief STOP, called after the lifter charged the instruction's cost (4 cycles; the lifter adds 4 more when the result
+ * is 0). Returns 1 when the byte after STOP is not skipped (it runs as the next instruction: an interrupt was already
+ * requested, or the machine said so), else 0. With an interrupt pending it does nothing else. Otherwise it asks the
+ * machine (rl_sm83_ints.stop): a speed switch changes the CPU clock's ratio through the scheduler and charges
+ * RL_SM83_STOP_STALL cycles; a held button halts as rl_sm83_halt does; stop mode waits for a raised line and then
+ * charges RL_SM83_STOP_WAKE_CYCLES. Returns 0 after a stop that ended the guest (with a report) too.
+ */
+RL_RUNTIME_API int rl_sm83_stop(rl_ctx *c, uint8_t *mem);
 
 #endif
