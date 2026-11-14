@@ -290,6 +290,13 @@ pub(crate) fn check_op(
 impl Block {
     /// Checks every width and operand reference, and the exit.
     pub fn verify(&self) -> Result<(), VerifyError> {
+        self.check(true)
+    }
+
+    /// As [`Block::verify`]; with `ops` false, for a block whose operations
+    /// were each checked as they were added, only what spans operations:
+    /// the order of guards and syncs, and the exit.
+    pub(crate) fn check(&self, ops: bool) -> Result<(), VerifyError> {
         let mut widths = Vec::with_capacity(self.insts.len());
         let mut effect = false;
         for (i, inst) in self.insts.iter().enumerate() {
@@ -311,12 +318,14 @@ impl Block {
             } else if inst.op.has_effect() && !matches!(inst.op, Op::Load { .. }) {
                 effect = true;
             }
-            check_op(&inst.op, inst.width, &widths, &self.regs, self.addr_width).map_err(
-                |message| VerifyError {
-                    at: Some(i),
-                    message,
-                },
-            )?;
+            if ops {
+                check_op(&inst.op, inst.width, &widths, &self.regs, self.addr_width).map_err(
+                    |message| VerifyError {
+                        at: Some(i),
+                        message,
+                    },
+                )?;
+            }
             widths.push(inst.width);
         }
         let exit_err = |message: &str| VerifyError {

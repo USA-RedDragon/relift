@@ -408,7 +408,7 @@ impl Builder {
             exit,
             bank: self.bank,
         };
-        if let Err(e) = block.verify() {
+        if let Err(e) = block.check(false) {
             panic!("ill-typed block: {e}");
         }
         block
