@@ -366,6 +366,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-a64-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-a64",
+]
+
+[[package]]
 name = "relift-emit"
 version = "0.1.0"
 dependencies = [

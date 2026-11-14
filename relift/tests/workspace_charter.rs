@@ -208,6 +208,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-cpu-a64-gen",
+        band: 3,
+        why: "the A64 template generator over the decoder, run by hand; nothing links it",
+        normal: &["relift-cpu-a64"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift",
         band: 3,
         why: "the binary: settings, dispatch and the guest registry",
@@ -262,6 +270,8 @@ enum Folder {
     Override,
     /// `relift/`, the binary.
     Tool,
+    /// `cpus/<cpu>/gen`, a generator run by hand to refresh committed code.
+    Generator,
 }
 
 impl Folder {
@@ -274,6 +284,7 @@ impl Folder {
             ["testguest"] => Folder::TestGuest,
             ["override", _] => Folder::Override,
             ["relift"] => Folder::Tool,
+            ["cpus", _, "gen"] => Folder::Generator,
             _ => {
                 panic!("member at {rel} sits in no folder the charter knows; add it to Folder::of")
             }
@@ -615,6 +626,42 @@ fn the_band_order_holds() {
         "control: only {edges} edges between members, too few to be this workspace"
     );
     report("band order", broken);
+}
+
+/// No member depends on a generator: generated code is committed, so a
+/// build never runs one.
+#[test]
+fn no_member_reaches_a_generator() {
+    let ws = workspace();
+    let gens = ws.in_folder(|f| *f == Folder::Generator);
+    assert!(
+        !gens.is_empty(),
+        "control: no member under cpus/*/gen, so this rule checks nothing"
+    );
+    for (id, m) in &gens {
+        assert!(
+            ws.members_reached(id)
+                .iter()
+                .any(|(r, _)| r.folder == Folder::Cpus),
+            "control: {} reaches no cpus/ member, so the walk cannot be trusted",
+            m.name
+        );
+    }
+    let all = ws.in_folder(|_| true);
+    let mut broken = Vec::new();
+    for (id, m) in &all {
+        for (reached, route) in ws.members_reached(id) {
+            if reached.folder == Folder::Generator {
+                broken.push(format!(
+                    "{} reaches {}: {}",
+                    m.name,
+                    reached.rel,
+                    render(ws, id, &route)
+                ));
+            }
+        }
+    }
+    report("generators", broken);
 }
 
 /// Nothing under `core/` reaches anything under `cpus/`, `guests/` or
