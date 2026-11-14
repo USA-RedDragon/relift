@@ -1,10 +1,10 @@
 //! The A64 side of template generation: an AARCHMRS encoding as a
-//! [`crate::stage::Form`], with the A64 decode groups of the Sail
+//! [`relift_sail::stage::Form`], with the A64 decode groups of the Sail
 //! top-level decoder and the A64 decoder as the reachability check.
 
-use crate::model::Model;
-use crate::stage::{self, Form, Template};
 use relift_cpu_a64::decode::Encoding;
+use relift_sail::model::Model;
+use relift_sail::stage::{self, Form, Template};
 
 use crate::cut::A64;
 

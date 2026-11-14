@@ -14,16 +14,10 @@
 //! templates of the listed encodings in one class ([`CLASSES`]), the file
 //! `cpus/a64/src/lift/sail/generated/CLASS.rs`.
 
-mod ast;
-mod builtins;
 mod cut;
-mod eval;
-mod model;
-mod ops;
-mod parse;
-mod stage;
 mod template;
-mod value;
+
+use relift_sail::model;
 
 use std::fmt::Write as _;
 use std::process::ExitCode;

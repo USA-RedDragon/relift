@@ -121,6 +121,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-sail",
+        band: 0,
+        why: "the shared Sail frontend (parser, model tables, staged evaluator) for template generators; a leaf that knows no CPU and no guest",
+        normal: NONE,
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-guest",
         band: 1,
         why: "the guest contract and vocabulary, over the IR only",
@@ -287,8 +295,8 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-cpu-a64-gen",
         band: 3,
-        why: "the A64 template generator over the decoder and the IR, run by hand; nothing links it",
-        normal: &["relift-cpu-a64", "relift-ir"],
+        why: "the A64 template generator over the decoder, the IR and the Sail frontend, run by hand; nothing links it",
+        normal: &["relift-cpu-a64", "relift-ir", "relift-sail"],
         dev: NONE,
         build: NONE,
     },

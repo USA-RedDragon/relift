@@ -899,6 +899,7 @@ version = "0.1.0"
 dependencies = [
  "relift-cpu-a64",
  "relift-ir",
+ "relift-sail",
 ]
 
 [[package]]
@@ -991,6 +992,10 @@ version = "0.1.0"
 
 [[package]]
 name = "relift-progress"
+version = "0.1.0"
+
+[[package]]
+name = "relift-sail"
 version = "0.1.0"
 
 [[package]]

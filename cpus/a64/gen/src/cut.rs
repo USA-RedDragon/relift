@@ -30,10 +30,10 @@
 
 use std::rc::Rc;
 
-use crate::ast::Expr;
-use crate::eval::{Cpu, Gen, R, fail};
-use crate::stage::Stage;
-use crate::value::{K, V};
+use relift_sail::ast::Expr;
+use relift_sail::eval::{Cpu, Gen, R, fail};
+use relift_sail::stage::Stage;
+use relift_sail::value::{K, V};
 
 /// The A64 layer of the evaluator, and its per-run state: the exclusive
 /// monitor bookkeeping.
@@ -290,7 +290,7 @@ pub const CRYPTO_CUT: &[(&str, relift_ir::CryptoOp)] = &[
 /// concrete values: every byte value in every position (the functions
 /// work bytewise or, for MixColumns, are linear over GF(2), so the basis
 /// vectors decide them). Fails with the first difference.
-pub fn verify_crypto(m: &crate::model::Model) -> Result<(), String> {
+pub fn verify_crypto(m: &relift_sail::model::Model) -> Result<(), String> {
     for (name, op) in CRYPTO_CUT {
         let w = op.width().bits();
         let mut inputs: Vec<u128> = Vec::new();
@@ -396,7 +396,7 @@ impl A64Cut for Gen<'_, A64> {
     /// quotient rounded toward zero (`SDIV`, `UDIV`), kept as a fraction.
     fn real(&mut self, name: &str, a: &[V]) -> R<Option<V>> {
         Ok(Some(match name {
-            "to_real" | "Real" if a.len() == 1 && a[0].kind() == crate::value::Kind::Int => {
+            "to_real" | "Real" if a.len() == 1 && a[0].kind() == relift_sail::value::Kind::Int => {
                 real_of(a[0].clone(), V::Int(1))
             }
             "op/" | "div_real" if a.len() == 2 => {
@@ -416,7 +416,7 @@ impl A64Cut for Gen<'_, A64> {
                 if d == V::Int(1) {
                     n
                 } else {
-                    self.int_op(crate::ops::IOp::TDiv, &n, &d)?
+                    self.int_op(relift_sail::ops::IOp::TDiv, &n, &d)?
                 }
             }
             _ => return Ok(None),
@@ -443,7 +443,7 @@ impl A64Cut for Gen<'_, A64> {
         }
         let w = a[0]
             .width()
-            .ok_or_else(|| crate::eval::err("FP operand width"))?;
+            .ok_or_else(|| relift_sail::eval::err("FP operand width"))?;
         if w != 16 && w != 32 && w != 64 {
             return fail(format!("{name} on {w} bits"));
         }
@@ -470,7 +470,7 @@ impl A64Cut for Gen<'_, A64> {
             "FPCompare" => {
                 let signal = match &a[2] {
                     V::Bool(s) => *s,
-                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    V::S(_, _, d) if *d != 0 => return Err(relift_sail::eval::E::Split(*d)),
                     v => return fail(format!("FPCompare signal {v:?}")),
                 };
                 (
@@ -502,7 +502,7 @@ impl A64Cut for Gen<'_, A64> {
         let x = self.bitify(&a[0])?;
         let w = x
             .width()
-            .ok_or_else(|| crate::eval::err("FP operand width"))?;
+            .ok_or_else(|| relift_sail::eval::err("FP operand width"))?;
         if w != 16 && w != 32 && w != 64 {
             return fail(format!("{name} on {w} bits"));
         }
@@ -545,7 +545,7 @@ impl A64Cut for Gen<'_, A64> {
     fn fp_round(&self, v: &V) -> R<&'static str> {
         let i = match v {
             V::Enum(_, i) => *i,
-            V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+            V::S(_, _, d) if *d != 0 => return Err(relift_sail::eval::E::Split(*d)),
             _ => return fail(format!("rounding {v:?}")),
         };
         let names = &self.m.enums["FPRounding"];
@@ -590,7 +590,7 @@ impl A64Cut for Gen<'_, A64> {
         let x = self.bitify(&a[0])?;
         let iw = fpw(x
             .width()
-            .ok_or_else(|| crate::eval::err("FP operand width"))?)?;
+            .ok_or_else(|| relift_sail::eval::err("FP operand width"))?)?;
         let xs = self.dx(&x)?.to_string();
         let (k, call) = match name {
             "FPToFixed" | "FixedToFP" => {
@@ -598,7 +598,7 @@ impl A64Cut for Gen<'_, A64> {
                 let fbits = self.cint(&a[1])?;
                 let unsigned = match &a[2] {
                     V::Bool(u) => *u,
-                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    V::S(_, _, d) if *d != 0 => return Err(relift_sail::eval::E::Split(*d)),
                     v => return fail(format!("signedness {v:?}")),
                 };
                 let r = self.fp_round(&a[4])?;
@@ -680,7 +680,7 @@ impl A64Cut for Gen<'_, A64> {
                 let r = self.fp_round(&a[2])?;
                 let exact = match &a[3] {
                     V::Bool(e) => *e,
-                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    V::S(_, _, d) if *d != 0 => return Err(relift_sail::eval::E::Split(*d)),
                     v => return fail(format!("FPRoundInt exact {v:?}")),
                 };
                 (
@@ -822,8 +822,9 @@ impl A64Cut for Gen<'_, A64> {
                         }
                         Some(b) => V::Bool(b),
                         None => {
-                            let f = relift_cpu_a64::decode::Feature::from_name(&name)
-                                .ok_or_else(|| crate::eval::err(format!("no Feature {name}")))?;
+                            let f = relift_cpu_a64::decode::Feature::from_name(&name).ok_or_else(
+                                || relift_sail::eval::err(format!("no Feature {name}")),
+                            )?;
                             self.st(K::Bool, format!("st.has(Feature::{f:?})"), 0)
                         }
                     }
@@ -942,10 +943,10 @@ impl A64Cut for Gen<'_, A64> {
                     .iter()
                     .find(|(k, _)| k == "modop")
                     .map(|(_, v)| v.clone())
-                    .ok_or_else(|| crate::eval::err("no modop"))?;
+                    .ok_or_else(|| relift_sail::eval::err("no modop"))?;
                 let op = match &modop {
                     V::Enum(t, i) => self.m.enums[t.as_ref()][*i].clone(),
-                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    V::S(_, _, d) if *d != 0 => return Err(relift_sail::eval::E::Split(*d)),
                     _ => return fail(format!("MemAtomic modop {modop:?}")),
                 };
                 let atomic = match op.as_str() {
@@ -963,7 +964,9 @@ impl A64Cut for Gen<'_, A64> {
                 };
                 let addr = self.extend(&a[0], 64, false)?;
                 let v = self.bitify(&a[2])?;
-                let w = v.width().ok_or_else(|| crate::eval::err("atomic width"))?;
+                let w = v
+                    .width()
+                    .ok_or_else(|| relift_sail::eval::err("atomic width"))?;
                 let x = self.dx(&addr)?;
                 let y = self.dx(&v)?;
                 if self.guard.d.is_some() {
@@ -1071,7 +1074,7 @@ impl A64Cut for Gen<'_, A64> {
                         }
                     }
                     Some(V::Enum(..)) => "SeqCst",
-                    Some(V::S(_, _, d)) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    Some(V::S(_, _, d)) if *d != 0 => return Err(relift_sail::eval::E::Split(*d)),
                     v => return fail(format!("{name} types {v:?}")),
                 };
                 self.effect(format!("b.fence(Order::{order});"));
