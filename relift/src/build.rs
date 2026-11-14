@@ -629,6 +629,8 @@ fn lift_and_emit(
     let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
     let cdir = out.join("c");
     let hints = crate::hints::read(Path::new("game.toml"))?;
+    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    crate::game_settings::check_dir(Path::new("overrides"), &game_settings)?;
     let emitted = emit_modules(
         settings,
         &placed,
@@ -652,6 +654,12 @@ fn lift_and_emit(
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
+    let settings_c = cdir.join("game_settings.c");
+    relift_cache::write_if_changed(
+        &settings_c,
+        crate::game_settings::generate_c(&game_settings).as_bytes(),
+    )?;
+    prog.push(settings_c);
     for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;

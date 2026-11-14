@@ -62,6 +62,56 @@ pub fn type_name(kind: &SettingKind) -> &'static str {
     }
 }
 
+/// The settings the runtime defines, as the self-description lists them.
+/// A test keeps this list equal to the declarations in `runtime/`.
+#[must_use]
+pub fn runtime_settings() -> Vec<Setting> {
+    let s = |key: &str, label: &str, description: &str, default: Value, kind| Setting {
+        key: key.into(),
+        label: label.into(),
+        description: description.into(),
+        apply: Apply::Start,
+        default,
+        kind,
+    };
+    vec![
+        s(
+            "video",
+            "Window backend",
+            "auto opens SDL3 when it is built in and a display exists; sdl3 skips the display check; headless (or none) opens no window",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: ["auto", "sdl3", "headless", "none"]
+                    .map(String::from)
+                    .into(),
+            },
+        ),
+        s(
+            "save.dir",
+            "Save folder",
+            "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
+            "vk.device",
+            "Graphics device",
+            "A part of the name of the host graphics device the game uses. Empty: the first device that can present",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+    ]
+}
+
+/// The `settings` section of the self-description for a game's settings.
+#[must_use]
+pub fn section(game: Vec<Setting>) -> relift_info::Settings {
+    relift_info::Settings {
+        runtime: runtime_settings(),
+        game,
+    }
+}
+
 fn text(t: &toml::Table, key: &str, what: &str) -> Result<String, BoxError> {
     match t.get(key) {
         None => Ok(String::new()),
@@ -615,6 +665,24 @@ default = "p1:a"
         assert_eq!(by("mode").default, "low");
         assert_eq!(by("jump").default["port"], "p1");
         assert_eq!(by("fast_text").label, "Fast text");
+    }
+
+    #[test]
+    fn runtime_settings_match_the_runtime_declarations() {
+        let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
+        let mut c = String::new();
+        for f in ["core/settings.c", "guests/switch/settings.c"] {
+            c.push_str(&std::fs::read_to_string(rt.join(f)).unwrap());
+        }
+        let declared: Vec<String> = c
+            .split(".key = \"")
+            .skip(1)
+            .map(|r| r.split('"').next().unwrap().to_string())
+            .collect();
+        let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
+        assert_eq!(declared, listed);
+        assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
+        assert_eq!(section(Vec::new()).runtime.len(), 3);
     }
 
     #[test]
