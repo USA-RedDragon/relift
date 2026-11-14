@@ -41,7 +41,6 @@ const STEPS: usize = 200_000;
 /// The uses of the slots `slots` (each `size` bytes) in `f`.
 pub fn slot_uses(f: &Function, slots: &BTreeSet<u64>, size: u64) -> SlotUses {
     let mut out = SlotUses::default();
-    let pages: BTreeSet<u64> = slots.iter().map(|s| s & !0xfff).collect();
     let slot_at = |a: u128| -> Option<u64> {
         let a = u64::try_from(a).ok()?;
         let &s = slots.range(..=a).next_back()?;
@@ -54,9 +53,9 @@ pub fn slot_uses(f: &Function, slots: &BTreeSet<u64>, size: u64) -> SlotUses {
             for inst in &b.insts {
                 if let Op::Const(c) = inst.op
                     && let Ok(c) = u64::try_from(c.get())
-                    && pages.contains(&(c & !0xfff))
                 {
-                    named.extend(slots.range(c & !0xfff..(c & !0xfff) + 0x1000));
+                    let page = c & !0xfff;
+                    named.extend(slots.range(page..page.saturating_add(0x1000)));
                 }
             }
         }
