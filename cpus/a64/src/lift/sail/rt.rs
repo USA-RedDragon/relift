@@ -36,6 +36,7 @@ pub struct St {
     cur: Vec<Option<Value>>,
     exit: Option<(Next, Kind)>,
     fp: bool,
+    qc: Option<Value>,
 }
 
 impl St {
@@ -52,6 +53,20 @@ impl St {
     /// Whether the instruction assumes FPCR zero.
     pub fn assumes_default_fpcr(&self) -> bool {
         self.fp
+    }
+
+    /// Sets FPSR.QC (saturation), or, under the condition `g`, only when
+    /// `g` is 1. QC is sticky: the conditions of one instruction are ORed
+    /// and [`St::finish`] ORs the bit into FPSR once.
+    pub fn set_qc(&mut self, b: &mut Builder, g: Option<Value>) {
+        let g = match g {
+            Some(g) => g,
+            None => b.konst(Width::new(1), 1),
+        };
+        self.qc = Some(match self.qc {
+            Some(q) => b.bin(BinOp::Or, q, g),
+            None => g,
+        });
     }
 
     /// The current value of `r`.
@@ -146,7 +161,15 @@ impl St {
     }
 
     /// Emits the writes and gives the instruction's exit.
-    pub fn finish(self, b: &mut Builder) -> Exit {
+    pub fn finish(mut self, b: &mut Builder) -> Exit {
+        if let Some(q) = self.qc.take() {
+            let f = self.get(b, regs::FPSR);
+            let q = b.zext(q, Width::W32);
+            let k = b.konst(Width::W32, 27);
+            let q = b.bin(BinOp::Shl, q, k);
+            let f = b.bin(BinOp::Or, f, q);
+            self.set(b, regs::FPSR, f, None);
+        }
         for (i, v) in self.cur.iter().enumerate() {
             if let Some(v) = v {
                 b.set(Reg(i as u16), *v);
