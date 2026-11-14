@@ -700,3 +700,19 @@ fn a_call_that_returns_past_an_inline_string_continues_after_it() {
     let entry = &r.functions[&Loc::fixed(0x100)];
     assert!(!entry.body.contains_key(&Loc::fixed(0x153)));
 }
+
+#[test]
+fn a_byte_stored_to_an_io_register_is_not_assumed_to_read_back() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x55, 0xEA, 0xA0, 0xFE, 0xFA, 0xA0, 0xFE, 0xFE, 0x55, 0x28, 0x03, 0xCD, 0x00,
+                0x03, 0xC9,
+            ],
+        )
+        .put(0, 0x300, &[0xC9])
+        .analyze();
+    assert!(has(&r, 0, 0x300), "{:?}", r.functions.keys());
+}

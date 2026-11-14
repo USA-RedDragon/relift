@@ -409,6 +409,9 @@ impl State {
         {
             self.nonzero = None;
         }
+        if !plain_ram(addr) {
+            return;
+        }
         if let Some(c) = self.cells.iter_mut().find(|c| c.0 == addr) {
             c.1 = v;
             return;
@@ -477,6 +480,13 @@ pub(crate) fn join_val(a: Val, b: Val) -> Val {
         _ if a.depends_on_entry() || b.depends_on_entry() => Val::Dep,
         _ => Val::Top,
     }
+}
+
+/// Whether a byte stored at `addr` reads back unchanged: work RAM and high
+/// RAM. Video RAM, OAM, cartridge RAM and I/O registers may not, depending
+/// on the PPU mode, the RAM enable or the hardware.
+pub(crate) fn plain_ram(addr: u16) -> bool {
+    (0xC000..0xE000).contains(&addr) || (0xFF80..0xFFFF).contains(&addr)
 }
 
 /// The bank mapped in the window on a path.
