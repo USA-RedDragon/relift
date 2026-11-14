@@ -2,6 +2,7 @@
  * @file window.c
  * @brief The window backend in use, the event listener and rl_window_main.
  */
+#include <relift/settings.h>
 #include <relift/window.h>
 
 #include "core.h"
@@ -59,20 +60,33 @@ static const rl_window_backend *host_backend(void)
 #endif
 }
 
+enum { VIDEO_AUTO, VIDEO_SDL3, VIDEO_HEADLESS, VIDEO_NONE };
+
+static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
+
+static const rl_setting_def g_video_def = {
+    .key = "video",
+    .type = RL_SETTING_ENUM,
+    .label = "Window backend",
+    .description = "auto opens SDL3 when it is built in and a display exists; sdl3 skips the display check; "
+                   "headless (or none) opens no window",
+    .env = RL_WINDOW_ENV,
+    .choices = g_video_choices,
+    .nchoices = 4,
+};
+
 static const rl_window_backend *wanted(void)
 {
-    const char *e = getenv(RL_WINDOW_ENV);
-    if (e && (!strcmp(e, "none") || !strcmp(e, "headless")))
+    rl_settings_declare(&g_video_def, 1);
+    uint32_t v = rl_setting_enum("video");
+    if (v == VIDEO_HEADLESS || v == VIDEO_NONE)
         return NULL;
-    if (e && !strcmp(e, "sdl3")) {
+    if (v == VIDEO_SDL3) {
         const rl_window_backend *b = g_set ? g_set : host_backend();
         if (!b)
-            rl_log(RL_LOG_WARN, "window", "%s=sdl3, but this runtime was built without SDL3; running headless",
-                   RL_WINDOW_ENV);
+            rl_log(RL_LOG_WARN, "window", "video=sdl3, but this runtime was built without SDL3; running headless");
         return b;
     }
-    if (e && *e)
-        rl_log(RL_LOG_WARN, "window", "%s=%s is not headless or sdl3; choosing automatically", RL_WINDOW_ENV, e);
     if (g_set)
         return g_set;
     const rl_window_backend *b = host_backend();

@@ -1,0 +1,889 @@
+/**
+ * @file settings.c
+ * @brief The settings registry: declaration, typed validation, layered
+ * values, the JSON file reader, the command-line flags, the schema writer
+ * and the per-user folder.
+ */
+#include <relift/settings.h>
+
+#include "core.h"
+
+#include <errno.h>
+#include <math.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/** @brief The value of one setting. */
+typedef struct value {
+    bool set;
+    int64_t i;
+    double f;
+    char *s;
+} value;
+
+/** @brief A declared setting and its value. */
+typedef struct slot {
+    const rl_setting_def *def;
+    value val;
+    value envval;
+    char *env_text;
+    bool env_warned;
+    char *port;
+} slot;
+
+static slot g_slots[RL_SETTINGS_MAX];
+static size_t g_nslots;
+static char *g_app;
+static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void value_free(value *v)
+{
+    free(v->s);
+    memset(v, 0, sizeof *v);
+}
+
+static char *dup(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *p = malloc(n);
+    if (p)
+        memcpy(p, s, n);
+    return p;
+}
+
+static bool key_ok(const char *k)
+{
+    if (!k || !*k || *k == '.' || *k == '_' || (*k >= '0' && *k <= '9'))
+        return false;
+    for (; *k; k++)
+        if (!((*k >= 'a' && *k <= 'z') || (*k >= '0' && *k <= '9') || *k == '_' || *k == '.'))
+            return false;
+    return true;
+}
+
+static bool def_ok(const rl_setting_def *d, const char **why)
+{
+    if (!key_ok(d->key)) {
+        *why = "the key must be lowercase letters, digits, '_' and '.', starting with a letter";
+        return false;
+    }
+    switch (d->type) {
+    case RL_SETTING_BOOL:
+        if (d->def_int != 0 && d->def_int != 1)
+            return *why = "the default of a bool is 0 or 1", false;
+        break;
+    case RL_SETTING_INT:
+        if (d->min_int > d->max_int || d->def_int < d->min_int || d->def_int > d->max_int || d->step_int < 0)
+            return *why = "the int range is empty, the step is negative or the default is outside it", false;
+        break;
+    case RL_SETTING_FLOAT:
+        if (!(d->min_float <= d->max_float) || !(d->def_float >= d->min_float && d->def_float <= d->max_float) ||
+            d->step_float < 0 || !isfinite(d->min_float) || !isfinite(d->max_float))
+            return *why = "the float range is empty or not finite, the step is negative or the default is outside it",
+                   false;
+        break;
+    case RL_SETTING_ENUM:
+        if (!d->choices || d->nchoices == 0 || d->def_int < 0 || d->def_int >= (int64_t)d->nchoices)
+            return *why = "an enum needs choices and a default that is one of them", false;
+        break;
+    case RL_SETTING_STRING:
+    case RL_SETTING_BINDING:
+        break;
+    default:
+        return *why = "unknown type", false;
+    }
+    return true;
+}
+
+static slot *find(const char *key)
+{
+    for (size_t i = 0; key && i < g_nslots; i++)
+        if (!strcmp(g_slots[i].def->key, key))
+            return &g_slots[i];
+    return NULL;
+}
+
+int rl_settings_declare(const rl_setting_def *defs, size_t n)
+{
+    int added = 0;
+    pthread_mutex_lock(&g_lock);
+    size_t fresh = 0;
+    for (size_t i = 0; i < n; i++) {
+        const char *why = NULL;
+        slot *s = find(defs[i].key);
+        if (s && s->def == &defs[i])
+            continue;
+        if (s) {
+            rl_log(RL_LOG_ERROR, "settings", "%s is declared twice", defs[i].key);
+            goto fail;
+        }
+        for (size_t j = 0; j < i; j++)
+            if (defs[j].key && !strcmp(defs[j].key, defs[i].key)) {
+                rl_log(RL_LOG_ERROR, "settings", "%s is declared twice", defs[i].key);
+                goto fail;
+            }
+        if (!def_ok(&defs[i], &why)) {
+            rl_log(RL_LOG_ERROR, "settings", "%s: %s", defs[i].key ? defs[i].key : "(no key)", why);
+            goto fail;
+        }
+        fresh++;
+    }
+    if (g_nslots + fresh > RL_SETTINGS_MAX) {
+        rl_log(RL_LOG_ERROR, "settings", "more than %u settings", RL_SETTINGS_MAX);
+        goto fail;
+    }
+    for (size_t i = 0; i < n; i++) {
+        slot *s = find(defs[i].key);
+        if (s)
+            continue;
+        g_slots[g_nslots++] = (slot){ .def = &defs[i] };
+        added++;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return added;
+fail:
+    pthread_mutex_unlock(&g_lock);
+    return -1;
+}
+
+static bool parse_bool(const char *t, bool *out)
+{
+    static const char *const yes[] = { "true", "1", "yes", "on" };
+    static const char *const no[] = { "false", "0", "no", "off" };
+    for (size_t i = 0; i < 4; i++) {
+        if (!strcmp(t, yes[i]))
+            return *out = true, true;
+        if (!strcmp(t, no[i]))
+            return *out = false, true;
+    }
+    return false;
+}
+
+/** @brief Parses and checks text against def; on failure writes why into err. */
+static bool parse_value(const rl_setting_def *d, const char *t, value *out, char *err, size_t errsz)
+{
+    char *end;
+    value v = { .set = true };
+    switch (d->type) {
+    case RL_SETTING_BOOL: {
+        bool b;
+        if (!parse_bool(t, &b)) {
+            snprintf(err, errsz, "'%s' is not true or false", t);
+            return false;
+        }
+        v.i = b;
+        break;
+    }
+    case RL_SETTING_INT: {
+        errno = 0;
+        long long x = strtoll(t, &end, 0);
+        if (!*t || *end || errno) {
+            snprintf(err, errsz, "'%s' is not an integer", t);
+            return false;
+        }
+        if (x < d->min_int || x > d->max_int) {
+            snprintf(err, errsz, "%lld is outside %lld to %lld", x, (long long)d->min_int, (long long)d->max_int);
+            return false;
+        }
+        if (d->step_int > 0 && (x - d->min_int) % d->step_int != 0) {
+            snprintf(err, errsz, "%lld is not a multiple of %lld from %lld", x, (long long)d->step_int,
+                     (long long)d->min_int);
+            return false;
+        }
+        v.i = x;
+        break;
+    }
+    case RL_SETTING_FLOAT: {
+        errno = 0;
+        double x = strtod(t, &end);
+        if (!*t || *end || errno || !isfinite(x)) {
+            snprintf(err, errsz, "'%s' is not a number", t);
+            return false;
+        }
+        if (x < d->min_float || x > d->max_float) {
+            snprintf(err, errsz, "%g is outside %g to %g", x, d->min_float, d->max_float);
+            return false;
+        }
+        if (d->step_float > 0) {
+            double q = (x - d->min_float) / d->step_float;
+            if (fabs(q - (double)(long long)(q + 0.5)) > 1e-6) {
+                snprintf(err, errsz, "%g is not a multiple of %g from %g", x, d->step_float, d->min_float);
+                return false;
+            }
+        }
+        v.f = x;
+        break;
+    }
+    case RL_SETTING_ENUM: {
+        uint32_t i = 0;
+        while (i < d->nchoices && strcmp(d->choices[i], t))
+            i++;
+        if (i == d->nchoices) {
+            size_t n = (size_t)snprintf(err, errsz, "'%s' is not one of", t);
+            for (uint32_t k = 0; k < d->nchoices && n < errsz; k++)
+                n += (size_t)snprintf(err + n, errsz - n, "%s%s", k ? ", " : " ", d->choices[k]);
+            return false;
+        }
+        v.i = i;
+        break;
+    }
+    case RL_SETTING_STRING:
+        v.s = dup(t);
+        break;
+    case RL_SETTING_BINDING: {
+        const char *colon = strchr(t, ':');
+        if (!colon || colon == t || !colon[1] || strchr(colon + 1, ':')) {
+            snprintf(err, errsz, "'%s' is not port:control", t);
+            return false;
+        }
+        v.s = dup(t);
+        break;
+    }
+    }
+    if ((d->type == RL_SETTING_STRING || d->type == RL_SETTING_BINDING) && !v.s) {
+        snprintf(err, errsz, "out of memory");
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+rl_setting_status rl_settings_set(const char *key, const char *val)
+{
+    char err[256];
+    value v;
+    pthread_mutex_lock(&g_lock);
+    slot *s = find(key);
+    if (!s) {
+        pthread_mutex_unlock(&g_lock);
+        rl_log(RL_LOG_WARN, "settings", "unknown setting %s; ignored", key ? key : "(null)");
+        return RL_SETTING_UNKNOWN;
+    }
+    if (!parse_value(s->def, val ? val : "", &v, err, sizeof err)) {
+        pthread_mutex_unlock(&g_lock);
+        rl_log(RL_LOG_WARN, "settings", "%s: %s; ignored", key, err);
+        return RL_SETTING_INVALID;
+    }
+    value_free(&s->val);
+    s->val = v;
+    pthread_mutex_unlock(&g_lock);
+    return RL_SETTING_OK;
+}
+
+typedef struct jp {
+    const char *p;
+} jp;
+
+static void skip_ws(jp *j)
+{
+    while (*j->p == ' ' || *j->p == '\t' || *j->p == '\n' || *j->p == '\r')
+        j->p++;
+}
+
+static int hex4(const char *p)
+{
+    int v = 0;
+    for (int i = 0; i < 4; i++) {
+        char c = p[i];
+        v <<= 4;
+        if (c >= '0' && c <= '9')
+            v |= c - '0';
+        else if (c >= 'a' && c <= 'f')
+            v |= c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F')
+            v |= c - 'A' + 10;
+        else
+            return -1;
+    }
+    return v;
+}
+
+static size_t utf8(unsigned c, char *o)
+{
+    if (c < 0x80) {
+        o[0] = (char)c;
+        return 1;
+    }
+    if (c < 0x800) {
+        o[0] = (char)(0xC0 | (c >> 6));
+        o[1] = (char)(0x80 | (c & 0x3F));
+        return 2;
+    }
+    o[0] = (char)(0xE0 | (c >> 12));
+    o[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+    o[2] = (char)(0x80 | (c & 0x3F));
+    return 3;
+}
+
+/** @brief Reads a JSON string at j into a new buffer; NULL when malformed. */
+static char *jstring(jp *j)
+{
+    if (*j->p != '"')
+        return NULL;
+    j->p++;
+    size_t cap = strlen(j->p) + 1, n = 0;
+    char *o = malloc(cap);
+    if (!o)
+        return NULL;
+    while (*j->p && *j->p != '"') {
+        unsigned char c = (unsigned char)*j->p++;
+        if (c < 0x20)
+            goto bad;
+        if (c != '\\') {
+            o[n++] = (char)c;
+            continue;
+        }
+        c = (unsigned char)*j->p++;
+        switch (c) {
+        case '"':
+        case '\\':
+        case '/':
+            o[n++] = (char)c;
+            break;
+        case 'b':
+            o[n++] = '\b';
+            break;
+        case 'f':
+            o[n++] = '\f';
+            break;
+        case 'n':
+            o[n++] = '\n';
+            break;
+        case 'r':
+            o[n++] = '\r';
+            break;
+        case 't':
+            o[n++] = '\t';
+            break;
+        case 'u': {
+            int u = hex4(j->p);
+            if (u < 0)
+                goto bad;
+            j->p += 4;
+            if (u >= 0xD800 && u < 0xE000)
+                u = 0xFFFD;
+            n += utf8((unsigned)u, o + n);
+            break;
+        }
+        default:
+            goto bad;
+        }
+    }
+    if (*j->p != '"')
+        goto bad;
+    j->p++;
+    o[n] = 0;
+    return o;
+bad:
+    free(o);
+    return NULL;
+}
+
+int rl_settings_load_json(const char *text, const char *origin)
+{
+    jp j = { text };
+    int applied = 0;
+    skip_ws(&j);
+    if (*j.p++ != '{')
+        goto bad;
+    skip_ws(&j);
+    if (*j.p == '}')
+        j.p++;
+    else
+        for (;;) {
+            skip_ws(&j);
+            char *key = jstring(&j);
+            if (!key)
+                goto bad;
+            skip_ws(&j);
+            if (*j.p++ != ':') {
+                free(key);
+                goto bad;
+            }
+            skip_ws(&j);
+            char *val = NULL;
+            bool null = false;
+            if (*j.p == '"') {
+                val = jstring(&j);
+            } else {
+                const char *b = j.p;
+                while (*j.p && *j.p != ',' && *j.p != '}' && *j.p != ' ' && *j.p != '\n' && *j.p != '\r' &&
+                       *j.p != '\t')
+                    j.p++;
+                size_t n = (size_t)(j.p - b);
+                if (n == 4 && !strncmp(b, "null", 4))
+                    null = true;
+                else if (n && *b != '{' && *b != '[') {
+                    val = malloc(n + 1);
+                    if (val) {
+                        memcpy(val, b, n);
+                        val[n] = 0;
+                    }
+                }
+            }
+            if (!val && !null) {
+                free(key);
+                goto bad;
+            }
+            if (val && rl_settings_set(key, val) == RL_SETTING_OK)
+                applied++;
+            free(key);
+            free(val);
+            skip_ws(&j);
+            if (*j.p == ',') {
+                j.p++;
+                continue;
+            }
+            if (*j.p++ != '}')
+                goto bad;
+            break;
+        }
+    skip_ws(&j);
+    if (*j.p)
+        goto bad;
+    return applied;
+bad:
+    rl_log(RL_LOG_WARN, "settings", "%s is not a JSON object of settings; ignored", origin ? origin : "settings");
+    return -1;
+}
+
+int rl_settings_load_file(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        rl_log(RL_LOG_WARN, "settings", "cannot read %s: %s; ignored", path, strerror(errno));
+        return -1;
+    }
+    size_t cap = 4096, n = 0;
+    char *buf = malloc(cap);
+    while (buf) {
+        size_t got = fread(buf + n, 1, cap - n - 1, f);
+        n += got;
+        if (n + 1 < cap)
+            break;
+        if (cap > (size_t)1 << 24) {
+            free(buf);
+            buf = NULL;
+            break;
+        }
+        char *bigger = realloc(buf, cap * 2);
+        if (!bigger) {
+            free(buf);
+            buf = NULL;
+            break;
+        }
+        buf = bigger;
+        cap *= 2;
+    }
+    bool bad = ferror(f) || !buf;
+    fclose(f);
+    if (bad) {
+        free(buf);
+        rl_log(RL_LOG_WARN, "settings", "cannot read %s; ignored", path);
+        return -1;
+    }
+    buf[n] = 0;
+    int r = rl_settings_load_json(buf, path);
+    free(buf);
+    return r;
+}
+
+/** @brief The value of `--name value` or `--name=value` at argv[*i]; NULL when the flag is another. */
+static const char *flag_value(int argc, char *const *argv, int *i, const char *name, bool *missing)
+{
+    size_t n = strlen(name);
+    const char *a = argv[*i];
+    if (strncmp(a, name, n))
+        return NULL;
+    if (a[n] == '=')
+        return a + n + 1;
+    if (a[n])
+        return NULL;
+    if (*i + 1 >= argc) {
+        *missing = true;
+        return NULL;
+    }
+    return argv[++*i];
+}
+
+int rl_settings_args(int argc, char *const *argv)
+{
+    int applied = 0, n;
+    bool file_flag = false;
+    for (int i = 1; i < argc; i++) {
+        bool missing = false;
+        const char *v = flag_value(argc, argv, &i, "--relift-settings", &missing);
+        if (missing)
+            rl_log(RL_LOG_WARN, "settings", "--relift-settings needs a file; ignored");
+        if (!v)
+            continue;
+        file_flag = true;
+        if ((n = rl_settings_load_file(v)) > 0)
+            applied += n;
+    }
+    char user[4096];
+    if (!file_flag && rl_settings_user_file(user, sizeof user)) {
+        FILE *f = fopen(user, "rb");
+        if (f) {
+            fclose(f);
+            if ((n = rl_settings_load_file(user)) > 0)
+                applied += n;
+        }
+    }
+    for (int i = 1; i < argc; i++) {
+        bool missing = false;
+        const char *v = flag_value(argc, argv, &i, "--relift-set", &missing);
+        if (missing)
+            rl_log(RL_LOG_WARN, "settings", "--relift-set needs key=value; ignored");
+        if (!v)
+            continue;
+        const char *eq = strchr(v, '=');
+        if (!eq || eq == v) {
+            rl_log(RL_LOG_WARN, "settings", "--relift-set %s is not key=value; ignored", v);
+            continue;
+        }
+        char key[128];
+        size_t kn = (size_t)(eq - v);
+        if (kn >= sizeof key) {
+            rl_log(RL_LOG_WARN, "settings", "--relift-set: the key is too long; ignored");
+            continue;
+        }
+        memcpy(key, v, kn);
+        key[kn] = 0;
+        if (rl_settings_set(key, eq + 1) == RL_SETTING_OK)
+            applied++;
+    }
+    return applied;
+}
+
+void rl_settings_reset(void)
+{
+    pthread_mutex_lock(&g_lock);
+    for (size_t i = 0; i < g_nslots; i++) {
+        value_free(&g_slots[i].val);
+        value_free(&g_slots[i].envval);
+        free(g_slots[i].env_text);
+        free(g_slots[i].port);
+    }
+    memset(g_slots, 0, sizeof g_slots);
+    g_nslots = 0;
+    free(g_app);
+    g_app = NULL;
+    pthread_mutex_unlock(&g_lock);
+}
+
+/** @brief The slot of key when it has the type, else NULL (with a debug log). */
+static slot *typed(const char *key, rl_setting_type type)
+{
+    slot *s = find(key);
+    if (!s || s->def->type != type) {
+        rl_log(RL_LOG_DEBUG, "settings", "%s is not a declared %s setting", key ? key : "(null)",
+               type == RL_SETTING_BOOL    ? "bool"
+               : type == RL_SETTING_INT   ? "int"
+               : type == RL_SETTING_FLOAT ? "float"
+               : type == RL_SETTING_ENUM  ? "enum"
+               : type == RL_SETTING_STRING ? "string"
+                                           : "binding");
+        return NULL;
+    }
+    return s;
+}
+
+/** @brief The value that wins for s: the environment, the set value, the default. Lock held. */
+static const value *effective(slot *s, value *dflt)
+{
+    const rl_setting_def *d = s->def;
+    const char *e = d->env ? getenv(d->env) : NULL;
+    if (e && *e) {
+        if (!s->env_text || strcmp(s->env_text, e)) {
+            char err[256];
+            value_free(&s->envval);
+            free(s->env_text);
+            s->env_text = dup(e);
+            s->env_warned = false;
+            if (!parse_value(d, e, &s->envval, err, sizeof err) && !s->env_warned) {
+                s->env_warned = true;
+                rl_log(RL_LOG_WARN, "settings", "%s=%s: %s; ignored", d->env, e, err);
+            }
+        }
+        if (s->envval.set)
+            return &s->envval;
+    }
+    if (s->val.set)
+        return &s->val;
+    memset(dflt, 0, sizeof *dflt);
+    dflt->i = d->def_int;
+    dflt->f = d->def_float;
+    dflt->s = (char *)(d->def_str ? d->def_str : "");
+    return dflt;
+}
+
+bool rl_setting_bool(const char *key)
+{
+    pthread_mutex_lock(&g_lock);
+    slot *s = typed(key, RL_SETTING_BOOL);
+    value d;
+    bool r = s && effective(s, &d)->i != 0;
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
+int64_t rl_setting_int(const char *key)
+{
+    pthread_mutex_lock(&g_lock);
+    slot *s = typed(key, RL_SETTING_INT);
+    value d;
+    int64_t r = s ? effective(s, &d)->i : 0;
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
+double rl_setting_float(const char *key)
+{
+    pthread_mutex_lock(&g_lock);
+    slot *s = typed(key, RL_SETTING_FLOAT);
+    value d;
+    double r = s ? effective(s, &d)->f : 0;
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
+uint32_t rl_setting_enum(const char *key)
+{
+    pthread_mutex_lock(&g_lock);
+    slot *s = typed(key, RL_SETTING_ENUM);
+    value d;
+    uint32_t r = s ? (uint32_t)effective(s, &d)->i : 0;
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
+const char *rl_setting_str(const char *key)
+{
+    pthread_mutex_lock(&g_lock);
+    slot *s = typed(key, RL_SETTING_STRING);
+    value d;
+    const char *r = s ? effective(s, &d)->s : "";
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
+bool rl_setting_binding(const char *key, const char **port, const char **control)
+{
+    pthread_mutex_lock(&g_lock);
+    slot *s = typed(key, RL_SETTING_BINDING);
+    value d;
+    const char *t = s ? effective(s, &d)->s : "";
+    const char *colon = strchr(t, ':');
+    bool ok = false;
+    *port = *control = "";
+    if (s && colon) {
+        size_t n = (size_t)(colon - t);
+        free(s->port);
+        s->port = malloc(n + 1);
+        if (s->port) {
+            memcpy(s->port, t, n);
+            s->port[n] = 0;
+            *port = s->port;
+            *control = colon + 1;
+            ok = true;
+        }
+    }
+    pthread_mutex_unlock(&g_lock);
+    return ok;
+}
+
+typedef struct sink {
+    char *buf;
+    size_t size, len;
+} sink;
+
+static void put(sink *k, const char *s, size_t n)
+{
+    if (k->len < k->size && k->buf) {
+        size_t room = k->size - k->len - 1;
+        memcpy(k->buf + k->len, s, n < room ? n : room);
+    }
+    k->len += n;
+}
+
+static void puts_(sink *k, const char *s) { put(k, s, strlen(s)); }
+
+static void put_json_str(sink *k, const char *s)
+{
+    puts_(k, "\"");
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        char tmp[8];
+        if (c == '"' || c == '\\') {
+            tmp[0] = '\\';
+            tmp[1] = (char)c;
+            put(k, tmp, 2);
+        } else if (c < 0x20) {
+            put(k, tmp, (size_t)snprintf(tmp, sizeof tmp, "\\u%04x", c));
+        } else {
+            put(k, (const char *)&c, 1);
+        }
+    }
+    puts_(k, "\"");
+}
+
+static void put_fmt(sink *k, const char *fmt, ...) RL_PRINTF(2, 3);
+static void put_fmt(sink *k, const char *fmt, ...)
+{
+    char tmp[64];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(tmp, sizeof tmp, fmt, ap);
+    va_end(ap);
+    put(k, tmp, n > 0 ? (size_t)n : 0);
+}
+
+static void put_field(sink *k, const char *name, const char *val)
+{
+    put_fmt(k, ",\"%s\":", name);
+    put_json_str(k, val ? val : "");
+}
+
+size_t rl_settings_schema_json(char *buf, size_t size)
+{
+    static const char *const types[] = { "bool", "int", "float", "enum", "string", "key_binding" };
+    sink k = { buf, size, 0 };
+    pthread_mutex_lock(&g_lock);
+    puts_(&k, "[");
+    for (size_t i = 0; i < g_nslots; i++) {
+        const rl_setting_def *d = g_slots[i].def;
+        puts_(&k, i ? ",{\"key\":" : "{\"key\":");
+        put_json_str(&k, d->key);
+        put_fmt(&k, ",\"type\":\"%s\"", types[d->type]);
+        put_field(&k, "label", d->label);
+        put_field(&k, "description", d->description);
+        put_fmt(&k, ",\"apply\":\"%s\"", d->apply == RL_APPLY_LIVE ? "live" : "start");
+        switch (d->type) {
+        case RL_SETTING_BOOL:
+            put_fmt(&k, ",\"default\":%s", d->def_int ? "true" : "false");
+            break;
+        case RL_SETTING_INT:
+            put_fmt(&k, ",\"default\":%lld,\"min\":%lld,\"max\":%lld,\"step\":%lld", (long long)d->def_int,
+                    (long long)d->min_int, (long long)d->max_int, (long long)d->step_int);
+            break;
+        case RL_SETTING_FLOAT:
+            put_fmt(&k, ",\"default\":%.17g,\"min\":%.17g,\"max\":%.17g,\"step\":%.17g", d->def_float,
+                    d->min_float, d->max_float, d->step_float);
+            break;
+        case RL_SETTING_ENUM:
+            puts_(&k, ",\"default\":");
+            put_json_str(&k, d->choices[d->def_int]);
+            puts_(&k, ",\"choices\":[");
+            for (uint32_t c = 0; c < d->nchoices; c++) {
+                if (c)
+                    puts_(&k, ",");
+                put_json_str(&k, d->choices[c]);
+            }
+            puts_(&k, "]");
+            break;
+        case RL_SETTING_STRING:
+            put_field(&k, "default", d->def_str);
+            break;
+        case RL_SETTING_BINDING: {
+            const char *t = d->def_str ? d->def_str : "";
+            const char *c = strchr(t, ':');
+            puts_(&k, ",\"default\":{\"port\":");
+            char *pn = c ? strndup(t, (size_t)(c - t)) : NULL;
+            put_json_str(&k, pn ? pn : "");
+            free(pn);
+            puts_(&k, ",\"control\":");
+            put_json_str(&k, c ? c + 1 : "");
+            puts_(&k, "}");
+            break;
+        }
+        }
+        if (d->env)
+            put_field(&k, "env", d->env);
+        puts_(&k, "}");
+    }
+    puts_(&k, "]");
+    pthread_mutex_unlock(&g_lock);
+    if (k.buf && k.size)
+        k.buf[k.len < k.size ? k.len : k.size - 1] = 0;
+    return k.len;
+}
+
+static bool absolute(const char *p, rl_dir_os os)
+{
+    if (!p || !*p)
+        return false;
+    if (os == RL_DIR_WINDOWS)
+        return (p[0] && p[1] == ':' && (p[2] == '\\' || p[2] == '/')) || (p[0] == '\\' && p[1] == '\\');
+    return p[0] == '/';
+}
+
+bool rl_settings_dir_for(char *out, size_t size, rl_dir_os os, const char *app, const char *home,
+                         const char *xdg_data, const char *appdata)
+{
+    char sep = os == RL_DIR_WINDOWS ? '\\' : '/';
+    char base[4096];
+    int n;
+    if (!app || !*app || strpbrk(app, "/\\") || !strcmp(app, ".") || !strcmp(app, ".."))
+        return false;
+    switch (os) {
+    case RL_DIR_MACOS:
+        if (!absolute(home, os))
+            return false;
+        n = snprintf(base, sizeof base, "%s/Library/Application Support", home);
+        break;
+    case RL_DIR_WINDOWS:
+        if (absolute(appdata, os))
+            n = snprintf(base, sizeof base, "%s", appdata);
+        else if (absolute(home, os))
+            n = snprintf(base, sizeof base, "%s\\AppData\\Roaming", home);
+        else
+            return false;
+        break;
+    default:
+        if (absolute(xdg_data, os))
+            n = snprintf(base, sizeof base, "%s", xdg_data);
+        else if (absolute(home, os))
+            n = snprintf(base, sizeof base, "%s/.local/share", home);
+        else
+            return false;
+        break;
+    }
+    while (n > 1 && (base[n - 1] == '/' || base[n - 1] == '\\'))
+        base[--n] = 0;
+    n = snprintf(out, size, "%s%c%s", base, sep, app);
+    return n > 0 && (size_t)n < size;
+}
+
+bool rl_settings_user_dir(char *out, size_t size, const char *app)
+{
+#if defined(_WIN32)
+    return rl_settings_dir_for(out, size, RL_DIR_WINDOWS, app, getenv("USERPROFILE"), NULL, getenv("APPDATA"));
+#elif defined(__APPLE__)
+    return rl_settings_dir_for(out, size, RL_DIR_MACOS, app, getenv("HOME"), NULL, NULL);
+#else
+    return rl_settings_dir_for(out, size, RL_DIR_XDG, app, getenv("HOME"), getenv("XDG_DATA_HOME"), NULL);
+#endif
+}
+
+void rl_settings_set_app(const char *app)
+{
+    pthread_mutex_lock(&g_lock);
+    free(g_app);
+    g_app = app && *app ? dup(app) : NULL;
+    pthread_mutex_unlock(&g_lock);
+}
+
+const char *rl_settings_app(void) { return g_app; }
+
+bool rl_settings_user_file(char *out, size_t size)
+{
+    char dir[4096];
+    if (!g_app || !rl_settings_user_dir(dir, sizeof dir, g_app))
+        return false;
+    int n = snprintf(out, size, "%s/settings.json", dir);
+    return n > 0 && (size_t)n < size;
+}
