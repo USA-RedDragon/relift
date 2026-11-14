@@ -203,7 +203,7 @@ pub fn raises(b: &Block) -> bool {
     use relift_ir::FpOp;
     b.insts.iter().any(|i| match &i.op {
         Op::Fp(op, _) => !matches!(op, FpOp::Neg | FpOp::Abs),
-        Op::Intrinsic(name, _) => *name == crate::lift::system::FP_RAISE,
+        Op::Intrinsic(call) => call.name == crate::lift::system::FP_RAISE,
         Op::Guard(_, code) => {
             *code == crate::lift::sail::SLOW_FPCR || *code == crate::lift::sail::SLOW_FLAGS
         }
@@ -246,7 +246,7 @@ fn fold(
     let wd = |x: relift_ir::Value| b.width_of(x).unwrap_or(Width::W1);
     let w = inst.width?;
     let r = match inst.op {
-        Op::Const(c) => c,
+        Op::Const(c) => c.get(),
         Op::Get(r) => *regs.get(&r)?,
         Op::Un(op, a) => eval_un(op, v(a)?, w),
         Op::Bin(op, a, c) => eval_bin(op, v(a)?, v(c)?, w),

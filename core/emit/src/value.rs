@@ -99,7 +99,7 @@ pub(crate) fn inlined(b: &Block) -> Vec<Option<String>> {
     b.insts
         .iter()
         .map(|i| match i.op {
-            Op::Const(c) => Some(typed_lit(c, i.width.unwrap_or(Width::W1))),
+            Op::Const(c) => Some(typed_lit(c.get(), i.width.unwrap_or(Width::W1))),
             Op::Get(r) if !written.contains(&r) => Some(reg(r)),
             _ => None,
         })
@@ -170,7 +170,7 @@ pub(crate) fn emit_op(
         }
     };
     let e = match &inst.op {
-        Op::Const(c) => fit(&lit(*c, w), w),
+        Op::Const(c) => fit(&lit(c.get(), w), w),
         Op::Get(r) => reg(*r),
         Op::Set(r, v) => return Ok(Emitted::Set(*r, val(*v))),
         Op::Guard(c, code) => return Ok(Emitted::Guard(*c, *code)),
@@ -209,7 +209,7 @@ pub(crate) fn emit_op(
             let amt = val(*y);
             // A constant shift amount below the width needs no range check.
             let k = match b.insts[y.index()].op {
-                Op::Const(k) if k < u128::from(n) => Some(k),
+                Op::Const(k) if k.get() < u128::from(n) => Some(k.get()),
                 _ => None,
             };
             let e = match (op, k) {
@@ -366,8 +366,9 @@ pub(crate) fn emit_op(
                 }
             }
         }
-        Op::Intrinsic(name, args) => {
-            let exprs: Vec<String> = args.iter().map(|v| val(*v)).collect();
+        Op::Intrinsic(call) => {
+            let name = call.name;
+            let exprs: Vec<String> = call.args.iter().map(|v| val(*v)).collect();
             let e = fe
                 .intrinsic(name, &exprs)
                 .ok_or_else(|| format!("intrinsic {name}"))?;

@@ -508,11 +508,11 @@ fn verify_rejects_ill_typed_blocks() {
         bank: None,
     };
     let c8 = Inst {
-        op: Op::Const(1),
+        op: Op::konst(1),
         width: Some(Width::W8),
     };
     let c16 = Inst {
-        op: Op::Const(1),
+        op: Op::konst(1),
         width: Some(Width::W16),
     };
     let add = Inst {
@@ -531,7 +531,7 @@ fn verify_rejects_ill_typed_blocks() {
     };
     assert!(base(vec![forward, c8.clone()]).verify().is_err());
     let too_big = Inst {
-        op: Op::Const(0x100),
+        op: Op::konst(0x100),
         width: Some(Width::W8),
     };
     assert!(base(vec![too_big]).verify().is_err());

@@ -374,11 +374,148 @@ impl CryptoOp {
     }
 }
 
+/// A 128-bit constant kept as two 64-bit halves, so that it does not raise
+/// the alignment of [`Op`] to 16 bytes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Konst {
+    lo: u64,
+    hi: u64,
+}
+
+impl Konst {
+    /// The constant `v`.
+    pub const fn new(v: u128) -> Konst {
+        Konst {
+            lo: v as u64,
+            hi: (v >> 64) as u64,
+        }
+    }
+
+    /// The value.
+    pub const fn get(self) -> u128 {
+        ((self.hi as u128) << 64) | self.lo as u128
+    }
+}
+
+impl From<u128> for Konst {
+    fn from(v: u128) -> Konst {
+        Konst::new(v)
+    }
+}
+
+impl std::fmt::Debug for Konst {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.get(), f)
+    }
+}
+
+impl std::hash::Hash for Konst {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.get().hash(state);
+    }
+}
+
+/// The operands of an [`Op::Fp`], held inline: at most three.
+#[derive(Clone, Copy)]
+pub struct FpArgs {
+    len: u8,
+    vals: [Value; 3],
+}
+
+impl FpArgs {
+    /// The operands `args`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there are more than three.
+    pub fn new(args: &[Value]) -> FpArgs {
+        assert!(args.len() <= 3, "floating point takes at most 3 operands");
+        let mut vals = [Value(0); 3];
+        vals[..args.len()].copy_from_slice(args);
+        FpArgs {
+            len: args.len() as u8,
+            vals,
+        }
+    }
+
+    /// The operands as a slice.
+    pub fn as_slice(&self) -> &[Value] {
+        &self.vals[..usize::from(self.len)]
+    }
+
+    /// The operands, each replaced by `f` of it.
+    pub fn map(&self, f: impl Fn(&Value) -> Value) -> FpArgs {
+        let mut out = *self;
+        for v in &mut out.vals[..usize::from(self.len)] {
+            *v = f(v);
+        }
+        out
+    }
+}
+
+impl std::ops::Deref for FpArgs {
+    type Target = [Value];
+
+    fn deref(&self) -> &[Value] {
+        self.as_slice()
+    }
+}
+
+impl<'a> IntoIterator for &'a FpArgs {
+    type Item = &'a Value;
+    type IntoIter = std::slice::Iter<'a, Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl From<&[Value]> for FpArgs {
+    fn from(args: &[Value]) -> FpArgs {
+        FpArgs::new(args)
+    }
+}
+
+impl<const N: usize> From<[Value; N]> for FpArgs {
+    fn from(args: [Value; N]) -> FpArgs {
+        FpArgs::new(&args)
+    }
+}
+
+impl PartialEq for FpArgs {
+    fn eq(&self, other: &FpArgs) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for FpArgs {}
+
+impl std::fmt::Debug for FpArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_slice(), f)
+    }
+}
+
+impl std::hash::Hash for FpArgs {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
+
+/// A call of a named intrinsic, the payload of [`Op::Intrinsic`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Call {
+    /// The intrinsic's name.
+    pub name: &'static str,
+    /// The arguments.
+    pub args: Vec<Value>,
+}
+
 /// One IR operation. Operands are earlier [`Value`]s of the same block.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// A constant of the instruction's width.
-    Const(u128),
+    Const(Konst),
     /// The value a slot held when the block was entered.
     Get(Reg),
     /// Writes a slot. Writes take effect when the block exits, so a later
@@ -445,7 +582,7 @@ pub enum Op {
     /// A memory fence.
     Fence(Order),
     /// A floating-point operation of the instruction's width (16, 32 or 64).
-    Fp(FpOp, Vec<Value>),
+    Fp(FpOp, FpArgs),
     /// Leaves the block before it has any effect when `cond` (one bit) is 1:
     /// the block's assumption does not hold, and the runtime runs the
     /// instruction on its slow path, the one named by `code`. A guard comes
@@ -453,7 +590,7 @@ pub enum Op {
     Guard(Value, u32),
     /// A call to a named intrinsic the frontend and runtime define, giving
     /// the instruction's width, or nothing when the instruction has none.
-    Intrinsic(&'static str, Vec<Value>),
+    Intrinsic(Box<Call>),
     /// Advances the guest clock by this many cycles, in the unit the CPU
     /// frontend defines (Game Boy: T-cycles). The clock moves at this
     /// position: an I/O access or sync point after it sees the time
@@ -537,6 +674,16 @@ pub enum Op {
 }
 
 impl Op {
+    /// The constant `v`.
+    pub const fn konst(v: u128) -> Op {
+        Op::Const(Konst::new(v))
+    }
+
+    /// A call of intrinsic `name` with `args`.
+    pub fn intrinsic(name: &'static str, args: Vec<Value>) -> Op {
+        Op::Intrinsic(Box::new(Call { name, args }))
+    }
+
     /// The operands, in order.
     pub fn operands(&self) -> Vec<Value> {
         match self {
@@ -572,7 +719,8 @@ impl Op {
                 value,
                 ..
             } => vec![*addr, *expected, *value],
-            Op::Fp(_, args) | Op::Intrinsic(_, args) => args.clone(),
+            Op::Fp(_, args) => args.to_vec(),
+            Op::Intrinsic(call) => call.args.clone(),
         }
     }
 

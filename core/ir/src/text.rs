@@ -85,8 +85,8 @@ use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst,
-    IoKind, Next, Op, Order, RegFile, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpArgs, FpOp, FpRound,
+    Inst, IoKind, Next, Op, Order, RegFile, UnOp, Value, Width,
 };
 
 const UN: [(UnOp, &str); 7] = [
@@ -251,7 +251,7 @@ impl fmt::Display for Block {
                 write!(f, "v{i}:i{} = ", w.bits())?;
             }
             match &inst.op {
-                Op::Const(c) => write!(f, "const {c:#x}")?,
+                Op::Const(c) => write!(f, "const {:#x}", c.get())?,
                 Op::Get(r) => write!(f, "get {}", self.regs.decl(*r).name)?,
                 Op::Set(r, v) => write!(f, "set {}, v{}", self.regs.decl(*r).name, v.0)?,
                 Op::Un(u, v) => write!(f, "{} v{}", name_of(&UN, *u), v.0)?,
@@ -317,10 +317,10 @@ impl fmt::Display for Block {
                     write!(f, "fp.{}", name_of(&FP, *op))?;
                     write_args(f, args)?;
                 }
-                Op::Intrinsic(name, args) => {
+                Op::Intrinsic(call) => {
                     f.write_str("intrinsic ")?;
-                    write_quoted(f, name)?;
-                    write_args(f, args)?;
+                    write_quoted(f, call.name)?;
+                    write_args(f, &call.args)?;
                 }
                 Op::Tick(n) => write!(f, "tick {n}")?,
                 Op::Sync => f.write_str("sync")?,
@@ -766,7 +766,7 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
         let v = c.values(2, defined)?;
         Op::Cmp(cmp, v[0], v[1])
     } else if let Some(f) = text.strip_prefix("fp.").and_then(|s| lookup(&FP, s)) {
-        Op::Fp(f, c.values(f.arity(), defined)?)
+        Op::Fp(f, FpArgs::new(&c.values(f.arity(), defined)?))
     } else if let Some(k) = text
         .strip_prefix("crypto.")
         .and_then(|s| lookup(&CRYPTO, s))
@@ -774,7 +774,7 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
         Op::Crypto(k, c.value(defined)?)
     } else {
         match text {
-            "const" => Op::Const(c.hex("a constant")?),
+            "const" => Op::konst(c.hex("a constant")?),
             "get" => Op::Get(reg(c)?),
             "set" => {
                 let r = reg(c)?;
@@ -831,7 +831,7 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
                         args.push(c.value(defined)?);
                     }
                 }
-                Op::Intrinsic(intern(&n.text), args)
+                Op::intrinsic(intern(&n.text), args)
             }
             _ => {
                 if let Some(rest) = text.strip_prefix("io.load.") {

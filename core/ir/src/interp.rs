@@ -582,7 +582,7 @@ pub fn run_verified(
         let v = |x: crate::Value| vals[x.index()];
         let width = inst.width.unwrap_or(Width::W1);
         let r: u128 = match &inst.op {
-            Op::Const(c) => *c,
+            Op::Const(c) => c.get(),
             Op::Get(reg) => state.regs[reg.index()] & width.mask(),
             Op::Set(reg, x) => {
                 writes.push((reg.index(), v(*x)));
@@ -680,9 +680,9 @@ pub fn run_verified(
                 let aw = block.insts[args[0].index()].width.unwrap_or(width);
                 eval_fp(*op, &a, aw, width)
             }
-            Op::Intrinsic(name, args) => {
-                let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
-                intrinsics.call(name, &a)? & width.mask()
+            Op::Intrinsic(call) => {
+                let a: Vec<u128> = call.args.iter().map(|x| v(*x)).collect();
+                intrinsics.call(call.name, &a)? & width.mask()
             }
             Op::Tick(n) => {
                 devices.tick(u64::from(*n));

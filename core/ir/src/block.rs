@@ -11,6 +11,8 @@ pub struct Inst {
     pub width: Option<Width>,
 }
 
+const _: () = assert!(std::mem::size_of::<Inst>() == 32);
+
 /// Where control goes when a block exits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Next {
@@ -146,6 +148,7 @@ pub(crate) fn check_op(
     };
     match op {
         Op::Const(c) => {
+            let c = c.get();
             let r = need()?;
             if c & !r.mask() != 0 {
                 return err(format!("constant {c:#x} does not fit {} bits", r.bits()));
@@ -248,8 +251,8 @@ pub(crate) fn check_op(
             }
             Ok(())
         }
-        Op::Intrinsic(_, args) => {
-            for a in args {
+        Op::Intrinsic(call) => {
+            for a in &call.args {
                 w(*a)?;
             }
             Ok(())

@@ -1,7 +1,7 @@
 use crate::block::check_op;
 use crate::{
-    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, IoKind, Next,
-    Op, Order, Reg, RegFile, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpArgs, FpOp, Inst,
+    IoKind, Next, Op, Order, Reg, RegFile, UnOp, Value, Width,
 };
 
 /// Builds a [`Block`] one operation at a time, checking widths as it goes.
@@ -90,7 +90,7 @@ impl Builder {
 
     /// A constant, truncated to `width`.
     pub fn konst(&mut self, width: Width, value: u128) -> Value {
-        self.val(Op::Const(value & width.mask()), width)
+        self.val(Op::konst(value & width.mask()), width)
     }
 
     /// Reads a slot's entry value.
@@ -278,7 +278,7 @@ impl Builder {
 
     /// A floating-point operation of `width` (16, 32 or 64).
     pub fn fp(&mut self, op: FpOp, args: &[Value], width: Width) -> Value {
-        self.val(Op::Fp(op, args.to_vec()), width)
+        self.val(Op::Fp(op, FpArgs::new(args)), width)
     }
 
     /// Advances the guest clock by `cycles`; see [`Op::Tick`].
@@ -368,7 +368,7 @@ impl Builder {
 
     /// Calls a named intrinsic.
     pub fn intrinsic(&mut self, name: &'static str, args: &[Value], width: Option<Width>) -> Value {
-        self.push(Op::Intrinsic(name, args.to_vec()), width)
+        self.push(Op::intrinsic(name, args.to_vec()), width)
     }
 
     /// `a + b + carry_in` with its carry out and signed overflow, all three

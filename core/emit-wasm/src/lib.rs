@@ -217,7 +217,8 @@ pub fn intrinsics_of(frontend: &dyn Frontend, fns: &[Function<'_>]) -> BTreeMap<
     let mut out = BTreeMap::new();
     for b in fns.iter().flat_map(lifted) {
         for inst in &b.insts {
-            if let Op::Intrinsic(name, _) = inst.op
+            if let Op::Intrinsic(call) = &inst.op
+                && let name = call.name
                 && let Some(k) = frontend.wasm_intrinsic(name)
             {
                 out.insert(name.to_string(), k);
@@ -388,11 +389,11 @@ fn val_types(w: Option<Width>) -> Vec<ValType> {
 
 /// The parameter and result types of intrinsic `op` in `b`, when it is one.
 fn intrinsic_sig(b: &Block, op: &Op, width: Option<Width>) -> Option<(Vec<ValType>, Vec<ValType>)> {
-    let Op::Intrinsic(_, args) = op else {
+    let Op::Intrinsic(call) = op else {
         return None;
     };
     let mut params = vec![ValType::I32, ValType::I32];
-    for a in args {
+    for a in &call.args {
         params.extend(val_types(b.width_of(*a)));
     }
     Some((params, val_types(width)))
@@ -461,7 +462,8 @@ pub fn emit(fns: &[Function<'_>], opts: &Options) -> Output {
     let mut clash: BTreeSet<&'static str> = BTreeSet::new();
     for b in fns.iter().flat_map(lifted) {
         for inst in &b.insts {
-            if let Op::Intrinsic(name, _) = inst.op
+            if let Op::Intrinsic(call) = &inst.op
+                && let name = call.name
                 && opts.intrinsics.get(name) == Some(&Intrinsic::Import)
                 && let Some(sig) = intrinsic_sig(b, &inst.op, inst.width)
             {

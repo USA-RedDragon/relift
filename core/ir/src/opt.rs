@@ -141,7 +141,7 @@ pub fn simplify(block: &Block) -> Block {
         }
         let mut same: Option<Value> = None;
         let mut konst = match &op {
-            Op::Const(c) => Some(*c),
+            Op::Const(c) => Some(c.get()),
             Op::Un(u, a) => k(a).map(|a| eval_un(*u, a, w)),
             Op::Bin(b, x, y) => k(x).zip(k(y)).map(|(a, b2)| eval_bin(*b, a, b2, w)),
             Op::Cmp(c, x, y) => k(x)
@@ -242,7 +242,7 @@ pub fn simplify(block: &Block) -> Block {
             Some(c) if pure && inst.width.is_some() => {
                 let c = c & ones;
                 known[i] = Some(c);
-                Op::Const(c)
+                Op::konst(c)
             }
             _ => op,
         };
@@ -357,7 +357,7 @@ pub fn constants(block: &Block) -> Vec<Option<u128>> {
         let wid = |v: &Value| block.width_of(*v).unwrap_or(Width::W1);
         let w = inst.width.unwrap_or(Width::W1);
         let c = match &inst.op {
-            Op::Const(c) => Some(*c),
+            Op::Const(c) => Some(c.get()),
             Op::Un(u, a) => k(a).map(|a| eval_un(*u, a, w)),
             Op::Bin(b, x, y) => k(x).zip(k(y)).map(|(a, b2)| eval_bin(*b, a, b2, w)),
             Op::Cmp(c, x, y) => k(x)
@@ -439,8 +439,8 @@ fn remap_with(op: &Op, r: &dyn Fn(&Value) -> Value) -> Op {
         Op::ClearExclusive => Op::ClearExclusive,
         Op::Guard(v, code) => Op::Guard(r(v), *code),
         Op::Fence(o) => Op::Fence(*o),
-        Op::Fp(f, args) => Op::Fp(*f, args.iter().map(r).collect()),
-        Op::Intrinsic(name, args) => Op::Intrinsic(name, args.iter().map(r).collect()),
+        Op::Fp(f, args) => Op::Fp(*f, args.map(r)),
+        Op::Intrinsic(call) => Op::intrinsic(call.name, call.args.iter().map(r).collect()),
         Op::Tick(n) => Op::Tick(*n),
         Op::Sync => Op::Sync,
         Op::TickIf(v, n) => Op::TickIf(r(v), *n),

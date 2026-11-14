@@ -312,10 +312,11 @@ impl Em<'_> {
         }
         match op {
             Op::Const(c) => {
-                self.c64(*c as u64 as i64);
+                let c = c.get();
+                self.c64(c as u64 as i64);
                 self.set(dst.lo());
                 if let V::P(_, h) = dst {
-                    self.c64((*c >> 64) as u64 as i64);
+                    self.c64((c >> 64) as u64 as i64);
                     self.set(h);
                 }
             }
@@ -478,9 +479,9 @@ impl Em<'_> {
                 }
                 self.set(dst.lo());
             }
-            Op::Intrinsic(name, args) => {
-                let a: Vec<V> = args.iter().map(|x| loc(self, *x)).collect();
-                self.intrinsic(name, &a, width, dst)?;
+            Op::Intrinsic(call) => {
+                let a: Vec<V> = call.args.iter().map(|x| loc(self, *x)).collect();
+                self.intrinsic(call.name, &a, width, dst)?;
             }
             Op::Tick(c) => {
                 self.get(L_BUDGET);

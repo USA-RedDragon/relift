@@ -94,6 +94,6 @@ fn counter_reads_are_intrinsics() {
     assert!(
         b.insts
             .iter()
-            .any(|i| i.op == Op::Intrinsic(system::CNTPCT, Vec::new()))
+            .any(|i| i.op == Op::intrinsic(system::CNTPCT, Vec::new()))
     );
 }

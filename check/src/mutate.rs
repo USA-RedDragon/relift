@@ -60,7 +60,7 @@ fn live(block: &Block) -> Vec<bool> {
 /// by 4 bytes (or swaps its two targets). Returns what it changed.
 pub fn mutate(block: &mut Block) -> String {
     let live = live(block);
-    let zeros: Vec<bool> = block.insts.iter().map(|i| i.op == Op::Const(0)).collect();
+    let zeros: Vec<bool> = block.insts.iter().map(|i| i.op == Op::konst(0)).collect();
     for (i, inst) in block.insts.iter_mut().enumerate() {
         if !live[i] {
             continue;
@@ -112,7 +112,7 @@ pub fn mutate(block: &mut Block) -> String {
             let w = block.addr_width;
             let k = Value(block.insts.len() as u32);
             block.insts.push(Inst {
-                op: Op::Const(4),
+                op: Op::konst(4),
                 width: Some(w),
             });
             let moved = Value(block.insts.len() as u32);

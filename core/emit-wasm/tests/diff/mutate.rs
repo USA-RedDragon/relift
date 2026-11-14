@@ -1,7 +1,9 @@
 //! The mutation control, copied from `check/src/mutate.rs`: a deliberately
 //! broken lifted block, which the differential run must catch.
 
-use relift_ir::{AtomicOp, BinOp, Block, CmpOp, CryptoOp, FpOp, FpRound, Inst, Next, Op, Value};
+use relift_ir::{
+    AtomicOp, BinOp, Block, CmpOp, CryptoOp, FpArgs, FpOp, FpRound, Inst, Next, Op, Value,
+};
 
 fn swap_bin(op: BinOp) -> BinOp {
     match op {
@@ -62,7 +64,7 @@ fn live(block: &Block) -> Vec<bool> {
 /// by 4 bytes (or swaps its two targets). Returns what it changed.
 pub fn mutate(block: &mut Block) -> String {
     let live = live(block);
-    let zeros: Vec<bool> = block.insts.iter().map(|i| i.op == Op::Const(0)).collect();
+    let zeros: Vec<bool> = block.insts.iter().map(|i| i.op == Op::konst(0)).collect();
     for (i, inst) in block.insts.iter_mut().enumerate() {
         if !live[i] {
             continue;
@@ -114,7 +116,7 @@ pub fn mutate(block: &mut Block) -> String {
             let w = block.addr_width;
             let k = Value(block.insts.len() as u32);
             block.insts.push(Inst {
-                op: Op::Const(4),
+                op: Op::konst(4),
                 width: Some(w),
             });
             let moved = Value(block.insts.len() as u32);
@@ -164,7 +166,7 @@ fn swap_fp(f: FpOp, args: &[Value]) -> Op {
         FpOp::Neg => FpOp::Abs,
         FpOp::Abs => FpOp::Neg,
         FpOp::MulAdd => {
-            return Op::Fp(FpOp::MulAdd, vec![args[2], args[1], args[0]]);
+            return Op::Fp(FpOp::MulAdd, FpArgs::new(&[args[2], args[1], args[0]]));
         }
         FpOp::RoundInt(r) => FpOp::RoundInt(swap_round(r)),
         FpOp::ToSInt(r) => FpOp::ToUInt(r),
@@ -172,7 +174,7 @@ fn swap_fp(f: FpOp, args: &[Value]) -> Op {
         FpOp::FromSInt => FpOp::FromUInt,
         FpOp::FromUInt | FpOp::Convert => FpOp::FromSInt,
     };
-    Op::Fp(other, args.to_vec())
+    Op::Fp(other, FpArgs::new(args))
 }
 
 /// Breaks the first live atomic, cipher or binary16 operation of `block`:

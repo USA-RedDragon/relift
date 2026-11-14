@@ -23,7 +23,7 @@ fn eval(b: &Block, vals: &[Option<u128>], known: &HashMap<Reg, u128>, i: usize) 
     let get = |v: Value| vals.get(v.index()).copied().flatten();
     let wv = |v: Value| b.width_of(v).map(|x| x.bits()).unwrap_or(0);
     let r = match &inst.op {
-        Op::Const(c) => *c,
+        Op::Const(c) => c.get(),
         Op::Get(r) => *known.get(r)?,
         Op::Bin(op, x, y) => {
             let (x, y) = (get(*x)?, get(*y)?);

@@ -53,7 +53,7 @@ pub fn slot_uses(f: &Function, slots: &BTreeSet<u64>, size: u64) -> SlotUses {
         if let Insn::Lifted(b) = i {
             for inst in &b.insts {
                 if let Op::Const(c) = inst.op
-                    && let Ok(c) = u64::try_from(c)
+                    && let Ok(c) = u64::try_from(c.get())
                     && pages.contains(&(c & !0xfff))
                 {
                     named.extend(slots.range(c & !0xfff..(c & !0xfff) + 0x1000));
@@ -151,7 +151,7 @@ fn step(
     for (i, inst) in b.insts.iter().enumerate() {
         let w = inst.width.map(|w| w.mask());
         let fact = match &inst.op {
-            Op::Const(c) => Some(Fact::Const(*c)),
+            Op::Const(c) => Some(Fact::Const(c.get())),
             Op::Get(r) => {
                 from[i] = Some(*r);
                 state.get(r).copied()

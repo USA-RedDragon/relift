@@ -431,8 +431,8 @@ mod tests {
         let calls: Vec<&str> = b
             .insts
             .iter()
-            .filter_map(|i| match i.op {
-                relift_ir::Op::Intrinsic(n, _) => Some(n),
+            .filter_map(|i| match &i.op {
+                relift_ir::Op::Intrinsic(call) => Some(call.name),
                 _ => None,
             })
             .collect();
