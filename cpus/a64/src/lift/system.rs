@@ -34,6 +34,26 @@ pub const WFE: &str = "a64.wfe";
 /// Intrinsic: `SEV`; no operands, no result.
 pub const SEV: &str = "a64.sev";
 
+/// The `relift-ir` interpreter's view of the intrinsics that have no effect
+/// a single-threaded interpreter can see: `WFE` and `SEV` (an event wait
+/// that may return at once, and its signal) and cache maintenance. Every
+/// other intrinsic needs runtime state and stays unknown.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InterpIntrinsics;
+
+impl relift_ir::interp::Intrinsics for InterpIntrinsics {
+    fn call(
+        &mut self,
+        name: &'static str,
+        _args: &[u128],
+    ) -> Result<u128, relift_ir::interp::Error> {
+        match name {
+            WFE | SEV | CACHE_MAINT => Ok(0),
+            _ => Err(relift_ir::interp::Error::UnknownIntrinsic(name)),
+        }
+    }
+}
+
 /// The hand-written system lifter for `enc`, if there is one.
 pub fn lifter(enc: Encoding) -> Option<LiftFn> {
     use Encoding::*;
