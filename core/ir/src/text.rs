@@ -59,6 +59,9 @@
 //! | `concat hi, lo` | [`Op::Concat`] |
 //! | `load.E.O addr` / `store.E.O addr, value` | memory, `E` is `le` or `be` |
 //! | `load.excl.E.O addr` / `store.excl.E.O addr, value` | exclusive memory |
+//! | `atomic.U.E.O addr, value` | [`Op::AtomicRmw`], `U` is `add clr eor set smax smin umax umin swp` |
+//! | `cas.E.O addr, expected, value` | [`Op::CompareSwap`] |
+//! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns sm4.sbox` |
 //! | `fence.O` / `clear.excl` | fence, clear the monitor |
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
 //! | `fp.rint.R fp.tosint.R fp.touint.R fp.fromsint fp.fromuint fp.convert v` | [`FpOp`] conversions; `R` is `n`, `a`, `m`, `p` or `z` ([`FpRound`]) |
@@ -82,8 +85,8 @@ use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst, IoKind, Next,
-    Op, Order, RegFile, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst,
+    IoKind, Next, Op, Order, RegFile, UnOp, Value, Width,
 };
 
 const UN: [(UnOp, &str); 7] = [
@@ -157,6 +160,18 @@ const ORDER: [(Order, &str); 5] = [
     (Order::Release, "release"),
     (Order::AcqRel, "acqrel"),
     (Order::SeqCst, "seqcst"),
+];
+
+const ATOMIC: [(AtomicOp, &str); 9] = [
+    (AtomicOp::Add, "add"),
+    (AtomicOp::Clear, "clr"),
+    (AtomicOp::Xor, "eor"),
+    (AtomicOp::Or, "set"),
+    (AtomicOp::SMax, "smax"),
+    (AtomicOp::SMin, "smin"),
+    (AtomicOp::UMax, "umax"),
+    (AtomicOp::UMin, "umin"),
+    (AtomicOp::Swap, "swp"),
 ];
 
 const CRYPTO: [(CryptoOp, &str); 5] = [
@@ -331,6 +346,36 @@ impl fmt::Display for Block {
                     value.0
                 )?,
                 Op::Crypto(op, x) => write!(f, "crypto.{} v{}", name_of(&CRYPTO, *op), x.0)?,
+                Op::AtomicRmw {
+                    op,
+                    addr,
+                    value,
+                    endian,
+                    order,
+                } => write!(
+                    f,
+                    "atomic.{}.{}.{} v{}, v{}",
+                    name_of(&ATOMIC, *op),
+                    endian_name(*endian),
+                    name_of(&ORDER, *order),
+                    addr.0,
+                    value.0
+                )?,
+                Op::CompareSwap {
+                    addr,
+                    expected,
+                    value,
+                    endian,
+                    order,
+                } => write!(
+                    f,
+                    "cas.{}.{} v{}, v{}, v{}",
+                    endian_name(*endian),
+                    name_of(&ORDER, *order),
+                    addr.0,
+                    expected.0,
+                    value.0
+                )?,
             }
             writeln!(f)?;
         }
@@ -820,6 +865,32 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
                     let (endian, order) = parse_order_endian(c, &m, &parts, at + 5)?;
                     Op::Load {
                         addr: c.value(defined)?,
+                        endian,
+                        order,
+                    }
+                } else if let Some(rest) = text.strip_prefix("atomic.") {
+                    let parts: Vec<&str> = rest.split('.').collect();
+                    let Some(op) = parts.first().and_then(|p| lookup(&ATOMIC, p)) else {
+                        return c.err(at + 7, "unknown atomic update");
+                    };
+                    let skip = 8 + parts[0].len();
+                    let (endian, order) = parse_order_endian(c, &m, &parts[1..], at + skip)?;
+                    let v = c.values(2, defined)?;
+                    Op::AtomicRmw {
+                        op,
+                        addr: v[0],
+                        value: v[1],
+                        endian,
+                        order,
+                    }
+                } else if let Some(rest) = text.strip_prefix("cas.") {
+                    let parts: Vec<&str> = rest.split('.').collect();
+                    let (endian, order) = parse_order_endian(c, &m, &parts, at + 4)?;
+                    let v = c.values(3, defined)?;
+                    Op::CompareSwap {
+                        addr: v[0],
+                        expected: v[1],
+                        value: v[2],
                         endian,
                         order,
                     }

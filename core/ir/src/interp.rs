@@ -703,6 +703,44 @@ pub fn run_with(
             }
             Op::Sync => 0,
             Op::Crypto(op, x) => crate::crypto::eval(*op, v(*x)),
+            Op::AtomicRmw {
+                op,
+                addr,
+                value,
+                endian,
+                order: _,
+            } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = width.bits() / 8;
+                let mut buf = vec![0u8; n as usize];
+                mem.read(a, &mut buf).map_err(Error::Fault)?;
+                let old = from_bytes(&buf, *endian);
+                let new = op.apply(old, v(*value), width);
+                // Like a plain store, the access leaves the local monitor
+                // as it is (whether it clears it is IMPLEMENTATION
+                // DEFINED; the runtime's rl_atomic does not).
+                mem.write(a, &to_bytes(new, n as usize, *endian))
+                    .map_err(Error::Fault)?;
+                old
+            }
+            Op::CompareSwap {
+                addr,
+                expected,
+                value,
+                endian,
+                order: _,
+            } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = width.bits() / 8;
+                let mut buf = vec![0u8; n as usize];
+                mem.read(a, &mut buf).map_err(Error::Fault)?;
+                let old = from_bytes(&buf, *endian);
+                if old == v(*expected) {
+                    mem.write(a, &to_bytes(v(*value), n as usize, *endian))
+                        .map_err(Error::Fault)?;
+                }
+                old
+            }
         };
         vals.push(r);
     }

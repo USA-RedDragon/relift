@@ -40,7 +40,8 @@ pub use block::{Block, Exit, Flow, Inst, Next, VerifyError};
 pub use builder::Builder;
 pub use io::{AddrClass, IoMap, IoRange};
 pub use ops::{
-    BinOp, CmpOp, CryptoOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, Order, UnOp, Value, Width,
+    AtomicOp, BinOp, CmpOp, CryptoOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, Order, UnOp,
+    Value, Width,
 };
 pub use opt::{classify_io, dce, simplify};
 pub use regs::{Reg, RegDecl, RegFile};

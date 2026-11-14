@@ -377,6 +377,9 @@ pub(crate) fn emit_op(
         Op::IoLoad { .. } | Op::IoStore { .. } => return Err("an I/O access".into()),
         Op::Sync => return Err("a sync point".into()),
         Op::Crypto(..) => return Err("a cipher step".into()),
+        Op::AtomicRmw { .. } | Op::CompareSwap { .. } => {
+            return Err("an atomic read-modify-write".into());
+        }
     };
     Ok(Emitted::Value(e))
 }

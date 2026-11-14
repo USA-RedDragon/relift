@@ -1,7 +1,7 @@
 use crate::block::check_op;
 use crate::{
-    BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, IoKind, Next, Op,
-    Order, Reg, RegFile, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, IoKind, Next,
+    Op, Order, Reg, RegFile, UnOp, Value, Width,
 };
 
 /// Builds a [`Block`] one operation at a time, checking widths as it goes.
@@ -315,6 +315,50 @@ impl Builder {
     /// Makes the exit a sync point; see [`Op::Sync`]. Push it last.
     pub fn sync(&mut self) {
         self.push(Op::Sync, None);
+    }
+
+    /// An atomic read-modify-write; gives the old value.
+    pub fn atomic_rmw(
+        &mut self,
+        op: AtomicOp,
+        addr: Value,
+        value: Value,
+        endian: Endian,
+        order: Order,
+    ) -> Value {
+        let w = self.width(value);
+        self.val(
+            Op::AtomicRmw {
+                op,
+                addr,
+                value,
+                endian,
+                order,
+            },
+            w,
+        )
+    }
+
+    /// An atomic compare-and-swap; gives the old value.
+    pub fn compare_swap(
+        &mut self,
+        addr: Value,
+        expected: Value,
+        value: Value,
+        endian: Endian,
+        order: Order,
+    ) -> Value {
+        let w = self.width(value);
+        self.val(
+            Op::CompareSwap {
+                addr,
+                expected,
+                value,
+                endian,
+                order,
+            },
+            w,
+        )
     }
 
     /// A cipher step.

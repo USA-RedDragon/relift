@@ -259,6 +259,24 @@ pub(crate) fn check_op(
             none()?;
             same(w(*c)?, Width::W1)
         }
+        Op::AtomicRmw { addr, value, .. } => {
+            same(w(*addr)?, addr_width)?;
+            let r = need()?;
+            same(w(*value)?, r)?;
+            bytes(r)
+        }
+        Op::CompareSwap {
+            addr,
+            expected,
+            value,
+            ..
+        } => {
+            same(w(*addr)?, addr_width)?;
+            let r = need()?;
+            same(w(*value)?, r)?;
+            same(w(*expected)?, r)?;
+            bytes(r)
+        }
         Op::Crypto(c, x) => {
             same(need()?, c.width())?;
             same(w(*x)?, c.width())

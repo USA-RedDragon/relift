@@ -589,6 +589,9 @@ impl Em<'_> {
                 self.i(I::End);
             }
             Op::Crypto(..) => return Err("a cipher step".into()),
+            Op::AtomicRmw { .. } | Op::CompareSwap { .. } => {
+                return Err("an atomic read-modify-write".into());
+            }
             Op::Set(..) | Op::Guard(..) => {
                 return Err("an operation out of place".into());
             }

@@ -461,5 +461,31 @@ fn remap_with(op: &Op, r: &dyn Fn(&Value) -> Value) -> Op {
             kind: *kind,
         },
         Op::Crypto(c, v) => Op::Crypto(*c, r(v)),
+        Op::AtomicRmw {
+            op,
+            addr,
+            value,
+            endian,
+            order,
+        } => Op::AtomicRmw {
+            op: *op,
+            addr: r(addr),
+            value: r(value),
+            endian: *endian,
+            order: *order,
+        },
+        Op::CompareSwap {
+            addr,
+            expected,
+            value,
+            endian,
+            order,
+        } => Op::CompareSwap {
+            addr: r(addr),
+            expected: r(expected),
+            value: r(value),
+            endian: *endian,
+            order: *order,
+        },
     }
 }

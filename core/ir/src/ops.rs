@@ -288,6 +288,64 @@ pub enum IoKind {
     Device,
 }
 
+/// The update of an [`Op::AtomicRmw`]: the new memory value from the old
+/// one and the operand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AtomicOp {
+    /// `old + v`.
+    Add,
+    /// `old & !v`.
+    Clear,
+    /// `old ^ v`.
+    Xor,
+    /// `old | v`.
+    Or,
+    /// The signed maximum.
+    SMax,
+    /// The signed minimum.
+    SMin,
+    /// The unsigned maximum.
+    UMax,
+    /// The unsigned minimum.
+    UMin,
+    /// `v`.
+    Swap,
+}
+
+impl AtomicOp {
+    /// The new value from `old` and `v`, both `w` bits.
+    pub fn apply(self, old: u128, v: u128, w: Width) -> u128 {
+        let s = |x: u128| -> i128 {
+            let sh = 128 - w.bits();
+            ((x << sh) as i128) >> sh
+        };
+        let r = match self {
+            AtomicOp::Add => old.wrapping_add(v),
+            AtomicOp::Clear => old & !v,
+            AtomicOp::Xor => old ^ v,
+            AtomicOp::Or => old | v,
+            AtomicOp::SMax => {
+                if s(old) >= s(v) {
+                    old
+                } else {
+                    v
+                }
+            }
+            AtomicOp::SMin => {
+                if s(old) <= s(v) {
+                    old
+                } else {
+                    v
+                }
+            }
+            AtomicOp::UMax => old.max(v),
+            AtomicOp::UMin => old.min(v),
+            AtomicOp::Swap => v,
+        };
+        r & w.mask()
+    }
+}
+
 /// Fixed table-driven steps of standard ciphers, kept whole so an emitter
 /// can map each to a table or a host instruction instead of the gate-level
 /// circuit the tables stand for. Each is pure and has one meaning.
@@ -447,6 +505,35 @@ pub enum Op {
     Sync,
     /// A cipher step of the width [`CryptoOp::width`].
     Crypto(CryptoOp, Value),
+    /// One single-copy-atomic read-modify-write of the instruction's width
+    /// (whole bytes) at `addr`: memory becomes `op(old, value)`; gives `old`.
+    AtomicRmw {
+        /// The update.
+        op: AtomicOp,
+        /// The address.
+        addr: Value,
+        /// The operand.
+        value: Value,
+        /// The byte order.
+        endian: Endian,
+        /// The ordering.
+        order: Order,
+    },
+    /// One single-copy-atomic compare-and-swap of the instruction's width:
+    /// memory becomes `value` when it equals `expected`; gives the old
+    /// value either way.
+    CompareSwap {
+        /// The address.
+        addr: Value,
+        /// The value compared.
+        expected: Value,
+        /// The value stored on a match.
+        value: Value,
+        /// The byte order.
+        endian: Endian,
+        /// The ordering.
+        order: Order,
+    },
 }
 
 impl Op {
@@ -475,9 +562,16 @@ impl Op {
             }
             Op::Store { addr, value, .. }
             | Op::StoreExclusive { addr, value, .. }
-            | Op::IoStore { addr, value, .. } => {
+            | Op::IoStore { addr, value, .. }
+            | Op::AtomicRmw { addr, value, .. } => {
                 vec![*addr, *value]
             }
+            Op::CompareSwap {
+                addr,
+                expected,
+                value,
+                ..
+            } => vec![*addr, *expected, *value],
             Op::Fp(_, args) | Op::Intrinsic(_, args) => args.clone(),
         }
     }
@@ -502,6 +596,8 @@ impl Op {
                 | Op::IoLoad { .. }
                 | Op::IoStore { .. }
                 | Op::Sync
+                | Op::AtomicRmw { .. }
+                | Op::CompareSwap { .. }
         )
     }
 }

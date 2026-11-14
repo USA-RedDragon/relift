@@ -3,8 +3,8 @@
 
 use relift_ir::interp::{self, Error, FlatMemory, NoIntrinsics, State};
 use relift_ir::{
-    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, Inst, Next, Op, Order, Reg,
-    RegDecl, RegFile, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, Inst, Next, Op,
+    Order, Reg, RegDecl, RegFile, UnOp, Value, Width,
 };
 
 static DECLS: [RegDecl; 4] = [
@@ -239,6 +239,57 @@ fn memory_honors_byte_order() {
     assert_eq!(s.regs[0], 0x0302_0100);
     assert_eq!(s.regs[1], 0x0001_0203);
     assert_eq!(&m.bytes[0x10..0x12], &[0xaa, 0xbb]);
+}
+
+#[test]
+fn atomics_update_memory_and_give_the_old_value() {
+    let cases = [
+        (
+            AtomicOp::Add,
+            0x8000_0001u128,
+            0x0302_0100 + 0x8000_0001u128,
+        ),
+        (AtomicOp::Clear, 0x0000_0101, 0x0302_0000),
+        (AtomicOp::Xor, 0xffff_ffff, !0x0302_0100u128 & 0xffff_ffff),
+        (AtomicOp::Or, 0x8000_0000, 0x8302_0100),
+        (AtomicOp::SMax, 0x8000_0000, 0x0302_0100),
+        (AtomicOp::SMin, 0x8000_0000, 0x8000_0000),
+        (AtomicOp::UMax, 0x8000_0000, 0x8000_0000),
+        (AtomicOp::UMin, 0x8000_0000, 0x0302_0100),
+        (AtomicOp::Swap, 0x1234_5678, 0x1234_5678),
+    ];
+    for (op, operand, want) in cases {
+        let mut b = Builder::new(file(), Width::W64, 0);
+        let addr = b.konst(Width::W64, 0x1000);
+        let v = b.konst(Width::W32, operand);
+        let old = b.atomic_rmw(op, addr, v, Endian::Little, Order::AcqRel);
+        let old = b.zext(old, Width::W64);
+        b.set(Reg(0), old);
+        let block = b.jump(4, 4);
+        block.verify().expect("verifies");
+        let mut s = State::new(4);
+        let mut m = mem();
+        run(&block, &mut s, &mut m).expect("runs");
+        assert_eq!(s.regs[0], 0x0302_0100, "{op:?}");
+        let got = u32::from_le_bytes(m.bytes[..4].try_into().expect("4 bytes"));
+        assert_eq!(u128::from(got), want, "{op:?}");
+    }
+    for (expected, stored) in [(0x0100u128, true), (0x0101, false)] {
+        let mut b = Builder::new(file(), Width::W64, 0);
+        let addr = b.konst(Width::W64, 0x1000);
+        let e = b.konst(Width::W16, expected);
+        let v = b.konst(Width::W16, 0xbeef);
+        let old = b.compare_swap(addr, e, v, Endian::Little, Order::Plain);
+        let old = b.zext(old, Width::W64);
+        b.set(Reg(0), old);
+        let block = b.jump(4, 4);
+        let mut s = State::new(4);
+        let mut m = mem();
+        run(&block, &mut s, &mut m).expect("runs");
+        assert_eq!(s.regs[0], 0x0100);
+        let want: [u8; 2] = if stored { [0xef, 0xbe] } else { [0, 1] };
+        assert_eq!(m.bytes[..2], want);
+    }
 }
 
 #[test]

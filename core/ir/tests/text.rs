@@ -2,8 +2,8 @@
 
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{
-    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, IoKind, Next, Order, Reg,
-    RegDecl, RegFile, UnOp, Value, Width, dce, parse,
+    AtomicOp, BinOp, Block, Builder, CmpOp, CryptoOp, Endian, Exit, Flow, FpOp, FpRound, IoKind,
+    Next, Order, Reg, RegDecl, RegFile, UnOp, Value, Width, dce, parse,
 };
 
 static DECLS: [RegDecl; 4] = [
@@ -113,6 +113,31 @@ fn everything(exit: Exit, addr: Width) -> Block {
         b.fence(o);
     }
     b.clear_exclusive();
+    for op in [
+        AtomicOp::Add,
+        AtomicOp::Clear,
+        AtomicOp::Xor,
+        AtomicOp::Or,
+        AtomicOp::SMax,
+        AtomicOp::SMin,
+        AtomicOp::UMax,
+        AtomicOp::UMin,
+        AtomicOp::Swap,
+    ] {
+        b.atomic_rmw(op, ad, x0, Endian::Little, Order::AcqRel);
+    }
+    b.compare_swap(ad, x0, x0, Endian::Big, Order::Acquire);
+    let q = b.zext(x0, Width::W128);
+    for op in [
+        CryptoOp::AesSubBytes,
+        CryptoOp::AesInvSubBytes,
+        CryptoOp::AesMixColumns,
+        CryptoOp::AesInvMixColumns,
+    ] {
+        b.crypto(op, q);
+    }
+    let byte = b.trunc(x0, Width::W8);
+    b.crypto(CryptoOp::Sm4Sbox, byte);
     let f = b.trunc(x0, Width::W32);
     for op in [FpOp::Add, FpOp::Sub, FpOp::Mul, FpOp::Div] {
         b.fp(op, &[f, w2], Width::W32);
