@@ -9,9 +9,12 @@
 //! identity.
 
 pub mod bundled;
+pub mod cache;
 pub mod conflicts;
 pub mod rom;
+pub mod stage;
 pub mod user;
+pub mod variants;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -60,6 +63,12 @@ impl ExefsPatch {
                 records: p.records,
                 kind: "pchtxt",
             });
+        }
+        if stem.is_empty() || !stem.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!(
+                "{rel}: an IPS patch is named for the build id of its module (<build id>.ips)"
+            )
+            .into());
         }
         let (records, kind) = ips_records(&bytes).map_err(|e| format!("{rel}: {e}"))?;
         Ok(ExefsPatch {

@@ -46,6 +46,12 @@ pub enum Command {
         /// A host target to build for; repeat for several. Default: this host.
         #[arg(long)]
         target: Vec<String>,
+        /// Code mods to build in, in order: mod directories (Atmosphere or
+        /// Ryujinx layout) or .ips and .pchtxt files, comma-separated or
+        /// repeated. Later mods apply over earlier ones; two mods that
+        /// write different bytes at one address are refused.
+        #[arg(long, value_delimiter = ',', value_name = "MOD")]
+        mods: Vec<PathBuf>,
     },
     /// Build if needed, then run the project.
     Run {

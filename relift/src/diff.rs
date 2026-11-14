@@ -93,7 +93,7 @@ pub fn run(settings: &Settings, req: &Request<'_>, ui: &mut Ui) -> Result<u8, Bo
     let what = req.function.ok_or("a function is needed (or --serve)")?;
     let host = host_name(what)?;
     let gdb = relift_build::find_tool("gdb").ok_or("gdb is not on PATH")?;
-    let built = build_project(settings, &[], Mode::Dev, ui)?;
+    let built = build_project(settings, &[], &[], Mode::Dev, ui)?;
     let rt = if settings.runtime_dir.as_os_str().is_empty() {
         PathBuf::from(crate::build::RUNTIME_DIR)
     } else {

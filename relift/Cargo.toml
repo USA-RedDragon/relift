@@ -11,6 +11,7 @@ clap = { workspace = true }
 configulator-rs = { workspace = true }
 toml = { workspace = true }
 sha2 = { workspace = true }
+zstd = { workspace = true }
 relift-analyze = { workspace = true }
 relift-build = { workspace = true }
 relift-cache = { workspace = true }

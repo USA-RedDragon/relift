@@ -44,7 +44,9 @@ fn main() -> ExitCode {
         Command::Import { dump, update } => {
             relift::import::run(&settings, dump, update.as_deref(), &mut ui)
         }
-        Command::Build { target } => relift::build::run_build(&settings, target, &mut ui),
+        Command::Build { target, mods } => {
+            relift::build::run_build(&settings, target, mods, &mut ui)
+        }
         Command::Run {
             target, trace_os, ..
         } => match relift::build::run_run(&settings, target.as_deref(), *trace_os, &mut ui) {

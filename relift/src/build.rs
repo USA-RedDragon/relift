@@ -4,10 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use relift_analyze::{EntryKind, Insn, Outline, Progress, outline_visit};
+use relift_analyze::{EntryKind, Insn, Outline, Progress};
 use relift_build::{Compile, Event, Plan};
 use relift_cpu_a64::frontend::A64;
-use relift_guest::{Root, RootKind};
+use relift_guest::{Frontend, Root, RootKind};
 use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration, noun};
 use relift_switch::program::{self, Placed};
 use relift_switch_formats::npdm::Npdm;
@@ -15,6 +15,8 @@ use relift_switch_formats::nso::Nso;
 
 use crate::hints::Hint;
 use crate::import::{BoxError, cache_root};
+use crate::mods::stage::{Analyzed, Found, Stage};
+use crate::mods::variants::ModulePlan;
 use crate::settings::Settings;
 use crate::ui::Ui;
 
@@ -57,6 +59,12 @@ type Loaded = (Vec<(String, Nso)>, Option<Npdm>);
 
 /// The modules of the import in load order, with the NPDM.
 pub(crate) fn load(import: &Path) -> Result<Loaded, BoxError> {
+    let (mods, npdm) = load_slots(import)?;
+    Ok((mods.into_iter().map(|m| (m.name, m.nso)).collect(), npdm))
+}
+
+/// As [`load`], with each module's exefs slot.
+fn load_slots(import: &Path) -> Result<(Vec<crate::mods::user::Loaded>, Option<Npdm>), BoxError> {
     let table = read_toml(&import.join("modules.toml"))?;
     let mut mods = Vec::new();
     for m in table
@@ -68,13 +76,17 @@ pub(crate) fn load(import: &Path) -> Result<Loaded, BoxError> {
         let path = import.join(field("path"));
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let nso = Nso::parse(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-        mods.push((slot_rank(field("slot")), field("name").to_string(), nso));
+        mods.push(crate::mods::user::Loaded {
+            slot: field("slot").to_string(),
+            name: field("name").to_string(),
+            nso,
+        });
     }
-    mods.sort_by_key(|m| m.0);
+    mods.sort_by_key(|m| slot_rank(&m.slot));
     let npdm = std::fs::read(import.join("exefs").join("main.npdm"))
         .ok()
         .and_then(|b| Npdm::parse(&b).ok());
-    Ok((mods.into_iter().map(|(_, n, m)| (n, m)).collect(), npdm))
+    Ok((mods, npdm))
 }
 
 fn c_ident(s: &str) -> String {
@@ -172,9 +184,10 @@ fn emit_modules(
     cdir: &Path,
     ui: &mut Ui,
     rows: &[usize],
-    image_id: [u8; 32],
     hints: &BTreeSet<Hint>,
+    stage: &mut Stage,
 ) -> Result<Emitted, BoxError> {
+    let image_id = image_id(placed);
     let mut done = Emitted {
         files: Vec::new(),
         units: Vec::new(),
@@ -195,9 +208,27 @@ fn emit_modules(
         let mut found = 0;
         let mine = fpsr.slots_of(p);
         let visit = |f: &relift_analyze::Function| fpsr.visit(&module, &mine, f);
-        let (layout, visits) = outline_visit(
+        let original = stage.originals[i].clone().map(|nso| {
+            module_with_hints(
+                &Placed {
+                    name: p.name.clone(),
+                    base: p.base,
+                    nso,
+                },
+                hints,
+            )
+        });
+        let hint_key: String = hints
+            .iter()
+            .filter(|h| h.module == p.name)
+            .map(|h| format!("{:x} ", h.offset))
+            .collect();
+        let analyzed = stage.analyze(
             &cpu,
+            i,
             &module,
+            original.as_ref(),
+            &hint_key,
             &mut |event| match event {
                 Progress::Found { entries, .. } => {
                     found = entries;
@@ -233,7 +264,16 @@ fn emit_modules(
                 }
             },
             &visit,
-        );
+        )?;
+        let Analyzed {
+            layout,
+            visits,
+            analysis,
+            found: how,
+        } = analyzed;
+        if let Found::Incremental { reuse, ms } = &how {
+            ui.note(&Line::new().text(crate::mods::stage::reuse_line(&p.name, reuse, *ms)));
+        }
         if !lifting {
             ui.done(row, Line::new().text(noun(found as u64, "function")));
             ui.begin(row, "lift");
@@ -265,17 +305,38 @@ fn emit_modules(
                 u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
             })
         };
-        let heads: Vec<relift_emit::Head> = all
-            .iter()
-            .map(|o| relift_emit::Head {
-                entry: o.entry,
-                name: program::host_name(p, o.name.as_deref(), o.entry),
-                guest_name: o.name.clone(),
-                span: o.span(),
-                pads: o.pads.clone(),
-            })
+        let head = |o: &Outline| relift_emit::Head {
+            entry: o.entry,
+            name: program::host_name(p, o.name.as_deref(), o.entry),
+            guest_name: o.name.clone(),
+            span: o.span(),
+            pads: o.pads.clone(),
+        };
+        let known_overrides: BTreeMap<u64, String> = layout
+            .functions
+            .keys()
+            .filter_map(|&a| Some((a, program::known(module.bytes_at(a)?)?.host_fn.to_string())))
             .collect();
-        let overrides: Vec<relift_emit::Override> = layout
+        let (plan, notes) = match &analysis {
+            Some(a) => stage.plan(
+                i,
+                &module,
+                &p.nso.build_id,
+                a,
+                cpu.granule(),
+                &known_overrides,
+            )?,
+            None => (ModulePlan::default(), Vec::new()),
+        };
+        for n in notes {
+            ui.note(&Line::new().text(n));
+        }
+        let swapped: BTreeSet<u64> = plan.swaps.iter().map(|s| s.entry).collect();
+        let keep: Vec<usize> = (0..all.len())
+            .filter(|&k| !swapped.contains(&all[k].entry))
+            .collect();
+        let heads: Vec<relift_emit::Head> = keep.iter().map(|&k| head(all[k])).collect();
+        let mut overrides: Vec<relift_emit::Override> = layout
             .functions
             .keys()
             .filter_map(|&a| {
@@ -289,11 +350,41 @@ fn emit_modules(
                 })
             })
             .collect();
+        if let (false, Some(analysis)) = (swapped.is_empty(), &analysis) {
+            let mut names: BTreeMap<u64, String> =
+                heads.iter().map(|h| (h.entry, h.name.clone())).collect();
+            for &e in &swapped {
+                let sw = crate::mods::variants::switch_name(i, e);
+                names.insert(e, sw.clone());
+                overrides.retain(|o| o.entry != e);
+                overrides.push(relift_emit::Override {
+                    entry: e,
+                    host_fn: sw,
+                    may_unwind: true,
+                    resume_point: false,
+                    declare: true,
+                });
+            }
+            stage.emit_variants(
+                &crate::mods::variants::Variants {
+                    fe: &cpu,
+                    index: i,
+                    module: &module,
+                    analysis,
+                    names: &names,
+                    overrides: &overrides,
+                    list: &stage.bundled.clone(),
+                    plan: &plan,
+                    image_id,
+                },
+                &cdir.join("mods").join(i.to_string()),
+            )?;
+        }
         let flags = fpsr.begin_module(i, &module, &layout, visits, &cpu, &overrides);
         let summaries = std::sync::Mutex::new(Vec::new());
         let fpsr_now = &fpsr;
         let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &relift_emit::Function<'_>)| {
-            let group: Vec<&Outline> = ks.iter().map(|&k| all[k]).collect();
+            let group: Vec<&Outline> = ks.iter().map(|&k| all[keep[k]]).collect();
             let mut n = 0;
             relift_analyze::lift_each(&cpu, &module, &group, &mut |_, f| {
                 let k = ks[n];
@@ -320,11 +411,11 @@ fn emit_modules(
                     tables: f.tables.clone(),
                     pads: f.pads.clone(),
                 };
-                if let Some(s) = fpsr_now.function(&flags, &module, all[k], f) {
+                if let Some(s) = fpsr_now.function(&flags, &module, all[keep[k]], f) {
                     summaries
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push((k, s));
+                        .push((keep[k], s));
                 }
                 sink(k, &e);
             });
@@ -615,11 +706,28 @@ fn lift_and_emit(
     settings: &Settings,
     name: &str,
     out: &Path,
+    mods: &[PathBuf],
     ui: &mut Ui,
 ) -> Result<EmitRecord, BoxError> {
     let import = import_dir()?;
-    let (mods, npdm) = load(&import)?;
-    let placed = program::place(mods);
+    let (mut loaded, npdm) = load_slots(&import)?;
+    let game = read_toml(Path::new("game.toml"))?;
+    let title_id = npdm
+        .as_ref()
+        .map(|n| format!("{:016x}", n.program_id))
+        .unwrap_or_default();
+    let mut stage = Stage::new(
+        mods,
+        &game,
+        Path::new("."),
+        &title_id,
+        &mut loaded,
+        out.join("analysis"),
+    )?;
+    for n in &stage.notes {
+        ui.note(&Line::new().text(n.clone()));
+    }
+    let placed = program::place(loaded.into_iter().map(|m| (m.name, m.nso)).collect());
     ui.title(&format!(
         "relift build: {name} ({} module{}, {}-{})",
         placed.len(),
@@ -630,17 +738,23 @@ fn lift_and_emit(
     let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
     let cdir = out.join("c");
     let hints = crate::hints::read(Path::new("game.toml"))?;
-    let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    let mut game_settings = crate::game_settings::read(Path::new("game.toml"))?;
+    game_settings.extend(stage.settings());
     crate::game_settings::check_dir(Path::new("overrides"), &game_settings)?;
-    let emitted = emit_modules(
-        settings,
-        &placed,
-        &cdir,
-        ui,
-        &rows,
-        image_id(&placed),
-        &hints,
-    )?;
+    let emitted = emit_modules(settings, &placed, &cdir, ui, &rows, &hints, &mut stage)?;
+    let mut emitted = emitted;
+    let cpu = A64 {
+        features: relift_switch::CPU_FEATURES,
+    };
+    let mods_c = stage.mods_c(cpu.abi_headers());
+    if let Some(text) = &mods_c {
+        let path = cdir.join("mods.c");
+        relift_cache::write_if_changed(&path, text.as_bytes())?;
+        emitted.files.push(path);
+        emitted.files.extend(stage.files.iter().cloned());
+    }
+    let info = serde_json::json!({ "mods": stage.info(), "set": stage.hash() });
+    relift_cache::write_if_changed(&out.join("mods.json"), info.to_string().as_bytes())?;
     relift_cache::write_if_changed(&out.join(ENTRIES), emitted.entries.as_bytes())?;
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
@@ -671,7 +785,13 @@ fn lift_and_emit(
     let ports_c = cdir.join("game_ports.c");
     relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("game.toml"))?.as_bytes())?;
     prog.push(ports_c);
-    for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags, None) {
+    for f in program::program_files(
+        &placed,
+        npdm.as_ref(),
+        &emitted.units,
+        fp_flags,
+        mods_c.as_ref().map(|_| crate::mods::bundled::SYMBOL),
+    ) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
         if f.is_c() {
@@ -816,6 +936,7 @@ fn build_plans(
 pub(crate) fn build_project(
     settings: &Settings,
     targets: &[String],
+    mods: &[PathBuf],
     mode: Mode,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
@@ -824,7 +945,7 @@ pub(crate) fn build_project(
     }
     let (name, out) = project_out(settings)?;
     if let Some(rec) = std::env::var_os(EMIT_RECORD) {
-        let r = lift_and_emit(settings, &name, &out, ui)?;
+        let r = lift_and_emit(settings, &name, &out, mods, ui)?;
         relift_cache::write_if_changed(Path::new(&rec), r.to_text().as_bytes())?;
         std::process::exit(0);
     }
@@ -1141,8 +1262,13 @@ pub fn run_info(settings: &Settings, binary: Option<&Path>) -> Result<(), BoxErr
 ///
 /// No game.toml or import, a module that does not parse, or a failed
 /// compile or link.
-pub fn run_build(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<(), BoxError> {
-    build_project(settings, targets, Mode::Shipped, ui).map(|_| ())
+pub fn run_build(
+    settings: &Settings,
+    targets: &[String],
+    mods: &[PathBuf],
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
+    build_project(settings, targets, mods, Mode::Shipped, ui).map(|_| ())
 }
 
 /// `relift run`: a dev build, then the program in the working directory,
@@ -1161,7 +1287,7 @@ pub fn run_run(
     ui: &mut Ui,
 ) -> Result<i32, BoxError> {
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
-    let built = build_project(settings, &targets, Mode::Dev, ui)?;
+    let built = build_project(settings, &targets, &[], Mode::Dev, ui)?;
     let import = import_dir()?;
     let (mods, _) = load(&import)?;
     let placed = program::place(mods);
