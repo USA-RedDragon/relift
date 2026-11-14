@@ -941,6 +941,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-diff"
+version = "0.1.0"
+
+[[package]]
 name = "relift-emit"
 version = "0.1.0"
 dependencies = [

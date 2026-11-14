@@ -77,6 +77,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 0 | `relift-cache` | `core/cache` | Content-addressed store, stage keys, and the one file writer |
 | 0 | `relift-host` | `core/host` | The host target list that emit and build share |
 | 0 | `relift-proc` | `core/proc` | The one subprocess runner |
+| 0 | `relift-diff` | `core/diff` | The wire protocol, page cache and comparison of `relift diff`: one guest function run in a reference engine from a live process's state and compared with the lifted code's registers and pages; no CPU |
 | 0 | `relift-progress` | `core/progress` | Progress output for `build` and `import`: live lines on a terminal, throttled plain lines elsewhere, color rules (`--color`, `NO_COLOR`, `TERM=dumb`), time from an injected clock |
 | 1 | `relift-guest` | `core/guest` | The guest contract and vocabulary, including the `Naming` trait a guest implements for its symbol scheme |
 | 2 | `relift-analyze` | `core/analyze` | Function boundaries, CFG, jump tables, indirect targets, generic over a CPU frontend |

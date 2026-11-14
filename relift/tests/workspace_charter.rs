@@ -129,6 +129,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-diff",
+        band: 0,
+        why: "the differential check's wire protocol, page cache and comparison; knows no CPU, a leaf",
+        normal: NONE,
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-guest",
         band: 1,
         why: "the guest contract and vocabulary, over the IR only",
@@ -320,6 +328,7 @@ const CHARTERS: &[Charter] = &[
             "relift-cache",
             "relift-cpu-a64",
             "relift-cpu-sm83",
+            "relift-diff",
             "relift-emit",
             "relift-guest",
             "relift-host",
