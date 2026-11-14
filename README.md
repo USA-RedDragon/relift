@@ -34,16 +34,14 @@ Per-game data lives in each game project's `game.toml`, not here.
 
 <!-- configulator:begin -->
 
-| Key                | Type    | Default                                                                                                           | Environment               | Flag                 | Description                                                                      |
-|--------------------|---------|-------------------------------------------------------------------------------------------------------------------|---------------------------|----------------------|----------------------------------------------------------------------------------|
-| `keys`             | string  |                                                                                                                   | `RELIFT_KEYS`             | `--keys`             | path to the console key file that import reads                                   |
-| `cache-dir`        | string  |                                                                                                                   | `RELIFT_CACHE_DIR`        | `--cache-dir`        | where lifted, emitted and built artifacts are cached (empty: the user cache dir) |
-| `jobs`             | integer | `0`                                                                                                               | `RELIFT_JOBS`             | `-j`, `--jobs`       | parallel compile jobs (0: one per CPU)                                           |
-| `cross-image`      | string  | `ghcr.io/usa-reddragon/rust-cross:1.98.1@sha256:a4d9cb8c3d4a4134c36dec1df78f1b0cc760d7fe443240dd5303ee64a01996c2` | `RELIFT_CROSS_IMAGE`      | `--cross-image`      | the cross-build container image, pinned by digest                                |
-| `toolchain.clang`  | string  |                                                                                                                   | `RELIFT_TOOLCHAIN_CLANG`  | `--toolchain.clang`  | the clang driver                                                                 |
-| `toolchain.zig`    | string  |                                                                                                                   | `RELIFT_TOOLCHAIN_ZIG`    | `--toolchain.zig`    | zig, for `zig cc` player builds                                                  |
-| `toolchain.ninja`  | string  |                                                                                                                   | `RELIFT_TOOLCHAIN_NINJA`  | `--toolchain.ninja`  | the ninja build tool                                                             |
-| `toolchain.podman` | string  |                                                                                                                   | `RELIFT_TOOLCHAIN_PODMAN` | `--toolchain.podman` | the container runtime for cross builds                                           |
+| Key               | Type    | Default | Environment              | Flag                | Description                                                                      |
+|-------------------|---------|---------|--------------------------|---------------------|----------------------------------------------------------------------------------|
+| `keys`            | string  |         | `RELIFT_KEYS`            | `--keys`            | path to the console key file that import reads                                   |
+| `cache-dir`       | string  |         | `RELIFT_CACHE_DIR`       | `--cache-dir`       | where lifted, emitted and built artifacts are cached (empty: the user cache dir) |
+| `jobs`            | integer | `0`     | `RELIFT_JOBS`            | `-j`, `--jobs`      | parallel compile jobs (0: one per CPU)                                           |
+| `toolchain.clang` | string  |         | `RELIFT_TOOLCHAIN_CLANG` | `--toolchain.clang` | the clang driver                                                                 |
+| `toolchain.zig`   | string  |         | `RELIFT_TOOLCHAIN_ZIG`   | `--toolchain.zig`   | zig, for `zig cc` player builds                                                  |
+| `toolchain.ninja` | string  |         | `RELIFT_TOOLCHAIN_NINJA` | `--toolchain.ninja` | the ninja build tool                                                             |
 
 <!-- configulator:end -->
 
