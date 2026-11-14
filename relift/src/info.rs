@@ -5,10 +5,14 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use relift_info::{Identity, Info, Mods, ModuleId, Needs, Repo, Save, TreeNeed, embed, section};
+use relift_info::{
+    Identity, Info, Mods, ModuleId, Needs, Repo, Save, Setting, TreeNeed, embed, section,
+};
+use relift_input::PortSet;
 use relift_switch::program::Placed;
 use sha2::{Digest, Sha256};
 
+use crate::game_settings;
 use crate::identity;
 use crate::import::BoxError;
 
@@ -79,6 +83,8 @@ pub fn switch_document(
     game: &toml::Table,
     placed: &[Placed],
     project: &str,
+    settings: Vec<Setting>,
+    ports: &PortSet,
 ) -> Result<Info, BoxError> {
     let g = game.get("game").and_then(|g| g.as_table());
     let title_id = g
@@ -139,6 +145,33 @@ pub fn switch_document(
         location: Some("launcher".into()),
         ..Save::default()
     };
+    info.settings = game_settings::section(settings);
+    info.input = relift_input::input_section(ports);
+    Ok(info)
+}
+
+/// The document of a Game Boy, Game Boy Color or Game Boy Advance build:
+/// the identity and save come from the cartridge header.
+///
+/// # Errors
+///
+/// The header does not decode.
+pub fn handheld_document(
+    rom: &[u8],
+    gba: bool,
+    settings: Vec<Setting>,
+    ports: &PortSet,
+) -> Result<Info, BoxError> {
+    let (id, save) = if gba {
+        identity::from_gba(rom)?
+    } else {
+        identity::from_gb(rom)?
+    };
+    let mut info = Info::new(env!("CARGO_PKG_VERSION"));
+    info.identity = id;
+    info.save = save;
+    info.settings = game_settings::section(settings);
+    info.input = relift_input::input_section(ports);
     Ok(info)
 }
 
@@ -205,5 +238,28 @@ mod tests {
     fn info_without_a_binary_or_a_build_says_what_is_missing() {
         let e = run(None, &[PathBuf::from("/nonexistent/relift-game")]).unwrap_err();
         assert!(e.to_string().contains("no built binary"), "{e}");
+    }
+
+    #[test]
+    fn a_handheld_document_lists_both_settings_and_the_ports() {
+        let mut rom = vec![0u8; 0x100];
+        rom[0xA0..0xA4].copy_from_slice(b"TEST");
+        rom[0xAC..0xB0].copy_from_slice(b"ATSE");
+        let game =
+            game_settings::parse("[settings.hud]\ntype = \"bool\"\ndefault = true\n").unwrap();
+        let mut ports = relift_input::native_ports("gba").unwrap();
+        ports
+            .extend_from_toml(
+                "game.toml",
+                relift_input::Origin::Game,
+                "[input.port.dial]\nkind = \"Rotary dial\"\n[input.port.dial.control.turn]\nkind = \"axis\"\n",
+            )
+            .unwrap();
+        let info = handheld_document(&rom, true, game, &ports).unwrap();
+        assert_eq!(info.identity.platform, "gba");
+        assert_eq!(info.settings.runtime.len(), 3);
+        assert_eq!(info.settings.game.len(), 1);
+        let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["p1", "dial"]);
     }
 }

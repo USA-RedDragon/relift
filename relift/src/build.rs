@@ -650,7 +650,14 @@ fn lift_and_emit(
     }
     let mut prog = Vec::new();
     let game = read_toml(Path::new("game.toml"))?;
-    let doc = crate::info::switch_document(&import, &game, &placed, name)?;
+    let doc = crate::info::switch_document(
+        &import,
+        &game,
+        &placed,
+        name,
+        game_settings.clone(),
+        &game_ports(Path::new("game.toml"))?,
+    )?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
@@ -1238,14 +1245,18 @@ pub fn run_run(
 
 /// The C that declares the extra input ports of a game to the runtime: the
 /// `[input.port.*]` tables of `game.toml` on top of the Switch's native ports.
-fn game_ports_c(game_toml: &Path) -> Result<String, BoxError> {
+fn game_ports(game_toml: &Path) -> Result<relift_input::PortSet, BoxError> {
     let mut set = relift_input::native_ports("switch")?;
     match std::fs::read_to_string(game_toml) {
         Ok(text) => set.extend_from_toml("game.toml", relift_input::Origin::Game, &text)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("{}: {e}", game_toml.display()).into()),
     }
-    Ok(relift_input::extras_c_file(&set))
+    Ok(set)
+}
+
+fn game_ports_c(game_toml: &Path) -> Result<String, BoxError> {
+    Ok(relift_input::extras_c_file(&game_ports(game_toml)?))
 }
 
 #[cfg(test)]
