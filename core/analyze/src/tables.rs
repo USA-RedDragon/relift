@@ -18,7 +18,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use relift_guest::Module;
-use relift_ir::interp::{self, Fault, GuestMemory, NoIntrinsics, State};
+use relift_ir::interp::{self, Fault, GuestMemory, NoDevices, NoIntrinsics, State};
 use relift_ir::{Block, Flow, Next, Op, Reg};
 
 /// The most instructions between the conditional branch and the jump.
@@ -99,7 +99,7 @@ fn run(blocks: &[Block], state: &mut State, mem: &mut Image<'_>) -> Option<u64> 
         if b.pc != next {
             return None;
         }
-        next = interp::run_verified(b, state, mem, &mut NoIntrinsics)
+        next = interp::run_verified(b, state, mem, &mut NoIntrinsics, &mut NoDevices)
             .ok()?
             .next;
     }

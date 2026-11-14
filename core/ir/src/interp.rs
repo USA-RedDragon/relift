@@ -555,6 +555,20 @@ pub fn run_with(
     devices: &mut dyn Devices,
 ) -> Result<Outcome, Error> {
     block.verify().map_err(|e| Error::Invalid(e.to_string()))?;
+    run_verified(block, state, mem, intrinsics, devices)
+}
+
+/// As [`run_with`], for a block the caller already verified (every block
+/// [`crate::Builder`] finishes is), so a caller that runs one block many
+/// times checks it once. An unverified ill-typed block may give a wrong
+/// result or panic, never undefined behavior.
+pub fn run_verified(
+    block: &Block,
+    state: &mut State,
+    mem: &mut dyn GuestMemory,
+    intrinsics: &mut dyn Intrinsics,
+    devices: &mut dyn Devices,
+) -> Result<Outcome, Error> {
     if state.regs.len() != block.regs.len() {
         return Err(Error::StateSize {
             expected: block.regs.len(),
