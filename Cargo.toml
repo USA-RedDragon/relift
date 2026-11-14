@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core/*", "cpus/*", "cpus/a64/gen", "guests/*/*", "override/*", "relift", "testguest"]
+members = ["core/*", "cpus/*", "cpus/a64/gen", "cpus/sm83/gen", "guests/*/*", "override/*", "relift", "testguest"]
 exclude = ["check"]
 
 [workspace.package]

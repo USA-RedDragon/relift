@@ -911,6 +911,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-sm83-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-sm83",
+ "relift-sail",
+]
+
+[[package]]
 name = "relift-emit"
 version = "0.1.0"
 dependencies = [

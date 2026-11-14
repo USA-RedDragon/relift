@@ -301,6 +301,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-cpu-sm83-gen",
+        band: 3,
+        why: "the SM83 Sail model checks over the opcode table and the Sail frontend, run by hand; nothing links it",
+        normal: &["relift-cpu-sm83", "relift-sail"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift",
         band: 3,
         why: "the binary: settings, dispatch and the guest registry",
