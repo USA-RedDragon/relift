@@ -4,6 +4,7 @@
  * values, the JSON file reader, the command-line flags, the schema writer
  * and the per-user folder.
  */
+#include <relift/override.h>
 #include <relift/settings.h>
 
 #include "core.h"
@@ -907,4 +908,14 @@ bool rl_settings_user_file(char *out, size_t size)
         return false;
     int n = snprintf(out, size, "%s/settings.json", dir);
     return n > 0 && (size_t)n < size;
+}
+
+bool relift_setting_bool(const char *key) { return rl_setting_bool(key); }
+int64_t relift_setting_int(const char *key) { return rl_setting_int(key); }
+double relift_setting_float(const char *key) { return rl_setting_float(key); }
+uint32_t relift_setting_enum(const char *key) { return rl_setting_enum(key); }
+const char *relift_setting_str(const char *key) { return rl_setting_str(key); }
+bool relift_setting_binding(const char *key, const char **port, const char **control)
+{
+    return rl_setting_binding(key, port, control);
 }

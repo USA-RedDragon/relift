@@ -6,6 +6,7 @@
  */
 #include "runner.h"
 
+#include <relift/override.h>
 #include <relift/settings.h>
 
 #include <stdlib.h>
@@ -270,4 +271,19 @@ TEST(settings_user_file_is_read_only_with_an_app_and_no_launcher_file)
     CHECK_EQ(rl_setting_int("scale"), 1);
     snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
     CHECK_EQ(system(cmd), 0);
+}
+
+TEST(override_api_reads_the_same_values)
+{
+    fresh();
+    CHECK(relift_setting_bool("hud"));
+    CHECK_EQ(relift_setting_int("scale"), 3);
+    CHECK(relift_setting_float("gain") == 0.5);
+    CHECK_EQ(relift_setting_enum("mode"), 1);
+    CHECK(!strcmp(relift_setting_str("name"), "anon"));
+    const char *port, *control;
+    CHECK(relift_setting_binding("jump", &port, &control));
+    CHECK(!strcmp(port, "pad") && !strcmp(control, "a"));
+    CHECK_EQ(rl_settings_set("scale", "5"), RL_SETTING_OK);
+    CHECK_EQ(relift_setting_int("scale"), 5);
 }
