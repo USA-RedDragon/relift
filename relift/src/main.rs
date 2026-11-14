@@ -8,7 +8,7 @@ use configulator::{
     serde_loader,
 };
 
-use relift::cli::Cli;
+use relift::cli::{Cli, Command};
 use relift::settings::Settings;
 
 fn main() -> ExitCode {
@@ -27,7 +27,7 @@ fn main() -> ExitCode {
         })
         .load_with_matches();
 
-    let (_settings, matches) = match loaded {
+    let (settings, matches) = match loaded {
         Ok(loaded) => loaded,
         Err(ConfigulatorError::CLIError(e)) => e.exit(),
         Err(e) => {
@@ -39,6 +39,15 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
-    eprintln!("relift {}: not implemented", cli.command.name());
-    ExitCode::FAILURE
+    let result = match &cli.command {
+        Command::Import { dump, update } => relift::import::run(&settings, dump, update.as_deref()),
+        _ => Err("not implemented".into()),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("relift {}: {e}", cli.command.name());
+            ExitCode::FAILURE
+        }
+    }
 }

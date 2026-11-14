@@ -62,7 +62,8 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
-| 2 | `relift-switch-formats` | `guests/switch/formats` | NSP, NCA, BKTR, NSO, NPDM, tickets, keys |
+| 2 | `relift-switch-formats` | `guests/switch/formats` | Decrypted Switch formats (romfs, NSO, NRO, NPDM, NUP) and the import of a `.nup` or an extracted dump tree |
+| 2 | `relift-switch-tools` | `guests/switch/tools` | `relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate |
 | 2 | `relift-switch` | `guests/switch/guest` | The Switch guest, over its formats and `relift-cpu-a64` |
 | 2 | `relift-testguest` | `testguest` | Tiny synthetic guest the core is tested against |
 | 3 | `relift` | `relift` | The binary: settings, command dispatch, guest registry |

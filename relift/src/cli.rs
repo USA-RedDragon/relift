@@ -16,12 +16,19 @@ pub struct Cli {
 /// One `relift` action.
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Extract a game dump, and its update if any, into a project.
+    /// Extract a decrypted game dump into a project.
+    ///
+    /// The dump is a .nup file, or a directory holding base/{exefs,romfs},
+    /// updates/<version>/{exefs,romfs} and dlc/<title id>/<index>/romfs (or
+    /// exefs/ and romfs/ directly). Encrypted dumps are refused: convert
+    /// them with a separate tool first.
     Import {
-        /// The base game dump.
-        base: PathBuf,
-        /// The update dump applied on top of the base.
-        update: Option<PathBuf>,
+        /// The .nup file or dump directory.
+        dump: PathBuf,
+        /// The update version to apply, or `base` for the base alone
+        /// (default: the newest update).
+        #[arg(long, value_name = "VERSION|base")]
+        update: Option<String>,
     },
     /// Lift, emit and compile the project.
     Build {
