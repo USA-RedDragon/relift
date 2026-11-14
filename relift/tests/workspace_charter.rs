@@ -163,10 +163,12 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-switch-tools",
         band: 2,
-        why: "single-purpose tools for decrypted Switch files, thin wrappers over relift-switch-formats",
+        why: "single-purpose tools for decrypted Switch files, thin wrappers over relift-switch-formats, and the IR dump over relift-cpu-a64",
         normal: &[
             "clap",
             "relift-cache",
+            "relift-cpu-a64",
+            "relift-ir",
             "relift-switch-formats",
             "serde_json",
         ],
