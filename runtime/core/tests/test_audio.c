@@ -7,6 +7,8 @@
 
 #include <relift/audio.h>
 
+#include "../core.h"
+
 #include <time.h>
 
 static void sleep_ms(long ms)
@@ -25,11 +27,22 @@ TEST(audio_null_output_drains_at_its_rate)
     CHECK_EQ(rl_audio_queued(o), 4800);
     sleep_ms(50);
     CHECK_EQ(rl_audio_queued(o), 4800);
+    uint64_t t_before = rl_clock_ns();
     rl_audio_pause(o, false);
-    sleep_ms(50);
+    uint64_t t_after = rl_clock_ns();
+    uint64_t t_read;
+    do {
+        sleep_ms(5);
+        t_read = rl_clock_ns();
+    } while (t_read - t_after < 20000000ull);
     uint32_t q = rl_audio_queued(o);
-    CHECK(q < 4800 - 1500);
-    CHECK(q > 4800 - 3600);
+    uint64_t t_done = rl_clock_ns();
+    uint64_t lo_frames = (t_read - t_after) * 48000ull / 1000000000ull;
+    uint64_t hi_frames = (t_done - t_before) * 48000ull / 1000000000ull + 1;
+    if (hi_frames > 4800)
+        hi_frames = 4800;
+    CHECK(4800 - q + 1 >= lo_frames);
+    CHECK(4800 - q <= hi_frames);
     rl_audio_close(o);
 }
 
