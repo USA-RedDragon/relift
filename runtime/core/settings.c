@@ -50,7 +50,7 @@ static const rl_setting_def g_runtime_defs[] = {
     },
 };
 
-static char *g_mods[RL_MODS_MAX];
+static char *g_mods[RL_SETTINGS_MODS_MAX];
 static size_t g_nmods;
 static slot g_slots[RL_SETTINGS_MAX];
 static size_t g_nslots;
@@ -405,8 +405,8 @@ static bool add_mod(const char *path)
 {
     if (!path || !*path)
         return false;
-    if (g_nmods >= RL_MODS_MAX) {
-        rl_log(RL_LOG_WARN, "settings", "more than %u mods; %s ignored", RL_MODS_MAX, path);
+    if (g_nmods >= RL_SETTINGS_MODS_MAX) {
+        rl_log(RL_LOG_WARN, "settings", "more than %u mods; %s ignored", RL_SETTINGS_MODS_MAX, path);
         return false;
     }
     char *p = dup(path);
