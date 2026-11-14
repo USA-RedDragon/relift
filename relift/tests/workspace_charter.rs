@@ -69,7 +69,7 @@ const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries and that `relift` does not link, so
 /// the reachability control skips them; the absence walks still cover them.
-const STANDALONE: &[&str] = &["relift-switch-tools"];
+const STANDALONE: &[&str] = &["relift-switch-tools", "relift-switch-vkgen"];
 
 const CHARTERS: &[Charter] = &[
     Charter {
@@ -176,6 +176,14 @@ const CHARTERS: &[Charter] = &[
             "relift-switch-formats",
             "serde_json",
         ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-switch-vkgen",
+        band: 2,
+        why: "generates the Switch runtime's Vulkan forwarding C from vk.xml; writes through relift-cache",
+        normal: &["clap", "relift-cache", "roxmltree", "sha2", "toml"],
+        dev: NONE,
         build: NONE,
     },
     Charter {

@@ -1,0 +1,100 @@
+# relift-vkgen configuration for the public runtime: core Vulkan 1.0 to 1.3
+# plus the extensions below. A game repository may pass a second file with
+# more extensions (lists concatenate).
+
+[registry]
+tag = "v1.4.363"
+url = "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Headers/v1.4.363/registry/vk.xml"
+sha256 = "55ec60950cfb18c3575dcf5fd52741b2bb70eb1e466408f803a91049973ee6fb"
+
+[api]
+features = ["VK_VERSION_1_0", "VK_VERSION_1_1", "VK_VERSION_1_2", "VK_VERSION_1_3"]
+extensions = [
+    "VK_KHR_surface",
+    "VK_KHR_swapchain",
+    "VK_NN_vi_surface",
+    "VK_EXT_debug_utils",
+    "VK_EXT_debug_report",
+    "VK_EXT_debug_marker",
+    "VK_KHR_get_physical_device_properties2",
+    "VK_KHR_get_surface_capabilities2",
+    "VK_KHR_maintenance1",
+    "VK_KHR_maintenance2",
+    "VK_KHR_maintenance3",
+    "VK_KHR_bind_memory2",
+    "VK_KHR_get_memory_requirements2",
+    "VK_KHR_dedicated_allocation",
+    "VK_KHR_descriptor_update_template",
+    "VK_KHR_push_descriptor",
+    "VK_KHR_sampler_ycbcr_conversion",
+    "VK_KHR_create_renderpass2",
+    "VK_KHR_depth_stencil_resolve",
+    "VK_KHR_timeline_semaphore",
+    "VK_KHR_draw_indirect_count",
+    "VK_KHR_dynamic_rendering",
+    "VK_KHR_synchronization2",
+    "VK_KHR_copy_commands2",
+    "VK_KHR_external_memory_capabilities",
+    "VK_KHR_external_semaphore_capabilities",
+    "VK_KHR_external_fence_capabilities",
+    "VK_KHR_device_group_creation",
+    "VK_EXT_extended_dynamic_state",
+    "VK_EXT_extended_dynamic_state2",
+    "VK_EXT_sample_locations",
+    "VK_EXT_discard_rectangles",
+    "VK_EXT_hdr_metadata",
+]
+# Used by the runtime on the host only; the guest never sees them.
+host_extensions = [
+    "VK_KHR_map_memory2",
+    "VK_EXT_map_memory_placed",
+    "VK_EXT_external_memory_host",
+    "VK_EXT_headless_surface",
+]
+
+[thunks]
+# Written by hand in runtime/guests/switch/vk/ as vkh_<name>.
+hand_commands = [
+    "vkGetInstanceProcAddr",
+    "vkGetDeviceProcAddr",
+    "vkCreateInstance",
+    "vkDestroyInstance",
+    "vkEnumerateInstanceExtensionProperties",
+    "vkEnumerateDeviceExtensionProperties",
+    "vkCreateDevice",
+    "vkDestroyDevice",
+    "vkAllocateMemory",
+    "vkFreeMemory",
+    "vkMapMemory",
+    "vkUnmapMemory",
+    "vkFlushMappedMemoryRanges",
+    "vkInvalidateMappedMemoryRanges",
+    "vkCreateBuffer",
+    "vkAllocateCommandBuffers",
+    "vkFreeCommandBuffers",
+    "vkDestroyCommandPool",
+    "vkCreateViSurfaceNN",
+    "vkCreateDebugUtilsMessengerEXT",
+    "vkDestroyDebugUtilsMessengerEXT",
+    "vkCreateDebugReportCallbackEXT",
+    "vkDestroyDebugReportCallbackEXT",
+]
+# Written by hand as vkh_in_<name> and vkh_out_<name> (they hold guest callbacks).
+hand_structs = ["VkDebugUtilsMessengerCreateInfoEXT", "VkDebugReportCallbackCreateInfoEXT"]
+# Always NULL on the host: the host driver allocates with its own allocator.
+drop_types = ["VkAllocationCallbacks"]
+
+# Shadow-mapped memory: copy guest writes to the host before work reaches the
+# GPU, and host-cached results back after the guest waits for it.
+[hooks.before]
+vkQueueSubmit = "vkf_shadow_flush"
+vkQueueSubmit2 = "vkf_shadow_flush"
+vkQueueBindSparse = "vkf_shadow_flush"
+vkQueuePresentKHR = "vkf_shadow_flush"
+
+[hooks.after]
+vkWaitForFences = "vkf_shadow_pull"
+vkGetFenceStatus = "vkf_shadow_pull"
+vkQueueWaitIdle = "vkf_shadow_pull"
+vkDeviceWaitIdle = "vkf_shadow_pull"
+vkWaitSemaphores = "vkf_shadow_pull"
