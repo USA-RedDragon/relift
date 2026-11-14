@@ -1,12 +1,13 @@
 /**
  * @file thread.c
- * @brief Host threads backing guest threads, FPCR, process exit and the
- * system-instruction entries of docs/abi.md section 10.
+ * @brief Host threads backing guest threads, each with the CPU layer's
+ * context, process exit, the pending records and fatal guest reports.
  */
 #include "core.h"
 
 #include <pthread.h>
 #include <sched.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,51 +26,36 @@ struct rl_thread *rl_thread_current(void) { return t_self; }
 uint8_t *rl_mem_base(void) { return g_mem; }
 void rl_set_mem_base(uint8_t *base) { g_mem = base; }
 
-void rl_host_set_fpcr(uint32_t fpcr)
-{
-#if defined(__aarch64__)
-    uint64_t v = fpcr;
-    __asm__ volatile("msr fpcr, %0" ::"r"(v));
-#else
-    (void)fpcr;
-#endif
-}
-
-uint32_t rl_host_get_fpcr(void)
-{
-#if defined(__aarch64__)
-    uint64_t v;
-    __asm__ volatile("mrs %0, fpcr" : "=r"(v));
-    return (uint32_t)v;
-#else
-    return 0;
-#endif
-}
-
 void rl_thread_bind(struct rl_thread *t)
 {
+    const rl_cpu_desc *cpu = rl_core_cpu();
     t_self = t;
     rl_fault_thread_init();
-    if (t && t->ctx)
-        rl_host_set_fpcr(t->ctx->fpcr);
+    if (t && t->ctx && cpu && cpu->bind)
+        cpu->bind(t->ctx);
 }
 
 struct rl_thread *rl_thread_alloc(void)
 {
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    if (!cpu)
+        return NULL;
     struct rl_thread *t = calloc(1, sizeof *t);
     if (!t)
         return NULL;
     void *p = NULL;
-    if (posix_memalign(&p, 64, sizeof(rl_ctx)) != 0) {
+    if (posix_memalign(&p, cpu->ctx_align, cpu->ctx_size) != 0) {
         free(t);
         return NULL;
     }
+    memset(p, 0, cpu->ctx_size);
     t->ctx = p;
-    memset(t->ctx, 0, sizeof(rl_ctx));
-    t->ctx->thread = t;
-    t->ctx->fpcr = RL_FPCR_DEFAULT;
-    t->ctx->pend.sp = RL_SP_NONE;
+    rl_ctx_common *k = rl_common(t->ctx);
+    k->thread = t;
+    k->pend.sp = RL_SP_NONE;
     rl_dispatch_view(t->ctx);
+    if (cpu->ctx_init)
+        cpu->ctx_init(t->ctx);
     return t;
 }
 
@@ -165,42 +151,38 @@ void rl_process_exit(uint32_t code)
 
 int rl_pend_exit_process(rl_ctx *c, uint32_t code)
 {
-    c->pend.kind = RL_PEND_EXIT_PROCESS;
-    c->pend.code = code;
-    c->pend.sp = RL_SP_NONE;
-    c->pend.pc = 0;
+    rl_pending *p = &rl_common(c)->pend;
+    p->kind = RL_PEND_EXIT_PROCESS;
+    p->code = code;
+    p->sp = RL_SP_NONE;
+    p->pc = 0;
     return RL_PENDING;
 }
 
 int rl_pend_exit_thread(rl_ctx *c)
 {
-    c->pend.kind = RL_PEND_EXIT_THREAD;
-    c->pend.code = 0;
-    c->pend.sp = RL_SP_NONE;
-    c->pend.pc = 0;
+    rl_pending *p = &rl_common(c)->pend;
+    p->kind = RL_PEND_EXIT_THREAD;
+    p->code = 0;
+    p->sp = RL_SP_NONE;
+    p->pc = 0;
     return RL_PENDING;
 }
 
-void rl_msr_fpcr(rl_ctx *c, uint64_t v)
+int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...)
 {
-    uint32_t f = (uint32_t)v;
-    c->fpcr = f;
-    if (c->thread == t_self)
-        rl_host_set_fpcr(f);
-    if ((f & RL_FPCR_MODE) != (RL_FPCR_DEFAULT & RL_FPCR_MODE) && rl_once(0x4650435200000000ull | (f & RL_FPCR_MODE)))
-        rl_log(RL_LOG_WARN, "fpcr", "guest set FPCR 0x%08x: a mode the lifted code was not generated for", f);
-}
-
-void rl_wfe(rl_ctx *c)
-{
-    (void)c;
-    rl_host_yield();
-}
-
-int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
-{
-    (void)mem;
-    rl_log(RL_LOG_ERROR, "guest", "undefined instruction 0x%08x at guest pc 0x%llx (lr 0x%llx, sp 0x%llx)", insn,
-           (unsigned long long)pc, (unsigned long long)c->x[30], (unsigned long long)c->sp);
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    char what[512], regs[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(what, sizeof what, fmt, ap);
+    va_end(ap);
+    regs[0] = 0;
+    if (cpu && cpu->describe)
+        cpu->describe(c, regs, sizeof regs);
+    if (regs[0])
+        rl_log(RL_LOG_ERROR, tag, "%s (%s)", what, regs);
+    else
+        rl_log(RL_LOG_ERROR, tag, "%s", what);
     return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
 }
