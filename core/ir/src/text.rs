@@ -63,6 +63,7 @@
 //! | `fp.rint.R fp.tosint.R fp.touint.R fp.fromsint fp.fromuint fp.convert v` | [`FpOp`] conversions; `R` is `n`, `a`, `m`, `p` or `z` ([`FpRound`]) |
 //! | `intrinsic "name" args` | [`Op::Intrinsic`], args may be empty |
 //! | `guard c, HEX` | [`Op::Guard`]: leave to slow path `HEX` when `c` is 1 |
+//! | `tick DEC` / `tick.if c, DEC` | [`Op::Tick`] / [`Op::TickIf`]: guest cycles, decimal |
 //!
 //! The ordering `O` is `plain`, `acquire`, `release`, `acqrel` or `seqcst`.
 //! Intrinsic names are quoted with `\"` and `\\` escapes. A parsed
@@ -285,6 +286,8 @@ impl fmt::Display for Block {
                     write_quoted(f, name)?;
                     write_args(f, args)?;
                 }
+                Op::Tick(n) => write!(f, "tick {n}")?,
+                Op::TickIf(v, n) => write!(f, "tick.if v{}, {n}", v.0)?,
             }
             writeln!(f)?;
         }
@@ -539,6 +542,14 @@ impl Cursor {
         Ok(out)
     }
 
+    fn cycles(&mut self) -> Result<u32, ParseError> {
+        let t = self.word("a cycle count")?;
+        match t.text.parse::<u32>() {
+            Ok(n) if t.text.chars().all(|d| d.is_ascii_digit()) => Ok(n),
+            _ => self.err(t.col, "expected a cycle count as decimal 0 to 4294967295"),
+        }
+    }
+
     fn order(&self, text: &str, col: usize) -> Result<Order, ParseError> {
         lookup(&ORDER, text).map_or_else(|| self.err(col, format!("unknown ordering `{text}`")), Ok)
     }
@@ -668,6 +679,12 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
             "concat" => {
                 let v = c.values(2, defined)?;
                 Op::Concat(v[0], v[1])
+            }
+            "tick" => Op::Tick(c.cycles()?),
+            "tick.if" => {
+                let v = c.value(defined)?;
+                c.comma()?;
+                Op::TickIf(v, c.cycles()?)
             }
             "clear.excl" => Op::ClearExclusive,
             "guard" => {
