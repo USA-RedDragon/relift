@@ -188,7 +188,16 @@ static rl_result sys_get_display_mode(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+static rl_result sys_set_layer_size(rl_ipc_req *r)
+{
+    uint64_t a[3];
+    if (!rl_srv_in(r, a, sizeof a))
+        return SF_RESULT_INVALID_HEADER;
+    return vi_layer_set_size(a[0], a[1], a[2]);
+}
+
 static const rl_ipc_cmd system_cmds[] = {
+    { 2203, "SetLayerSize", sys_set_layer_size },
     RL_SRV_STUB(2205, "SetLayerZ"),
     RL_SRV_STUB(2207, "SetLayerVisibility"),
     { 2312, "CreateStrayLayer", sys_create_stray },

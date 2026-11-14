@@ -930,6 +930,37 @@ bool rl_vi_layer_id(uint32_t index, uint64_t *id)
     return ok;
 }
 
+bool rl_vi_layer_size(uint64_t id, uint32_t *width, uint32_t *height)
+{
+    vi_layer *l = vi_layer_get(id);
+    if (!l)
+        return false;
+    vi_get_resolution(width, height);
+    pthread_mutex_lock(&reg_lock);
+    if (l->width && l->height) {
+        *width = l->width;
+        *height = l->height;
+    }
+    pthread_mutex_unlock(&reg_lock);
+    vi_layer_unref(l);
+    return true;
+}
+
+rl_result vi_layer_set_size(uint64_t id, uint64_t width, uint64_t height)
+{
+    if (!width || !height || width > 0x10000 || height > 0x10000)
+        return VI_RESULT_INVALID_ARGUMENTS;
+    vi_layer *l = vi_layer_get(id);
+    if (!l)
+        return VI_RESULT_INVALID_VALUE;
+    pthread_mutex_lock(&reg_lock);
+    l->width = (uint32_t)width;
+    l->height = (uint32_t)height;
+    pthread_mutex_unlock(&reg_lock);
+    vi_layer_unref(l);
+    return KR_SUCCESS;
+}
+
 bool rl_vi_render_layer(uint64_t *id)
 {
     pthread_mutex_lock(&reg_lock);

@@ -88,6 +88,8 @@ RL_RUNTIME_API uint32_t rl_vi_layer_count(void);
 RL_RUNTIME_API bool rl_vi_layer_id(uint32_t index, uint64_t *id);
 /** @brief Id of the layer the guest opened or created last (the one to present); false when there is none. */
 RL_RUNTIME_API bool rl_vi_render_layer(uint64_t *id);
+/** @brief Size of a layer: the one SetLayerSize gave, else the display resolution; false for an unknown layer. */
+RL_RUNTIME_API bool rl_vi_layer_size(uint64_t id, uint32_t *width, uint32_t *height);
 /**
  * @brief Takes the next queued frame of layer: the slot becomes owned by the
  * host until rl_vi_release_frame. Returns KR_SUCCESS, VI_RESULT_INVALID_VALUE
@@ -285,6 +287,7 @@ typedef struct vi_layer {
     int state;
     int32_t binder_id;
     uint64_t owner;
+    uint32_t width, height;
     vi_core core;
 } vi_layer;
 
@@ -308,6 +311,8 @@ rl_result vi_layer_close(uint64_t id);
 rl_result vi_layer_destroy_managed(uint64_t id);
 /** @brief DestroyStrayLayer. */
 rl_result vi_layer_destroy_stray(uint64_t id);
+/** @brief SetLayerSize: records the size a host window for the layer starts with. */
+rl_result vi_layer_set_size(uint64_t id, uint64_t width, uint64_t height);
 /** @brief Makes id the layer to present. */
 void vi_layer_set_render(uint64_t id);
 /** @brief Binder id of a layer's producer, or 0. */
