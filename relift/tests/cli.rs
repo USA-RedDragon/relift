@@ -32,10 +32,16 @@ fn help_and_version_succeed() {
 #[test]
 fn every_stub_subcommand_fails_as_not_implemented() {
     for (args, name) in [
-        (&["import", "dump.nsp"][..], "import"),
+        (&["import", "base.nsp"][..], "import"),
+        (&["import", "base.nsp", "update.nsp"], "import"),
         (&["build"], "build"),
-        (&["run", "--target", "linux-x64"], "run"),
-        (&["check"], "check"),
+        (&["build", "--target", "a", "--target", "b"], "build"),
+        (
+            &["run", "--target", "linux-x64", "--trace-svc", "--strict"],
+            "run",
+        ),
+        (&["check", "0x7100"], "check"),
+        (&["where", "0x7100"], "where"),
     ] {
         let out = relift(args);
         assert!(!out.status.success(), "relift {args:?} succeeded");
@@ -63,7 +69,12 @@ fn settings_flags_work_before_and_after_a_subcommand() {
 
 #[test]
 fn an_unpinned_cross_image_is_refused() {
-    let out = relift(&["--cross-image", "example.invalid/image:latest", "check"]);
+    let out = relift(&[
+        "--cross-image",
+        "example.invalid/image:latest",
+        "check",
+        "x",
+    ]);
     assert!(!out.status.success());
     assert!(
         stderr(&out).contains("not pinned by digest"),
@@ -82,7 +93,7 @@ fn relift_toml_in_the_working_dir_is_read() {
     )
     .expect("the config file is writable");
     let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
-        .arg("check")
+        .args(["check", "x"])
         .current_dir(&dir)
         .output()
         .expect("the relift binary runs");
@@ -105,7 +116,7 @@ fn the_example_config_loads() {
     )
     .expect("the config file is writable");
     let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
-        .arg("check")
+        .args(["check", "x"])
         .current_dir(&dir)
         .output()
         .expect("the relift binary runs");
