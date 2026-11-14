@@ -25,6 +25,12 @@ struct Ctx<'a> {
     f: &'a Function<'a>,
     entries: &'a BTreeSet<u64>,
     callees: BTreeSet<u64>,
+    hoisted: BTreeSet<Reg>,
+}
+
+/// The C local holding whether hoisted guard register `r` is nonzero.
+fn flag(r: Reg) -> String {
+    format!("g{}", reg(r))
 }
 
 impl Ctx<'_> {
@@ -54,6 +60,7 @@ pub(crate) fn emit_function(
     let mut used: BTreeSet<Reg> = BTreeSet::new();
     let mut written: BTreeSet<Reg> = BTreeSet::new();
     let mut has_fp = false;
+    let mut hoisted: BTreeSet<Reg> = BTreeSet::new();
     for i in f.insts.values() {
         if let Insn::Lifted { block: b, .. } = i {
             for inst in &b.insts {
@@ -66,6 +73,11 @@ pub(crate) fn emit_function(
                         written.insert(r);
                     }
                     Op::Fp(..) => has_fp = true,
+                    Op::Guard(_, code) => {
+                        if let Some(r) = fe.guard_state(code) {
+                            hoisted.insert(r);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -74,6 +86,7 @@ pub(crate) fn emit_function(
     if has_fp {
         used.extend(fe.fp_state());
     }
+    used.extend(hoisted.iter().copied());
     let regs = fe.regs();
     let mut t = String::new();
     let _ = writeln!(t, "\nRL_LIFTED({})\n{{", fn_name(f.entry));
@@ -85,6 +98,9 @@ pub(crate) fn emit_function(
                 writeln!(t, "    {ty} {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
             }
         };
+    }
+    for &r in &hoisted {
+        let _ = writeln!(t, "    int {} = {} != 0;", flag(r), reg(r));
     }
     t.push_str("    int rc;\n    (void)rc;\n");
     t.push_str("#define RL_STORE() do {");
@@ -108,6 +124,9 @@ pub(crate) fn emit_function(
             }
         };
     }
+    for &r in &hoisted {
+        let _ = write!(t, " {} = {} != 0;", flag(r), reg(r));
+    }
     t.push_str(" } while (0)\n");
     let _ = writeln!(t, "    goto {};", label(f.entry));
     let mut cx = Ctx {
@@ -115,6 +134,7 @@ pub(crate) fn emit_function(
         f,
         entries,
         callees: BTreeSet::new(),
+        hoisted,
     };
     let mut undefined = 0;
     for (&pc, i) in &f.insts {
@@ -155,10 +175,28 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 let _ = writeln!(s, "    {e};");
             }
             Emitted::Set(r, e) => sets.push((r, e)),
+            Emitted::Guard(c, code) => {
+                let cond = match cx.fe.guard_state(code) {
+                    Some(r) if cx.hoisted.contains(&r) => flag(r),
+                    _ => val(c),
+                };
+                let slow = cx
+                    .fe
+                    .guard_slow(code, b.pc, raw)
+                    .unwrap_or_else(|| cx.fe.undefined(b.pc, raw));
+                let next = cx.jump(b.pc + u64::from(b.len));
+                let _ = writeln!(
+                    s,
+                    "    if (RL_UNLIKELY({cond})) {{\n        RL_STORE();\n        rc = {slow};\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n        RL_RELOAD();\n        {next}\n    }}"
+                );
+            }
         }
     }
     for (r, e) in sets {
         let _ = writeln!(s, "    {} = {e};", reg(r));
+        if cx.hoisted.contains(&r) {
+            let _ = writeln!(s, "    {} = {} != 0;", flag(r), reg(r));
+        }
     }
     let after = |s: &mut String, call: String| {
         let _ = writeln!(

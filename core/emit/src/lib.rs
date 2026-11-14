@@ -104,10 +104,7 @@ pub fn emit(fe: &dyn Frontend, fns: &[Function<'_>], opts: &Options) -> Output {
         name: PRELUDE_NAME.into(),
         text: PRELUDE.into(),
     });
-    let header = format!(
-        "#include <{}>\n#include \"{PRELUDE_NAME}\"\n",
-        fe.abi_header()
-    );
+    let header = format!("{}#include \"{PRELUDE_NAME}\"\n", includes(fe));
     for (i, chunk) in fns.chunks(opts.shard_size.max(1)).enumerate() {
         let mut body = String::new();
         let mut callees = BTreeSet::new();
@@ -138,8 +135,15 @@ pub fn emit(fe: &dyn Frontend, fns: &[Function<'_>], opts: &Options) -> Output {
     out
 }
 
+fn includes(fe: &dyn Frontend) -> String {
+    fe.abi_headers()
+        .iter()
+        .map(|h| format!("#include <{h}>\n"))
+        .collect()
+}
+
 fn unit_table(fe: &dyn Frontend, fns: &[Function<'_>], opts: &Options) -> String {
-    let mut t = format!("#include <{}>\n", fe.abi_header());
+    let mut t = includes(fe);
     for f in fns {
         let _ = writeln!(t, "RL_LIFTED({});", fn_name(f.entry));
     }

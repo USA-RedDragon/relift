@@ -138,3 +138,44 @@ fn values_are_kept_to_their_width() {
         "(((rl_u128)UINT64_C(0xffffffffffffffff) << 64) | UINT64_C(0xffffffffffffffff))"
     );
 }
+
+#[test]
+fn guards_leave_for_the_slow_path_and_continue_after() {
+    let mut b = relift_ir::Builder::new(Toy.regs(), relift_ir::Width::W64, 0x200);
+    let x = b.get(relift_ir::Reg(1));
+    let z = b.konst(relift_ir::Width::W64, 0);
+    let ne = b.cmp(relift_ir::CmpOp::Ne, x, z);
+    b.guard(ne, 7);
+    let blk = b.jump(4, 0x204);
+    let ret = Toy.lift(&word(0x03, 0, 0), 0x204).expect("lifts");
+    let f = Function {
+        entry: 0x200,
+        span: 8,
+        insts: BTreeMap::from([
+            (
+                0x200,
+                Insn::Lifted {
+                    block: &blk,
+                    raw: 0x55,
+                },
+            ),
+            (
+                0x204,
+                Insn::Lifted {
+                    block: &ret,
+                    raw: 0,
+                },
+            ),
+        ]),
+    };
+    let out = emit(&Toy, &[f], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("if (RL_UNLIKELY(v2)) {\n        RL_STORE();\n        rc = toy_slow(c, mem, UINT64_C(0x200), 0x55u);"),
+        "{s}"
+    );
+    assert!(
+        s.contains("        RL_RELOAD();\n        goto L_204;\n    }"),
+        "{s}"
+    );
+}
