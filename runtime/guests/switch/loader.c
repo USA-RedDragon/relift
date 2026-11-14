@@ -492,22 +492,6 @@ static bool wants_hook(const rl_switch_program *p, const rl_switch_hook *h)
     return false;
 }
 
-static void request_mods(int argc, char **argv)
-{
-    static const char flag[] = "--relift-mods";
-    const char **paths = argc > 0 ? calloc((size_t)argc, sizeof *paths) : NULL;
-    size_t n = 0;
-    for (int i = 1; paths && i < argc; i++) {
-        if (strcmp(argv[i], flag) == 0 && i + 1 < argc)
-            paths[n++] = argv[++i];
-        else if (strncmp(argv[i], flag, sizeof flag - 1) == 0 && argv[i][sizeof flag - 1] == '=')
-            paths[n++] = argv[i] + sizeof flag;
-    }
-    if (n)
-        rl_hos_mods_request(paths, n);
-    free(paths);
-}
-
 int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 {
 #if defined(_WIN32)
@@ -517,7 +501,6 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     rl_switch_declare_settings();
     rl_settings_args(argc, argv);
     main_args a = { p };
-    request_mods(argc, argv);
     uint32_t base = g_nhooks;
     for (uint32_t i = 0; i < g_nauto; i++) {
         const rl_switch_hook *h = g_auto[i];

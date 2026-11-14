@@ -15,6 +15,7 @@
 #include "hos_fs.h"
 
 #include <relift/input.h>
+#include <relift/settings.h>
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -295,26 +296,6 @@ size_t rl_hos_mods_set_paths(const char *const *paths, size_t n, uint64_t progra
     r = g_nmods;
     pthread_mutex_unlock(&g_lock);
     return r;
-}
-
-static char **g_req;
-static size_t g_nreq;
-
-void rl_hos_mods_request(const char *const *paths, size_t n)
-{
-    pthread_mutex_lock(&g_lock);
-    for (size_t i = 0; i < g_nreq; i++)
-        free(g_req[i]);
-    free(g_req);
-    g_req = NULL;
-    g_nreq = 0;
-    if (n) {
-        g_req = calloc(n, sizeof *g_req);
-        for (size_t i = 0; g_req && i < n; i++)
-            if (paths[i] && *paths[i] && (g_req[g_nreq] = strdup(paths[i])))
-                g_nreq++;
-    }
-    pthread_mutex_unlock(&g_lock);
 }
 
 size_t rl_hos_mods_count(void)
@@ -764,14 +745,15 @@ size_t rl_hos_mods_json(char *buf, size_t cap)
 void rl_hos_mods_install(void)
 {
     const char *list = getenv("RELIFT_MODS");
-    const char *const *req;
-    size_t n;
-    pthread_mutex_lock(&g_lock);
-    req = (const char *const *)g_req;
-    n = g_nreq;
-    pthread_mutex_unlock(&g_lock);
-    if (n)
-        rl_hos_mods_set_paths(req, n, hos.cfg.program_id);
+    size_t n = rl_settings_mod_count();
+    if (n) {
+        const char **paths = calloc(n, sizeof *paths);
+        for (size_t i = 0; paths && i < n; i++)
+            paths[i] = rl_settings_mod(i);
+        if (paths)
+            rl_hos_mods_set_paths(paths, n, hos.cfg.program_id);
+        free(paths);
+    }
     else if (list && *list)
         rl_hos_mods_set(list, hos.cfg.program_id);
     else

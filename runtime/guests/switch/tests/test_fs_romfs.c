@@ -9,6 +9,7 @@
 #include "hos_mods.h"
 
 #include <relift/input.h>
+#include <relift/settings.h>
 #include "tc.h"
 
 #include <errno.h>
@@ -719,7 +720,7 @@ static uint64_t held_keys(void *u)
     return keys_held;
 }
 
-TEST(mods_request_takes_paths_with_separators_and_keeps_order)
+TEST(mods_set_paths_takes_paths_with_separators_and_keeps_order)
 {
     char a[512], b[512];
     const char *paths[2];
@@ -729,13 +730,30 @@ TEST(mods_request_takes_paths_with_separators_and_keeps_order)
     put(b, "romfs/x", "b");
     paths[0] = a;
     paths[1] = b;
-    rl_hos_mods_request(paths, 2);
     rl_hos_mods_set_paths(paths, 2, hos.cfg.program_id);
     CHECK_EQ(rl_hos_mods_count(), 2);
     CHECK(strcmp(rl_hos_mods_info(0)->path, a) == 0);
     CHECK(strcmp(rl_hos_mods_info(1)->path, b) == 0);
     rl_hos_mods_clear();
-    rl_hos_mods_request(NULL, 0);
+    tree_remove(a);
+    tree_remove(b);
+}
+
+TEST(mods_install_takes_the_launcher_flags_in_order)
+{
+    char a[512], b[512];
+    char *argv[5] = { "x", "--relift-mods", a, "--relift-mods", b };
+    env e = boot();
+    (void)e;
+    make_root(a, sizeof a);
+    make_root(b, sizeof b);
+    put(a, "romfs/x", "a");
+    put(b, "romfs/x", "b");
+    rl_settings_args(5, argv);
+    rl_hos_mods_install();
+    CHECK_EQ(rl_hos_mods_count(), 2);
+    CHECK(strcmp(rl_hos_mods_info(1)->path, b) == 0);
+    rl_hos_mods_clear();
     tree_remove(a);
     tree_remove(b);
 }

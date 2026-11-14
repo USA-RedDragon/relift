@@ -4,7 +4,7 @@
  * the base tree and Atmosphere dmnt cheats that write RAM every frame.
  *
  * The launcher passes the ordered mod list as repeated `--relift-mods <path>`
- * flags (flag order is mod order) or as the `mods` array of its settings file;
+ * flags or the `mods` array of its settings file (rl_settings_mod, in order);
  * $RELIFT_MODS (host path list: ':' separated, ';' on Windows) is a debug
  * override used only when no flag was given. Later entries win. Each entry is
  * one of:
@@ -65,12 +65,6 @@ RL_RUNTIME_API size_t rl_hos_mods_set(const char *list, uint64_t program_id);
  * hold any character.
  */
 RL_RUNTIME_API size_t rl_hos_mods_set_paths(const char *const *paths, size_t n, uint64_t program_id);
-/**
- * @brief Records the mod list the launcher passed (copied; replaces an
- * earlier request). Applied when the file system service installs; with no
- * request $RELIFT_MODS is used. rl_switch_main records its --relift-mods flags.
- */
-RL_RUNTIME_API void rl_hos_mods_request(const char *const *paths, size_t n);
 /** @brief Forgets all mods and cheats. */
 RL_RUNTIME_API void rl_hos_mods_clear(void);
 /** @brief Number of active mods. */
@@ -109,7 +103,7 @@ RL_RUNTIME_API void rl_hos_mods_set_keys(uint64_t (*fn)(void *user), void *user)
  */
 RL_RUNTIME_API size_t rl_hos_mods_json(char *buf, size_t cap);
 
-/** @brief Reads RELIFT_MODS and applies it with RELIFT_ROMFS as the base; rl_srv_install_fs calls it. */
+/** @brief Applies the launcher's mod list (rl_settings_mod; else $RELIFT_MODS) with RELIFT_ROMFS as the base; rl_srv_install_fs calls it. */
 void rl_hos_mods_install(void);
 
 #endif
