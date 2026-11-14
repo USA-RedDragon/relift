@@ -3,7 +3,7 @@
 
 pub mod toy;
 
-use relift_ir::{Block, FpOp, Reg, RegFile, Width};
+use relift_ir::{Block, CryptoOp, FpOp, Reg, RegFile, Width};
 
 /// How a guest turns its own symbol names into host names.
 ///
@@ -126,6 +126,14 @@ pub trait Frontend {
         args: &[String],
         reg: &dyn Fn(Reg) -> String,
     ) -> Option<String>;
+
+    /// The C expression for cipher step `op` on the C expression `arg`, or
+    /// `None` when the runtime has none (the emitter then refuses the
+    /// block).
+    fn crypto(&self, op: CryptoOp, arg: &str) -> Option<String> {
+        let _ = (op, arg);
+        None
+    }
 
     /// The registers [`Frontend::fp`] expressions read or write (the FP
     /// control and status registers).

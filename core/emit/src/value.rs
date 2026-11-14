@@ -4,7 +4,9 @@
 //! and always holds its value modulo 2^w. Arithmetic runs in the wide type
 //! (`uint64_t` up to 64 bits, `rl_u128` above), never in a promoted `int`.
 
-use relift_ir::{BinOp, Block, CmpOp, Endian, ExtKind, FpOp, Op, Order, Reg, UnOp, Value, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, Op, Order, Reg, UnOp, Value, Width,
+};
 
 use relift_guest::Frontend;
 
@@ -376,12 +378,64 @@ pub(crate) fn emit_op(
         Op::Tick(_) | Op::TickIf(..) => return Err("a guest clock tick".into()),
         Op::IoLoad { .. } | Op::IoStore { .. } => return Err("an I/O access".into()),
         Op::Sync => return Err("a sync point".into()),
-        Op::Crypto(..) => return Err("a cipher step".into()),
-        Op::AtomicRmw { .. } | Op::CompareSwap { .. } => {
-            return Err("an atomic read-modify-write".into());
+        Op::Crypto(op, x) => fe
+            .crypto(*op, &val(*x))
+            .ok_or_else(|| format!("cipher step {op:?}"))?,
+        Op::AtomicRmw {
+            op,
+            addr,
+            value,
+            endian,
+            order,
+        } => {
+            little(*endian)?;
+            let n = bytes(w)?;
+            let (ad, v, o) = (val(*addr), val(*value), ord(*order));
+            let k = atomic_name(*op);
+            if n == 16 {
+                format!("rl_atomic128(mem, {ad}, {k}, {v}, {o})")
+            } else {
+                fit(
+                    &format!("rl_atomic(mem, {ad}, {n}, {k}, (uint64_t){v}, {o})"),
+                    w,
+                )
+            }
+        }
+        Op::CompareSwap {
+            addr,
+            expected,
+            value,
+            endian,
+            order,
+        } => {
+            little(*endian)?;
+            let n = bytes(w)?;
+            let (ad, e, v, o) = (val(*addr), val(*expected), val(*value), ord(*order));
+            if n == 16 {
+                format!("rl_cas128(mem, {ad}, {e}, {v}, {o})")
+            } else {
+                fit(
+                    &format!("rl_cas(mem, {ad}, {n}, (uint64_t){e}, (uint64_t){v}, {o})"),
+                    w,
+                )
+            }
         }
     };
     Ok(Emitted::Value(e))
+}
+
+fn atomic_name(op: AtomicOp) -> &'static str {
+    match op {
+        AtomicOp::Add => "RL_AT_ADD",
+        AtomicOp::Clear => "RL_AT_CLR",
+        AtomicOp::Xor => "RL_AT_EOR",
+        AtomicOp::Or => "RL_AT_SET",
+        AtomicOp::SMax => "RL_AT_SMAX",
+        AtomicOp::SMin => "RL_AT_SMIN",
+        AtomicOp::UMax => "RL_AT_UMAX",
+        AtomicOp::UMin => "RL_AT_UMIN",
+        AtomicOp::Swap => "RL_AT_SWP",
+    }
 }
 
 fn bytes(w: Width) -> Result<u32, String> {
