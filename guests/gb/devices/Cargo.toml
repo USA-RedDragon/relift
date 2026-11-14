@@ -1,0 +1,23 @@
+[package]
+name = "relift-gb-devices"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/USA-RedDragon/relift"
+publish = false
+description = "rustyboi-core's Game Boy devices behind a C ABI, for the relift Game Boy runtime"
+
+[workspace]
+
+[lib]
+name = "relift_gb_devices"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "4fb82b9dbec9c913d1d10607574359aba2da01f4" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
