@@ -157,24 +157,12 @@ pub(crate) fn code_addresses(
     out
 }
 
-/// What a forward constant propagation knows about a register.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Fact {
-    Const(u128),
-    Unknown,
-}
-
-/// Meets `from` into `into` (a missing register is unknown); whether
-/// `into` changed.
-fn meet(into: &mut HashMap<Reg, Fact>, from: &HashMap<Reg, Fact>) -> bool {
-    let mut changed = false;
-    for (r, g) in into.iter_mut() {
-        if *g != Fact::Unknown && from.get(r) != Some(g) {
-            *g = Fact::Unknown;
-            changed = true;
-        }
-    }
-    changed
+/// Meets `from` into `into`, both the registers known to hold one
+/// constant (a missing register is unknown); whether `into` changed.
+fn meet(into: &mut HashMap<Reg, u128>, from: &HashMap<Reg, u128>) -> bool {
+    let before = into.len();
+    into.retain(|r, c| from.get(r) == Some(c));
+    into.len() != before
 }
 
 /// The registers known to hold one constant when each instruction of the
@@ -186,10 +174,11 @@ pub(crate) fn in_states(
     entry: u64,
     preserved: &[Reg],
 ) -> HashMap<u64, HashMap<Reg, u128>> {
-    let mut ins: HashMap<u64, HashMap<Reg, Fact>> = HashMap::new();
+    let mut ins: HashMap<u64, HashMap<Reg, u128>> = HashMap::new();
     ins.insert(entry, HashMap::new());
     let mut work = vec![entry];
     let mut steps = 0usize;
+    let mut vals = Vec::new();
     while let Some(pc) = work.pop() {
         steps += 1;
         if steps > 200_000 {
@@ -198,34 +187,28 @@ pub(crate) fn in_states(
         let Some(Insn::Lifted(b)) = insts.get(&pc) else {
             continue;
         };
-        let state = ins.get(&pc).cloned().unwrap_or_default();
-        let known: HashMap<Reg, u128> = state
-            .iter()
-            .filter_map(|(r, f)| match f {
-                Fact::Const(c) => Some((*r, *c)),
-                Fact::Unknown => None,
-            })
-            .collect();
-        let mut vals = Vec::with_capacity(b.insts.len());
-        let mut out = state.clone();
+        let known = ins.get(&pc).cloned().unwrap_or_default();
+        vals.clear();
         for n in 0..b.insts.len() {
             let v = eval(b, &vals, &known, n);
             vals.push(v);
         }
+        let mut out = known;
         for inst in &b.insts {
             if let Op::Set(r, x) = &inst.op {
-                let f = vals[x.index()].map_or(Fact::Unknown, Fact::Const);
-                out.insert(*r, f);
+                match vals[x.index()] {
+                    Some(c) => {
+                        out.insert(*r, c);
+                    }
+                    None => {
+                        out.remove(r);
+                    }
+                }
             }
         }
         let mut succ = Vec::new();
-        let kill = matches!(b.exit.flow, Flow::Call { .. } | Flow::Trap(_));
-        if kill {
-            for (r, f) in out.iter_mut() {
-                if !preserved.contains(r) {
-                    *f = Fact::Unknown;
-                }
-            }
+        if matches!(b.exit.flow, Flow::Call { .. } | Flow::Trap(_)) {
+            out.retain(|r, _| preserved.contains(r));
         }
         match (b.exit.flow, b.exit.next) {
             (Flow::Return, _) => {}
@@ -259,17 +242,5 @@ pub(crate) fn in_states(
             }
         }
     }
-    ins.into_iter()
-        .map(|(pc, m)| {
-            (
-                pc,
-                m.into_iter()
-                    .filter_map(|(r, f)| match f {
-                        Fact::Const(c) => Some((r, c)),
-                        Fact::Unknown => None,
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
+    ins
 }
