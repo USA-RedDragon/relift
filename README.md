@@ -1,20 +1,29 @@
 # relift
 
-relift is a static recompiler. It translates a console game's machine code
-ahead of time into portable C11, which clang or `zig cc` builds into a native
-program for Linux, macOS, Windows and other hosts, linked against a C runtime
-that stands in for the console's operating system.
+relift is a static recompiler. It translates a game's machine code ahead of
+time into portable C11, which clang or `zig cc` builds into a native program
+for Linux, macOS, Windows and other hosts. The program links against a C
+runtime that stands in for the original console: its operating system, its
+devices, or both.
 
-The tool is written in Rust. The first guest is the Nintendo Switch (ARM64);
-the core is guest-neutral so other consoles can follow.
+The tool is written in Rust. The core (IR, analysis, C emitter, build driver,
+runtime core) knows no particular console or CPU. Each guest adds a CPU
+frontend under `cpus/` and a guest layer under `guests/` and
+`runtime/guests/`.
 
-**Status: early development, nothing works yet.** The repository holds the
-workspace skeleton and its structural tests.
+| Guest | CPU frontend | State |
+|---|---|---|
+| Nintendo Switch | ARM64 (`cpus/a64`, generated from Arm's Sail model) | libnx test programs build and run end to end on Linux x86-64; commercial games are not running yet |
+| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | decoder, cartridge reader and test oracle; lifting and runtime in progress |
+
+**Status: early development.** Nothing is ready for players.
 
 relift ships no game code, keys or data, and never will. You supply your own
 legally obtained dumps.
 
 ## Importing a game
+
+### Nintendo Switch
 
 relift reads decrypted dumps only. An encrypted dump must first be converted
 to one of the inputs below with a separate tool.
@@ -42,22 +51,27 @@ another; its exefs and romfs replace the base's when it has them. The same
 choice applies to the update packages of a `.nup`. The program ID comes from
 `main.npdm`.
 
+### Game Boy and Game Boy Color
+
+Import is not available yet. `relift-gbrom` reads and checks a ROM header.
+
 ## Tools
 
-| Binary | Does |
-|---|---|
-| `relift` | the recompiler: `import`, `build`, `run`, `check`, `where` |
-| `relift-nup` | list and extract `.nup` containers |
-| `relift-romfs` | list, extract and print files of a romfs image |
-| `relift-nso` | show, list symbols of and decompress NSO modules |
-| `relift-nro` | show NRO modules and extract their assets |
-| `relift-npdm` | show a `main.npdm` |
-| `relift-gbrom` | show a Game Boy ROM header and validate its checksums |
+| Binary | Guest | Does |
+|---|---|---|
+| `relift` | all | the recompiler: `import`, `build`, `run`, `check`, `where` |
+| `relift-nup` | Switch | list and extract `.nup` containers |
+| `relift-romfs` | Switch | list, extract and print files of a romfs image |
+| `relift-nso` | Switch | show, list symbols of and decompress NSO modules |
+| `relift-nro` | Switch | show NRO modules and extract their assets |
+| `relift-npdm` | Switch | show a `main.npdm` |
+| `relift-ir` | Switch | print the IR of A64 instruction words or NSO symbols |
+| `relift-gbrom` | Game Boy | show a ROM header and validate its checksums |
 
 ## Building
 
 ```sh
-cargo build --release -p relift -p relift-switch-tools
+cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools
 pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
