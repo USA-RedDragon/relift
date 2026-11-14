@@ -374,6 +374,7 @@ fn explore(
         pads: module_pads(module),
     };
     let mut done: BTreeSet<u64> = skip.keys().copied().collect();
+    let mut explored: HashMap<u64, Extent> = HashMap::new();
     // A function's extent stops at the entries of other functions, except
     // at addresses only known as computed values: those are often labels
     // inside a function (a jump-table base or a loop head taken with adr),
@@ -394,10 +395,11 @@ fn explore(
             break;
         }
         for e in todo {
-            let (insts, _, _) = extent(&mut lifter, &entries, e);
-            for (a, k) in new_entries(module, granule, &insts) {
+            let ext = extent(&mut lifter, &entries, e);
+            for (a, k) in new_entries(module, granule, &ext.0) {
                 kinds.entry(a).or_insert(k);
             }
+            explored.insert(e, ext);
             done.insert(e);
             on(Progress::Found {
                 entries: kinds.len(),
@@ -417,7 +419,10 @@ fn explore(
         .into_iter()
         .enumerate()
         .map(|(n, (e, kind))| {
-            let (insts, tables, pads) = extent(&mut lifter, &entries, e);
+            let (insts, tables, pads) = match explored.remove(&e) {
+                Some(x) if x.0.keys().all(|a| *a == e || !entries.contains(a)) => x,
+                _ => extent(&mut lifter, &entries, e),
+            };
             failed.extend(
                 insts
                     .iter()
