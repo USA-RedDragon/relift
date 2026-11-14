@@ -96,6 +96,13 @@ RL_RUNTIME_API rl_u128 rl_sm4e(rl_u128 d, rl_u128 n);
 /** @brief SM4EKEY Vd, Vn, Vm: four SM4 key schedule rounds on the keys n with the constants m. */
 RL_RUNTIME_API rl_u128 rl_sm4ekey(rl_u128 n, rl_u128 m);
 
+/** @brief AES SubBytes alone (the IR's CryptoOp::AesSubBytes): AESE with a zero key after InvShiftRows. */
+RL_RUNTIME_API rl_u128 rl_aes_subbytes(rl_u128 x);
+/** @brief AES InvSubBytes alone: AESD with a zero key after ShiftRows. */
+RL_RUNTIME_API rl_u128 rl_aes_invsubbytes(rl_u128 x);
+/** @brief The SM4 S-box on one byte (the IR's CryptoOp::Sm4Sbox). */
+RL_RUNTIME_API uint8_t rl_sm4_sbox(uint8_t x);
+
 /** @brief Portable path of rl_aese. */
 RL_RUNTIME_API rl_u128 rl_aese_portable(rl_u128 d, rl_u128 n);
 /** @brief Portable path of rl_aesd. */

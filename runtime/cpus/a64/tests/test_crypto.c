@@ -609,3 +609,20 @@ TEST(crypto_vector_file)
     CHECK_EQ(n_bad, 0);
     CHECK(n_ok > 0);
 }
+
+TEST(crypto_cipher_steps)
+{
+    /* SubBytes and InvSubBytes alone, byte by byte (FIPS-197 figure 7: S(0x53) = 0xed). */
+    for (unsigned i = 0; i < 256; i++) {
+        rl_u128 x = 0;
+        for (unsigned k = 0; k < 16; k++)
+            x |= (rl_u128)(uint8_t)(i + 37 * k) << (8 * k);
+        rl_u128 s = rl_aes_subbytes(x);
+        CHECK(rl_aes_invsubbytes(s) == x);
+        CHECK(rl_aesimc(rl_aesmc(x)) == x);
+    }
+    CHECK_EQ((unsigned)(uint8_t)rl_aes_subbytes((rl_u128)0x53), 0xedu);
+    CHECK_EQ((unsigned)(uint8_t)rl_aes_subbytes(0), 0x63u);
+    CHECK_EQ((unsigned)rl_sm4_sbox(0), 0xd6u);
+    CHECK_EQ((unsigned)rl_sm4_sbox(0xff), 0x48u);
+}

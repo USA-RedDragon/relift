@@ -173,6 +173,18 @@ static rl_u128 mix_columns(rl_u128 x, const uint8_t k[4]) {
 static const uint8_t mc_k[4] = {2, 3, 1, 1};
 static const uint8_t imc_k[4] = {14, 11, 13, 9};
 
+rl_u128 rl_aes_subbytes(rl_u128 x) {
+    return rl_aese(shift_rows(x, 1), 0);
+}
+
+rl_u128 rl_aes_invsubbytes(rl_u128 x) {
+    return rl_aesd(shift_rows(x, 0), 0);
+}
+
+uint8_t rl_sm4_sbox(uint8_t x) {
+    return sm4_sbox[x];
+}
+
 rl_u128 rl_aese_portable(rl_u128 d, rl_u128 n) {
     return sub_bytes(shift_rows(d ^ n, 0), aes_sbox);
 }
