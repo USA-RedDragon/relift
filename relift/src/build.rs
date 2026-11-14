@@ -242,6 +242,7 @@ fn emit_modules(
                 unit_symbol: unit.clone(),
                 module_base: p.base,
                 parts: fpsr.parts(),
+                ..relift_emit::Options::default()
             },
             &mut |d, total| {
                 ui.update(

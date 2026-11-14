@@ -14,8 +14,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use relift_guest::{Frontend, Home};
-use relift_ir::{Block, Flow, Next, Op, Reg, Value};
+use relift_ir::{Block, Flow, IoMap, Next, Op, Reg, Value};
 
+use crate::time;
 use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
 use crate::{Function, Insn, Target};
 
@@ -67,6 +68,10 @@ struct Ctx<'a> {
     lp_sp: Option<String>,
     /// The division into pieces and the piece being written, when split.
     split: Option<(&'a Split, usize)>,
+    /// The guest's I/O map.
+    io: &'a IoMap,
+    /// The C lvalue of the clock, when the piece keeps a budget local.
+    clock: Option<&'static str>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -280,6 +285,7 @@ pub(crate) fn emit_function(
     f: &Function<'_>,
     targets: &BTreeMap<u64, Target>,
     piece_bytes: usize,
+    io: &IoMap,
 ) -> Emitted1 {
     let resumes = resume_points(f, targets);
     let blocks: BTreeMap<u64, Block> = f
@@ -292,7 +298,15 @@ pub(crate) fn emit_function(
         .collect();
     let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
-    let whole = emit_piece(fe, f, targets, &blocks, &resumes, &all, None);
+    let env = Env {
+        fe,
+        f,
+        targets,
+        blocks: &blocks,
+        resumes: &resumes,
+        io,
+    };
+    let whole = emit_piece(&env, &all, None);
     if whole.text.len() <= piece_bytes || all.len() < 2 {
         return Emitted1 {
             pieces: vec![Piece {
@@ -339,7 +353,7 @@ pub(crate) fn emit_function(
             .copied()
             .filter(|pc| split.piece_of[pc] == i)
             .collect();
-        let p = emit_piece(fe, f, targets, &blocks, &resumes, &pcs, Some((&split, i)));
+        let p = emit_piece(&env, &pcs, Some((&split, i)));
         callees.extend(p.callees);
         undefined += p.undefined;
         flags = p.flags;
@@ -356,6 +370,17 @@ pub(crate) fn emit_function(
     }
 }
 
+/// What every piece of a function is emitted from.
+#[derive(Clone, Copy)]
+struct Env<'a> {
+    fe: &'a dyn Frontend,
+    f: &'a Function<'a>,
+    targets: &'a BTreeMap<u64, Target>,
+    blocks: &'a BTreeMap<u64, Block>,
+    resumes: &'a BTreeSet<u64>,
+    io: &'a IoMap,
+}
+
 /// One emitted C function over the instructions `pcs` of `f`.
 struct Written {
     text: String,
@@ -366,19 +391,24 @@ struct Written {
     sizes: BTreeMap<u64, usize>,
 }
 
-fn emit_piece(
-    fe: &dyn Frontend,
-    f: &Function<'_>,
-    targets: &BTreeMap<u64, Target>,
-    blocks: &BTreeMap<u64, Block>,
-    resumes: &BTreeSet<u64>,
-    pcs: &[u64],
-    split: Option<(&Split, usize)>,
-) -> Written {
+fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Written {
+    let Env {
+        fe,
+        f,
+        targets,
+        blocks,
+        resumes,
+        io,
+    } = *env;
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let mut used: BTreeSet<Reg> = BTreeSet::new();
     let mut written: BTreeSet<Reg> = BTreeSet::new();
     let mut has_fp = false;
+    let clock = fe.clock().filter(|_| {
+        pcs.iter()
+            .filter_map(|pc| blocks.get(pc))
+            .any(time::uses_clock)
+    });
     let mut hoisted: BTreeSet<Reg> = BTreeSet::new();
     for b in pcs.iter().filter_map(|pc| blocks.get(pc)) {
         for inst in &b.insts {
@@ -421,8 +451,14 @@ fn emit_piece(
     for &r in &hoisted {
         let _ = writeln!(t, "    int {} = {} != 0;", flag(r), reg(r));
     }
+    if let Some(clk) = clock {
+        let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
+    }
     t.push_str("    int rc;\n    (void)rc;\n");
     t.push_str("#define RL_STORE() do {");
+    if let Some(clk) = clock {
+        let _ = write!(t, " {clk}.budget = {};", time::BUDGET);
+    }
     for &r in &written {
         let _ = match fe.home(r) {
             Home::Field(lv) => write!(t, " {lv} = {};", reg(r)),
@@ -434,6 +470,9 @@ fn emit_piece(
         };
     }
     t.push_str(" } while (0)\n#define RL_RELOAD() do {");
+    if let Some(clk) = clock {
+        let _ = write!(t, " {} = {clk}.budget;", time::BUDGET);
+    }
     for &r in &used {
         let ty = cty(regs.width(r));
         let _ = match fe.home(r) {
@@ -491,6 +530,8 @@ fn emit_piece(
         hoisted,
         lp_sp: lp_reg.map(reg),
         split,
+        io,
+        clock,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -559,7 +600,12 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         if inl[i].is_some() {
             continue;
         }
-        match emit_op(cx.fe, b, i, &inl).map_err(|m| (raw, m))? {
+        let call = cx.clock.filter(|_| matches!(inst.op, Op::Intrinsic(..)));
+        if let Some(clk) = call {
+            let _ = writeln!(s, "    {clk}.budget = {};", time::BUDGET);
+        }
+        let emitted = emit_op(cx.fe, b, i, &inl, cx.io).map_err(|m| (raw, m))?;
+        match emitted {
             Emitted::Value(e) => {
                 let ty = cty(inst.width.unwrap_or(relift_ir::Width::W1));
                 let _ = writeln!(s, "    {ty} v{i} = {e};");
@@ -584,6 +630,9 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 );
             }
         }
+        if let Some(clk) = call {
+            let _ = writeln!(s, "    {} = {clk}.budget;", time::BUDGET);
+        }
     }
     for (r, e) in sets {
         let _ = writeln!(s, "    {} = {e};", reg(r));
@@ -603,6 +652,21 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             "    RL_STORE();\n    rc = {call};\n{check}\n    RL_RELOAD();"
         );
     };
+    if cx.clock.is_some() && matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)) {
+        let next = match b.exit.next {
+            Next::Const(t) => format!("UINT64_C({t:#x})"),
+            Next::Select {
+                cond,
+                taken,
+                not_taken,
+            } => format!(
+                "({} ? UINT64_C({taken:#x}) : UINT64_C({not_taken:#x}))",
+                val(cond)
+            ),
+            Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
+        };
+        s.push_str(&time::sync(&next));
+    }
     match b.exit.flow {
         Flow::Return => s.push_str("    RL_STORE();\n    return RL_OK;\n"),
         Flow::Call { ret } => {

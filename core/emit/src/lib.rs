@@ -17,6 +17,7 @@
 //! report themselves through the frontend's undefined-instruction entry.
 
 mod func;
+mod time;
 mod value;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -108,6 +109,8 @@ pub struct Options {
     pub module_base: u64,
     /// Whether the build may compile a shard in two parts ([`parts_header`]).
     pub parts: bool,
+    /// The guest's I/O map, for I/O accesses of kind `Any`.
+    pub io_map: relift_ir::IoMap,
 }
 
 impl Default for Options {
@@ -119,6 +122,7 @@ impl Default for Options {
             unit_symbol: "rl_unit_module".into(),
             module_base: 0,
             parts: false,
+            io_map: relift_ir::IoMap::memory(),
         }
     }
 }
@@ -251,7 +255,7 @@ pub fn emit_with(
     let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
     let budget = opts.shard_bytes.max(1);
     for (k, f) in fns.iter().enumerate() {
-        let e = func::emit_function(fe, f, &targets, opts.piece_bytes.max(1));
+        let e = func::emit_function(fe, f, &targets, opts.piece_bytes.max(1), &opts.io_map);
         out.undefined += e.undefined;
         flags.insert(f.entry, e.flags);
         // A shard map's range stops at the next function of the module, so

@@ -5,7 +5,7 @@
 //! (`uint64_t` up to 64 bits, `rl_u128` above), never in a promoted `int`.
 
 use relift_ir::{
-    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, Op, Order, Reg, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, IoMap, Op, Order, Reg, UnOp, Value, Width,
 };
 
 use relift_guest::Frontend;
@@ -155,6 +155,7 @@ pub(crate) fn emit_op(
     b: &Block,
     i: usize,
     inl: &[Option<String>],
+    io: &IoMap,
 ) -> Result<Emitted, String> {
     let inst = &b.insts[i];
     let wv = |v: Value| b.insts[v.index()].width.unwrap_or(Width::W1);
@@ -375,9 +376,9 @@ pub(crate) fn emit_op(
             }
             fit(&e, w)
         }
-        Op::Tick(_) | Op::TickIf(..) => return Err("a guest clock tick".into()),
-        Op::IoLoad { .. } | Op::IoStore { .. } => return Err("an I/O access".into()),
-        Op::Sync => return Err("a sync point".into()),
+        Op::Tick(_) | Op::TickIf(..) | Op::IoLoad { .. } | Op::IoStore { .. } | Op::Sync => {
+            return crate::time::emit(fe, b, i, &val, io);
+        }
         Op::Crypto(op, x) => fe
             .crypto(*op, &val(*x))
             .ok_or_else(|| format!("cipher step {op:?}"))?,
