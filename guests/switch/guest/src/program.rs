@@ -18,6 +18,8 @@ const DT_NULL: u64 = 0;
 const DT_PLTRELSZ: u64 = 2;
 const DT_RELA: u64 = 7;
 const DT_RELASZ: u64 = 8;
+const DT_INIT: u64 = 12;
+const DT_FINI: u64 = 13;
 const DT_JMPREL: u64 = 23;
 const DT_RELRSZ: u64 = 35;
 const DT_RELR: u64 = 36;
@@ -153,6 +155,36 @@ fn reloc_targets(
     dynamic: usize,
     symbols: &[relift_switch_formats::nso::Symbol],
 ) -> Vec<u64> {
+    relocs(img, dynamic)
+        .into_iter()
+        .filter_map(|r| match r {
+            Reloc::Value(v) => Some(v),
+            Reloc::Symbol { sym, addend, .. } => sym
+                .checked_sub(1)
+                .and_then(|k| symbols.get(k))
+                .filter(|s| s.is_defined())
+                .map(|s| s.value.wrapping_add(addend)),
+        })
+        .collect()
+}
+
+/// One relocation, as image offsets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reloc {
+    /// A relative relocation storing this value.
+    Value(u64),
+    /// A symbol's address (plus `addend`) stored at `at`.
+    Symbol {
+        at: u64,
+        sym: usize,
+        addend: u64,
+        kind: SlotKind,
+    },
+}
+
+/// The relocations of the module whose dynamic section is at image offset
+/// `dynamic`.
+fn relocs(img: &[u8], dynamic: usize) -> Vec<Reloc> {
     let mut tables = Vec::new();
     let (mut rela, mut relasz, mut jmprel, mut pltsz) = (None, 0, None, 0);
     let (mut relr, mut relrsz) = (None, 0);
@@ -178,25 +210,120 @@ fn reloc_targets(
     }
     let mut out = Vec::new();
     if let Some(r) = relr {
-        out.extend(relr_targets(img, r, relrsz));
+        out.extend(relr_targets(img, r, relrsz).into_iter().map(Reloc::Value));
     }
     for (start, size) in tables {
         for i in 0..size / 24 {
             let o = (start + i * 24) as usize;
-            let (Some(info), Some(addend)) = (u64_at(img, o + 8), u64_at(img, o + 16)) else {
+            let (Some(off), Some(info), Some(addend)) =
+                (u64_at(img, o), u64_at(img, o + 8), u64_at(img, o + 16))
+            else {
                 break;
             };
             let sym = (info >> 32) as usize;
-            match info as u32 {
-                R_AARCH64_RELATIVE => out.push(addend),
-                R_AARCH64_ABS64 | R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT => {
-                    if let Some(s) = sym.checked_sub(1).and_then(|k| symbols.get(k))
-                        && s.is_defined()
-                    {
-                        out.push(s.value.wrapping_add(addend));
-                    }
+            let kind = match info as u32 {
+                R_AARCH64_RELATIVE => {
+                    out.push(Reloc::Value(addend));
+                    continue;
                 }
-                _ => {}
+                R_AARCH64_ABS64 => SlotKind::Data,
+                R_AARCH64_GLOB_DAT => SlotKind::Got,
+                R_AARCH64_JUMP_SLOT => SlotKind::Plt,
+                _ => continue,
+            };
+            out.push(Reloc::Symbol {
+                at: off,
+                sym,
+                addend,
+                kind,
+            });
+        }
+    }
+    out
+}
+
+/// What kind of word a symbol relocation fills.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotKind {
+    /// A PLT entry's GOT word (`R_AARCH64_JUMP_SLOT`), read only by its
+    /// PLT stub.
+    Plt,
+    /// A GOT word (`R_AARCH64_GLOB_DAT`).
+    Got,
+    /// Any other word (`R_AARCH64_ABS64`), which may carry an addend.
+    Data,
+}
+
+/// A word the loader fills with a symbol's address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Slot {
+    /// Its guest address.
+    pub addr: u64,
+    /// The symbol's name.
+    pub name: String,
+    /// The kind of word.
+    pub kind: SlotKind,
+}
+
+/// The loader-visible linkage of placed module `p`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Linkage {
+    /// The words the loader fills with a symbol's address, by name.
+    pub slots: Vec<Slot>,
+    /// The guest addresses relative relocations store.
+    pub values: Vec<u64>,
+    /// The functions the module defines for other modules, by name and
+    /// guest address.
+    pub exports: Vec<(String, u64)>,
+}
+
+/// The linkage of `p`: what the loader resolves by name and the pointers
+/// it relocates. The loader binds a symbol slot to a definition of that
+/// name in some module, so a symbol's possible targets are all its
+/// definitions in the program.
+pub fn linkage(p: &Placed) -> Linkage {
+    let symbols = p.nso.symbols().unwrap_or_default();
+    let mut out = Linkage {
+        exports: symbols
+            .iter()
+            .filter(|s| s.is_defined() && s.info & 0xf == STT_FUNC)
+            .map(|s| (s.name.clone(), p.base + s.value))
+            .collect(),
+        ..Linkage::default()
+    };
+    let Ok(Some(m)) = p.nso.mod0() else {
+        return out;
+    };
+    // The loader calls DT_INIT and DT_FINI by the address the dynamic
+    // section holds, which no relocation names.
+    let mut at = m.dynamic as usize;
+    while let (Some(tag), Some(v)) = (u64_at(&p.nso.image, at), u64_at(&p.nso.image, at + 8)) {
+        match tag {
+            DT_NULL => break,
+            DT_INIT | DT_FINI => out.values.push(p.base.wrapping_add(v)),
+            _ => {}
+        }
+        at += 16;
+    }
+    for r in relocs(&p.nso.image, m.dynamic as usize) {
+        match r {
+            Reloc::Value(v) => out.values.push(p.base.wrapping_add(v)),
+            Reloc::Symbol {
+                at,
+                sym,
+                addend,
+                kind,
+            } => {
+                let Some(s) = sym.checked_sub(1).and_then(|k| symbols.get(k)) else {
+                    continue;
+                };
+                // A symbol word with an addend points into its target.
+                let kind = if addend == 0 { kind } else { SlotKind::Data };
+                out.slots.push(Slot {
+                    addr: p.base.wrapping_add(at),
+                    name: s.name.clone(),
+                    kind,
+                });
             }
         }
     }
@@ -473,6 +600,55 @@ mod tests {
         img[0xb8..0xc0].copy_from_slice(&u64::from(R_AARCH64_RELATIVE).to_le_bytes());
         img[0xc0..0xc8].copy_from_slice(&0x24u64.to_le_bytes());
         assert_eq!(reloc_targets(&img, dynamic, &[]), [0x24]);
+    }
+
+    #[test]
+    fn symbol_relocations_name_their_slots() {
+        let mut img = vec![0u8; 0x200];
+        let put =
+            |img: &mut Vec<u8>, o: usize, v: u64| img[o..o + 8].copy_from_slice(&v.to_le_bytes());
+        for (k, (tag, v)) in [(DT_RELA, 0x100u64), (DT_RELASZ, 72), (DT_NULL, 0)]
+            .into_iter()
+            .enumerate()
+        {
+            put(&mut img, k * 16, tag);
+            put(&mut img, k * 16 + 8, v);
+        }
+        let rel = [
+            (0x40, R_AARCH64_GLOB_DAT, 1, 0),
+            (0x48, R_AARCH64_JUMP_SLOT, 2, 0),
+            (0x50, R_AARCH64_ABS64, 1, 8),
+        ];
+        for (i, (at, kind, sym, addend)) in rel.into_iter().enumerate() {
+            let o = 0x100 + i * 24;
+            put(&mut img, o, at);
+            put(&mut img, o + 8, (sym << 32) | u64::from(kind));
+            put(&mut img, o + 16, addend);
+        }
+        let r = relocs(&img, 0);
+        assert_eq!(
+            r,
+            [
+                Reloc::Symbol {
+                    at: 0x40,
+                    sym: 1,
+                    addend: 0,
+                    kind: SlotKind::Got
+                },
+                Reloc::Symbol {
+                    at: 0x48,
+                    sym: 2,
+                    addend: 0,
+                    kind: SlotKind::Plt
+                },
+                Reloc::Symbol {
+                    at: 0x50,
+                    sym: 1,
+                    addend: 8,
+                    kind: SlotKind::Data
+                },
+            ]
+        );
     }
 
     #[test]
