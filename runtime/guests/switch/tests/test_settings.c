@@ -54,7 +54,10 @@ TEST(save_dir_falls_back_to_the_user_folder_of_the_app)
     unsetenv("XDG_DATA_HOME");
     rl_settings_set_app("mygame");
     rl_srv_install_fs();
-    CHECK(!strcmp(rl_hos_fs_save_dir(), "/home/someone/.local/share/mygame/save"));
+    char want[300], udir[256];
+    CHECK(rl_settings_user_dir(udir, sizeof udir, "mygame"));
+    snprintf(want, sizeof want, "%s/save", udir);
+    CHECK(!strcmp(rl_hos_fs_save_dir(), want));
     CHECK_EQ(rl_settings_set("save.dir", "/tmp/rl_c"), RL_SETTING_OK);
     rl_srv_install_fs();
     CHECK(!strcmp(rl_hos_fs_save_dir(), "/tmp/rl_c"));
