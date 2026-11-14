@@ -311,6 +311,126 @@ static inline uint32_t rl_stxp64(rl_excl *m, uint8_t *mem, uint64_t a, uint64_t 
 /** @brief CLREX, and the monitor clear on every runtime entry that models an exception return (svc). */
 static inline void rl_clrex(rl_excl *m) { m->size = 0; }
 
+/*
+ * FEAT_LSE atomics (LDADD, LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN, LDUMAX,
+ * LDUMIN, SWP, CAS, CASP) and FEAT_LSE128 (LDCLRP, LDSETP, SWPP) as host
+ * atomic read-modify-writes on guest memory, so they stay atomic against
+ * other guest threads and against the exclusive helpers above. ord is
+ * RL_ORD_PLAIN for the plain forms and RL_ORD_SC for any acquire or release
+ * form (A, L, AL), lowered to sequentially consistent as for LDAR and STLR
+ * (docs/abi.md section 8.1). The address must be aligned to the access size,
+ * as the guest requires.
+ */
+
+/** @brief rl_atomic op: LDADD, old + v. */
+#define RL_AT_ADD 0
+/** @brief rl_atomic op: LDCLR, old & ~v. */
+#define RL_AT_CLR 1
+/** @brief rl_atomic op: LDEOR, old ^ v. */
+#define RL_AT_EOR 2
+/** @brief rl_atomic op: LDSET, old | v. */
+#define RL_AT_SET 3
+/** @brief rl_atomic op: LDSMAX, the signed maximum at the access size. */
+#define RL_AT_SMAX 4
+/** @brief rl_atomic op: LDSMIN, the signed minimum at the access size. */
+#define RL_AT_SMIN 5
+/** @brief rl_atomic op: LDUMAX, the unsigned maximum. */
+#define RL_AT_UMAX 6
+/** @brief rl_atomic op: LDUMIN, the unsigned minimum. */
+#define RL_AT_UMIN 7
+/** @brief rl_atomic op: SWP, v. */
+#define RL_AT_SWP 8
+
+/** @brief Defines rl_atomic_<bits>_: one atomic read-modify-write of type T (signed twin S); returns the old value. */
+#define RL_ATOMIC_SIZED_(bits, T, S)                                                    \
+    static inline T rl_atomic_##bits##_(T *p, int op, T v, int o)                       \
+    {                                                                                   \
+        switch (op) {                                                                   \
+        case RL_AT_ADD: return __atomic_fetch_add(p, v, o);                             \
+        case RL_AT_CLR: return __atomic_fetch_and(p, (T)~v, o);                         \
+        case RL_AT_EOR: return __atomic_fetch_xor(p, v, o);                             \
+        case RL_AT_SET: return __atomic_fetch_or(p, v, o);                              \
+        case RL_AT_SWP: return __atomic_exchange_n(p, v, o);                            \
+        default: break;                                                                 \
+        }                                                                               \
+        T old = __atomic_load_n(p, __ATOMIC_RELAXED);                                   \
+        for (;;) {                                                                      \
+            int gt_s = (S)old > (S)v, gt_u = old > v;                                   \
+            T nv = op == RL_AT_SMAX ? (gt_s ? old : v)                                  \
+                 : op == RL_AT_SMIN ? (gt_s ? v : old)                                  \
+                 : op == RL_AT_UMAX ? (gt_u ? old : v)                                  \
+                                    : (gt_u ? v : old);                                 \
+            if (__atomic_compare_exchange_n(p, &old, nv, 1, o, __ATOMIC_RELAXED))       \
+                return old;                                                             \
+        }                                                                               \
+    }
+RL_ATOMIC_SIZED_(8, uint8_t, int8_t)
+RL_ATOMIC_SIZED_(16, uint16_t, int16_t)
+RL_ATOMIC_SIZED_(32, uint32_t, int32_t)
+RL_ATOMIC_SIZED_(64, uint64_t, int64_t)
+#undef RL_ATOMIC_SIZED_
+
+/** @brief LD<op> and SWP (size 1, 2, 4, 8; op RL_AT_*): atomic read-modify-write at guest address a. Returns the old value, zero-extended. */
+static inline uint64_t rl_atomic(uint8_t *mem, uint64_t a, unsigned size, int op, uint64_t v, int ord)
+{
+    void *p = mem + a;
+    int o = ord ? __ATOMIC_SEQ_CST : __ATOMIC_RELAXED;
+    switch (size) {
+    case 1: return rl_atomic_8_((uint8_t *)p, op, (uint8_t)v, o);
+    case 2: return rl_atomic_16_((uint16_t *)p, op, (uint16_t)v, o);
+    case 4: return rl_atomic_32_((uint32_t *)p, op, (uint32_t)v, o);
+    default: return rl_atomic_64_((uint64_t *)p, op, v, o);
+    }
+}
+
+/** @brief A first guess of a 16-byte value for a CAS loop: two 8-byte loads; a torn pair only makes the first CAS fail and return the real value. */
+static inline rl_u128 rl_load128_(const rl_u128 *p)
+{
+    const uint64_t *q = (const uint64_t *)(const void *)p;
+    uint64_t lo = __atomic_load_n(q, __ATOMIC_RELAXED);
+    uint64_t hi = __atomic_load_n(q + 1, __ATOMIC_RELAXED);
+    return ((rl_u128)hi << 64) | lo;
+}
+
+/** @brief LDCLRP, LDSETP and SWPP (op RL_AT_CLR, RL_AT_SET, RL_AT_SWP; RL_AT_ADD and RL_AT_EOR also work): 16-byte atomic read-modify-write at guest address a, a CAS loop. Returns the old value. Needs -mcx16 on x86-64. */
+static inline rl_u128 rl_atomic128(uint8_t *mem, uint64_t a, int op, rl_u128 v, int ord)
+{
+    rl_u128 *p = (rl_u128 *)(void *)(mem + a);
+    int o = ord ? __ATOMIC_SEQ_CST : __ATOMIC_RELAXED;
+    rl_u128 old = rl_load128_(p);
+    for (;;) {
+        rl_u128 nv = op == RL_AT_CLR ? old & ~v
+                   : op == RL_AT_SET ? old | v
+                   : op == RL_AT_EOR ? old ^ v
+                   : op == RL_AT_ADD ? old + v
+                                     : v;
+        if (__atomic_compare_exchange_n(p, &old, nv, 1, o, __ATOMIC_RELAXED))
+            return old;
+    }
+}
+
+/** @brief CAS, CASA, CASL, CASAL (size 1, 2, 4, 8; CASP with 32-bit registers is size 8): store v if memory holds expected. Returns the old value, zero-extended; a failed compare stores nothing. */
+static inline uint64_t rl_cas(uint8_t *mem, uint64_t a, unsigned size, uint64_t expected, uint64_t v, int ord)
+{
+    void *p = mem + a;
+    int o = ord ? __ATOMIC_SEQ_CST : __ATOMIC_RELAXED;
+    switch (size) {
+    case 1: { uint8_t x = (uint8_t)expected; __atomic_compare_exchange_n((uint8_t *)p, &x, (uint8_t)v, 0, o, o); return x; }
+    case 2: { uint16_t x = (uint16_t)expected; __atomic_compare_exchange_n((uint16_t *)p, &x, (uint16_t)v, 0, o, o); return x; }
+    case 4: { uint32_t x = (uint32_t)expected; __atomic_compare_exchange_n((uint32_t *)p, &x, (uint32_t)v, 0, o, o); return x; }
+    default: __atomic_compare_exchange_n((uint64_t *)p, &expected, v, 0, o, o); return expected;
+    }
+}
+
+/** @brief CASP with 64-bit registers: 16-byte compare-and-swap (low register in bits 63:0). Returns the old value. Needs -mcx16 on x86-64. */
+static inline rl_u128 rl_cas128(uint8_t *mem, uint64_t a, rl_u128 expected, rl_u128 v, int ord)
+{
+    rl_u128 *p = (rl_u128 *)(void *)(mem + a);
+    int o = ord ? __ATOMIC_SEQ_CST : __ATOMIC_RELAXED;
+    __atomic_compare_exchange_n(p, &expected, v, 0, o, o);
+    return expected;
+}
+
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
 RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 
