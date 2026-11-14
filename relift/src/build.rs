@@ -42,7 +42,7 @@ fn read_toml(path: &Path) -> Result<toml::Table, BoxError> {
 }
 
 /// The import directory game.toml in the working directory names.
-fn import_dir() -> Result<PathBuf, BoxError> {
+pub(crate) fn import_dir() -> Result<PathBuf, BoxError> {
     let game = read_toml(Path::new("game.toml"))?;
     let dir = game
         .get("game")
@@ -56,7 +56,7 @@ fn import_dir() -> Result<PathBuf, BoxError> {
 type Loaded = (Vec<(String, Nso)>, Option<Npdm>);
 
 /// The modules of the import in load order, with the NPDM.
-fn load(import: &Path) -> Result<Loaded, BoxError> {
+pub(crate) fn load(import: &Path) -> Result<Loaded, BoxError> {
     let table = read_toml(&import.join("modules.toml"))?;
     let mut mods = Vec::new();
     for m in table
