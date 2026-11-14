@@ -2,6 +2,8 @@
 //! (`relift-gbrom`): inputs from files or stdin, JSON and the one-line
 //! error exit. All format logic lives in `relift-gb-formats`.
 
+pub mod functions;
+
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;

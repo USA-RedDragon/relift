@@ -1,21 +1,25 @@
 //! `relift-gbrom`: print the header of a Game Boy or Game Boy Color ROM and
-//! validate its checksums.
+//! validate its checksums, or list its functions per bank.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use relift_gb_formats::Cartridge;
+use relift_gb_tools::functions::{self, FunctionsArgs};
 use relift_gb_tools::{BoxError, input, print_json, run};
 use serde_json::{Value, json};
 
 /// Show a ROM's cartridge header and check its logo, checksums and size.
 #[derive(Parser, Debug)]
-#[command(name = "relift-gbrom", version)]
+#[command(name = "relift-gbrom", version, args_conflicts_with_subcommands = true)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// The ROM image, or - for stdin.
-    rom: PathBuf,
+    #[arg(required = true)]
+    rom: Option<PathBuf>,
     /// Print JSON.
     #[arg(long)]
     json: bool,
@@ -24,10 +28,22 @@ struct Cli {
     check: bool,
 }
 
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Find the functions of a ROM across its mapper banks: per bank, with
+    /// the transfers that cannot be resolved and the code run from RAM.
+    Functions(FunctionsArgs),
+}
+
 fn main() -> ExitCode {
     run::<Cli>("relift-gbrom", |cli| {
-        let rom = input(&cli.rom)?;
-        let cart = Cartridge::parse(&rom).map_err(|e| format!("{}: {e}", cli.rom.display()))?;
+        let rom_path = match (cli.command, cli.rom) {
+            (Some(Command::Functions(a)), _) => return functions::run(&a),
+            (None, Some(p)) => p,
+            (None, None) => return Err("a ROM path is required".into()),
+        };
+        let rom = input(&rom_path)?;
+        let cart = Cartridge::parse(&rom).map_err(|e| format!("{}: {e}", rom_path.display()))?;
         if cli.json {
             print_json(&to_json(&cart))?;
         } else {
