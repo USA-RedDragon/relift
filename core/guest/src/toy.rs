@@ -27,7 +27,7 @@
 //! | 0x0e | `bz off` (branch when `z`) |
 
 use relift_ir::{
-    Block, Builder, CmpOp, Endian, Exit, Flow, Next, Order, Reg, RegDecl, RegFile, Width,
+    Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, Next, Order, Reg, RegDecl, RegFile, Width,
 };
 
 use crate::{Frontend, Home, LiftFailure};
@@ -215,5 +215,20 @@ impl Frontend for Toy {
 
     fn monitor(&self) -> &'static str {
         "&c->excl"
+    }
+
+    fn fp(
+        &self,
+        _op: FpOp,
+        _from: Width,
+        _to: Width,
+        _args: &[String],
+        _reg: &dyn Fn(Reg) -> String,
+    ) -> Option<String> {
+        None
+    }
+
+    fn fp_state(&self) -> Vec<Reg> {
+        Vec::new()
     }
 }
