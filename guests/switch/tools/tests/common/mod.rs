@@ -74,6 +74,7 @@ fn exe(bin: &str) -> PathBuf {
     match bin {
         "relift-romfs" => env!("CARGO_BIN_EXE_relift-romfs").into(),
         "relift-nso" => env!("CARGO_BIN_EXE_relift-nso").into(),
+        "relift-ir" => env!("CARGO_BIN_EXE_relift-ir").into(),
         other => panic!("unknown tool {other}"),
     }
 }

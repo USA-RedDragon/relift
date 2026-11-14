@@ -444,6 +444,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-cpu-a64",
+ "relift-ir",
  "relift-proc",
  "relift-switch-formats",
  "serde_json",
