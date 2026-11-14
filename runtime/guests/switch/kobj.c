@@ -357,7 +357,7 @@ bool hos_read_u32(uint64_t addr, uint32_t *v)
     if ((addr & 3) || !rl_vm_contains(&hos.vm, addr, 4))
         return false;
     rl_vm_block b = rl_vm_query(&hos.vm, addr);
-    if (!((uint32_t)b.tag & MS_MAPPED) || !(b.perm & RL_PERM_R))
+    if (!((uint32_t)b.tag & MS_MAPPED) || !(b.perm & RL_VM_R))
         return false;
     *v = __atomic_load_n((uint32_t *)(void *)(hos.vm.base + addr), __ATOMIC_SEQ_CST);
     return true;
@@ -368,7 +368,7 @@ bool hos_writable_u32(uint64_t addr)
     if ((addr & 3) || !rl_vm_contains(&hos.vm, addr, 4))
         return false;
     rl_vm_block b = rl_vm_query(&hos.vm, addr);
-    return ((uint32_t)b.tag & MS_MAPPED) && (b.perm & RL_PERM_W);
+    return ((uint32_t)b.tag & MS_MAPPED) && (b.perm & RL_VM_W);
 }
 
 bool hos_write_u32(uint64_t addr, uint32_t v)

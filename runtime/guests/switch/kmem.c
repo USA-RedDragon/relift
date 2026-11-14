@@ -16,7 +16,7 @@
 static uint64_t tag_of(uint32_t state, uint32_t attr) { return state | ((uint64_t)attr << 32); }
 static uint32_t state_of(const rl_vm_block *b) { return (uint32_t)b->tag; }
 static uint32_t attr_of(const rl_vm_block *b) { return (uint32_t)(b->tag >> 32); }
-static bool aligned(uint64_t v) { return (v & (RL_GUEST_PAGE - 1)) == 0; }
+static bool aligned(uint64_t v) { return (v & (HOS_PAGE - 1)) == 0; }
 static uint64_t align_up(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1); }
 
 static bool inside(uint64_t addr, uint64_t size, uint64_t start, uint64_t end)
@@ -35,7 +35,7 @@ static bool check(uint64_t addr, uint64_t size, uint32_t smask, uint32_t sval, u
     rl_vm_block b;
     if (!rl_vm_uniform(&hos.vm, addr, size, &b))
         return false;
-    if ((state_of(&b) & smask) != sval || (b.perm & pmask) != pval || (attr_of(&b) & amask) != aval)
+    if ((state_of(&b) & smask) != sval || (hos_perm(b.perm) & pmask) != pval || (attr_of(&b) & amask) != aval)
         return false;
     if (out)
         *out = b;
@@ -137,7 +137,7 @@ rl_result rl_hos_map_segment(uint64_t addr, uint64_t size, uint32_t perm, uint32
         rc = KR_INVALID_ADDRESS;
     else if (!is_free(addr, size))
         rc = KR_INVALID_MEM_STATE;
-    else if (rl_vm_set(&hos.vm, addr, size, perm, tag_of(state, 0), RL_VM_FRESH))
+    else if (rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), tag_of(state, 0), RL_VM_FRESH))
         rc = KR_OUT_OF_MEMORY;
     hos_unlock();
     return rc;
@@ -146,12 +146,12 @@ rl_result rl_hos_map_segment(uint64_t addr, uint64_t size, uint32_t perm, uint32
 rl_result rl_hos_map_main_stack(uint64_t size, uint64_t *top)
 {
     rl_result rc = KR_SUCCESS;
-    size = align_up(size, RL_GUEST_PAGE);
+    size = align_up(size, HOS_PAGE);
     hos_lock();
     uint64_t a = find_free_top(hos.lay.stack_start, hos.lay.stack_end, size);
     if (!a || !size)
         rc = KR_OUT_OF_MEMORY;
-    else if (rl_vm_set(&hos.vm, a, size, RL_PERM_RW, tag_of(MS_STACK, 0), RL_VM_FRESH))
+    else if (rl_vm_set(&hos.vm, a, size, RL_VM_RW, tag_of(MS_STACK, 0), RL_VM_FRESH))
         rc = KR_OUT_OF_MEMORY;
     else {
         hos.stack_bytes += size;
@@ -173,8 +173,8 @@ uint64_t hos_tls_alloc(void)
             }
     if (hos.tls_page_count >= HOS_TLS_PAGES)
         return 0;
-    uint64_t a = find_free_top(hos.lay.tlsio_start, hos.lay.tlsio_end, RL_GUEST_PAGE);
-    if (!a || rl_vm_set(&hos.vm, a, RL_GUEST_PAGE, RL_PERM_RW, tag_of(MS_THREAD_LOCAL, 0), RL_VM_FRESH))
+    uint64_t a = find_free_top(hos.lay.tlsio_start, hos.lay.tlsio_end, HOS_PAGE);
+    if (!a || rl_vm_set(&hos.vm, a, HOS_PAGE, RL_VM_RW, tag_of(MS_THREAD_LOCAL, 0), RL_VM_FRESH))
         return 0;
     hos.tls_pages[hos.tls_page_count] = a;
     hos.tls_used[hos.tls_page_count] = 1;
@@ -185,7 +185,7 @@ uint64_t hos_tls_alloc(void)
 void hos_tls_free(uint64_t slot)
 {
     for (uint32_t p = 0; p < hos.tls_page_count; p++)
-        if (slot >= hos.tls_pages[p] && slot < hos.tls_pages[p] + RL_GUEST_PAGE)
+        if (slot >= hos.tls_pages[p] && slot < hos.tls_pages[p] + HOS_PAGE)
             hos.tls_used[p] &= (uint8_t) ~(1u << ((slot - hos.tls_pages[p]) / 0x200u));
 }
 
@@ -215,12 +215,12 @@ rl_result hos_set_heap_size(uint64_t size, uint64_t *out)
     } else if (size > cur) {
         if (!is_free(start + cur, size - cur))
             rc = KR_INVALID_MEM_STATE;
-        else if (rl_vm_set(&hos.vm, start + cur, size - cur, RL_PERM_RW, tag_of(MS_HEAP, 0), RL_VM_FRESH))
+        else if (rl_vm_set(&hos.vm, start + cur, size - cur, RL_VM_RW, tag_of(MS_HEAP, 0), RL_VM_FRESH))
             rc = KR_OUT_OF_MEMORY;
     } else if (size < cur) {
-        if (!check(start + size, cur - size, 0xFFFFFFFFu, MS_HEAP, 0xFFFFFFFFu, RL_PERM_RW, 0xFF, 0, NULL))
+        if (!check(start + size, cur - size, 0xFFFFFFFFu, MS_HEAP, 0xFFFFFFFFu, HOS_PERM_RW, 0xFF, 0, NULL))
             rc = KR_INVALID_MEM_STATE;
-        else if (rl_vm_set(&hos.vm, start + size, cur - size, RL_PERM_NONE, 0, RL_VM_DISCARD))
+        else if (rl_vm_set(&hos.vm, start + size, cur - size, RL_VM_NONE, 0, RL_VM_DISCARD))
             rc = KR_OUT_OF_MEMORY;
     }
     if (rc == KR_SUCCESS) {
@@ -239,7 +239,7 @@ rl_result hos_set_memory_permission(uint64_t addr, uint64_t size, uint32_t perm)
         return KR_INVALID_SIZE;
     if (addr + size <= addr)
         return KR_INVALID_MEM_STATE;
-    if (perm != RL_PERM_NONE && (perm | RL_PERM_W) != RL_PERM_RW)
+    if (perm != HOS_PERM_NONE && (perm | HOS_PERM_W) != HOS_PERM_RW)
         return KR_INVALID_PERMISSION;
     rl_result rc = KR_SUCCESS;
     rl_vm_block b;
@@ -248,7 +248,7 @@ rl_result hos_set_memory_permission(uint64_t addr, uint64_t size, uint32_t perm)
         !check(addr, size, MS_PERMISSION_CHANGE_ALLOWED, MS_PERMISSION_CHANGE_ALLOWED, 0, 0,
                0xFFu & ~(uint32_t)(MA_IPC_MAPPED | MA_DEVICE_MAPPED), 0, &b))
         rc = KR_INVALID_MEM_STATE;
-    else if (perm != b.perm && rl_vm_set(&hos.vm, addr, size, perm, b.tag, RL_VM_KEEP))
+    else if (hos_vm_perm(perm) != b.perm && rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), b.tag, RL_VM_KEEP))
         rc = KR_OUT_OF_MEMORY;
     hos_unlock();
     return rc;
@@ -303,15 +303,15 @@ rl_result hos_map_memory(uint64_t dst, uint64_t src, uint64_t size)
         return rc;
     rl_vm_block b;
     hos_lock();
-    if (!check(src, size, MS_MAP_ALLOWED, MS_MAP_ALLOWED, 0xFFFFFFFFu, RL_PERM_RW,
+    if (!check(src, size, MS_MAP_ALLOWED, MS_MAP_ALLOWED, 0xFFFFFFFFu, HOS_PERM_RW,
                0xFFu & ~(uint32_t)(MA_IPC_MAPPED | MA_DEVICE_MAPPED), 0, &b) ||
         !is_free(dst, size)) {
         rc = KR_INVALID_MEM_STATE;
-    } else if (rl_vm_set(&hos.vm, dst, size, RL_PERM_RW, tag_of(MS_STACK, 0), RL_VM_FRESH)) {
+    } else if (rl_vm_set(&hos.vm, dst, size, RL_VM_RW, tag_of(MS_STACK, 0), RL_VM_FRESH)) {
         rc = KR_OUT_OF_MEMORY;
     } else {
         rl_vm_kernel_copy(&hos.vm, dst, src, size);
-        if (rl_vm_set(&hos.vm, src, size, RL_PERM_NONE, tag_of(state_of(&b), MA_BORROWED), RL_VM_KEEP))
+        if (rl_vm_set(&hos.vm, src, size, RL_VM_NONE, tag_of(state_of(&b), MA_BORROWED), RL_VM_KEEP))
             rc = KR_OUT_OF_MEMORY;
     }
     hos_unlock();
@@ -325,14 +325,14 @@ rl_result hos_unmap_memory(uint64_t dst, uint64_t src, uint64_t size)
         return rc;
     rl_vm_block b;
     hos_lock();
-    if (!check(src, size, MS_MAP_ALLOWED, MS_MAP_ALLOWED, 0xFFFFFFFFu, RL_PERM_NONE, 0xFF, MA_BORROWED, &b) ||
+    if (!check(src, size, MS_MAP_ALLOWED, MS_MAP_ALLOWED, 0xFFFFFFFFu, HOS_PERM_NONE, 0xFF, MA_BORROWED, &b) ||
         !check(dst, size, 0xFFFFFFFFu, MS_STACK, 0, 0, 0xFFu & ~(uint32_t)(MA_IPC_MAPPED | MA_DEVICE_MAPPED), 0, NULL)) {
         rc = KR_INVALID_MEM_STATE;
-    } else if (rl_vm_set(&hos.vm, src, size, RL_PERM_RW, tag_of(state_of(&b), 0), RL_VM_KEEP)) {
+    } else if (rl_vm_set(&hos.vm, src, size, RL_VM_RW, tag_of(state_of(&b), 0), RL_VM_KEEP)) {
         rc = KR_OUT_OF_MEMORY;
     } else {
         rl_vm_kernel_copy(&hos.vm, src, dst, size);
-        if (rl_vm_set(&hos.vm, dst, size, RL_PERM_NONE, 0, RL_VM_DISCARD))
+        if (rl_vm_set(&hos.vm, dst, size, RL_VM_NONE, 0, RL_VM_DISCARD))
             rc = KR_OUT_OF_MEMORY;
     }
     hos_unlock();
@@ -346,7 +346,7 @@ bool hos_user_range(uint64_t addr, uint64_t size, uint32_t perm)
         return false;
     while (a < addr + size) {
         rl_vm_block b = rl_vm_query(&hos.vm, a);
-        if (!(state_of(&b) & MS_MAPPED) || (b.perm & perm) != perm)
+        if (!(state_of(&b) & MS_MAPPED) || (hos_perm(b.perm) & perm) != perm)
             return false;
         a = b.addr + b.size;
     }
@@ -372,10 +372,10 @@ rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_inf
         mi.size = b.size;
         mi.type = state_of(&b) & 0xFF;
         mi.attr = attr_of(&b);
-        mi.perm = b.perm;
+        mi.perm = hos_perm(b.perm);
     }
     rl_result rc = KR_SUCCESS;
-    if (!hos_user_range(info_addr, sizeof mi, RL_PERM_W))
+    if (!hos_user_range(info_addr, sizeof mi, HOS_PERM_W))
         rc = KR_INVALID_MEM_STATE;
     else
         rl_vm_kernel_write(&hos.vm, info_addr, &mi, sizeof mi);
@@ -395,7 +395,7 @@ hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm)
     hos_shmem *s = calloc(1, sizeof *s);
     if (!s)
         return NULL;
-    size = align_up(size, RL_GUEST_PAGE);
+    size = align_up(size, HOS_PAGE);
     if (rl_shm_create(&s->shm, size) != 0) {
         free(s);
         return NULL;
@@ -427,7 +427,7 @@ rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32
         return KR_INVALID_SIZE;
     if (addr + size <= addr)
         return KR_INVALID_MEM_STATE;
-    if ((perm | RL_PERM_W) != RL_PERM_RW)
+    if ((perm | HOS_PERM_W) != HOS_PERM_RW)
         return KR_INVALID_PERMISSION;
     rl_result rc = KR_SUCCESS;
     hos_lock();
@@ -458,7 +458,7 @@ rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32
                    (unsigned long long)addr, (unsigned long long)size, (unsigned long long)hos.vm.host_page);
         rc = KR_INVALID_ADDRESS;
     } else if (rl_vm_map_shm(&hos.vm, addr, size, &s->shm) ||
-               rl_vm_set(&hos.vm, addr, size, perm, tag_of(MS_SHARED_MEMORY, 0), RL_VM_KEEP)) {
+               rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), tag_of(MS_SHARED_MEMORY, 0), RL_VM_KEEP)) {
         rc = KR_OUT_OF_MEMORY;
     } else {
         s->views[slot] = addr;
@@ -487,7 +487,7 @@ rl_result hos_unmap_shared_memory(uint32_t h, uint64_t addr, uint64_t size)
         rc = KR_INVALID_MEM_STATE;
     else {
         s->views[slot] = 0;
-        if (rl_vm_set(&hos.vm, addr, size, RL_PERM_NONE, 0, RL_VM_DISCARD))
+        if (rl_vm_set(&hos.vm, addr, size, RL_VM_NONE, 0, RL_VM_DISCARD))
             rc = KR_OUT_OF_MEMORY;
     }
     hos_unlock();
@@ -502,7 +502,7 @@ static void tmem_destroy(hos_kobj *o)
     rl_vm_block b;
     hos_lock();
     if (check(t->addr, t->size, MS_TRANSFER_MEMORY_ALLOWED, MS_TRANSFER_MEMORY_ALLOWED, 0, 0, 0xFF, MA_BORROWED, &b))
-        rl_vm_set(&hos.vm, t->addr, t->size, RL_PERM_RW, tag_of(state_of(&b), 0), RL_VM_KEEP);
+        rl_vm_set(&hos.vm, t->addr, t->size, RL_VM_RW, tag_of(state_of(&b), 0), RL_VM_KEEP);
     hos_unlock();
     free(t);
 }
@@ -515,7 +515,7 @@ rl_result hos_create_transfer_memory(uint32_t *out, uint64_t addr, uint64_t size
         return KR_INVALID_SIZE;
     if (addr + size <= addr)
         return KR_INVALID_MEM_STATE;
-    if (perm > RL_PERM_RW || perm == RL_PERM_W)
+    if (perm > HOS_PERM_RW || perm == HOS_PERM_W)
         return KR_INVALID_PERMISSION;
     hos_tmem *t = calloc(1, sizeof *t);
     if (!t)
@@ -527,9 +527,9 @@ rl_result hos_create_transfer_memory(uint32_t *out, uint64_t addr, uint64_t size
     rl_result rc = KR_SUCCESS;
     rl_vm_block b;
     hos_lock();
-    if (!check(addr, size, MS_TRANSFER_MEMORY_ALLOWED, MS_TRANSFER_MEMORY_ALLOWED, 0xFFFFFFFFu, RL_PERM_RW, 0xFF, 0, &b))
+    if (!check(addr, size, MS_TRANSFER_MEMORY_ALLOWED, MS_TRANSFER_MEMORY_ALLOWED, 0xFFFFFFFFu, HOS_PERM_RW, 0xFF, 0, &b))
         rc = KR_INVALID_MEM_STATE;
-    else if (rl_vm_set(&hos.vm, addr, size, perm, tag_of(state_of(&b), MA_BORROWED), RL_VM_KEEP))
+    else if (rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), tag_of(state_of(&b), MA_BORROWED), RL_VM_KEEP))
         rc = KR_OUT_OF_MEMORY;
     else
         rc = hos_handle_add(&t->obj, out);
