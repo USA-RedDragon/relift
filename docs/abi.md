@@ -770,6 +770,17 @@ are also call boundaries. [inferred]
   runtime never enters the program entry again, since it does not deliver
   exceptions through it; landing pads, once lifted, must be marked as
   entered from elsewhere]
+- A read that cannot run has no region. A function is entered when its
+  address escapes, when it has no call site, or from a block that runs in
+  an entered function. In the program start (the first module's entry,
+  when its address does not escape) only the blocks run that a forward
+  propagation of the registers `rl_hos_run_main` sets (`x0` = 0,
+  `program::START_REGS`) reaches; code nothing in the start reaches, such
+  as a landing pad, starts with no register known. rtld's start takes a
+  nonzero `x0` as an exception to deliver and jumps to the SDK's user
+  exception handler, so reads that only that handler reaches never run.
+  [inferred: the runtime enters the start once, for the main thread, and
+  does not implement `svcReturnFromException`]
 - `program.c` of a program with a live read calls
   `rl_a64_set_fp_flags(1)`, and `MSR FPSR` clears the host flags in every
   function, so a write in flag-free code still starts a region cleanly. In

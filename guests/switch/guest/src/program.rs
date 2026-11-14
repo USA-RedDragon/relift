@@ -13,6 +13,15 @@ use relift_switch_formats::nso::Nso;
 /// and 36-bit address spaces, the runtime's default.
 pub const CODE_START: u64 = 0x800_0000;
 
+/// The general registers the runtime sets before it enters the program
+/// start (the first module's entry), by number and value. `x0` is 0: rtld's
+/// entry takes a nonzero `x0` as an exception to deliver and jumps to the
+/// SDK's user exception handler, but the runtime enters the start once,
+/// for the main thread (`rl_hos_run_main`), and never delivers an
+/// exception (a guest fault ends in a crash report, and
+/// `svcReturnFromException` is not implemented).
+pub const START_REGS: [(u32, u64); 1] = [(0, 0)];
+
 const PAGE: u64 = 0x1000;
 const DT_NULL: u64 = 0;
 const DT_PLTRELSZ: u64 = 2;

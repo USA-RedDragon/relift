@@ -221,6 +221,175 @@ pub struct Context<'a> {
     /// Whether a call to an entry may come back to its return point from
     /// elsewhere (`setjmp`).
     pub resume_point: &'a dyn Fn(u64) -> bool,
+    /// The program start, if it is in this module: its entry and the
+    /// registers the runtime sets before it enters there.
+    pub start: Option<(u64, &'a [(relift_ir::Reg, u128)])>,
+}
+
+fn sext(v: u128, w: relift_ir::Width) -> u128 {
+    let s = 128 - w.bits();
+    (((v << s) as i128) >> s) as u128
+}
+
+/// The value of instruction `i` of `b` from the known values `vals` of
+/// earlier ones and the known registers `regs`; `None` when unknown.
+fn fold(
+    b: &Block,
+    i: usize,
+    vals: &[Option<u128>],
+    regs: &BTreeMap<relift_ir::Reg, u128>,
+) -> Option<u128> {
+    use relift_ir::interp::{eval_bin, eval_cmp, eval_un};
+    use relift_ir::{ExtKind, Width};
+    let inst = &b.insts[i];
+    let v = |x: relift_ir::Value| vals.get(x.index()).copied().flatten();
+    let wd = |x: relift_ir::Value| b.width_of(x).unwrap_or(Width::W1);
+    let w = inst.width?;
+    let r = match inst.op {
+        Op::Const(c) => c,
+        Op::Get(r) => *regs.get(&r)?,
+        Op::Un(op, a) => eval_un(op, v(a)?, w),
+        Op::Bin(op, a, c) => eval_bin(op, v(a)?, v(c)?, w),
+        Op::Cmp(op, a, c) => u128::from(eval_cmp(op, v(a)?, v(c)?, wd(a))),
+        Op::Select(c, a, d) => {
+            if v(c)? != 0 {
+                v(a)?
+            } else {
+                v(d)?
+            }
+        }
+        Op::Ext(ExtKind::Zero, a) => v(a)?,
+        Op::Ext(ExtKind::Sign, a) => sext(v(a)?, wd(a)),
+        Op::Extract(a, lo) => v(a)? >> lo,
+        Op::Concat(h, l) => (v(h)? << wd(l).bits()) | v(l)?,
+        _ => return None,
+    };
+    Some(r & w.mask())
+}
+
+/// The instructions of `f` that can run when it is entered with the
+/// registers `known` holding the given values and from nowhere else: a
+/// forward propagation of known register values, which follows only the
+/// taken side of a branch whose condition it knows. A call, a trap or a
+/// merge of paths that disagree forgets the values it cannot keep. An
+/// instruction that no other one of `f` can reach (a landing pad) is
+/// entered with nothing known; one that failed to lift ends the thread.
+pub fn reachable(
+    f: &Function<'_>,
+    tables: &BTreeMap<u64, Vec<u64>>,
+    known: &[(relift_ir::Reg, u128)],
+) -> BTreeSet<u64> {
+    let mut ins: BTreeMap<u64, BTreeMap<relift_ir::Reg, u128>> = BTreeMap::new();
+    ins.insert(f.entry, known.iter().copied().collect());
+    let mut work = vec![f.entry];
+    let mut reached = BTreeSet::new();
+    for (&pc, b) in &f.insts {
+        let Some(b) = b else { continue };
+        match (b.exit.flow, b.exit.next) {
+            (Flow::Return, _) => {}
+            (Flow::Call { ret }, n) => {
+                reached.insert(ret);
+                if let Next::Const(t) = n {
+                    reached.insert(t);
+                }
+            }
+            (_, Next::Const(t)) => {
+                reached.insert(t);
+            }
+            (
+                _,
+                Next::Select {
+                    taken, not_taken, ..
+                },
+            ) => {
+                reached.extend([taken, not_taken]);
+            }
+            (_, Next::Dynamic(_)) => {
+                reached.extend(tables.get(&pc).into_iter().flatten().copied());
+            }
+        }
+    }
+    for &pc in f.insts.keys() {
+        if pc != f.entry && !reached.contains(&pc) {
+            ins.insert(pc, BTreeMap::new());
+            work.push(pc);
+        }
+    }
+    while let Some(pc) = work.pop() {
+        let Some(Some(b)) = f.insts.get(&pc) else {
+            continue;
+        };
+        let regs = ins[&pc].clone();
+        let mut vals = Vec::with_capacity(b.insts.len());
+        for i in 0..b.insts.len() {
+            let v = fold(b, i, &vals, &regs);
+            vals.push(v);
+        }
+        let mut out = regs.clone();
+        for inst in &b.insts {
+            if let Op::Set(r, v) = inst.op {
+                match vals.get(v.index()).copied().flatten() {
+                    Some(c) => out.insert(r, c),
+                    None => out.remove(&r),
+                };
+            }
+        }
+        let mut succs = Vec::new();
+        match (b.exit.flow, b.exit.next) {
+            (Flow::Return, _) => {}
+            (Flow::Call { ret }, _) => {
+                out.clear();
+                succs.push(ret);
+            }
+            (flow, Next::Const(t)) => {
+                if flow != Flow::Jump {
+                    out.clear();
+                }
+                succs.push(t);
+            }
+            (
+                flow,
+                Next::Select {
+                    cond,
+                    taken,
+                    not_taken,
+                },
+            ) => {
+                let c = vals.get(cond.index()).copied().flatten();
+                if flow != Flow::Jump {
+                    out.clear();
+                }
+                match c {
+                    Some(0) => succs.push(not_taken),
+                    Some(_) => succs.push(taken),
+                    None => succs.extend([taken, not_taken]),
+                }
+            }
+            (_, Next::Dynamic(_)) => match tables.get(&pc) {
+                Some(ts) => succs.extend(ts.iter().copied()),
+                None => return f.insts.keys().copied().collect(),
+            },
+        }
+        for s in succs {
+            if !f.insts.contains_key(&s) {
+                continue;
+            }
+            match ins.get_mut(&s) {
+                None => {
+                    ins.insert(s, out.clone());
+                    work.push(s);
+                }
+                Some(e) => {
+                    let n = e.len();
+                    e.retain(|r, v| out.get(r) == Some(v));
+                    if e.len() != n {
+                        work.push(s);
+                    }
+                }
+            }
+        }
+    }
+    ins.into_keys().collect()
 }
 
 /// One instruction's edges: successors in the function and what leaves it.
@@ -358,6 +527,10 @@ pub fn summarize(
         .chain(leaders.iter().copied().filter(|&a| a != f.entry))
         .collect();
     let index: BTreeMap<u64, usize> = order.iter().enumerate().map(|(k, &a)| (a, k)).collect();
+    let live = match cx.start {
+        Some((e, regs)) if e == f.entry => Some(reachable(f, tables, regs)),
+        _ => None,
+    };
     let mut blocks: Vec<Bb> = order
         .iter()
         .map(|&a| Bb {
@@ -368,6 +541,7 @@ pub fn summarize(
             succs: Vec::new(),
             end: End::Fall,
             foreign: foreign.contains(&a),
+            start_dead: live.as_ref().is_some_and(|l| !l.contains(&a)),
         })
         .collect();
     let mut cur = 0;
@@ -468,5 +642,65 @@ mod tests {
         let a = func(0x1000, &aw, &ab, &raw);
         let b = func(0x3000, &bw, &bb, &raw);
         assert_eq!(live_fpsr_reads(&[a, callee, b]), vec![0x2000]);
+    }
+
+    /// rtld's entry: cmp x0, #0; b.ne exc; nop; nop; ret; exc: br x2.
+    const START: [u32; 6] = [
+        0xf100_001f,
+        0x5400_0081,
+        0xd503_201f,
+        0xd503_201f,
+        RET,
+        0xd61f_0040,
+    ];
+
+    #[test]
+    fn a_known_register_rules_out_the_branch_it_decides() {
+        let b = lift_all(0x1000, &START);
+        let raw = |pc: u64| START[((pc - 0x1000) / 4) as usize];
+        let f = func(0x1000, &START, &b, &raw);
+        let t = BTreeMap::new();
+        let r = reachable(&f, &t, &[(regs::x(0), 0)]);
+        assert_eq!(
+            r.into_iter().collect::<Vec<_>>(),
+            vec![0x1000, 0x1004, 0x1008, 0x100c, 0x1010]
+        );
+        // The other side's computed jump may land anywhere in the function.
+        assert_eq!(reachable(&f, &t, &[(regs::x(0), 1)]).len(), START.len());
+    }
+
+    #[test]
+    fn code_nothing_in_the_function_reaches_is_entered_from_outside() {
+        let w = [
+            START[0],
+            START[1],
+            START[2],
+            START[3],
+            RET,
+            START[5],
+            0xd503_201f,
+            RET,
+        ];
+        let b = lift_all(0x1000, &w);
+        let raw = |pc: u64| w[((pc - 0x1000) / 4) as usize];
+        let f = func(0x1000, &w, &b, &raw);
+        let r = reachable(&f, &BTreeMap::new(), &[(regs::x(0), 0)]);
+        assert!(!r.contains(&0x1014));
+        assert!(r.contains(&0x1018) && r.contains(&0x101c));
+    }
+
+    #[test]
+    fn an_unknown_register_keeps_every_path() {
+        let b = lift_all(0x1000, &START);
+        let raw = |pc: u64| START[((pc - 0x1000) / 4) as usize];
+        let f = func(0x1000, &START, &b, &raw);
+        let t = BTreeMap::new();
+        assert_eq!(reachable(&f, &t, &[]).len(), START.len());
+        // A value the code overwrites before the branch decides nothing.
+        let w = [0xaa01_03e0, START[0], 0x5400_0061, START[2], RET, START[5]];
+        let b = lift_all(0x1000, &w);
+        let raw = |pc: u64| w[((pc - 0x1000) / 4) as usize];
+        let f = func(0x1000, &w, &b, &raw);
+        assert_eq!(reachable(&f, &t, &[(regs::x(0), 0)]).len(), w.len());
     }
 }

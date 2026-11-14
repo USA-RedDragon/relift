@@ -72,6 +72,9 @@ pub struct Bb {
     /// Whether code the analysis cannot see may enter the block (a resume
     /// point after `setjmp`, a landing pad).
     pub foreign: bool,
+    /// Whether the block cannot run when its function is entered as the
+    /// program start, with the registers the runtime sets there.
+    pub start_dead: bool,
 }
 
 /// One function: its blocks (the first is the entry) and the blocks that
@@ -96,6 +99,12 @@ pub struct Program {
     /// that is neither escaped nor called runs only as a thread start
     /// (where the flags are clear) or never.
     pub escaped: BTreeSet<u64>,
+    /// The program start: entries the runtime enters once, with the
+    /// registers it sets there, which mark the blocks that cannot then
+    /// run ([`Bb::start_dead`]). When nothing else may enter a start, its
+    /// dead blocks never run and a function entered only from them is
+    /// never entered.
+    pub starts: BTreeSet<u64>,
 }
 
 /// Why a function must raise exact flags.
@@ -120,6 +129,9 @@ pub struct Region {
     pub touched: usize,
     /// Why the region could not be bounded, if it could not.
     pub unbounded: Option<String>,
+    /// Whether the read can run: a read in a function that cannot be
+    /// entered, or in a dead block of a start, has no region.
+    pub entered: bool,
 }
 
 /// The analysis result.
@@ -155,6 +167,7 @@ struct Walker<'a> {
     index: &'a HashMap<u64, usize>,
     preds: &'a [Vec<Vec<usize>>],
     callers: &'a HashMap<u64, Vec<(usize, usize)>>,
+    live: &'a Live,
     must: &'a HashSet<u64>,
     seen: HashSet<(usize, usize, bool)>,
     tails: HashSet<u64>,
@@ -225,7 +238,9 @@ impl Walker<'_> {
             ));
         }
         for &(g, b) in self.callers.get(&e).into_iter().flatten() {
-            self.work.push(Item::Whole(g, b, true));
+            if self.live.runs(self.p, g, b) {
+                self.work.push(Item::Whole(g, b, true));
+            }
         }
         Ok(())
     }
@@ -360,6 +375,76 @@ fn must_write(p: &Program, index: &HashMap<u64, usize>) -> HashSet<u64> {
     }
 }
 
+/// Which functions can be entered and which of their blocks can run.
+struct Live {
+    /// By function: whether anything may enter it.
+    entered: Vec<bool>,
+    /// By function: whether it is a start nothing else enters, so its
+    /// [`Bb::start_dead`] blocks never run.
+    start_only: Vec<bool>,
+}
+
+impl Live {
+    /// A function is entered when code the analysis cannot see may call it
+    /// (it escapes), when it is a start or has no call site (a thread
+    /// start), or from a block that runs in an entered function. This
+    /// relies on what the walk relies on: the runtime enters guest code
+    /// only at a start or at an address the code computes or stores, and
+    /// such an address escapes.
+    fn new(
+        p: &Program,
+        index: &HashMap<u64, usize>,
+        callers: &HashMap<u64, Vec<(usize, usize)>>,
+    ) -> Live {
+        let start_only: Vec<bool> = p
+            .fns
+            .iter()
+            .map(|f| {
+                p.starts.contains(&f.entry)
+                    && !p.escaped.contains(&f.entry)
+                    && !callers.contains_key(&f.entry)
+            })
+            .collect();
+        let mut live = Live {
+            entered: vec![false; p.fns.len()],
+            start_only,
+        };
+        let mut work = Vec::new();
+        for (i, f) in p.fns.iter().enumerate() {
+            if p.escaped.contains(&f.entry)
+                || p.starts.contains(&f.entry)
+                || !callers.contains_key(&f.entry)
+            {
+                live.entered[i] = true;
+                work.push(i);
+            }
+        }
+        while let Some(i) = work.pop() {
+            for (b, blk) in p.fns[i].blocks.iter().enumerate() {
+                if !live.runs(p, i, b) {
+                    continue;
+                }
+                if let End::Call(Targets::Known(ts)) | End::Exit(Targets::Known(ts)) = &blk.end {
+                    for t in ts {
+                        if let Some(&j) = index.get(t)
+                            && !live.entered[j]
+                        {
+                            live.entered[j] = true;
+                            work.push(j);
+                        }
+                    }
+                }
+            }
+        }
+        live
+    }
+
+    /// Whether block `b` of function `f` can run.
+    fn runs(&self, p: &Program, f: usize, b: usize) -> bool {
+        self.entered[f] && !(self.start_only[f] && p.fns[f].blocks[b].start_dead)
+    }
+}
+
 /// Finds the functions of `p` that must raise exact flags.
 pub fn decide(p: &Program) -> Decision {
     let index: HashMap<u64, usize> = p
@@ -392,15 +477,28 @@ pub fn decide(p: &Program) -> Decision {
         }
     }
     let must = must_write(p, &index);
+    let live = Live::new(p, &index, &callers);
     let mut d = Decision::default();
     for (i, f) in p.fns.iter().enumerate() {
         for &(read, b) in &f.reads {
+            if !live.runs(p, i, b) {
+                d.regions.push(Region {
+                    read,
+                    func: f.entry,
+                    fp: BTreeSet::new(),
+                    touched: 0,
+                    unbounded: None,
+                    entered: false,
+                });
+                continue;
+            }
             d.flagged.insert(f.entry, Reason::Read);
             let mut w = Walker {
                 p,
                 index: &index,
                 preds: &preds,
                 callers: &callers,
+                live: &live,
                 must: &must,
                 seen: HashSet::new(),
                 tails: HashSet::new(),
@@ -419,6 +517,7 @@ pub fn decide(p: &Program) -> Decision {
                 fp: w.fp,
                 touched: w.touched.len(),
                 unbounded: r.err(),
+                entered: true,
             });
         }
     }
@@ -439,6 +538,7 @@ mod tests {
             succs: succs.to_vec(),
             end,
             foreign: false,
+            start_dead: false,
         }
     }
 
@@ -483,6 +583,7 @@ mod tests {
         let p = Program {
             fns: vec![f, leaf(0x200, true), leaf(0x300, false), leaf(0x400, true)],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         let d = decide(&p);
         assert!(!d.program_wide());
@@ -535,6 +636,7 @@ mod tests {
                 func(0x400, vec![bb(0x400, false, true, &[], End::Return)], &[]),
             ],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         let d = decide(&p);
         assert!(!d.program_wide());
@@ -542,6 +644,106 @@ mod tests {
             flagged(&d),
             vec![(0x100, Reason::Read), (0x300, Reason::Region)]
         );
+    }
+
+    /// The program start at 0x100, whose block 1 (dead at the start when
+    /// `dead`) tail-calls 0x200, a handler that makes an unknown call and
+    /// then reads.
+    fn start_and_handler(dead: bool) -> Program {
+        let start = func(
+            0x100,
+            vec![
+                bb(0x100, false, false, &[1, 2], End::Fall),
+                Bb {
+                    start_dead: dead,
+                    ..bb(
+                        0x110,
+                        false,
+                        false,
+                        &[],
+                        End::Exit(Targets::Known(vec![0x200])),
+                    )
+                },
+                bb(0x120, false, false, &[], End::Return),
+            ],
+            &[],
+        );
+        let handler = func(
+            0x200,
+            vec![
+                bb(0x200, false, false, &[1], End::Call(Targets::Unknown)),
+                bb(0x210, false, false, &[], End::Return),
+            ],
+            &[1],
+        );
+        Program {
+            fns: vec![start, handler],
+            escaped: BTreeSet::new(),
+            starts: BTreeSet::from([0x100]),
+        }
+    }
+
+    #[test]
+    fn a_function_entered_only_from_dead_start_code_never_runs() {
+        let d = decide(&start_and_handler(true));
+        assert!(!d.program_wide());
+        assert!(d.flagged.is_empty());
+        assert!(!d.regions[0].entered);
+    }
+
+    #[test]
+    fn a_read_in_dead_start_code_never_runs() {
+        let mut p = start_and_handler(true);
+        p.fns[0].reads = vec![(0x110, 1)];
+        p.fns[0].blocks[0].end = End::Call(Targets::Unknown);
+        p.fns[1].reads.clear();
+        let d = decide(&p);
+        assert!(!d.program_wide());
+        assert!(d.regions.iter().all(|r| !r.entered));
+        p.fns[0].blocks[1].start_dead = false;
+        assert!(decide(&p).program_wide());
+    }
+
+    #[test]
+    fn a_handler_entered_another_way_keeps_its_region() {
+        // The branch to it is not proven dead.
+        assert!(decide(&start_and_handler(false)).program_wide());
+        // The start may be entered from elsewhere, so its dead blocks may run.
+        let mut p = start_and_handler(true);
+        p.escaped.insert(0x100);
+        assert!(decide(&p).program_wide());
+        let mut p = start_and_handler(true);
+        p.fns.push(func(
+            0x300,
+            vec![bb(
+                0x300,
+                false,
+                false,
+                &[],
+                End::Exit(Targets::Known(vec![0x100])),
+            )],
+            &[],
+        ));
+        assert!(decide(&p).program_wide());
+        // Code the analysis cannot see may call the handler.
+        let mut p = start_and_handler(true);
+        p.escaped.insert(0x200);
+        assert!(decide(&p).program_wide());
+        // A live call site reaches it.
+        let mut p = start_and_handler(true);
+        p.fns.push(func(
+            0x300,
+            vec![
+                bb(0x300, false, false, &[1], call(0x200)),
+                bb(0x310, false, false, &[], End::Return),
+            ],
+            &[],
+        ));
+        assert!(decide(&p).program_wide());
+        // Dead blocks count only in a start.
+        let mut p = start_and_handler(true);
+        p.starts.clear();
+        assert!(decide(&p).program_wide());
     }
 
     #[test]
@@ -556,6 +758,7 @@ mod tests {
                 &[1],
             )],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         let d = decide(&p);
         assert!(d.program_wide());
@@ -574,6 +777,7 @@ mod tests {
                 &[0],
             )],
             escaped: BTreeSet::from([0x100]),
+            starts: BTreeSet::new(),
         };
         assert!(decide(&p).program_wide());
         // A write before the indirect call bounds it.
@@ -588,6 +792,7 @@ mod tests {
                 &[2],
             )],
             escaped: BTreeSet::from([0x100]),
+            starts: BTreeSet::new(),
         };
         assert!(!decide(&p).program_wide());
         // A resume point after setjmp may be entered from any longjmp.
@@ -603,6 +808,7 @@ mod tests {
         let p = Program {
             fns: vec![f, leaf(0x200, false)],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         assert!(decide(&p).program_wide());
     }
@@ -650,6 +856,7 @@ mod tests {
         let p = Program {
             fns: vec![f, r, w, n],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         let d = decide(&p);
         assert_eq!(
@@ -703,6 +910,7 @@ mod tests {
         let p = Program {
             fns: vec![l, a, b, c],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         let d = decide(&p);
         assert!(!d.program_wide());
@@ -746,6 +954,7 @@ mod tests {
                 leaf(0x700, true),
             ],
             escaped: BTreeSet::new(),
+            starts: BTreeSet::new(),
         };
         let d = decide(&p);
         assert!(!d.program_wide());

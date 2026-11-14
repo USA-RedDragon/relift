@@ -64,6 +64,8 @@ pub struct Fpsr {
     escaped: BTreeSet<u64>,
     /// Names whose definitions escape.
     escaped_names: BTreeSet<String>,
+    /// The program start.
+    starts: BTreeSet<u64>,
     fns: Vec<region::Func>,
     names: BTreeMap<u64, Named>,
     modules: Vec<String>,
@@ -103,6 +105,7 @@ impl Fpsr {
             slots: BTreeMap::new(),
             escaped: BTreeSet::new(),
             escaped_names: BTreeSet::new(),
+            starts: BTreeSet::new(),
             fns: Vec::new(),
             names: BTreeMap::new(),
             modules: placed.iter().map(|p| p.name.clone()).collect(),
@@ -209,10 +212,23 @@ impl Fpsr {
             Some(self.defs.get(n).cloned().unwrap_or_default())
         };
         let resume_point = |a: u64| resume.contains(&a);
+        let regs: Vec<(relift_ir::Reg, u128)> = program::START_REGS
+            .iter()
+            .map(|&(n, v)| (relift_cpu_a64::regs::x(n), u128::from(v)))
+            .collect();
+        let start = module
+            .roots
+            .iter()
+            .find(|r| i == 0 && r.kind == RootKind::Entry)
+            .map(|r| (r.addr, regs.as_slice()));
+        if let Some((e, _)) = start {
+            self.starts.insert(e);
+        }
         let cx = flags::Context {
             is_entry: &is_entry,
             resolved: &resolved,
             resume_point: &resume_point,
+            start,
         };
         let mut fns = Vec::with_capacity(views.len());
         for (v, f) in views.iter().zip(analysis.functions.values()) {
@@ -271,6 +287,7 @@ impl Fpsr {
         let p = region::Program {
             fns: std::mem::take(&mut self.fns),
             escaped: std::mem::take(&mut self.escaped),
+            starts: std::mem::take(&mut self.starts),
         };
         let d = region::decide(&p);
         let wide = d.program_wide();
@@ -344,6 +361,15 @@ impl Fpsr {
             );
         }
         for r in &d.regions {
+            if !r.entered {
+                let _ = writeln!(
+                    t,
+                    "  read at {:#x} in {}: never entered",
+                    r.read,
+                    self.name(r.func)
+                );
+                continue;
+            }
             let fp: Vec<String> = r.fp.iter().map(|&e| self.name(e)).collect();
             let _ = writeln!(
                 t,
