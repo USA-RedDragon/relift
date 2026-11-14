@@ -20,6 +20,7 @@
 
 mod decode;
 mod frontend;
+pub mod irq;
 pub mod lift;
 pub mod regs;
 mod table;
@@ -27,7 +28,9 @@ mod types;
 
 pub use decode::{DecodeError, Immediate, Instruction, decode};
 pub use frontend::Sm83;
-pub use lift::{LiftError, lift_instruction};
+pub use lift::{
+    BUG, HALF, LiftError, Options, SyncPolicy, lift_bytes, lift_instruction, lift_with,
+};
 pub use table::{BASE, CB};
 pub use types::{
     AccessKind, AccessTarget, Accesses, Cond, Cycles, FlagEffect, FlagSet, Flags, MemAccess,
