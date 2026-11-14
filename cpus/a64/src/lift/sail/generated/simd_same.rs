@@ -7711,6 +7711,330 @@ pub(super) fn FMUL_asimdsame_only(
     }
 }
 
+/// `FRECPS_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRecipStepFused, V_read, V_set.
+pub(super) fn FRECPS_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRECPS_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).recip_step(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v16 = rt::Fp::new(32).recip_step(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            st.v_set(b, s4 as u32, v20, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).recip_step(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v16 = rt::Fp::new(32).recip_step(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            st.assume_default_fpcr();
+            let v23 = rt::Fp::new(32).recip_step(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            st.assume_default_fpcr();
+            let v30 = rt::Fp::new(32).recip_step(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(64).recip_step(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            st.assume_default_fpcr();
+            let v16 = rt::Fp::new(64).recip_step(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRECPS_asisdsame_only`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FPRecipStepFused, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRECPS_asisdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRECPS_asisdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 32);
+            let v8 = st.v_read(b, s6 as u32, 32);
+            st.assume_default_fpcr();
+            let v9 = rt::Fp::new(32).recip_step(b, v7, v8);
+            let v10 = b.konst(Width::new(96), 0x0);
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            st.assume_default_fpcr();
+            let v9 = rt::Fp::new(64).recip_step(b, v7, v8);
+            let v10 = b.konst(Width::new(64), 0x0);
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRSQRTS_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRSqrtStepFused, V_read, V_set.
+pub(super) fn FRSQRTS_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRSQRTS_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).rsqrt_step(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v16 = rt::Fp::new(32).rsqrt_step(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            st.v_set(b, s4 as u32, v20, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).rsqrt_step(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v16 = rt::Fp::new(32).rsqrt_step(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            st.assume_default_fpcr();
+            let v23 = rt::Fp::new(32).rsqrt_step(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            st.assume_default_fpcr();
+            let v30 = rt::Fp::new(32).rsqrt_step(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(64).rsqrt_step(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            st.assume_default_fpcr();
+            let v16 = rt::Fp::new(64).rsqrt_step(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRSQRTS_asisdsame_only`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FPRSqrtStepFused, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRSQRTS_asisdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRSQRTS_asisdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 32);
+            let v8 = st.v_read(b, s6 as u32, 32);
+            st.assume_default_fpcr();
+            let v9 = rt::Fp::new(32).rsqrt_step(b, v7, v8);
+            let v10 = b.konst(Width::new(96), 0x0);
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            st.assume_default_fpcr();
+            let v9 = rt::Fp::new(64).rsqrt_step(b, v7, v8);
+            let v10 = b.konst(Width::new(64), 0x0);
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FSUB_asimdsame_only`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -37097,6 +37421,10 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FMLA_asimdsame_only => FMLA_asimdsame_only,
         Encoding::FMLS_asimdsame_only => FMLS_asimdsame_only,
         Encoding::FMUL_asimdsame_only => FMUL_asimdsame_only,
+        Encoding::FRECPS_asimdsame_only => FRECPS_asimdsame_only,
+        Encoding::FRECPS_asisdsame_only => FRECPS_asisdsame_only,
+        Encoding::FRSQRTS_asimdsame_only => FRSQRTS_asimdsame_only,
+        Encoding::FRSQRTS_asisdsame_only => FRSQRTS_asisdsame_only,
         Encoding::FSUB_asimdsame_only => FSUB_asimdsame_only,
         Encoding::MLA_asimdsame_only => MLA_asimdsame_only,
         Encoding::MLS_asimdsame_only => MLS_asimdsame_only,

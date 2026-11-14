@@ -95,7 +95,10 @@ Nothing in the main workspace may link it; `relift check` runs it as a
 subprocess. The root manifest excludes it.
 
 `relift-cpu-a64` lifts each encoding with its Sail-generated template when it
-has one, else with a hand-written lifter. The hand-written lifters cover only
+has one, else with a hand-written lifter. Templates that use the
+floating-point cut assume FPCR zero and start with an `Op::Guard` that sends
+any other FPCR to the runtime's slow path; `relift-check --fpcr` checks that
+the guard trips (see `relift_ir::FpOp` for the contract). The hand-written lifters cover only
 the forms the checker was brought up on, kept as a cross-check:
 `cpus/a64/tests/lift.rs` (`generated_templates_agree_with_the_hand_lifter`)
 runs both in the interpreter.

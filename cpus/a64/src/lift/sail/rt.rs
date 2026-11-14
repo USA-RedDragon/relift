@@ -2,7 +2,7 @@
 //! sees it while it runs, branch exits, and the integer helpers their static
 //! code uses. These are the hand-written side of the cut line.
 
-use relift_ir::{Builder, CmpOp, Exit, Flow, FpOp, FpRound, Next, Reg, Value, Width};
+use relift_ir::{BinOp, Builder, CmpOp, Exit, Flow, FpOp, FpRound, Next, Reg, UnOp, Value, Width};
 
 use crate::regs;
 
@@ -662,5 +662,257 @@ impl Fp {
         let nan = b.or(sx, fx);
         let nan = b.or(nan, q);
         b.select(n, nan, r)
+    }
+
+    fn k64(b: &mut Builder, v: u64) -> Value {
+        b.konst(Width::W64, u128::from(v))
+    }
+
+    fn op64(b: &mut Builder, op: BinOp, x: Value, k: u64) -> Value {
+        let k = Fp::k64(b, k);
+        b.bin(op, x, k)
+    }
+
+    fn frac_bits(&self) -> u32 {
+        self.quiet.trailing_zeros() + 1
+    }
+
+    /// The fraction widened to 52 bits and the biased exponent, as 64-bit
+    /// values.
+    fn unpack52(&self, b: &mut Builder, x: Value) -> (Value, Value) {
+        let f = self.frac_bits();
+        let x64 = if self.w == Width::W64 {
+            x
+        } else {
+            b.zext(x, Width::W64)
+        };
+        let frac = Fp::op64(b, BinOp::And, x64, (1u64 << f) - 1);
+        let frac = Fp::op64(b, BinOp::Shl, frac, u64::from(52 - f));
+        let e = Fp::op64(b, BinOp::LShr, x64, u64::from(f));
+        let emask = (self.inf >> f) as u64;
+        let exp = Fp::op64(b, BinOp::And, e, emask);
+        (frac, exp)
+    }
+
+    fn pack(&self, b: &mut Builder, sign: Value, exp: Value, frac52: Value) -> Value {
+        let f = self.frac_bits();
+        let emask = (self.inf >> f) as u64;
+        let e = Fp::op64(b, BinOp::And, exp, emask);
+        let e = Fp::op64(b, BinOp::Shl, e, u64::from(f));
+        let fr = Fp::op64(b, BinOp::LShr, frac52, u64::from(52 - f));
+        let r = b.or(e, fr);
+        let r = if self.w == Width::W64 {
+            r
+        } else {
+            b.trunc(r, self.w)
+        };
+        b.or(r, sign)
+    }
+
+    fn sign_of(&self, b: &mut Builder, x: Value) -> Value {
+        let s = self.k(b, self.sign);
+        b.and(x, s)
+    }
+
+    /// `FPRecipEstimate` (FRECPE) for FPCR zero.
+    pub fn recip_estimate(&self, b: &mut Builder, x: Value) -> Value {
+        let sign = self.sign_of(b, x);
+        let (frac, exp) = self.unpack52(b, x);
+        let zero64 = Fp::k64(b, 0);
+        let e0 = b.cmp(CmpOp::Eq, exp, zero64);
+        let b51 = Fp::op64(b, BinOp::LShr, frac, 51);
+        let top = b.trunc(b51, Width::W1);
+        let f_a = Fp::op64(b, BinOp::And, frac, (1u64 << 50) - 1);
+        let f_a = Fp::op64(b, BinOp::Shl, f_a, 2);
+        let f_b = Fp::op64(b, BinOp::And, frac, (1u64 << 51) - 1);
+        let f_b = Fp::op64(b, BinOp::Shl, f_b, 1);
+        let fsub = b.select(top, f_b, f_a);
+        let minus1 = Fp::k64(b, u64::MAX);
+        let esub = b.select(top, zero64, minus1);
+        let frac = b.select(e0, fsub, frac);
+        let exp = b.select(e0, esub, exp);
+        let hi = Fp::op64(b, BinOp::LShr, frac, 44);
+        let scaled = Fp::op64(b, BinOp::Or, hi, 256);
+        let a2 = Fp::op64(b, BinOp::Shl, scaled, 1);
+        let a2 = Fp::op64(b, BinOp::Or, a2, 1);
+        let num = Fp::k64(b, 1 << 19);
+        let q = b.bin(BinOp::UDiv, num, a2);
+        let q = Fp::op64(b, BinOp::Add, q, 1);
+        let est = Fp::op64(b, BinOp::LShr, q, 1);
+        let c = if self.w == Width::W32 { 253 } else { 2045 };
+        let ck = Fp::k64(b, c);
+        let rexp = b.bin(BinOp::Sub, ck, exp);
+        let fr = Fp::op64(b, BinOp::And, est, 0xff);
+        let fr = Fp::op64(b, BinOp::Shl, fr, 44);
+        let f1 = Fp::op64(b, BinOp::LShr, fr, 1);
+        let f1 = Fp::op64(b, BinOp::Or, f1, 1 << 51);
+        let f2 = Fp::op64(b, BinOp::LShr, fr, 2);
+        let f2 = Fp::op64(b, BinOp::Or, f2, 1 << 50);
+        let r0 = b.cmp(CmpOp::Eq, rexp, zero64);
+        let rm1 = b.cmp(CmpOp::Eq, rexp, minus1);
+        let fr = b.select(r0, f1, fr);
+        let fr = b.select(rm1, f2, fr);
+        let rexp = b.select(rm1, zero64, rexp);
+        let normal = self.pack(b, sign, rexp, fr);
+        let tiny_k = if self.w == Width::W32 {
+            1u128 << 21
+        } else {
+            1u128 << 50
+        };
+        let m = self.magnitude(b, x);
+        let tk = self.k(b, tiny_k);
+        let tiny = b.cmp(CmpOp::Ult, m, tk);
+        let inf = self.k(b, self.inf);
+        let sinf = b.or(sign, inf);
+        let r = b.select(tiny, sinf, normal);
+        let isinf = self.is_inf(b, x);
+        let r = b.select(isinf, sign, r);
+        self.nans(b, &[x], r)
+    }
+
+    /// `FPRSqrtEstimate` (FRSQRTE) for FPCR zero.
+    pub fn rsqrt_estimate(&self, b: &mut Builder, x: Value) -> Value {
+        let sign = self.sign_of(b, x);
+        let (frac, exp) = self.unpack52(b, x);
+        let zero64 = Fp::k64(b, 0);
+        let e0 = b.cmp(CmpOp::Eq, exp, zero64);
+        let lz = b.un(UnOp::Clz, frac);
+        let lz52 = Fp::op64(b, BinOp::Sub, lz, 12);
+        let sh = Fp::op64(b, BinOp::Add, lz52, 1);
+        let fsub = b.bin(BinOp::Shl, frac, sh);
+        let fsub = Fp::op64(b, BinOp::And, fsub, (1u64 << 52) - 1);
+        let esub = b.bin(BinOp::Sub, zero64, lz52);
+        let frac = b.select(e0, fsub, frac);
+        let exp = b.select(e0, esub, exp);
+        let odd = b.trunc(exp, Width::W1);
+        let s_even = Fp::op64(b, BinOp::LShr, frac, 44);
+        let s_even = Fp::op64(b, BinOp::Or, s_even, 256);
+        let s_odd = Fp::op64(b, BinOp::LShr, frac, 45);
+        let s_odd = Fp::op64(b, BinOp::Or, s_odd, 128);
+        let a = b.select(odd, s_odd, s_even);
+        let k256 = Fp::k64(b, 256);
+        let small = b.cmp(CmpOp::Ult, a, k256);
+        let a_s = Fp::op64(b, BinOp::Shl, a, 1);
+        let a_s = Fp::op64(b, BinOp::Or, a_s, 1);
+        let a_l = Fp::op64(b, BinOp::And, a, !1);
+        let a_l = Fp::op64(b, BinOp::Add, a_l, 1);
+        let a_l = Fp::op64(b, BinOp::Shl, a_l, 1);
+        let a2 = b.select(small, a_s, a_l);
+        let mut lo = Fp::k64(b, 512);
+        let mut hi = Fp::k64(b, 1023);
+        let limit = Fp::k64(b, 1 << 28);
+        for _ in 0..10 {
+            let sum = b.add(lo, hi);
+            let mid = Fp::op64(b, BinOp::LShr, sum, 1);
+            let m1 = Fp::op64(b, BinOp::Add, mid, 1);
+            let sq = b.bin(BinOp::Mul, m1, m1);
+            let prod = b.bin(BinOp::Mul, a2, sq);
+            let below = b.cmp(CmpOp::Ult, prod, limit);
+            let next_lo = Fp::op64(b, BinOp::Add, mid, 1);
+            lo = b.select(below, next_lo, lo);
+            hi = b.select(below, hi, mid);
+        }
+        let r = Fp::op64(b, BinOp::Add, lo, 1);
+        let est = Fp::op64(b, BinOp::LShr, r, 1);
+        let c = if self.w == Width::W32 { 380 } else { 3068 };
+        let ck = Fp::k64(b, c);
+        let d = b.bin(BinOp::Sub, ck, exp);
+        let rexp = Fp::op64(b, BinOp::LShr, d, 1);
+        let fr = Fp::op64(b, BinOp::And, est, 0xff);
+        let fr = Fp::op64(b, BinOp::Shl, fr, 44);
+        let zero = self.k(b, 0);
+        let normal = self.pack(b, zero, rexp, fr);
+        let isinf = self.is_inf(b, x);
+        let r = b.select(isinf, zero, normal);
+        let neg = b.cmp(CmpOp::Ne, sign, zero);
+        let dn = self.default_nan(b);
+        let r = b.select(neg, dn, r);
+        let iz = self.is_zero(b, x);
+        let inf = self.k(b, self.inf);
+        let sinf = b.or(sign, inf);
+        let r = b.select(iz, sinf, r);
+        self.nans(b, &[x], r)
+    }
+
+    fn step(
+        &self,
+        b: &mut Builder,
+        x: Value,
+        y: Value,
+        base: u128,
+        special: u128,
+        halve: bool,
+    ) -> Value {
+        let s = self.k(b, self.sign);
+        let nx = b.xor(x, s);
+        let (ix, iy) = (self.is_inf(b, nx), self.is_inf(b, y));
+        let (zx, zy) = (self.is_zero(b, nx), self.is_zero(b, y));
+        let p = b.and(ix, zy);
+        let q = b.and(zx, iy);
+        let inv = b.or(p, q);
+        let anyinf = b.or(ix, iy);
+        let sx = b.xor(nx, y);
+        let sxs = b.and(sx, s);
+        let inf = self.k(b, self.inf);
+        let sinf = b.or(sxs, inf);
+        let kb = self.k(b, base);
+        let r = b.fp(FpOp::MulAdd, &[nx, y, kb], self.w);
+        let r = if halve {
+            let half = self.k(
+                b,
+                if self.w == Width::W32 {
+                    0x3f00_0000
+                } else {
+                    0x3fe0_0000_0000_0000
+                },
+            );
+            let two = self.k(
+                b,
+                if self.w == Width::W32 {
+                    0x4000_0000
+                } else {
+                    0x4000_0000_0000_0000
+                },
+            );
+            let slow = b.fp(FpOp::Div, &[r, two], self.w);
+            let kh = self.k(b, special);
+            let f = self.frac_bits();
+            let lowest = self.k(b, 2u128 << f);
+            let (mx, my) = (self.magnitude(b, nx), self.magnitude(b, y));
+            let xn = b.cmp(CmpOp::Ule, lowest, mx);
+            let yn = b.cmp(CmpOp::Ule, lowest, my);
+            let hx = b.fp(FpOp::Mul, &[nx, half], self.w);
+            let hy = b.fp(FpOp::Mul, &[y, half], self.w);
+            let rx = b.fp(FpOp::MulAdd, &[hx, y, kh], self.w);
+            let ry = b.fp(FpOp::MulAdd, &[nx, hy, kh], self.w);
+            let r = b.select(yn, ry, slow);
+            b.select(xn, rx, r)
+        } else {
+            r
+        };
+        let r = b.select(anyinf, sinf, r);
+        let sp = self.k(b, special);
+        let r = b.select(inv, sp, r);
+        self.nans(b, &[nx, y], r)
+    }
+
+    /// `FPRecipStepFused` (FRECPS): `2 - x * y` with one rounding.
+    pub fn recip_step(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        let two = if self.w == Width::W32 {
+            0x4000_0000
+        } else {
+            0x4000_0000_0000_0000
+        };
+        self.step(b, x, y, two, two, false)
+    }
+
+    /// `FPRSqrtStepFused` (FRSQRTS): `(3 - x * y) / 2`.
+    pub fn rsqrt_step(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        let (three, one5) = if self.w == Width::W32 {
+            (0x4040_0000, 0x3fc0_0000)
+        } else {
+            (0x4008_0000_0000_0000, 0x3ff8_0000_0000_0000)
+        };
+        self.step(b, x, y, three, one5, true)
     }
 }
