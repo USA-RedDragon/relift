@@ -135,6 +135,14 @@ pub trait Frontend {
         None
     }
 
+    /// The C lvalue of the guest cycle clock, an `rl_time` (docs/abi.md
+    /// section 13), such as `c->time`; `None` for a CPU without one, whose
+    /// blocks hold no tick, I/O access or sync point (the emitter reports
+    /// each as an error).
+    fn clock(&self) -> Option<&'static str> {
+        None
+    }
+
     /// The registers [`Frontend::fp`] expressions read or write (the FP
     /// control and status registers).
     fn fp_state(&self) -> Vec<Reg>;
