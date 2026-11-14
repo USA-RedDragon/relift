@@ -55,6 +55,12 @@ impl Ctx<'_> {
     }
 }
 
+/// The block as the emitter writes it: without the values nothing
+/// observable uses.
+fn prepare(b: &Block) -> Block {
+    relift_ir::dce(b)
+}
+
 /// The return addresses of the calls in `f` that are resume points.
 fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<u64> {
     f.insts
@@ -81,29 +87,35 @@ pub(crate) fn emit_function(
 ) -> Emitted1 {
     let resumes = resume_points(f, targets);
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
+    let blocks: BTreeMap<u64, Block> = f
+        .insts
+        .iter()
+        .filter_map(|(&pc, i)| match i {
+            Insn::Lifted { block, .. } => Some((pc, prepare(block))),
+            Insn::Failed(_) => None,
+        })
+        .collect();
     let mut used: BTreeSet<Reg> = BTreeSet::new();
     let mut written: BTreeSet<Reg> = BTreeSet::new();
     let mut has_fp = false;
     let mut hoisted: BTreeSet<Reg> = BTreeSet::new();
-    for i in f.insts.values() {
-        if let Insn::Lifted { block: b, .. } = i {
-            for inst in &b.insts {
-                match inst.op {
-                    Op::Get(r) => {
-                        used.insert(r);
-                    }
-                    Op::Set(r, _) => {
-                        used.insert(r);
-                        written.insert(r);
-                    }
-                    Op::Fp(..) => has_fp = true,
-                    Op::Guard(_, code) => {
-                        if let Some(r) = fe.guard_state(code) {
-                            hoisted.insert(r);
-                        }
-                    }
-                    _ => {}
+    for b in blocks.values() {
+        for inst in &b.insts {
+            match inst.op {
+                Op::Get(r) => {
+                    used.insert(r);
                 }
+                Op::Set(r, _) => {
+                    used.insert(r);
+                    written.insert(r);
+                }
+                Op::Fp(..) => has_fp = true,
+                Op::Guard(_, code) => {
+                    if let Some(r) = fe.guard_state(code) {
+                        hoisted.insert(r);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -165,9 +177,10 @@ pub(crate) fn emit_function(
     let mut undefined = 0;
     for (&pc, i) in &f.insts {
         let _ = writeln!(t, "{}: {{", label(pc));
-        let body = match i {
-            Insn::Lifted { block: b, raw } => block(&mut cx, b, *raw),
-            Insn::Failed(e) => Err((e.insn, e.message.clone())),
+        let body = match (i, blocks.get(&pc)) {
+            (Insn::Lifted { raw, .. }, Some(b)) => block(&mut cx, b, *raw),
+            (Insn::Failed(e), _) => Err((e.insn, e.message.clone())),
+            (Insn::Lifted { raw, .. }, None) => Err((*raw, "no block".into())),
         };
         match body {
             Ok(s) => t.push_str(&s),
