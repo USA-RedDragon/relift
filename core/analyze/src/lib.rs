@@ -14,7 +14,10 @@
 //! the dispatcher.
 
 mod consts;
+mod slots;
 mod tables;
+
+pub use slots::{SlotUses, slot_uses};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -241,6 +244,12 @@ fn new_entries(
     }
     out.retain(|(a, _)| module.is_code(*a) && a % granule == 0);
     out
+}
+
+/// The code addresses `f` computes (its functions whose address is taken,
+/// among other code addresses), as discovery found them.
+pub fn address_taken(module: &Module, granule: u64, f: &Function) -> BTreeSet<u64> {
+    consts::code_addresses(module, granule, &f.insts)
 }
 
 /// What [`discover_with`] reports while it works.
