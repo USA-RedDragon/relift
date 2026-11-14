@@ -649,7 +649,7 @@ TEST(sm83_a_miss_reports_the_target)
     rl_thread_free(t);
 }
 
-TEST(sm83_stop_with_a_line_pending_skips_nothing_and_asks_nobody)
+TEST(sm83_stop_with_a_button_held_and_a_line_pending_is_a_nop)
 {
     struct rl_thread *t;
     rl_sched *s;
@@ -657,11 +657,52 @@ TEST(sm83_stop_with_a_line_pending_skips_nothing_and_asks_nobody)
     CHECK_EQ(boot(&t, &s, &k), 0);
     rl_ctx *c = t->ctx;
     mc.ie = 0x04;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_HALT};
     raise_line(2);
     int64_t b = c->time.budget;
     CHECK_EQ(rl_sm83_stop(c, ram), 1);
-    CHECK_EQ(mc.stop_calls, 0);
+    CHECK_EQ(mc.stop_calls, 1);
+    CHECK_EQ(c->halted, 0);
     CHECK_EQ(c->time.budget, b);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_mode_with_a_line_pending_waits_for_the_joypad_and_is_one_byte)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    mc.ie = 0x01;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_MODE};
+    raise_line(0);
+    rl_device dev = {.name = "joypad", .line = RL_LINE_NONE};
+    rl_sched_add_device(s, &dev);
+    rl_event ev = {.fire = timer_fire, .dev = &dev, .opaque = (void *)(uintptr_t)4};
+    rl_sched_post(s, &ev, 6000);
+    CHECK_EQ(rl_sm83_stop(c, ram), 1);
+    CHECK_EQ(mc.stop_calls, 1);
+    CHECK(rl_sched_now(k) >= 6000);
+    CHECK_EQ(c->halted, 0);
+    rl_sched_destroy(s);
+    rl_thread_free(t);
+}
+
+TEST(sm83_stop_speed_switch_with_a_line_pending_switches_and_is_one_byte)
+{
+    struct rl_thread *t;
+    rl_sched *s;
+    rl_sched_cpu *k;
+    CHECK_EQ(boot(&t, &s, &k), 0);
+    rl_ctx *c = t->ctx;
+    mc.ie = 0x04;
+    mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_SWITCH, .ratio = 2, .run_operand = 0};
+    raise_line(2);
+    CHECK_EQ(rl_sm83_stop(c, ram), 1);
+    CHECK_EQ(mc.stop_calls, 1);
+    CHECK_EQ(c->time.budget, -RL_SM83_STOP_STALL);
     rl_sched_destroy(s);
     rl_thread_free(t);
 }

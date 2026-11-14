@@ -2,7 +2,7 @@
 //! emitted as C, linked with the runtime's core, the SM83 layer and a mock
 //! machine, and run. It checks the three STOP paths: a speed switch, stop
 //! mode woken by a joypad line, and STOP with an interrupt already requested
-//! (the byte after it runs). Skipped with a note when clang is not on `PATH`.
+//! (the machine is asked, and the byte after it runs). Skipped with a note when clang is not on `PATH`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -228,7 +228,7 @@ fn a_lifted_rom_with_stop_links_and_runs() {
         String::from_utf8_lossy(&run.stderr)
     );
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(text.starts_with("rc=0 a=4 mem=4 stops=2 "), "{text}");
+    assert!(text.starts_with("rc=0 a=4 mem=4 stops=3 "), "{text}");
     let now: u64 = text
         .split("now=")
         .nth(1)

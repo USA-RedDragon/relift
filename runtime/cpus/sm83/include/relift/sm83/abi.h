@@ -24,6 +24,8 @@
 #define RL_SM83_IRQ_LINES 5u
 /** @brief Mask of the interrupt line bits. */
 #define RL_SM83_IRQ_MASK 0x1Fu
+/** @brief Mask of the joypad line bit, the only line that ends stop mode. */
+#define RL_SM83_IRQ_JOYPAD_MASK 0x10u
 /** @brief Guest cycles (T-cycles) an interrupt entry costs: five machine cycles. */
 #define RL_SM83_IRQ_CYCLES 20
 /** @brief Guest address of the vector of interrupt line n. */
@@ -62,10 +64,10 @@ typedef struct rl_sm83_ints {
     /** @brief The CPU takes line: the machine clears the request. */
     void (*ack)(void *opaque, uint32_t line);
     /**
-     * @brief Optional. STOP ran with no interrupt requested and enabled: the machine decides which of RL_SM83_STOP_* applies
-     * (held button, armed speed switch, else stop mode), does its half and fills r. NULL means stop mode.
-     * In stop mode the CPU waits for any raised line of RL_SM83_IRQ_MASK, so the machine must raise the joypad line
-     * when a selected button goes low, whether or not it is enabled.
+     * @brief Optional. STOP ran, with or without an interrupt requested and enabled: the machine decides which of
+     * RL_SM83_STOP_* applies (held button, armed speed switch, else stop mode), does its half and fills r. NULL means
+     * stop mode. In stop mode the CPU waits for the joypad line (RL_SM83_IRQ_JOYPAD_MASK), so the machine must raise it
+     * when a selected button goes low, whether or not it is enabled; lines already raised do not end it.
      */
     void (*stop)(void *opaque, rl_sm83_stop_info *r);
 } rl_sm83_ints;
@@ -243,10 +245,11 @@ RL_RUNTIME_API int rl_sm83_halt(rl_ctx *c, uint8_t *mem);
 /**
  * @brief STOP, called after the lifter charged the instruction's cost (4 cycles; the lifter adds 4 more when the result
  * is 0). Returns 1 when the byte after STOP is not skipped (it runs as the next instruction: an interrupt was already
- * requested, or the machine said so), else 0. With an interrupt pending it does nothing else. Otherwise it asks the
- * machine (rl_sm83_ints.stop): a speed switch changes the CPU clock's ratio through the scheduler and charges
- * RL_SM83_STOP_STALL cycles; a held button halts as rl_sm83_halt does; stop mode waits for a raised line and then
- * charges RL_SM83_STOP_WAKE_CYCLES. Returns 0 after a stop that ended the guest (with a report) too.
+ * requested, or the machine said so), else 0. It asks the machine (rl_sm83_ints.stop): a speed switch changes the CPU
+ * clock's ratio through the scheduler and charges RL_SM83_STOP_STALL cycles; a held button halts as rl_sm83_halt does,
+ * or does nothing with an interrupt pending; stop mode waits for the joypad line and then charges
+ * RL_SM83_STOP_WAKE_CYCLES, with an interrupt pending as without. Returns 0 after a stop that ended the guest (with a
+ * report) too.
  */
 RL_RUNTIME_API int rl_sm83_stop(rl_ctx *c, uint8_t *mem);
 
