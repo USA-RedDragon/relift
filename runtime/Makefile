@@ -11,6 +11,7 @@
 #                              needs pkg-config packages sdl3 and opus). The default is the null
 #                              output and the stub decoder, with no extra dependency.
 #   make gdb-test              check the gdb frame filter (skips without gdb)
+#   make sched-bench           run the device scheduler microbenchmark
 #   make CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 #
 # TARGET is passed as -target; leave it empty for the compiler's default.
@@ -102,8 +103,10 @@ TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
 CRASH_TEST := $(BUILD)/crash_test
+SCHED_BENCH_OBJS := $(call obj,core/tests/bench/sched_bench.c)
+SCHED_BENCH := $(BUILD)/sched_bench
 
-.PHONY: all test charter gdb-test clean
+.PHONY: all test charter gdb-test sched-bench clean
 all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS) $(CRASH_TEST)
 
 $(CORE_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -165,6 +168,17 @@ $(CRASH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 
 $(CRASH_TEST): $(CRASH_TEST_OBJS) $(CRASH_OBJS)
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
+
+# The scheduler microbenchmark links only the core.
+$(SCHED_BENCH_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(CORE_INC) $(CFLAGS) -c $< -o $@
+
+$(SCHED_BENCH): $(SCHED_BENCH_OBJS) $(CORE_OBJS)
+	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
+
+sched-bench: $(SCHED_BENCH)
+	$(abspath $(SCHED_BENCH))
 
 test: $(TESTS) $(CRASH_TEST)
 	$(abspath $(CRASH_TEST))
