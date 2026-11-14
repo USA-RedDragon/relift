@@ -9,6 +9,7 @@ pub mod devsock;
 pub mod fpflags;
 pub mod hints;
 pub mod import;
+pub mod paths;
 pub mod runtime_link;
 pub mod settings;
 pub mod ui;

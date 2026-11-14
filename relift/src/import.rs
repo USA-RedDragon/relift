@@ -41,7 +41,7 @@ pub fn cache_root(settings: &Settings) -> Result<PathBuf, BoxError> {
 ///
 /// As [`cache_root`], or the project directory has no name.
 pub fn import_dir(settings: &Settings, project: &Path) -> Result<PathBuf, BoxError> {
-    let abs = std::fs::canonicalize(project)?;
+    let abs = crate::paths::canonical(project)?;
     let name = abs
         .file_name()
         .ok_or("the project directory has no name")?

@@ -521,13 +521,13 @@ impl EmitRecord {
 
 /// The project's name and its host build directory.
 fn project_out(settings: &Settings) -> Result<(String, PathBuf), BoxError> {
-    let name = std::fs::canonicalize(".")?
+    let name = crate::paths::canonical(".")?
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "project".into());
     let root = cache_root(settings)?;
     std::fs::create_dir_all(&root)?;
-    let out = std::fs::canonicalize(root)?
+    let out = crate::paths::canonical(root)?
         .join("projects")
         .join(&name)
         .join("build")
@@ -1074,7 +1074,7 @@ pub fn run_run(
         abi,
         built.toolchain.clone(),
         hot,
-        std::fs::canonicalize("game.toml")?,
+        crate::paths::canonical("game.toml")?,
     );
     let sock = crate::dev::socket_path(&built.out);
     let _ = std::fs::remove_file(&sock);
