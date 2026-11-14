@@ -25,6 +25,7 @@
 //! [`interp::run`] is the reference interpreter. Its semantics are the
 //! definition of every operation; the C emitter must agree with it.
 
+mod bin;
 mod block;
 mod builder;
 mod crypto;
@@ -36,6 +37,7 @@ pub mod opt;
 mod regs;
 pub mod text;
 
+pub use bin::{BinError, FORMAT as BIN_FORMAT, Reader, put_str, put_uvar, read_block, write_block};
 pub use block::{Block, Exit, Flow, Inst, Next, VerifyError};
 pub use builder::Builder;
 pub use io::{AddrClass, IoMap, IoRange};

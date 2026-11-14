@@ -643,7 +643,7 @@ impl Cursor {
     }
 }
 
-fn intern(name: &str) -> &'static str {
+pub(crate) fn intern(name: &str) -> &'static str {
     static TABLE: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
     let mut table = TABLE
         .get_or_init(|| Mutex::new(HashSet::new()))

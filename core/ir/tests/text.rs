@@ -3,7 +3,8 @@
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{
     AtomicOp, BinOp, Block, Builder, CmpOp, CryptoOp, Endian, Exit, Flow, FpOp, FpRound, IoKind,
-    Next, Order, Reg, RegDecl, RegFile, UnOp, Value, Width, dce, parse,
+    Next, Order, Reader, Reg, RegDecl, RegFile, UnOp, Value, Width, dce, parse, read_block,
+    write_block,
 };
 
 static DECLS: [RegDecl; 4] = [
@@ -38,6 +39,14 @@ fn roundtrip(b: &Block) {
     let back = parse(&text, &files()).unwrap_or_else(|e| panic!("{e}\n{text}"));
     assert_eq!(&back, b, "{text}");
     assert_eq!(back.to_string(), text);
+    let mut bin = Vec::new();
+    write_block(&mut bin, b, &files());
+    let mut r = Reader::new(&bin);
+    assert_eq!(&read_block(&mut r, &files()).unwrap(), b, "{text}");
+    assert!(r.is_empty());
+    for cut in 0..bin.len() {
+        assert!(read_block(&mut Reader::new(&bin[..cut]), &files()).is_err());
+    }
 }
 
 fn everything(exit: Exit, addr: Width) -> Block {
