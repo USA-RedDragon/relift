@@ -102,6 +102,8 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
             .values()
             .map(|f| relift_emit::Function {
                 entry: f.entry,
+                name: program::host_name(p, f.name.as_deref(), f.entry),
+                guest_name: f.name.clone(),
                 span: f.span(4),
                 insts: f
                     .insts
@@ -120,14 +122,29 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
                 tables: f.tables.clone(),
             })
             .collect();
+        let overrides: Vec<relift_emit::Override> = analysis
+            .functions
+            .keys()
+            .filter_map(|&a| {
+                let k = program::known(module.bytes_at(a)?)?;
+                Some(relift_emit::Override {
+                    entry: a,
+                    host_fn: k.host_fn.into(),
+                    may_unwind: k.may_unwind,
+                    resume_point: k.resume_point,
+                })
+            })
+            .collect();
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         let out = relift_emit::emit(
             &A64,
             &fns,
+            &overrides,
             &relift_emit::Options {
                 shard_size: 64,
                 unit_name: p.name.clone(),
                 unit_symbol: unit.clone(),
+                module_base: p.base,
             },
         );
         let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
@@ -140,10 +157,11 @@ fn emit_modules(placed: &[Placed], cdir: &Path) -> Result<(Vec<PathBuf>, Vec<Str
             }
         }
         eprintln!(
-            "relift build: {} at {:#x}: {} functions, {} instructions do not lift",
+            "relift build: {} at {:#x}: {} functions, {} overrides, {} instructions do not lift",
             p.name,
             p.base,
             analysis.functions.len(),
+            overrides.len(),
             out.undefined
         );
         units.push(unit);
@@ -218,6 +236,7 @@ fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxEr
     let lifted_flags: Vec<String> = base
         .iter()
         .cloned()
+        .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))
         .chain([inc("core/include"), inc("cpus/a64/include")])
         .collect();
     let rt_flags: Vec<String> = base
