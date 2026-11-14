@@ -32,20 +32,6 @@ pub struct Settings {
     pub runtime_dir: PathBuf,
 
     #[configulator(
-        name = "quiet",
-        short = 'q',
-        description = "print only the final summary and errors"
-    )]
-    pub quiet: bool,
-
-    #[configulator(
-        name = "verbose",
-        short = 'v',
-        description = "also print each shard as it compiles and every instruction that does not lift"
-    )]
-    pub verbose: bool,
-
-    #[configulator(
         name = "color",
         default = "auto",
         description = "color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never"
@@ -72,9 +58,6 @@ pub struct Toolchain {
 impl Validate for Settings {
     fn validate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         relift_progress::ColorChoice::parse(&self.color)?;
-        if self.quiet && self.verbose {
-            return Err("quiet and verbose cannot both be set".into());
-        }
         Ok(())
     }
 }

@@ -1,8 +1,6 @@
 cache-dir = ""
 jobs = 0
 runtime-dir = ""
-quiet = false
-verbose = false
 color = "auto"
 
 [toolchain]
