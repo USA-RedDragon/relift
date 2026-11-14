@@ -530,7 +530,12 @@ host function), optional line map, code base, name, and the function maps of its
 (section 11). The same record
 describes statically linked code: the emitted program file holds the unit
 table and passes it to the loader in `rl_switch_program` (`units` and
-`unit_count`), and the runtime fills its table from it at start-up. The
+`unit_count`), and the runtime fills its table from it at start-up. Bundled code mods
+(`relift/mods.h`) add a `mods` table there: each function a bundled mod
+patches is registered as a switch that tail-calls through a slot, and at
+start the loader points every slot at the variant lifted for the mods whose
+bool settings (`mod.<name>`) are on, then writes the mods' data patches into
+guest memory. The
 runtime library names no symbol that the program provides, so it links as a
 shared library on every host.
 
