@@ -61,6 +61,64 @@ pub(super) fn LDAXP_LP32_ldstexclp(
     Ok(())
 }
 
+/// `LDAXP_LP64_ldstexclp`.
+///
+/// Cut: AArch64_Abort, AArch64_SetExclusiveMonitors, AlignmentFault, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAXP_LP64_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAXP_LP64_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: i128 = s2 as i128;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s8: bool = s5 == s6;
+    if s8 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s9: bool = !s8;
+    let s10: bool = s4 == (31i128);
+    let v12 = st.sp_read(b);
+    let v15 = st.x_read(b, s4 as u32, 64);
+    let v16 = if s10 { v12 } else { v15 };
+    let v17 = b.zext(v16, Width::W128);
+    let v19 = b.konst(Width::new(128), 4u128);
+    let v20 = b.bin(BinOp::AShr, v17, v19);
+    let v21 = b.konst(Width::new(128), 16u128);
+    let v22 = b.bin(BinOp::Mul, v20, v21);
+    let v23 = b.extract(v22, 0, Width::new(64));
+    let v24 = b.cmp(CmpOp::Eq, v16, v23);
+    let v25 = b.not(v24);
+    if s9 {
+        align::fault(b, v25);
+    }
+    let v27 = b.konst(Width::new(64), 0x0);
+    let v28 = b.bin(BinOp::Add, v16, v27);
+    if s9 {
+        align::check(b, st, v28, 16, true);
+    }
+    let v29 = if s9 {
+        b.load_exclusive(v28, Width::new(128), Endian::Little, Order::Acquire)
+    } else {
+        b.konst(Width::new(128), 0)
+    };
+    let v30 = b.extract(v29, 0, Width::new(64));
+    if s9 {
+        st.x_set(b, s5 as u32, v30, None);
+    }
+    let v33 = b.extract(v29, 64, Width::new(64));
+    if s9 {
+        st.x_set(b, s6 as u32, v33, None);
+    }
+    Ok(())
+}
+
 /// `LDNP_32_ldstnapair_offs`.
 ///
 /// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
@@ -6412,6 +6470,64 @@ pub(super) fn LDXP_LP32_ldstexclp(
     Ok(())
 }
 
+/// `LDXP_LP64_ldstexclp`.
+///
+/// Cut: AArch64_Abort, AArch64_SetExclusiveMonitors, AlignmentFault, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDXP_LP64_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDXP_LP64_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: i128 = s2 as i128;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s8: bool = s5 == s6;
+    if s8 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s9: bool = !s8;
+    let s10: bool = s4 == (31i128);
+    let v12 = st.sp_read(b);
+    let v15 = st.x_read(b, s4 as u32, 64);
+    let v16 = if s10 { v12 } else { v15 };
+    let v17 = b.zext(v16, Width::W128);
+    let v19 = b.konst(Width::new(128), 4u128);
+    let v20 = b.bin(BinOp::AShr, v17, v19);
+    let v21 = b.konst(Width::new(128), 16u128);
+    let v22 = b.bin(BinOp::Mul, v20, v21);
+    let v23 = b.extract(v22, 0, Width::new(64));
+    let v24 = b.cmp(CmpOp::Eq, v16, v23);
+    let v25 = b.not(v24);
+    if s9 {
+        align::fault(b, v25);
+    }
+    let v27 = b.konst(Width::new(64), 0x0);
+    let v28 = b.bin(BinOp::Add, v16, v27);
+    if s9 {
+        align::check(b, st, v28, 16, true);
+    }
+    let v29 = if s9 {
+        b.load_exclusive(v28, Width::new(128), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(128), 0)
+    };
+    let v30 = b.extract(v29, 0, Width::new(64));
+    if s9 {
+        st.x_set(b, s5 as u32, v30, None);
+    }
+    let v33 = b.extract(v29, 64, Width::new(64));
+    if s9 {
+        st.x_set(b, s6 as u32, v33, None);
+    }
+    Ok(())
+}
+
 /// `PRFM_P_ldst_pos`.
 ///
 /// Cut: ENV, IsFeatureImplemented, SP_read, X_read.
@@ -10914,6 +11030,7 @@ pub(super) fn STXP_SP64_ldstexclp(
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
         Encoding::LDAXP_LP32_ldstexclp => LDAXP_LP32_ldstexclp,
+        Encoding::LDAXP_LP64_ldstexclp => LDAXP_LP64_ldstexclp,
         Encoding::LDNP_32_ldstnapair_offs => LDNP_32_ldstnapair_offs,
         Encoding::LDNP_64_ldstnapair_offs => LDNP_64_ldstnapair_offs,
         Encoding::LDNP_D_ldstnapair_offs => LDNP_D_ldstnapair_offs,
@@ -11027,6 +11144,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDUR_Q_ldst_unscaled => LDUR_Q_ldst_unscaled,
         Encoding::LDUR_S_ldst_unscaled => LDUR_S_ldst_unscaled,
         Encoding::LDXP_LP32_ldstexclp => LDXP_LP32_ldstexclp,
+        Encoding::LDXP_LP64_ldstexclp => LDXP_LP64_ldstexclp,
         Encoding::PRFM_P_ldst_pos => PRFM_P_ldst_pos,
         Encoding::PRFM_P_ldst_regoff => PRFM_P_ldst_regoff,
         Encoding::PRFM_P_loadlit => PRFM_P_loadlit,

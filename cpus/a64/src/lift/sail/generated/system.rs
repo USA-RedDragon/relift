@@ -94,6 +94,64 @@ pub(super) fn AUTIBZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `AXFLAG_M_pstate`.
+///
+/// Cut: IsFeatureImplemented, PSTATE.NZCV.
+pub(super) fn AXFLAG_M_pstate(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AXFLAG_M_pstate;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: bool = st.has(Feature::FlagM2);
+    let s2: bool = !s1;
+    if s2 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s3: bool = !s2;
+    let v4 = st.get(b, regs::Z);
+    let v5 = st.get(b, regs::V);
+    let v6 = b.or(v4, v5);
+    let v7 = st.get(b, regs::C);
+    let v8 = st.get(b, regs::V);
+    let v9 = b.not(v8);
+    let v10 = b.and(v7, v9);
+    let v11 = b.konst(Width::new(1), 0x0);
+    if s3 {
+        st.set(b, regs::N, v11, None);
+    }
+    if s3 {
+        st.set(b, regs::Z, v6, None);
+    }
+    if s3 {
+        st.set(b, regs::C, v10, None);
+    }
+    let v12 = b.konst(Width::new(1), 0x0);
+    if s3 {
+        st.set(b, regs::V, v12, None);
+    }
+    Ok(())
+}
+
+/// `CFINV_M_pstate`.
+///
+/// Cut: IsFeatureImplemented, PSTATE.NZCV.
+pub(super) fn CFINV_M_pstate(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::CFINV_M_pstate;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: bool = st.has(Feature::FlagM);
+    let s2: bool = !s1;
+    if s2 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s3: bool = !s2;
+    let v4 = st.get(b, regs::C);
+    let v5 = b.not(v4);
+    if s3 {
+        st.set(b, regs::C, v5, None);
+    }
+    Ok(())
+}
+
 /// `CLREX_BN_barriers`.
 ///
 /// Cut: ClearExclusiveLocal.
@@ -292,6 +350,49 @@ pub(super) fn SEVL_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<(
     Ok(())
 }
 
+/// `XAFLAG_M_pstate`.
+///
+/// Cut: IsFeatureImplemented, PSTATE.NZCV.
+pub(super) fn XAFLAG_M_pstate(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::XAFLAG_M_pstate;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: bool = st.has(Feature::FlagM2);
+    let s2: bool = !s1;
+    if s2 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s3: bool = !s2;
+    let v4 = st.get(b, regs::C);
+    let v5 = b.not(v4);
+    let v6 = st.get(b, regs::Z);
+    let v7 = b.not(v6);
+    let v8 = b.and(v5, v7);
+    let v9 = st.get(b, regs::Z);
+    let v10 = st.get(b, regs::C);
+    let v11 = b.and(v9, v10);
+    let v12 = st.get(b, regs::C);
+    let v13 = st.get(b, regs::Z);
+    let v14 = b.or(v12, v13);
+    let v15 = st.get(b, regs::C);
+    let v16 = b.not(v15);
+    let v17 = st.get(b, regs::Z);
+    let v18 = b.and(v16, v17);
+    if s3 {
+        st.set(b, regs::N, v8, None);
+    }
+    if s3 {
+        st.set(b, regs::Z, v11, None);
+    }
+    if s3 {
+        st.set(b, regs::C, v14, None);
+    }
+    if s3 {
+        st.set(b, regs::V, v18, None);
+    }
+    Ok(())
+}
+
 /// `YIELD_HI_hints`.
 ///
 /// Cut: .
@@ -311,12 +412,15 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::AUTIB1716_HI_hints => AUTIB1716_HI_hints,
         Encoding::AUTIBSP_HI_hints => AUTIBSP_HI_hints,
         Encoding::AUTIBZ_HI_hints => AUTIBZ_HI_hints,
+        Encoding::AXFLAG_M_pstate => AXFLAG_M_pstate,
+        Encoding::CFINV_M_pstate => CFINV_M_pstate,
         Encoding::CLREX_BN_barriers => CLREX_BN_barriers,
         Encoding::DMB_BO_barriers => DMB_BO_barriers,
         Encoding::DSB_BO_barriers => DSB_BO_barriers,
         Encoding::ISB_BI_barriers => ISB_BI_barriers,
         Encoding::NOP_HI_hints => NOP_HI_hints,
         Encoding::SEVL_HI_hints => SEVL_HI_hints,
+        Encoding::XAFLAG_M_pstate => XAFLAG_M_pstate,
         Encoding::YIELD_HI_hints => YIELD_HI_hints,
         _ => return None,
     })

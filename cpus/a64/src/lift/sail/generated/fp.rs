@@ -14109,6 +14109,270 @@ pub(super) fn FNMUL_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FRINT32X_D_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT32X_D_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT32X_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 64);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(64).round_int_n(b, v8, FpRound::TiesEven, 32);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT32X_S_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT32X_S_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT32X_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 32);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(32).round_int_n(b, v8, FpRound::TiesEven, 32);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT32Z_D_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT32Z_D_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT32Z_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 64);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(64).round_int_n(b, v8, FpRound::Zero, 32);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT32Z_S_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT32Z_S_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT32Z_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 32);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(32).round_int_n(b, v8, FpRound::Zero, 32);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT64X_D_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT64X_D_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT64X_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 64);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(64).round_int_n(b, v8, FpRound::TiesEven, 64);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT64X_S_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT64X_S_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT64X_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 32);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(32).round_int_n(b, v8, FpRound::TiesEven, 64);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT64Z_D_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT64Z_D_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT64Z_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 64);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(64).round_int_n(b, v8, FpRound::Zero, 64);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
+/// `FRINT64Z_S_floatdp1`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT64Z_S_floatdp1(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT64Z_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: bool = st.has(Feature::FRINTTS);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s2 as i128;
+    let v8 = st.v_read(b, s7 as u32, 32);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(32).round_int_n(b, v8, FpRound::Zero, 64);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    if s5 {
+        st.v_set(b, s6 as u32, v11, None);
+    }
+    Ok(())
+}
+
 /// `FRINTA_D_floatdp1`.
 ///
 /// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
@@ -25066,6 +25330,14 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FNMUL_D_floatdp2 => FNMUL_D_floatdp2,
         Encoding::FNMUL_H_floatdp2 => FNMUL_H_floatdp2,
         Encoding::FNMUL_S_floatdp2 => FNMUL_S_floatdp2,
+        Encoding::FRINT32X_D_floatdp1 => FRINT32X_D_floatdp1,
+        Encoding::FRINT32X_S_floatdp1 => FRINT32X_S_floatdp1,
+        Encoding::FRINT32Z_D_floatdp1 => FRINT32Z_D_floatdp1,
+        Encoding::FRINT32Z_S_floatdp1 => FRINT32Z_S_floatdp1,
+        Encoding::FRINT64X_D_floatdp1 => FRINT64X_D_floatdp1,
+        Encoding::FRINT64X_S_floatdp1 => FRINT64X_S_floatdp1,
+        Encoding::FRINT64Z_D_floatdp1 => FRINT64Z_D_floatdp1,
+        Encoding::FRINT64Z_S_floatdp1 => FRINT64Z_S_floatdp1,
         Encoding::FRINTA_D_floatdp1 => FRINTA_D_floatdp1,
         Encoding::FRINTA_H_floatdp1 => FRINTA_H_floatdp1,
         Encoding::FRINTA_S_floatdp1 => FRINTA_S_floatdp1,

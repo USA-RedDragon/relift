@@ -47,6 +47,7 @@ AUTIAZ_HI_hints
 AUTIB1716_HI_hints
 AUTIBSP_HI_hints
 AUTIBZ_HI_hints
+AXFLAG_M_pstate
 BCAX_VVV16_crypto4
 BC_only_condbranch
 BFM_32M_bitfield
@@ -104,6 +105,7 @@ CCMP_32_condcmp_imm
 CCMP_32_condcmp_reg
 CCMP_64_condcmp_imm
 CCMP_64_condcmp_reg
+CFINV_M_pstate
 CLREX_BN_barriers
 CLS_32_dp_1src
 CLS_64_dp_1src
@@ -446,6 +448,7 @@ FMOV_64D_float2int
 FMOV_64H_float2int
 FMOV_64VX_float2int
 FMOV_asimdimm_D2_d
+FMOV_asimdimm_H_h
 FMOV_asimdimm_S_s
 FMOV_D64_float2int
 FMOV_D_floatdp1
@@ -492,6 +495,18 @@ FRECPS_asimdsamefp16_only
 FRECPS_asimdsame_only
 FRECPS_asisdsamefp16_only
 FRECPS_asisdsame_only
+FRINT32X_asimdmisc_R
+FRINT32X_D_floatdp1
+FRINT32X_S_floatdp1
+FRINT32Z_asimdmisc_R
+FRINT32Z_D_floatdp1
+FRINT32Z_S_floatdp1
+FRINT64X_asimdmisc_R
+FRINT64X_D_floatdp1
+FRINT64X_S_floatdp1
+FRINT64Z_asimdmisc_R
+FRINT64Z_D_floatdp1
+FRINT64Z_S_floatdp1
 FRINTA_asimdmiscfp16_R
 FRINTA_asimdmisc_R
 FRINTA_D_floatdp1
@@ -663,6 +678,7 @@ LDARH_LR32_ldstord
 LDAR_LR32_ldstord
 LDAR_LR64_ldstord
 LDAXP_LP32_ldstexclp
+LDAXP_LP64_ldstexclp
 LDAXRB_LR32_ldstexclr
 LDAXRH_LR32_ldstexclr
 LDAXR_LR32_ldstexclr
@@ -896,6 +912,7 @@ LDURSH_64_ldst_unscaled
 LDUR_S_ldst_unscaled
 LDURSW_64_ldst_unscaled
 LDXP_LP32_ldstexclp
+LDXP_LP64_ldstexclp
 LDXRB_LR32_ldstexclr
 LDXRH_LR32_ldstexclr
 LDXR_LR32_ldstexclr
@@ -1449,6 +1466,7 @@ USUBL_asimddiff_L
 USUBW_asimddiff_W
 UZP1_asimdperm_only
 UZP2_asimdperm_only
+XAFLAG_M_pstate
 XAR_VVV2_crypto3_imm6
 XTN_asimdmisc_N
 YIELD_HI_hints

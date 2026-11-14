@@ -142,6 +142,30 @@ fn exclusive_pairs_report_status() {
     assert_eq!(x(&s, 3), 1);
 }
 
+/// LDXP X3, X4, [X1] reads both registers in one 16-byte exclusive access
+/// that STXP can complete, and a base that is not 16-byte aligned leaves
+/// for the alignment fault before any register changes. The checker only
+/// places aligned bases for exclusives, so the fault is tested here.
+#[test]
+fn exclusive_pair_of_64_bit_registers() {
+    let ldxp = 0xc87f_0000 | (4 << 10) | (1 << 5) | 3;
+    let stxp = 0xc820_0000 | (5 << 16) | (4 << 10) | (1 << 5) | 3;
+    let mut s = state();
+    let mut m = mem();
+    setx(&mut s, 1, 0x1_0010);
+    step(ldxp, &mut s, &mut m);
+    assert_eq!(x(&s, 3), 0x1716_1514_1312_1110);
+    assert_eq!(x(&s, 4), 0x1f1e_1d1c_1b1a_1918);
+    step(stxp, &mut s, &mut m);
+    assert_eq!(x(&s, 5), 0);
+    setx(&mut s, 1, 0x1_0008);
+    setx(&mut s, 3, 7);
+    let b = lift(ldxp, PC, &Features::ALL).expect("lifts");
+    let o = interp::run(&b, &mut s, &mut m, &mut NoIntrinsics).expect("runs");
+    assert_eq!(o.flow, Flow::Trap(sail::SLOW_ALIGN));
+    assert_eq!(x(&s, 3), 7);
+}
+
 #[test]
 fn unpredictable_and_unallocated_words_are_refused() {
     let ldr_post_same = 0xf840_0400 | (1 << 5) | 1;

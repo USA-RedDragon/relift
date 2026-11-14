@@ -21720,6 +21720,538 @@ pub(super) fn FRECPE_asisdmiscfp16_R(
     Ok(())
 }
 
+/// `FRINT32X_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT32X_asimdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT32X_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 64);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::TiesEven, 32);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::TiesEven, 32);
+            let v15 = b.extract(v12, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        0x00400000 => {
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::TiesEven, 32);
+            let v11 = b.konst(Width::new(96), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::TiesEven, 32);
+            let v15 = b.extract(v12, 64, Width::new(64));
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            let v19 = b.extract(v8, 64, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v20 = rt::Fp::new(32).round_int_n(b, v19, FpRound::TiesEven, 32);
+            let v21 = b.extract(v18, 96, Width::new(32));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v18, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v8, 96, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v26 = rt::Fp::new(32).round_int_n(b, v25, FpRound::TiesEven, 32);
+            let v27 = b.extract(v24, 0, Width::new(96));
+            let v28 = b.concat(v26, v27);
+            if s5 {
+                st.v_set(b, s6 as u32, v28, None);
+            }
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(64).round_int_n(b, v9, FpRound::TiesEven, 32);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 64, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(64).round_int_n(b, v13, FpRound::TiesEven, 32);
+            let v15 = b.extract(v12, 0, Width::new(64));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRINT32Z_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT32Z_asimdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT32Z_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 64);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::Zero, 32);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::Zero, 32);
+            let v15 = b.extract(v12, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        0x00400000 => {
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::Zero, 32);
+            let v11 = b.konst(Width::new(96), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::Zero, 32);
+            let v15 = b.extract(v12, 64, Width::new(64));
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            let v19 = b.extract(v8, 64, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v20 = rt::Fp::new(32).round_int_n(b, v19, FpRound::Zero, 32);
+            let v21 = b.extract(v18, 96, Width::new(32));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v18, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v8, 96, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v26 = rt::Fp::new(32).round_int_n(b, v25, FpRound::Zero, 32);
+            let v27 = b.extract(v24, 0, Width::new(96));
+            let v28 = b.concat(v26, v27);
+            if s5 {
+                st.v_set(b, s6 as u32, v28, None);
+            }
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(64).round_int_n(b, v9, FpRound::Zero, 32);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 64, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(64).round_int_n(b, v13, FpRound::Zero, 32);
+            let v15 = b.extract(v12, 0, Width::new(64));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRINT64X_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT64X_asimdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT64X_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 64);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::TiesEven, 64);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::TiesEven, 64);
+            let v15 = b.extract(v12, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        0x00400000 => {
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::TiesEven, 64);
+            let v11 = b.konst(Width::new(96), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::TiesEven, 64);
+            let v15 = b.extract(v12, 64, Width::new(64));
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            let v19 = b.extract(v8, 64, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v20 = rt::Fp::new(32).round_int_n(b, v19, FpRound::TiesEven, 64);
+            let v21 = b.extract(v18, 96, Width::new(32));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v18, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v8, 96, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v26 = rt::Fp::new(32).round_int_n(b, v25, FpRound::TiesEven, 64);
+            let v27 = b.extract(v24, 0, Width::new(96));
+            let v28 = b.concat(v26, v27);
+            if s5 {
+                st.v_set(b, s6 as u32, v28, None);
+            }
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(64).round_int_n(b, v9, FpRound::TiesEven, 64);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 64, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(64).round_int_n(b, v13, FpRound::TiesEven, 64);
+            let v15 = b.extract(v12, 0, Width::new(64));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRINT64Z_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRoundIntN, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINT64Z_asimdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINT64Z_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 64);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::Zero, 64);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::Zero, 64);
+            let v15 = b.extract(v12, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        0x00400000 => {
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(32).round_int_n(b, v9, FpRound::Zero, 64);
+            let v11 = b.konst(Width::new(96), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(32).round_int_n(b, v13, FpRound::Zero, 64);
+            let v15 = b.extract(v12, 64, Width::new(64));
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            let v19 = b.extract(v8, 64, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v20 = rt::Fp::new(32).round_int_n(b, v19, FpRound::Zero, 64);
+            let v21 = b.extract(v18, 96, Width::new(32));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v18, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v8, 96, Width::new(32));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v26 = rt::Fp::new(32).round_int_n(b, v25, FpRound::Zero, 64);
+            let v27 = b.extract(v24, 0, Width::new(96));
+            let v28 = b.concat(v26, v27);
+            if s5 {
+                st.v_set(b, s6 as u32, v28, None);
+            }
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: bool = st.has(Feature::FRINTTS);
+            let s4: bool = !s3;
+            if s4 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s5: bool = !s4;
+            let s6: i128 = s1 as i128;
+            let s7: i128 = s2 as i128;
+            let v8 = st.v_read(b, s7 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v10 = rt::Fp::new(64).round_int_n(b, v9, FpRound::Zero, 64);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 64, Width::new(64));
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            let v14 = rt::Fp::new(64).round_int_n(b, v13, FpRound::Zero, 64);
+            let v15 = b.extract(v12, 0, Width::new(64));
+            let v16 = b.concat(v14, v15);
+            if s5 {
+                st.v_set(b, s6 as u32, v16, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FRINTA_asimdmisc_R`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -35994,6 +36526,10 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FRECPE_asimdmiscfp16_R => FRECPE_asimdmiscfp16_R,
         Encoding::FRECPE_asisdmisc_R => FRECPE_asisdmisc_R,
         Encoding::FRECPE_asisdmiscfp16_R => FRECPE_asisdmiscfp16_R,
+        Encoding::FRINT32X_asimdmisc_R => FRINT32X_asimdmisc_R,
+        Encoding::FRINT32Z_asimdmisc_R => FRINT32Z_asimdmisc_R,
+        Encoding::FRINT64X_asimdmisc_R => FRINT64X_asimdmisc_R,
+        Encoding::FRINT64Z_asimdmisc_R => FRINT64Z_asimdmisc_R,
         Encoding::FRINTA_asimdmisc_R => FRINTA_asimdmisc_R,
         Encoding::FRINTA_asimdmiscfp16_R => FRINTA_asimdmiscfp16_R,
         Encoding::FRINTI_asimdmisc_R => FRINTI_asimdmisc_R,

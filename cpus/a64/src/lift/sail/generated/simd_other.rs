@@ -7159,6 +7159,110 @@ pub(super) fn FMOV_asimdimm_D2_d(word: u32, b: &mut Builder, st: &mut St) -> Res
     Ok(())
 }
 
+/// `FMOV_asimdimm_H_h`.
+///
+/// Split on the word bits `0x40000000`.
+///
+/// Cut: ENV, FEAT, V_set.
+pub(super) fn FMOV_asimdimm_H_h(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_asimdimm_H_h;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40000000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1;
+            let s3: u128 = (w >> 6) & 0x1;
+            let s4: u128 = (w >> 7) & 0x1;
+            let s5: u128 = (w >> 8) & 0x1;
+            let s6: u128 = (w >> 9) & 0x1;
+            let s7: u128 = (w >> 16) & 0x1;
+            let s8: u128 = (w >> 17) & 0x1;
+            let s9: u128 = (w >> 18) & 0x1;
+            let s10: bool = st.has(Feature::FP16);
+            let s11: bool = !s10;
+            if s11 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s12: bool = !s11;
+            let s13: i128 = s1 as i128;
+            let s14: u128 = (s9 << 1) | s8;
+            let s15: u128 = (s14 << 1) | s7;
+            let s16: u128 = (s15 << 1) | s6;
+            let s17: u128 = (s16 << 1) | s5;
+            let s18: u128 = (s17 << 1) | s4;
+            let s19: u128 = (s18 << 1) | s3;
+            let s20: u128 = (s19 << 1) | s2;
+            let s21: u128 = (s20 >> 7) & 0x1;
+            let s22: u128 = (s20 >> 6) & 0x1;
+            let s23: u128 = !s22 & 0x1;
+            let s24: u128 = (s21 << 1) | s23;
+            let s25: u128 = (s20 >> 6) & 0x1;
+            let s26: u128 = (s25 << 1) | s25;
+            let s27: u128 = (s24 << 2) | s26;
+            let s28: u128 = (s20 >> 0) & 0x3f;
+            let s29: u128 = (s27 << 6) | s28;
+            let s30: u128 = (s29 << 6) | 0x0u128;
+            let s31: u128 = (s30 << 16) | s30;
+            let s32: u128 = (s31 << 16) | s30;
+            let s33: u128 = (s32 << 16) | s30;
+            let v34 = b.konst(Width::new(64), s33);
+            if s12 {
+                st.v_set(b, s13 as u32, v34, None);
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1;
+            let s3: u128 = (w >> 6) & 0x1;
+            let s4: u128 = (w >> 7) & 0x1;
+            let s5: u128 = (w >> 8) & 0x1;
+            let s6: u128 = (w >> 9) & 0x1;
+            let s7: u128 = (w >> 16) & 0x1;
+            let s8: u128 = (w >> 17) & 0x1;
+            let s9: u128 = (w >> 18) & 0x1;
+            let s10: bool = st.has(Feature::FP16);
+            let s11: bool = !s10;
+            if s11 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s12: bool = !s11;
+            let s13: i128 = s1 as i128;
+            let s14: u128 = (s9 << 1) | s8;
+            let s15: u128 = (s14 << 1) | s7;
+            let s16: u128 = (s15 << 1) | s6;
+            let s17: u128 = (s16 << 1) | s5;
+            let s18: u128 = (s17 << 1) | s4;
+            let s19: u128 = (s18 << 1) | s3;
+            let s20: u128 = (s19 << 1) | s2;
+            let s21: u128 = (s20 >> 7) & 0x1;
+            let s22: u128 = (s20 >> 6) & 0x1;
+            let s23: u128 = !s22 & 0x1;
+            let s24: u128 = (s21 << 1) | s23;
+            let s25: u128 = (s20 >> 6) & 0x1;
+            let s26: u128 = (s25 << 1) | s25;
+            let s27: u128 = (s24 << 2) | s26;
+            let s28: u128 = (s20 >> 0) & 0x3f;
+            let s29: u128 = (s27 << 6) | s28;
+            let s30: u128 = (s29 << 6) | 0x0u128;
+            let s31: u128 = (s30 << 16) | s30;
+            let s32: u128 = (s31 << 16) | s30;
+            let s33: u128 = (s32 << 16) | s30;
+            let s34: u128 = (s33 << 16) | s30;
+            let s35: u128 = (s34 << 16) | s30;
+            let s36: u128 = (s35 << 16) | s30;
+            let s37: u128 = (s36 << 16) | s30;
+            let v38 = b.konst(Width::new(128), s37);
+            if s12 {
+                st.v_set(b, s13 as u32, v38, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FMOV_asimdimm_S_s`.
 ///
 /// Split on the word bits `0x40000000`.
@@ -33015,6 +33119,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::EOR3_VVV16_crypto4 => EOR3_VVV16_crypto4,
         Encoding::EXT_asimdext_only => EXT_asimdext_only,
         Encoding::FMOV_asimdimm_D2_d => FMOV_asimdimm_D2_d,
+        Encoding::FMOV_asimdimm_H_h => FMOV_asimdimm_H_h,
         Encoding::FMOV_asimdimm_S_s => FMOV_asimdimm_S_s,
         Encoding::INS_asimdins_IR_r => INS_asimdins_IR_r,
         Encoding::INS_asimdins_IV_v => INS_asimdins_IV_v,
