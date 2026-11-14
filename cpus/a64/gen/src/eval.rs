@@ -1119,6 +1119,20 @@ impl<'m> Gen<'m> {
                 };
                 self.assign(b, nb)
             }
+            Expr::Index(b, i)
+                if matches!(b.as_ref(), Expr::Id(r) if r == "FPSR")
+                    && matches!(i.as_ref(), Expr::Id(f) if f == "QC") =>
+            {
+                // The saturation flag is the one FPSR write outside the FP
+                // cut: it is sticky, so a write ORs it in.
+                if !matches!(self.defd(&v), V::Bits(1, 1)) {
+                    return fail("FPSR.QC written with a value other than 1");
+                }
+                self.used_cut.insert("FPSR.QC");
+                let g = self.gd();
+                self.effect(format!("st.set_qc(b, {g});"));
+                Ok(())
+            }
             Expr::Index(b, i) => {
                 let base = self.eval(b, None)?;
                 if let V::Bf(t, bits) = &base
