@@ -64,6 +64,7 @@
 //! | `intrinsic "name" args` | [`Op::Intrinsic`], args may be empty |
 //! | `guard c, HEX` | [`Op::Guard`]: leave to slow path `HEX` when `c` is 1 |
 //! | `tick DEC` / `tick.if c, DEC` | [`Op::Tick`] / [`Op::TickIf`]: guest cycles, decimal |
+//! | `sync` | [`Op::Sync`], the last instruction |
 //! | `io.load.E.K addr` / `io.store.E.K addr, value` | [`Op::IoLoad`] / [`Op::IoStore`]; `K` is `any` or `dev` ([`IoKind`]) |
 //!
 //! The ordering `O` is `plain`, `acquire`, `release`, `acqrel` or `seqcst`.
@@ -295,6 +296,7 @@ impl fmt::Display for Block {
                     write_args(f, args)?;
                 }
                 Op::Tick(n) => write!(f, "tick {n}")?,
+                Op::Sync => f.write_str("sync")?,
                 Op::TickIf(v, n) => write!(f, "tick.if v{}, {n}", v.0)?,
                 Op::IoLoad { addr, endian, kind } => write!(
                     f,
@@ -730,6 +732,7 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
                 Op::Concat(v[0], v[1])
             }
             "tick" => Op::Tick(c.cycles()?),
+            "sync" => Op::Sync,
             "tick.if" => {
                 let v = c.value(defined)?;
                 c.comma()?;

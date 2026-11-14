@@ -299,6 +299,11 @@ impl Builder {
         );
     }
 
+    /// Makes the exit a sync point; see [`Op::Sync`]. Push it last.
+    pub fn sync(&mut self) {
+        self.push(Op::Sync, None);
+    }
+
     /// Calls a named intrinsic.
     pub fn intrinsic(&mut self, name: &'static str, args: &[Value], width: Option<Width>) -> Value {
         self.push(Op::Intrinsic(name, args.to_vec()), width)

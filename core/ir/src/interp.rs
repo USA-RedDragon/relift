@@ -3,8 +3,8 @@
 use std::fmt;
 
 use crate::{
-    AddrClass, BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, FpRound, IoKind, IoMap, Next, Op,
-    UnOp, Width,
+    AddrClass, BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, FpRound, Inst, IoKind, IoMap,
+    Next, Op, UnOp, Width,
 };
 
 /// A failed guest memory access.
@@ -61,13 +61,26 @@ pub trait Devices {
 
     /// A device write of `data` at `addr`, in memory order.
     fn io_write(&mut self, mem: &mut dyn GuestMemory, addr: u64, data: &[u8]) -> Result<(), Fault>;
+
+    /// A sync point ([`Op::Sync`]) at an exit to `next`, after the block's
+    /// register writes are committed: runs the devices up to the current
+    /// cycle and decides whether an interrupt is taken. A taken one gives
+    /// the handler entry, after the hook has made the entry's effects on
+    /// `state`, `mem` and the clock (with `next` as the return address);
+    /// `None` continues at `next`.
+    fn sync(
+        &mut self,
+        state: &mut State,
+        mem: &mut dyn GuestMemory,
+        next: u64,
+    ) -> Result<Option<u64>, Error>;
 }
 
 static MEMORY_ONLY: IoMap = IoMap::memory();
 
 /// [`Devices`] of a guest without any: the clock is ignored, the map is all
-/// memory, and a device access (only an [`IoKind::Device`] one reaches it)
-/// reads or writes guest memory.
+/// memory, a device access (only an [`IoKind::Device`] one reaches it)
+/// reads or writes guest memory, and no interrupt is ever taken.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoDevices;
 
@@ -89,6 +102,15 @@ impl Devices for NoDevices {
 
     fn io_write(&mut self, mem: &mut dyn GuestMemory, addr: u64, data: &[u8]) -> Result<(), Fault> {
         mem.write(addr, data)
+    }
+
+    fn sync(
+        &mut self,
+        _state: &mut State,
+        _mem: &mut dyn GuestMemory,
+        _next: u64,
+    ) -> Result<Option<u64>, Error> {
+        Ok(None)
     }
 }
 
@@ -177,6 +199,10 @@ pub struct Outcome {
     pub next: u64,
     /// The kind of transfer.
     pub flow: Flow,
+    /// `Some(pc)` when the block's sync point took an interrupt: `next` is
+    /// then the handler entry and `pc` the exit's target, where the handler
+    /// returns to; `flow` stays the exit's.
+    pub resume: Option<u64>,
 }
 
 fn sext(v: u128, w: Width) -> i128 {
@@ -423,10 +449,14 @@ pub fn run(
     run_with(block, state, mem, intrinsics, &mut NoDevices)
 }
 
-/// Runs `block` like [`run`], with `devices` for the clock and I/O.
+/// Runs `block` like [`run`], with `devices` for the clock, I/O and sync
+/// points.
 ///
 /// Clock ticks and I/O accesses take effect in order with memory
 /// operations, so a fault leaves the ticks and accesses before it applied.
+/// A sync point runs [`Devices::sync`] after the exit's register writes
+/// are committed; when it takes an interrupt, the outcome's `next` is the
+/// handler entry and `resume` the exit's target.
 pub fn run_with(
     block: &Block,
     state: &mut State,
@@ -536,6 +566,7 @@ pub fn run_with(
                     return Ok(Outcome {
                         next: block.pc,
                         flow: Flow::Trap(*code),
+                        resume: None,
                     });
                 }
                 0
@@ -588,6 +619,7 @@ pub fn run_with(
                 .map_err(Error::Fault)?;
                 0
             }
+            Op::Sync => 0,
         };
         vals.push(r);
     }
@@ -609,9 +641,19 @@ pub fn run_with(
     for (slot, value) in writes {
         state.regs[slot] = value;
     }
+    let next = next & (addr_mask as u64);
+    let sync = matches!(block.insts.last(), Some(Inst { op: Op::Sync, .. }));
+    if sync && let Some(entry) = devices.sync(state, mem, next)? {
+        return Ok(Outcome {
+            next: entry & (addr_mask as u64),
+            flow: block.exit.flow,
+            resume: Some(next),
+        });
+    }
     Ok(Outcome {
-        next: next & (addr_mask as u64),
+        next,
         flow: block.exit.flow,
+        resume: None,
     })
 }
 

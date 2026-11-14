@@ -7,8 +7,8 @@ use crate::{AddrClass, Block, Exit, ExtKind, Inst, IoKind, IoMap, Next, Op, Orde
 ///
 /// An instruction is kept when it has an effect ([`Op::has_effect`]: `Set`,
 /// every load and store including exclusive ones, `ClearExclusive`, `Fence`,
-/// every intrinsic, the clock ticks `Tick` and `TickIf`, and the I/O
-/// accesses `IoLoad` and `IoStore`) or when a kept instruction or the exit uses its
+/// every intrinsic, the clock ticks `Tick` and `TickIf`, the I/O
+/// accesses `IoLoad` and `IoStore`, and `Sync`) or when a kept instruction or the exit uses its
 /// value, transitively. Plain loads are kept even when the loaded value is
 /// unused, because a load may fault and the fault is observable. Intrinsics
 /// are all treated as effectful, since the IR cannot see into them.
@@ -235,6 +235,7 @@ fn remap(op: &Op, map: &[u32]) -> Op {
         Op::Fp(f, args) => Op::Fp(*f, args.iter().map(r).collect()),
         Op::Intrinsic(name, args) => Op::Intrinsic(name, args.iter().map(r).collect()),
         Op::Tick(n) => Op::Tick(*n),
+        Op::Sync => Op::Sync,
         Op::TickIf(v, n) => Op::TickIf(r(v), *n),
         Op::IoLoad { addr, endian, kind } => Op::IoLoad {
             addr: r(addr),

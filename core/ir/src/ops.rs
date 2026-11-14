@@ -405,15 +405,29 @@ pub enum Op {
         /// What the access is known to reach.
         kind: IoKind,
     },
+    /// Makes the block's exit a sync point: once the exit's register writes
+    /// are committed and its target is known, the runtime may run the
+    /// devices up to the current cycle and deliver an interrupt. A taken
+    /// interrupt redirects control: execution continues at the handler
+    /// entry the guest's interrupt logic gives, and the exit's target
+    /// becomes the pc the handler returns to; the entry's guest-visible
+    /// effects (a pushed return address, a cleared interrupt enable, the
+    /// entry's cycles) are the guest runtime's. When no interrupt is taken
+    /// the sync has no guest-visible effect besides device time. At most one
+    /// per block, and it is the block's last instruction.
+    Sync,
 }
 
 impl Op {
     /// The operands, in order.
     pub fn operands(&self) -> Vec<Value> {
         match self {
-            Op::Const(_) | Op::Get(_) | Op::ClearExclusive | Op::Fence(_) | Op::Tick(_) => {
-                Vec::new()
-            }
+            Op::Const(_)
+            | Op::Get(_)
+            | Op::ClearExclusive
+            | Op::Fence(_)
+            | Op::Tick(_)
+            | Op::Sync => Vec::new(),
             Op::Set(_, v)
             | Op::Un(_, v)
             | Op::Ext(_, v)
@@ -455,6 +469,7 @@ impl Op {
                 | Op::TickIf(..)
                 | Op::IoLoad { .. }
                 | Op::IoStore { .. }
+                | Op::Sync
         )
     }
 }

@@ -147,6 +147,7 @@ fn everything(exit: Exit, addr: Width) -> Block {
     }
     b.set(Reg(0), x1);
     b.set(Reg(2), cond);
+    b.sync();
     b.finish(4, exit)
 }
 
