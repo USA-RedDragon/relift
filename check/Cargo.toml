@@ -1,0 +1,14 @@
+[package]
+name = "relift-check"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/USA-RedDragon/relift"
+publish = false
+
+[workspace]
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
