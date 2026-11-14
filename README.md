@@ -36,7 +36,6 @@ Per-game data lives in each game project's `game.toml`, not here.
 
 | Key               | Type    | Default | Environment              | Flag                | Description                                                                      |
 |-------------------|---------|---------|--------------------------|---------------------|----------------------------------------------------------------------------------|
-| `keys`            | string  |         | `RELIFT_KEYS`            | `--keys`            | path to the console key file that import reads                                   |
 | `cache-dir`       | string  |         | `RELIFT_CACHE_DIR`       | `--cache-dir`       | where lifted, emitted and built artifacts are cached (empty: the user cache dir) |
 | `jobs`            | integer | `0`     | `RELIFT_JOBS`            | `-j`, `--jobs`      | parallel compile jobs (0: one per CPU)                                           |
 | `toolchain.clang` | string  |         | `RELIFT_TOOLCHAIN_CLANG` | `--toolchain.clang` | the clang driver                                                                 |

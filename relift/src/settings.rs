@@ -12,12 +12,6 @@ use configulator::{Config, Validate};
 #[derive(Config, Debug)]
 pub struct Settings {
     #[configulator(
-        name = "keys",
-        description = "path to the console key file that import reads"
-    )]
-    pub keys: PathBuf,
-
-    #[configulator(
         name = "cache-dir",
         description = "where lifted, emitted and built artifacts are cached (empty: the user cache dir)"
     )]

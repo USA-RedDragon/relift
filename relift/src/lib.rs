@@ -2,4 +2,5 @@
 //! integration tests can name them.
 
 pub mod cli;
+pub mod import;
 pub mod settings;
