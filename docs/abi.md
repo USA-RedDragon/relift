@@ -1514,6 +1514,51 @@ Every module imports these from `rt`, in this order (`RUNTIME_IMPORTS`):
   `guard_state`). Floating point is otherwise WebAssembly's own IEEE
   arithmetic, which is what `FpOp` means (round to nearest even,
   saturating conversions, any NaN).
+- **Binary16.** WebAssembly has no half precision, so an `FpOp` with a
+  16-bit operand or result is inline code in the module, no import: the
+  operands are widened to binary64 exactly by integer code, the operation
+  runs in binary64, and one helper rounds the result to nearest even
+  binary16 (NaNs keep their sign and the top of the payload, quieted).
+  This is how `relift_ir` defines binary16 (`core/ir/src/half.rs`), and
+  it is exact: binary64 has more than twice binary16's precision plus two
+  bits, so a sum, difference, product, quotient or square root rounded
+  twice is correctly rounded; a product of two binary16 values is exact
+  in binary64, and adding the third operand of a fused multiply-add is
+  exact unless the exponents are 33 or more apart, when the error stays
+  below the distance to the nearest binary16 rounding boundary.
+  Conversions to integers round in binary64 and saturate at the integer
+  width (16, 32 or 64; NaN gives 0); integers convert to binary64 and
+  round once. The C side calls the A64 runtime's `rl_fp16_*` with FPCR
+  zero, which is the same IEEE fast path; imports named after the IR
+  operations would only move this code into every runtime.
+- **Cipher steps** (`Op::Crypto`) are inline as well, so a runtime needs
+  no cipher code: AES `MixColumns` and `InvMixColumns` work on each
+  64-bit half (two columns) with byte-parallel doubling in GF(2^8), the
+  inverse as `MixColumns` after `x ^= 4 (x ^ (x rotated by two rows))`.
+  The AES S-box, its inverse and the SM4 S-box are 256-byte tables held
+  in code: each is a helper that picks one of 32 `i64` constants with a
+  `br_table` on the byte's top five bits and shifts by the low three. The
+  tables are computed at emit time from `relift_ir`'s definition and
+  live in code, not in a data segment, so the module still writes
+  nothing into the shared memory. Every module carries the cipher and
+  binary16 helpers, used or not: an empty module grows from 953 to 3,791
+  bytes.
+- **Atomics** (`Op::AtomicRmw`, `Op::CompareSwap`) are plain
+  load-update-store sequences of 1 to 16 bytes in either byte order, with
+  the alignment and splitting of ordinary accesses. This is single-copy
+  atomic because a module runs one guest thread per memory: the memory
+  is imported unshared and nothing else runs between the load and the
+  store. A compare-and-swap stores only when the old value equals the
+  expected one and gives the old value either way. Both leave the
+  exclusive monitor as it is, like a plain store, the interpreter and the
+  C runtime's `rl_atomic` and `rl_cas` (whether such a store clears the
+  local monitor is IMPLEMENTATION DEFINED). Orderings are dropped like fences. A
+  build for shared memory (threads, not done) would use
+  `i32/i64.atomic.rmw*.{add,and,or,xor,xchg}` and `atomic.rmw*.cmpxchg`
+  for naturally aligned 1, 2, 4 and 8 bytes with sequentially consistent
+  ordering, a `cmpxchg` loop for `Clear` and the minimum and maximum
+  updates, and a runtime import for 16 bytes, other sizes and big-endian
+  data.
 - **Section 13.** Ticks subtract from a budget local loaded at entry; the
   local is stored before every runtime call and reloaded after it. I/O
   accesses of kind `any` get the same inline range check from the
@@ -1534,9 +1579,9 @@ Every module imports these from `rt`, in this order (`RUNTIME_IMPORTS`):
   coherent); `cpus/a64` checks the constants against the header.
 - **Exclusives** use the monitor fields of the context: a load-exclusive
   arms it with address and size, a store-exclusive succeeds when it is
-  armed for the same address and size, and both a store-exclusive and a
-  clear disarm it. Fences are no-ops: one memory per thread, no shared
-  memory yet.
+  armed for the same address and size, and a store-exclusive, a clear,
+  an atomic update and a compare-and-swap disarm it. Fences are no-ops:
+  one memory per thread, no shared memory yet.
 
 ### Modes
 
@@ -1551,7 +1596,7 @@ the way the IR interpreter does.
 An instruction that did not lift, or that uses something with no
 WebAssembly form here (an address or computed target wider than 64 bits,
 a memory access of other than 1 to 16 whole bytes, floating point of
-other than 32 or 64 bits, an intrinsic the frontend does not carry or
+other than 16, 32 or 64 bits, an intrinsic the frontend does not carry or
 with a carrier that does not fit), calls `rt.undefined` at run time with
 its address and raw unit; the latter kind is also listed in
 `Output::errors`, never dropped. An IR operation added later fails to
@@ -1563,7 +1608,8 @@ The browser shell and the JavaScript runtime (the imports above, the
 lookup and table management), the C runtime compiled to WebAssembly,
 registers kept in locals across calls and lazy flags (speed), hoisted
 guards, an exact `fma64` for engines without one (the stand-in uses the
-host's), and linking a guest's device model.
+host's), shared memory with the threads proposal (atomics above), and
+linking a guest's device model.
 
 ## Checks run for this contract
 
