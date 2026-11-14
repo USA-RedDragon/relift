@@ -8,6 +8,7 @@
  * w0, outputs from x1.
  */
 #include "ipc.h"
+#include "services.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -514,6 +515,7 @@ int rl_hos_init(const rl_hos_config *cfg)
     hos.user_exception_ctx = hos_tls_alloc();
     hos_unlock();
     hos.up = true;
+    rl_srv_install_all();
     return 0;
 }
 
