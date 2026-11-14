@@ -440,7 +440,8 @@ table entries change only from NULL to a function, once. [inferred]
 
 **Implementation** (`runtime/core/devload.c`, `runtime/core/dispatch.c`,
 `relift/src/dev.rs`) [verified: `relift/tests/e2e_hotload.rs` on x86-64
-Linux]:
+Linux and an Apple M2; Windows is not done: the runtime's core does not build
+there yet and relift has no local socket on Windows]:
 
 - The guest layer sizes the dispatch table over the code of every module
   before it registers the static units (`rl_dispatch_reserve`), so a
