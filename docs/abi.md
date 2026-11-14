@@ -28,6 +28,10 @@ Prototype names used in the tags:
   handling of 4 KiB guest mappings on 16 KiB host pages, on an Apple M2 Mac.
 - **slice prototype**: a lift, compile and compare run over a small set of
   functions, checked against a reference with many inputs.
+- **hot-load prototype (not yet in the repo)**: a runtime as a shared library,
+  a stand-in for relift's dev server, and a hand-written host, run end to end
+  (miss, socket round trip, compile, load, register, resume) on x86-64 Linux
+  and an Apple M2 Mac; the Windows build links but was not run.
 - **probe**: the ABI probe programs described under "Checks run for this
   contract".
 
@@ -292,16 +296,26 @@ and reads the target from `c->pc`.
 1. Take the process miss lock. If another thread already loaded the target,
    release the lock and continue at step 6.
 2. Connect once per process to the socket named by `RELIFT_DEV_SOCKET`
-   (Unix domain socket; Windows 10 1803+ has AF_UNIX) and send
+   (Unix domain socket; Windows 10 1803+ has AF_UNIX, built but not run) and send
    `RL_DEV_HELLO` (ABI version, host page size, image id, pid). relift
    refuses a different image id or ABI version.
-3. Send `RL_DEV_LIFT` with the target, the call site (from the host return
-   address through the line map; 0 after a tail call, where it is lost),
-   the guest thread id, the reason (`RL_MISS_CALL`, `RL_MISS_JUMP`,
-   `RL_MISS_ENTRY`, `RL_MISS_RESUME`) and the thread's FPCR.
-4. relift lifts the target (and any new code it reaches), compiles a shared
-   library, adds the target to the hint list in `game.toml`, and answers
-   `RL_DEV_LIFT_REPLY`: status, absolute library path, message text.
+3. Send `RL_DEV_LIFT` with the target, the call site, the guest thread id,
+   the reason (`RL_MISS_CALL`, `RL_MISS_JUMP`, `RL_MISS_ENTRY`,
+   `RL_MISS_RESUME`) and the thread's FPCR. `site` and `reason` are best
+   effort and relift must not depend on them: at a miss the runtime only
+   knows `c->pc` (`rl_indirect` stores nothing else), so it cannot tell an
+   indirect call from an indirect jump (it sends `RL_MISS_CALL`), and the
+   site is 0 when unknown and lost after a tail call. No ABI version bump.
+   [verified: hot-load prototype sends `RL_MISS_CALL` and site 0]
+4. relift lifts the target and all code newly reachable from it, compiles
+   **one** shared library for the whole request, adds the target to the
+   hint list in `game.toml`, and answers `RL_DEV_LIFT_REPLY`: status,
+   absolute library path, message text. One library per request because
+   macOS pays about 125 to 260 ms on the first load of any new library
+   file; reopening a loaded file costs under 1.3 ms, and a byte-identical
+   copy at a new path pays again, so the cause is inferred to be a per-file
+   system check. [verified: hot-load prototype on an Apple M2 Mac; cause
+   inferred] A loaded library is never unloaded.
 5. The runtime opens the library, calls its exported `relift_unit()`, and
    refuses the unit unless `abi_version == RL_ABI_VERSION`,
    `ctx_size == sizeof(rl_ctx)` and `image_id` matches. It then stores
@@ -323,8 +337,37 @@ to one machine. [inferred]
 never by symbol, so it does not need the main program's lifted symbols. It
 calls runtime entry points by name: in dev builds the runtime is a shared
 library (`librelift_rt`) that both the program and hot-loaded units link
-against. Shipped builds link it statically. [inferred; open: check on
-Windows gnullvm and macOS]
+against. Shipped builds link it statically (`RL_STATIC_RUNTIME` on
+Windows). [verified: hot-load prototype on x86-64 Linux and an Apple M2 Mac;
+the Windows build links with zig cc 0.17.1, not run]
+
+**Linking a unit:** a unit links against the runtime library: `-lrelift_rt`,
+or the import library (`librelift_rt.dll.a`) on Windows. macOS rejects
+unresolved symbols otherwise, and Windows needs the import library.
+Linux units build with `-Wl,--no-undefined`. Units are built with hidden
+visibility; the only symbol a unit exports is `relift_unit`
+(`RL_UNIT_EXPORT`). The runtime library exports every entry declared in the
+header (`RL_RUNTIME_API`, defined as default visibility on ELF and Mach-O,
+`dllexport` with `RL_BUILDING_RUNTIME` and `dllimport` otherwise on
+Windows). [verified: hot-load prototype, one runtime instance checked from
+inside a unit; Linux run with `-fvisibility=hidden -Wl,--no-undefined`]
+
+**Failures:** `rl_dev_reply.status` is `RL_DEV_OK` (0), `RL_DEV_ERR_INTERNAL`
+(1), `RL_DEV_ERR_HELLO` (2, relift refused the hello) or `RL_DEV_ERR_COMPILE`
+(3, the lift or compile failed). A nonzero status, a missing or unreachable
+socket, a unit that fails the checks in step 5, and a miss in a shipped
+build all report on stderr and end the process with `RL_EXIT_SOFTWARE`
+(70, EX_SOFTWARE). [verified: hot-load prototype, each case]
+
+**Socket path:** it must fit `sun_path` (108 bytes on Linux, 104 on macOS,
+NUL included). relift picks a short path; the runtime reports a longer one
+and fails as above. [verified: length check in the hot-load prototype]
+
+**Latency, miss to resume** (one function, one library, the stand-in
+compiling with clang -O2): x86-64 Linux 42 to 63 ms (zig cc as the
+compiler: 61 to 63 ms), macOS on an Apple M2 196 to 278 ms. The load itself
+is 0.05 to 0.2 ms on Linux; on macOS it is 129 to 216 ms and dominates.
+Check and register take about 1 us. [verified: hot-load prototype]
 
 **Registration ABI** (`rl_unit`): ABI version, `sizeof(rl_ctx)`, 32-byte
 image id, sorted `rl_fn_entry` array (guest address, guest size, flags,
@@ -648,8 +691,10 @@ committed.
 4. Interprocedural analyses: "may unwind" to drop plain checks; exit-store
    pruning of caller-dead registers (4, 7).
 5. Cost of the hash-table dispatch on Android and iOS (5).
-6. Dev hot-load: runtime as a shared library on Windows gnullvm and macOS;
-   AF_UNIX on Windows; first end-to-end hot-load (6).
+6. Dev hot-load on Windows: AF_UNIX and the runtime DLL build and link with
+   zig cc 0.17.1 (x86_64-windows-gnu) but have not been run. Linux and macOS
+   are verified end to end (42 to 63 ms and 196 to 278 ms from miss to
+   resume; macOS is dominated by the first load of a new library) (6).
 7. `spin_flag` and `llsc_stress` recompiled from the libnx test programs, on
    x86-64 Linux and arm64 macOS (8, 9).
 8. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
