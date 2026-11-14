@@ -283,3 +283,24 @@ fn map_ranges_stop_at_the_next_function() {
         "{unit}"
     );
 }
+
+#[test]
+fn emit_with_reports_each_shard_against_the_real_total() {
+    let code = [word(0x03, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [
+        function(0x100, &blocks[0..1]),
+        function(0x104, &blocks[1..2]),
+        function(0x108, &blocks[2..3]),
+    ];
+    let opts = Options {
+        shard_size: 2,
+        unit_name: "t".into(),
+        unit_symbol: "u".into(),
+        module_base: 0x100,
+    };
+    let mut seen = Vec::new();
+    let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
+    assert_eq!(seen, [(1, 2), (2, 2)]);
+    assert_eq!(out.files.len(), 4);
+}

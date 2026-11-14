@@ -142,6 +142,21 @@ pub fn emit(
     overrides: &[Override],
     opts: &Options,
 ) -> Output {
+    emit_with(fe, fns, overrides, opts, &mut |_, _| {})
+}
+
+fn shard_count(functions: usize, opts: &Options) -> usize {
+    functions.div_ceil(opts.shard_size.max(1))
+}
+
+/// As [`emit`], calling `on(done, total)` after every shard.
+pub fn emit_with(
+    fe: &dyn Frontend,
+    fns: &[Function<'_>],
+    overrides: &[Override],
+    opts: &Options,
+    on: &mut dyn FnMut(usize, usize),
+) -> Output {
     let mut targets: BTreeMap<u64, Target> = fns
         .iter()
         .map(|f| {
@@ -177,6 +192,7 @@ pub fn emit(
     let header = format!("{}#include \"{PRELUDE_NAME}\"\n", includes(fe));
     let mut maps = Vec::new();
     let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
+    let shards = shard_count(fns.len(), opts);
     for (i, chunk) in fns.chunks(opts.shard_size.max(1)).enumerate() {
         let mut body = String::new();
         let mut callees = BTreeSet::new();
@@ -228,6 +244,7 @@ pub fn emit(
             name: format!("{shard}.c"),
             text,
         });
+        on(i + 1, shards);
     }
     out.files.push(File {
         name: "unit.c".into(),
