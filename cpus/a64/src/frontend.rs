@@ -4,7 +4,7 @@
 use relift_guest::{Frontend, Home, LiftFailure};
 use relift_ir::{Block, FpOp, FpRound, Reg, RegFile, Width};
 
-use crate::lift::{self, system};
+use crate::lift::{self, sail, system};
 use crate::regs;
 
 /// The A64 frontend.
@@ -34,8 +34,8 @@ impl Frontend for A64 {
         })
     }
 
-    fn abi_header(&self) -> &'static str {
-        "relift/a64/abi.h"
+    fn abi_headers(&self) -> &'static [&'static str] {
+        &["relift/a64/abi.h", "relift/a64/fp_slow.h"]
     }
 
     fn home(&self, reg: Reg) -> Home {
@@ -145,6 +145,15 @@ impl Frontend for A64 {
     fn fp_state(&self) -> Vec<Reg> {
         vec![regs::FPCR]
     }
+
+    fn guard_state(&self, code: u32) -> Option<Reg> {
+        (code == sail::SLOW_FPCR).then_some(regs::FPCR)
+    }
+
+    fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        (code == sail::SLOW_FPCR)
+            .then(|| format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
+    }
 }
 
 /// The runtime's `enum rl_rmode` value for an IR rounding direction.
@@ -189,6 +198,17 @@ mod tests {
         let e = f.lift(&[0, 0, 0, 0], 0x100).expect_err("udf");
         assert_eq!(e.insn, 0);
         assert!(f.lift(&[0, 0], 0x100).is_err());
+    }
+
+    #[test]
+    fn the_fpcr_guard_is_hoisted_and_has_a_slow_path() {
+        let f = A64;
+        assert_eq!(f.guard_state(sail::SLOW_FPCR), Some(regs::FPCR));
+        assert_eq!(
+            f.guard_slow(sail::SLOW_FPCR, 0x40, 0x1e602820).as_deref(),
+            Some("rl_fp_slow(c, mem, UINT64_C(0x40), 0x1e602820u)")
+        );
+        assert_eq!(f.guard_slow(1, 0x40, 0), None);
     }
 
     #[test]

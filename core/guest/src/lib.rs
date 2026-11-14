@@ -58,8 +58,8 @@ pub trait Frontend {
     /// The bytes are not an instruction the frontend can lift.
     fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure>;
 
-    /// The runtime header lifted C includes, such as `relift/a64/abi.h`.
-    fn abi_header(&self) -> &'static str;
+    /// The runtime headers lifted C includes, such as `relift/a64/abi.h`.
+    fn abi_headers(&self) -> &'static [&'static str];
 
     /// Where `reg` lives in the context.
     fn home(&self, reg: Reg) -> Home;
@@ -99,6 +99,18 @@ pub trait Frontend {
     /// The registers [`Frontend::fp`] expressions read or write (the FP
     /// control and status registers).
     fn fp_state(&self) -> Vec<Reg>;
+
+    /// The register whose being nonzero is exactly the condition of guards
+    /// with slow-path `code`, so the emitter may test it once per function
+    /// entry, call return and write instead of per instruction; `None` keeps
+    /// the guard's own condition.
+    fn guard_state(&self, code: u32) -> Option<Reg>;
+
+    /// An `int` C expression that runs the instruction `insn` at `pc` on the
+    /// runtime's slow path `code`, with the context fully stored, and
+    /// returns `RL_PENDING` when it could not; `None` when the frontend has
+    /// no such path (the emitter then reports the instruction as undefined).
+    fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String>;
 }
 
 /// What a module section holds.
