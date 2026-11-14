@@ -318,3 +318,42 @@ fn a_stop_that_never_hits_ends_at_the_default_budget() {
     .unwrap();
     assert_eq!(r.reason.0, Stop::Cycles(600 * 70_224));
 }
+
+fn lift_options(op: (bool, u8), mutation: super::lift::Mutation) -> super::lift::Options {
+    super::lift::Options {
+        cases: 12,
+        seed: 3,
+        hardware: vec![Hardware::DMG, Hardware::CGB],
+        mutation,
+        only: Some(op),
+        verbose: false,
+    }
+}
+
+#[test]
+fn lifted_opcodes_match_the_oracle() {
+    use super::lift::{Mutation, run_lift};
+    for op in [
+        (false, 0x86),
+        (false, 0xC5),
+        (false, 0xF1),
+        (false, 0xE8),
+        (false, 0xF8),
+        (false, 0x2A),
+        (false, 0x08),
+        (true, 0x16),
+        (true, 0xFE),
+    ] {
+        assert!(
+            run_lift(&lift_options(op, Mutation::None)).unwrap(),
+            "{op:?}"
+        );
+    }
+}
+
+#[test]
+fn a_mutated_lift_is_caught() {
+    use super::lift::{Mutation, run_lift};
+    assert!(run_lift(&lift_options((false, 0x86), Mutation::Cycles)).unwrap());
+    assert!(run_lift(&lift_options((false, 0x86), Mutation::Ops)).unwrap());
+}

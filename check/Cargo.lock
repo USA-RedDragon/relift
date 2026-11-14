@@ -397,6 +397,8 @@ name = "relift-check"
 version = "0.1.0"
 dependencies = [
  "relift-cpu-a64",
+ "relift-cpu-sm83",
+ "relift-guest",
  "relift-ir",
  "relift-proc",
  "rustyboi-core",
@@ -405,6 +407,14 @@ dependencies = [
 
 [[package]]
 name = "relift-cpu-a64"
+version = "0.1.0"
+dependencies = [
+ "relift-guest",
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-sm83"
 version = "0.1.0"
 dependencies = [
  "relift-guest",

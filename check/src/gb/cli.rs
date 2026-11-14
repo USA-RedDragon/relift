@@ -8,7 +8,7 @@ use super::{Hardware, Regs, RomSpec, Segment, StepSpec, Stop, run_rom, run_step}
 pub const USAGE: &str = "\
 usage: relift-check --oracle rustyboi step --hw HW --code HEX [--at ADDR] [--mem ADDR=HEX]...
                     [--a|--f|--b|--c|--d|--e|--h|--l HEX] [--sp HEX] [--pc HEX] [--ime 0|1] [--fill HEX] [--io]
-       relift-check --oracle rustyboi rom FILE --hw HW [--boot-rom FILE]
+       relift-check --oracle rustyboi lift [-n CASES] [--seed S] [--hw HW,HW] [--op HEX|cbHEX] [--mutate cycles|ops] [-v]\n       relift-check --oracle rustyboi rom FILE --hw HW [--boot-rom FILE]
                     [--cycles N] [--frames N] [--pc ADDR] [--until ADDR=HEX] [--dump ADDR:LEN]...
 HW is dmg, dmg0, mgb, sgb, sgb2, cgb0, cgbb, cgb (CGB-C), cgbe or agb";
 
@@ -156,6 +156,56 @@ pub fn parse_rom(args: &[String]) -> Result<RomSpec, String> {
     })
 }
 
+fn parse_lift(args: &[String]) -> Result<super::lift::Options, String> {
+    use super::lift::{Mutation, Options};
+    let mut o = Options {
+        cases: 64,
+        seed: 1,
+        hardware: vec![Hardware::DMG, Hardware::CGB],
+        mutation: Mutation::None,
+        only: None,
+        verbose: false,
+    };
+    let mut i = 0;
+    while i < args.len() {
+        let k = args[i].as_str();
+        if k == "-v" {
+            o.verbose = true;
+            i += 1;
+            continue;
+        }
+        let v = args.get(i + 1).ok_or(format!("{k} needs a value"))?;
+        let bad = || format!("bad value for {k}: {v}");
+        match k {
+            "-n" => o.cases = v.parse().map_err(|_| bad())?,
+            "--seed" => o.seed = v.parse().map_err(|_| bad())?,
+            "--hw" => {
+                o.hardware = v
+                    .split(',')
+                    .map(|n| parse_hardware(n).ok_or_else(bad))
+                    .collect::<Result<_, _>>()?
+            }
+            "--mutate" => {
+                o.mutation = match v.as_str() {
+                    "cycles" => Mutation::Cycles,
+                    "ops" => Mutation::Ops,
+                    _ => return Err(bad()),
+                }
+            }
+            "--op" => {
+                let (prefix, hex) = match v.strip_prefix("cb") {
+                    Some(h) => (true, h),
+                    None => (false, v.as_str()),
+                };
+                o.only = Some((prefix, byte(hex).ok_or_else(bad)?));
+            }
+            _ => return Err(format!("unknown option {k}")),
+        }
+        i += 2;
+    }
+    Ok(o)
+}
+
 fn regs_line(r: &Regs) -> String {
     format!(
         "a={:02x} f={:02x} b={:02x} c={:02x} d={:02x} e={:02x} h={:02x} l={:02x} sp={:04x} pc={:04x} ime={}",
@@ -234,6 +284,14 @@ fn run(sub: &str, rest: &[String]) -> Result<(), String> {
                 println!("dump {a:04x} {hex}");
             }
             Ok(())
+        }
+        "lift" => {
+            let opts = parse_lift(rest)?;
+            if super::lift::run_lift(&opts)? {
+                Ok(())
+            } else {
+                Err("lift check failed".into())
+            }
         }
         _ => Err(format!("unknown oracle command {sub}")),
     }

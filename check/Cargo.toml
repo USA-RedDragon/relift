@@ -10,6 +10,8 @@ publish = false
 
 [dependencies]
 relift-cpu-a64 = { path = "../cpus/a64" }
+relift-cpu-sm83 = { path = "../cpus/sm83" }
+relift-guest = { path = "../core/guest" }
 relift-ir = { path = "../core/ir" }
 relift-proc = { path = "../core/proc" }
 rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "14acecf35f6bfc8589a09ce7affbf7c1be3854a0" }

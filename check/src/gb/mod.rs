@@ -8,6 +8,7 @@
 //! * `rom` runs a whole ROM on a given hardware revision.
 
 pub mod cli;
+mod lift;
 mod machine;
 mod rom;
 mod step;
