@@ -173,13 +173,21 @@ fn qreg(i: usize) -> i32 {
 /// Whether words lift with the hand-written lifter only.
 pub static HAND: AtomicBool = AtomicBool::new(false);
 
+/// Whether lifted blocks go through dead-value elimination.
+pub static DCE: AtomicBool = AtomicBool::new(false);
+
 /// Lifts `w` at `pc` as the frontend does, or with the hand-written lifter
-/// under [`HAND`].
+/// under [`HAND`], then removes dead values under [`DCE`].
 pub fn lift(w: u32, pc: u64) -> Result<Block, LiftError> {
-    if HAND.load(Ordering::Relaxed) {
-        return lift::lift_hand(w, pc);
+    let b = if HAND.load(Ordering::Relaxed) {
+        lift::lift_hand(w, pc)?
+    } else {
+        lift::lift(w, pc)?
+    };
+    if DCE.load(Ordering::Relaxed) {
+        return Ok(relift_ir::dce(&b));
     }
-    lift::lift(w, pc)
+    Ok(b)
 }
 
 /// Lifts every word at its address from [`CODE`].

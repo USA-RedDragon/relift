@@ -7,8 +7,8 @@
 //! window.
 //!
 //! ```text
-//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand]
-//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand]
+//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce]
+//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -16,7 +16,8 @@
 //! word of that encoding. `--mutate` breaks the lifted IR of the last word
 //! (see `mutate.rs`); then a form passes when the run catches it. `--hand`
 //! lifts with the hand-written lifter instead of the generated templates, and
-//! `all` then means every encoding that has one.
+//! `all` then means every encoding that has one. `--dce` runs every lifted
+//! block through `relift_ir::dce` first.
 
 mod emu;
 mod mutate;
@@ -148,7 +149,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand]"
+        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce]"
     );
     ExitCode::from(2)
 }
@@ -179,6 +180,7 @@ fn main() -> ExitCode {
             }
             "--mutate" => opts.mutate = true,
             "--hand" => emu::HAND.store(true, std::sync::atomic::Ordering::Relaxed),
+            "--dce" => emu::DCE.store(true, std::sync::atomic::Ordering::Relaxed),
             _ => return usage(),
         }
         i += 1;
