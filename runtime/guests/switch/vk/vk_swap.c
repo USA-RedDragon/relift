@@ -77,6 +77,11 @@ typedef struct vkf_swap {
     uint32_t creations;
     VkCommandPool pool;
     uint32_t pool_family;
+    VkBuffer cap_buf;
+    VkDeviceMemory cap_mem;
+    void *cap_ptr;
+    VkCommandBuffer cap_cmd;
+    VkFence cap_fence;
     pthread_mutex_t lock;
 } vkf_swap;
 
@@ -514,6 +519,12 @@ static void swap_free(vkf_swap *s)
         DFN(s, vkFreeMemory)(s->dev, s->mem[i], NULL);
         DFN(s, vkDestroyFence)(s->dev, s->done[i], NULL);
     }
+    if (s->cap_fence)
+        DFN(s, vkDestroyFence)(s->dev, s->cap_fence, NULL);
+    if (s->cap_buf)
+        DFN(s, vkDestroyBuffer)(s->dev, s->cap_buf, NULL);
+    if (s->cap_mem)
+        DFN(s, vkFreeMemory)(s->dev, s->cap_mem, NULL);
     if (s->pool)
         DFN(s, vkDestroyCommandPool)(s->dev, s->pool, NULL);
     if (s->host)
@@ -1010,6 +1021,84 @@ static void show(vkf_swap *s, uint32_t i)
     s->any_shown = true;
 }
 
+static bool capture_ready(vkf_swap *s)
+{
+    if (s->cap_ptr)
+        return true;
+    const vkf_dev *d = s->dobj->dev;
+    VkBufferCreateInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = (VkDeviceSize)s->extent.width * s->extent.height * 4,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    };
+    if (DFN(s, vkCreateBuffer)(s->dev, &bi, NULL, &s->cap_buf) < 0)
+        return false;
+    VkMemoryRequirements req;
+    DFN(s, vkGetBufferMemoryRequirements)(s->dev, s->cap_buf, &req);
+    const uint32_t want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t type = UINT32_MAX;
+    for (uint32_t i = 0; i < d->type_count && type == UINT32_MAX; i++)
+        if ((req.memoryTypeBits & (1u << i)) && (d->type_flags[i] & want) == want)
+            type = i;
+    VkMemoryAllocateInfo ai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = type,
+    };
+    VkCommandBufferAllocateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = s->pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    if (type == UINT32_MAX || DFN(s, vkAllocateMemory)(s->dev, &ai, NULL, &s->cap_mem) < 0 ||
+        DFN(s, vkBindBufferMemory)(s->dev, s->cap_buf, s->cap_mem, 0) < 0 ||
+        DFN(s, vkAllocateCommandBuffers)(s->dev, &ci, &s->cap_cmd) < 0 ||
+        DFN(s, vkCreateFence)(s->dev, &fci, NULL, &s->cap_fence) < 0 ||
+        DFN(s, vkMapMemory)(s->dev, s->cap_mem, 0, VK_WHOLE_SIZE, 0, &s->cap_ptr) < 0) {
+        rl_log(RL_LOG_ERROR, "vk", "capture: no host-visible buffer for a %ux%u image", s->extent.width,
+               s->extent.height);
+        s->cap_ptr = NULL;
+        return false;
+    }
+    return true;
+}
+
+static void capture(vkf_swap *s, VkQueue q, uint32_t i, uint64_t frame)
+{
+    bool bgra = s->format == VK_FORMAT_B8G8R8A8_UNORM || s->format == VK_FORMAT_B8G8R8A8_SRGB;
+    bool rgba = s->format == VK_FORMAT_R8G8B8A8_UNORM || s->format == VK_FORMAT_R8G8B8A8_SRGB ||
+                s->format == VK_FORMAT_A8B8G8R8_UNORM_PACK32 || s->format == VK_FORMAT_A8B8G8R8_SRGB_PACK32;
+    if ((!bgra && !rgba) || !capture_ready(s))
+        return;
+    DFN(s, vkWaitForFences)(s->dev, 1, &s->done[i], VK_TRUE, UINT64_MAX);
+    VkCommandBuffer cb = s->cap_cmd;
+    DFN(s, vkResetCommandBuffer)(cb, 0);
+    VkCommandBufferBeginInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    DFN(s, vkBeginCommandBuffer)(cb, &bi);
+    barrier(s, cb, s->img[i], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0,
+            VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    VkBufferImageCopy region = {
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent = { s->extent.width, s->extent.height, 1 },
+    };
+    DFN(s, vkCmdCopyImageToBuffer)(cb, s->img[i], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s->cap_buf, 1, &region);
+    barrier(s, cb, s->img[i], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_ACCESS_TRANSFER_READ_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    DFN(s, vkEndCommandBuffer)(cb);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb };
+    DFN(s, vkResetFences)(s->dev, 1, &s->cap_fence);
+    if (DFN(s, vkQueueSubmit)(q, 1, &si, s->cap_fence) < 0)
+        return;
+    DFN(s, vkWaitForFences)(s->dev, 1, &s->cap_fence, VK_TRUE, UINT64_MAX);
+    vkf_capture_write(frame, rl_clock_ns(), s->extent.width, s->extent.height, s->cap_ptr,
+                      (size_t)s->extent.width * 4, bgra);
+}
+
 static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkSemaphore *waits, uint32_t nwaits,
                              uint32_t i)
 {
@@ -1044,6 +1133,9 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     if (r < 0)
         goto out;
     s->busy[i] = true;
+    uint64_t frame;
+    if (vkf_capture_due(&frame))
+        capture(s, q, i, frame);
     VkPresentInfoKHR pi = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,

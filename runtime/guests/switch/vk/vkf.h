@@ -384,4 +384,10 @@ void vkf_cb_release(uint64_t owner);
 /** @brief Gives the unowned callback records made during this call to owner. */
 void vkf_cb_adopt(uint64_t owner);
 
+/** @brief Counts one present; true when capture is on and this frame (its number in *frame) is to be written. */
+bool vkf_capture_due(uint64_t *frame);
+/** @brief Writes a w x h image of 4-byte RGBA (or BGRA) pixels, rows stride bytes apart, as the PNG of frame. */
+bool vkf_capture_write(uint64_t frame, uint64_t guest_ns, uint32_t w, uint32_t h, const uint8_t *px, size_t stride,
+                       bool bgra);
+
 #endif

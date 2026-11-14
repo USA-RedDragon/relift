@@ -42,6 +42,8 @@ enum rl_vk_map_mode {
 
 /** @brief Environment variable that picks the host physical device by a part of its name. */
 #define RL_VK_DEVICE_ENV "RELIFT_VK_DEVICE"
+/** @brief Debug capture of presented guest images: <dir>[:N] writes every Nth present as a PNG (vk_capture.c). */
+#define RL_VK_CAPTURE_ENV "RELIFT_VK_CAPTURE"
 
 /**
  * @brief Creates host surfaces for the guest's VK_NN_vi_surface.
@@ -147,6 +149,8 @@ RL_RUNTIME_API uint64_t rl_vk_guest_addr(const char *name);
 RL_RUNTIME_API uint32_t rl_vk_live_handles(void);
 /** @brief Size of the host swapchain behind a guest swapchain and how many host swapchains it has had (tests). */
 RL_RUNTIME_API bool rl_vk_swapchain_host(uint64_t guest_swapchain, uint32_t *width, uint32_t *height, uint32_t *creations);
+/** @brief Sets the capture spec as RELIFT_VK_CAPTURE would (<dir>[:N]); NULL or "" turns capture off. Restarts the frame count. */
+RL_RUNTIME_API void rl_vk_capture(const char *spec);
 /** @brief The map mode the device behind a guest VkDevice handle uses, or -1. */
 RL_RUNTIME_API int rl_vk_device_map_mode(uint64_t guest_device);
 

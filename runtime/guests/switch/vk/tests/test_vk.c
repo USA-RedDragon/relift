@@ -19,6 +19,8 @@
 
 #include <relift/settings.h>
 
+#include <dirent.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -889,6 +891,47 @@ static int64_t mono_ns(void)
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
 }
 
+/** @brief Whether the one PNG in dir is 64x64 with every pixel the clear color (0, 0.5, 1); removes it and dir. */
+static bool capture_is_the_clear_color(const char *dir, int format)
+{
+    DIR *dp = opendir(dir);
+    if (!dp)
+        return false;
+    char path[1024] = { 0 };
+    struct dirent *e;
+    while ((e = readdir(dp)))
+        if (!strncmp(e->d_name, "frame-000000-", 13))
+            snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+    closedir(dp);
+    FILE *f = path[0] ? fopen(path, "rb") : NULL;
+    static uint8_t png[64 * 1024];
+    size_t n = f ? fread(png, 1, sizeof png, f) : 0;
+    if (f)
+        fclose(f);
+    remove(path);
+    rmdir(dir);
+    bool srgb = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+    uint8_t g = srgb ? 188 : 128;
+    if (n < 8 + 25 + 8 + 2 + 5 || memcmp(png, "\x89PNG\r\n\x1a\n", 8) || memcmp(png + 12, "IHDR", 4))
+        return false;
+    uint32_t w = (uint32_t)png[16] << 24 | (uint32_t)png[17] << 16 | (uint32_t)png[18] << 8 | png[19];
+    uint32_t h = (uint32_t)png[20] << 24 | (uint32_t)png[21] << 16 | (uint32_t)png[22] << 8 | png[23];
+    if (w != 64 || h != 64 || memcmp(png + 37, "IDAT", 4))
+        return false;
+    const uint8_t *raw = png + 41 + 2 + 5;
+    for (uint32_t y = 0; y < h; y++) {
+        const uint8_t *row = raw + y * (1 + w * 3);
+        if (row[0] != 0)
+            return false;
+        for (uint32_t x = 0; x < w; x++) {
+            const uint8_t *p = row + 1 + x * 3;
+            if (p[0] > 1 || p[1] < g - 1 || p[1] > g + 1 || p[2] < 254)
+                return false;
+        }
+    }
+    return true;
+}
+
 TEST(vk_vi_surface_presents_headless)
 {
     g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
@@ -1019,8 +1062,14 @@ TEST(vk_vi_surface_presents_headless)
             .pImageIndices = GP(gput(&idx, 4)),
             .pResults = GP(gres),
         };
+        char cap[512];
+        const char *tmp = getenv("TMPDIR");
+        snprintf(cap, sizeof cap, "%s/relift-vk-capture-%d", tmp && *tmp ? tmp : "/tmp", (int)getpid());
+        rl_vk_capture(cap);
         int32_t pr = VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi)));
+        rl_vk_capture(NULL);
         CHECK(pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR);
+        CHECK(capture_is_the_clear_color(cap, fmt.format));
         CHECK(VKR(g32(gres)) == VK_SUCCESS || VKR(g32(gres)) == VK_SUBOPTIMAL_KHR);
         fprintf(stderr, "  %s: presented image %u of %u (%dx%d swapchain, format %d)\n", name, idx, g32(gin), 64, 64, fmt.format);
         uint32_t hw = 0, hh = 0, made = 0;
