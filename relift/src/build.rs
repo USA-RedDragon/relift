@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use relift_analyze::{EntryKind, Insn, Progress, discover_with};
+use relift_analyze::{EntryKind, Insn, Outline, Progress, outline_with};
 use relift_build::{Compile, Event, Plan};
 use relift_cpu_a64::frontend::A64;
 use relift_guest::{Root, RootKind};
@@ -193,7 +193,7 @@ fn emit_modules(
         ui.begin(row, "discover");
         let mut lifting = false;
         let mut found = 0;
-        let analysis = discover_with(&cpu, &module, &mut |event| match event {
+        let layout = outline_with(&cpu, &module, &mut |event| match event {
             Progress::Found { entries, .. } => {
                 found = entries;
                 ui.update(
@@ -232,11 +232,9 @@ fn emit_modules(
             ui.begin(row, "lift");
         }
         let mut failed = BTreeMap::new();
-        for f in analysis.functions.values() {
-            for (&pc, i) in &f.insts {
-                if let Insn::Failed(e) = i {
-                    failed.insert(pc, e);
-                }
+        for o in layout.functions.values() {
+            for (pc, e) in &o.failed {
+                failed.insert(*pc, e);
             }
         }
         for (&pc, e) in &failed {
@@ -248,20 +246,21 @@ fn emit_modules(
                     .paint(Paint::Yellow, e.message.clone()),
             );
         }
-        for f in analysis.functions.values() {
-            done.entries.push_str(&entries_line(i, f.entry, f.kind));
+        for o in layout.functions.values() {
+            done.entries.push_str(&entries_line(i, o.entry, o.kind));
         }
         done.unlifted += failed.len();
-        done.functions += analysis.functions.len();
-        ui.done(row, lift_summary(analysis.functions.len(), failed.len()));
+        done.functions += layout.functions.len();
+        ui.done(row, lift_summary(layout.functions.len(), failed.len()));
+        let all: Vec<&Outline> = layout.functions.values().collect();
+        let lifted = relift_analyze::each_lifted(&cpu, &module, &all, |_, f| f.clone());
         let raw = |pc: u64| {
             module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
                 u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
             })
         };
-        let fns: Vec<relift_emit::Function<'_>> = analysis
-            .functions
-            .values()
+        let fns: Vec<relift_emit::Function<'_>> = lifted
+            .iter()
             .map(|f| relift_emit::Function {
                 entry: f.entry,
                 name: program::host_name(p, f.name.as_deref(), f.entry),
@@ -285,7 +284,7 @@ fn emit_modules(
                 pads: f.pads.clone(),
             })
             .collect();
-        let overrides: Vec<relift_emit::Override> = analysis
+        let overrides: Vec<relift_emit::Override> = layout
             .functions
             .keys()
             .filter_map(|&a| {
@@ -298,7 +297,7 @@ fn emit_modules(
                 })
             })
             .collect();
-        fpsr.add_module(i, p, &module, &analysis, &overrides);
+        fpsr.add_module(i, p, &module, &layout, &cpu, &overrides);
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         ui.begin(row, "emit");
         let out = relift_emit::emit_with(

@@ -35,9 +35,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use relift_analyze::{Analysis, Insn};
+use relift_analyze::{Function, Insn, Layout, Outline};
 use relift_cpu_a64::flags::{self, region};
-use relift_guest::{Module, RootKind};
+use relift_guest::{Frontend, Module, RootKind};
 use relift_switch::program::{self, Placed, SlotKind};
 
 use crate::import::BoxError;
@@ -73,6 +73,42 @@ pub struct Fpsr {
     modules: Vec<String>,
     /// Per module: its directory and shard files with their functions.
     shards: Vec<(PathBuf, Vec<Shard>)>,
+}
+
+/// What [`Fpsr::begin_module`] found in one module for its functions.
+pub struct ModuleFlags {
+    index: usize,
+    base: u64,
+    live: BTreeSet<u64>,
+    via: BTreeMap<u64, u64>,
+    resume: BTreeSet<u64>,
+    start: Option<u64>,
+    entries: BTreeSet<u64>,
+}
+
+/// One function's summary, from [`Fpsr::function`].
+pub struct FnFlags {
+    func: region::Func,
+    entry: u64,
+    name: String,
+}
+
+fn view<'a>(f: &'a Function, raw: &'a dyn Fn(u64) -> u32) -> flags::Function<'a> {
+    flags::Function {
+        entry: f.entry,
+        insts: f
+            .insts
+            .iter()
+            .map(|(&pc, i)| {
+                let b = match i {
+                    Insn::Lifted(b) => Some(&**b),
+                    Insn::Failed(_) => None,
+                };
+                (pc, b)
+            })
+            .collect(),
+        raw,
+    }
 }
 
 /// What the build does with the decision.
@@ -137,18 +173,30 @@ impl Fpsr {
         self.on
     }
 
-    /// Takes module `i` (`p`, analyzed as `analysis`), whose host overrides
-    /// are `overrides`, before its analysis is dropped.
-    pub fn add_module(
+    /// Starts module `i` (`p`, outlined as `layout`), whose host overrides
+    /// are `overrides`; `lift` lifts one of its functions. Every function
+    /// then goes through [`Fpsr::function`] and the results, in entry order,
+    /// to [`Fpsr::end_module`].
+    pub fn begin_module(
         &mut self,
         i: usize,
         p: &Placed,
         module: &Module,
-        analysis: &Analysis,
+        layout: &Layout,
+        fe: &(dyn Frontend + Sync),
         overrides: &[relift_emit::Override],
-    ) {
+    ) -> ModuleFlags {
+        let mut m = ModuleFlags {
+            index: i,
+            base: p.base,
+            live: BTreeSet::new(),
+            via: BTreeMap::new(),
+            resume: BTreeSet::new(),
+            start: None,
+            entries: layout.functions.keys().copied().collect(),
+        };
         if !self.on {
-            return;
+            return m;
         }
         let raw = |pc: u64| {
             module
@@ -156,37 +204,47 @@ impl Fpsr {
                 .and_then(|b| b.get(..4))
                 .map_or(0, |w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
         };
-        let views: Vec<flags::Function<'_>> = analysis
+        let sites: BTreeSet<u64> = layout
             .functions
             .values()
-            .map(|f| flags::Function {
-                entry: f.entry,
-                insts: f
-                    .insts
-                    .iter()
-                    .map(|(&pc, i)| {
-                        let b = match i {
-                            Insn::Lifted(b) => Some(&**b),
-                            Insn::Failed(_) => None,
-                        };
-                        (pc, b)
-                    })
-                    .collect(),
-                raw: &raw,
-            })
+            .filter(|o| o.pcs().any(|pc| flags::mrs_fpsr(raw(pc)).is_some()))
+            .map(|o| o.entry)
             .collect();
-        let live: BTreeSet<u64> = flags::live_fpsr_reads(&views).into_iter().collect();
+        if !sites.is_empty() {
+            let mut callers: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
+            for o in layout.functions.values() {
+                for &(t, _) in &o.calls {
+                    callers.entry(t).or_default().insert(o.entry);
+                }
+            }
+            let mut need = sites.clone();
+            let mut todo: Vec<u64> = sites.into_iter().collect();
+            while let Some(e) = todo.pop() {
+                for &c in callers.get(&e).into_iter().flatten() {
+                    if need.insert(c) {
+                        todo.push(c);
+                    }
+                }
+            }
+            let need: Vec<&Outline> = need.iter().map(|e| &layout.functions[e]).collect();
+            let lifted = relift_analyze::each_lifted(fe, module, &need, |_, f| f.clone());
+            let views: Vec<flags::Function<'_>> = lifted.iter().map(|f| view(f, &raw)).collect();
+            m.live = flags::live_fpsr_reads(&views).into_iter().collect();
+        }
         let end = p.base + p.nso.image.len() as u64 + u64::from(p.nso.bss_size);
         let mine: BTreeSet<u64> = self.slots.range(p.base..end).map(|(&a, _)| a).collect();
-        let mut via: BTreeMap<u64, u64> = BTreeMap::new();
-        for f in analysis.functions.values() {
-            self.escaped
-                .extend(relift_analyze::address_taken(module, 4, f));
-            if mine.is_empty() {
+        let all: Vec<&Outline> = layout.functions.values().collect();
+        let uses = relift_analyze::each_lifted(fe, module, &all, |_, f| {
+            let taken = relift_analyze::address_taken(module, 4, f);
+            let u = (!mine.is_empty()).then(|| relift_analyze::slot_uses(f, &mine, SLOT));
+            (taken, u)
+        });
+        for (taken, u) in uses {
+            self.escaped.extend(taken);
+            let Some(u) = u else {
                 continue;
-            }
-            let u = relift_analyze::slot_uses(f, &mine, SLOT);
-            via.extend(u.transfers);
+            };
+            m.via.extend(u.transfers);
             for s in u.escaped {
                 if let Some((n, kind)) = self.slots.get(&s)
                     && *kind != SlotKind::Plt
@@ -200,56 +258,105 @@ impl Fpsr {
                 self.escaped.insert(r.addr);
             }
         }
-        let resume: BTreeSet<u64> = overrides
+        m.resume = overrides
             .iter()
             .filter(|o| o.resume_point)
             .map(|o| o.entry)
             .collect();
-        let is_entry = |a: u64| analysis.functions.contains_key(&a);
+        m.start = module
+            .roots
+            .iter()
+            .find(|r| i == 0 && r.kind == RootKind::Entry)
+            .map(|r| r.addr);
+        if let Some(e) = m.start {
+            self.starts.insert(e);
+        }
+        m
+    }
+
+    /// The summary of function `f` (lifted from `o`) of the module `m`
+    /// started, from `module`.
+    pub fn function(
+        &self,
+        m: &ModuleFlags,
+        module: &Module,
+        o: &Outline,
+        f: &Function,
+    ) -> Option<FnFlags> {
+        if !self.on {
+            return None;
+        }
+        let raw = |pc: u64| {
+            module
+                .bytes_at(pc)
+                .and_then(|b| b.get(..4))
+                .map_or(0, |w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        };
+        let is_entry = |a: u64| m.entries.contains(&a);
         let resolved = |pc: u64| {
-            let s = via.get(&pc)?;
+            let s = m.via.get(&pc)?;
             let (n, _) = self.slots.get(s)?;
             Some(self.defs.get(n).cloned().unwrap_or_default())
         };
-        let resume_point = |a: u64| resume.contains(&a);
+        let resume_point = |a: u64| m.resume.contains(&a);
         let regs: Vec<(relift_ir::Reg, u128)> = program::START_REGS
             .iter()
             .map(|&(n, v)| (relift_cpu_a64::regs::x(n), u128::from(v)))
             .collect();
-        let start = module
-            .roots
-            .iter()
-            .find(|r| i == 0 && r.kind == RootKind::Entry)
-            .map(|r| (r.addr, regs.as_slice()));
-        if let Some((e, _)) = start {
-            self.starts.insert(e);
-        }
         let cx = flags::Context {
             is_entry: &is_entry,
             resolved: &resolved,
             resume_point: &resume_point,
-            start,
+            start: m.start.map(|e| (e, regs.as_slice())),
         };
-        let mut fns = Vec::with_capacity(views.len());
-        for (v, f) in views.iter().zip(analysis.functions.values()) {
-            let reads: BTreeSet<u64> = live.range(f.entry..f.entry + f.span(4)).copied().collect();
-            let reads = reads
-                .into_iter()
-                .filter(|r| f.insts.contains_key(r))
-                .collect();
-            fns.push(flags::summarize(v, &f.tables, &reads, &cx));
+        let reads: BTreeSet<u64> = m
+            .live
+            .range(f.entry..f.entry + o.span())
+            .copied()
+            .filter(|r| f.insts.contains_key(r))
+            .collect();
+        Some(FnFlags {
+            func: flags::summarize(&view(f, &raw), &f.tables, &reads, &cx),
+            entry: f.entry,
+            name: f
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("fn_{:x}", f.entry - m.base)),
+        })
+    }
+
+    /// Takes the summaries of every function of the module `m` started.
+    pub fn end_module(&mut self, m: ModuleFlags, fns: Vec<FnFlags>) {
+        for f in fns {
             self.names.insert(
                 f.entry,
                 Named {
-                    module: i,
-                    name: f
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("fn_{:x}", f.entry - p.base)),
+                    module: m.index,
+                    name: f.name,
                 },
             );
+            self.fns.push(f.func);
         }
-        self.fns.extend(fns);
+    }
+
+    /// Takes module `i` (`p`, outlined as `layout`) whole, as
+    /// [`Fpsr::begin_module`], [`Fpsr::function`] and [`Fpsr::end_module`]
+    /// do it.
+    pub fn add_module(
+        &mut self,
+        i: usize,
+        p: &Placed,
+        module: &Module,
+        layout: &Layout,
+        fe: &(dyn Frontend + Sync),
+        overrides: &[relift_emit::Override],
+    ) {
+        let m = self.begin_module(i, p, module, layout, fe, overrides);
+        let me = &*self;
+        let all: Vec<&Outline> = layout.functions.values().collect();
+        let fns =
+            relift_analyze::each_lifted(fe, module, &all, |o, f| me.function(&m, module, o, f));
+        self.end_module(m, fns.into_iter().flatten().collect());
     }
 
     /// Records the files emitted for a module into `dir`.
