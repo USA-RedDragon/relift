@@ -273,6 +273,14 @@ int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
   v16-v31 (and the upper halves of v8-v15) at exits when its interprocedural
   analysis shows no caller reads them before writing. The full-state checker
   build always stores everything. [inferred; open: the analysis]
+- **Dead writes.** Inside a function the emitter drops a register write
+  when every path from it writes the register again before any read and
+  before any point that stores the context (a call, trap, return, tail
+  call, indirect jump, guard or instruction that does not lift). Such a
+  value is never read, so the state at every boundary is unchanged. A
+  transfer between the pieces of a split function may store the stale
+  value to `c`, but the next piece writes it again before it reads it. NZCV computations a later compare
+  overwrites are the common case. [verified: the libnx corpus]
 
 ### Split functions
 
