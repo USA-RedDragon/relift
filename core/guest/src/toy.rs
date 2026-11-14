@@ -4,7 +4,7 @@
 //! register `a` in byte 1 and a 16-bit immediate in bytes 2 and 3 (a second
 //! register `b` in byte 2 where noted). Branch offsets are signed and count
 //! words from the instruction. Registers `r0` to `r3` are 64 bits (`r3` is
-//! the link register) plus a zero flag `z`; they live where the A64 runtime
+//! the link register, `r2` is kept across calls) plus a zero flag `z`; they live where the A64 runtime
 //! keeps `x0` to `x3` and Z, so emitted toy code builds against the A64
 //! runtime header.
 //!
@@ -82,6 +82,10 @@ impl Frontend for Toy {
 
     fn regs(&self) -> RegFile {
         RegFile::new("toy", &DECLS)
+    }
+
+    fn preserved(&self) -> Vec<Reg> {
+        vec![Reg(2)]
     }
 
     fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure> {

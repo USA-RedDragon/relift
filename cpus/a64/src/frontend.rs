@@ -20,6 +20,10 @@ impl Frontend for A64 {
         regs::regs()
     }
 
+    fn preserved(&self) -> Vec<Reg> {
+        (19..=29).map(regs::x).chain([regs::SP]).collect()
+    }
+
     fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure> {
         let Some(w) = bytes.get(..4) else {
             return Err(LiftFailure {
