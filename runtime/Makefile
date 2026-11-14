@@ -92,8 +92,9 @@ SM83_SRCS := $(wildcard cpus/sm83/*.c)
 SM83_HDRS := $(CORE_HDRS) $(wildcard cpus/sm83/include/relift/sm83/*.h cpus/sm83/*.h)
 SWITCH_SRCS := $(wildcard guests/switch/*.c)
 SWITCH_HDRS := $(A64_HDRS) $(wildcard guests/switch/*.h)
-GB_SRCS := $(wildcard guests/gb/*.c)
+GB_SRCS := $(filter-out guests/gb/gbdev.c,$(wildcard guests/gb/*.c))
 GB_HDRS := $(CORE_HDRS) $(wildcard guests/gb/*.h)
+GBDEV_SRCS := guests/gb/gbdev.c guests/gb/devtests/lockstep.c
 VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c)
 VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h)
 
@@ -123,6 +124,7 @@ SM83_OBJS := $(call obj,$(SM83_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
 VK_OBJS := $(call obj,$(VK_SRCS))
 GB_OBJS := $(call obj,$(GB_SRCS))
+GBDEV_OBJS := $(call obj,$(GBDEV_SRCS))
 GB_TEST_OBJS := $(call obj,$(GB_TEST_SRCS))
 RUNNER_OBJS := $(call obj,$(RUNNER_SRCS))
 CORE_TEST_OBJS := $(call obj,$(CORE_TEST_SRCS))
@@ -159,7 +161,15 @@ SCHED_BENCH_OBJS := $(call obj,core/tests/bench/sched_bench.c)
 SCHED_BENCH := $(BUILD)/sched_bench$(EXE)
 PORTABLE := $(CRASH_TEST) $(FIBER_TESTS) $(SCHED_BENCH)
 
-.PHONY: all test portable test-portable charter gdb-test sched-bench vk-present clean
+# The Game Boy devices come from a Rust static library (guests/gb/devices):
+#   cargo build --release --manifest-path guests/gb/devices/Cargo.toml
+#   make GBDEV_LIB=<target dir>/release/librelift_gb_devices.a gbdev-lockstep GBDEV_ROMS="a.gb b.gbc"
+GBDEV_LIB ?=
+GBDEV_ROMS ?=
+GBDEV_FRAMES ?= 60
+GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
+
+.PHONY: all test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
 all: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
 portable: $(PORTABLE)
 
@@ -198,6 +208,10 @@ $(GB_OBJS): $(BUILD)/obj/%.o: %.c $(GB_HDRS)
 $(GB_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(GB_HDRS) $(RUNNER_HDRS) $(GB_TEST_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(GB_INC) $(RUNNER_INC) $(CFLAGS) -Iguests/gb/tests -c $< -o $@
+
+$(GBDEV_OBJS): $(BUILD)/obj/%.o: %.c $(GB_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(GB_INC) $(CFLAGS) -c $< -o $@
 
 $(VK_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
@@ -240,6 +254,13 @@ $(SM83_TESTS): $(SM83_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(SM83_OBJS)
 $(SWITCH_TESTS): $(SWITCH_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(GB_TESTS): $(GB_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GB_OBJS)
+$(GBDEV_LOCKSTEP): $(GBDEV_OBJS) $(CORE_OBJS) $(GB_OBJS)
+	$(if $(GBDEV_LIB),,$(error set GBDEV_LIB to librelift_gb_devices.a))
+	$(CC) $(TARGET_FLAGS) $^ $(GBDEV_LIB) -o $@ $(LDLIBS) -lm -ldl -lpthread
+
+gbdev-lockstep: $(GBDEV_LOCKSTEP)
+	$(GBDEV_LOCKSTEP) --frames $(GBDEV_FRAMES) $(GBDEV_ROMS)
+
 $(VK_PRESENT): $(VK_DEMO_OBJS) $(TC_OBJS) $(RT_OBJS)
 $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
