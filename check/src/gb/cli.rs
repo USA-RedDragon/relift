@@ -8,7 +8,7 @@ use super::{Hardware, Regs, RomSpec, Segment, StepSpec, Stop, run_rom, run_step}
 pub const USAGE: &str = "\
 usage: relift-check --oracle rustyboi step --hw HW --code HEX [--at ADDR] [--mem ADDR=HEX]...
                     [--a|--f|--b|--c|--d|--e|--h|--l HEX] [--sp HEX] [--pc HEX] [--ime 0|1] [--fill HEX] [--io]
-       relift-check --oracle rustyboi lift [-n CASES] [--seed S] [--hw HW,HW] [--op HEX|cbHEX] [--mutate cycles|ops] [-v]\n       relift-check --oracle rustyboi rom FILE --hw HW [--boot-rom FILE]
+       relift-check --oracle rustyboi lift [-n CASES] [--seed S] [--hw HW,HW] [--op HEX|cbHEX] [--mutate cycles|ops|exits] [-v]\n       relift-check --oracle rustyboi rom FILE --hw HW [--boot-rom FILE]
                     [--cycles N] [--frames N] [--pc ADDR] [--until ADDR=HEX] [--dump ADDR:LEN]...
 HW is dmg, dmg0, mgb, sgb, sgb2, cgb0, cgbb, cgb (CGB-C), cgbe or agb";
 
@@ -189,6 +189,7 @@ fn parse_lift(args: &[String]) -> Result<super::lift::Options, String> {
                 o.mutation = match v.as_str() {
                     "cycles" => Mutation::Cycles,
                     "ops" => Mutation::Ops,
+                    "exits" => Mutation::Exits,
                     _ => return Err(bad()),
                 }
             }

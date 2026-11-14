@@ -100,6 +100,26 @@ fn ram_snapshot(gb: &mut GB) -> Vec<u8> {
     m
 }
 
+/// How many instructions to run, and an interrupt state to install after
+/// them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sequence {
+    /// Instruction steps to run.
+    pub steps: u32,
+    /// `(IE, IF)` written after the steps; when the interrupt master enable
+    /// is then set and an enabled interrupt is requested, one more step runs
+    /// (the interrupt entry).
+    pub late: Option<(u8, u8)>,
+}
+
+impl Sequence {
+    /// One instruction.
+    pub const ONE: Sequence = Sequence {
+        steps: 1,
+        late: None,
+    };
+}
+
 struct Run {
     regs: Regs,
     cycles: u32,
@@ -108,7 +128,7 @@ struct Run {
     io: Vec<(u16, u8)>,
 }
 
-fn run_once(spec: &StepSpec, fill: u8) -> Result<Run, Error> {
+fn run_once(spec: &StepSpec, fill: u8, seq: Sequence) -> Result<Run, Error> {
     let mut code = vec![0u8; machine::ROM_SIZE];
     for s in &spec.image {
         for (i, b) in s.bytes.iter().enumerate() {
@@ -131,9 +151,24 @@ fn run_once(spec: &StepSpec, fill: u8) -> Result<Run, Error> {
         }
     }
     let before = ram_snapshot(&mut gb);
-    let (stopped, cycles) = gb.step_instruction(false);
-    if stopped {
-        return err("a breakpoint stopped the step");
+    let mut cycles = 0;
+    let mut run_step = |gb: &mut GB| -> Result<(), Error> {
+        let (stopped, c) = gb.step_instruction(false);
+        if stopped {
+            return err("a breakpoint stopped the step");
+        }
+        cycles += c;
+        Ok(())
+    };
+    for _ in 0..seq.steps {
+        run_step(&mut gb)?;
+    }
+    if let Some((ie, iff)) = seq.late {
+        gb.write_memory(0xFFFF, ie);
+        gb.write_memory(0xFF0F, iff);
+        if machine::regs_of(&gb).ime && ie & iff & 0x1F != 0 {
+            run_step(&mut gb)?;
+        }
     }
     let after = ram_snapshot(&mut gb);
     let io = (0..=0xFFFFu32)
@@ -151,8 +186,13 @@ fn run_once(spec: &StepSpec, fill: u8) -> Result<Run, Error> {
 
 /// Run one instruction.
 pub fn run_step(spec: &StepSpec) -> Result<StepResult, Error> {
-    let a = run_once(spec, spec.fill)?;
-    let b = run_once(spec, !spec.fill)?;
+    run_sequence(spec, Sequence::ONE)
+}
+
+/// Run a [`Sequence`].
+pub fn run_sequence(spec: &StepSpec, seq: Sequence) -> Result<StepResult, Error> {
+    let a = run_once(spec, spec.fill, seq)?;
+    let b = run_once(spec, !spec.fill, seq)?;
     let mut writes = Vec::new();
     for range in RAM_RANGES {
         for addr in range {

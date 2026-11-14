@@ -17,7 +17,7 @@ mod tests;
 
 pub use machine::Hardware;
 pub use rom::{RomSpec, Stop, run_rom};
-pub use step::{Segment, StepSpec, run_step};
+pub use step::{Segment, Sequence, StepSpec, run_sequence, run_step};
 
 /// The SM83 register file and the interrupt master enable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
