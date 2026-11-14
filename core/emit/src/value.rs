@@ -33,17 +33,19 @@ fn natural(w: Width) -> bool {
 
 /// `e` (in the wide type) reduced to width `w`, as the initializer of a
 /// local of its C type: a natural width needs nothing, the conversion to
-/// the local's type reduces it.
+/// the local's type reduces it; other widths are masked.
 fn fit(e: &str, w: Width) -> String {
     if natural(w) {
         e.to_string()
     } else {
-        format!("({})(({e}) & {})", cty(w), mask(w))
+        format!("({e}) & {}", mask(w))
     }
 }
 
 fn mask(w: Width) -> String {
-    if w.bits() <= 64 {
+    if w.bits() <= 32 {
+        format!("{:#x}u", w.mask())
+    } else if w.bits() <= 64 {
         format!("UINT64_C({:#x})", w.mask())
     } else {
         format!("rl_e_m128({})", w.bits())
@@ -55,6 +57,10 @@ pub(crate) fn lit(v: u128, w: Width) -> String {
     let v = v & w.mask();
     if w.bits() <= 64 {
         format!("UINT64_C({v:#x})")
+    } else if v >> 64 == 0 {
+        format!("((rl_u128)UINT64_C({:#x}))", v as u64)
+    } else if v == u128::MAX {
+        "(~(rl_u128)0)".into()
     } else {
         format!(
             "(((rl_u128)UINT64_C({:#x}) << 64) | UINT64_C({:#x}))",
@@ -109,6 +115,16 @@ pub(crate) fn reg(r: Reg) -> String {
 }
 
 fn sx(e: &str, w: Width) -> String {
+    // The natural widths convert through the signed type of the width;
+    // clang and zig cc reduce modulo 2^n.
+    match w.bits() {
+        8 => return format!("(int64_t)(int8_t)({e})"),
+        16 => return format!("(int64_t)(int16_t)({e})"),
+        32 => return format!("(int64_t)(int32_t)({e})"),
+        64 => return format!("(int64_t)({e})"),
+        128 => return format!("(rl_e_s128)({e})"),
+        _ => {}
+    }
     if w.bits() <= 64 {
         format!("rl_e_sx64((uint64_t)({e}), {})", w.bits())
     } else {
@@ -160,6 +176,7 @@ pub(crate) fn emit_op(
             let ax = a(x);
             let n = w.bits();
             let e = match op {
+                UnOp::Not if n == 1 => return Ok(Emitted::Value(format!("!{}", val(*x)))),
                 UnOp::Not => format!("~{ax}"),
                 UnOp::Neg => format!("({u})0 - {ax}"),
                 UnOp::Clz if x64 => format!("rl_e_clz64({ax}, {n})"),

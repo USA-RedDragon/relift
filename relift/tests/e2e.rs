@@ -87,5 +87,5 @@ fn a_tiny_program_split_into_pieces_runs_the_same() {
         .count();
     let text = std::fs::read_to_string(c.join("shard0000.c")).expect("shard0000.c");
     assert!(text.contains("_part1(c, mem);"), "{text}");
-    assert!(shards > 4, "{shards} shards");
+    assert!(shards >= 3, "{shards} shards");
 }

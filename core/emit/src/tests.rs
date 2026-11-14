@@ -142,7 +142,15 @@ fn values_are_kept_to_their_width() {
     assert_eq!(value::cty(relift_ir::Width::W128), "rl_u128");
     assert_eq!(
         value::lit(u128::MAX, relift_ir::Width::W128),
-        "(((rl_u128)UINT64_C(0xffffffffffffffff) << 64) | UINT64_C(0xffffffffffffffff))"
+        "(~(rl_u128)0)"
+    );
+    assert_eq!(
+        value::lit(5, relift_ir::Width::W128),
+        "((rl_u128)UINT64_C(0x5))"
+    );
+    assert_eq!(
+        value::lit(1 << 64, relift_ir::Width::W128),
+        "(((rl_u128)UINT64_C(0x1) << 64) | UINT64_C(0x0))"
     );
 }
 
