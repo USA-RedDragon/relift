@@ -865,6 +865,11 @@ are also call boundaries. [inferred]
     on the frontend's `FP_FLAGS` slot, homed at the constant
     `RL_FP_FLAGS_ON`) and run on the slow path in flag-producing programs
     only.
+  - FCVTXN (round to odd): the IR converts to nearest even, converts back
+    and, when inexact, steps to the truncated value and sets its lowest
+    bit. The host conversion's overflow and underflow flags do not match
+    rounding to odd, so these blocks carry the `SLOW_FLAGS` guard too; the
+    slow path converts with `RL_RM_ODD`.
   - Binary16 arithmetic, square root, rounding to integral and every
     conversion from or to binary16: the section 10.3 helpers compute in
     software and raise no host flags, so these blocks carry the

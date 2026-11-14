@@ -77,7 +77,7 @@ static unsigned rm_arg(const fpenv *v, uint32_t r)
 {
     if (r == RL_RM_FPCR)
         return rm_fpcr(v);
-    return r > RL_RM_AWAY ? (unsigned)RL_RM_NEAREST : r;
+    return r > RL_RM_AWAY && r != RL_RM_ODD ? (unsigned)RL_RM_NEAREST : r;
 }
 
 static unsigned msb128(rl_u128 x)
@@ -194,6 +194,7 @@ static rl_u128 round_shift(rl_u128 m, unsigned n, unsigned sign, unsigned rm, in
     case RL_RM_POSINF: up = !sign; break;
     case RL_RM_NEGINF: up = sign; break;
     case RL_RM_AWAY: up = cmp >= 0; break;
+    case RL_RM_ODD: return q | 1u;
     default: up = 0; break;
     }
     return q + (rl_u128)(up ? 1 : 0);

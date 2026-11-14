@@ -386,7 +386,7 @@ static int simd_same(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     return RL_OK;
 }
 
-enum { M_CVT, M_SCVTF, M_ABS, M_NEG, M_SQRT, M_RINT, M_RINTN, M_CMP0, M_RECPE, M_RSQRTE, M_CVTN, M_CVTL };
+enum { M_CVT, M_SCVTF, M_ABS, M_NEG, M_SQRT, M_RINT, M_RINTN, M_CMP0, M_RECPE, M_RSQRTE, M_CVTN, M_CVTXN, M_CVTL };
 
 /* Two-register miscellaneous, vector (asimdmisc) or scalar (asisdmisc). */
 static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half)
@@ -417,6 +417,7 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     case 0x3A: kind = M_CVT; rm = RL_RM_POSINF; break;
     case 0x3B: kind = M_CVT; rm = RL_RM_ZERO; break;
     case 0x3D: kind = M_RECPE; break;
+    case 0x56: kind = M_CVTXN; break;
     case 0x58: kind = M_RINT; rm = RL_RM_AWAY; break;
     case 0x59: kind = M_RINT; rm = RL_RM_FPCR; exact = 1; break;
     case 0x5A: kind = M_CVT; rm = RL_RM_NEAREST; break;
@@ -435,10 +436,26 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     case 0x7F: kind = M_SQRT; break;
     default: return unsupported(c, pc, insn);
     }
-    if (half && (kind == M_CVTN || kind == M_CVTL))
+    if (half && (kind == M_CVTN || kind == M_CVTXN || kind == M_CVTL))
         return unsupported(c, pc, insn);
     if ((half || scalar) && kind == M_RINTN)
         return unsupported(c, pc, insn);
+    if (kind == M_CVTXN) {
+        /* FCVTXN rounds each double to a single with round to odd. The
+         * scalar form writes Sd and clears the rest; the vector form writes
+         * the low half and clears the high one, FCVTXN2 writes the high half
+         * and keeps the low one. */
+        if (!sz)
+            return unsupported(c, pc, insn);
+        rl_v128 src = c->v[rn], r = c->v[rd];
+        unsigned cnt = scalar ? 1 : 2, at = scalar ? 0 : q * 2;
+        if (scalar || !q)
+            r.q = 0;
+        for (unsigned i = 0; i < cnt; i++)
+            lane_set(&r, 32, at + i, rl_fp_convert(lane_get(&src, 64, i), 64, 32, RL_RM_ODD, f, s));
+        c->v[rd] = r;
+        return RL_OK;
+    }
     if (kind == M_CVTN || kind == M_CVTL) {
         /* sz 0: half and single; sz 1: single and double. */
         unsigned wide = sz ? 64 : 32, narrow = sz ? 32 : 16, cnt = 64 / narrow;

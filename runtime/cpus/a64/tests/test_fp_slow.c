@@ -15,6 +15,8 @@
 #define DN RL_FPCR_DN
 
 #define IOC 0x01u
+#define OFC 0x04u
+#define UFC 0x08u
 #define IXC 0x10u
 #define IDC 0x80u
 
@@ -512,6 +514,42 @@ TEST(fp_slow_vector_convert)
     c->fpcr = RZ;
     CHECK_EQ(run(c, 0x4E21D820u), RL_OK);
     CHECK_EQ(c->v[0].s[0], 0x4B800000u);
+}
+
+TEST(fp_slow_fcvtxn_rounds_to_odd)
+{
+    /* Round to odd ignores FPCR.RMode: truncate, then set the lowest bit
+     * when inexact; overflow gives the largest normal. */
+    rl_ctx *c = boot(RP);
+    CHECK(c != NULL);
+    c->v[1].d[0] = 0xBFF0000000000001ull;
+    c->v[1].d[1] = 0x3FF0000000000000ull;
+    c->v[0].q = ~(rl_u128)0;
+    CHECK_EQ(run(c, 0x2E616820u), RL_OK); /* FCVTXN v0.2s, v1.2d */
+    CHECK_EQ(c->v[0].s[0], 0xBF800001u);
+    CHECK_EQ(c->v[0].s[1], 0x3F800000u);
+    CHECK_EQ(c->v[0].d[1], 0);
+    CHECK_EQ(c->fpsr, IXC);
+    c->fpsr = 0;
+    c->v[1].d[0] = 0x47EFFFFFF0000000ull;
+    c->v[1].d[1] = 0x47F0000000000000ull;
+    CHECK_EQ(run(c, 0x6E616820u), RL_OK); /* FCVTXN2 v0.4s, v1.2d */
+    CHECK_EQ(c->v[0].s[0], 0xBF800001u);
+    CHECK_EQ(c->v[0].s[2], 0x7F7FFFFFu);
+    CHECK_EQ(c->v[0].s[3], 0x7F7FFFFFu);
+    CHECK_EQ(c->fpsr, OFC | IXC);
+    c->fpsr = 0;
+    c->v[1].d[0] = 0x47EFFFFFF0000000ull;
+    CHECK_EQ(run(c, 0x7E616820u), RL_OK); /* FCVTXN s0, d1 */
+    CHECK_EQ(c->v[0].s[0], 0x7F7FFFFFu);
+    CHECK_EQ(c->v[0].s[1], 0);
+    CHECK_EQ(c->v[0].d[1], 0);
+    CHECK_EQ(c->fpsr, IXC);
+    c->fpsr = 0;
+    c->v[1].d[0] = 1;
+    CHECK_EQ(run(c, 0x7E616820u), RL_OK);
+    CHECK_EQ(c->v[0].s[0], 1);
+    CHECK_EQ(c->fpsr, UFC | IXC);
 }
 
 TEST(fp_slow_vector_one_source)

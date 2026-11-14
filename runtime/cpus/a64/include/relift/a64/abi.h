@@ -64,14 +64,19 @@
 /** @brief FPSR cumulative exception and saturation bits (IOC DZC OFC UFC IXC IDC QC). */
 #define RL_FPSR_MASK 0x0800009Fu
 
-/** @brief FP rounding modes, encoded like FPCR.RMode, plus the A (ties away) mode of FCVTA and FRINTA. */
+/**
+ * @brief FP rounding modes, encoded like FPCR.RMode, plus the A (ties away)
+ * mode of FCVTA and FRINTA and the round-to-odd mode of FCVTXN (truncate,
+ * then set the lowest bit when inexact; overflow gives the largest normal).
+ */
 enum rl_rmode {
     RL_RM_NEAREST = 0,
     RL_RM_POSINF = 1,
     RL_RM_NEGINF = 2,
     RL_RM_ZERO = 3,
     RL_RM_AWAY = 4,
-    RL_RM_FPCR = 5
+    RL_RM_FPCR = 5,
+    RL_RM_ODD = 6
 };
 
 /** @brief One SIMD and FP register: 128 bits, viewable as lanes. */
