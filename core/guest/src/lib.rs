@@ -1,6 +1,8 @@
 //! The guest contract and vocabulary: the traits a guest implements and the ids
 //! every stage shares.
 
+use relift_ir::{Block, Reg, RegFile};
+
 /// How a guest turns its own symbol names into host names.
 ///
 /// The symbol scheme belongs to the guest (Itanium remangling for the Switch,
@@ -10,4 +12,172 @@ pub trait Naming {
     /// The host identifier for `symbol` in `module`, or `None` when the guest
     /// cannot name it and the caller falls back to an address-based name.
     fn host_name(&self, module: &str, symbol: &str) -> Option<String>;
+}
+
+/// Why a frontend could not lift the code at an address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiftFailure {
+    /// The raw instruction unit, as the frontend reads it (at most 8 bytes).
+    pub insn: u64,
+    /// What went wrong, for reports.
+    pub message: String,
+}
+
+/// Where a register slot lives in the lifted-code context.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Home {
+    /// A context field: a C lvalue through `c`, such as `c->x[3]`.
+    Field(String),
+    /// A condition flag: one bit of a packed context word. The plain build
+    /// keeps flags in locals only; the flags-stored build packs them there at
+    /// every boundary.
+    Flag {
+        /// The C lvalue of the packed word, such as `c->nzcv`.
+        word: String,
+        /// The bit of the flag in that word.
+        bit: u32,
+    },
+}
+
+/// A CPU frontend: decoding and lifting, plus the facts the C emitter needs
+/// about the CPU's half of the runtime ABI.
+pub trait Frontend {
+    /// The code granule in bytes: the size and alignment of the smallest
+    /// instruction.
+    fn granule(&self) -> u64;
+
+    /// The register file of every lifted block.
+    fn regs(&self) -> RegFile;
+
+    /// Lifts the instruction at `pc`, whose bytes start `bytes`.
+    ///
+    /// # Errors
+    ///
+    /// The bytes are not an instruction the frontend can lift.
+    fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure>;
+
+    /// The runtime header lifted C includes, such as `relift/a64/abi.h`.
+    fn abi_header(&self) -> &'static str;
+
+    /// Where `reg` lives in the context.
+    fn home(&self, reg: Reg) -> Home;
+
+    /// The C for intrinsic `name` applied to the C expressions `args`: an
+    /// expression for intrinsics with a result, a statement without the
+    /// trailing semicolon otherwise. `None` for an intrinsic it does not
+    /// know.
+    fn intrinsic(&self, name: &str, args: &[String]) -> Option<String>;
+
+    /// An `int` C expression that enters the runtime for trap `code` (the
+    /// guest's system call); a call boundary that may return `RL_PENDING`.
+    fn trap(&self, code: u32) -> String;
+
+    /// An `int` C expression that reports the unliftable instruction `insn`
+    /// at `pc` and returns `RL_PENDING`.
+    fn undefined(&self, pc: u64, insn: u64) -> String;
+
+    /// The C expression of the exclusive monitor the `rl_ldx` family takes.
+    fn monitor(&self) -> &'static str;
+}
+
+/// What a module section holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionKind {
+    /// Executable code.
+    Code,
+    /// Read-only data.
+    ReadOnly,
+    /// Writable data; the part past the image is zero-filled.
+    Data,
+}
+
+/// One section of a loaded module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Section {
+    /// The guest address.
+    pub addr: u64,
+    /// The size in bytes.
+    pub size: u64,
+    /// What it holds.
+    pub kind: SectionKind,
+}
+
+/// Why an address is a function entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RootKind {
+    /// The module's entry point.
+    Entry,
+    /// A defined function symbol.
+    Symbol,
+    /// The start of an unwind-table entry (an `.eh_frame` FDE).
+    Unwind,
+    /// A code address stored in data by a relocation.
+    Pointer,
+}
+
+/// A function entry the guest knows before analysis.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Root {
+    /// The guest address.
+    pub addr: u64,
+    /// Why it is an entry.
+    pub kind: RootKind,
+    /// The symbol name, when there is one.
+    pub name: Option<String>,
+}
+
+/// One guest module as analysis sees it: its bytes at their load address,
+/// its sections, and the entries the guest's formats name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Module {
+    /// The module name.
+    pub name: String,
+    /// The load address of `image[0]`.
+    pub base: u64,
+    /// The loaded bytes from `base` (without zero-filled data).
+    pub image: Vec<u8>,
+    /// The sections.
+    pub sections: Vec<Section>,
+    /// The known entries.
+    pub roots: Vec<Root>,
+}
+
+impl Module {
+    /// The bytes at guest address `addr` to the end of the image, if `addr`
+    /// lies inside it.
+    pub fn bytes_at(&self, addr: u64) -> Option<&[u8]> {
+        let off = usize::try_from(addr.checked_sub(self.base)?).ok()?;
+        self.image.get(off..)
+    }
+
+    /// Whether `addr` lies in a code section.
+    pub fn is_code(&self, addr: u64) -> bool {
+        self.sections
+            .iter()
+            .any(|s| s.kind == SectionKind::Code && addr >= s.addr && addr - s.addr < s.size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_bytes_and_code_ranges() {
+        let m = Module {
+            name: "m".into(),
+            base: 0x1000,
+            image: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            sections: vec![Section {
+                addr: 0x1000,
+                size: 4,
+                kind: SectionKind::Code,
+            }],
+            roots: Vec::new(),
+        };
+        assert_eq!(m.bytes_at(0x1006), Some(&[7u8, 8][..]));
+        assert_eq!(m.bytes_at(0xfff), None);
+        assert!(m.is_code(0x1003));
+        assert!(!m.is_code(0x1004));
+    }
 }
