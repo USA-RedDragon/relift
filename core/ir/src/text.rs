@@ -82,8 +82,8 @@ use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst, IoKind, Next, Op, Order,
-    RegFile, UnOp, Value, Width,
+    BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst, IoKind, Next,
+    Op, Order, RegFile, UnOp, Value, Width,
 };
 
 const UN: [(UnOp, &str); 7] = [
@@ -157,6 +157,14 @@ const ORDER: [(Order, &str); 5] = [
     (Order::Release, "release"),
     (Order::AcqRel, "acqrel"),
     (Order::SeqCst, "seqcst"),
+];
+
+const CRYPTO: [(CryptoOp, &str); 5] = [
+    (CryptoOp::AesSubBytes, "aes.subbytes"),
+    (CryptoOp::AesInvSubBytes, "aes.invsubbytes"),
+    (CryptoOp::AesMixColumns, "aes.mixcolumns"),
+    (CryptoOp::AesInvMixColumns, "aes.invmixcolumns"),
+    (CryptoOp::Sm4Sbox, "sm4.sbox"),
 ];
 
 fn name_of<T: Copy + PartialEq>(table: &[(T, &'static str)], x: T) -> &'static str {
@@ -322,6 +330,7 @@ impl fmt::Display for Block {
                     addr.0,
                     value.0
                 )?,
+                Op::Crypto(op, x) => write!(f, "crypto.{} v{}", name_of(&CRYPTO, *op), x.0)?,
             }
             writeln!(f)?;
         }
@@ -713,6 +722,11 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
         Op::Cmp(cmp, v[0], v[1])
     } else if let Some(f) = text.strip_prefix("fp.").and_then(|s| lookup(&FP, s)) {
         Op::Fp(f, c.values(f.arity(), defined)?)
+    } else if let Some(k) = text
+        .strip_prefix("crypto.")
+        .and_then(|s| lookup(&CRYPTO, s))
+    {
+        Op::Crypto(k, c.value(defined)?)
     } else {
         match text {
             "const" => Op::Const(c.hex("a constant")?),

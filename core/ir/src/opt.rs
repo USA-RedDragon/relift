@@ -460,5 +460,6 @@ fn remap_with(op: &Op, r: &dyn Fn(&Value) -> Value) -> Op {
             endian: *endian,
             kind: *kind,
         },
+        Op::Crypto(c, v) => Op::Crypto(*c, r(v)),
     }
 }

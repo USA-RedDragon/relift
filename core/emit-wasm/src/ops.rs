@@ -588,6 +588,7 @@ impl Em<'_> {
                 self.store_le(a, v, nb);
                 self.i(I::End);
             }
+            Op::Crypto(..) => return Err("a cipher step".into()),
             Op::Set(..) | Op::Guard(..) => {
                 return Err("an operation out of place".into());
             }

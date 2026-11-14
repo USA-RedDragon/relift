@@ -287,6 +287,34 @@ pub enum IoKind {
     Device,
 }
 
+/// Fixed table-driven steps of standard ciphers, kept whole so an emitter
+/// can map each to a table or a host instruction instead of the gate-level
+/// circuit the tables stand for. Each is pure and has one meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CryptoOp {
+    /// AES `SubBytes` (FIPS-197 5.1.1) on each byte of a 128-bit value.
+    AesSubBytes,
+    /// AES `InvSubBytes` (FIPS-197 5.3.2) on each byte of a 128-bit value.
+    AesInvSubBytes,
+    /// AES `MixColumns` (FIPS-197 5.1.3) on a 128-bit state, column `c` in
+    /// bytes `4c .. 4c + 4`, row 0 lowest.
+    AesMixColumns,
+    /// AES `InvMixColumns` (FIPS-197 5.3.3), same layout.
+    AesInvMixColumns,
+    /// The SM4 S-box (GB/T 32907) on one byte.
+    Sm4Sbox,
+}
+
+impl CryptoOp {
+    /// The operand and result width.
+    pub fn width(self) -> Width {
+        match self {
+            CryptoOp::Sm4Sbox => Width::W8,
+            _ => Width::W128,
+        }
+    }
+}
+
 /// One IR operation. Operands are earlier [`Value`]s of the same block.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
@@ -416,6 +444,8 @@ pub enum Op {
     /// the sync has no guest-visible effect besides device time. At most one
     /// per block, and it is the block's last instruction.
     Sync,
+    /// A cipher step of the width [`CryptoOp::width`].
+    Crypto(CryptoOp, Value),
 }
 
 impl Op {
@@ -433,7 +463,8 @@ impl Op {
             | Op::Ext(_, v)
             | Op::Extract(v, _)
             | Op::Guard(v, _)
-            | Op::TickIf(v, _) => {
+            | Op::TickIf(v, _)
+            | Op::Crypto(_, v) => {
                 vec![*v]
             }
             Op::Bin(_, a, b) | Op::Cmp(_, a, b) | Op::Concat(a, b) => vec![*a, *b],

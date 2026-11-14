@@ -258,6 +258,10 @@ pub(crate) fn check_op(
             none()?;
             same(w(*c)?, Width::W1)
         }
+        Op::Crypto(c, x) => {
+            same(need()?, c.width())?;
+            same(w(*x)?, c.width())
+        }
     }
 }
 

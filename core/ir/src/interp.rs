@@ -620,6 +620,7 @@ pub fn run_with(
                 0
             }
             Op::Sync => 0,
+            Op::Crypto(op, x) => crate::crypto::eval(*op, v(*x)),
         };
         vals.push(r);
     }

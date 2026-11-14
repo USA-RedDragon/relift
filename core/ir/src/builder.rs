@@ -1,7 +1,7 @@
 use crate::block::check_op;
 use crate::{
-    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, IoKind, Next, Op, Order, Reg,
-    RegFile, UnOp, Value, Width,
+    BinOp, Block, CmpOp, CryptoOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, IoKind, Next, Op,
+    Order, Reg, RegFile, UnOp, Value, Width,
 };
 
 /// Builds a [`Block`] one operation at a time, checking widths as it goes.
@@ -315,6 +315,11 @@ impl Builder {
     /// Makes the exit a sync point; see [`Op::Sync`]. Push it last.
     pub fn sync(&mut self) {
         self.push(Op::Sync, None);
+    }
+
+    /// A cipher step.
+    pub fn crypto(&mut self, op: CryptoOp, x: Value) -> Value {
+        self.val(Op::Crypto(op, x), op.width())
     }
 
     /// Calls a named intrinsic.

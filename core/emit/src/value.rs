@@ -376,6 +376,7 @@ pub(crate) fn emit_op(
         Op::Tick(_) | Op::TickIf(..) => return Err("a guest clock tick".into()),
         Op::IoLoad { .. } | Op::IoStore { .. } => return Err("an I/O access".into()),
         Op::Sync => return Err("a sync point".into()),
+        Op::Crypto(..) => return Err("a cipher step".into()),
     };
     Ok(Emitted::Value(e))
 }

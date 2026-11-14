@@ -27,6 +27,7 @@
 
 mod block;
 mod builder;
+mod crypto;
 pub mod interp;
 mod io;
 mod ops;
@@ -38,7 +39,7 @@ pub use block::{Block, Exit, Flow, Inst, Next, VerifyError};
 pub use builder::Builder;
 pub use io::{AddrClass, IoMap, IoRange};
 pub use ops::{
-    BinOp, CmpOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, Order, UnOp, Value, Width,
+    BinOp, CmpOp, CryptoOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, Order, UnOp, Value, Width,
 };
 pub use opt::{classify_io, dce, simplify};
 pub use regs::{Reg, RegDecl, RegFile};
