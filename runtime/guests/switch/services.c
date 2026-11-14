@@ -27,5 +27,6 @@ void rl_srv_install_all(void)
     rl_srv_install_time();
     rl_srv_install_vi();
     rl_srv_install_nv();
+    rl_srv_install_fs();
     rl_hos_audio_register();
 }

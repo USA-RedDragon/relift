@@ -7,7 +7,6 @@
 #include "loader.h"
 
 #include "hos.h"
-#include "hos_fs.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -92,28 +91,10 @@ static int load_module(const rl_switch_module *m)
     return 0;
 }
 
-static void make_dirs(const char *path)
-{
-    char buf[4096];
-    size_t n = strlen(path);
-    if (n == 0 || n >= sizeof buf)
-        return;
-    memcpy(buf, path, n + 1);
-    for (size_t i = 1; i <= n; i++)
-        if (buf[i] == '/' || buf[i] == 0) {
-            char c = buf[i];
-            buf[i] = 0;
-            if (mkdir(buf, 0777) != 0 && errno != EEXIST)
-                rl_log(RL_LOG_WARN, "loader", "cannot create %s: %s", buf, strerror(errno));
-            buf[i] = c;
-        }
-}
-
 int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 {
     rl_hos_config cfg;
     uint64_t lo = UINT64_MAX, hi = 0, top = 0;
-    const char *sdmc;
     rl_ctx *c;
     rl_result rc;
     int ret;
@@ -172,11 +153,6 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     for (uint32_t i = 0; i < p->module_count; i++)
         if (load_module(&p->modules[i]) != 0)
             return 1;
-    sdmc = getenv("RELIFT_SDMC");
-    if (!sdmc || !*sdmc)
-        sdmc = "./sdmc";
-    make_dirs(sdmc);
-    rl_hos_fs_init(sdmc);
     c = rl_hos_attach_thread(p->main_prio, p->main_core);
     if (!c) {
         rl_log(RL_LOG_ERROR, "loader", "cannot attach the main thread");

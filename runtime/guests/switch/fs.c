@@ -9,6 +9,7 @@
  */
 #include "hos_fs.h"
 #include "ipc.h"
+#include "services.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -728,4 +729,30 @@ void rl_hos_fs_init(const char *sdmc_host_dir)
         n--;
     g_root[n] = 0;
     rl_ipc_register_service("fsp-srv", proxy_factory);
+}
+
+static void make_dirs(const char *path)
+{
+    char buf[4096];
+    size_t n = strlen(path);
+    if (n == 0 || n >= sizeof buf)
+        return;
+    memcpy(buf, path, n + 1);
+    for (size_t i = 1; i <= n; i++)
+        if (buf[i] == '/' || buf[i] == 0) {
+            char c = buf[i];
+            buf[i] = 0;
+            if (mkdir(buf, 0777) != 0 && errno != EEXIST)
+                rl_log(RL_LOG_WARN, "fs", "cannot create %s: %s", buf, strerror(errno));
+            buf[i] = c;
+        }
+}
+
+void rl_srv_install_fs(void)
+{
+    const char *sdmc = getenv("RELIFT_SDMC");
+    if (!sdmc || !*sdmc)
+        sdmc = "./sdmc";
+    make_dirs(sdmc);
+    rl_hos_fs_init(sdmc);
 }
