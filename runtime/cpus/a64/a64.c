@@ -8,12 +8,29 @@
 #include "a64.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static int g_exact = -1;
+static int g_fp_flags;
+
+int rl_a64_exact_flags(void)
+{
+    if (g_exact < 0) {
+        const char *e = getenv("RELIFT_FP_EXACT");
+        g_exact = e && e[0] == '1';
+    }
+    return g_exact;
+}
+
+int rl_a64_fp_flags(void) { return g_fp_flags; }
+
+void rl_a64_set_fp_flags(int on) { g_fp_flags = on != 0; }
 
 void rl_host_set_fpcr(uint32_t fpcr)
 {
 #if defined(__aarch64__)
-    uint64_t v = fpcr;
+    uint64_t v = fpcr & RL_FPCR_GUEST;
     __asm__ volatile("msr fpcr, %0" ::"r"(v));
 #else
     (void)fpcr;
@@ -31,9 +48,14 @@ uint32_t rl_host_get_fpcr(void)
 #endif
 }
 
-static void ctx_init(rl_ctx *c) { c->fpcr = RL_FPCR_DEFAULT; }
+static void ctx_init(rl_ctx *c) { c->fpcr = RL_FPCR_DEFAULT | (rl_a64_exact_flags() ? RL_FPCR_EXACT : 0u); }
 
-static void bind(rl_ctx *c) { rl_host_set_fpcr(c->fpcr); }
+static void bind(rl_ctx *c)
+{
+    rl_host_set_fpcr(c->fpcr);
+    if (g_fp_flags)
+        rl_fp_host_clear();
+}
 
 static void describe(const rl_ctx *c, char *buf, size_t n)
 {
@@ -87,7 +109,7 @@ uint64_t rl_mrs_cntpct(rl_ctx *c)
 
 void rl_msr_fpcr(rl_ctx *c, uint64_t v)
 {
-    uint32_t f = (uint32_t)v;
+    uint32_t f = ((uint32_t)v & RL_FPCR_GUEST) | (c->fpcr & RL_FPCR_EXACT);
     c->fpcr = f;
     if (c->thread == rl_thread_current())
         rl_host_set_fpcr(f);

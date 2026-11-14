@@ -441,12 +441,21 @@ static int dispatch(rl_ctx *c, uint32_t imm)
     return RL_OK;
 }
 
+static int svc_traced(rl_ctx *c, uint32_t imm);
+
 int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
 {
     (void)mem;
     rl_clrex(&c->excl);
-    if (!rl_cfg()->trace_os)
-        return dispatch(c, imm);
+    /* The guest's FP flags stay out of the runtime's own FP work. */
+    uint32_t flags = rl_a64_flags_enter();
+    int r = rl_cfg()->trace_os ? svc_traced(c, imm) : dispatch(c, imm);
+    rl_a64_flags_leave(flags);
+    return r;
+}
+
+static int svc_traced(rl_ctx *c, uint32_t imm)
+{
     uint64_t a[4] = { c->x[0], c->x[1], c->x[2], c->x[3] };
     uint64_t t0 = rl_clock_ns();
     int r = dispatch(c, imm);
