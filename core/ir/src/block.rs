@@ -242,6 +242,11 @@ pub(crate) fn check_op(
             }
             Ok(())
         }
+        Op::Tick(_) => none(),
+        Op::TickIf(c, _) => {
+            none()?;
+            same(w(*c)?, Width::W1)
+        }
     }
 }
 

@@ -30,6 +30,25 @@ pub trait Intrinsics {
     fn call(&mut self, name: &'static str, args: &[u128]) -> Result<u128, Error>;
 }
 
+/// The devices of a hardware-register guest as the interpreter sees them:
+/// the guest clock, I/O accesses and sync points.
+///
+/// Guests without devices use [`NoDevices`], and [`run`] runs with it; the
+/// operations of this interface then never occur or behave as plain memory.
+pub trait Devices {
+    /// Advances the guest clock by `cycles`, for [`Op::Tick`] and a taken
+    /// [`Op::TickIf`].
+    fn tick(&mut self, cycles: u64);
+}
+
+/// [`Devices`] of a guest without any: the clock is ignored.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoDevices;
+
+impl Devices for NoDevices {
+    fn tick(&mut self, _cycles: u64) {}
+}
+
 /// An [`Intrinsics`] that knows no intrinsic.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoIntrinsics;
@@ -336,7 +355,7 @@ fn from_bytes(buf: &[u8], endian: Endian) -> u128 {
     u128::from_le_bytes(le)
 }
 
-/// Runs `block` on `state` and `mem`.
+/// Runs `block` on `state` and `mem`, with no devices ([`NoDevices`]).
 ///
 /// `Get` reads the state at entry; `Set`s are committed together when the
 /// block reaches its exit, so a fault leaves registers unchanged. Memory
@@ -346,6 +365,20 @@ pub fn run(
     state: &mut State,
     mem: &mut dyn GuestMemory,
     intrinsics: &mut dyn Intrinsics,
+) -> Result<Outcome, Error> {
+    run_with(block, state, mem, intrinsics, &mut NoDevices)
+}
+
+/// Runs `block` like [`run`], with `devices` for the clock.
+///
+/// Clock ticks take effect in order with memory operations, so a fault
+/// leaves the ticks before it applied.
+pub fn run_with(
+    block: &Block,
+    state: &mut State,
+    mem: &mut dyn GuestMemory,
+    intrinsics: &mut dyn Intrinsics,
+    devices: &mut dyn Devices,
 ) -> Result<Outcome, Error> {
     block.verify().map_err(|e| Error::Invalid(e.to_string()))?;
     if state.regs.len() != block.regs.len() {
@@ -461,6 +494,16 @@ pub fn run(
             Op::Intrinsic(name, args) => {
                 let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
                 intrinsics.call(name, &a)? & width.mask()
+            }
+            Op::Tick(n) => {
+                devices.tick(u64::from(*n));
+                0
+            }
+            Op::TickIf(c, n) => {
+                if v(*c) != 0 {
+                    devices.tick(u64::from(*n));
+                }
+                0
             }
         };
         vals.push(r);

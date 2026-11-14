@@ -357,14 +357,33 @@ pub enum Op {
     /// A call to a named intrinsic the frontend and runtime define, giving
     /// the instruction's width, or nothing when the instruction has none.
     Intrinsic(&'static str, Vec<Value>),
+    /// Advances the guest clock by this many cycles, in the unit the CPU
+    /// frontend defines (Game Boy: T-cycles). The clock moves at this
+    /// position: an I/O access or sync point after it sees the time
+    /// including it, one before it does not. A frontend gives each guest
+    /// instruction its cost here and may split it around the instruction's
+    /// I/O accesses so that each access happens at its own cycle. Guests
+    /// without a clock never emit it. See docs/abi.md section 13.
+    Tick(u32),
+    /// Advances the guest clock by this many cycles when `cond` (one bit) is 1 and
+    /// does nothing otherwise: the extra cost of a taken branch, or of one
+    /// data-dependent step.
+    TickIf(Value, u32),
 }
 
 impl Op {
     /// The operands, in order.
     pub fn operands(&self) -> Vec<Value> {
         match self {
-            Op::Const(_) | Op::Get(_) | Op::ClearExclusive | Op::Fence(_) => Vec::new(),
-            Op::Set(_, v) | Op::Un(_, v) | Op::Ext(_, v) | Op::Extract(v, _) | Op::Guard(v, _) => {
+            Op::Const(_) | Op::Get(_) | Op::ClearExclusive | Op::Fence(_) | Op::Tick(_) => {
+                Vec::new()
+            }
+            Op::Set(_, v)
+            | Op::Un(_, v)
+            | Op::Ext(_, v)
+            | Op::Extract(v, _)
+            | Op::Guard(v, _)
+            | Op::TickIf(v, _) => {
                 vec![*v]
             }
             Op::Bin(_, a, b) | Op::Cmp(_, a, b) | Op::Concat(a, b) => vec![*a, *b],
@@ -378,7 +397,7 @@ impl Op {
     }
 
     /// Whether the operation has an effect besides its result: state, memory,
-    /// the monitor, or an intrinsic the IR cannot see into.
+    /// the monitor, the guest clock, or an intrinsic the IR cannot see into.
     pub fn has_effect(&self) -> bool {
         matches!(
             self,
@@ -391,6 +410,8 @@ impl Op {
                 | Op::Fence(_)
                 | Op::Intrinsic(..)
                 | Op::Guard(..)
+                | Op::Tick(_)
+                | Op::TickIf(..)
         )
     }
 }

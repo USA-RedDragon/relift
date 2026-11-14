@@ -138,6 +138,9 @@ fn everything(exit: Exit, addr: Width) -> Block {
     b.intrinsic("sys.\"q\"\\x", &[x0, x1], Some(Width::W64));
     b.intrinsic("barrier", &[], None);
     b.intrinsic("one", &[x0], None);
+    b.tick(4);
+    b.tick_if(cond, 12);
+    b.tick(u32::MAX);
     b.set(Reg(0), x1);
     b.set(Reg(2), cond);
     b.finish(4, exit)
@@ -264,6 +267,14 @@ fn parse_errors_carry_positions() {
         "{head}  v0:i64 = get x0\n  exit jump select v0, 0x1, 0x2\n"
     ));
     assert_eq!((l, c), (3, 3));
+
+    let (l, c, m) = err(&format!("{head}  tick 0x4\n{tail}"));
+    assert_eq!((l, c), (2, 8));
+    assert!(m.contains("cycle count"), "{m}");
+
+    let (l, c, m) = err(&format!("{head}  v0:i64 = get x0\n  tick.if v0, 4\n{tail}"));
+    assert_eq!((l, c), (3, 3));
+    assert!(m.contains("width mismatch"), "{m}");
 }
 
 fn mem() -> FlatMemory {

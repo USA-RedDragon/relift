@@ -268,6 +268,17 @@ impl Builder {
         self.val(Op::Fp(op, args.to_vec()), width)
     }
 
+    /// Advances the guest clock by `cycles`; see [`Op::Tick`].
+    pub fn tick(&mut self, cycles: u32) {
+        self.push(Op::Tick(cycles), None);
+    }
+
+    /// Advances the guest clock by `cycles` when `cond` (one bit) is 1; see
+    /// [`Op::TickIf`].
+    pub fn tick_if(&mut self, cond: Value, cycles: u32) {
+        self.push(Op::TickIf(cond, cycles), None);
+    }
+
     /// Calls a named intrinsic.
     pub fn intrinsic(&mut self, name: &'static str, args: &[Value], width: Option<Width>) -> Value {
         self.push(Op::Intrinsic(name, args.to_vec()), width)
