@@ -13,6 +13,11 @@ pub fn count(n: u64) -> String {
     out
 }
 
+/// A counted noun with a plural `s`: `1 shard`, `2 shards`, `0 shards`.
+pub fn noun(n: u64, word: &str) -> String {
+    format!("{} {word}{}", count(n), if n == 1 { "" } else { "s" })
+}
+
 /// A time: `0.1 s`, `42.0 s`, `1m12s`, `1h02m`.
 pub fn duration(d: Duration) -> String {
     let secs = d.as_secs();
@@ -77,6 +82,13 @@ mod tests {
         assert_eq!(count(1000), "1,000");
         assert_eq!(count(31616), "31,616");
         assert_eq!(count(1234567), "1,234,567");
+    }
+
+    #[test]
+    fn nouns_take_a_plural_s() {
+        assert_eq!(noun(0, "shard"), "0 shards");
+        assert_eq!(noun(1, "shard"), "1 shard");
+        assert_eq!(noun(1234, "file"), "1,234 files");
     }
 
     #[test]
