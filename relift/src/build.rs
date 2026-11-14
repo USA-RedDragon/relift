@@ -271,8 +271,10 @@ fn emit_modules(
             analysis,
             found: how,
         } = analyzed;
-        if let Found::Incremental { reuse, ms } = &how {
-            ui.note(&Line::new().text(crate::mods::stage::reuse_line(&p.name, reuse, *ms)));
+        if let Found::Incremental { reuse, ms, base_ms } = &how {
+            ui.note(&Line::new().text(crate::mods::stage::reuse_line(
+                &p.name, reuse, *ms, *base_ms,
+            )));
         }
         if !lifting {
             ui.done(row, Line::new().text(noun(found as u64, "function")));

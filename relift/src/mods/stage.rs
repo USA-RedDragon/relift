@@ -55,6 +55,9 @@ pub enum Found {
         reuse: Reuse,
         /// Milliseconds the incremental analysis took.
         ms: f64,
+        /// Milliseconds reading the cached stock analysis took (or finding
+        /// it, when there was none).
+        base_ms: f64,
     },
 }
 
@@ -156,6 +159,7 @@ impl Stage {
         let key_path = self.cache_dir.join(format!("{i}.key"));
         if let Some(orig) = original {
             let key = cache::key(&self.tool, &orig.image, orig.base, hints);
+            let t0 = Instant::now();
             let base = match cache::read(&path, &key, &files) {
                 Some(a) => a,
                 None => {
@@ -170,6 +174,7 @@ impl Stage {
                 .flat_map(|w| w.ranges.iter())
                 .map(|r| module.base + r.start..module.base + r.end)
                 .collect();
+            let base_ms = t0.elapsed().as_secs_f64() * 1e3;
             let t0 = Instant::now();
             let (a, reuse) = relift_analyze::rediscover(fe, module, &base, &changed, on);
             let ms = t0.elapsed().as_secs_f64() * 1e3;
@@ -179,7 +184,7 @@ impl Stage {
                 layout,
                 visits,
                 analysis: Some(a),
-                found: Found::Incremental { reuse, ms },
+                found: Found::Incremental { reuse, ms, base_ms },
             });
         }
         let (layout, visits) = relift_analyze::outline_visit(fe, module, on, visit);
@@ -303,9 +308,9 @@ impl Stage {
 }
 
 /// The text of a reuse for the build log.
-pub fn reuse_line(module: &str, reuse: &Reuse, ms: f64) -> String {
+pub fn reuse_line(module: &str, reuse: &Reuse, ms: f64, base_ms: f64) -> String {
     format!(
-        "{module}: code mods changed {} function{}; {} reused from the stock analysis ({ms:.0} ms)",
+        "{module}: code mods changed {} function{}; {} reused from the stock analysis ({ms:.0} ms, stock analysis read in {base_ms:.0} ms)",
         reuse.lifted.len(),
         if reuse.lifted.len() == 1 { "" } else { "s" },
         reuse.reused.len()
