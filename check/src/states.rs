@@ -90,6 +90,62 @@ pub fn reg_value(r: &mut Rng) -> u64 {
     }
 }
 
+/// Double-precision values the FP rules treat specially: zeros, infinities,
+/// quiet and signaling NaNs with payloads, subnormals, ones and extremes.
+const F64_SPECIAL: [u64; 14] = [
+    0,
+    0x8000_0000_0000_0000,
+    0x7ff0_0000_0000_0000,
+    0xfff0_0000_0000_0000,
+    0x7ff8_0000_0000_0000,
+    0xfff8_0000_dead_beef,
+    0x7ff0_0000_0000_0001,
+    0xfff4_0000_0000_0000,
+    0x0000_0000_0000_0001,
+    0x800f_ffff_ffff_ffff,
+    0x3ff0_0000_0000_0000,
+    0xbff0_0000_0000_0000,
+    0x7fef_ffff_ffff_ffff,
+    0x4330_0000_0000_0000,
+];
+
+/// The single-precision counterparts of [`F64_SPECIAL`].
+const F32_SPECIAL: [u32; 14] = [
+    0,
+    0x8000_0000,
+    0x7f80_0000,
+    0xff80_0000,
+    0x7fc0_0000,
+    0xffc0_beef,
+    0x7f80_0001,
+    0xffa0_0000,
+    0x0000_0001,
+    0x807f_ffff,
+    0x3f80_0000,
+    0xbf80_0000,
+    0x7f7f_ffff,
+    0x4b00_0000,
+];
+
+/// A random 64 bits of a vector register: as [`reg_value`], or one or two
+/// special floating-point values.
+fn vec_half(r: &mut Rng) -> u64 {
+    match r.below(4) {
+        0 => r.pick(&F64_SPECIAL),
+        1 => {
+            let lane = |r: &mut Rng| {
+                if r.chance(0.6) {
+                    u64::from(r.pick(&F32_SPECIAL))
+                } else {
+                    r.next() & 0xffff_ffff
+                }
+            };
+            (lane(r) << 32) | lane(r)
+        }
+        _ => reg_value(r),
+    }
+}
+
 /// A random word of `enc` whose don't-care bits are random, that decodes to
 /// `enc` and lifts, or `None` after many tries.
 pub fn word_of(enc: Encoding, r: &mut Rng) -> Option<u32> {
@@ -240,7 +296,7 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
         *x = reg_value(r);
     }
     for v in &mut g.v {
-        *v = (u128::from(reg_value(r)) << 64) | u128::from(reg_value(r));
+        *v = (u128::from(vec_half(r)) << 64) | u128::from(vec_half(r));
     }
     for f in &mut g.nzcv {
         *f = r.chance(0.5);
