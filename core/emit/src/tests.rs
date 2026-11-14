@@ -274,6 +274,7 @@ fn calls_to_a_resume_point_override_go_through_the_landing_pad_dispatch() {
         host_fn: "rl_a64_setjmp".into(),
         may_unwind: false,
         resume_point: true,
+        declare: false,
     };
     let out = emit(&Toy, &fns, &[o], &Options::default());
     let s = shard(&out);
@@ -656,4 +657,24 @@ fn landing_pads_are_resume_points_with_a_table_entry_of_their_own() {
         ),
         "{unit}"
     );
+}
+
+#[test]
+fn a_declared_override_is_declared_where_it_is_called() {
+    let code = [branch(0x02, 0, 2), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x100, &blocks[0..2])];
+    let o = Override {
+        entry: 0x108,
+        host_fn: "rl_modsw_108".into(),
+        may_unwind: true,
+        resume_point: false,
+        declare: true,
+    };
+    let out = emit(&Toy, &fns, &[o], &Options::default());
+    let s = shard(&out);
+    assert!(s.contains("RL_LIFTED(rl_modsw_108);"), "{s}");
+    assert!(s.contains("rc = rl_modsw_108(c, mem);"), "{s}");
+    let unit = &out.files.last().expect("unit").text;
+    assert!(unit.contains("RL_LIFTED(rl_modsw_108);"), "{unit}");
 }

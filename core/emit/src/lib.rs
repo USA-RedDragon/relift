@@ -82,6 +82,11 @@ pub struct Override {
     /// Whether control may come back to the return address of a call to it
     /// through the landing-pad dispatch (a `setjmp`).
     pub resume_point: bool,
+    /// Whether the emitter declares it (`RL_LIFTED`) where it is used: a
+    /// function of the build rather than one the frontend's headers
+    /// declare, such as a lifted function of another emit or a bundled
+    /// mod's switch.
+    pub declare: bool,
 }
 
 /// The default [`Options::shard_bytes`]: clang at `-O2` needs about 100 MB
@@ -203,6 +208,8 @@ pub(crate) struct Target {
     pub(crate) lifted: bool,
     /// Whether calls to it are resume points.
     pub(crate) resume_point: bool,
+    /// Whether a shard that calls it declares it.
+    pub(crate) declare: bool,
 }
 
 /// Emits the functions `fns` and the overrides `overrides` with frontend `fe`.
@@ -393,6 +400,7 @@ fn emit_core(
                     name: f.name.clone(),
                     lifted: true,
                     resume_point: false,
+                    declare: true,
                 },
             )
         })
@@ -404,6 +412,7 @@ fn emit_core(
                 name: o.host_fn.clone(),
                 lifted: false,
                 resume_point: o.resume_point,
+                declare: o.declare,
             },
         );
     }
@@ -598,7 +607,7 @@ impl Shards<'_> {
         }
         let mut decl: BTreeSet<&str> = BTreeSet::new();
         for c in &sh.callees {
-            if let Some(t) = self.targets.get(c).filter(|t| t.lifted)
+            if let Some(t) = self.targets.get(c).filter(|t| t.declare)
                 && !own.contains(t.name.as_str())
                 && decl.insert(&t.name)
             {
@@ -699,6 +708,9 @@ fn unit_table(
     }
     for f in fns {
         let _ = writeln!(t, "RL_LIFTED({});", f.name);
+    }
+    for o in overrides.iter().filter(|o| o.declare) {
+        let _ = writeln!(t, "RL_LIFTED({});", o.host_fn);
     }
     for (i, m) in maps.iter().enumerate() {
         let _ = writeln!(t, "extern const rl_fn_map {m};");

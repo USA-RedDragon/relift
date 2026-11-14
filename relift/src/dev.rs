@@ -302,6 +302,7 @@ impl Server {
                     host_fn: k.host_fn.into(),
                     may_unwind: k.may_unwind,
                     resume_point: k.resume_point,
+                    declare: false,
                 })
             })
             .collect();
