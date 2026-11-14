@@ -3,6 +3,7 @@
 //! committed output.
 //!
 //! ```text
+//! relift-cpu-a64-gen classes
 //! relift-cpu-a64-gen parse-all SAIL_LIB MODEL_SRC
 //! relift-cpu-a64-gen try SAIL_LIB MODEL_SRC ENCODING...
 //! relift-cpu-a64-gen gen SAIL_LIB MODEL_SRC ENCODING_LIST CLASS > OUT
@@ -47,7 +48,22 @@ const SAIL_ARM: &str = "5416ef6b43e9527c38dc71fb752259c1d01a47e1";
 const SAIL_LIB: &str = "c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456";
 
 /// The output files, one per instruction class.
-const CLASSES: [&str; 7] = ["int", "ldst", "excl", "branch", "system", "simd", "fp"];
+const CLASSES: [&str; 14] = [
+    "int",
+    "ldst",
+    "excl",
+    "branch",
+    "system",
+    "simd_ldst_multi",
+    "simd_ldst_multi_post",
+    "simd_ldst_single",
+    "simd_same",
+    "simd_shift",
+    "simd_misc",
+    "simd_elem",
+    "simd_other",
+    "fp",
+];
 
 /// The class of an encoding, from its AARCHMRS name.
 fn class_of(name: &str) -> &'static str {
@@ -55,7 +71,7 @@ fn class_of(name: &str) -> &'static str {
     if has("float") {
         "fp"
     } else if has("asimd") || has("asisd") || has("crypto") {
-        "simd"
+        simd_class(name)
     } else if has("_ldstexclr") || has("_ldstord") {
         "excl"
     } else if has("_ldst") || has("loadlit") {
@@ -67,6 +83,32 @@ fn class_of(name: &str) -> &'static str {
         "system"
     } else {
         "int"
+    }
+}
+
+/// The file of a SIMD encoding, by its AARCHMRS group, so no file grows
+/// past about 2 MB.
+fn simd_class(name: &str) -> &'static str {
+    let group = name
+        .split('_')
+        .find(|p| p.starts_with("asimd") || p.starts_with("asisd") || p.starts_with("crypto"))
+        .unwrap_or("");
+    match group {
+        "asisdlse" => "simd_ldst_multi",
+        "asisdlsep" => "simd_ldst_multi_post",
+        "asisdlso" | "asisdlsop" => "simd_ldst_single",
+        g if g.starts_with("asimdsame") || g.starts_with("asisdsame") => "simd_same",
+        "asimdshf" | "asisdshf" => "simd_shift",
+        g if g.starts_with("asimdmisc")
+            || g.starts_with("asisdmisc")
+            || g == "asimdall"
+            || g == "asisdpair"
+            || g == "asisdone" =>
+        {
+            "simd_misc"
+        }
+        "asimdelem" | "asisdelem" => "simd_elem",
+        _ => "simd_other",
     }
 }
 
@@ -94,6 +136,9 @@ use crate::regs;
 
 fn real_main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() == 1 && args[0] == "classes" {
+        return print_classes();
+    }
     if args.len() < 3 {
         eprintln!("usage: see the crate documentation");
         return ExitCode::from(2);
@@ -178,4 +223,12 @@ fn real_main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// `relift-cpu-a64-gen classes` prints the class names, one per line.
+fn print_classes() -> ExitCode {
+    for c in CLASSES {
+        println!("{c}");
+    }
+    ExitCode::SUCCESS
 }

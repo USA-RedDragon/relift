@@ -208,6 +208,7 @@ impl Gen<'_> {
             "FPMaxNum" => (K::Bits(w), two("max_num")),
             _ => (K::Bits(w), two("min_num")),
         };
+        self.line("st.assume_default_fpcr();".into());
         Ok(self.dy(k, call))
     }
 
@@ -307,6 +308,7 @@ impl Gen<'_> {
                 )
             }
         };
+        self.line("st.assume_default_fpcr();".into());
         Ok(self.dy(k, call))
     }
 
