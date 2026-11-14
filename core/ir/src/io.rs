@@ -75,6 +75,41 @@ impl IoMap {
             AddrClass::Memory
         }
     }
+
+    /// The byte intervals `(first, last)` of addresses below `2^bits` (and
+    /// the 16 bytes an access may run past the top) whose class is
+    /// [`AddrClass::Device`] for one direction, in address order with
+    /// adjacent ones joined. An emitter compiles an access's range check
+    /// from them: the access is a device access when any of its bytes lies
+    /// in an interval.
+    pub fn device_intervals(&self, bits: u32, write: bool) -> Vec<(u64, u64)> {
+        let top: u128 = if bits >= 64 {
+            1u128 << 64
+        } else {
+            (1u128 << bits) + 16
+        };
+        let mut cuts: Vec<u128> = vec![0, top];
+        for r in &self.ranges {
+            cuts.push(u128::from(r.first).min(top));
+            cuts.push((u128::from(r.last) + 1).min(top));
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut out: Vec<(u64, u64)> = Vec::new();
+        for w in cuts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if a >= b {
+                continue;
+            }
+            if self.class_of(a as u64, write) == AddrClass::Device {
+                match out.last_mut() {
+                    Some(l) if u128::from(l.1) + 1 == a => l.1 = (b - 1) as u64,
+                    _ => out.push((a as u64, (b - 1) as u64)),
+                }
+            }
+        }
+        out
+    }
 }
 
 impl Default for IoMap {

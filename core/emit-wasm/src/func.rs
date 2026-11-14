@@ -86,39 +86,6 @@ pub(crate) struct Emitted {
     pub(crate) errors: Vec<EmitError>,
 }
 
-/// The byte intervals `(first, last)` of addresses below `2^bits` plus the
-/// bytes an access may run past the top, which an access must not touch to
-/// stay memory, for one direction.
-pub(crate) fn device_intervals(map: &relift_ir::IoMap, bits: u32, write: bool) -> Vec<(u64, u64)> {
-    use relift_ir::AddrClass;
-    let top: u128 = if bits >= 64 {
-        1u128 << 64
-    } else {
-        (1u128 << bits) + 16
-    };
-    let mut cuts: Vec<u128> = vec![0, top];
-    for r in &map.ranges {
-        cuts.push(u128::from(r.first).min(top));
-        cuts.push((u128::from(r.last) + 1).min(top));
-    }
-    cuts.sort_unstable();
-    cuts.dedup();
-    let mut out: Vec<(u64, u64)> = Vec::new();
-    for w in cuts.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        if a >= b {
-            continue;
-        }
-        if map.class_of(a as u64, write) == AddrClass::Device {
-            match out.last_mut() {
-                Some(l) if u128::from(l.1) + 1 == a => l.1 = (b - 1) as u64,
-                _ => out.push((a as u64, (b - 1) as u64)),
-            }
-        }
-    }
-    out
-}
-
 impl Em<'_> {
     pub(crate) fn i(&mut self, x: I<'static>) {
         self.out.push(x);
@@ -609,8 +576,8 @@ pub(crate) fn emit_function<'a>(
     let addr_mask = if aw >= 64 { u64::MAX } else { (1u64 << aw) - 1 };
     let map = &cx.opts.io_map;
     let (dev_r, dev_w) = (
-        device_intervals(map, aw, false),
-        device_intervals(map, aw, true),
+        map.device_intervals(aw, false),
+        map.device_intervals(aw, true),
     );
     let mut used = BTreeSet::new();
     let mut written = BTreeSet::new();
