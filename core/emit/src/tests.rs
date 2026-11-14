@@ -86,7 +86,7 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
     );
     let unit = &out.files.last().expect("unit").text;
     assert!(unit.contains("{ UINT64_C(0x10c), 8u, RL_FN_MAY_UNWIND, F_10c },"));
-    assert!(unit.contains("const uint32_t rl_static_unit_count = 1;"));
+    assert!(unit.contains("const rl_unit rl_unit_module = {"));
 }
 
 #[test]
@@ -119,6 +119,7 @@ fn shards_declare_their_foreign_callees() {
         &Options {
             shard_size: 1,
             unit_name: "t".into(),
+            unit_symbol: "u".into(),
         },
     );
     assert_eq!(out.files.len(), 4);
