@@ -93,7 +93,8 @@ const LIB_FILES: &[&str] = &[
     "concurrency_interface.sail",
 ];
 
-const SRC_FILES: &[&str] = &[
+/// The model files the A64 generator reads, in load order.
+pub const A64_SRC_FILES: &[&str] = &[
     "prelude.sail",
     "decode_start.sail",
     "builtins.sail",
@@ -209,8 +210,8 @@ fn first_word(it: &str) -> &str {
 
 impl Model {
     /// Loads the library files in `sail_lib` (missing ones are skipped) and the
-    /// model sources in `src`.
-    pub fn load(sail_lib: &Path, src: &Path) -> std::io::Result<Model> {
+    /// model sources `files` in `src`.
+    pub fn load(sail_lib: &Path, src: &Path, files: &[&str]) -> std::io::Result<Model> {
         let mut m = Model::default();
         for f in LIB_FILES {
             let p = sail_lib.join(f);
@@ -218,7 +219,7 @@ impl Model {
                 m.load_file(&p)?;
             }
         }
-        for f in SRC_FILES {
+        for f in files {
             let before: std::collections::HashSet<String> = m.funcs.keys().cloned().collect();
             m.load_file(&src.join(f))?;
             if *f == "stubs.sail" {
