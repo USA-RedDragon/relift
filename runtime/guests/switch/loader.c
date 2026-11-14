@@ -7,6 +7,7 @@
 #include "loader.h"
 
 #include "hos.h"
+#include "vk/vk.h"
 
 #include <relift/window.h>
 
@@ -401,10 +402,48 @@ static int run_program(void *arg)
     return 0;
 }
 
+static bool is_added(const rl_switch_hook *h)
+{
+    for (uint32_t i = 0; i < g_nhooks; i++)
+        if (g_hooks[i] == h)
+            return true;
+    return false;
+}
+
+/** @brief True when a dynamic symbol of any module (defined or imported) is one the hook wants. */
+static bool wants_hook(const rl_switch_program *p, const rl_switch_hook *h)
+{
+    if (!h->wants || !p || !p->modules)
+        return false;
+    for (uint32_t i = 0; i < p->module_count; i++) {
+        const rl_switch_module *m = &p->modules[i];
+        dyn_info d;
+        if (!m->image || !dyn_of(m, &d))
+            continue;
+        for (uint64_t k = 1; k < d.nsyms; k++) {
+            uint16_t shndx;
+            uint64_t value;
+            const char *name = sym_of(m, &d, k, &shndx, &value);
+            if (name && *name && h->wants(h->user, name))
+                return true;
+        }
+    }
+    return false;
+}
+
 int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     main_args a = { p };
-    return rl_window_main(run_program, &a);
+    const rl_switch_hook *vk = rl_vk_switch_hook();
+    bool automatic = !is_added(vk) && g_nhooks < RL_SWITCH_HOOKS && wants_hook(p, vk);
+    if (automatic) {
+        g_hooks[g_nhooks++] = vk;
+        rl_log(RL_LOG_INFO, "loader", "the program uses Vulkan: forwarding is on");
+    }
+    int ret = g_nhooks ? rl_window_main(run_program, &a) : run_program(&a);
+    if (automatic)
+        g_hooks[--g_nhooks] = NULL;
+    return ret;
 }

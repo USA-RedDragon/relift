@@ -212,11 +212,18 @@ static rl_fn hook_replace(void *user, const char *symbol)
     return g_up && !vkf_swap_unsupported(symbol) ? rl_vk_import(symbol) : NULL;
 }
 
+static int hook_wants(void *user, const char *symbol)
+{
+    (void)user;
+    return !strcmp(symbol, "vkGetInstanceProcAddr") || !strcmp(symbol, "vkGetDeviceProcAddr");
+}
+
 static const rl_switch_hook g_hook = {
     .name = "vulkan-forwarding",
     .start = hook_start,
     .import = hook_import,
     .replace = hook_replace,
+    .wants = hook_wants,
 };
 
 const rl_switch_hook *rl_vk_switch_hook(void) { return &g_hook; }

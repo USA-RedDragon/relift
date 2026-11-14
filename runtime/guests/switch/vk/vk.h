@@ -82,7 +82,9 @@ RL_RUNTIME_API const rl_vk_surface_provider *rl_vk_window_surfaces(void);
  * the layout, the window provider when a backend is up (headless surfaces
  * otherwise), resolves imports of Vulkan commands to thunks and replaces the
  * Vulkan commands a module (the guest's vulkan module) defines. Without host
- * Vulkan it does nothing and the guest's own driver runs.
+ * Vulkan it does nothing and the guest's own driver runs. rl_switch_main adds
+ * it by itself when a module defines or imports vkGetInstanceProcAddr or
+ * vkGetDeviceProcAddr, so a program does not call rl_switch_add_hook for it.
  */
 RL_RUNTIME_API const rl_switch_hook *rl_vk_switch_hook(void);
 

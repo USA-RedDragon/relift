@@ -71,6 +71,13 @@ typedef struct rl_switch_hook {
     uint64_t (*import)(void *user, const char *symbol);
     /** @brief Host function that replaces a function a module defines, NULL to keep the module's code. */
     rl_fn (*replace)(void *user, const char *symbol);
+    /**
+     * @brief For a hook the loader adds by itself: called with the name of
+     * each dynamic symbol a module defines or imports; a non-zero result
+     * adds the hook to this run. NULL means the hook only runs when the
+     * program adds it with rl_switch_add_hook.
+     */
+    int (*wants)(void *user, const char *symbol);
     /** @brief Passed to every function. */
     void *user;
 } rl_switch_hook;
@@ -91,7 +98,14 @@ RL_RUNTIME_API int rl_switch_add_hook(const rl_switch_hook *h);
  * from RELIFT_DLC (see hos_fs.h), attaches a thread as the main thread and
  * runs the entry on a main stack. The main thread is the calling thread in a
  * headless run and a second host thread when a window backend is up
- * (rl_window_main), so the calling thread can run the window event loop.
+ * (rl_window_main; only when a hook runs, so only for a Vulkan program), so the calling thread can run the window event loop.
+ *
+ * Automatic hooks: before anything starts, the loader reads the dynamic
+ * symbols of every module and adds the Vulkan forwarding hook (vk/vk.h) when
+ * one is vkGetInstanceProcAddr or vkGetDeviceProcAddr, defined or imported.
+ * A program without those symbols starts no hook and no window backend, so
+ * it reserves nothing for Vulkan. A program may add the hook itself; it is
+ * never added twice.
  *
  * Linking: the loader reads each module's dynamic section (through MOD0).
  * A function the module defines whose name a hook replaces gets an
