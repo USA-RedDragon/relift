@@ -18,6 +18,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /** @brief Interrupt lines of the SM83: line n is bit n of the request and enable bytes, vector 0x40 + 8 * n. */
 #define RL_SM83_IRQ_LINES 5u
@@ -164,6 +165,18 @@ _Static_assert(offsetof(rl_ctx, disp_lo) == RL_SM83_COMMON_OFFSET + offsetof(rl_
 _Static_assert(offsetof(rl_ctx, disp_count) == RL_SM83_COMMON_OFFSET + offsetof(rl_ctx_common, disp_count), "common disp_count");
 _Static_assert(sizeof(rl_ctx_common) == offsetof(rl_ctx, time) - RL_SM83_COMMON_OFFSET, "common block size");
 _Static_assert(offsetof(rl_ctx, time) == RL_SM83_TIME_OFFSET, "time offset");
+
+/** @brief Guest memory accessors the lifted code uses: the guest's 64 KiB window is host memory at mem, little endian. */
+static inline uint8_t rl_ld8(const uint8_t *mem, uint64_t a) { return mem[a]; }
+static inline uint16_t rl_ld16(const uint8_t *mem, uint64_t a) { uint16_t v; memcpy(&v, mem + a, 2); return v; }
+static inline uint32_t rl_ld32(const uint8_t *mem, uint64_t a) { uint32_t v; memcpy(&v, mem + a, 4); return v; }
+static inline uint64_t rl_ld64(const uint8_t *mem, uint64_t a) { uint64_t v; memcpy(&v, mem + a, 8); return v; }
+static inline rl_u128 rl_ld128(const uint8_t *mem, uint64_t a) { rl_u128 v; memcpy(&v, mem + a, 16); return v; }
+static inline void rl_st8(uint8_t *mem, uint64_t a, uint8_t v) { mem[a] = v; }
+static inline void rl_st16(uint8_t *mem, uint64_t a, uint16_t v) { memcpy(mem + a, &v, 2); }
+static inline void rl_st32(uint8_t *mem, uint64_t a, uint32_t v) { memcpy(mem + a, &v, 4); }
+static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v) { memcpy(mem + a, &v, 8); }
+static inline void rl_st128(uint8_t *mem, uint64_t a, rl_u128 v) { memcpy(mem + a, &v, 16); }
 
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
 RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
