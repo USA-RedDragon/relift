@@ -6,6 +6,7 @@
 //! same states. Skipped with a note when clang is not on `PATH`.
 
 mod common;
+mod seq;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,8 @@ use relift_ir::interp::{FlatMemory, NoIntrinsics, run};
 use relift_ir::{Block, Flow, Next, Op};
 
 use common::{
-    BASE, CTX, Expect, Harness, Rng, SHARD, STATES, WORDS, diffs, fill, fnv, pack, slots, state,
+    BASE, CTX, Expect, Harness, Rng, SHARD, STATES, WORDS, diffs, fill, fnv, left_for_runtime,
+    pack, slots, state,
 };
 
 /// Whether the block leaves through a constant target equal to its own pc,
@@ -140,7 +142,7 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
     let mut bad = Vec::new();
     for (e, rec) in expect.iter().zip(got.as_chunks::<{ 4 + CTX }>().0) {
         let (pc, w, _) = &cases[e.case];
-        if rec[2] != 0 {
+        if left_for_runtime(rec) {
             skipped += 1;
             continue;
         }

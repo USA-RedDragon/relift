@@ -207,6 +207,14 @@ pub fn pack(s: &State, slots: &[Slot], mem: &[u8], out: &mut Vec<u64>) {
     out.extend_from_slice(&ctx);
 }
 
+/// The harness's event bit for a host fault inside the emitted code.
+pub const FAULT: u64 = 16;
+
+/// Whether the run needed the runtime, which the harness does not have.
+pub fn left_for_runtime(rec: &[u64]) -> bool {
+    rec[2] & !FAULT != 0
+}
+
 /// What the interpreter says one run does.
 pub struct Expect {
     pub case: usize,
@@ -219,6 +227,8 @@ pub const HARNESS: &str = r#"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <setjmp.h>
 #include <relift/a64/abi.h>
 #include <relift/a64/fp_slow.h>
 
@@ -228,6 +238,9 @@ extern const unsigned case_count;
 static uint64_t miss;
 static int missed;
 static uint64_t events;
+static sigjmp_buf jb;
+
+static void on_fault(int sig) { (void)sig; siglongjmp(jb, 1); }
 static uint8_t buf[WINDOW] __attribute__((aligned(64)));
 
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { missed = 1; miss = c->pc; } return RL_OK; }
@@ -305,6 +318,12 @@ int main(int argc, char **argv)
     FILE *out = fopen(argv[2], "wb");
     if (!in || !out)
         return 2;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_fault;
+    sa.sa_flags = SA_NODEFER;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
     static rl_ctx ctx;
     uint64_t rec[2 + CTX];
     uint8_t *mem = (uint8_t *)((uintptr_t)buf - (uintptr_t)BASE);
@@ -318,7 +337,12 @@ int main(int argc, char **argv)
         if (rec[0] >= case_count)
             return 3;
         uint64_t res[4 + CTX];
-        res[0] = (uint64_t)cases[rec[0]](&ctx, mem);
+        if (sigsetjmp(jb, 1) == 0) {
+            res[0] = (uint64_t)cases[rec[0]](&ctx, mem);
+        } else {
+            res[0] = UINT64_MAX;
+            events |= 16;
+        }
         res[1] = missed ? miss : UINT64_MAX;
         res[2] = events;
         res[3] = fnv();
@@ -482,7 +506,8 @@ impl Harness {
             .expect("the harness runs");
         assert!(
             run.status.success(),
-            "harness: {}",
+            "harness {}: {}",
+            run.status,
             String::from_utf8_lossy(&run.stderr)
         );
         read_words(&dir.join("out.bin"))
@@ -493,6 +518,9 @@ impl Harness {
 pub fn diffs(fe: &A64, slots: &[Slot], e: &Expect, rec: &[u64]) -> Vec<String> {
     let ctx = &rec[4..];
     let mut diffs = Vec::new();
+    if rec[2] & FAULT != 0 {
+        diffs.push("host fault".to_string());
+    }
     if rec[0] != 0 {
         diffs.push(format!("returned {}", rec[0]));
     }
