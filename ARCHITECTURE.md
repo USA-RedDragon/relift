@@ -179,5 +179,6 @@ cargo test --workspace
 cargo deny check
 ```
 
-`git config core.hooksPath .githooks` turns on the tracked hooks: pre-commit
-rustfmt-checks staged `.rs` files, pre-push runs the clippy gate.
+`pre-commit install --hook-type pre-commit --hook-type pre-push` turns on the
+hooks in `.pre-commit-config.yaml`: on commit, rustfmt and the generated
+config docs; on push, the clippy gate.
