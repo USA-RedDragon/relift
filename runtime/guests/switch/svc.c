@@ -8,7 +8,9 @@
  * w0, outputs from x1.
  */
 #include "ipc.h"
+#include "hid.h"
 #include "services.h"
+#include "vi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -523,6 +525,8 @@ void rl_hos_shutdown(void)
 {
     if (!hos.up)
         return;
+    rl_hid_stop();
+    rl_vi_stop();
     hos_kobj *drop[HOS_HANDLES];
     uint32_t n = 0;
     hos_audio_shutdown();
