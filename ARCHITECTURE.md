@@ -80,6 +80,9 @@ business, and the core sees only `relift_guest::Naming`.
 The C runtime (`runtime/core`, `runtime/switch`) and the public override
 header (`include/relift/override.h`) sit outside Cargo and do not exist yet.
 
+The contract between emitted C and that runtime is the header
+`runtime/include/relift/abi.h`; `docs/abi.md` gives the reason for each choice.
+
 ## 2. Structural rules and the tests that enforce them
 
 All of these run in `cargo test` and in CI's checks job.
