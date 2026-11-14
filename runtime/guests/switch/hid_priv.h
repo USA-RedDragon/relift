@@ -38,6 +38,8 @@ uint32_t hid_id_from_slot(uint32_t slot);
 
 /** @brief Returns the shared memory (creating it and starting the update thread on first use), with a new reference for the caller; NULL when out of memory. */
 hos_shmem *hid_core_open(void);
+/** @brief The npad button bits (HID_BTN_*, sticks as directions) the bound inputs of a player give in a snapshot. */
+uint64_t hid_core_pad_buttons(uint32_t player, const rl_input_snapshot *s);
 /** @brief Registers hid:sys, hid:dbg, irs and irs:sys. */
 void hid_sys_install(void);
 /** @brief Drops all state; called by the install function at rl_hos_init. */

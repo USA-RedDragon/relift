@@ -7,6 +7,8 @@
  */
 #include "hos_fs.h"
 #include "hos_mods.h"
+
+#include <relift/input.h>
 #include "tc.h"
 
 #include <errno.h>
@@ -747,6 +749,23 @@ TEST(mods_cheat_writes_ram_every_frame)
     memcpy(&v, heap + 0x44, 4);
     CHECK_EQ(v, 7);
     rl_hos_mods_set_keys(NULL, NULL);
+    memset(heap + 0x40, 0, 8);
+    {
+        rl_input_snapshot snap;
+        memset(&snap, 0, sizeof snap);
+        snap.pads[0].connected = true;
+        rl_input_publish(&snap);
+        rl_hos_mods_frame();
+        memcpy(&v, heap + 0x44, 4);
+        CHECK_EQ(v, 0);
+        snap.pads[0].buttons = 1u << RL_BTN_EAST;
+        rl_input_publish(&snap);
+        rl_hos_mods_frame();
+        memcpy(&v, heap + 0x44, 4);
+        CHECK_EQ(v, 7);
+        snap.pads[0].buttons = 0;
+        rl_input_publish(&snap);
+    }
     rl_hos_mods_clear();
     tree_remove(mod);
 }

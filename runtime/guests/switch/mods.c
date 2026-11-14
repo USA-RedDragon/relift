@@ -11,7 +11,10 @@
 
 #include "cheat_vm.h"
 #include "hos.h"
+#include "hid_priv.h"
 #include "hos_fs.h"
+
+#include <relift/input.h>
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -619,8 +622,12 @@ static uint64_t env_base(void *user, unsigned region)
 
 static uint64_t env_keys(void *user)
 {
+    if (g_keys)
+        return g_keys(g_keys_user);
     (void)user;
-    return g_keys ? g_keys(g_keys_user) : 0;
+    rl_input_snapshot s;
+    rl_input_sample(&s);
+    return s.pads[0].connected ? hid_core_pad_buttons(0, &s) : 0;
 }
 
 void rl_hos_mods_frame(void)

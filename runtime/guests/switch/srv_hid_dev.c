@@ -350,6 +350,16 @@ static rl_input_pad bound_pad(uint32_t player, const rl_input_snapshot *s, uint6
     return p;
 }
 
+uint64_t hid_core_pad_buttons(uint32_t player, const rl_input_snapshot *s)
+{
+    uint64_t buttons = 0;
+    if (player >= RL_INPUT_PADS)
+        return 0;
+    ports_init();
+    (void)bound_pad(player, s, &buttons);
+    return buttons;
+}
+
 static int32_t clamp_axis(int16_t v) { return v < -32767 ? -32767 : v; }
 
 static hid_six_axis_state six_state(bool connected)
