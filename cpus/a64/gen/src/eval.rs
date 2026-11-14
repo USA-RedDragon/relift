@@ -118,6 +118,15 @@ const FEATURES: &[&str] = &[
     "FEAT_AA32EL0",
 ];
 
+/// Stubs of `stubs.sail` whose empty body is right for a user-mode guest:
+/// hints with no architectural effect.
+const STUBS_OK: &[&str] = &[
+    "Hint_Yield",
+    "Hint_PreloadData",
+    "Hint_PreloadDataForWrite",
+    "Hint_PreloadInstr",
+];
+
 /// Whether a feature is in the fixed Armv8.0-A configuration.
 pub fn feature(name: &str) -> bool {
     FEATURES.contains(&name)
@@ -1568,6 +1577,9 @@ impl<'m> Gen<'m> {
     }
 
     fn invoke(&mut self, name: &str, args: Vec<V>, _tyvars: HashMap<String, V>) -> R<V> {
+        if self.m.stubs.contains(name) && !STUBS_OK.contains(&name) {
+            return fail(format!("calls the stub {name}"));
+        }
         let clauses = match self.m.func(name) {
             Some(Ok(c)) => c,
             Some(Err(e)) => return fail(format!("parse {name}: {e}")),

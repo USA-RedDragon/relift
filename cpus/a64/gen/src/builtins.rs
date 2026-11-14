@@ -206,9 +206,7 @@ impl Gen<'_> {
             | "prerr_bits"
             | "print"
             | "prerr"
-            | "sail_branch_announce"
-            | "sail_barrier"
-            | "Barrier_ISB" => V::Unit,
+            | "sail_branch_announce" => V::Unit,
             "__monomorphize" => arg(0)?.clone(),
             "undefined_bitvector" | "__UNKNOWN_bits" => {
                 let n = self.cw(arg(0)?)?;
