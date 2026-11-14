@@ -10,6 +10,7 @@
 #include "t.h"
 
 #include <stdlib.h>
+#include <unistd.h>
 
 /** @brief A request being built. */
 typedef struct creq {
@@ -637,4 +638,62 @@ TEST(ipc_trace)
     CHECK(h);
     uint32_t v;
     CHECK_EQ(add(c, h, 0, 1, 1, &v), 0);
+}
+
+/** @brief Starts capturing stderr into a pipe; returns the saved fd. */
+static int capture_begin(int fds[2])
+{
+    fflush(stderr);
+    if (pipe(fds) != 0)
+        return -1;
+    int saved = dup(2);
+    dup2(fds[1], 2);
+    return saved;
+}
+
+/** @brief Stops capturing, restores stderr and reads what was written into buf. */
+static void capture_end(int fds[2], int saved, char *buf, size_t n)
+{
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    close(fds[1]);
+    ssize_t got = read(fds[0], buf, n - 1);
+    buf[got > 0 ? got : 0] = 0;
+    close(fds[0]);
+}
+
+static int count_of(const char *hay, const char *needle)
+{
+    int n = 0;
+    for (const char *p = strstr(hay, needle); p; p = strstr(p + 1, needle))
+        n++;
+    return n;
+}
+
+TEST(unknown_command_logged_once)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = open_test_service(c, heap, false);
+    CHECK(h);
+    int fds[2];
+    char out[4096];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    cres r[4];
+    for (int i = 0; i < 3; i++)
+        r[i] = call(c, h, &(creq){ .cmd = 55 }, false);
+    r[3] = call(c, h, &(creq){ .cmd = 56 }, false);
+    for (int i = 0; i < 2; i++)
+        t_svc(c, 0x7d, 0, 0, 0, 0, 0, 0);
+    capture_end(fds, saved, out, sizeof out);
+    for (int i = 0; i < 4; i++) {
+        CHECK_EQ(r[i].svc_rc, 0);
+        CHECK_EQ(r[i].result, SF_RESULT_UNKNOWN_COMMAND);
+    }
+    CHECK_EQ(count_of(out, "unknown command 55"), 1);
+    CHECK_EQ(count_of(out, "unknown command 56"), 1);
+    CHECK_EQ(count_of(out, "unimplemented svc 0x7d"), 1);
+    CHECK_EQ(c->x[0], KR_NOT_IMPLEMENTED);
 }
