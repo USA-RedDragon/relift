@@ -17,9 +17,27 @@ LEAF = "Instruction.Instruction"
 GROUP = "Instruction.InstructionGroup"
 ALIAS = "Instruction.InstructionAlias"
 ISET = "Instruction.InstructionSet"
-# Features the Sail semantics test (so a template can branch on them) but no
-# AARCHMRS encoding condition names.
-EXTRA_FEATURES = ["FEAT_PMULL"]
+# Features the Sail semantics test (so a template can branch on them) or a
+# CPU description names, but no AARCHMRS encoding condition names.
+EXTRA_FEATURES = [
+    "FEAT_PMULL",
+    "FEAT_FPAC",
+    "FEAT_FPACCOMBINE",
+    "FEAT_PAuth2",
+    "FEAT_EPAC",
+    "FEAT_CONSTPACFIELD",
+    "FEAT_PACIMP",
+    "FEAT_PACQARMA3",
+    "FEAT_PACQARMA5",
+    "FEAT_LSE2",
+    "FEAT_DIT",
+    "FEAT_SSBS",
+    "FEAT_DPB",
+    "FEAT_DPB2",
+    "FEAT_ECV",
+    "FEAT_CSV2",
+    "FEAT_CSV3",
+]
 IDENT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 

@@ -12,8 +12,8 @@ The generator prints the number of leaves it emitted (4429 for release
 2026-09) and fails on any encodeset, value or condition shape it does not
 understand. Every field constraint and feature test (`IsFeatureImplemented`)
 becomes a predicate in `generated::condition` over the word and the CPU's
-`Features`; the feature names become the `Feature` enum (plus `FEAT_PMULL`,
-which only the Sail semantics test).
+`Features`; the feature names become the `Feature` enum (plus
+`EXTRA_FEATURES`, which only the Sail semantics or CPU descriptions name).
 
 # A64 lifting templates from Sail
 
