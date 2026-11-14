@@ -7,7 +7,6 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-relift-diff = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }
 

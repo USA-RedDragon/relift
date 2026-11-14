@@ -187,8 +187,8 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-cpu-a64",
         band: 2,
-        why: "the ARM64 frontend, over the IR and the guest contract only; the diff protocol for the interpreter engine of `relift diff`",
-        normal: &["relift-diff", "relift-guest", "relift-ir"],
+        why: "the ARM64 frontend, over the IR and the guest contract only",
+        normal: &["relift-guest", "relift-ir"],
         dev: NONE,
         build: NONE,
     },

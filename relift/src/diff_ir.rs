@@ -1,5 +1,6 @@
-//! The ARM64 side of `relift diff`: the register names the protocol uses and
-//! an engine that runs a function in the `relift-ir` interpreter.
+//! The interpreter engine of `relift diff`: the ARM64 register names the
+//! protocol uses and an engine that runs a function in the `relift-ir`
+//! interpreter.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -9,10 +10,10 @@ use relift_diff::{Engine, Outcome, Pager, Reg, State as Case, Status};
 use relift_ir::interp::{self, Fault, GuestMemory, Intrinsics, State};
 use relift_ir::{Block, Flow};
 
-use crate::decode::Features;
-use crate::lift;
-use crate::lift::system::{self, TRAP_BRK};
-use crate::regs;
+use relift_cpu_a64::decode::Features;
+use relift_cpu_a64::lift;
+use relift_cpu_a64::lift::system::{self, TRAP_BRK};
+use relift_cpu_a64::regs;
 
 /// The registers a state carries, in report order: `x0` to `x30`, `sp`,
 /// `nzcv` (the MRS layout), `fpcr`, `tpidr_el0`, `tpidrro_el0`, then `v0`

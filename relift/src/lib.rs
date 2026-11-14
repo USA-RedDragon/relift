@@ -7,6 +7,7 @@ pub mod coverage;
 pub mod dev;
 pub mod devsock;
 pub mod diff;
+pub mod diff_ir;
 pub mod fpflags;
 pub mod hints;
 pub mod import;

@@ -8,7 +8,6 @@ use std::cell::Cell;
 use std::process::ExitCode;
 use std::rc::Rc;
 
-use relift_cpu_a64::diff::names;
 use relift_diff::{Engine, Outcome, Pager, Reg, State, Status, Wire, serve};
 use unicorn_engine::RegisterARM64 as R;
 use unicorn_engine::unicorn_const::{Arch, HookType, MemType, Mode, Prot, uc_error};
@@ -110,14 +109,17 @@ fn read_reg(uc: &Unicorn<'_, ()>, name: &str) -> Result<u128, uc_error> {
     }
 }
 
+fn names() -> Vec<String> {
+    let mut n: Vec<String> = (0..31).map(|i| format!("x{i}")).collect();
+    n.extend(["sp", "nzcv", "fpcr", "tpidr_el0", "tpidrro_el0"].map(String::from));
+    n.extend((0..32).map(|i| format!("v{i}")));
+    n
+}
+
 struct UnicornEngine;
 
 impl UnicornEngine {
-    fn run_in(
-        state: &State,
-        pager: &mut Pager<'_>,
-        limit: u64,
-    ) -> Result<(Status, Vec<Reg>, Option<(u64, u64)>), uc_error> {
+    fn run_in(state: &State, pager: &mut Pager<'_>, limit: u64) -> Result<Outcome, uc_error> {
         let mut uc = Unicorn::new(Arch::ARM64, Mode::ARM)?;
         uc.ctl_set_cpu_model(CPU_ARM64_MAX)?;
         uc.reg_write(R::CPACR_EL1, 3 << 20)?;
@@ -201,19 +203,19 @@ impl UnicornEngine {
             }
         }
         let low = low.get();
-        Ok((status, regs, (low < sp0).then_some((low, sp0))))
+        Ok(Outcome {
+            status,
+            steps: 0,
+            regs,
+            scratch: (low < sp0).then_some((low, sp0)),
+        })
     }
 }
 
 impl Engine for UnicornEngine {
     fn run(&mut self, state: &State, pager: &mut Pager<'_>, limit: u64) -> Outcome {
         match UnicornEngine::run_in(state, pager, limit) {
-            Ok((status, regs, scratch)) => Outcome {
-                status,
-                steps: 0,
-                regs,
-                scratch,
-            },
+            Ok(outcome) => outcome,
             Err(e) => Outcome {
                 status: Status::Failed(format!("unicorn: {e:?}")),
                 steps: 0,

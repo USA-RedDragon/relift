@@ -7,12 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::diff::IrEngine;
 use relift_diff::{Wire, serve as serve_wire};
 use relift_switch::program::c_module;
 use relift_switch_names::fallback_name;
 
 use crate::build::{Mode, build_project};
+use crate::diff_ir::IrEngine;
 use crate::import::BoxError;
 use crate::settings::Settings;
 use crate::ui::Ui;

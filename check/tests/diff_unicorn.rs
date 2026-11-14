@@ -3,7 +3,7 @@
 //! driver says the lifted code left, and a mismatch against wrong ones.
 
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 const MOVZ_X1_17: u32 = 0xd280_0221;
 const ADD_X0_X0_X1: u32 = 0x8b01_0000;
@@ -14,7 +14,7 @@ fn drive(after: &str) -> (String, String) {
     for (i, w) in [MOVZ_X1_17, ADD_X0_X0_X1, RET].iter().enumerate() {
         page[i * 4..i * 4 + 4].copy_from_slice(&w.to_le_bytes());
     }
-    let mut child = Command::new(env!("CARGO_BIN_EXE_relift-diff-unicorn"))
+    let mut child = relift_proc::command(env!("CARGO_BIN_EXE_relift-diff-unicorn"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
