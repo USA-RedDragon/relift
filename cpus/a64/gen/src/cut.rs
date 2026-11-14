@@ -78,6 +78,10 @@ pub const CUT: &[&str] = &[
     "SpeculationBarrier",
     "SpeculativeStoreBypassBarrierToVA",
     "SpeculativeStoreBypassBarrierToPA",
+    "FPRecipEstimate",
+    "FPRSqrtEstimate",
+    "FPRecipStepFused",
+    "FPRSqrtStepFused",
     "FPToFixed",
     "FixedToFP",
     "FPConvert",
@@ -210,6 +214,36 @@ impl Gen<'_> {
         };
         self.line("st.assume_default_fpcr();".into());
         Ok(self.dy(k, call))
+    }
+
+    fn fp_estimate(&mut self, name: &str, a: &[V]) -> R<V> {
+        if name.ends_with("Estimate") {
+            self.fp_fpcr_ok(name, &a[1])?;
+        }
+        let x = self.bitify(&a[0])?;
+        let w = x
+            .width()
+            .ok_or_else(|| crate::eval::err("FP operand width"))?;
+        if w != 32 && w != 64 {
+            return fail(format!("{name} on {w} bits"));
+        }
+        let xs = self.dx(&x)?.to_string();
+        let call = match name {
+            "FPRecipEstimate" => format!("rt::Fp::new({w}).recip_estimate(b, {xs})"),
+            "FPRSqrtEstimate" => format!("rt::Fp::new({w}).rsqrt_estimate(b, {xs})"),
+            _ => {
+                let y = self.bitify(&a[1])?;
+                let ys = self.dx(&y)?.to_string();
+                let m = if name == "FPRecipStepFused" {
+                    "recip_step"
+                } else {
+                    "rsqrt_step"
+                };
+                format!("rt::Fp::new({w}).{m}(b, {xs}, {ys})")
+            }
+        };
+        self.line("st.assume_default_fpcr();".into());
+        Ok(self.dy(K::Bits(w), call))
     }
 
     fn fp_fpcr_ok(&self, name: &str, fpcr: &V) -> R<()> {
@@ -510,6 +544,9 @@ impl Gen<'_> {
                 ])
             }
             n if FP_CUT.contains(&n) => return self.fp_cut(name, a).map(Some),
+            "FPRecipEstimate" | "FPRSqrtEstimate" | "FPRecipStepFused" | "FPRSqrtStepFused" => {
+                return self.fp_estimate(name, a).map(Some);
+            }
             "FPToFixed" | "FixedToFP" | "FPConvert" | "FPConvert__1" | "FPRoundInt" => {
                 return self.fp_convert(name, a).map(Some);
             }
