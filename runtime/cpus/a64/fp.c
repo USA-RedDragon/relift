@@ -826,11 +826,31 @@ static uint64_t fp_from_fixed(fpenv *v, const fmt *to, uint64_t a, unsigned from
     return round_pack(v, to, sign, x, -(int)fbits, rm_arg(v, rmode));
 }
 
-static void commit(const fpenv *v, uint32_t *fpsr)
+#if defined(__x86_64__)
+void rl_fp_host_raise_any(uint32_t f)
+{
+    if ((f & 0x0Cu) && !(f & 0x10u)) {
+        _mm_setcsr(_mm_getcsr() | (f & 1u) | ((f & 0x1Eu) << 1));
+        return;
+    }
+    if (f & 0x01u)
+        RL_FP_X86_RAISE("divss", 0.0f, 0.0f);
+    if (f & 0x02u)
+        RL_FP_X86_RAISE("divss", 1.0f, 0.0f);
+    if (f & 0x04u)
+        RL_FP_X86_RAISE("mulss", 0x1p127f, 0x1p127f);
+    if (f & 0x08u)
+        RL_FP_X86_RAISE("mulss", 0x1p-100f, 0x1p-100f);
+    if (f & 0x10u)
+        RL_FP_X86_RAISE("addss", 1.0f, 0x1p-100f);
+}
+#endif
+
+static inline void commit(const fpenv *v, uint32_t *fpsr)
 {
     if (fpsr)
         *fpsr |= v->flags;
-    else if (v->flags && rl_a64_fp_flags())
+    else if (v->flags && rl_a64_fp_flags_on)
         rl_fp_host_raise(v->flags);
 }
 

@@ -12,7 +12,7 @@
 #include <string.h>
 
 static int g_exact = -1;
-static int g_fp_flags;
+int rl_a64_fp_flags_on;
 
 int rl_a64_exact_flags(void)
 {
@@ -23,9 +23,9 @@ int rl_a64_exact_flags(void)
     return g_exact;
 }
 
-int rl_a64_fp_flags(void) { return g_fp_flags; }
+int rl_a64_fp_flags(void) { return rl_a64_fp_flags_on; }
 
-void rl_a64_set_fp_flags(int on) { g_fp_flags = on != 0; }
+void rl_a64_set_fp_flags(int on) { rl_a64_fp_flags_on = on != 0; }
 
 void rl_host_set_fpcr(uint32_t fpcr)
 {
@@ -53,7 +53,7 @@ static void ctx_init(rl_ctx *c) { c->fpcr = RL_FPCR_DEFAULT | (rl_a64_exact_flag
 static void bind(rl_ctx *c)
 {
     rl_host_set_fpcr(c->fpcr);
-    if (g_fp_flags)
+    if (rl_a64_fp_flags_on)
         rl_fp_host_clear();
 }
 

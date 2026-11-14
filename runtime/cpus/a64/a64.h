@@ -27,12 +27,14 @@ RL_RUNTIME_API const rl_cpu_desc *rl_a64_cpu(void);
 RL_RUNTIME_API int rl_a64_exact_flags(void);
 /** @brief Whether FPSR flags are produced on host hardware (the build's FPSR census found a usable read). */
 RL_RUNTIME_API int rl_a64_fp_flags(void);
+/** @brief What rl_a64_fp_flags returns, for the runtime's per-operation checks. */
+extern int rl_a64_fp_flags_on;
 /** @brief Turns FPSR flag production on; program.c calls it before the program starts. */
 RL_RUNTIME_API void rl_a64_set_fp_flags(int on);
 /** @brief Saves and clears the host FP flags at a runtime entry that may do host FP work, in flag mode. */
 static inline uint32_t rl_a64_flags_enter(void)
 {
-    if (!rl_a64_fp_flags())
+    if (!rl_a64_fp_flags_on)
         return 0;
     uint32_t f = rl_fp_host_flags();
     rl_fp_host_clear();
@@ -41,7 +43,7 @@ static inline uint32_t rl_a64_flags_enter(void)
 /** @brief Restores the flags rl_a64_flags_enter saved when leaving the runtime entry. */
 static inline void rl_a64_flags_leave(uint32_t f)
 {
-    if (rl_a64_fp_flags()) {
+    if (rl_a64_fp_flags_on) {
         rl_fp_host_clear();
         rl_fp_host_raise(f);
     }

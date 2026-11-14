@@ -29,6 +29,7 @@ int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...)
 
 /* Flags go to the context here, never to the host. */
 int rl_a64_fp_flags(void) { return 0; }
+int rl_a64_fp_flags_on;
 
 static uint8_t g_window[DATA_SIZE], g_mem[DATA_SIZE];
 
