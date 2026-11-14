@@ -12,6 +12,8 @@
 
 #include "hid.h"
 
+#include <relift/ports.h>
+
 #include <unistd.h>
 
 typedef struct env {
@@ -987,5 +989,63 @@ TEST(hid_stop_is_idempotent_and_restartable)
     tc_put64(&q, 0x1234);
     CHECK_EQ(tc_sub(e.c, e.hid, q, &ar2), 0);
     CHECK(rl_hid_is_active());
+    rl_hid_stop();
+}
+
+TEST(hid_reports_bound_keyboard_inputs)
+{
+    env e;
+    CHECK(start(&e));
+    CHECK_EQ(cmd_aruid(&e, 103), 0);
+    rl_hid_update_now();
+    CHECK(rl_ports_apply_setting("bind.p1.a", "key:x"));
+    CHECK(rl_ports_apply_setting("bind.p1.lstick_x", "key:left-,key:right+"));
+    CHECK(rl_ports_apply_setting("bind.p1.zr", "gamepad:south"));
+    rl_input_snapshot s = blank();
+    s.keys[0] |= 1ull << 27;
+    s.keys[1] |= 1ull << (79 % 64);
+    s.pads[0].buttons = (1u << RL_BTN_EAST) | (1u << RL_BTN_SOUTH);
+    publish(&s);
+    rl_hid_update_now();
+    hid_npad_state st[17];
+    CHECK_EQ(GET_STATES(e.mem->npads[0].state.full_key, st, 17), 16);
+    CHECK_EQ(st[0].buttons, HID_BTN_ZR | HID_BTN_B | HID_BTN_A | HID_BTN_STICK_L_RIGHT);
+    CHECK_EQ(st[0].l.x, 32767);
+    rl_hid_stop();
+}
+
+TEST(hid_each_player_reads_its_own_port)
+{
+    env e;
+    CHECK(start(&e));
+    CHECK_EQ(cmd_aruid(&e, 103), 0);
+    rl_input_snapshot s = blank();
+    s.pads[1].connected = true;
+    s.pads[1].buttons = 1u << RL_BTN_NORTH;
+    publish(&s);
+    rl_hid_update_now();
+    hid_npad_state p1[17], p2[17];
+    CHECK(GET_STATES(e.mem->npads[0].state.full_key, p1, 17) >= 1);
+    CHECK(GET_STATES(e.mem->npads[1].state.full_key, p2, 17) >= 1);
+    CHECK_EQ(p1[0].buttons, 0);
+    CHECK_EQ(p2[0].buttons, HID_BTN_X);
+    CHECK(rl_ports_apply_setting("bind.p2.x", "gamepad1:south"));
+    s.pads[0].buttons = 1u << RL_BTN_SOUTH;
+    publish(&s);
+    rl_hid_update_now();
+    CHECK(GET_STATES(e.mem->npads[1].state.full_key, p2, 17) >= 1);
+    CHECK_EQ(p2[0].buttons, HID_BTN_X);
+    rl_hid_stop();
+}
+
+TEST(hid_declares_eight_players_and_touch)
+{
+    env e;
+    CHECK(start(&e));
+    CHECK_EQ(cmd_aruid(&e, 103), 0);
+    rl_hid_update_now();
+    CHECK_EQ(rl_ports_count(), 9);
+    CHECK(rl_ports_find("p8", "zl") != RL_PORT_NONE);
+    CHECK(rl_ports_find("touch", "press") != RL_PORT_NONE);
     rl_hid_stop();
 }

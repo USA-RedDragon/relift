@@ -274,51 +274,80 @@ static uint32_t desired_style(uint32_t slot, const rl_input_snapshot *s)
     return 0;
 }
 
-static uint64_t map_buttons(const rl_input_pad *p)
+enum {
+    PORT_A, PORT_B, PORT_X, PORT_Y, PORT_LSTICK, PORT_RSTICK, PORT_L, PORT_R, PORT_ZL, PORT_ZR,
+    PORT_PLUS, PORT_MINUS, PORT_UP, PORT_RIGHT, PORT_DOWN, PORT_LEFT,
+    PORT_LX, PORT_LY, PORT_RX, PORT_RY, PORT_CONTROLS
+};
+
+static const struct {
+    const char *id;
+    uint64_t button;
+} k_port_controls[PORT_CONTROLS] = {
+    { "a", HID_BTN_A }, { "b", HID_BTN_B }, { "x", HID_BTN_X }, { "y", HID_BTN_Y },
+    { "lstick", HID_BTN_STICK_L }, { "rstick", HID_BTN_STICK_R }, { "l", HID_BTN_L },
+    { "r", HID_BTN_R }, { "zl", HID_BTN_ZL }, { "zr", HID_BTN_ZR }, { "plus", HID_BTN_PLUS },
+    { "minus", HID_BTN_MINUS }, { "dpad_up", HID_BTN_UP }, { "dpad_right", HID_BTN_RIGHT },
+    { "dpad_down", HID_BTN_DOWN }, { "dpad_left", HID_BTN_LEFT }, { "lstick_x", 0 },
+    { "lstick_y", 0 }, { "rstick_x", 0 }, { "rstick_y", 0 },
+};
+
+static rl_control_ref g_port_ref[RL_INPUT_PADS][PORT_CONTROLS];
+static bool g_ports_ready;
+
+static void ports_init(void)
 {
-    static const struct {
-        uint32_t src;
-        uint32_t dst;
-    } map[] = {
-        { 1u << RL_BTN_SOUTH, HID_BTN_B },
-        { 1u << RL_BTN_EAST, HID_BTN_A },
-        { 1u << RL_BTN_WEST, HID_BTN_Y },
-        { 1u << RL_BTN_NORTH, HID_BTN_X },
-        { 1u << RL_BTN_LEFT_STICK, HID_BTN_STICK_L },
-        { 1u << RL_BTN_RIGHT_STICK, HID_BTN_STICK_R },
-        { 1u << RL_BTN_LEFT_SHOULDER, HID_BTN_L },
-        { 1u << RL_BTN_RIGHT_SHOULDER, HID_BTN_R },
-        { 1u << RL_BTN_LEFT_TRIGGER, HID_BTN_ZL },
-        { 1u << RL_BTN_RIGHT_TRIGGER, HID_BTN_ZR },
-        { 1u << RL_BTN_START, HID_BTN_PLUS },
-        { 1u << RL_BTN_BACK, HID_BTN_MINUS },
-        { 1u << RL_BTN_DPAD_UP, HID_BTN_UP },
-        { 1u << RL_BTN_DPAD_RIGHT, HID_BTN_RIGHT },
-        { 1u << RL_BTN_DPAD_DOWN, HID_BTN_DOWN },
-        { 1u << RL_BTN_DPAD_LEFT, HID_BTN_LEFT },
-    };
+    if (g_ports_ready)
+        return;
+    rl_ports_declare(rl_switch_ports, rl_switch_ports_count);
+    for (uint32_t p = 0; p < RL_INPUT_PADS; p++) {
+        char id[3] = { 'p', (char)('1' + p), 0 };
+        for (uint32_t c = 0; c < PORT_CONTROLS; c++)
+            g_port_ref[p][c] = rl_ports_find(id, k_port_controls[c].id);
+    }
+    g_ports_ready = true;
+}
+
+static int16_t axis_value(float v)
+{
+    float f = v * 32767.0f;
+    long r = (long)(f < 0 ? f - 0.5f : f + 0.5f);
+    return (int16_t)(r < -32767 ? -32767 : r > 32767 ? 32767 : r);
+}
+
+/** The pad of a player as the bound inputs report it. */
+static rl_input_pad bound_pad(uint32_t player, const rl_input_snapshot *s, uint64_t *buttons)
+{
+    rl_input_pad p;
+    memset(&p, 0, sizeof p);
+    p.connected = s->pads[player].connected;
     uint64_t b = 0;
-    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
-        if (p->buttons & map[i].src)
-            b |= map[i].dst;
+    for (uint32_t c = 0; c < PORT_LX; c++)
+        if (rl_ports_eval(g_port_ref[player][c], s) > 0.5f)
+            b |= k_port_controls[c].button;
+    p.lx = axis_value(rl_ports_eval(g_port_ref[player][PORT_LX], s));
+    p.ly = axis_value(rl_ports_eval(g_port_ref[player][PORT_LY], s));
+    p.rx = axis_value(rl_ports_eval(g_port_ref[player][PORT_RX], s));
+    p.ry = axis_value(rl_ports_eval(g_port_ref[player][PORT_RY], s));
     const int32_t th = 32767 / 2;
-    if (p->lx < -th)
+    if (p.lx < -th)
         b |= HID_BTN_STICK_L_LEFT;
-    if (p->lx > th)
+    if (p.lx > th)
         b |= HID_BTN_STICK_L_RIGHT;
-    if (p->ly < -th)
+    if (p.ly < -th)
         b |= HID_BTN_STICK_L_DOWN;
-    if (p->ly > th)
+    if (p.ly > th)
         b |= HID_BTN_STICK_L_UP;
-    if (p->rx < -th)
+    if (p.rx < -th)
         b |= HID_BTN_STICK_R_LEFT;
-    if (p->rx > th)
+    if (p.rx > th)
         b |= HID_BTN_STICK_R_RIGHT;
-    if (p->ry < -th)
+    if (p.ry < -th)
         b |= HID_BTN_STICK_R_DOWN;
-    if (p->ry > th)
+    if (p.ry > th)
         b |= HID_BTN_STICK_R_UP;
-    return b;
+    *buttons = b;
+    return p;
 }
 
 static int32_t clamp_axis(int16_t v) { return v < -32767 ? -32767 : v; }
@@ -373,11 +402,14 @@ static void npad_write_six(hid_npad_internal *n)
     six_push(&n->joy_dual_right_six, n->style_set == HID_STYLE_JOY_DUAL ? live : idle);
 }
 
-static void npad_write_input(hid_npad_internal *n, const rl_input_pad *p)
+static void npad_write_input(hid_npad_internal *n, uint32_t player, const rl_input_snapshot *s)
 {
+    uint64_t buttons;
+    const rl_input_pad bp = bound_pad(player, s, &buttons);
+    const rl_input_pad *p = &bp;
     hid_npad_state st;
     memset(&st, 0, sizeof st);
-    st.buttons = map_buttons(p);
+    st.buttons = buttons;
     st.l.x = clamp_axis(p->lx);
     st.l.y = clamp_axis(p->ly);
     st.r.x = clamp_axis(p->rx);
@@ -429,6 +461,7 @@ static void npad_write_disconnected(hid_npad_internal *n)
 
 static uint32_t update_npads(const rl_input_snapshot *s)
 {
+    ports_init();
     uint32_t changed = 0;
     for (uint32_t slot = 0; slot < NPAD_SLOTS; slot++) {
         if (npad_setup(slot, desired_style(slot, s)))
@@ -438,8 +471,7 @@ static uint32_t update_npads(const rl_input_snapshot *s)
             npad_write_disconnected(n);
             continue;
         }
-        const rl_input_pad *p = slot == HID_NPAD_HANDHELD ? &s->pads[0] : &s->pads[slot];
-        npad_write_input(n, p);
+        npad_write_input(n, slot == HID_NPAD_HANDHELD ? 0 : slot, s);
     }
     npad_write_disconnected(&g.mem->npads[9].state);
     return changed;

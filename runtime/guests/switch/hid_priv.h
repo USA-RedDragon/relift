@@ -6,6 +6,7 @@
 #ifndef RELIFT_HID_PRIV_H
 #define RELIFT_HID_PRIV_H
 
+#include <relift/ports.h>
 #include "hid.h"
 #include "services.h"
 
@@ -74,5 +75,9 @@ uint8_t hid_core_footer_type(uint32_t slot);
 /** @brief Last vibration values per slot and position, in/out (4 floats). */
 void hid_core_set_vibration(uint32_t slot, uint32_t position, const float v[4]);
 void hid_core_get_vibration(uint32_t slot, uint32_t position, float v[4]);
+
+/** @brief The native ports of the Switch (generated: ports_gen.c). */
+extern const rl_port_decl rl_switch_ports[];
+extern const uint32_t rl_switch_ports_count;
 
 #endif
