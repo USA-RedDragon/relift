@@ -231,6 +231,28 @@ static bool chain_has(const void *chain, VkStructureType s)
     return false;
 }
 
+static bool drop_optional_dedication(vkf_call *k, VkDevice dev, VkMemoryAllocateInfo *ai)
+{
+    for (VkBaseOutStructure *prev = (VkBaseOutStructure *)ai; prev->pNext; prev = prev->pNext) {
+        VkBaseOutStructure *b = prev->pNext;
+        if (b->sType != VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO)
+            continue;
+        const VkMemoryDedicatedAllocateInfo *ded = (const VkMemoryDedicatedAllocateInfo *)b;
+        PFN_vkGetBufferMemoryRequirements2 req2 = VKF_FN(k->fns, vkGetBufferMemoryRequirements2);
+        if (ded->image || !ded->buffer || !req2)
+            return false;
+        VkMemoryDedicatedRequirements dr = { .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS };
+        VkMemoryRequirements2 mr = { .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2, .pNext = &dr };
+        VkBufferMemoryRequirementsInfo2 ri = { .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2, .buffer = ded->buffer };
+        req2(dev, &ri, &mr);
+        if (dr.requiresDedicatedAllocation)
+            return false;
+        prev->pNext = b->pNext;
+        return true;
+    }
+    return true;
+}
+
 int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -253,8 +275,8 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     r->mode = d->map_mode;
     bool visible = r->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
     if (visible && r->mode == RL_VK_MAP_IMPORT) {
-        bool plain = !chain_has(ai->pNext, VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO) &&
-                     !chain_has(ai->pNext, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO);
+        bool plain = !chain_has(ai->pNext, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO) &&
+                     drop_optional_dedication(&k, dev, ai);
         uint64_t align = d->import_align ? d->import_align : 4096;
         uint64_t size = (r->size + align - 1) & ~(align - 1);
         uint64_t va = plain ? vkf_va_alloc(size, align) : 0;

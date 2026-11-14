@@ -598,6 +598,61 @@ TEST(vk_mapped_memory_is_guest_memory)
     G("vkDestroyInstance", g_inst, 0);
 }
 
+/** @brief In import mode a dedicated buffer allocation is still backed by guest pages: the host sees guest writes with no sync. */
+TEST(vk_import_backs_dedicated_buffer_memory)
+{
+    setenv(RL_VK_MAP_ENV, "import", 1);
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint32_t qf = queue_family(pds[0], VK_QUEUE_GRAPHICS_BIT);
+    uint64_t dev = make_device(pds[0], qf, NULL, 0);
+    CHECK(dev != 0);
+    if (rl_vk_device_map_mode(dev) != RL_VK_MAP_IMPORT) {
+        fprintf(stderr, "  skipped: the device does not import host pointers\n");
+        G("vkDestroyDevice", dev, 0);
+        G("vkDestroyInstance", g_inst, 0);
+        return;
+    }
+    enum { SIZE = 1 << 16 };
+    VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = SIZE, .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT };
+    uint64_t gb = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateBuffer", dev, gput(&bci, sizeof bci), 0, gb)), VK_SUCCESS);
+    uint64_t buf = g64(gb);
+    uint64_t greq = galloc(sizeof(VkMemoryRequirements));
+    G("vkGetBufferMemoryRequirements", dev, buf, greq);
+    VkMemoryRequirements req;
+    memcpy(&req, g_mem + greq, sizeof req);
+    uint32_t t = memory_type(pds[0], req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    CHECK(t != UINT32_MAX);
+    VkMemoryDedicatedAllocateInfo ded = { .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, .buffer = (VkBuffer)(uintptr_t)buf };
+    uint64_t gded = gput(&ded, sizeof ded);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = GP(gded), .allocationSize = req.size, .memoryTypeIndex = t };
+    uint64_t gm = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateMemory", dev, gput(&mai, sizeof mai), 0, gm)), VK_SUCCESS);
+    uint64_t mem = g64(gm);
+    CHECK_EQ(VKR(G("vkBindBufferMemory", dev, buf, mem, 0)), VK_SUCCESS);
+    uint64_t gptr = galloc(8);
+    CHECK_EQ(VKR(G("vkMapMemory", dev, mem, 0, VK_WHOLE_SIZE, 0, gptr)), VK_SUCCESS);
+    uint64_t ptr = g64(gptr);
+    memset(g_mem + ptr, 0x5a, SIZE);
+
+    vkf_obj *o = vkf_obj_of(dev, VKG_KIND_VkDevice);
+    CHECK(o != NULL);
+    void *host = NULL;
+    CHECK_EQ(VKF_FN(o->fns, vkMapMemory)(o->host, (VkDeviceMemory)(uintptr_t)mem, 0, VK_WHOLE_SIZE, 0, &host), VK_SUCCESS);
+    CHECK(host == g_mem + ptr);
+    CHECK_EQ(((uint8_t *)host)[SIZE - 1], 0x5a);
+    VKF_FN(o->fns, vkUnmapMemory)(o->host, (VkDeviceMemory)(uintptr_t)mem);
+
+    G("vkUnmapMemory", dev, mem);
+    G("vkDestroyBuffer", dev, buf, 0);
+    G("vkFreeMemory", dev, mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+}
+
 /**
  * @brief A shadow allocation keeps the guest's writes made while a submit is in
  * flight: the device fills one half, the guest rewrites the other half between

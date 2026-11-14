@@ -105,7 +105,9 @@ device (spike 0.5; `RELIFT_VK_MAP=placed|import|shadow` forces one):
 2. Import (`VK_EXT_external_memory_host`): a host-visible allocation is created
    on guest pages, aligned to `minImportedHostPointerAlignment` (16 KiB on Apple
    M2) and the host page; buffers get the matching external-memory flag.
-   Dedicated and exported allocations fall back to shadow.
+   A dedicated buffer allocation drops the dedication when the host does not
+   require it and is imported; dedicated image and exported allocations fall
+   back to shadow.
 3. Shadow: the guest gets its own pages, plus a third copy of the bytes both
    sides held at the last synchronization. Map copies host to guest; every
    submit and present moves the bytes the guest changed to the host; every
