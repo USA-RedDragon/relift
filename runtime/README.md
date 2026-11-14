@@ -69,9 +69,14 @@ rule must match its own sample, and the denylist must hit files there.
 
 ## Known limits
 
-- Shared memory is mapped by mapping the same host pages again, so on 16 KiB
-  host pages its guest address and size must be 16 KiB aligned; other
-  mappings fail with an invalid address result and a one-time report.
+- Shared memory is mapped by mapping the same host pages again. On 16 KiB
+  host pages a view that does not fill its host pages needs the rest of
+  them free: the kernel reserves that rest (svcQueryMemory reports it as
+  inaccessible, and guest access to it is not trapped) and refuses with an
+  invalid memory state result and a one-time report when another mapping
+  is already there. The object's bytes sit at the host-page offset of its
+  first view, so a second view at another offset is refused while the first
+  is mapped.
 - The Switch guest does not support 32-bit address spaces (the core does).
 - Guest threads run on host threads at host priority; guest priorities order
   the kernel's wait queues only.

@@ -167,21 +167,60 @@ TEST(map_memory_copy_semantics)
     CHECK_EQ(t_svc(c, SVC_UNMAP_MEMORY, dst, src, size, 0, 0, 0), KR_INVALID_MEM_STATE);
 }
 
+static uint32_t shmem_handle(hos_shmem *s)
+{
+    uint32_t h = 0;
+    hos_lock();
+    if (hos_handle_add(&s->obj, &h) != 0)
+        h = 0;
+    hos_unlock();
+    hos_kobj_unref(&s->obj);
+    return h;
+}
+
 TEST(shared_memory_16k_host_pages)
 {
     rl_ctx *c = boot_pages(0x4000);
+    uint64_t heap = t_heap(c, 0x200000);
     hos_shmem *s = rl_hos_shmem_create(0x4000, HOS_PERM_RW);
     CHECK(s);
-    uint32_t h;
-    hos_lock();
-    CHECK_EQ(hos_handle_add(&s->obj, &h), 0);
-    hos_unlock();
-    hos_kobj_unref(&s->obj);
+    uint32_t h = shmem_handle(s);
+    CHECK(h);
+    rl_hos_shmem_ptr(s)[0] = 0x11;
     uint64_t at = t_free_map_addr();
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, HOS_PERM_RW, 0, 0), KR_INVALID_ADDRESS);
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_RW, 0, 0), 0);
-    t_mem()[at + 0x3FFF] = 9;
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, HOS_PERM_RW, 0, 0), 0);
+    CHECK_EQ(t_mem()[at + 0x1000], 0x11);
+    CHECK(!t_write(at + 0x4FFF, 9).faulted);
     CHECK_EQ(rl_hos_shmem_ptr(s)[0x3FFF], 9);
+    rl_hos_shmem_ptr(s)[0x10] = 0x22;
+    CHECK_EQ(t_mem()[at + 0x1010], 0x22);
+    t_meminfo mi = query(c, heap, at);
+    CHECK_EQ(mi.addr, at);
+    CHECK_EQ(mi.size, 0x1000);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE);
+    mi = query(c, heap, at + 0x5000);
+    CHECK_EQ(mi.addr, at + 0x5000);
+    CHECK_EQ(mi.size, 0x3000);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE);
+    CHECK_EQ(query(c, heap, at + 0x1000).type, MS_SHARED_MEMORY & 0xFF);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x400000, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_MEM_STATE);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x401000, 0x4000, HOS_PERM_R, 0, 0), 0);
+    CHECK_EQ(t_mem()[at + 0x401010], 0x22);
+    CHECK(!t_write(at + 0x1020, 0x33).faulted);
+    CHECK_EQ(t_mem()[at + 0x401020], 0x33);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_SHARED_MEMORY, h, at + 0x401000, 0x4000, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, 0, 0, 0), 0);
+    mi = query(c, heap, at);
+    CHECK_EQ(mi.type, 0);
+    CHECK(mi.addr + mi.size >= at + 0x8000);
+    CHECK(t_read(at + 0x1000).faulted);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_RW, 0, 0), 0);
+    CHECK_EQ(t_mem()[at], 0x11);
+    CHECK_EQ(t_mem()[at + 0x20], 0x33);
+    CHECK_EQ(t_mem()[at + 0x3FFF], 9);
+    CHECK_EQ(query(c, heap, at + 0x4000).type, 0);
+    CHECK_EQ(t_svc(c, SVC_UNMAP_SHARED_MEMORY, h, at, 0x4000, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_CLOSE_HANDLE, h, 0, 0, 0, 0, 0), 0);
 }
 
 TEST(map_memory_16k_host_pages)
@@ -301,8 +340,6 @@ TEST(shared_memory)
     uint64_t at = t_free_map_addr();
     CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_RW, 0, 0), KR_INVALID_PERMISSION);
     CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x1000, HOS_PERM_R, 0, 0), KR_INVALID_SIZE);
-    if (hos.vm.host_page > 0x1000)
-        CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_ADDRESS);
     CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, heap, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_MEM_RANGE);
     CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_R, 0, 0), 0);
     CHECK_EQ(t_mem()[at + 5], 0x42);

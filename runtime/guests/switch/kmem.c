@@ -397,7 +397,9 @@ hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm)
     if (!s)
         return NULL;
     size = align_up(size, HOS_PAGE);
-    if (rl_shm_create(&s->shm, size) != 0) {
+    uint64_t hp = hos.vm.host_page > HOS_PAGE ? hos.vm.host_page : HOS_PAGE;
+    uint64_t pages = align_up(size, hp) + (hp > HOS_PAGE ? hp : 0);
+    if (rl_shm_create(&s->shm, pages) != 0) {
         free(s);
         return NULL;
     }
@@ -410,13 +412,13 @@ hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm)
 
 uint8_t *rl_hos_shmem_ptr(hos_shmem *s)
 {
-    return s->shm.host;
+    return s->shm.host + s->offset;
 }
 
 uint8_t *rl_hos_shmem_lock(hos_shmem *s)
 {
     pthread_mutex_lock(&s->lock);
-    return s->shm.host;
+    return s->shm.host + s->offset;
 }
 
 void rl_hos_shmem_unlock(hos_shmem *s) { pthread_mutex_unlock(&s->lock); }
@@ -427,6 +429,63 @@ static int shmem_view(const hos_shmem *s, uint64_t addr)
         if (s->views[i] == addr && addr)
             return i;
     return -1;
+}
+
+static bool shmem_has_views(const hos_shmem *s)
+{
+    for (int i = 0; i < HOS_SHMEM_VIEWS; i++)
+        if (s->views[i])
+            return true;
+    return false;
+}
+
+static void shmem_move(hos_shmem *s, uint64_t offset)
+{
+    pthread_mutex_lock(&s->lock);
+    uint8_t *p = s->shm.host;
+    memmove(p + offset, p + s->offset, s->size);
+    memset(p, 0, offset);
+    memset(p + offset + s->size, 0, s->shm.size - offset - s->size);
+    s->offset = offset;
+    pthread_mutex_unlock(&s->lock);
+}
+
+static void shmem_refuse(uint64_t addr, uint64_t size, uint64_t key, const char *why)
+{
+    if (rl_once(0x53484D454D000000ull | key))
+        rl_log(RL_LOG_WARN, "kernel", "shared memory at 0x%llx size 0x%llx refused: %s (0x%llx host pages)",
+               (unsigned long long)addr, (unsigned long long)size, why, (unsigned long long)hos.vm.host_page);
+}
+
+static rl_result shmem_map(hos_shmem *s, uint64_t addr, uint64_t size, uint32_t perm)
+{
+    uint64_t hp = hos.vm.host_page;
+    uint64_t lo = addr & ~(hp - 1), hi = align_up(addr + size, hp);
+    if ((lo < addr && !is_free(lo, addr - lo)) || (hi > addr + size && !is_free(addr + size, hi - addr - size))) {
+        shmem_refuse(addr, size, 1, "another mapping shares a host page with it");
+        return KR_INVALID_MEM_STATE;
+    }
+    if (addr - lo != s->offset) {
+        if (addr - lo + size > s->shm.size) {
+            shmem_refuse(addr, size, 3, "it was created before the address space and has no room to move");
+            return KR_INVALID_ADDRESS;
+        }
+        if (shmem_has_views(s)) {
+            shmem_refuse(addr, size, 2, "another view sits at a different offset in its host page");
+            return KR_INVALID_MEM_STATE;
+        }
+        shmem_move(s, addr - lo);
+    }
+    if (rl_vm_map_shm(&hos.vm, lo, hi - lo, &s->shm))
+        return KR_OUT_OF_MEMORY;
+    uint64_t pad = tag_of(MS_INACCESSIBLE, 0);
+    if ((lo < addr && rl_vm_set(&hos.vm, lo, addr - lo, RL_VM_NONE, pad, RL_VM_KEEP)) ||
+        (hi > addr + size && rl_vm_set(&hos.vm, addr + size, hi - addr - size, RL_VM_NONE, pad, RL_VM_KEEP)) ||
+        rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), tag_of(MS_SHARED_MEMORY, 0), RL_VM_KEEP)) {
+        rl_vm_set(&hos.vm, lo, hi - lo, RL_VM_NONE, 0, RL_VM_DISCARD);
+        return KR_OUT_OF_MEMORY;
+    }
+    return KR_SUCCESS;
 }
 
 rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32_t perm)
@@ -461,18 +520,8 @@ rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32
         rc = KR_INVALID_MEM_STATE;
     else if (slot < 0)
         rc = KR_OUT_OF_RESOURCE;
-    else if (((addr | size) & (hos.vm.host_page - 1)) != 0) {
-        if (rl_once(0x53484D454D000000ull))
-            rl_log(RL_LOG_WARN, "kernel",
-                   "shared memory at 0x%llx size 0x%llx is not aligned to the 0x%llx host page: not supported yet",
-                   (unsigned long long)addr, (unsigned long long)size, (unsigned long long)hos.vm.host_page);
-        rc = KR_INVALID_ADDRESS;
-    } else if (rl_vm_map_shm(&hos.vm, addr, size, &s->shm) ||
-               rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), tag_of(MS_SHARED_MEMORY, 0), RL_VM_KEEP)) {
-        rc = KR_OUT_OF_MEMORY;
-    } else {
+    else if ((rc = shmem_map(s, addr, size, perm)) == KR_SUCCESS)
         s->views[slot] = addr;
-    }
     hos_unlock();
     if (s)
         hos_kobj_unref(&s->obj);
@@ -488,6 +537,8 @@ rl_result hos_unmap_shared_memory(uint32_t h, uint64_t addr, uint64_t size)
     if (addr + size <= addr)
         return KR_INVALID_MEM_STATE;
     rl_result rc = KR_SUCCESS;
+    uint64_t hp = hos.vm.host_page;
+    uint64_t lo = addr & ~(hp - 1), hi = align_up(addr + size, hp);
     hos_lock();
     hos_shmem *s = (hos_shmem *)hos_handle_get(h, KOBJ_SHARED_MEMORY);
     int slot = s ? shmem_view(s, addr) : -1;
@@ -497,7 +548,7 @@ rl_result hos_unmap_shared_memory(uint32_t h, uint64_t addr, uint64_t size)
         rc = KR_INVALID_MEM_STATE;
     else {
         s->views[slot] = 0;
-        if (rl_vm_set(&hos.vm, addr, size, RL_VM_NONE, 0, RL_VM_DISCARD))
+        if (rl_vm_set(&hos.vm, lo, hi - lo, RL_VM_NONE, 0, RL_VM_DISCARD))
             rc = KR_OUT_OF_MEMORY;
     }
     hos_unlock();
