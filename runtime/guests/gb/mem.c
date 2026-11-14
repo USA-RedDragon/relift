@@ -34,7 +34,7 @@ rl_gb *rl_gb_create(rl_gb_model model, const rl_gb_cart *cart, rl_gb_status *sta
         }
     }
     if (g)
-        gb_reset_mapper(g);
+        rl_gb_reset(g);
     if (status)
         *status = st;
     return g;

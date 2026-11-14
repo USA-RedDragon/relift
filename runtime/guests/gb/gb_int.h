@@ -44,6 +44,8 @@ struct rl_gb {
     rl_gb_model model;
     /** @brief The cartridge. */
     rl_gb_cart cart;
+    /** @brief The post-boot state. */
+    rl_gb_boot boot;
     /** @brief Number of 16 KiB ROM banks (at least 2). */
     uint32_t rom_banks;
     /** @brief Color hardware with a Color cartridge. */
@@ -115,6 +117,8 @@ static inline unsigned gb_wram_bank(const rl_gb *g)
     return g->svbk ? g->svbk : 1u;
 }
 
+/** @brief Copies the post-boot I/O values into the stubs' registers. */
+void gb_seed_stubs(rl_gb *g);
 /** @brief Puts the controller registers at their power-on values and maps the banks. */
 void gb_reset_mapper(rl_gb *g);
 /** @brief Sets the clock from a save's record (rl_gb_save_bytes layout). */

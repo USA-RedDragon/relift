@@ -64,6 +64,7 @@ int rl_gb_attach(rl_gb *g, rl_sched *s, rl_device *const devs[RL_GB_SLOTS])
         if (rl_sched_map(s, r->lo, (uint64_t)r->hi - r->lo + 1, g->dev[r->slot], 0) != 0)
             return -1;
     g->sched = s;
+    gb_seed_stubs(g);
     return 0;
 }
 

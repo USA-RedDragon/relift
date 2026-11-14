@@ -132,8 +132,57 @@ typedef struct rl_gb_io_range {
 /** @brief The I/O ranges the scheduler is given, in address order; the table ends at the entry whose hi is 0. */
 extern const rl_gb_io_range rl_gb_io_ranges[];
 
+/** @brief The state a revision's boot program hands the cartridge. */
+typedef struct rl_gb_boot {
+    /** @brief The revision. */
+    rl_gb_model model;
+    /** @brief The entry is for a color cartridge on color hardware (false for the compatibility mode and for monochrome hardware). */
+    bool color_mode;
+    /** @brief CPU registers. */
+    uint8_t a, f, b, c, d, e, h, l;
+    /** @brief Program counter: the cartridge entry point. */
+    uint16_t pc;
+    /** @brief Stack pointer. */
+    uint16_t sp;
+    /** @brief The 16-bit divider counter ($FF04 is its high byte). */
+    uint16_t div_counter;
+    /** @brief The picture unit's position in its frame, in dots since the start of line 0 (456 dots per line). */
+    uint32_t frame_dot;
+    /** @brief Interrupt enable, $FFFF. */
+    uint8_t ie;
+    /** @brief The I/O registers $FF00-$FF7F as the CPU reads them. */
+    uint8_t io[128];
+} rl_gb_boot;
+
+/**
+ * @brief The table entry of a revision, for a cartridge whose header the boot
+ * program does not look at. color_mode selects the full color hand-off over
+ * the compatibility one on color hardware and is ignored elsewhere. The
+ * compatibility hand-off of color hardware lands later by up to a few
+ * thousand dots depending on the title and licensee bytes of the header;
+ * div_counter holds the base value. NULL for a model out of range.
+ */
+const rl_gb_boot *rl_gb_boot_state(rl_gb_model model, bool color_mode);
+/**
+ * @brief Copies the entry into out and applies what the header changes: the
+ * flags of the original and pocket models follow the header checksum byte,
+ * and the divider of the Super Game Boys follows the bits of the header
+ * they send to the console. rom may be NULL.
+ */
+void rl_gb_boot_state_for(rl_gb_model model, bool color_mode, const uint8_t *rom, size_t len, rl_gb_boot *out);
+
 /** @brief The Game Boy memory. */
 typedef struct rl_gb rl_gb;
+
+/** @brief The post-boot state of g (rl_gb_boot_state_for for its model and cartridge). */
+const rl_gb_boot *rl_gb_boot_of(const rl_gb *g);
+/**
+ * @brief Puts the memory-side registers (the bank registers and the
+ * controller) at their post-boot values and, once attached, the stub
+ * devices' registers. RAM, VRAM and the rest are left alone. rl_gb_create
+ * does this already.
+ */
+void rl_gb_reset(rl_gb *g);
 
 /**
  * @brief Adds the device of every slot to s, in slot order (the order the
