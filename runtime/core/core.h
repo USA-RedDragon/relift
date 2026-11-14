@@ -264,8 +264,10 @@ RL_RUNTIME_API void rl_vm_kernel_read(rl_vm *vm, void *dst, uint64_t src, uint64
 
 /** @brief A host shared-memory object: one set of pages that can be mapped several times. */
 typedef struct rl_shm {
-    /** @brief File descriptor of the pages. */
+    /** @brief File descriptor of the pages (-1 where the host has none). */
     int fd;
+    /** @brief The host's object handle where it has no file descriptor (Windows). */
+    void *handle;
     /** @brief Size in bytes, a multiple of the host page. */
     uint64_t size;
     /** @brief Writable host mapping of the pages. */
@@ -301,14 +303,25 @@ RL_RUNTIME_API void rl_fault_install(rl_vm *vm);
 /** @brief Gives the calling host thread an alternate signal stack. Idempotent per thread. */
 RL_RUNTIME_API void rl_fault_thread_init(void);
 
+#if defined(_WIN32)
+/** @brief The jump buffer of a fault catcher: sigjmp_buf where the host has signals, jmp_buf on Windows. */
+typedef jmp_buf rl_fault_jmp;
+#define RL_FAULT_SETJMP(jb) setjmp(jb)
+#define RL_FAULT_LONGJMP(jb, v) longjmp(jb, v)
+#else
+typedef sigjmp_buf rl_fault_jmp;
+#define RL_FAULT_SETJMP(jb) sigsetjmp(jb, 1)
+#define RL_FAULT_LONGJMP(jb, v) siglongjmp(jb, v)
+#endif
+
 /**
  * @brief A per-thread fault catcher (tests and probing). While armed, a guest
- * fault on this thread records the fault and siglongjmps to jb with 1:
- * arm, then `if (sigsetjmp(fc.jb, 1) == 0) { access } else { caught }`, then disarm.
+ * fault on this thread records the fault and jumps to jb with 1: arm, then
+ * `if (RL_FAULT_SETJMP(fc.jb) == 0) { access } else { caught }`, then disarm.
  */
 typedef struct rl_fault_catch {
-    /** @brief Jump target, set by the caller with sigsetjmp. */
-    sigjmp_buf jb;
+    /** @brief Jump target, set by the caller with RL_FAULT_SETJMP. */
+    rl_fault_jmp jb;
     /** @brief The fault, valid after a catch. */
     rl_fault fault;
 } rl_fault_catch;

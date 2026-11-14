@@ -45,7 +45,7 @@ t_probe t_read(uint64_t a)
     t_probe p = { false, 0 };
     rl_fault_catch fc;
     rl_fault_catch *prev = rl_fault_arm(&fc);
-    if (sigsetjmp(fc.jb, 1) == 0) {
+    if (RL_FAULT_SETJMP(fc.jb) == 0) {
         volatile uint8_t *m = t_mem();
         (void)m[a];
     } else {
@@ -61,7 +61,7 @@ t_probe t_write(uint64_t a, uint8_t v)
     t_probe p = { false, 0 };
     rl_fault_catch fc;
     rl_fault_catch *prev = rl_fault_arm(&fc);
-    if (sigsetjmp(fc.jb, 1) == 0) {
+    if (RL_FAULT_SETJMP(fc.jb) == 0) {
         volatile uint8_t *m = t_mem();
         m[a] = v;
     } else {

@@ -10,12 +10,20 @@
 #include "core.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+
+#define PROT_NONE 0
+#define PROT_READ 1
+#define PROT_WRITE 2
+#else
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
@@ -23,6 +31,62 @@
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
+#endif
+
+static void *os_reserve(uint64_t len)
+{
+#if defined(_WIN32)
+    return VirtualAlloc(NULL, len, MEM_RESERVE, PAGE_NOACCESS);
+#else
+    void *p = mmap(NULL, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+#endif
+}
+
+static void os_release(void *p, uint64_t len)
+{
+#if defined(_WIN32)
+    (void)len;
+    VirtualFree(p, 0, MEM_RELEASE);
+#else
+    munmap(p, len);
+#endif
+}
+
+static int os_protect(void *p, uint64_t len, int prot)
+{
+#if defined(_WIN32)
+    DWORD w = prot & PROT_WRITE ? PAGE_READWRITE : prot & PROT_READ ? PAGE_READONLY : PAGE_NOACCESS;
+    DWORD old;
+    if (VirtualProtect(p, len, w, &old))
+        return 0;
+    if (!VirtualAlloc(p, len, MEM_COMMIT, PAGE_NOACCESS))
+        return -1;
+    return VirtualProtect(p, len, w, &old) ? 0 : -1;
+#else
+    return mprotect(p, len, prot);
+#endif
+}
+
+static int os_decommit(void *p, uint64_t len)
+{
+#if defined(_WIN32)
+    return VirtualFree(p, len, MEM_DECOMMIT) ? 0 : -1;
+#else
+    return mmap(p, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0) == MAP_FAILED ? -1 : 0;
+#endif
+}
+
+static const char *os_error(void)
+{
+#if defined(_WIN32)
+    static _Thread_local char b[32];
+    snprintf(b, sizeof b, "error %lu", (unsigned long)GetLastError());
+    return b;
+#else
+    return strerror(errno);
+#endif
+}
 
 static uint64_t align_down(uint64_t v, uint64_t a) { return v & ~(a - 1); }
 static uint64_t align_up(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1); }
@@ -56,8 +120,8 @@ int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
     vm->guest_page = g->page_size;
     vm->size = 1ull << bits;
     vm->map_len = RL_VM_GUARD_LO + vm->size + RL_VM_GUARD_HI + host_page;
-    void *p = mmap(NULL, vm->map_len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (p == MAP_FAILED) {
+    void *p = os_reserve(vm->map_len);
+    if (!p) {
         vm->map_len = 0;
         return -1;
     }
@@ -66,7 +130,7 @@ int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
     vm->cap = 64;
     vm->blocks = calloc(vm->cap, sizeof *vm->blocks);
     if (!vm->blocks) {
-        munmap(p, vm->map_len);
+        os_release(p, vm->map_len);
         return -1;
     }
     vm->blocks[0] = (rl_vm_block){ 0, vm->size, 0, RL_VM_NONE, 0 };
@@ -77,7 +141,7 @@ int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
 void rl_vm_destroy(rl_vm *vm)
 {
     if (vm->map_start)
-        munmap(vm->map_start, vm->map_len);
+        os_release(vm->map_start, vm->map_len);
     free(vm->blocks);
     memset(vm, 0, sizeof *vm);
 }
@@ -163,9 +227,9 @@ int rl_vm_host_prot(const rl_vm *vm, uint64_t addr)
 static int host_protect(rl_vm *vm, uint64_t addr, uint64_t len, int prot)
 {
     vm->protect_calls++;
-    if (mprotect(vm->base + addr, len, prot) != 0) {
-        rl_log(RL_LOG_ERROR, "vm", "mprotect(0x%llx, 0x%llx, %d) failed: %s", (unsigned long long)addr,
-               (unsigned long long)len, prot, strerror(errno));
+    if (os_protect(vm->base + addr, len, prot) != 0) {
+        rl_log(RL_LOG_ERROR, "vm", "protect(0x%llx, 0x%llx, %d) failed: %s", (unsigned long long)addr,
+               (unsigned long long)len, prot, os_error());
         return -1;
     }
     return 0;
@@ -197,9 +261,8 @@ static int discard(rl_vm *vm, uint64_t addr, uint64_t size)
     uint64_t hp = vm->host_page;
     uint64_t in_s = align_up(addr, hp), in_e = align_down(addr + size, hp);
     if (in_s < in_e) {
-        void *p = mmap(vm->base + in_s, in_e - in_s, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
-        if (p == MAP_FAILED) {
-            rl_log(RL_LOG_ERROR, "vm", "release 0x%llx failed: %s", (unsigned long long)in_s, strerror(errno));
+        if (os_decommit(vm->base + in_s, in_e - in_s) != 0) {
+            rl_log(RL_LOG_ERROR, "vm", "release 0x%llx failed: %s", (unsigned long long)in_s, os_error());
             return -1;
         }
     }
@@ -304,6 +367,46 @@ void rl_vm_kernel_read(rl_vm *vm, void *dst, uint64_t src, uint64_t size)
     relock_range(vm, src, size);
 }
 
+#if defined(_WIN32)
+int rl_shm_create(rl_shm *s, uint64_t size)
+{
+    uint64_t page = rl_os_page_size();
+    memset(s, 0, sizeof *s);
+    s->fd = -1;
+    size = align_up(size ? size : 1, page < 0x4000 ? 0x4000 : page);
+    HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, (DWORD)(size >> 32), (DWORD)size, NULL);
+    if (!h)
+        return -1;
+    void *p = MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    if (!p) {
+        CloseHandle(h);
+        return -1;
+    }
+    s->handle = h;
+    s->host = p;
+    s->size = size;
+    return 0;
+}
+
+void rl_shm_destroy(rl_shm *s)
+{
+    if (s->host)
+        UnmapViewOfFile(s->host);
+    if (s->handle)
+        CloseHandle((HANDLE)s->handle);
+    memset(s, 0, sizeof *s);
+    s->fd = -1;
+}
+
+int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
+{
+    (void)vm;
+    (void)addr;
+    (void)size;
+    (void)s;
+    return -1;
+}
+#else
 int rl_shm_create(rl_shm *s, uint64_t size)
 {
     static unsigned serial;
@@ -358,3 +461,4 @@ int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
     void *p = mmap(vm->base + addr, size, PROT_NONE, MAP_SHARED | MAP_FIXED, s->fd, 0);
     return p == MAP_FAILED ? -1 : 0;
 }
+#endif
