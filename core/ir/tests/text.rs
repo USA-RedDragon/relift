@@ -2,8 +2,8 @@
 
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{
-    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, Next, Order, Reg, RegDecl, RegFile,
-    UnOp, Value, Width, dce, parse,
+    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, Next, Order, Reg, RegDecl,
+    RegFile, UnOp, Value, Width, dce, parse,
 };
 
 static DECLS: [RegDecl; 4] = [
@@ -119,6 +119,20 @@ fn everything(exit: Exit, addr: Width) -> Block {
         b.fp(op, &[f], Width::W32);
     }
     b.fp(FpOp::MulAdd, &[f, w2, f], Width::W32);
+    for r in [
+        FpRound::TiesEven,
+        FpRound::TiesAway,
+        FpRound::Floor,
+        FpRound::Ceil,
+        FpRound::Zero,
+    ] {
+        b.fp(FpOp::RoundInt(r), &[f], Width::W32);
+        b.fp(FpOp::ToSInt(r), &[f], Width::W64);
+        b.fp(FpOp::ToUInt(r), &[x0], Width::W32);
+    }
+    b.fp(FpOp::FromSInt, &[x0], Width::W32);
+    b.fp(FpOp::FromUInt, &[f], Width::W64);
+    b.fp(FpOp::Convert, &[f], Width::W64);
     b.intrinsic("sys.\"q\"\\x", &[x0, x1], Some(Width::W64));
     b.intrinsic("barrier", &[], None);
     b.intrinsic("one", &[x0], None);

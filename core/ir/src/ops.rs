@@ -180,12 +180,30 @@ pub enum Order {
     SeqCst,
 }
 
+/// A rounding direction for [`FpOp`] conversions to integral values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FpRound {
+    /// To nearest, ties to even.
+    TiesEven,
+    /// To nearest, ties away from zero.
+    TiesAway,
+    /// Toward minus infinity.
+    Floor,
+    /// Toward plus infinity.
+    Ceil,
+    /// Toward zero.
+    Zero,
+}
+
 /// Floating-point operations on IEEE 754 binary32 or binary64 bit patterns.
 ///
 /// They are named intrinsics: the interpreter evaluates them with the host's
 /// IEEE arithmetic in round-to-nearest-even and records no exception flags.
 /// Guest-specific behavior (NaN propagation rules, flush to zero, flags) is
-/// built by the frontend around them.
+/// built by the frontend around them. The arithmetic operations take and
+/// give the instruction's width; the conversions (`ToSInt` through
+/// `Convert`) take an operand of 32 or 64 bits and give a result of 32 or
+/// 64 bits, either of which may differ.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FpOp {
     /// `a + b`.
@@ -204,13 +222,41 @@ pub enum FpOp {
     Neg,
     /// `|a|`, a sign clear.
     Abs,
+    /// `a` rounded to an integral value in the same format; NaN stays NaN.
+    RoundInt(FpRound),
+    /// `a` rounded to a signed integer, saturating; NaN gives 0.
+    ToSInt(FpRound),
+    /// `a` rounded to an unsigned integer, saturating; NaN gives 0.
+    ToUInt(FpRound),
+    /// The signed integer `a`, rounded to nearest even.
+    FromSInt,
+    /// The unsigned integer `a`, rounded to nearest even.
+    FromUInt,
+    /// `a` in the other format, rounded to nearest even.
+    Convert,
 }
 
 impl FpOp {
+    /// Whether the operand width may differ from the result width.
+    pub fn converts(self) -> bool {
+        matches!(
+            self,
+            FpOp::ToSInt(_) | FpOp::ToUInt(_) | FpOp::FromSInt | FpOp::FromUInt | FpOp::Convert
+        )
+    }
+
     /// The number of operands.
     pub fn arity(self) -> usize {
         match self {
-            FpOp::Sqrt | FpOp::Neg | FpOp::Abs => 1,
+            FpOp::Sqrt
+            | FpOp::Neg
+            | FpOp::Abs
+            | FpOp::RoundInt(_)
+            | FpOp::ToSInt(_)
+            | FpOp::ToUInt(_)
+            | FpOp::FromSInt
+            | FpOp::FromUInt
+            | FpOp::Convert => 1,
             FpOp::Add | FpOp::Sub | FpOp::Mul | FpOp::Div => 2,
             FpOp::MulAdd => 3,
         }

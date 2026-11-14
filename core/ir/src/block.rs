@@ -221,7 +221,14 @@ pub(crate) fn check_op(
                 return err(format!("{f:?} takes {} operands", f.arity()));
             }
             for a in args {
-                same(w(*a)?, r)?;
+                let aw = w(*a)?;
+                if f.converts() {
+                    if aw != Width::W32 && aw != Width::W64 {
+                        return err("floating point is 32 or 64 bits".to_string());
+                    }
+                } else {
+                    same(aw, r)?;
+                }
             }
             Ok(())
         }

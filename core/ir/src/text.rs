@@ -60,6 +60,7 @@
 //! | `load.excl.E.O addr` / `store.excl.E.O addr, value` | exclusive memory |
 //! | `fence.O` / `clear.excl` | fence, clear the monitor |
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
+//! | `fp.rint.R fp.tosint.R fp.touint.R fp.fromsint fp.fromuint fp.convert v` | [`FpOp`] conversions; `R` is `n`, `a`, `m`, `p` or `z` ([`FpRound`]) |
 //! | `intrinsic "name" args` | [`Op::Intrinsic`], args may be empty |
 //!
 //! The ordering `O` is `plain`, `acquire`, `release`, `acqrel` or `seqcst`.
@@ -76,8 +77,8 @@ use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, Next, Op, Order, RegFile, UnOp,
-    Value, Width,
+    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst, Next, Op, Order,
+    RegFile, UnOp, Value, Width,
 };
 
 const UN: [(UnOp, &str); 7] = [
@@ -116,7 +117,7 @@ const CMP: [(CmpOp, &str); 6] = [
     (CmpOp::Sle, "sle"),
 ];
 
-const FP: [(FpOp, &str); 8] = [
+const FP: [(FpOp, &str); 26] = [
     (FpOp::Add, "add"),
     (FpOp::Sub, "sub"),
     (FpOp::Mul, "mul"),
@@ -125,6 +126,24 @@ const FP: [(FpOp, &str); 8] = [
     (FpOp::MulAdd, "muladd"),
     (FpOp::Neg, "neg"),
     (FpOp::Abs, "abs"),
+    (FpOp::RoundInt(FpRound::TiesEven), "rint.n"),
+    (FpOp::RoundInt(FpRound::TiesAway), "rint.a"),
+    (FpOp::RoundInt(FpRound::Floor), "rint.m"),
+    (FpOp::RoundInt(FpRound::Ceil), "rint.p"),
+    (FpOp::RoundInt(FpRound::Zero), "rint.z"),
+    (FpOp::ToSInt(FpRound::TiesEven), "tosint.n"),
+    (FpOp::ToSInt(FpRound::TiesAway), "tosint.a"),
+    (FpOp::ToSInt(FpRound::Floor), "tosint.m"),
+    (FpOp::ToSInt(FpRound::Ceil), "tosint.p"),
+    (FpOp::ToSInt(FpRound::Zero), "tosint.z"),
+    (FpOp::ToUInt(FpRound::TiesEven), "touint.n"),
+    (FpOp::ToUInt(FpRound::TiesAway), "touint.a"),
+    (FpOp::ToUInt(FpRound::Floor), "touint.m"),
+    (FpOp::ToUInt(FpRound::Ceil), "touint.p"),
+    (FpOp::ToUInt(FpRound::Zero), "touint.z"),
+    (FpOp::FromSInt, "fromsint"),
+    (FpOp::FromUInt, "fromuint"),
+    (FpOp::Convert, "convert"),
 ];
 
 const ORDER: [(Order, &str); 5] = [

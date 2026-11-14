@@ -26,7 +26,7 @@ pub mod text;
 
 pub use block::{Block, Exit, Flow, Inst, Next, VerifyError};
 pub use builder::Builder;
-pub use ops::{BinOp, CmpOp, Endian, ExtKind, FpOp, Op, Order, UnOp, Value, Width};
+pub use ops::{BinOp, CmpOp, Endian, ExtKind, FpOp, FpRound, Op, Order, UnOp, Value, Width};
 pub use opt::dce;
 pub use regs::{Reg, RegDecl, RegFile};
 pub use text::{ParseError, parse};

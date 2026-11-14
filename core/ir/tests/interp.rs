@@ -3,8 +3,8 @@
 
 use relift_ir::interp::{self, Error, FlatMemory, NoIntrinsics, State};
 use relift_ir::{
-    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, Inst, Next, Op, Order, Reg, RegDecl,
-    RegFile, UnOp, Value, Width,
+    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, Inst, Next, Op, Order, Reg,
+    RegDecl, RegFile, UnOp, Value, Width,
 };
 
 static DECLS: [RegDecl; 4] = [
@@ -390,6 +390,47 @@ fn floating_point_intrinsics_use_ieee_arithmetic() {
         b.fp(FpOp::Neg, &[x], Width::W32)
     });
     assert_eq!(f32::from_bits(r as u32), -2.0);
+}
+
+#[test]
+fn floating_point_conversions_round_saturate_and_change_width() {
+    let fp = |op: FpOp, v: u128, from: Width, to: Width| {
+        eval(|b| {
+            let x = b.konst(from, v);
+            b.fp(op, &[x], to)
+        })
+    };
+    let d = |x: f64| u128::from(x.to_bits());
+    let (w32, w64) = (Width::W32, Width::W64);
+    assert_eq!(
+        fp(FpOp::ToSInt(FpRound::Zero), d(-2.7), w64, w32),
+        0xffff_fffe
+    );
+    assert_eq!(
+        fp(FpOp::ToSInt(FpRound::Floor), d(-2.5), w64, w64),
+        (-3i64) as u64 as u128
+    );
+    assert_eq!(fp(FpOp::ToSInt(FpRound::TiesEven), d(2.5), w64, w64), 2);
+    assert_eq!(fp(FpOp::ToSInt(FpRound::TiesAway), d(2.5), w64, w64), 3);
+    assert_eq!(
+        fp(FpOp::ToSInt(FpRound::Zero), d(1e300), w64, w32),
+        0x7fff_ffff
+    );
+    assert_eq!(fp(FpOp::ToUInt(FpRound::Ceil), d(-0.5), w64, w64), 0);
+    assert_eq!(fp(FpOp::ToSInt(FpRound::Zero), d(f64::NAN), w64, w64), 0);
+    assert_eq!(fp(FpOp::FromSInt, 0xffff_ffff, w32, w64), d(-1.0));
+    assert_eq!(
+        fp(FpOp::FromUInt, 0xffff_ffff, w32, w64),
+        d(4_294_967_295.0)
+    );
+    assert_eq!(
+        fp(FpOp::Convert, d(1.0 + f64::EPSILON), w64, w32),
+        u128::from(1.0f32.to_bits())
+    );
+    assert_eq!(
+        fp(FpOp::RoundInt(FpRound::Ceil), d(-0.5), w64, w64),
+        d(-0.0)
+    );
 }
 
 #[test]
