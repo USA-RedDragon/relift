@@ -73,6 +73,9 @@ pub fn lift(word: u32, pc: u64, f: &Features) -> Result<Block, LiftError> {
 /// `f`: with its generated template when it has one, else with its
 /// hand-written lifter. The caller decoded `insn` for the same features.
 pub fn lift_insn(insn: Insn, pc: u64, f: &Features) -> Result<Block, LiftError> {
+    if insn.encoding == Encoding::XPACLRI_HI_hints && f.has(crate::decode::Feature::PAuth) {
+        return Err(LiftError::Unsupported(insn.encoding));
+    }
     if let Some(l) = system::lifter(insn.encoding) {
         return run_lifter(l, insn, pc);
     }

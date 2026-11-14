@@ -10,6 +10,12 @@
 //! FEAT_PAuth, where every one of them executes as a NOP: XPACLRI has no PAC
 //! bits to strip because no instruction ever adds them, and CHKFEAT leaves
 //! x16 unchanged when no feature is implemented.
+//!
+//! With `FEAT_PAuth` in the CPU's features the pointer-authentication hints
+//! decode to their own encodings, which have no lifter (the lift fails
+//! instead of dropping an authentication), and XPACLRI is refused too.
+//! Without them those words decode to the plain `HINT`, which executes as
+//! a NOP, as does every hint whose feature the CPU lacks.
 
 use relift_ir::{Builder, Exit, Flow, Next, Width};
 
@@ -64,7 +70,7 @@ pub fn lifter(enc: Encoding) -> Option<LiftFn> {
         SYS_CR_systeminstrs => sys,
         WFE_HI_hints => wfe,
         SEV_HI_hints => sev,
-        BTI_HB_hints | CHKFEAT_HF_hints | XPACLRI_HI_hints => nop,
+        BTI_HB_hints | CHKFEAT_HF_hints | XPACLRI_HI_hints | HINT_HM_hints => nop,
         _ => return None,
     };
     Some(f)

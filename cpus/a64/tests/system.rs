@@ -1,7 +1,7 @@
 //! Tests of the hand-written system lifters, run in the `relift-ir`
 //! interpreter where they have no intrinsic.
 
-use relift_cpu_a64::decode::Features;
+use relift_cpu_a64::decode::{Feature, Features};
 use relift_cpu_a64::lift::{lift, system};
 use relift_cpu_a64::regs::{self, C, N, TPIDR_EL0, TPIDRRO_EL0, V, Z};
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
@@ -72,11 +72,13 @@ fn nzcv_round_trips_through_x() {
 
 #[test]
 fn hints_without_the_feature_are_nops() {
+    let no_pac = Features::ALL.without(Feature::PAuth);
     for w in [0xd503_245f, 0xd503_251f, 0xd503_20ff] {
-        let b = lift(w, PC, &Features::ALL).expect("lifts");
+        let b = lift(w, PC, &no_pac).expect("lifts");
         assert!(b.insts.is_empty(), "{w:#x}");
         assert_eq!(b.exit.next, Next::Const(PC + 4));
     }
+    assert!(lift(0xd503_20ff, PC, &Features::ALL).is_err());
 }
 
 #[test]
