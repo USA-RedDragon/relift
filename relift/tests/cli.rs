@@ -1,5 +1,6 @@
 //! The binary as a user runs it: help and version succeed, every stub
-//! subcommand says it is not implemented and fails, global settings flags
+//! subcommand says it is not implemented and fails, build and run without a
+//! project say what is missing, global settings flags
 //! work on either side of a subcommand, and `import` extracts synthetic
 //! decrypted dumps and refuses encrypted ones.
 
@@ -33,13 +34,7 @@ fn help_and_version_succeed() {
 #[test]
 fn every_stub_subcommand_fails_as_not_implemented() {
     for (args, name) in [
-        (&["build"][..], "build"),
-        (&["build", "--target", "a", "--target", "b"], "build"),
-        (
-            &["run", "--target", "linux-x64", "--trace-os", "--strict"],
-            "run",
-        ),
-        (&["check", "0x7100"], "check"),
+        (&["check", "0x7100"][..], "check"),
         (&["where", "0x7100"], "where"),
     ] {
         let out = relift(args);
@@ -53,6 +48,27 @@ fn every_stub_subcommand_fails_as_not_implemented() {
 }
 
 #[test]
+fn build_and_run_without_a_project_say_what_is_missing() {
+    for (args, name) in [
+        (&["build"][..], "build"),
+        (&["run", "--trace-os", "--strict"], "run"),
+    ] {
+        let out = relift(args);
+        assert!(!out.status.success(), "relift {args:?} succeeded");
+        let err = stderr(&out);
+        assert!(
+            err.starts_with(&format!("relift {name}: game.toml")),
+            "relift {args:?} -- {err}"
+        );
+    }
+    let err = stderr(&relift(&["build", "--target", "a", "--target", "b"]));
+    assert!(
+        err.contains("target a: only the host target builds so far"),
+        "{err}"
+    );
+}
+
+#[test]
 fn settings_flags_work_before_and_after_a_subcommand() {
     for args in [
         &["-j", "2", "build"][..],
@@ -60,7 +76,7 @@ fn settings_flags_work_before_and_after_a_subcommand() {
     ] {
         let err = stderr(&relift(args));
         assert!(
-            err.contains("not implemented"),
+            err.starts_with("relift build: "),
             "relift {args:?} did not reach the subcommand -- {err}"
         );
     }

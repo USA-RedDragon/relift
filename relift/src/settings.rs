@@ -25,6 +25,12 @@ pub struct Settings {
     )]
     pub jobs: u32,
 
+    #[configulator(
+        name = "runtime-dir",
+        description = "the C runtime sources to build against (empty: the ones beside this relift's source)"
+    )]
+    pub runtime_dir: PathBuf,
+
     #[configulator(name = "toolchain", nested)]
     pub toolchain: Toolchain,
 }
