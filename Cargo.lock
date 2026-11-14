@@ -849,6 +849,7 @@ dependencies = [
  "relift-build",
  "relift-cache",
  "relift-cpu-a64",
+ "relift-cpu-sm83",
  "relift-emit",
  "relift-guest",
  "relift-host",

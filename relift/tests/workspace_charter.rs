@@ -68,11 +68,9 @@ struct Charter {
 const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries or are not wired into `relift` yet
-/// (`relift-cpu-sm83` until its lifter lands, `relift-emit-wasm` until a
-/// browser build uses it), so the reachability controls skip them; the
+/// (`relift-emit-wasm` until a browser build uses it), so the reachability controls skip them; the
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
-    "relift-cpu-sm83",
     "relift-emit-wasm",
     "relift-gb-analyze",
     "relift-gb-formats",
@@ -181,8 +179,8 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-cpu-sm83",
         band: 2,
-        why: "the SM83 decoder and opcode table; describes the CPU and depends on nothing in the workspace",
-        normal: NONE,
+        why: "the SM83 decoder, opcode table and frontend, over the IR and the guest contract only",
+        normal: &["relift-guest", "relift-ir"],
         dev: NONE,
         build: NONE,
     },
@@ -305,6 +303,7 @@ const CHARTERS: &[Charter] = &[
             "relift-build",
             "relift-cache",
             "relift-cpu-a64",
+            "relift-cpu-sm83",
             "relift-emit",
             "relift-guest",
             "relift-host",

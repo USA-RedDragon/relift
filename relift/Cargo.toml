@@ -14,6 +14,7 @@ relift-analyze = { workspace = true }
 relift-build = { workspace = true }
 relift-cache = { workspace = true }
 relift-cpu-a64 = { workspace = true }
+relift-cpu-sm83 = { workspace = true }
 relift-emit = { workspace = true }
 relift-guest = { workspace = true }
 relift-host = { workspace = true }
