@@ -10,6 +10,9 @@
 #   make AUDIO=real BUILD=build/audio   also build runtime/host (SDL3 output and libopus decoding;
 #                              needs pkg-config packages sdl3 and opus). The default is the null
 #                              output and the stub decoder, with no extra dependency.
+#   make VIDEO=sdl3 BUILD=build/video   also build the SDL3 window backend (runtime/host/window_sdl3.c;
+#                              needs pkg-config package sdl3). The default has no window backend:
+#                              runs are headless and Vulkan presents to headless surfaces.
 #   make gdb-test              check the gdb frame filter (skips without gdb)
 #   make sched-bench           run the device scheduler microbenchmark
 #   make portable              only crash_test, fiber_tests and sched_bench: they link just the
@@ -28,6 +31,7 @@ BUILD ?= build/host
 TARGET ?=
 OPT ?= -O2
 AUDIO ?= null
+VIDEO ?= none
 
 TARGET_FLAGS := $(if $(TARGET),-target $(TARGET),)
 MACHINE := $(if $(TARGET),$(TARGET),$(shell $(CC) -dumpmachine))
@@ -54,10 +58,18 @@ WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) $(if $(WINDOWS),-DRL_STATIC_RUNTIME,-fPIC) \
 	-fvisibility=hidden -fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME -DRL_CHECKS
 LDLIBS := $(if $(WINDOWS),,-lpthread)
+HOST_SRCS :=
 ifeq ($(AUDIO),real)
-HOST_SRCS := $(wildcard host/*.c)
+HOST_SRCS += host/audio_sdl3.c host/opus_libopus.c
 CFLAGS_BASE += -DRL_HOST_AUDIO $(shell pkg-config --cflags opus sdl3)
 LDLIBS += $(shell pkg-config --libs opus sdl3)
+endif
+ifeq ($(VIDEO),sdl3)
+HOST_SRCS += host/window_sdl3.c
+CFLAGS_BASE += -DRL_HOST_VIDEO $(shell pkg-config --cflags sdl3)
+LDLIBS += $(shell pkg-config --libs sdl3)
+else ifneq ($(VIDEO),none)
+$(error VIDEO must be none or sdl3)
 endif
 
 # Include paths per layer: a layer sees itself and the layers below it.
