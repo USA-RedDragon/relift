@@ -360,11 +360,14 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
     for l in fpsr.report.lines() {
         ui.note(&Line::new().text(l));
     }
-    let prog = cdir.join("program.c");
-    relift_cache::write_if_changed(
-        &prog,
-        program::program_c(&placed, npdm.as_ref(), &units, fp_flags).as_bytes(),
-    )?;
+    let mut prog = Vec::new();
+    for f in program::program_files(&placed, npdm.as_ref(), &units, fp_flags) {
+        let path = cdir.join(&f.name);
+        relift_cache::write_if_changed(&path, &f.bytes)?;
+        if f.is_c() {
+            prog.push(path);
+        }
+    }
     let rt = if settings.runtime_dir.as_os_str().is_empty() {
         PathBuf::from(RUNTIME_DIR)
     } else {
@@ -446,11 +449,13 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
                 .collect(),
         });
     }
-    compiles.push(Compile {
-        src: prog.clone(),
-        obj: obj(&prog, "lifted"),
-        flags: rt_flags.clone(),
-    });
+    for s in &prog {
+        compiles.push(Compile {
+            src: s.clone(),
+            obj: obj(s, "lifted"),
+            flags: rt_flags.clone(),
+        });
+    }
     for s in runtime_sources(&rt)? {
         compiles.push(Compile {
             obj: obj(&s, "rt"),

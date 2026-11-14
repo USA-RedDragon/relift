@@ -473,17 +473,66 @@ pub fn known(bytes: &[u8]) -> Option<Known> {
     None
 }
 
-/// The C file that describes the placed modules to the runtime's loader
-/// and holds their images, with the process parameters from `npdm` and the
-/// lifted unit tables `units` (C symbols of `const rl_unit`) to register.
+/// One file of the program description: its name in the C directory and
+/// its bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProgramFile {
+    /// The file name, relative to the C directory.
+    pub name: String,
+    /// The contents.
+    pub bytes: Vec<u8>,
+}
+
+impl ProgramFile {
+    /// Whether the build compiles this file.
+    pub fn is_c(&self) -> bool {
+        self.name.ends_with(".c")
+    }
+}
+
+/// The C file that holds module `i`'s image: the raw bytes go in
+/// `image<i>.bin` and the C pulls them in with `#embed`, so the compiler
+/// reads them as data rather than parsing an initializer of millions of
+/// numbers.
+fn image_c(i: usize) -> String {
+    format!(
+        "#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_image{i}[];\nconst uint8_t rl_image{i}[] = {{\n#embed \"image{i}.bin\"\n}};\n"
+    )
+}
+
+/// The files that describe the placed modules to the runtime's loader and
+/// hold their images, with the process parameters from `npdm` and the
+/// lifted unit tables `units` (C symbols of `const rl_unit`) to register:
+/// `program.c`, and per module `image<i>.c` with its `image<i>.bin`.
 /// `fp_flags` turns on FPSR flag production in the runtime before the
 /// program starts (the build's FPSR census found a read that can be used).
-pub fn program_c(
+pub fn program_files(
     placed: &[Placed],
     npdm: Option<&Npdm>,
     units: &[String],
     fp_flags: bool,
-) -> String {
+) -> Vec<ProgramFile> {
+    let mut out = Vec::new();
+    for (i, p) in placed.iter().enumerate() {
+        out.push(ProgramFile {
+            name: format!("image{i}.bin"),
+            bytes: p.nso.image.clone(),
+        });
+        out.push(ProgramFile {
+            name: format!("image{i}.c"),
+            bytes: image_c(i).into_bytes(),
+        });
+    }
+    out.push(ProgramFile {
+        name: "program.c".into(),
+        bytes: program_c(placed, npdm, units, fp_flags).into_bytes(),
+    });
+    out
+}
+
+/// `program.c`: the module table, the process parameters and `main`. The
+/// images live in the `image<i>.c` files [`program_files`] adds.
+fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags: bool) -> String {
     let mut t = String::from("#include <stdint.h>\n#include \"loader.h\"\n");
     for u in units {
         let _ = writeln!(t, "extern const rl_unit {u};");
@@ -496,22 +545,15 @@ pub fn program_c(
         t.push_str(" 0");
     }
     let _ = writeln!(t, " }};");
-    for (i, p) in placed.iter().enumerate() {
-        let _ = write!(t, "static const uint8_t image{i}[] = {{");
-        for (k, b) in p.nso.image.iter().enumerate() {
-            if k % 24 == 0 {
-                t.push('\n');
-            }
-            let _ = write!(t, "{b},");
-        }
-        t.push_str("\n};\n");
+    for i in 0..placed.len() {
+        let _ = writeln!(t, "extern const uint8_t rl_image{i}[];");
     }
     t.push_str("static const rl_switch_module modules[] = {\n");
     for (i, p) in placed.iter().enumerate() {
         let s = p.nso.segments;
         let _ = writeln!(
             t,
-            "    {{ {:?}, UINT64_C({:#x}), image{i}, {}u, {}u, {}u, {}u, {}u, {}u, {}u, {}u }},",
+            "    {{ {:?}, UINT64_C({:#x}), rl_image{i}, {}u, {}u, {}u, {}u, {}u, {}u, {}u, {}u }},",
             p.name,
             p.base,
             p.nso.image.len(),
@@ -701,9 +743,17 @@ mod tests {
     #[test]
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
-        let c = program_c(&p, None, &["rl_unit_main".into()], false);
+        let files = program_files(&p, None, &["rl_unit_main".into()], false);
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["image0.bin", "image0.c", "program.c"]);
+        assert_eq!(files[0].bytes, p[0].nso.image);
+        let img = String::from_utf8_lossy(&files[1].bytes);
+        assert!(img.contains("#embed \"image0.bin\""), "{img}");
+        assert!(img.contains("const uint8_t rl_image0[] = {"), "{img}");
+        let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("static const rl_unit *const static_units[] = { &rl_unit_main, };"));
-        assert!(c.contains("static const uint8_t image0[] = {\n1,2,3,4,"));
+        assert!(c.contains("extern const uint8_t rl_image0[];"));
+        assert!(c.contains("UINT64_C(0x8000000), rl_image0, "));
         assert!(c.contains(
             "const rl_switch_program rl_program = { modules, 1u, UINT64_C(0x8000000), 3u, 44, 0,"
         ));
