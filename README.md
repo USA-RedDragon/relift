@@ -18,7 +18,7 @@ legally obtained dumps.
 
 ```sh
 cargo build --release -p relift
-git config core.hooksPath .githooks
+pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Before contributing, read
