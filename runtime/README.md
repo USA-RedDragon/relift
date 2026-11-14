@@ -112,7 +112,28 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_AUDIO=null` | In an `AUDIO=real` build, play through the null output (drains in real time, no sound) |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
+| `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
+| `RELIFT_ROMFS=<dir>` | Extracted romfs tree served as the program's data storage (`relift run` sets it from the import) |
+| `RELIFT_DLC=<dir>` | Add-on content trees, `<16 hex digit add-on id>/<index>/romfs` (`relift run` sets it from the import) |
 | `RELIFT_ADDRESS_BITS=36` | Ask the guest layer for this address width. The Switch guest accepts 36 and 39 and uses the 36-bit layout even when the NPDM asks for 39 bits (the fallback when the host cannot reserve 2^39 bytes) |
+
+## Data storage
+
+fsp-srv serves the program's romfs (commands 200 to 202) as a read-only
+`IStorage` over one RomFS image that `guests/switch/romfs_image.c` builds
+in memory from the extracted tree when the guest first opens the storage:
+the 0x50 byte header, the directory and file hash tables and metadata
+(entries sorted by name, the name hash libnn uses) and the file data at
+0x200-aligned offsets. Only the metadata is held in memory; file data is
+read from the host files on each `Read`, so a romfs of many gigabytes needs
+no second copy on disk (a tree of tens of thousands of files and several gigabytes opens in under a second and holds a few MiB). Games see
+the byte layout of an image made by the standard tools (tables before data),
+which libnn needs, but not necessarily the original image's order of entries.
+Add-on content opens by add-on id (`OpenDataStorageByDataId`, or
+`OpenDataStorageByProgramId` with an id that is not the program's). There is
+no separate patch storage: the import already holds the patched tree, so
+`OpenPatchDataStorageByCurrentProcess` reports the target as not found, as does
+any storage with no tree.
 
 ## Known limits
 
