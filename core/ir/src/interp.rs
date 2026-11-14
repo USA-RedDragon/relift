@@ -1,0 +1,441 @@
+//! The reference interpreter: the definition of every operation's meaning.
+
+use std::fmt;
+
+use crate::{BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, Next, Op, UnOp, Width};
+
+/// A failed guest memory access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fault {
+    /// The first address of the access.
+    pub addr: u64,
+    /// The size in bytes.
+    pub size: u32,
+    /// Whether it was a write.
+    pub write: bool,
+}
+
+/// Guest memory as the interpreter sees it: byte-addressed reads and writes
+/// that may fault.
+pub trait GuestMemory {
+    /// Fills `buf` from `addr` upward.
+    fn read(&mut self, addr: u64, buf: &mut [u8]) -> Result<(), Fault>;
+    /// Writes `data` from `addr` upward.
+    fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), Fault>;
+}
+
+/// Named intrinsics the frontend and runtime define.
+pub trait Intrinsics {
+    /// Evaluates `name` on `args`, giving the result (0 when it has none).
+    fn call(&mut self, name: &'static str, args: &[u128]) -> Result<u128, Error>;
+}
+
+/// An [`Intrinsics`] that knows no intrinsic.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoIntrinsics;
+
+impl Intrinsics for NoIntrinsics {
+    fn call(&mut self, name: &'static str, _args: &[u128]) -> Result<u128, Error> {
+        Err(Error::UnknownIntrinsic(name))
+    }
+}
+
+/// The address and size the exclusive monitor is armed for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Monitor {
+    /// The address.
+    pub addr: u64,
+    /// The size in bytes.
+    pub size: u32,
+}
+
+/// Guest state: one value per register-file slot, and the exclusive monitor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct State {
+    /// Slot values, indexed like the register file; each fits its slot width.
+    pub regs: Vec<u128>,
+    /// The exclusive monitor, `None` when clear.
+    pub monitor: Option<Monitor>,
+}
+
+impl State {
+    /// All slots zero and the monitor clear.
+    pub fn new(slots: usize) -> State {
+        State {
+            regs: vec![0; slots],
+            monitor: None,
+        }
+    }
+}
+
+/// Why a block could not run to its exit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// A memory access faulted. Register writes are discarded; stores
+    /// before the fault have happened.
+    Fault(Fault),
+    /// An intrinsic the environment does not know.
+    UnknownIntrinsic(&'static str),
+    /// The block does not verify.
+    Invalid(String),
+    /// The state has the wrong number of slots.
+    StateSize {
+        /// Slots in the register file.
+        expected: usize,
+        /// Slots in the state.
+        found: usize,
+    },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Fault(x) => write!(
+                f,
+                "{} of {} bytes at {:#x} faulted",
+                if x.write { "write" } else { "read" },
+                x.size,
+                x.addr
+            ),
+            Error::UnknownIntrinsic(n) => write!(f, "unknown intrinsic {n}"),
+            Error::Invalid(m) => write!(f, "invalid block: {m}"),
+            Error::StateSize { expected, found } => {
+                write!(f, "state has {found} slots, the register file {expected}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+/// Where a block went.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Outcome {
+    /// The next program counter.
+    pub next: u64,
+    /// The kind of transfer.
+    pub flow: Flow,
+}
+
+fn sext(v: u128, w: Width) -> i128 {
+    let s = 128 - w.bits();
+    ((v << s) as i128) >> s
+}
+
+/// Evaluates a one-operand operation on a value of width `w`.
+pub fn eval_un(op: UnOp, a: u128, w: Width) -> u128 {
+    let m = w.mask();
+    let bits = w.bits();
+    let r = match op {
+        UnOp::Not => !a,
+        UnOp::Neg => a.wrapping_neg(),
+        UnOp::Clz => u128::from(a.leading_zeros() - (128 - bits)),
+        UnOp::Ctz => u128::from(a.trailing_zeros().min(bits)),
+        UnOp::Popcount => u128::from(a.count_ones()),
+        UnOp::BitReverse => a.reverse_bits() >> (128 - bits),
+        UnOp::ByteSwap => a.swap_bytes() >> (128 - bits),
+    };
+    r & m
+}
+
+/// Evaluates a two-operand operation; `a` has width `w`, `b` is read
+/// unsigned for shifts and has width `w` otherwise.
+pub fn eval_bin(op: BinOp, a: u128, b: u128, w: Width) -> u128 {
+    let m = w.mask();
+    let bits = u128::from(w.bits());
+    let r = match op {
+        BinOp::Add => a.wrapping_add(b),
+        BinOp::Sub => a.wrapping_sub(b),
+        BinOp::Mul => a.wrapping_mul(b),
+        BinOp::UDiv => a.checked_div(b).unwrap_or(0),
+        BinOp::URem => a.checked_rem(b).unwrap_or(a),
+        BinOp::SDiv => {
+            let (x, y) = (sext(a, w), sext(b, w));
+            if y == 0 { 0 } else { x.wrapping_div(y) as u128 }
+        }
+        BinOp::SRem => {
+            let (x, y) = (sext(a, w), sext(b, w));
+            if y == 0 {
+                a
+            } else if y == -1 {
+                0
+            } else {
+                (x % y) as u128
+            }
+        }
+        BinOp::And => a & b,
+        BinOp::Or => a | b,
+        BinOp::Xor => a ^ b,
+        BinOp::Shl => {
+            if b >= bits {
+                0
+            } else {
+                a << b
+            }
+        }
+        BinOp::LShr => {
+            if b >= bits {
+                0
+            } else {
+                a >> b
+            }
+        }
+        BinOp::AShr => {
+            let x = sext(a, w);
+            (x >> b.min(bits - 1)) as u128
+        }
+        BinOp::RotR => {
+            let k = (b % bits) as u32;
+            if k == 0 {
+                a
+            } else {
+                (a >> k) | (a << (w.bits() - k))
+            }
+        }
+    };
+    r & m
+}
+
+/// Evaluates a comparison of two values of width `w`.
+pub fn eval_cmp(op: CmpOp, a: u128, b: u128, w: Width) -> bool {
+    match op {
+        CmpOp::Eq => a == b,
+        CmpOp::Ne => a != b,
+        CmpOp::Ult => a < b,
+        CmpOp::Ule => a <= b,
+        CmpOp::Slt => sext(a, w) < sext(b, w),
+        CmpOp::Sle => sext(a, w) <= sext(b, w),
+    }
+}
+
+/// Evaluates a floating-point operation on `w`-bit (32 or 64) patterns.
+pub fn eval_fp(op: FpOp, args: &[u128], w: Width) -> u128 {
+    if w == Width::W32 {
+        let f = |i: usize| f32::from_bits(args[i] as u32);
+        let r = match op {
+            FpOp::Add => f(0) + f(1),
+            FpOp::Sub => f(0) - f(1),
+            FpOp::Mul => f(0) * f(1),
+            FpOp::Div => f(0) / f(1),
+            FpOp::Sqrt => f(0).sqrt(),
+            FpOp::MulAdd => f(0).mul_add(f(1), f(2)),
+            FpOp::Neg => return args[0] ^ (1 << 31),
+            FpOp::Abs => return args[0] & !(1 << 31),
+        };
+        u128::from(r.to_bits())
+    } else {
+        let f = |i: usize| f64::from_bits(args[i] as u64);
+        let r = match op {
+            FpOp::Add => f(0) + f(1),
+            FpOp::Sub => f(0) - f(1),
+            FpOp::Mul => f(0) * f(1),
+            FpOp::Div => f(0) / f(1),
+            FpOp::Sqrt => f(0).sqrt(),
+            FpOp::MulAdd => f(0).mul_add(f(1), f(2)),
+            FpOp::Neg => return args[0] ^ (1 << 63),
+            FpOp::Abs => return args[0] & !(1 << 63),
+        };
+        u128::from(r.to_bits())
+    }
+}
+
+fn to_bytes(v: u128, n: usize, endian: Endian) -> Vec<u8> {
+    let le = v.to_le_bytes();
+    let mut out = le[..n].to_vec();
+    if endian == Endian::Big {
+        out.reverse();
+    }
+    out
+}
+
+fn from_bytes(buf: &[u8], endian: Endian) -> u128 {
+    let mut le = [0u8; 16];
+    le[..buf.len()].copy_from_slice(buf);
+    if endian == Endian::Big {
+        le[..buf.len()].reverse();
+    }
+    u128::from_le_bytes(le)
+}
+
+/// Runs `block` on `state` and `mem`.
+///
+/// `Get` reads the state at entry; `Set`s are committed together when the
+/// block reaches its exit, so a fault leaves registers unchanged. Memory
+/// operations and the monitor take effect in order.
+pub fn run(
+    block: &Block,
+    state: &mut State,
+    mem: &mut dyn GuestMemory,
+    intrinsics: &mut dyn Intrinsics,
+) -> Result<Outcome, Error> {
+    block.verify().map_err(|e| Error::Invalid(e.to_string()))?;
+    if state.regs.len() != block.regs.len() {
+        return Err(Error::StateSize {
+            expected: block.regs.len(),
+            found: state.regs.len(),
+        });
+    }
+    let mut vals: Vec<u128> = Vec::with_capacity(block.insts.len());
+    let mut writes: Vec<(usize, u128)> = Vec::new();
+    let addr_mask = block.addr_width.mask();
+    for inst in &block.insts {
+        let v = |x: crate::Value| vals[x.index()];
+        let width = inst.width.unwrap_or(Width::W1);
+        let r: u128 = match &inst.op {
+            Op::Const(c) => *c,
+            Op::Get(reg) => state.regs[reg.index()] & width.mask(),
+            Op::Set(reg, x) => {
+                writes.push((reg.index(), v(*x)));
+                0
+            }
+            Op::Un(op, a) => eval_un(*op, v(*a), width),
+            Op::Bin(op, a, b) => eval_bin(*op, v(*a), v(*b), width),
+            Op::Cmp(op, a, b) => {
+                let w = block.width_of(*a).unwrap_or(Width::W1);
+                u128::from(eval_cmp(*op, v(*a), v(*b), w))
+            }
+            Op::Select(c, a, b) => {
+                if v(*c) != 0 {
+                    v(*a)
+                } else {
+                    v(*b)
+                }
+            }
+            Op::Ext(kind, a) => {
+                let aw = block.width_of(*a).unwrap_or(Width::W1);
+                match kind {
+                    ExtKind::Zero => v(*a),
+                    ExtKind::Sign => (sext(v(*a), aw) as u128) & width.mask(),
+                }
+            }
+            Op::Extract(a, lo) => (v(*a) >> lo) & width.mask(),
+            Op::Concat(h, l) => {
+                let lw = block.width_of(*l).unwrap_or(Width::W1).bits();
+                ((v(*h) << lw) | v(*l)) & width.mask()
+            }
+            Op::Load {
+                addr,
+                endian,
+                order: _,
+            }
+            | Op::LoadExclusive {
+                addr,
+                endian,
+                order: _,
+            } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = width.bits() / 8;
+                let mut buf = vec![0u8; n as usize];
+                mem.read(a, &mut buf).map_err(Error::Fault)?;
+                if matches!(inst.op, Op::LoadExclusive { .. }) {
+                    state.monitor = Some(Monitor { addr: a, size: n });
+                }
+                from_bytes(&buf, *endian)
+            }
+            Op::Store {
+                addr,
+                value,
+                endian,
+                order: _,
+            } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = block.width_of(*value).unwrap_or(Width::W8).bits() / 8;
+                mem.write(a, &to_bytes(v(*value), n as usize, *endian))
+                    .map_err(Error::Fault)?;
+                0
+            }
+            Op::StoreExclusive {
+                addr,
+                value,
+                endian,
+                order: _,
+            } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = block.width_of(*value).unwrap_or(Width::W8).bits() / 8;
+                let armed = state.monitor == Some(Monitor { addr: a, size: n });
+                state.monitor = None;
+                if armed {
+                    mem.write(a, &to_bytes(v(*value), n as usize, *endian))
+                        .map_err(Error::Fault)?;
+                }
+                u128::from(armed)
+            }
+            Op::ClearExclusive => {
+                state.monitor = None;
+                0
+            }
+            Op::Fence(_) => 0,
+            Op::Fp(op, args) => {
+                let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
+                eval_fp(*op, &a, width)
+            }
+            Op::Intrinsic(name, args) => {
+                let a: Vec<u128> = args.iter().map(|x| v(*x)).collect();
+                intrinsics.call(name, &a)? & width.mask()
+            }
+        };
+        vals.push(r);
+    }
+    let next = match block.exit.next {
+        Next::Const(t) => t,
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => {
+            if vals[cond.index()] != 0 {
+                taken
+            } else {
+                not_taken
+            }
+        }
+        Next::Dynamic(x) => vals[x.index()] as u64,
+    };
+    for (slot, value) in writes {
+        state.regs[slot] = value;
+    }
+    Ok(Outcome {
+        next: next & (addr_mask as u64),
+        flow: block.exit.flow,
+    })
+}
+
+/// A flat byte array at a base address, for tests and simple guests.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FlatMemory {
+    /// The guest address of `bytes[0]`.
+    pub base: u64,
+    /// The contents.
+    pub bytes: Vec<u8>,
+}
+
+impl FlatMemory {
+    fn range(&self, addr: u64, n: usize, write: bool) -> Result<std::ops::Range<usize>, Fault> {
+        let fault = Fault {
+            addr,
+            size: n as u32,
+            write,
+        };
+        let off = addr.checked_sub(self.base).ok_or(fault)?;
+        let off = usize::try_from(off).map_err(|_| fault)?;
+        let end = off.checked_add(n).ok_or(fault)?;
+        if end > self.bytes.len() {
+            return Err(fault);
+        }
+        Ok(off..end)
+    }
+}
+
+impl GuestMemory for FlatMemory {
+    fn read(&mut self, addr: u64, buf: &mut [u8]) -> Result<(), Fault> {
+        let r = self.range(addr, buf.len(), false)?;
+        buf.copy_from_slice(&self.bytes[r]);
+        Ok(())
+    }
+
+    fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), Fault> {
+        let r = self.range(addr, data.len(), true)?;
+        self.bytes[r].copy_from_slice(data);
+        Ok(())
+    }
+}

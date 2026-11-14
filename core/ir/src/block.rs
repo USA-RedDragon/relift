@@ -1,0 +1,294 @@
+use std::fmt;
+
+use crate::{BinOp, Op, RegFile, UnOp, Value, Width};
+
+/// One instruction: an operation and the width of its result, if it has one.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Inst {
+    /// The operation.
+    pub op: Op,
+    /// The result width; `None` for operations that give no value.
+    pub width: Option<Width>,
+}
+
+/// Where control goes when a block exits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Next {
+    /// A known address.
+    Const(u64),
+    /// `taken` when `cond` (one bit) is 1, else `not_taken`.
+    Select {
+        /// The condition.
+        cond: Value,
+        /// The address when the condition holds.
+        taken: u64,
+        /// The address when it does not.
+        not_taken: u64,
+    },
+    /// An address computed in the block, of the block's address width.
+    Dynamic(Value),
+}
+
+/// What kind of control transfer the exit is, for analysis. The interpreter
+/// treats every kind as a jump to [`Exit::next`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Flow {
+    /// Straight-line or a branch within or between functions.
+    Jump,
+    /// A call that returns to `ret`.
+    Call {
+        /// The return address.
+        ret: u64,
+    },
+    /// A return to a caller.
+    Return,
+    /// A trap to the runtime (a system call, a breakpoint) with the
+    /// frontend's code; `next` is where execution resumes.
+    Trap(u32),
+}
+
+/// How a block ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Exit {
+    /// The next program counter.
+    pub next: Next,
+    /// The kind of transfer.
+    pub flow: Flow,
+}
+
+/// The lifted form of guest code at one address: straight-line SSA and an exit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Block {
+    /// The register file the block's `Get` and `Set` index.
+    pub regs: RegFile,
+    /// The width of guest addresses.
+    pub addr_width: Width,
+    /// The guest address of the first lifted instruction.
+    pub pc: u64,
+    /// The number of guest bytes lifted.
+    pub len: u32,
+    /// The instructions, in order; value `n` is the result of `insts[n]`.
+    pub insts: Vec<Inst>,
+    /// The exit.
+    pub exit: Exit,
+}
+
+/// A type error in a block, found by [`Block::verify`] or the builder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifyError {
+    /// The index of the offending instruction, or `None` for the exit.
+    pub at: Option<usize>,
+    /// What is wrong.
+    pub message: String,
+}
+
+impl fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.at {
+            Some(i) => write!(f, "instruction {i}: {}", self.message),
+            None => write!(f, "exit: {}", self.message),
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
+fn err<T>(message: String) -> Result<T, String> {
+    Err(message)
+}
+
+/// Checks `op` with the given result width against the widths of earlier
+/// values; `widths[n]` is the result width of value `n`.
+pub(crate) fn check_op(
+    op: &Op,
+    width: Option<Width>,
+    widths: &[Option<Width>],
+    regs: &RegFile,
+    addr_width: Width,
+) -> Result<(), String> {
+    let w = |v: Value| -> Result<Width, String> {
+        match widths.get(v.index()) {
+            Some(Some(w)) => Ok(*w),
+            Some(None) => err(format!("value {} has no result", v.0)),
+            None => err(format!("value {} is not defined before use", v.0)),
+        }
+    };
+    let need = || width.ok_or_else(|| "missing result width".to_string());
+    let none = || {
+        if width.is_some() {
+            err("operation gives no value but has a width".to_string())
+        } else {
+            Ok(())
+        }
+    };
+    let same = |a: Width, b: Width| {
+        if a == b {
+            Ok(())
+        } else {
+            err(format!("width mismatch: {} and {}", a.bits(), b.bits()))
+        }
+    };
+    let bytes = |x: Width| {
+        x.bytes()
+            .map(|_| ())
+            .ok_or_else(|| format!("memory width {} is not whole bytes", x.bits()))
+    };
+    match op {
+        Op::Const(c) => {
+            let r = need()?;
+            if c & !r.mask() != 0 {
+                return err(format!("constant {c:#x} does not fit {} bits", r.bits()));
+            }
+            Ok(())
+        }
+        Op::Get(reg) => {
+            if reg.index() >= regs.len() {
+                return err(format!("slot {} is not in the register file", reg.0));
+            }
+            same(need()?, regs.width(*reg))
+        }
+        Op::Set(reg, v) => {
+            none()?;
+            if reg.index() >= regs.len() {
+                return err(format!("slot {} is not in the register file", reg.0));
+            }
+            same(w(*v)?, regs.width(*reg))
+        }
+        Op::Un(u, v) => {
+            let a = w(*v)?;
+            same(need()?, a)?;
+            if *u == UnOp::ByteSwap {
+                bytes(a)?;
+            }
+            Ok(())
+        }
+        Op::Bin(b, x, y) => {
+            let a = w(*x)?;
+            let c = w(*y)?;
+            same(need()?, a)?;
+            match b {
+                BinOp::Shl | BinOp::LShr | BinOp::AShr | BinOp::RotR => Ok(()),
+                _ => same(a, c),
+            }
+        }
+        Op::Cmp(_, x, y) => {
+            same(need()?, Width::W1)?;
+            same(w(*x)?, w(*y)?)
+        }
+        Op::Select(c, x, y) => {
+            same(w(*c)?, Width::W1)?;
+            let a = w(*x)?;
+            same(a, w(*y)?)?;
+            same(need()?, a)
+        }
+        Op::Ext(_, v) => {
+            if need()? < w(*v)? {
+                return err("extension narrows".to_string());
+            }
+            Ok(())
+        }
+        Op::Extract(v, lo) => {
+            if u32::from(*lo) + need()?.bits() > w(*v)?.bits() {
+                return err("extract runs past the operand".to_string());
+            }
+            Ok(())
+        }
+        Op::Concat(h, l) => {
+            let sum = w(*h)?.bits() + w(*l)?.bits();
+            same(need()?, Width::try_new(sum).ok_or("concat wider than 128")?)
+        }
+        Op::Load { addr, .. } | Op::LoadExclusive { addr, .. } => {
+            same(w(*addr)?, addr_width)?;
+            bytes(need()?)
+        }
+        Op::Store { addr, value, .. } => {
+            none()?;
+            same(w(*addr)?, addr_width)?;
+            bytes(w(*value)?)
+        }
+        Op::StoreExclusive { addr, value, .. } => {
+            same(need()?, Width::W1)?;
+            same(w(*addr)?, addr_width)?;
+            bytes(w(*value)?)
+        }
+        Op::ClearExclusive | Op::Fence(_) => none(),
+        Op::Fp(f, args) => {
+            let r = need()?;
+            if r != Width::W32 && r != Width::W64 {
+                return err("floating point is 32 or 64 bits".to_string());
+            }
+            if args.len() != f.arity() {
+                return err(format!("{f:?} takes {} operands", f.arity()));
+            }
+            for a in args {
+                same(w(*a)?, r)?;
+            }
+            Ok(())
+        }
+        Op::Intrinsic(_, args) => {
+            for a in args {
+                w(*a)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+impl Block {
+    /// Checks every width and operand reference, and the exit.
+    pub fn verify(&self) -> Result<(), VerifyError> {
+        let mut widths = Vec::with_capacity(self.insts.len());
+        for (i, inst) in self.insts.iter().enumerate() {
+            check_op(&inst.op, inst.width, &widths, &self.regs, self.addr_width).map_err(
+                |message| VerifyError {
+                    at: Some(i),
+                    message,
+                },
+            )?;
+            widths.push(inst.width);
+        }
+        let exit_err = |message: &str| VerifyError {
+            at: None,
+            message: message.to_string(),
+        };
+        let width_of = |v: Value| widths.get(v.index()).copied().flatten();
+        match self.exit.next {
+            Next::Const(_) => {}
+            Next::Select { cond, .. } => {
+                if width_of(cond) != Some(Width::W1) {
+                    return Err(exit_err("the select condition is not one defined bit"));
+                }
+            }
+            Next::Dynamic(v) => {
+                if width_of(v) != Some(self.addr_width) {
+                    return Err(exit_err("the target is not an address-width value"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The width of value `v`, if it is defined and has one.
+    pub fn width_of(&self, v: Value) -> Option<Width> {
+        self.insts.get(v.index()).and_then(|i| i.width)
+    }
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "block {:#x} len {}:", self.pc, self.len)?;
+        for (i, inst) in self.insts.iter().enumerate() {
+            match inst.width {
+                Some(w) => write!(f, "  v{i}:b{} = ", w.bits())?,
+                None => write!(f, "  ")?,
+            }
+            match &inst.op {
+                Op::Get(r) => writeln!(f, "get {}", self.regs.decl(*r).name)?,
+                Op::Set(r, v) => writeln!(f, "set {} v{}", self.regs.decl(*r).name, v.0)?,
+                Op::Const(c) => writeln!(f, "const {c:#x}")?,
+                other => writeln!(f, "{other:?}")?,
+            }
+        }
+        writeln!(f, "  exit {:?} {:?}", self.exit.next, self.exit.flow)
+    }
+}
