@@ -911,38 +911,60 @@ are also call boundaries. [inferred]
   (`rl_a64_flags_enter`, `rl_a64_flags_leave`).
 - Where x86-64 and Arm differ at FPCR zero, and what covers it:
   - Tininess: Arm detects underflow before rounding, x86 after. They differ
-    only for a result that rounds up to the smallest normal magnitude;
-    `rl_fp_tiny_fixup` sends exactly those results to the exact layer
-    (`test_fp_flags.c`, values from an Apple M2).
+    only for a product or quotient that rounds up to the smallest normal
+    magnitude (a sum or difference below it is exact, as every finite value
+    is a multiple of the smallest subnormal). `rl_fp_flags_fixup` tests the
+    result's bits once for a NaN or, for those two, that magnitude, and
+    sends only those results to the exact layer (`test_fp_flags.c`, values
+    from an Apple M2).
   - x86 DE (denormal operand) has no Arm meaning at FZ 0 and is not mapped;
     IDC arises only with FZ set, which runs on the slow path.
   - NaN results: the x86 operation raised the same IE as Arm (signaling
     operands, invalid operations); the NaN bits come from the exact layer.
   - FMA, square root, conversions to and from integers and between
     formats, rounding to integral: always the exact layer, exact flags.
+    The exact layer raises its flags on the host with `rl_fp_host_raise`,
+    which on x86-64 runs an SSE operation that raises the same flag
+    (1 + 2^-100 for IXC alone, inline; `rl_fp_host_raise_any` otherwise)
+    instead of writing MXCSR, which costs several nanoseconds per write.
   - Compares (IOC for signaling NaNs, and for any NaN in FCMPE, FCMGE and
     FCMGT), FMAX/FMIN and their NUM, pairwise and across-lanes forms (IOC
-    for signaling NaNs): flags built in IR and raised under the
-    instruction's condition (FCCMP raises nothing when the condition fails).
-  - FRECPE, FRSQRTE, FRECPS, FRSQRTS and fixed-point conversions with
-    fraction bits (whose scaling multiply would raise flags Arm's exact
-    scaling does not): their blocks carry a second guard (`SLOW_FLAGS`,
-    on the frontend's `FP_FLAGS` slot, homed at the constant
-    `RL_FP_FLAGS_ON`) and run on the slow path in flag-producing programs
-    only.
+    for signaling NaNs), FRECPE and FRSQRTE (IOC for a signaling NaN or a
+    negative FRSQRTE operand, DZC for a zero, OFC and IXC for an FRECPE
+    result that overflows) and FRINTX's IXC: flags built in IR and raised
+    under the instruction's condition (FCCMP raises nothing when the
+    condition fails).
+  - FRECPS and FRSQRTS: only the computation whose result is chosen gets
+    the operands (the others get zeros, which raise nothing), so the host
+    raises the flags of one fused operation, as Arm's single rounding does.
+  - Fixed-point conversions with fraction bits: the scaling by a power of
+    two is exact except where it overflows, and a value that large
+    saturates; it is scaled as the smallest saturating value of its sign,
+    so only the conversion's own flags remain.
+  - A floating-point result written to XZR or WZR still raises its flags:
+    the template keeps it alive with a flag raise that depends on it and is
+    always zero.
   - FCVTXN (round to odd): the IR converts to nearest even, converts back
     and, when inexact, steps to the truncated value and sets its lowest
     bit. The host conversion's overflow and underflow flags do not match
-    rounding to odd, so these blocks carry the `SLOW_FLAGS` guard too; the
-    slow path converts with `RL_RM_ODD`.
-  - Binary16 arithmetic, square root, rounding to integral and every
-    conversion from or to binary16: the section 10.3 helpers compute in
-    software and raise no host flags, so these blocks carry the
-    `SLOW_FLAGS` guard too. The slow path runs them in the exact layer at
+    rounding to odd, so these blocks carry a second guard (`SLOW_FLAGS`, on
+    the frontend's `FP_FLAGS` slot, homed at the constant `RL_FP_FLAGS_ON`)
+    and run on the slow path in flag-producing programs only; the slow path
+    converts with `RL_RM_ODD`.
+  - Binary16 arithmetic, square root, rounding to integral, FRECPS and
+    FRSQRTS and every conversion from or to binary16: the section 10.3
+    helpers compute in software and raise no host flags, so these blocks
+    carry the `SLOW_FLAGS` guard too. The slow path runs them in the exact layer at
     16 bits, which also applies FZ16, DN and AHP (AHP only in conversions,
     as Arm's `FPUnpack` ignores it elsewhere).
   - Non-default FPCR (RMode, FZ, DN, AHP, FZ16) runs on the slow path in
     every program, which produces exact flags.
+- `relift/tests/emit_flags.rs` checks all of it on the host: random words
+  of every FP form, lifted for a flag-producing program and compiled at the
+  flagged flags, run on states full of FP special values, must give the
+  result and cumulative flags of `rl_fp_slow` (the exact layer, which
+  `relift-check` checks against an Apple M2 and QEMU). The same harness
+  runs on an M2 with `RELIFT_EMIT_FLAGS_KEEP`.
 - The reference mode `RELIFT_FP_EXACT=1` sets `RL_FPCR_EXACT` (FPCR bit 31,
   RES0, never visible to the guest or the host FPCR) so every guarded block
   runs on the slow path; it exists to check the host-flag path against.
