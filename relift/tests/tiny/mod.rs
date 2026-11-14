@@ -110,15 +110,25 @@ fn program(undefined: bool, pointer: bool) -> Vec<u8> {
     text
 }
 
+/// The scratch directory `name`. `RELIFT_TEST_TMP` replaces the build's
+/// target directory, for a test built on one host and run on another.
 pub fn scratch(name: &str) -> PathBuf {
-    let d = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let base = std::env::var_os("RELIFT_TEST_TMP")
+        .map_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")), PathBuf::from);
+    let d = base.join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).expect("the scratch dir is creatable");
     d
 }
 
+/// Runs relift in `dir`. `RELIFT_TEST_BIN` replaces the binary cargo built,
+/// for a test built on one host and run on another.
 pub fn relift(dir: &Path, args: &[&str]) -> std::process::Output {
-    relift_proc::command(env!("CARGO_BIN_EXE_relift"))
+    let bin = std::env::var_os("RELIFT_TEST_BIN").map_or_else(
+        || PathBuf::from(env!("CARGO_BIN_EXE_relift")),
+        PathBuf::from,
+    );
+    relift_proc::command(bin)
         .args(args)
         .env_remove("RELIFT_JOBS")
         .current_dir(dir)
