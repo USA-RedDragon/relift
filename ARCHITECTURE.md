@@ -161,6 +161,9 @@ funnel that stops calling the API fails the lint. Tests use the funnels too.
 
 `.github/workflows/ci.yaml`, GitHub-hosted runners only:
 
+Every job sets `timeout-minutes: 15`; a job that needs longer is split or
+sped up, never given more time.
+
 - **checks** (ubuntu-latest, the pinned toolchain through rustup): fmt,
   clippy `--all-targets --all-features -D warnings` (main and `check/`
   workspaces), the structural tests, all tests, the generated config docs,
