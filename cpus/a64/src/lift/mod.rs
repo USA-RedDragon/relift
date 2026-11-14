@@ -3,12 +3,14 @@
 //! [`lift`] uses the template generated from the Sail model ([`sail`]) when
 //! the encoding has one. A few encodings also keep a hand-written lifter
 //! ([`lifter`], [`lift_hand`]): the forms the differential checker was
-//! brought up on, kept as a cross-check of the generator.
+//! brought up on, kept as a cross-check of the generator. The system
+//! instructions with no template ([`system`]) are lifted by hand.
 
 mod arith;
 mod branch;
 mod mem;
 pub mod sail;
+pub mod system;
 
 use std::fmt;
 
@@ -67,6 +69,9 @@ pub fn lift(word: u32, pc: u64) -> Result<Block, LiftError> {
 /// Lifts an already decoded instruction at `pc`: with its generated template
 /// when it has one, else with its hand-written lifter.
 pub fn lift_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
+    if let Some(f) = system::lifter(insn.encoding) {
+        return run_lifter(f, insn, pc);
+    }
     if sail::has_template(insn.encoding) {
         return sail::lift_insn(insn, pc);
     }
@@ -82,6 +87,11 @@ pub fn lift_hand(word: u32, pc: u64) -> Result<Block, LiftError> {
 /// Lifts an already decoded instruction with its hand-written lifter.
 fn hand_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
     let f = lifter(insn.encoding).ok_or(LiftError::Unsupported(insn.encoding))?;
+    run_lifter(f, insn, pc)
+}
+
+/// Runs the lifting function `f` on `insn` at `pc`.
+fn run_lifter(f: LiftFn, insn: Insn, pc: u64) -> Result<Block, LiftError> {
     let mut b = Builder::new(regs::regs(), Width::W64, pc);
     let exit = match f(insn, &mut b)? {
         End::Next => Exit {
@@ -95,7 +105,8 @@ fn hand_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
 
 /// The encodings that lift, in specification order.
 pub fn supported() -> impl Iterator<Item = Encoding> {
-    Encoding::all().filter(|e| sail::has_template(*e) || lifter(*e).is_some())
+    Encoding::all()
+        .filter(|e| system::lifter(*e).is_some() || sail::has_template(*e) || lifter(*e).is_some())
 }
 
 /// The hand-written lifting function for `enc`, if there is one.
