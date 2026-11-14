@@ -195,3 +195,23 @@ fn jump_tables_are_resolved_into_the_function() {
     assert!(f.insts.contains_key(&(BASE + 0x3c)));
     assert_eq!(a.functions.len(), 1);
 }
+
+#[test]
+fn a_jump_table_entered_by_a_taken_branch() {
+    let m = module(
+        &[
+            word(0x0d, 1, 0),      // 0x00 cmpz r1
+            branch(0x0e, 0, 3),    // 0x04 bz +3 -> 0x10 (index 0 only)
+            word(0x04, 0, 0),      // 0x08 li r0, 0
+            word(0x03, 0, 0),      // 0x0c ret
+            word(0x04, 0, 0x1020), // 0x10 li r0, table
+            word(0x05, 0, 1),      // 0x14 add r0, r1
+            word(0x0a, 0, 0),      // 0x18 ld r0, [r0]
+            word(0x06, 0, 0),      // 0x1c br r0
+        ],
+        &(0x1000u64 + 0x0c).to_le_bytes(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert_eq!(a.functions[&BASE].tables[&(BASE + 0x1c)], [BASE + 0x0c]);
+}

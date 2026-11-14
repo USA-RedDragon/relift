@@ -195,7 +195,17 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
                 Insn::Lifted(b) => Some(b),
                 Insn::Failed(_) => None,
             };
-            let t = tables::resolve(module, pc, &b, granule, &mut at, &known).unwrap_or_default();
+            let entering = |a: u64| {
+                insts.values().find_map(|i| match i {
+                    Insn::Lifted(b) => match b.exit.next {
+                        Next::Select { taken, .. } if taken == a => Some(b.clone()),
+                        _ => None,
+                    },
+                    Insn::Failed(_) => None,
+                })
+            };
+            let t = tables::resolve(module, pc, &b, granule, &mut at, &entering, &known)
+                .unwrap_or_default();
             work.extend(
                 t.iter()
                     .copied()

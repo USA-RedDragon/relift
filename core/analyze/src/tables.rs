@@ -1,8 +1,8 @@
 //! Jump tables: the targets of a computed jump found by running the code
 //! before it in the IR interpreter, once per index value.
 //!
-//! The shape is a bounds check (a comparison and a conditional branch), then
-//! straight-line code that loads from the table and computes the target, and
+//! The shape is a bounds check (a comparison and a conditional branch that
+//! falls through or branches to the body), then straight-line code that loads from the table and computes the target, and
 //! the jump. Walking back from the jump over instructions that fall through
 //! into each other finds the conditional branch; the code between them is
 //! the body. Each register the body reads before writing it, and that the
@@ -71,13 +71,16 @@ fn run(blocks: &[Block], state: &mut State, mem: &mut FlatMemory) -> Option<u64>
 
 /// The targets of the computed jump `jump` at `pc`, or `None` when it is not
 /// a jump table this recognizes. `block_at` lifts the instruction at an
-/// address; `known` gives the registers known to be constant at an address.
+/// address; `entering` gives the conditional branch of the function that
+/// jumps to an address; `known` gives the registers known to be constant at
+/// an address.
 pub(crate) fn resolve(
     module: &Module,
     pc: u64,
     jump: &Block,
     granule: u64,
     block_at: &mut dyn FnMut(u64) -> Option<Block>,
+    entering: &dyn Fn(u64) -> Option<Block>,
     known: &dyn Fn(u64) -> HashMap<Reg, u128>,
 ) -> Option<Vec<u64>> {
     if !matches!(
@@ -92,18 +95,20 @@ pub(crate) fn resolve(
         if body.len() > RUN_BACK {
             return None;
         }
-        at = at.checked_sub(granule)?;
-        let b = block_at(at)?;
-        if !falls_into(&b, at + u64::from(b.len)) {
-            return None;
+        let prev = at
+            .checked_sub(granule)
+            .and_then(|a| block_at(a).map(|b| (a, b)));
+        match prev {
+            Some((a, b)) if falls_into(&b, at) && !matches!(b.exit.next, Next::Select { .. }) => {
+                if b.insts.iter().any(|i| matches!(i.op, Op::Store { .. })) {
+                    return None;
+                }
+                body.insert(0, b);
+                at = a;
+            }
+            Some((_, b)) if falls_into(&b, at) => break b,
+            _ => break entering(at)?,
         }
-        if matches!(b.exit.next, Next::Select { .. }) {
-            break b;
-        }
-        if has_memory(&b) && b.insts.iter().any(|i| matches!(i.op, Op::Store { .. })) {
-            return None;
-        }
-        body.insert(0, b);
     };
     let start = body[0].pc;
     let seeds = known(start);
