@@ -241,6 +241,18 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 let _ = writeln!(s, "    if ({}) {{ {jt} }}\n    {jn}", val(cond));
             }
             Next::Dynamic(v) => {
+                let known: Vec<u64> =
+                    cx.f.tables
+                        .get(&b.pc)
+                        .map(|t| t.iter().copied().filter(|t| cx.inside(*t)).collect())
+                        .unwrap_or_default();
+                if !known.is_empty() {
+                    let _ = writeln!(s, "    switch ({}) {{", val(v));
+                    for t in known.iter().collect::<BTreeSet<_>>() {
+                        let _ = writeln!(s, "    case UINT64_C({t:#x}): goto {};", label(*t));
+                    }
+                    s.push_str("    default: break;\n    }\n");
+                }
                 let _ = writeln!(
                     s,
                     "    RL_STORE();\n    RL_MUSTTAIL return rl_indirect(c, {})(c, mem);",

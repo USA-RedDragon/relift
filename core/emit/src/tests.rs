@@ -23,6 +23,7 @@ fn function(entry: u64, blocks: &[(u64, Block)]) -> Function<'_> {
             .iter()
             .map(|(pc, b)| (*pc, Insn::Lifted { block: b, raw: 0 }))
             .collect::<BTreeMap<_, _>>(),
+        tables: BTreeMap::new(),
     }
 }
 
@@ -99,6 +100,7 @@ fn failures_and_unknown_intrinsics_report_undefined() {
         entry: 0x40,
         span: 4,
         insts: BTreeMap::from([(0x40, Insn::Failed(&fail))]),
+        tables: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &Options::default());
     assert!(shard(&out).contains("return rl_undefined(c, mem, UINT64_C(0x40), 0xdeadu);"));
@@ -167,6 +169,7 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
                 },
             ),
         ]),
+        tables: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &Options::default());
     let s = shard(&out);
@@ -176,6 +179,20 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
     );
     assert!(
         s.contains("        RL_RELOAD();\n        goto L_204;\n    }"),
+        "{s}"
+    );
+}
+
+#[test]
+fn jump_tables_branch_to_their_targets_inside_the_function() {
+    let code = [word(0x06, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks);
+    f.tables.insert(0x100, vec![0x108, 0x104, 0x108, 0x900]);
+    let out = emit(&Toy, &[f], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("    switch (v0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_STORE();\n    RL_MUSTTAIL return rl_indirect(c, v0)(c, mem);"),
         "{s}"
     );
 }
