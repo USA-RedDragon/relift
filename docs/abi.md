@@ -479,10 +479,7 @@ Mac unless marked]:
 - **d8-d15** are in `c->v` and in `rl_resume_regs`, so a landing pad sees
   the values the unwinder restored. [inferred; the exceptions prototype did not track FP
   registers]
-- **Guest setjmp/longjmp:** each call to `setjmp` is a resume point (the
-  `lp_dispatch` shape with one case, the instruction after the call, x0 =
-  the longjmp value); guest `longjmp` is an override that calls
-  `rl_resume`. [inferred]
+- **Guest setjmp/longjmp:** section 7.1.
 - **Host code that must raise a guest exception** (an override or a
   service): allocate with the guest `__cxa_allocate_exception`, construct
   the object in guest memory, put the arguments in `c->x[0..2]`, leave x30
@@ -498,6 +495,54 @@ Mac unless marked]:
   walking into host code. Any other `RL_PENDING` that reaches such a host
   caller is propagated if the host caller has the lifted signature, else
   reported. [inferred; open: build the synthetic FDE]
+
+## 7.1 setjmp and longjmp
+
+Guest `setjmp` and `longjmp` use the same primitive as exceptions: the
+host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
+[verified: `a64_tests jmp` on x86-64 Linux]
+
+- **Overrides.** `rl_a64_setjmp` and `rl_a64_longjmp` (`a64/abi.h`) have
+  the lifted signature and replace the guest's `setjmp` and `longjmp`
+  (`_setjmp`, `__builtin_setjmp` and `sigsetjmp` with a zero mask take the
+  same overrides). The build registers them as `RL_FN_OVERRIDE` entries at
+  the guest symbols' addresses; `longjmp` also carries `RL_FN_MAY_UNWIND`.
+  - `rl_a64_setjmp` stores x19 to x30, sp and d8 to d15 (`v[8..15].d[0]`)
+    into the jmp_buf at guest address x0 and returns `RL_OK` with x0 = 0.
+    The buffer is guest memory, so guest code that reads or copies it sees
+    what the guest's own `setjmp` would have written.
+  - `rl_a64_longjmp` reads that buffer, sets x0 to w1 (1 when w1 is 0,
+    zero-extended, as the guest's `cinc w0, w1, eq` does), and calls
+    `rl_resume` with pc = the saved x30 and the saved sp. It returns
+    `RL_PENDING` with `pend = {saved x30, saved sp, RL_PEND_UNWIND}`.
+- **Layout.** `rl_a64_jmp_layout` gives the offsets of x19, sp and d8 in
+  the guest libc's jmp_buf. The default `rl_a64_jmp_newlib` is x19 at 0,
+  sp at 96, d8 at 112, 176 bytes [verified: disassembly of devkitA64
+  newlib's `setjmp` and `longjmp`]. A guest layer whose libc differs calls
+  `rl_a64_set_jmp_layout` at start-up; relift reads the offsets from the
+  guest's `setjmp` (a run of `stp`/`str` from x0) and refuses to build when
+  they do not fit the struct, or when the guest mangles the saved values
+  (none of the libcs seen do). [inferred: the read from the guest's setjmp]
+- **Emitter: resume points.** The call site of `setjmp` is a resume point
+  at the return address. A function that calls `setjmp` gets
+  `RL_FN_LANDING_PADS`, and every call in it after which control may come
+  back through `longjmp` (in practice every call in the function) uses the
+  landing-pad check of section 7:
+  `if (RL_UNLIKELY(rc)) { if (c->pend.sp == sp) goto lp_dispatch; return RL_PENDING; }`.
+  `lp_dispatch` gets one case per `setjmp` call site, next to the LSDA
+  landing pads: reload the registers the code after the call reads (x0 is
+  the longjmp value, x19 to x29 and d8 to d15 are the saved values) and sp
+  from `c`, set `pend.kind = RL_PEND_NONE`, and jump to the label after the
+  call. The `sp` match works because `bl` does not change sp, so the sp
+  `setjmp` saved is the caller's sp local at the call.
+- **Frames between.** Every frame between the `longjmp` and the `setjmp`
+  frame has the plain check and returns `RL_PENDING`; a frame with its own
+  resume points does not match, because its sp differs. Dropping a plain
+  check runs code that `longjmp` skips (negative control
+  `jmp_control_a_dropped_check_runs_code_longjmp_skipped`).
+- **A `longjmp` to a frame that already returned** is undefined in C; here
+  no frame matches and `RL_PENDING` with `RL_PEND_UNWIND` reaches the thread
+  entry, which reports it as an escaped unwind.
 
 ## 8. Exclusives
 
