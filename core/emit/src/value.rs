@@ -295,6 +295,9 @@ pub(crate) fn emit_op(fe: &dyn Frontend, b: &Block, i: usize) -> Result<Emitted,
             }
             fit(&e, w)
         }
+        Op::Tick(_) | Op::TickIf(..) => return Err("a guest clock tick".into()),
+        Op::IoLoad { .. } | Op::IoStore { .. } => return Err("an I/O access".into()),
+        Op::Sync => return Err("a sync point".into()),
     };
     Ok(Emitted::Value(e))
 }
