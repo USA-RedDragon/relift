@@ -250,10 +250,12 @@ TEST(settings_user_file_is_read_only_with_an_app_and_no_launcher_file)
     char dir[256], path[300], cmd[600];
     const char *tmp = getenv("TMPDIR");
     snprintf(dir, sizeof dir, "%s/rl_home_%d", tmp && *tmp ? tmp : "/tmp", (int)getpid());
-    snprintf(cmd, sizeof cmd, "mkdir -p %s/.local/share/g && printf '{\"scale\": 5}' > %s/.local/share/g/settings.json", dir, dir);
-    CHECK_EQ(system(cmd), 0);
     setenv("HOME", dir, 1);
     unsetenv("XDG_DATA_HOME");
+    char udir[400];
+    CHECK(rl_settings_user_dir(udir, sizeof udir, "g"));
+    snprintf(cmd, sizeof cmd, "mkdir -p '%s' && printf '{\"scale\": 5}' > '%s/settings.json'", udir, udir);
+    CHECK_EQ(system(cmd), 0);
     char *argv[] = { "x", NULL };
     CHECK_EQ(rl_settings_args(1, argv), 0);
     rl_settings_set_app("g");
