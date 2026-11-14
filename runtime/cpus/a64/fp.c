@@ -13,6 +13,8 @@
  */
 #include <relift/a64/abi.h>
 
+#include "fp.h"
+
 #define FPSR_IOC 0x01u
 #define FPSR_DZC 0x02u
 #define FPSR_OFC 0x04u
@@ -509,6 +511,171 @@ static uint64_t fp_rsqrt_est(fpenv *v, const fmt *f, uint64_t a)
     return ((uint64_t)(((3068 - ex) / 2) & 0x7FF) << 52) | ((uint64_t)(est & 0xFFu) << 44);
 }
 
+/** @brief RecipEstimate: a 9-bit estimate of 1/a for a in [256, 512). */
+static unsigned recip_estimate(unsigned a)
+{
+    unsigned b = (1u << 19) / (a * 2 + 1);
+    return (b + 1) / 2;
+}
+
+static uint64_t make_max_normal(const fmt *f, unsigned sign)
+{
+    return make_inf(f, sign) - 1;
+}
+
+/** @brief FPRecipEstimate (FRECPE). */
+static uint64_t fp_recip_est(fpenv *v, const fmt *f, uint64_t a)
+{
+    unp u = unpack(v, f, a);
+    uint64_t res;
+    const unp *ops[1] = { &u };
+    if (process_nans(v, f, ops, 1, &res))
+        return res;
+    if (u.k == K_INF)
+        return make_zero(f, u.sign);
+    if (u.k == K_ZERO) {
+        v->flags |= FPSR_DZC;
+        return make_inf(f, u.sign);
+    }
+    /* The value's exponent with the significand in [1, 2). */
+    int vexp = u.e + 63;
+    if (vexp < -(f->bias + 1)) {
+        unsigned rm = rm_fpcr(v);
+        int to_inf = rm == RL_RM_NEAREST || (rm == RL_RM_POSINF && !u.sign) || (rm == RL_RM_NEGINF && u.sign);
+        v->flags |= FPSR_OFC | FPSR_IXC;
+        return to_inf ? make_inf(f, u.sign) : make_max_normal(f, u.sign);
+    }
+    if (fz_on(v, f) && vexp >= f->bias - 1) {
+        v->flags |= FPSR_UFC;
+        return make_zero(f, u.sign);
+    }
+    /* The operand as a 52-bit fraction and biased exponent, as the
+     * pseudocode scales it. */
+    uint64_t frac;
+    int ex;
+    uint64_t fmask = (1ull << f->fbits) - 1;
+    frac = (a & fmask) << (52 - f->fbits);
+    ex = (int)((a >> f->fbits) & ((1ull << f->ebits) - 1));
+    if (ex == 0) {
+        if (((frac >> 51) & 1u) == 0) {
+            ex = -1;
+            frac = (frac & ((1ull << 50) - 1)) << 2;
+        } else {
+            frac = (frac & ((1ull << 51) - 1)) << 1;
+        }
+    }
+    unsigned scaled = 256u | (unsigned)((frac >> 44) & 0xFFu);
+    int rexp = 2 * f->bias - 1 - ex;
+    unsigned est = recip_estimate(scaled);
+    uint64_t rfrac = (uint64_t)(est & 0xFFu) << 44;
+    if (rexp == 0) {
+        rfrac = (1ull << 51) | (rfrac >> 1);
+    } else if (rexp == -1) {
+        rfrac = (1ull << 50) | (rfrac >> 2);
+        rexp = 0;
+    }
+    return ((uint64_t)u.sign << (f->bits - 1)) | ((uint64_t)rexp << f->fbits) | (rfrac >> (52 - f->fbits));
+}
+
+/** @brief FPRecipStepFused (FRECPS, 2 - a * b) or FPRSqrtStepFused (FRSQRTS, (3 - a * b) / 2), one rounding. */
+static uint64_t fp_step(fpenv *v, const fmt *f, uint64_t a, uint64_t b, int rsqrt)
+{
+    uint64_t na = a ^ (1ull << (f->bits - 1));
+    unp ua = unpack(v, f, na), ub = unpack(v, f, b);
+    const unp *ops[2] = { &ua, &ub };
+    uint64_t res;
+    /* 2.0 or 1.5 */
+    uint64_t special = rsqrt ? ((uint64_t)f->bias << f->fbits) | (1ull << (f->fbits - 1))
+                             : (uint64_t)(f->bias + 1) << f->fbits;
+    if (process_nans(v, f, ops, 2, &res))
+        return res;
+    if ((ua.k == K_INF && ub.k == K_ZERO) || (ua.k == K_ZERO && ub.k == K_INF))
+        return special;
+    if (ua.k == K_INF || ub.k == K_INF)
+        return make_inf(f, ua.sign ^ ub.sign);
+    /* The constant 2 or 3 as m * 2^q, and the halving for FRSQRTS. */
+    rl_u128 cm = rsqrt ? 3 : 1;
+    int cq = rsqrt ? -1 : 1;
+    if (ua.k == K_ZERO || ub.k == K_ZERO)
+        return round_pack(v, f, 0, cm, cq, rm_fpcr(v));
+    return sum_pack(v, f, ua.sign ^ ub.sign, (rl_u128)ua.sig * ub.sig, ua.e + ub.e - (rsqrt ? 1 : 0), 0, cm, cq);
+}
+
+/** @brief FPCompare: NZCV in bits 31 to 28. */
+static uint32_t fp_compare(fpenv *v, const fmt *f, uint64_t a, uint64_t b, int signal_nans)
+{
+    unp ua = unpack(v, f, a), ub = unpack(v, f, b);
+    if (is_nan(&ua) || is_nan(&ub)) {
+        if (signal_nans || ua.k == K_SNAN || ub.k == K_SNAN)
+            v->flags |= FPSR_IOC;
+        return 0x30000000u;
+    }
+    int c = 0;
+    /* Order by value: zeros are equal whatever their sign. */
+    if (ua.k == K_ZERO && ub.k == K_ZERO) {
+        c = 0;
+    } else {
+        int la = ua.k == K_ZERO ? 0 : (ua.sign ? -1 : 1), lb = ub.k == K_ZERO ? 0 : (ub.sign ? -1 : 1);
+        if (la != lb) {
+            c = la < lb ? -1 : 1;
+        } else {
+            /* Same sign, both nonzero: compare magnitudes. */
+            int m;
+            if (ua.k == K_INF || ub.k == K_INF)
+                m = (ua.k == K_INF) - (ub.k == K_INF);
+            else if (ua.e != ub.e)
+                m = ua.e < ub.e ? -1 : 1;
+            else
+                m = ua.sig < ub.sig ? -1 : (ua.sig > ub.sig ? 1 : 0);
+            c = la < 0 ? -m : m;
+        }
+    }
+    if (c == 0)
+        return 0x60000000u;
+    return c < 0 ? 0x80000000u : 0x20000000u;
+}
+
+/** @brief FPCompareEQ (kind 0), FPCompareGE (1) or FPCompareGT (2). */
+static int fp_compare_bool(fpenv *v, const fmt *f, uint64_t a, uint64_t b, int kind)
+{
+    uint32_t nzcv = fp_compare(v, f, a, b, kind != 0);
+    switch (kind) {
+    case 0: return nzcv == 0x60000000u;
+    case 1: return nzcv == 0x60000000u || nzcv == 0x20000000u;
+    default: return nzcv == 0x20000000u;
+    }
+}
+
+/** @brief FPMax or FPMin (num 0), FPMaxNum or FPMinNum (num 1). */
+static uint64_t fp_maxmin(fpenv *v, const fmt *f, uint64_t a, uint64_t b, int is_max, int num)
+{
+    unp ua = unpack(v, f, a), ub = unpack(v, f, b);
+    if (num) {
+        if (ua.k == K_QNAN && ub.k != K_QNAN) {
+            a = make_inf(f, is_max);
+            ua = unpack(v, f, a);
+        } else if (ua.k != K_QNAN && ub.k == K_QNAN) {
+            b = make_inf(f, is_max);
+            ub = unpack(v, f, b);
+        }
+    }
+    const unp *ops[2] = { &ua, &ub };
+    uint64_t res;
+    if (process_nans(v, f, ops, 2, &res))
+        return res;
+    if (ua.k == K_ZERO && ub.k == K_ZERO)
+        return make_zero(f, is_max ? (ua.sign & ub.sign) : (ua.sign | ub.sign));
+    fpenv quiet = *v;
+    uint32_t nzcv = fp_compare(&quiet, f, a, b, 0);
+    int first = is_max ? nzcv == 0x20000000u : nzcv == 0x80000000u;
+    const unp *w = first ? &ua : &ub;
+    if (w->k == K_INF)
+        return make_inf(f, w->sign);
+    if (w->k == K_ZERO)
+        return make_zero(f, w->sign);
+    return pack_unp(v, f, w, w->sign);
+}
+
 static uint64_t convert_nan(const fmt *from, const fmt *to, uint64_t a)
 {
     uint64_t sign = (a >> (from->bits - 1)) & 1u;
@@ -783,4 +950,125 @@ uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsign
     r = fp_from_fixed(&v, to, a, from_bits, fbits, is_unsigned, rmode);
     commit(&v, fpsr);
     return r;
+}
+
+/* Width-generic entries (fp.h), for the slow paths. */
+
+#define FPN_BEGIN(bits)                \
+    fpenv v = ENV(fpcr);               \
+    const fmt *f = fmt_of(bits);       \
+    uint64_t r;                        \
+    if (!f)                            \
+        return 0;
+
+uint64_t rl_fpn_add(unsigned bits, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_addsub(&v, f, a, b, 0);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_sub(unsigned bits, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_addsub(&v, f, a, b, 1);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_mul(unsigned bits, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_mul(&v, f, a, b);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_div(unsigned bits, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_div(&v, f, a, b);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_muladd(unsigned bits, uint64_t addend, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_muladd(&v, f, addend, a, b);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_sqrt(unsigned bits, uint64_t a, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_sqrt(&v, f, a);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_round_int(unsigned bits, uint64_t a, uint32_t rmode, int exact, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_round_int(&v, f, a, rmode, exact);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_recip_est(unsigned bits, uint64_t a, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_recip_est(&v, f, a);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_rsqrt_est(unsigned bits, uint64_t a, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_rsqrt_est(&v, f, a);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_recip_step(unsigned bits, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_step(&v, f, a, b, 0);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_rsqrt_step(unsigned bits, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_step(&v, f, a, b, 1);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_maxmin(unsigned bits, uint64_t a, uint64_t b, int is_max, int num, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_maxmin(&v, f, a, b, is_max, num);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint32_t rl_fpn_compare(unsigned bits, uint64_t a, uint64_t b, int signal_nans, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = fp_compare(&v, f, a, b, signal_nans);
+    commit(&v, fpsr);
+    return (uint32_t)r;
+}
+
+int rl_fpn_compare_bool(unsigned bits, uint64_t a, uint64_t b, int kind, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    r = (uint64_t)fp_compare_bool(&v, f, a, b, kind);
+    commit(&v, fpsr);
+    return (int)r;
 }
