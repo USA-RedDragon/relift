@@ -221,9 +221,20 @@ fn import_refuses_encrypted_dumps_pointing_to_a_separate_tool() {
     let project = root.join("game");
     let mut nsp = vec![0u8; 0x400];
     nsp[..4].copy_from_slice(b"PFS0");
+    let mut nca = vec![0u8; 0x400];
+    nca[0x200..0x204].copy_from_slice(b"NCA3");
     let noise: Vec<u8> = (0..0x400u32).map(|i| (i * 37 % 251) as u8).collect();
     let cache = root.join("cache").display().to_string();
-    for (name, bytes) in [("game.nsp", &nsp), ("program.nca", &noise)] {
+    for (name, bytes) in [
+        ("game.nsp", &nsp),
+        ("game.nsz", &noise),
+        ("card.xci", &noise),
+        ("card.xcz", &noise),
+        ("program.nca", &noise),
+        ("program.ncz", &noise),
+        ("renamed.dat", &nsp),
+        ("renamed.bin", &nca),
+    ] {
         let file = root.join(name);
         relift_cache::write_if_changed(&file, bytes).expect("the fixture is writable");
         let file = file.display().to_string();
