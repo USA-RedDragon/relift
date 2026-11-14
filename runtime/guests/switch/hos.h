@@ -276,15 +276,21 @@ struct hos_thread {
  * @brief Shared memory object: host pages mapped writable for services and
  * mapped again into guest memory for each svcMapSharedMemory, so every view
  * sees the same bytes.
+ *
+ * On host pages larger than the guest page the bytes start at offset within
+ * the pages, equal to the host-page offset of every guest view; the first
+ * view chooses it and moves the bytes.
  */
 typedef struct hos_shmem {
     /** @brief Base. */
     hos_kobj obj;
     /** @brief Size in bytes the guest maps. */
     uint64_t size;
-    /** @brief Host pages. */
+    /** @brief Host pages, one host page more than size when host pages are larger than guest pages. */
     rl_shm shm;
-    /** @brief Held by service threads that write the bytes without the kernel lock. */
+    /** @brief Byte offset of the object's bytes in shm. */
+    uint64_t offset;
+    /** @brief Held while the bytes move, and by service threads that write without the kernel lock. */
     pthread_mutex_t lock;
     /** @brief Guest addresses of the mapped views, 0 for a free slot. */
     uint64_t views[HOS_SHMEM_VIEWS];
@@ -474,7 +480,12 @@ RL_RUNTIME_API void rl_hos_event_clear(hos_revent *e);
 
 /** @brief Creates a shared memory object (service side), zero filled; user_perm in Horizon bits. */
 RL_RUNTIME_API hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm);
-/** @brief Host pointer to a shared memory object's bytes (always writable, coherent with every guest view). */
+/**
+ * @brief Host pointer to a shared memory object's bytes (always writable,
+ * coherent with every guest view). The first guest view may move the bytes,
+ * so the pointer is valid while the caller holds the kernel lock; threads
+ * that do not hold it use rl_hos_shmem_lock instead.
+ */
 RL_RUNTIME_API uint8_t *rl_hos_shmem_ptr(hos_shmem *s);
 /** @brief Locks the object's bytes in place and returns the host pointer to them; pair with rl_hos_shmem_unlock. */
 RL_RUNTIME_API uint8_t *rl_hos_shmem_lock(hos_shmem *s);

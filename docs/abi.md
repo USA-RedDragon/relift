@@ -140,13 +140,19 @@ Prototype names used in the tags:
   - **`svcMapMemory` (move semantics, e.g. stack mirrors):** copy the range to
     the destination, make the source fault, copy back on unmap. Exact; costs
     about 5 us for 4 KiB to 350 us for 1 MiB.
-  - **Live aliases (shared or transfer memory) that are not 16 KiB aligned:**
-    one view owns the data at full speed and an access to the other view
-    faults, copies and flips ownership (about 10 to 90 us per flip for 4 KiB
-    to 1 MiB); for small ranges with alternating fine-grained access, both
-    views stay `PROT_NONE` and every access is emulated (about 2 us). A hot
-    loop over such an alias stops with a report. Aligned live aliases use a
-    real host alias [inferred, not prototyped].
+  - **Shared memory that is not 16 KiB aligned:** a real host alias. Each
+    object has one host page more than it needs, and its bytes start at the
+    4 KiB offset within a host page where the guest maps it, so the host
+    pages that cover the guest range map the object's pages with no copy.
+    The first guest view picks the offset and moves the bytes (services
+    reach them through the kernel lock or a per-object lock, so the move is
+    safe). The rest of each covered host page must be free guest address
+    space; the kernel reserves it (reported as inaccessible) until the view
+    is unmapped, and refuses the map when another mapping is already there.
+    A second view at a different offset is refused while the first is
+    mapped.
+  - **Transfer memory:** lent in place, so it only changes permissions and
+    follows the union rule above.
   - Vulkan host-pointer imports need 16 KiB alignment and size on macOS.
   [verified: 16 KiB-page prototype on an Apple M2 Mac, all correctness checks
   including 20,000-operation random alias tests against a reference; normal
@@ -737,9 +743,9 @@ committed.
    x86-64 Linux and arm64 macOS (8, 9).
 7. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
    preservation (which registers `rl_svc` may change besides outputs) (10).
-8. Whether any guest program keeps an alias that is not 16 KiB aligned live
-   while both views are in use; aligned live aliases are not yet prototyped
-   (2).
+8. Whether any guest program maps one shared memory object twice at
+   different 4 KiB offsets within a 16 KiB page, or next to another mapping
+   in the same 16 KiB page (2).
 9. Guard sizes against real wild-pointer patterns (2).
 10. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
