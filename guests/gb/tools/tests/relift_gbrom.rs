@@ -167,3 +167,27 @@ fn functions_strict_fails_on_an_unresolved_transfer() {
     let v = json(&gbrom(&d, &["functions", path(&p), "--json"]));
     assert_eq!(v["unresolved_by_kind"]["indirect-jump"], 1);
 }
+
+#[test]
+fn functions_json_lists_tables_ram_pointers_and_instructions() {
+    let d = dir("gbrom-functions-tables");
+    let mut rom = banked_rom();
+    rom[0x150..0x15E].copy_from_slice(&[
+        0x3E, 0x00, 0xEA, 0x00, 0xC1, 0x3E, 0x03, 0xEA, 0x01, 0xC1, 0xCD, 0x20, 0x02, 0xC9,
+    ]);
+    rom[0x220..0x227].copy_from_slice(&[0x21, 0x00, 0xC1, 0x2A, 0x66, 0x6F, 0xE9]);
+    rom[0x300] = 0xC9;
+    synth::fix_checksums(&mut rom);
+    let p = put(&d, "t.gb", &rom);
+    let v = json(&gbrom(
+        &d,
+        &["functions", path(&p), "--json", "--instructions"],
+    ));
+    let ptrs = v["ram_pointers"].as_array().expect("ram pointers");
+    assert_eq!(ptrs.len(), 1, "{v}");
+    assert_eq!(ptrs[0]["cell"], 0xC100);
+    assert!(v["tables"].as_array().expect("tables").is_empty());
+    let f = v["functions"].as_array().expect("functions");
+    assert!(f.iter().any(|f| f["entry"]["text"] == "00:0300"), "{v}");
+    assert_eq!(f[0]["instructions"][0], serde_json::json!([0, 256, 1]));
+}

@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Args;
-use relift_gb_analyze::{CallKind, Function, Loc, Origin, Report, analyze};
+use relift_gb_analyze::{CallKind, Function, Loc, Origin, Report, TableBound, analyze};
 use serde_json::{Value, json};
 
 use crate::{BoxError, input, print_json};
@@ -21,6 +21,10 @@ pub struct FunctionsArgs {
     /// Leave out the list of functions.
     #[arg(long)]
     pub summary: bool,
+    /// With `--json`, list each function's instructions as
+    /// `[bank, address, length]`.
+    #[arg(long)]
+    pub instructions: bool,
     /// Exit with code 1 when a transfer is unresolved.
     #[arg(long)]
     pub strict: bool,
@@ -36,7 +40,7 @@ pub fn run(args: &FunctionsArgs) -> Result<(), BoxError> {
     let rom = input(&args.rom)?;
     let report = analyze(&rom).map_err(|e| format!("{}: {e}", args.rom.display()))?;
     if args.json {
-        print_json(&to_json(&report, args.summary))?;
+        print_json(&to_json(&report, args.summary, args.instructions))?;
     } else {
         print_text(&report, args.summary)?;
     }
@@ -44,6 +48,13 @@ pub fn run(args: &FunctionsArgs) -> Result<(), BoxError> {
         return Err(format!("{} unresolved transfers", report.unresolved.len()).into());
     }
     Ok(())
+}
+
+fn bound_name(b: TableBound) -> &'static str {
+    match b {
+        TableBound::Index => "index",
+        TableBound::Run => "run",
+    }
 }
 
 fn origin_name(o: Origin) -> &'static str {
@@ -77,7 +88,7 @@ fn loc_json(l: Loc) -> Value {
     json!({"bank": l.bank, "addr": l.addr, "text": l.to_string()})
 }
 
-fn to_json(report: &Report, summary: bool) -> Value {
+fn to_json(report: &Report, summary: bool, instructions: bool) -> Value {
     let banks: Vec<Value> = report
         .coverage
         .iter()
@@ -94,13 +105,21 @@ fn to_json(report: &Report, summary: bool) -> Value {
             .functions
             .values()
             .map(|f| {
-                json!({
+                let mut v = json!({
                     "entry": loc_json(f.entry),
                     "origin": origin_name(f.origin),
                     "bytes": f.bytes,
                     "switches_bank": f.switches_bank,
                     "trampoline": tramp_text(f),
-                })
+                });
+                if instructions {
+                    v["instructions"] = f
+                        .body
+                        .iter()
+                        .map(|(l, n)| json!([l.bank, l.addr, n]))
+                        .collect();
+                }
+                v
             })
             .collect()
     };
@@ -113,6 +132,13 @@ fn to_json(report: &Report, summary: bool) -> Value {
         "unresolved_by_kind": kinds,
         "unreached_pointers": report.unreached_pointers.iter().map(|t| json!({
             "site": loc_json(t.site), "value": t.value, "target": t.target.map(loc_json), "stored_at": t.stored_at,
+        })).collect::<Vec<_>>(),
+        "tables": report.tables.iter().map(|t| json!({
+            "site": loc_json(t.site), "table": loc_json(t.table), "step": t.step,
+            "entries": t.entries, "bound": bound_name(t.bound),
+        })).collect::<Vec<_>>(),
+        "ram_pointers": report.ram_pointers.iter().map(|p| json!({
+            "site": loc_json(p.site), "cell": p.cell, "targets": p.targets, "partial": p.partial,
         })).collect::<Vec<_>>(),
         "dynamic_bank_writes": report.dynamic_writes.iter().map(|l| loc_json(*l)).collect::<Vec<_>>(),
         "unresolved": report.unresolved.iter().map(|u| json!({
@@ -208,6 +234,35 @@ fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
                 .stored_at
                 .map_or_else(String::new, |a| format!(", stored at ${a:04X}"));
             writeln!(out, "  {} -> ${:04X} ({to}{how})", t.site, t.value)?;
+        }
+    }
+    writeln!(out, "jump tables followed: {}", report.tables.len())?;
+    if !summary {
+        for t in &report.tables {
+            writeln!(
+                out,
+                "  {} table {} step {}, {} entries, bounded by {}",
+                t.site,
+                t.table,
+                t.step,
+                t.entries,
+                bound_name(t.bound)
+            )?;
+        }
+    }
+    writeln!(
+        out,
+        "jumps through pointers in RAM followed: {}",
+        report.ram_pointers.len()
+    )?;
+    if !summary {
+        for p in &report.ram_pointers {
+            let partial = if p.partial { ", partial" } else { "" };
+            writeln!(
+                out,
+                "  {} through ${:04X}: {} targets{partial}",
+                p.site, p.cell, p.targets
+            )?;
         }
     }
     writeln!(out, "code run from RAM: {}", report.ram_code.len())?;
