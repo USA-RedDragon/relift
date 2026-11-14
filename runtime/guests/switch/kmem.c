@@ -56,8 +56,14 @@ static uint64_t find_free_top(uint64_t start, uint64_t end, uint64_t size)
     uint64_t a = end - size;
     for (;;) {
         rl_vm_block b = rl_vm_query(&hos.vm, a);
-        if (state_of(&b) == MS_FREE && b.addr + b.size >= a + size)
-            return a;
+        if (state_of(&b) == MS_FREE) {
+            if (b.addr + b.size >= a + size)
+                return a;
+            if (b.addr + b.size < start + size)
+                return 0;
+            a = b.addr + b.size - size;
+            continue;
+        }
         if (b.addr < start + size)
             return 0;
         a = b.addr - size;

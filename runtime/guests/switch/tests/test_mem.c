@@ -470,3 +470,17 @@ TEST(transfer_memory)
     CHECK(!t_write(a, 1).faulted);
     CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, HOS_PERM_W, 0, 0), KR_INVALID_PERMISSION);
 }
+
+TEST(main_stack_in_a_free_block_past_the_region_end)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    cfg.address_space_type = 1;
+    rl_ctx *c = t_boot(&cfg);
+    CHECK(c != NULL);
+    CHECK_EQ(hos.lay.bits, 36u);
+    uint64_t top = 0;
+    CHECK_EQ(rl_hos_map_main_stack(0x100000, &top), 0u);
+    CHECK(top <= hos.lay.stack_end && top - 0x100000 >= hos.lay.stack_start);
+    CHECK(!t_write(top - 8, 1).faulted);
+}
