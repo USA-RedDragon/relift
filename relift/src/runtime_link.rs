@@ -148,6 +148,7 @@ impl Extras {
                 obj: obj(s),
                 flags: rt_flags.iter().cloned().chain(vk_inc.clone()).collect(),
                 pool: None,
+                stage: 0,
             })
             .collect();
         if let (Some(w), Some(sdl3)) = (&self.window, &self.sdl3) {
@@ -160,6 +161,7 @@ impl Extras {
                     .chain(sdl3.cflags.iter().cloned())
                     .collect(),
                 pool: None,
+                stage: 0,
             });
         }
         out

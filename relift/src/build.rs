@@ -301,14 +301,11 @@ fn lift_summary(functions: usize, unlifted: usize) -> Line {
 }
 
 /// Bounds the compilers' memory, with the budget at three fifths of the
-/// memory available now: those that would not fit beside `jobs - 1` others
-/// go in a `heavy` pool sized to fit, and those that need more than a
-/// quarter of it in a `giant` pool of depth one, after all others. Sorts
-/// `compiles` largest
-/// source first (so the long compiles start early), giants last (so
-/// everything else is done before one of them can exhaust the memory).
-/// Returns the pools to declare.
-fn memory_pools(compiles: &mut Vec<Compile>, jobs: u32) -> Vec<(String, u32)> {
+/// memory available now: light compiles run first, the rest in stages of
+/// similar size, each in a pool sized so its members fit together
+/// ([`relift_build::schedule`]). Sorts `compiles` largest source first
+/// within a stage, so the long compiles start early. Returns the pools.
+fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, u32)> {
     let size = |c: &Compile| std::fs::metadata(&c.src).map_or(0, |m| m.len());
     compiles.sort_by_cached_key(|c| std::cmp::Reverse(size(c)));
     let Some(avail) = relift_build::available_memory() else {
@@ -320,21 +317,13 @@ fn memory_pools(compiles: &mut Vec<Compile>, jobs: u32) -> Vec<(String, u32)> {
         .collect();
     let s = relift_build::schedule(&needs, jobs, avail / 5 * 3);
     let mut pools = Vec::new();
-    for &i in &s.heavy {
-        compiles[i].pool = Some("heavy".into());
-    }
-    if !s.heavy.is_empty() {
-        pools.push(("heavy".into(), s.heavy_depth));
-    }
-    for &i in &s.giant {
-        compiles[i].pool = Some("giant".into());
-        compiles[i].last = true;
-    }
-    if !s.giant.is_empty() {
-        pools.push(("giant".into(), 1));
-        // Sorted largest first, so the giants are the first entries.
-        let giants: Vec<Compile> = compiles.drain(..s.giant.len()).collect();
-        compiles.extend(giants);
+    for (k, st) in s.stages.iter().enumerate() {
+        let name = format!("mem{}", k + 1);
+        for &i in &st.members {
+            compiles[i].pool = Some(name.clone());
+            compiles[i].stage = u32::try_from(k + 1).unwrap_or(u32::MAX);
+        }
+        pools.push((name, st.depth));
     }
     pools
 }
@@ -607,7 +596,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             obj: obj(s, "lifted"),
             flags: lifted_flags.clone(),
             pool: None,
-            last: false,
+            stage: 0,
         })
         .collect();
     for s in &emitted.fp_part1 {
@@ -620,6 +609,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
                 .chain(["-DRL_PART=1".to_string()])
                 .collect(),
             pool: None,
+            stage: 0,
         });
     }
     for s in &prog {
@@ -628,7 +618,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             obj: obj(s, "lifted"),
             flags: rt_flags.clone(),
             pool: None,
-            last: false,
+            stage: 0,
         });
     }
     for s in runtime_sources(&rt)? {
@@ -637,7 +627,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             src: s,
             flags: rt_flags.clone(),
             pool: None,
-            last: false,
+            stage: 0,
         });
     }
     compiles.extend(extras.compiles(&rt, &rt_flags, &|s| obj(s, "rt")));

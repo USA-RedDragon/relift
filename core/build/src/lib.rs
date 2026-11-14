@@ -22,9 +22,9 @@ pub struct Compile {
     /// The Ninja pool that limits how many of these run at once (`None`:
     /// only the job count limits it).
     pub pool: Option<String>,
-    /// Whether it starts only after every compile without this flag is done
-    /// (an order-only dependency on their objects).
-    pub last: bool,
+    /// The stage it belongs to: it starts only when every compile of a
+    /// lower stage is done (0: the first stage).
+    pub stage: u32,
 }
 
 /// What to build.
@@ -61,56 +61,52 @@ pub fn available_memory() -> Option<u64> {
     Some(kb.saturating_mul(1024))
 }
 
-/// How to run compiles of estimated memory `needs` with `jobs` jobs in
-/// `budget` bytes.
+/// One stage of a [`Schedule`]: compiles that run in a pool together.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stage {
+    /// Indices into the `needs` given to [`schedule`].
+    pub members: Vec<usize>,
+    /// How many of them run at once.
+    pub depth: u32,
+}
+
+/// How to run compiles of estimated memory `needs` in a memory budget.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Schedule {
     /// The jobs to run at once.
     pub jobs: u32,
-    /// The indices into `needs` of the heavy compiles, which run in a pool.
-    pub heavy: Vec<usize>,
-    /// How many heavy compiles run at once.
-    pub heavy_depth: u32,
-    /// The indices of the giant compiles (each larger than half the
-    /// budget), which run one at a time in a pool of their own.
-    pub giant: Vec<usize>,
+    /// The stages after the light compiles, smallest first. Stage `k`
+    /// starts when the light compiles and stages before it are done.
+    pub stages: Vec<Stage>,
 }
 
-/// Splits compiles so their memory stays within `budget`: half the budget
-/// goes to light compiles (each at most `budget / 2 / jobs`), which may all
-/// run at once, and half to the heavy ones, which share a pool deep enough
-/// for that half to hold its largest members together (at least one). A
-/// giant, one that alone needs more than a quarter of the budget, would hold
-/// the heavy pool to depth one;
-/// giants get a pool of depth one and do not count toward the heavy depth,
-/// so one giant does not serialize every other heavy compile.
+/// Splits compiles so their memory stays within `budget`. Light compiles
+/// (each at most `budget / jobs`) run first, all at once. The rest go in
+/// stages by size, each stage holding compiles within a factor of two of
+/// each other, run one stage after another with a pool deep enough for the
+/// budget to hold its largest members together (at least one, so a compile
+/// larger than the budget still runs, alone).
 pub fn schedule(needs: &[u64], jobs: u32, budget: u64) -> Schedule {
     let jobs = jobs.max(1);
-    let half = budget / 2;
-    let light_max = half / u64::from(jobs);
-    let giant: Vec<usize> = (0..needs.len()).filter(|&i| needs[i] > half / 2).collect();
-    let heavy: Vec<usize> = (0..needs.len())
-        .filter(|&i| needs[i] > light_max && needs[i] <= half / 2)
-        .collect();
-    // The deepest pool whose largest members still fit in half the budget
-    // together.
-    let mut sizes: Vec<u64> = heavy.iter().map(|&i| needs[i]).collect();
-    sizes.sort_unstable_by(|a, b| b.cmp(a));
-    let mut sum = 0u64;
-    let fits = sizes
-        .iter()
-        .take_while(|&&n| {
-            sum = sum.saturating_add(n);
-            sum <= half
-        })
-        .count();
-    let depth = u32::try_from(fits).unwrap_or(u32::MAX).clamp(1, jobs);
-    Schedule {
-        jobs,
-        heavy,
-        heavy_depth: depth,
-        giant,
+    let light_max = (budget / u64::from(jobs)).max(1);
+    let mut rest: Vec<usize> = (0..needs.len()).filter(|&i| needs[i] > light_max).collect();
+    rest.sort_by_key(|&i| needs[i]);
+    let mut stages = Vec::new();
+    let mut top = light_max;
+    while !rest.is_empty() {
+        top = top.saturating_mul(2);
+        let n = rest.iter().take_while(|&&i| needs[i] <= top).count();
+        if n == 0 {
+            continue;
+        }
+        let members: Vec<usize> = rest.drain(..n).collect();
+        let largest = members.iter().map(|&i| needs[i]).max().unwrap_or(1).max(1);
+        let depth = u32::try_from(budget / largest)
+            .unwrap_or(u32::MAX)
+            .clamp(1, jobs);
+        stages.push(Stage { members, depth });
     }
+    Schedule { jobs, stages }
 }
 
 /// Why a build failed.
@@ -168,23 +164,31 @@ pub fn ninja_file(plan: &Plan) -> String {
         "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
         cc.join(" ")
     );
-    let first: Vec<String> = plan
-        .compiles
-        .iter()
-        .filter(|c| !c.last)
-        .map(|c| nj(&c.obj))
-        .collect();
-    let first_objs = if plan.compiles.iter().any(|c| c.last) && !first.is_empty() {
-        format!(" || {}", first.join(" "))
-    } else {
-        String::new()
-    };
+    // Stage `k` waits (order-only) on the phony `stage<k-1>`, which stands
+    // for every object of stages up to `k - 1`.
+    let last = plan.compiles.iter().map(|c| c.stage).max().unwrap_or(0);
+    for k in 0..last {
+        let mut objs: Vec<String> = plan
+            .compiles
+            .iter()
+            .filter(|c| c.stage == k)
+            .map(|c| nj(&c.obj))
+            .collect();
+        if k > 0 {
+            objs.push(format!("stage{}", k - 1));
+        }
+        let _ = writeln!(t, "build stage{k}: phony {}\n", objs.join(" "));
+    }
     for (name, depth) in &plan.pools {
         let _ = writeln!(t, "pool {name}\n  depth = {depth}\n");
     }
     for c in &plan.compiles {
         let flags: Vec<String> = c.flags.iter().map(|s| sh(s)).collect();
-        let after = if c.last { first_objs.as_str() } else { "" };
+        let after = if c.stage > 0 {
+            format!(" || stage{}", c.stage - 1)
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             t,
             "build {}: cc {}{after}\n  flags = {}",
@@ -438,7 +442,7 @@ mod tests {
                 obj: "obj/a.o".into(),
                 flags: vec!["-O2".into(), "-DX=\"y\"".into()],
                 pool: None,
-                last: false,
+                stage: 0,
             }],
             output: "game".into(),
             link_flags: vec!["-lm".into()],
@@ -456,28 +460,31 @@ mod tests {
         assert!(t.contains("  pool = heavy\n"), "{t}");
         let mut b = p.compiles[0].clone();
         b.obj = "obj/b.o".into();
-        b.last = true;
+        b.stage = 1;
         p.compiles.push(b);
         let t = ninja_file(&p);
-        assert!(t.contains("build obj/b.o: cc c/a$ b.c || obj/a.o\n"), "{t}");
+        assert!(t.contains("build stage0: phony obj/a.o\n"), "{t}");
+        assert!(t.contains("build obj/b.o: cc c/a$ b.c || stage0\n"), "{t}");
     }
 
     #[test]
-    fn schedule_puts_large_compiles_in_a_shallow_pool() {
+    fn schedule_stages_large_compiles_by_size() {
         const G: u64 = 1 << 30;
-        // 16 jobs in 16 GiB: light compiles are at most 0.5 GiB.
-        let needs = [G / 4, 3 * G, G / 8, 4 * G, G / 2];
+        // 16 jobs in 16 GiB: light compiles are at most 1 GiB.
+        let needs = [G / 4, 3 * G, G / 8, 4 * G, G / 2, 40 * G, 3 * G / 2];
         let s = schedule(&needs, 16, 16 * G);
         assert_eq!(s.jobs, 16);
-        assert_eq!(s.heavy, vec![1, 3]);
-        assert_eq!(s.heavy_depth, 2);
-        // A giant gets its own pool and leaves the heavy depth alone.
-        let s = schedule(&[40 * G, 2 * G, 2 * G, 3 * G], 8, 16 * G);
-        assert_eq!(s.giant, vec![0]);
-        assert_eq!(s.heavy, vec![1, 2, 3]);
-        // 3 + 2 + 2 GiB fit in the 8 GiB half.
-        assert_eq!(s.heavy_depth, 3);
-        assert!(schedule(&[G / 8; 4], 4, 16 * G).heavy.is_empty());
+        let got: Vec<(Vec<usize>, u32)> = s
+            .stages
+            .iter()
+            .map(|g| (g.members.clone(), g.depth))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(vec![6], 10), (vec![1, 3], 4), (vec![5], 1)],
+            "{s:?}"
+        );
+        assert!(schedule(&[G / 8; 4], 4, 16 * G).stages.is_empty());
     }
 
     #[test]
