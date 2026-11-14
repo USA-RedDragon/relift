@@ -112,6 +112,125 @@ fn prepare(b: &Block) -> Block {
     relift_ir::dce(&relift_ir::simplify(b))
 }
 
+/// What one instruction reads, writes and continues at, for [`live_out`].
+type Flow1 = (Vec<bool>, Vec<bool>, Option<Vec<u64>>);
+
+/// The registers live after each instruction of `f`, as a bit set over the
+/// register file, by backward dataflow over the function's instructions.
+///
+/// Every register counts as live wherever the C stores the context: at
+/// calls, traps, returns, tail calls, indirect jumps, guards and
+/// instructions that do not lift. So a register is dead after an
+/// instruction only when every path redefines it before it is read or
+/// stored, and dropping its write there changes nothing observable.
+fn live_out(
+    f: &Function<'_>,
+    targets: &BTreeMap<u64, Target>,
+    blocks: &BTreeMap<u64, Block>,
+    regs: usize,
+) -> BTreeMap<u64, Vec<bool>> {
+    let all = vec![true; regs];
+    // Uses (reads, or all registers where the context is stored inside the
+    // instruction), definitions and in-function successors; `None` for an
+    // instruction whose exit may leave the function.
+    let mut info: BTreeMap<u64, Flow1> = BTreeMap::new();
+    for &pc in f.insts.keys() {
+        let Some(b) = blocks.get(&pc) else {
+            info.insert(pc, (all.clone(), vec![false; regs], None));
+            continue;
+        };
+        let mut uses = vec![false; regs];
+        let mut defs = vec![false; regs];
+        let mut stores = false;
+        for i in &b.insts {
+            match i.op {
+                Op::Get(r) => uses[r.index()] = true,
+                Op::Set(r, _) => defs[r.index()] = true,
+                Op::Guard(..) => stores = true,
+                _ => {}
+            }
+        }
+        if stores {
+            uses = all.clone();
+        }
+        let local = |t: u64| inside(f, targets, t).then_some(t);
+        let succ = match (b.exit.flow, b.exit.next) {
+            (Flow::Jump, Next::Const(t)) => local(t).map(|t| vec![t]),
+            (
+                Flow::Jump,
+                Next::Select {
+                    taken, not_taken, ..
+                },
+            ) => local(taken).zip(local(not_taken)).map(|(a, b)| vec![a, b]),
+            _ => None,
+        };
+        info.insert(pc, (uses, defs, succ));
+    }
+    let mut live_in: BTreeMap<u64, Vec<bool>> =
+        info.keys().map(|&pc| (pc, vec![false; regs])).collect();
+    let mut out: BTreeMap<u64, Vec<bool>> = BTreeMap::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (&pc, (uses, defs, succ)) in info.iter().rev() {
+            let o = match succ {
+                None => all.clone(),
+                Some(ts) => {
+                    let mut o = vec![false; regs];
+                    for t in ts {
+                        match live_in.get(t) {
+                            Some(l) => o.iter_mut().zip(l).for_each(|(a, b)| *a |= *b),
+                            None => o = all.clone(),
+                        }
+                    }
+                    o
+                }
+            };
+            let li: Vec<bool> = (0..regs).map(|r| uses[r] || (o[r] && !defs[r])).collect();
+            if live_in[&pc] != li {
+                live_in.insert(pc, li);
+                changed = true;
+            }
+            out.insert(pc, o);
+        }
+    }
+    out
+}
+
+/// `blocks` without the register writes no later instruction can see
+/// ([`live_out`]), and without the values only those writes used.
+fn drop_dead_sets(
+    fe: &dyn Frontend,
+    f: &Function<'_>,
+    targets: &BTreeMap<u64, Target>,
+    blocks: BTreeMap<u64, Block>,
+) -> BTreeMap<u64, Block> {
+    let regs = fe.regs();
+    let live = live_out(f, targets, &blocks, regs.len());
+    blocks
+        .into_iter()
+        .map(|(pc, mut b)| {
+            let mut dropped = false;
+            if let Some(l) = live.get(&pc) {
+                for i in &mut b.insts {
+                    if let Op::Set(r, _) = i.op
+                        && !l[r.index()]
+                    {
+                        // A read has no effect, so the pass below removes it.
+                        i.op = Op::Get(r);
+                        i.width = Some(regs.width(r));
+                        dropped = true;
+                    }
+                }
+            }
+            if dropped {
+                b = relift_ir::dce(&b);
+            }
+            (pc, b)
+        })
+        .collect()
+}
+
 /// The return addresses of the calls in `f` that are resume points.
 fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<u64> {
     f.insts
@@ -167,6 +286,7 @@ pub(crate) fn emit_function(
             Insn::Failed(_) => None,
         })
         .collect();
+    let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
     let whole = emit_piece(fe, f, targets, &blocks, &resumes, &all, None);
     if whole.text.len() <= piece_bytes || all.len() < 2 {

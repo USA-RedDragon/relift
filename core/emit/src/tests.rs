@@ -528,3 +528,26 @@ fn a_split_function_in_parts_lands_whole_in_its_part() {
         );
     }
 }
+
+#[test]
+fn a_write_every_path_overwrites_before_a_read_is_dropped() {
+    let code = [
+        word(0x0d, 0, 0),
+        word(0x0d, 1, 0),
+        branch(0x0e, 0, 2),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(&Toy, &[function(0x100, &blocks)], &[], &Options::default());
+    let s = shard(&out);
+    let body = |pc: &str| {
+        let start = s.find(&format!("L_{pc}: {{")).expect("the label");
+        let end = s[start..].find("\n}\n").expect("the block end");
+        s[start..start + end].to_string()
+    };
+    // The first compare's zero flag is overwritten by the second before
+    // anything reads or stores it; the second's is read by the branch.
+    assert!(!body("100").contains("r4 ="), "{s}");
+    assert!(body("104").contains("r4 ="), "{s}");
+}
