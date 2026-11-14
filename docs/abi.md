@@ -957,8 +957,9 @@ operations below. The IR side is defined by the reference interpreter
 (`core/ir/src/interp.rs`, `run_with` and the `Devices` trait) and checked by
 `core/ir/tests/hw.rs`; the runtime side lives in `runtime/core/sched.c` and
 `relift/sched.h`. [verified: IR semantics by `core/ir/tests/hw.rs`; the
-emitter half is not written yet, so every emitter rule below is
-[inferred] until it is]
+C emitter half is not written yet, so every emitter rule below is
+[inferred] for C until it is; the WebAssembly emitter follows them,
+checked by `core/emit-wasm/tests/diff/` (section 15)]
 
 ### IR operations
 
@@ -1175,6 +1176,182 @@ With 4096 ticks a hand-over is rare (about 2000 per run), so its time per
 hand-over includes cache refill and varies from run to run. Windows arm64
 builds (zig cc, llvm-mingw clang) link but were not run.
 
+## 15. WebAssembly modules
+
+`relift-emit-wasm` (`core/emit-wasm`) emits lifted functions as
+WebAssembly modules instead of C, for hosts that run WebAssembly (a
+browser first). It follows the contract above wherever WebAssembly allows
+it; this section lists the module interface and every difference. The
+runtime that implements the imports (JavaScript, or the C runtime compiled
+to WebAssembly) does not exist yet. [verified: every rule below is held by
+`core/emit-wasm/tests/diff/` against the IR interpreter in wasmtime, with a
+stand-in runtime written in the test; the browser side is [inferred]]
+
+### Modules and the program
+
+- A program is one linear memory, one `funcref` table and any number of
+  modules. Each module holds a batch of guest functions and imports the
+  memory as `env.memory` and the table as `env.table`. It defines nothing
+  else that is shared, so a module compiled later (code found at run time,
+  section 6) joins the program by being instantiated against the same
+  memory and table.
+- One memory only: Safari has no multi-memory, so the guest memory, every
+  context and the runtime's data share the one linear memory. The guest
+  memory starts at the offset `mem`; a guest address `a` is the linear
+  address `mem + a` modulo 2^32. A guest whose address space does not fit
+  in the 32-bit memory (the Switch) needs memory64 or a smaller layout
+  first; the Game Boy, GBA and NDS fit.
+- Function `i` of a module goes to table slot `Options::table_base + i`
+  through an active element segment, so the runtime gives each module a
+  free range of slots, grows the table before instantiating it, and adds
+  `Output::slots` (entry, bank, slot) to its lookup. Slot 0 is the
+  runtime's by convention; the tests put the miss entry there.
+- Functions are exported by name only with `Options::export`; the runtime
+  calls them through the table.
+
+### Lifted functions
+
+- Each guest function is one WebAssembly function of type
+  `(c: i32, mem: i32) -> i32`: the context address, the guest memory base,
+  and the return code. Return codes: 0 (`RL_OK`), 1 (`RL_PENDING`: unwind,
+  the runtime's code decides why), and, only in modules without tail calls,
+  2 (`RC_CHAIN`, below). Any other nonzero code from a runtime entry is
+  passed up unchanged.
+- As in C (section 4), registers live in locals: each register the
+  function uses is loaded from the context at entry and after every call,
+  and each register it writes is stored before every call, trap, slow
+  path, intrinsic import and exit. A value up to 64 bits is one `i64`
+  local, zero-extended; a wider one (up to 128) a low and a high `i64`.
+- A function with more than one entry point (its entry, branch targets
+  inside it, call return points) is a `loop` over nested blocks with a
+  `br_table` on a label local, one case per entry point; code between
+  entry points falls through.
+
+### Context layout
+
+The context is a CPU-neutral block in the linear memory, aligned to 16,
+not the CPU layer's `rl_ctx`:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 8 | `pc`: the target of the last indirect transfer, read by the lookup's miss path; in step mode every exit's target |
+| 8 | 8 | exclusive monitor address |
+| 16 | 4 | exclusive monitor size in bytes |
+| 20 | 4 | exclusive monitor armed (0 or 1) |
+| 24 | 8 | `rl_time.budget` (i64) |
+| 32 | 8 | `rl_time.deadline` (u64) |
+| 40 | 24 | the runtime's (pending record, thread) |
+| 64 | 16 per slot | register slot `k` at `64 + 16 k`, little-endian, zero-extended |
+
+Why not `rl_ctx`: the C emitter names each register's home with the C
+lvalue the frontend gives (`Frontend::home`), which is a C string. The
+WebAssembly emitter stays free of any CPU by giving every register of the
+block's `RegFile` one slot. Flags are one slot each, not packed into a
+word. The runtime that ports a CPU layer to WebAssembly reads registers by
+slot.
+
+### Calls and transfers
+
+- A direct call to a function of the same module (and not banked) is a
+  `call`; any other call stores the target in `pc`, gets a slot from
+  `rt.lookup(c, target)` and does a `call_indirect` through the table. The
+  return code is checked after each call (section 7): a nonzero code is
+  returned at once, so `RL_PENDING` unwinds the host stack as in C.
+- A transfer to another function (a jump or branch out, a computed jump
+  that no jump-table case of this function matches) is a tail call:
+  `return_call` to a function of the same module, `return_call_indirect`
+  through `rt.lookup` otherwise. This is the counterpart of C `musttail`.
+  A return is `return 0`. Jump tables (`Function::tables`) whose targets
+  are inside the function become compares and branches.
+- **Fallback without tail calls** (`Options::tail_calls = false`): an
+  engine without the tail-call proposal rejects `return_call`, so such a
+  transfer stores the target in `pc` and returns `RC_CHAIN`. Each call
+  site passes the callee's code through the module's dispatch loop, which
+  while it sees `RC_CHAIN` looks up `pc` and calls that function; an
+  entry from the runtime that returns `RC_CHAIN` asks the runtime to do
+  the same. The host stack stays bounded either way. Tail calls are in
+  every current engine (Chrome, Firefox, Safari 18.2 and later); the
+  fallback is for older ones.
+- `rt.lookup(c, target) -> i32` returns the slot for a guest address, or
+  the miss slot, whose function reads `pc` (section 6: a dev build loads
+  the code, a shipped build reports the crash). Banked functions
+  (`Function::bank`, section 13) are reached only through the lookup,
+  which knows the bank mapped at run time.
+
+### Runtime imports
+
+Every module imports these from `rt`, in this order (`RUNTIME_IMPORTS`):
+
+| Import | Type | C counterpart |
+|---|---|---|
+| `slow(c, mem, code, pc, insn) -> rc` | `(i32, i32, i32, i64, i64) -> i32` | `Frontend::guard_slow` (`rl_fp_slow` for `SLOW_FPCR`): runs the instruction on the slow path with the context stored, 0 to continue after it |
+| `lookup(c, target) -> slot` | `(i32, i64) -> i32` | `rl_indirect`'s table lookup |
+| `trap(c, mem, code, pc) -> rc` | `(i32, i32, i32, i64) -> i32` | `Frontend::trap` (`rl_svc`) |
+| `undefined(c, mem, pc, insn) -> rc` | `(i32, i32, i64, i64) -> i32` | `rl_undefined` |
+| `fma32(a, b, c)`, `fma64(a, b, c)` | `(f32, f32, f32) -> f32`, `(f64, f64, f64) -> f64` | `fma`: `a * b + c` with one rounding, which WebAssembly has no instruction for |
+| `div128(alo, ahi, blo, bhi, op, bits) -> (lo, hi)` | `(i64, i64, i64, i64, i32, i32) -> (i64, i64)` | the 128-bit `unsigned __int128` division (op 0 udiv, 1 sdiv, 2 urem, 3 srem), with the IR's rules for 0 and overflow |
+| `io_read(c, mem, addr, size) -> value` | `(i32, i32, i64, i32) -> i64` | `rl_io_read` |
+| `io_write(c, mem, addr, size, value)` | `(i32, i32, i64, i32, i64) -> ()` | `rl_io_write` |
+| `sync(c, mem, next) -> rc` | `(i32, i32, i64) -> i32` | `rl_sync` |
+
+- **Guards.** An `Op::Guard` (the FPCR guard of A64 templates and any
+  other slow-path guard) is checked where it stands; when it holds, the
+  registers are stored and `rt.slow` is called with the instruction. It is
+  not hoisted to function entry yet (a speed change, as in C's
+  `guard_state`). Floating point is otherwise WebAssembly's own IEEE
+  arithmetic, which is what `FpOp` means (round to nearest even,
+  saturating conversions, any NaN).
+- **Section 13.** Ticks subtract from a budget local loaded at entry; the
+  local is stored before every runtime call and reloaded after it. I/O
+  accesses of kind `any` get the same inline range check from the
+  `IoMap` (`Options::io_map`), `dev` accesses call the hook, and accesses
+  of other sizes are split in address order into 1, 2, 4 and 8 bytes. At
+  a sync point, when the budget is 0 or less, the registers are stored and
+  `rt.sync(c, mem, next)` is called; a nonzero code returns, otherwise the
+  exit continues to `next`. A taken interrupt is the runtime's to enter as
+  a nested call, as in C.
+- **Intrinsics.** The frontend says how each intrinsic is carried
+  (`Frontend::wasm_intrinsic`, `relift_guest::WasmIntrinsic`): `Import`
+  becomes `intrinsic.<name>` with `(c, mem)` and the operands, one `i64`
+  per operand up to 64 bits and two above, returning nothing, one `i64` or
+  two; `Nop`, `Const` and `ZeroBlock` are inline. A64 carries `CNTPCT` and
+  `WFE` as imports, `CNTFRQ`, `CTR_EL0` and `DCZID_EL0` as the constants
+  of `a64/abi.h`, `DC ZVA` as a 64-byte zeroing, and cache maintenance and
+  `SEV` as no-ops (one thread per memory, no instruction cache to keep
+  coherent); `cpus/a64` checks the constants against the header.
+- **Exclusives** use the monitor fields of the context: a load-exclusive
+  arms it with address and size, a store-exclusive succeeds when it is
+  armed for the same address and size, and both a store-exclusive and a
+  clear disarm it. Fences are no-ops: one memory per thread, no shared
+  memory yet.
+
+### Modes
+
+`Options::exits` selects how exits leave a function. `Chain` is the real
+mode above. `Step` is the checker's: every exit stores its target in `pc`
+and returns 0, and a sync point that calls `rt.sync` lets the runtime
+redirect `pc` to a taken interrupt, so a caller steps one exit at a time
+the way the IR interpreter does.
+
+### What it reports
+
+An instruction that did not lift, or that uses something with no
+WebAssembly form here (an address or computed target wider than 64 bits,
+a memory access of other than 1 to 16 whole bytes, floating point of
+other than 32 or 64 bits, an intrinsic the frontend does not carry or
+with a carrier that does not fit), calls `rt.undefined` at run time with
+its address and raw unit; the latter kind is also listed in
+`Output::errors`, never dropped. An IR operation added later fails to
+compile the emitter until it is handled.
+
+### Not done yet
+
+The browser shell and the JavaScript runtime (the imports above, the
+lookup and table management), the C runtime compiled to WebAssembly,
+registers kept in locals across calls and lazy flags (speed), hoisted
+guards, an exact `fma64` for engines without one (the stand-in uses the
+host's), and linking a guest's device model.
+
 ## Checks run for this contract
 
 All with clang 23.1.1 on Linux unless noted. Probe sources are scratch, not
@@ -1219,3 +1396,5 @@ committed.
 12. How `rl_sched_read` and `rl_sched_write` treat an access that straddles
     two ranges; the IR sends it to the hook as a whole (13).
 13. The dispatch table shape for banked code regions (13).
+14. The JavaScript runtime for WebAssembly modules, and an exact `fma64`
+    for it (15).
