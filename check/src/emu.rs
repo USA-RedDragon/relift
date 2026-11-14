@@ -1,5 +1,6 @@
 //! The two machines a check runs: Unicorn and the `relift-ir` interpreter.
 
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use relift_cpu_a64::lift::sail::SLOW_FPCR;
@@ -11,14 +12,16 @@ use unicorn_engine::RegisterARM64 as R;
 use unicorn_engine::Unicorn;
 use unicorn_engine::unicorn_const::{Arch, Mode, Prot, uc_error};
 
-/// Where the instruction words go.
-pub const CODE: u64 = 0x1000_0000;
+/// Where the instruction words go. Above 4 GiB, and above 0x70_0000_0000,
+/// since macOS refuses fixed mappings below both; `check/oracle/harness.c`
+/// uses the same layout.
+pub const CODE: u64 = 0x100_1000_0000;
 /// The mapped code region around [`CODE`], which covers 19-bit branches.
 pub const CODE_MAP: u64 = CODE - 0x10_0000;
 /// The size of the code region.
 pub const CODE_SIZE: u64 = 0x20_0000;
 /// The data window.
-pub const DATA: u64 = 0x2000_0000;
+pub const DATA: u64 = 0x100_2000_0000;
 /// The data window's size.
 pub const DATA_SIZE: usize = 0x4000;
 
@@ -35,10 +38,15 @@ pub struct Guest {
     pub v: [u128; 32],
     /// FPCR; the lifted FP blocks run only while it is zero.
     pub fpcr: u64,
+    /// FPSR: the cumulative exception flags and QC.
+    pub fpsr: u32,
     /// The program counter after the run.
     pub pc: u64,
     /// The data window.
     pub mem: Vec<u8>,
+    /// The seed `mem` was filled from (`oracle::fill_window`), when it was;
+    /// the native oracle then gets the seed instead of the bytes.
+    pub mem_seed: Option<u64>,
 }
 
 /// How a run ended.
@@ -139,6 +147,7 @@ impl Emu {
             .fold(0u64, |acc, (i, f)| acc | (u64::from(*f) << (31 - i)));
         uc.reg_write(R::NZCV, n)?;
         uc.reg_write(R::FPCR, input.fpcr)?;
+        uc.reg_write(R::FPSR, u64::from(input.fpsr))?;
         for (i, v) in input.v.iter().enumerate() {
             uc.reg_write_long(qreg(i), &v.to_le_bytes())?;
         }
@@ -155,8 +164,10 @@ impl Emu {
             nzcv: [false; 4],
             v: [0; 32],
             fpcr: input.fpcr,
+            fpsr: uc.reg_read(R::FPSR)? as u32,
             pc: uc.reg_read(R::PC)?,
             mem: vec![0; DATA_SIZE],
+            mem_seed: None,
         };
         for (i, r) in XREGS.iter().enumerate() {
             out.x[i] = uc.reg_read(*r)?;
@@ -189,6 +200,19 @@ pub static HAND: AtomicBool = AtomicBool::new(false);
 
 /// Whether lifted blocks go through dead-value elimination.
 pub static DCE: AtomicBool = AtomicBool::new(false);
+
+/// Whether a check compares FPSR.
+pub static FPSR: AtomicBool = AtomicBool::new(false);
+
+/// Whether the oracle's kernel zeroes x18 on every return to user mode
+/// (macOS, where x18 is the platform register): states then start with
+/// x18 zero and checks ignore it.
+pub static X18_ZERO: AtomicBool = AtomicBool::new(false);
+
+/// The oracle's CPU features, in `Features::parse` syntax (`all` for
+/// every feature). Not yet applied: the lifter on this branch lifts every
+/// encoding for every CPU.
+pub static FEATURES: OnceLock<String> = OnceLock::new();
 
 /// Lifts `w` at `pc` as the frontend does, or with the hand-written lifter
 /// under [`HAND`], then removes dead values under [`DCE`].
@@ -272,6 +296,7 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
         st.regs[regs::vreg(i as u32).index()] = *v;
     }
     st.regs[regs::FPCR.index()] = u128::from(input.fpcr);
+    st.regs[regs::FPSR.index()] = u128::from(input.fpsr);
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
     }
@@ -305,8 +330,10 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
         nzcv: [false; 4],
         v: [0; 32],
         fpcr: input.fpcr,
+        fpsr: st.regs[regs::FPSR.index()] as u32,
         pc,
         mem: mem.data.bytes,
+        mem_seed: None,
     };
     for (i, x) in out.x.iter_mut().enumerate() {
         *x = st.regs[i] as u64;
@@ -324,37 +351,42 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
 /// agree.
 pub fn compare(ir: &Outcome, uc: &Outcome) -> Vec<String> {
     match (ir, uc) {
+        (Outcome::Fault(e), _) if e.starts_with("no slow path") => vec![e.clone()],
         (Outcome::Fault(_), Outcome::Fault(_)) => Vec::new(),
         (Outcome::Slow(_), _) => vec!["ir left for the slow path".to_string()],
-        (_, Outcome::Slow(_)) => vec!["unicorn has no slow path".to_string()],
+        (_, Outcome::Slow(_)) => vec!["the oracle has no slow path".to_string()],
         (Outcome::Fault(e), Outcome::Done(_)) => vec![format!("ir faulted: {e}")],
-        (Outcome::Done(_), Outcome::Fault(e)) => vec![format!("unicorn faulted: {e}")],
+        (Outcome::Done(_), Outcome::Fault(e)) => vec![format!("oracle faulted: {e}")],
         (Outcome::Done(a), Outcome::Done(b)) => {
             let mut d = Vec::new();
+            let skip18 = X18_ZERO.load(Ordering::Relaxed);
             for i in 0..31 {
-                if a.x[i] != b.x[i] {
-                    d.push(format!("x{i} ir={:#x} uc={:#x}", a.x[i], b.x[i]));
+                if a.x[i] != b.x[i] && !(i == 18 && skip18) {
+                    d.push(format!("x{i} ir={:#x} or={:#x}", a.x[i], b.x[i]));
                 }
             }
             for i in 0..32 {
                 if a.v[i] != b.v[i] {
-                    d.push(format!("v{i} ir={:#x} uc={:#x}", a.v[i], b.v[i]));
+                    d.push(format!("v{i} ir={:#x} or={:#x}", a.v[i], b.v[i]));
                 }
             }
             if a.sp != b.sp {
-                d.push(format!("sp ir={:#x} uc={:#x}", a.sp, b.sp));
+                d.push(format!("sp ir={:#x} or={:#x}", a.sp, b.sp));
             }
             for (i, f) in ["n", "z", "c", "v"].iter().enumerate() {
                 if a.nzcv[i] != b.nzcv[i] {
-                    d.push(format!("{f} ir={} uc={}", a.nzcv[i], b.nzcv[i]));
+                    d.push(format!("{f} ir={} or={}", a.nzcv[i], b.nzcv[i]));
                 }
             }
+            if FPSR.load(Ordering::Relaxed) && a.fpsr != b.fpsr {
+                d.push(format!("fpsr ir={:#x} or={:#x}", a.fpsr, b.fpsr));
+            }
             if a.pc != b.pc {
-                d.push(format!("pc ir={:#x} uc={:#x}", a.pc, b.pc));
+                d.push(format!("pc ir={:#x} or={:#x}", a.pc, b.pc));
             }
             if let Some(off) = (0..DATA_SIZE).find(|i| a.mem[*i] != b.mem[*i]) {
                 d.push(format!(
-                    "mem+{off:#x} ir={:02x} uc={:02x}",
+                    "mem+{off:#x} ir={:02x} or={:02x}",
                     a.mem[off], b.mem[off]
                 ));
             }

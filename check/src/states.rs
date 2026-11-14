@@ -4,7 +4,12 @@
 use crate::emu::lift;
 use relift_cpu_a64::decode::{Encoding, Insn, decode};
 
-use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, DATA_SIZE, Guest};
+use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, Guest};
+use crate::oracle::fill_window;
+
+/// FPSR's cumulative bits: QC (27), IDC (7), IXC, UFC, OFC, DZC and IOC
+/// (4 to 0).
+pub const FPSR_CUMULATIVE: u32 = 0x0800_009f;
 
 /// A small xorshift generator, seeded from a string and a number.
 pub struct Rng(u64);
@@ -180,9 +185,16 @@ pub enum Kind {
 /// The kind of `enc`.
 pub fn kind(enc: Encoding) -> Kind {
     let n = enc.name();
-    if n.contains("_ldstexcl") || n.contains("_ldstord") || n.ends_with("_memop") {
+    // Ordered unscaled forms (`_ldapstl`) are aligned too: hardware faults
+    // an unaligned one that crosses 16 bytes, which Unicorn and the lifted
+    // code do not model.
+    if n.contains("_ldstexcl")
+        || n.contains("_ldstord")
+        || n.ends_with("_memop")
+        || n.contains("_ldapstl")
+    {
         Kind::Mem { aligned: true }
-    } else if n.contains("_ldst") || n.contains("_asisdls") || n.contains("_ldapstl") {
+    } else if n.contains("_ldst") || n.contains("_asisdls") {
         Kind::Mem { aligned: false }
     } else if n.ends_with("_branch_reg") {
         Kind::BranchReg
@@ -256,7 +268,7 @@ fn mem_offset(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<i64> {
 
 /// A prelude for exclusive stores: `clrex`, then half the time a
 /// load-acquire exclusive (`ldaxr`) of the same size, through the same
-/// address or another one.
+/// address or one outside its reservation granule.
 pub fn prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Vec<u32> {
     const CLREX: u32 = 0xd503_3f5f;
     let name = insn.encoding.name();
@@ -267,16 +279,21 @@ pub fn prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Vec<u32> {
     if (name.starts_with("STXR") || name.starts_with("STLXR")) && r.chance(0.5) {
         {
             let (s, t, n) = (insn.get("Rs"), insn.get("Rt"), insn.get("Rn"));
-            let used = [s, t, n, 31];
+            // x18 is left out: an oracle may zero it (see `X18_ZERO`).
+            let used = [s, t, n, 18, 31];
             let free: Vec<u32> = (0..31).filter(|x| !used.contains(x)).collect();
             let p = r.pick(&free);
             let q = r.pick(&free.iter().copied().filter(|x| *x != p).collect::<Vec<_>>());
             let base = if n == 31 { g.sp } else { g.x[n as usize] };
-            g.x[p as usize] = if r.chance(0.5) {
-                base
+            // The other address is more than 2 KiB away, beyond the largest
+            // exclusives reservation granule, where hardware may let a store
+            // to another address in the granule succeed.
+            let far = if base.wrapping_sub(DATA) < 0x2000 {
+                base.wrapping_add(0x1000 + 8 * r.range(0, 8) as u64)
             } else {
-                base.wrapping_add(8 * r.range(1, 8) as u64)
+                base.wrapping_sub(0x1000 + 8 * r.range(0, 8) as u64)
             };
+            g.x[p as usize] = if r.chance(0.5) { base } else { far };
             let size = insn.get("size");
             words.push((size << 30) | 0x085f_fc00 | (p << 5) | q);
         }
@@ -293,11 +310,24 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
         nzcv: [false; 4],
         v: [0; 32],
         fpcr: 0,
+        fpsr: 0,
         pc: 0,
-        mem: (0..DATA_SIZE).map(|_| r.next() as u8).collect(),
+        mem: Vec::new(),
+        mem_seed: None,
     };
+    let seed = r.next();
+    g.mem = fill_window(seed);
+    g.mem_seed = Some(seed);
+    // Half the states start with cumulative flags already set, so a form
+    // that clears a flag it should only set is caught.
+    if r.chance(0.5) {
+        g.fpsr = r.next() as u32 & FPSR_CUMULATIVE;
+    }
     for x in &mut g.x {
         *x = reg_value(r);
+    }
+    if crate::emu::X18_ZERO.load(std::sync::atomic::Ordering::Relaxed) {
+        g.x[18] = 0;
     }
     for v in &mut g.v {
         *v = (u128::from(vec_half(r)) << 64) | u128::from(vec_half(r));
@@ -327,11 +357,19 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
             let n = insn.get("Rn");
             let base = (target - off) as u64;
             if n == 31 {
+                if aligned && base & 15 != 0 {
+                    return None;
+                }
                 g.sp = base & !15;
             } else {
                 g.x[n as usize] = base;
             }
         }
+    }
+    // A base or index register placed in x18 cannot reach an oracle that
+    // zeroes x18.
+    if crate::emu::X18_ZERO.load(std::sync::atomic::Ordering::Relaxed) && g.x[18] != 0 {
+        return None;
     }
     Some(g)
 }

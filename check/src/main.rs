@@ -2,14 +2,17 @@
 //! main one links it; `relift check` runs it as a subprocess.
 //!
 //! It lifts A64 instruction words with `relift-cpu-a64`, runs them in the
-//! `relift-ir` interpreter and in Unicorn on generated states, and compares
-//! every general and vector register, SP, NZCV, the next PC and the data
-//! window.
+//! `relift-ir` interpreter and on an oracle (Unicorn, or the native harness
+//! on real hardware or QEMU, see `oracle.rs`) on generated states, and
+//! compares every general and vector register, SP, NZCV, the next PC, the
+//! data window and, with `--fpsr`, FPSR.
 //!
 //! ```text
-//! relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]
-//! relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]
-//! relift-check --oracle rustyboi step|rom ...   (Game Boy SM83, see gb/cli.rs)
+//! relift-check insn <hex>[,<hex>...] [options]
+//! relift-check forms <name>[,<name>...]|all [options]
+//! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
+//!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
+//!          [--slow cmd:<argv>] [--all-slow]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -20,12 +23,19 @@
 //! `all` then means every encoding that has one. `--dce` runs every lifted
 //! block through `relift_ir::dce` first. `--fpcr` runs with that FPCR: a
 //! block that uses floating point must then leave through its FPCR guard
-//! for the runtime's slow path (counted, not compared, since Unicorn has no
-//! slow path), and every other block must still match.
+//! for the runtime's slow path (counted, and compared only with `--slow`),
+//! and every other block must still match. `--oracle` picks
+//! the machine and with it the CPU feature set (`Features::parse` syntax),
+//! which `--features` overrides; the lifter does not take a feature set
+//! yet, so it is recorded only. `--slow` names the
+//! slow-path engine (`check/oracle/slow.c`, the runtime's `rl_fp_slow`): a
+//! block that leaves through its FPCR guard runs there instead and is
+//! compared with the oracle like any other; `--all-slow` sends every
+//! guarded block there, also with FPCR zero.
 
 mod emu;
-mod gb;
 mod mutate;
+mod oracle;
 mod states;
 
 use std::process::ExitCode;
@@ -33,7 +43,8 @@ use std::process::ExitCode;
 use relift_cpu_a64::decode::{Encoding, Insn, decode};
 use relift_cpu_a64::lift::{lifter, supported};
 
-use emu::{Emu, compare, interpret, lift_all};
+use emu::{Guest, compare, interpret, lift_all};
+use oracle::{Case, Oracle};
 use states::Rng;
 
 struct Opts {
@@ -54,64 +65,130 @@ struct Report {
     first: Option<String>,
 }
 
-fn run_one(emu: &mut Emu, words: &[u32], g: &emu::Guest, opts: &Opts, rep: &mut Report) {
-    let mut blocks = match lift_all(words) {
-        Ok(b) => b,
-        Err(e) => {
-            rep.states += 1;
-            rep.first.get_or_insert(format!("lift failed: {e}"));
-            return;
-        }
-    };
+/// One case and its lifted blocks, or why it could not be lifted.
+struct Prepared {
+    case: Case,
+    blocks: Result<Vec<relift_ir::Block>, String>,
+}
+
+fn prepare(words: Vec<u32>, g: Guest, opts: &Opts, rep: &mut Report) -> Prepared {
+    let mut blocks = lift_all(&words);
     if opts.mutate
-        && let Some(last) = blocks.last_mut()
+        && let Ok(bs) = &mut blocks
+        && let Some(last) = bs.last_mut()
     {
         let m = mutate::mutate(last);
         rep.mutation.get_or_insert(m);
     }
-    let ir = interpret(&blocks, words, g);
-    rep.states += 1;
-    let guarded = blocks.iter().any(|b| {
-        b.insts
-            .iter()
-            .any(|i| matches!(i.op, relift_ir::Op::Guard(..)))
-    });
-    if g.fpcr != 0 && guarded {
-        if matches!(ir, emu::Outcome::Slow(_)) {
-            rep.slow += 1;
-            rep.matched += 1;
-        } else {
-            rep.first.get_or_insert(format!(
-                "[{:08x}] the FPCR guard did not leave the block",
-                words.last().copied().unwrap_or(0)
-            ));
-        }
-        return;
-    }
-    let uc = match emu.run(words, g) {
-        Ok(o) => o,
-        Err(e) => emu::Outcome::Fault(format!("unicorn: {e:?}")),
-    };
-    if matches!((&ir, &uc), (emu::Outcome::Fault(_), emu::Outcome::Fault(_))) {
-        rep.both_faulted += 1;
-    }
-    let d = compare(&ir, &uc);
-    if d.is_empty() {
-        rep.matched += 1;
-    } else if rep.first.is_none() {
-        let words: Vec<String> = words.iter().map(|w| format!("{w:08x}")).collect();
-        rep.first = Some(format!("[{}] {}", words.join(","), d.join("; ")));
+    Prepared {
+        case: Case { words, input: g },
+        blocks,
     }
 }
 
-fn check_form(emu: &mut Emu, enc: Encoding, opts: &Opts) -> Report {
+/// The engine that runs blocks which leave for the FPCR slow path.
+struct Slow {
+    engine: Box<dyn Oracle>,
+    /// Route every guarded block there, also with FPCR zero.
+    always: bool,
+}
+
+/// Runs the prepared cases on the interpreter (or, for a block that leaves
+/// for the FPCR slow path, on the slow engine) and the oracle, and counts.
+fn run_all(
+    oracle: &mut dyn Oracle,
+    slow: &mut Option<Slow>,
+    ps: &[Prepared],
+    rep: &mut Report,
+) -> Result<(), String> {
+    let mut todo = Vec::new();
+    let mut irs = Vec::new();
+    let mut to_slow = Vec::new();
+    for p in ps {
+        rep.states += 1;
+        let blocks = match &p.blocks {
+            Ok(b) => b,
+            Err(e) => {
+                rep.first.get_or_insert(format!("lift failed: {e}"));
+                continue;
+            }
+        };
+        let ir = interpret(blocks, &p.case.words, &p.case.input);
+        let guarded = blocks.iter().any(|b| {
+            b.insts
+                .iter()
+                .any(|i| matches!(i.op, relift_ir::Op::Guard(..)))
+        });
+        if guarded
+            && let Some(sl) = slow
+            && (p.case.input.fpcr != 0 || sl.always)
+        {
+            if p.case.input.fpcr != 0 && !matches!(ir, emu::Outcome::Slow(_)) {
+                rep.first.get_or_insert(format!(
+                    "[{:08x}] the FPCR guard did not leave the block",
+                    p.case.words.last().copied().unwrap_or(0)
+                ));
+                continue;
+            }
+            rep.slow += 1;
+            to_slow.push(todo.len());
+            todo.push(p.case.clone());
+            irs.push(ir);
+            continue;
+        }
+        if p.case.input.fpcr != 0 && guarded {
+            if matches!(ir, emu::Outcome::Slow(_)) {
+                rep.slow += 1;
+                rep.matched += 1;
+            } else {
+                rep.first.get_or_insert(format!(
+                    "[{:08x}] the FPCR guard did not leave the block",
+                    p.case.words.last().copied().unwrap_or(0)
+                ));
+            }
+            continue;
+        }
+        todo.push(p.case.clone());
+        irs.push(ir);
+    }
+    if let Some(sl) = slow
+        && !to_slow.is_empty()
+    {
+        let cases: Vec<Case> = to_slow.iter().map(|i| todo[*i].clone()).collect();
+        for (i, o) in to_slow.iter().zip(sl.engine.run(&cases)?) {
+            irs[*i] = o;
+        }
+    }
+    let ors = oracle.run(&todo)?;
+    for ((c, ir), or) in todo.iter().zip(&irs).zip(&ors) {
+        if matches!((ir, or), (emu::Outcome::Fault(_), emu::Outcome::Fault(_))) {
+            rep.both_faulted += 1;
+        }
+        let d = compare(ir, or);
+        if d.is_empty() {
+            rep.matched += 1;
+        } else if rep.first.is_none() {
+            let words: Vec<String> = c.words.iter().map(|w| format!("{w:08x}")).collect();
+            rep.first = Some(format!("[{}] {}", words.join(","), d.join("; ")));
+        }
+    }
+    Ok(())
+}
+
+fn check_form(
+    oracle: &mut dyn Oracle,
+    slow: &mut Option<Slow>,
+    enc: Encoding,
+    opts: &Opts,
+) -> Result<Report, String> {
     let mut r = Rng::new(enc.name(), opts.seed);
     let mut rep = Report::default();
+    let mut ps = Vec::new();
     let mut tries = 0;
-    while rep.states < opts.n && tries < opts.n * 10 {
+    while (ps.len() as u64) < opts.n && tries < opts.n * 10 {
         tries += 1;
         let Some(word) = states::word_of(enc, &mut r) else {
-            rep.first = Some("no liftable word found".to_string());
+            rep.first = Some(NO_WORD.to_string());
             break;
         };
         let insn = decode(word).expect("word_of decodes");
@@ -122,28 +199,48 @@ fn check_form(emu: &mut Emu, enc: Encoding, opts: &Opts) -> Report {
         g.fpcr = opts.fpcr;
         let mut words = states::prelude(&insn, &mut g, &mut r);
         words.push(word);
-        run_one(emu, &words, &g, opts, &mut rep);
+        ps.push(prepare(words, g, opts, &mut rep));
     }
-    rep
+    run_all(oracle, slow, &ps, &mut rep)?;
+    Ok(rep)
 }
 
-fn check_words(emu: &mut Emu, words: &[u32], opts: &Opts) -> Result<Report, String> {
+fn check_words(
+    oracle: &mut dyn Oracle,
+    slow: &mut Option<Slow>,
+    words: &[u32],
+    opts: &Opts,
+) -> Result<Report, String> {
     let last = *words.last().ok_or("no words")?;
     let insn: Insn = decode(last).ok_or(format!("{last:08x} does not decode"))?;
     let mut r = Rng::new(&format!("{words:?}"), opts.seed);
     let mut rep = Report::default();
-    while rep.states < opts.n && rep.unplaced < opts.n * 10 {
+    let mut ps = Vec::new();
+    while (ps.len() as u64) < opts.n && rep.unplaced < opts.n * 10 {
         let Some(mut g) = states::state(&insn, &mut r) else {
             rep.unplaced += 1;
             continue;
         };
         g.fpcr = opts.fpcr;
-        run_one(emu, words, &g, opts, &mut rep);
+        ps.push(prepare(words.to_vec(), g, opts, &mut rep));
     }
+    run_all(oracle, slow, &ps, &mut rep)?;
     Ok(rep)
 }
 
+/// Whether no word of the form lifts (a feature the CPU lacks, or a form
+/// with only some words liftable).
+fn skipped(rep: &Report) -> bool {
+    rep.states == 0 && rep.first.as_deref() == Some(NO_WORD)
+}
+
+const NO_WORD: &str = "no liftable word found";
+
 fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
+    if skipped(rep) {
+        println!("SKIP   {name:28} {NO_WORD}");
+        return true;
+    }
     let ok = if opts.mutate {
         rep.matched < rep.states
     } else {
@@ -180,16 +277,13 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]\n       relift-check forms <name>[,<name>...]|all [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX]"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow]"
     );
     ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(code) = gb::cli::dispatch(&args) {
-        return code;
-    }
     if args.len() < 2 {
         return usage();
     }
@@ -199,6 +293,10 @@ fn main() -> ExitCode {
         mutate: false,
         fpcr: 0,
     };
+    let mut oracle_spec = "unicorn".to_string();
+    let mut features: Option<String> = None;
+    let mut slow_spec: Option<String> = None;
+    let mut all_slow = false;
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
@@ -223,6 +321,19 @@ fn main() -> ExitCode {
                 }
                 i += 1;
             }
+            "--oracle" | "--features" | "--slow" => {
+                let Some(v) = args.get(i + 1) else {
+                    return usage();
+                };
+                match args[i].as_str() {
+                    "--oracle" => oracle_spec = v.clone(),
+                    "--features" => features = Some(v.clone()),
+                    _ => slow_spec = Some(v.clone()),
+                }
+                i += 1;
+            }
+            "--all-slow" => all_slow = true,
+            "--fpsr" => emu::FPSR.store(true, std::sync::atomic::Ordering::Relaxed),
             "--mutate" => opts.mutate = true,
             "--hand" => emu::HAND.store(true, std::sync::atomic::Ordering::Relaxed),
             "--dce" => emu::DCE.store(true, std::sync::atomic::Ordering::Relaxed),
@@ -230,13 +341,27 @@ fn main() -> ExitCode {
         }
         i += 1;
     }
-    let mut emu = match Emu::new() {
-        Ok(e) => e,
+    let (mut oracle, default_features) = match oracle::open(&oracle_spec) {
+        Ok(o) => o,
         Err(e) => {
-            eprintln!("unicorn: {e:?}");
+            eprintln!("{e}");
             return ExitCode::FAILURE;
         }
     };
+    let features = features.unwrap_or(default_features);
+    let _ = emu::FEATURES.set(features);
+    let mut slow = match slow_spec.as_deref().map(oracle::open) {
+        None => None,
+        Some(Ok((engine, _))) => Some(Slow {
+            engine,
+            always: all_slow,
+        }),
+        Some(Err(e)) => {
+            eprintln!("--slow: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let oracle = oracle.as_mut();
     let mut all_ok = true;
     match args[0].as_str() {
         "insn" => {
@@ -247,7 +372,7 @@ fn main() -> ExitCode {
             let Ok(words) = words else {
                 return usage();
             };
-            match check_words(&mut emu, &words, &opts) {
+            match check_words(oracle, &mut slow, &words, &opts) {
                 Ok(rep) => all_ok &= print(&args[1], &rep, &opts),
                 Err(e) => {
                     eprintln!("{e}");
@@ -278,9 +403,20 @@ fn main() -> ExitCode {
                 }
                 v
             };
-            let (mut pass, mut total) = (0, 0);
+            let (mut pass, mut total, mut skip) = (0, 0, 0);
             for enc in encs {
-                let rep = check_form(&mut emu, enc, &opts);
+                let rep = match check_form(oracle, &mut slow, enc, &opts) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                if skipped(&rep) {
+                    skip += 1;
+                    print(enc.name(), &rep, &opts);
+                    continue;
+                }
                 total += 1;
                 if print(enc.name(), &rep, &opts) {
                     pass += 1;
@@ -289,7 +425,10 @@ fn main() -> ExitCode {
                 }
             }
             let what = if opts.mutate { "caught" } else { "passed" };
-            println!("{pass}/{total} forms {what}");
+            println!(
+                "{pass}/{total} forms {what} against {}, {skip} skipped",
+                oracle.name()
+            );
         }
         _ => return usage(),
     }

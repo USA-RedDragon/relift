@@ -398,6 +398,7 @@ version = "0.1.0"
 dependencies = [
  "relift-cpu-a64",
  "relift-ir",
+ "relift-proc",
  "rustyboi-core",
  "unicorn-engine",
 ]
@@ -419,6 +420,10 @@ dependencies = [
 
 [[package]]
 name = "relift-ir"
+version = "0.1.0"
+
+[[package]]
+name = "relift-proc"
 version = "0.1.0"
 
 [[package]]
