@@ -56,6 +56,14 @@ jobs:
       - name: tests
         run: cargo test --workspace --locked
 
+      - name: generated config docs are current
+        run: |
+          version=$(grep -A1 '^name = "configulator-rs"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
+          cargo install configulator-cli --locked --version "=$version" --root "$RUNNER_TEMP/configulator"
+          cd relift
+          "$RUNNER_TEMP/configulator/bin/configulator" --type Settings --sample --format toml --sample-file ../relift.example.toml --check
+          "$RUNNER_TEMP/configulator/bin/configulator" --type Settings --markdown --markdown-file ../README.md --env-prefix RELIFT_ --env-separator _ --check
+
       - name: cargo-deny
         run: |
           dir="$RUNNER_TEMP/cargo-deny"
