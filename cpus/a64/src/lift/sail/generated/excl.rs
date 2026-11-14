@@ -6,12 +6,14 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width,
+};
 
-use crate::decode::Encoding;
+use crate::decode::{Encoding, Feature};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
+use crate::lift::sail::{GenFn, align, half};
 use crate::regs;
 
 /// `LDARB_LR32_ldstord`.
@@ -29,6 +31,7 @@ pub(super) fn LDARB_LR32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 1, false);
     let v11 = b.load(v10, Width::new(8), Endian::Little, Order::Acquire);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -50,6 +53,7 @@ pub(super) fn LDARH_LR32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 2, false);
     let v11 = b.load(v10, Width::new(16), Endian::Little, Order::Acquire);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -71,6 +75,7 @@ pub(super) fn LDAR_LR32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 4, false);
     let v11 = b.load(v10, Width::new(32), Endian::Little, Order::Acquire);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -91,6 +96,7 @@ pub(super) fn LDAR_LR64_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 8, false);
     let v11 = b.load(v10, Width::new(64), Endian::Little, Order::Acquire);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -115,6 +121,7 @@ pub(super) fn LDAXRB_LR32_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 1, true);
     let v11 = b.load_exclusive(v10, Width::new(8), Endian::Little, Order::Acquire);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -140,6 +147,7 @@ pub(super) fn LDAXRH_LR32_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 2, true);
     let v11 = b.load_exclusive(v10, Width::new(16), Endian::Little, Order::Acquire);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -165,6 +173,7 @@ pub(super) fn LDAXR_LR32_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 4, true);
     let v11 = b.load_exclusive(v10, Width::new(32), Endian::Little, Order::Acquire);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -189,6 +198,7 @@ pub(super) fn LDAXR_LR64_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 8, true);
     let v11 = b.load_exclusive(v10, Width::new(64), Endian::Little, Order::Acquire);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -213,6 +223,7 @@ pub(super) fn LDLARB_LR32_ldstord(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 1, false);
     let v11 = b.load(v10, Width::new(8), Endian::Little, Order::Acquire);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -238,6 +249,7 @@ pub(super) fn LDLARH_LR32_ldstord(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 2, false);
     let v11 = b.load(v10, Width::new(16), Endian::Little, Order::Acquire);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -259,6 +271,7 @@ pub(super) fn LDLAR_LR32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 4, false);
     let v11 = b.load(v10, Width::new(32), Endian::Little, Order::Acquire);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -279,6 +292,7 @@ pub(super) fn LDLAR_LR64_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 8, false);
     let v11 = b.load(v10, Width::new(64), Endian::Little, Order::Acquire);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -303,6 +317,7 @@ pub(super) fn LDXRB_LR32_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 1, true);
     let v11 = b.load_exclusive(v10, Width::new(8), Endian::Little, Order::Plain);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -328,6 +343,7 @@ pub(super) fn LDXRH_LR32_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 2, true);
     let v11 = b.load_exclusive(v10, Width::new(16), Endian::Little, Order::Plain);
     let v12 = b.zext(v11, Width::new(32));
     st.x_set(b, s4 as u32, v12, None);
@@ -353,6 +369,7 @@ pub(super) fn LDXR_LR32_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 4, true);
     let v11 = b.load_exclusive(v10, Width::new(32), Endian::Little, Order::Plain);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -377,6 +394,7 @@ pub(super) fn LDXR_LR64_ldstexclr(
     let v7 = st.sp_read(b);
     let v9 = st.x_read(b, s3 as u32, 64);
     let v10 = if s6 { v7 } else { v9 };
+    align::check(b, st, v10, 8, true);
     let v11 = b.load_exclusive(v10, Width::new(64), Endian::Little, Order::Plain);
     st.x_set(b, s4 as u32, v11, None);
     Ok(())
@@ -404,6 +422,7 @@ pub(super) fn STLLRB_SL32_ldstord(
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 8);
+    align::check(b, st, v12, 1, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -430,6 +449,7 @@ pub(super) fn STLLRH_SL32_ldstord(
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 16);
+    align::check(b, st, v12, 2, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -452,6 +472,7 @@ pub(super) fn STLLR_SL32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 32);
+    align::check(b, st, v12, 4, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -474,6 +495,7 @@ pub(super) fn STLLR_SL64_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 64);
+    align::check(b, st, v12, 8, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -496,6 +518,7 @@ pub(super) fn STLRB_SL32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 8);
+    align::check(b, st, v12, 1, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -518,6 +541,7 @@ pub(super) fn STLRH_SL32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 16);
+    align::check(b, st, v12, 2, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -540,6 +564,7 @@ pub(super) fn STLR_SL32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 32);
+    align::check(b, st, v12, 4, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -562,6 +587,7 @@ pub(super) fn STLR_SL64_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v11 = b.konst(Width::new(64), 0x0);
     let v12 = b.bin(BinOp::Add, v10, v11);
     let v13 = st.x_read(b, s4 as u32, 64);
+    align::check(b, st, v12, 8, false);
     b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
@@ -602,6 +628,9 @@ pub(super) fn STLXRB_SR32_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 8);
+    if s15 {
+        align::check(b, st, v22, 1, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Release)
     } else {
@@ -653,6 +682,9 @@ pub(super) fn STLXRH_SR32_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 16);
+    if s15 {
+        align::check(b, st, v22, 2, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Release)
     } else {
@@ -704,6 +736,9 @@ pub(super) fn STLXR_SR32_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 32);
+    if s15 {
+        align::check(b, st, v22, 4, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Release)
     } else {
@@ -755,6 +790,9 @@ pub(super) fn STLXR_SR64_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 64);
+    if s15 {
+        align::check(b, st, v22, 8, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Release)
     } else {
@@ -806,6 +844,9 @@ pub(super) fn STXRB_SR32_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 8);
+    if s15 {
+        align::check(b, st, v22, 1, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Plain)
     } else {
@@ -857,6 +898,9 @@ pub(super) fn STXRH_SR32_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 16);
+    if s15 {
+        align::check(b, st, v22, 2, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Plain)
     } else {
@@ -908,6 +952,9 @@ pub(super) fn STXR_SR32_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 32);
+    if s15 {
+        align::check(b, st, v22, 4, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Plain)
     } else {
@@ -959,6 +1006,9 @@ pub(super) fn STXR_SR64_ldstexclr(
     let v21 = st.x_read(b, s4 as u32, 64);
     let v22 = if s16 { v18 } else { v21 };
     let v23 = st.x_read(b, s5 as u32, 64);
+    if s15 {
+        align::check(b, st, v22, 8, true);
+    }
     let xp24 = if s15 {
         b.store_exclusive(v22, v23, Endian::Little, Order::Plain)
     } else {

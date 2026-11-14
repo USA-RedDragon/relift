@@ -6,12 +6,14 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width,
+};
 
-use crate::decode::Encoding;
+use crate::decode::{Encoding, Feature};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
+use crate::lift::sail::{GenFn, align, half};
 use crate::regs;
 
 /// `LD1_asisdlse_R1_1v`.

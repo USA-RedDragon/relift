@@ -6,12 +6,14 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width,
+};
 
-use crate::decode::Encoding;
+use crate::decode::{Encoding, Feature};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
+use crate::lift::sail::{GenFn, align, half};
 use crate::regs;
 
 /// `LDAXP_LP32_ldstexclp`.
@@ -40,6 +42,9 @@ pub(super) fn LDAXP_LP32_ldstexclp(
     let v12 = st.sp_read(b);
     let v15 = st.x_read(b, s4 as u32, 64);
     let v16 = if s10 { v12 } else { v15 };
+    if s9 {
+        align::check(b, st, v16, 8, true);
+    }
     let v17 = if s9 {
         b.load_exclusive(v16, Width::new(64), Endian::Little, Order::Acquire)
     } else {
@@ -6388,6 +6393,9 @@ pub(super) fn LDXP_LP32_ldstexclp(
     let v12 = st.sp_read(b);
     let v15 = st.x_read(b, s4 as u32, 64);
     let v16 = if s10 { v12 } else { v15 };
+    if s9 {
+        align::check(b, st, v16, 8, true);
+    }
     let v17 = if s9 {
         b.load_exclusive(v16, Width::new(64), Endian::Little, Order::Plain)
     } else {
@@ -6942,6 +6950,9 @@ pub(super) fn STLXP_SP32_ldstexclp(
     let v27 = st.x_read(b, s6 as u32, 32);
     let v28 = st.x_read(b, s7 as u32, 32);
     let v29 = b.concat(v28, v27);
+    if s19 {
+        align::check(b, st, v26, 8, true);
+    }
     let xp30 = if s19 {
         b.store_exclusive(v26, v29, Endian::Little, Order::Release)
     } else {
@@ -6999,6 +7010,9 @@ pub(super) fn STLXP_SP64_ldstexclp(
     let v27 = st.x_read(b, s6 as u32, 64);
     let v28 = st.x_read(b, s7 as u32, 64);
     let v29 = b.concat(v28, v27);
+    if s19 {
+        align::check(b, st, v26, 16, true);
+    }
     let xp30 = if s19 {
         b.store_exclusive(v26, v29, Endian::Little, Order::Release)
     } else {
@@ -10818,6 +10832,9 @@ pub(super) fn STXP_SP32_ldstexclp(
     let v27 = st.x_read(b, s6 as u32, 32);
     let v28 = st.x_read(b, s7 as u32, 32);
     let v29 = b.concat(v28, v27);
+    if s19 {
+        align::check(b, st, v26, 8, true);
+    }
     let xp30 = if s19 {
         b.store_exclusive(v26, v29, Endian::Little, Order::Plain)
     } else {
@@ -10875,6 +10892,9 @@ pub(super) fn STXP_SP64_ldstexclp(
     let v27 = st.x_read(b, s6 as u32, 64);
     let v28 = st.x_read(b, s7 as u32, 64);
     let v29 = b.concat(v28, v27);
+    if s19 {
+        align::check(b, st, v26, 16, true);
+    }
     let xp30 = if s19 {
         b.store_exclusive(v26, v29, Endian::Little, Order::Plain)
     } else {

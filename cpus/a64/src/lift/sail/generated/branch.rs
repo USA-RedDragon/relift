@@ -6,13 +6,90 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width,
+};
 
-use crate::decode::Encoding;
+use crate::decode::{Encoding, Feature};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
+use crate::lift::sail::{GenFn, align, half};
 use crate::regs;
+
+/// `BC_only_condbranch`.
+///
+/// Cut: BranchTo, ENV, IsFeatureImplemented, PC_read, PSTATE.NZCV.
+pub(super) fn BC_only_condbranch(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::BC_only_condbranch;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x7ffff;
+    let s3: bool = st.has(Feature::HBC);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: u128 = (s2 << 2) | 0x0u128;
+    let s7: u128 = rt::sext(s6, 21, 64);
+    let s8: u128 = (s1 >> 1) & 0x7;
+    let s9: bool = s8 == 0x0u128;
+    let v11 = st.get(b, regs::Z);
+    let v12 = b.konst(Width::new(1), 0x1);
+    let v13 = b.cmp(CmpOp::Eq, v11, v12);
+    let s16: bool = s8 == 0x1u128;
+    let v18 = st.get(b, regs::C);
+    let v19 = b.konst(Width::new(1), 0x1);
+    let v20 = b.cmp(CmpOp::Eq, v18, v19);
+    let s23: bool = s8 == 0x2u128;
+    let v25 = st.get(b, regs::N);
+    let v26 = b.konst(Width::new(1), 0x1);
+    let v27 = b.cmp(CmpOp::Eq, v25, v26);
+    let s30: bool = s8 == 0x3u128;
+    let v32 = st.get(b, regs::V);
+    let v33 = b.konst(Width::new(1), 0x1);
+    let v34 = b.cmp(CmpOp::Eq, v32, v33);
+    let s37: bool = s8 == 0x4u128;
+    let v39 = st.get(b, regs::C);
+    let v40 = b.konst(Width::new(1), 0x1);
+    let v41 = b.cmp(CmpOp::Eq, v39, v40);
+    let v42 = st.get(b, regs::Z);
+    let v43 = b.konst(Width::new(1), 0x0);
+    let v44 = b.cmp(CmpOp::Eq, v42, v43);
+    let v45 = b.and(v41, v44);
+    let s48: bool = s8 == 0x5u128;
+    let v50 = st.get(b, regs::N);
+    let v51 = st.get(b, regs::V);
+    let v52 = b.cmp(CmpOp::Eq, v50, v51);
+    let s55: bool = s8 == 0x6u128;
+    let v57 = st.get(b, regs::N);
+    let v58 = st.get(b, regs::V);
+    let v59 = b.cmp(CmpOp::Eq, v57, v58);
+    let v60 = st.get(b, regs::Z);
+    let v61 = b.konst(Width::new(1), 0x0);
+    let v62 = b.cmp(CmpOp::Eq, v60, v61);
+    let v63 = b.and(v59, v62);
+    let v70 = b.konst(Width::new(1), 1);
+    let v71 = if s55 { v63 } else { v70 };
+    let v73 = if s48 { v52 } else { v71 };
+    let v75 = if s37 { v45 } else { v73 };
+    let v77 = if s30 { v34 } else { v75 };
+    let v79 = if s23 { v27 } else { v77 };
+    let v81 = if s16 { v20 } else { v79 };
+    let v83 = if s9 { v13 } else { v81 };
+    let s85: u128 = (s1 >> 0) & 0x1;
+    let s86: bool = s85 == 0x1u128;
+    let s87: bool = s1 != 0xfu128;
+    let s88: bool = s86 && s87;
+    let v90 = b.not(v83);
+    let v93 = if s88 { v90 } else { v83 };
+    let s94: u128 = pc.wrapping_add(s7) & 0xffffffffffffffff;
+    if s5 {
+        st.branch(b, Target::Const(s94 as u64), Kind::Jump, Some(v93));
+    }
+    Ok(())
+}
 
 /// `BLR_64_branch_reg`.
 ///
@@ -362,6 +439,7 @@ pub(super) fn TBZ_only_testbranch(
 /// The generated template of `enc`, if there is one.
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
+        Encoding::BC_only_condbranch => BC_only_condbranch,
         Encoding::BLR_64_branch_reg => BLR_64_branch_reg,
         Encoding::BL_only_branch_imm => BL_only_branch_imm,
         Encoding::BR_64_branch_reg => BR_64_branch_reg,

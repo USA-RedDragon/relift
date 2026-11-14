@@ -6,12 +6,14 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width,
+};
 
-use crate::decode::Encoding;
+use crate::decode::{Encoding, Feature};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
+use crate::lift::sail::{GenFn, align, half};
 use crate::regs;
 
 /// `FABS_D_floatdp1`.
@@ -37,7 +39,7 @@ pub(super) fn FABS_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
 
 /// `FABS_H_floatdp1`.
 ///
-/// Cut: ENV, IsFeatureImplemented, V_read, V_set.
+/// Cut: ENV, FEAT, IsFeatureImplemented, V_read, V_set.
 pub(super) fn FABS_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FABS_H_floatdp1;
     let w = u128::from(word);
@@ -46,13 +48,20 @@ pub(super) fn FABS_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.v_read(b, s4 as u32, 16);
-    let v6 = b.extract(v5, 0, Width::new(15));
-    let v7 = b.konst(Width::new(1), 0x0);
-    let v8 = b.concat(v7, v6);
-    let v9 = b.konst(Width::new(112), 0x0);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    let v8 = b.extract(v7, 0, Width::new(15));
+    let v9 = b.konst(Width::new(1), 0x0);
     let v10 = b.concat(v9, v8);
-    st.v_set(b, s3 as u32, v10, None);
+    let v11 = b.konst(Width::new(112), 0x0);
+    let v12 = b.concat(v11, v10);
+    if s5 {
+        st.v_set(b, s3 as u32, v12, None);
+    }
     Ok(())
 }
 
@@ -97,6 +106,37 @@ pub(super) fn FADD_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FADD_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FADD_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FADD_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v11 = rt::Fp::new(16).bin(b, FpOp::Add, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
     Ok(())
 }
 
@@ -201,6 +241,100 @@ pub(super) fn FCCMPE_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Res
     st.set(b, regs::C, v102, None);
     let v103 = b.extract(v96, 0, Width::new(1));
     st.set(b, regs::V, v103, None);
+    Ok(())
+}
+
+/// `FCCMPE_H_floatccmp`.
+///
+/// Cut: ENV, FEAT, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCCMPE_H_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCCMPE_H_floatccmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    let s11: u128 = (s3 >> 1) & 0x7;
+    let s12: bool = s11 == 0x0u128;
+    let v14 = st.get(b, regs::Z);
+    let v15 = b.konst(Width::new(1), 0x1);
+    let v16 = b.cmp(CmpOp::Eq, v14, v15);
+    let s19: bool = s11 == 0x1u128;
+    let v21 = st.get(b, regs::C);
+    let v22 = b.konst(Width::new(1), 0x1);
+    let v23 = b.cmp(CmpOp::Eq, v21, v22);
+    let s26: bool = s11 == 0x2u128;
+    let v28 = st.get(b, regs::N);
+    let v29 = b.konst(Width::new(1), 0x1);
+    let v30 = b.cmp(CmpOp::Eq, v28, v29);
+    let s33: bool = s11 == 0x3u128;
+    let v35 = st.get(b, regs::V);
+    let v36 = b.konst(Width::new(1), 0x1);
+    let v37 = b.cmp(CmpOp::Eq, v35, v36);
+    let s40: bool = s11 == 0x4u128;
+    let v42 = st.get(b, regs::C);
+    let v43 = b.konst(Width::new(1), 0x1);
+    let v44 = b.cmp(CmpOp::Eq, v42, v43);
+    let v45 = st.get(b, regs::Z);
+    let v46 = b.konst(Width::new(1), 0x0);
+    let v47 = b.cmp(CmpOp::Eq, v45, v46);
+    let v48 = b.and(v44, v47);
+    let s51: bool = s11 == 0x5u128;
+    let v53 = st.get(b, regs::N);
+    let v54 = st.get(b, regs::V);
+    let v55 = b.cmp(CmpOp::Eq, v53, v54);
+    let s58: bool = s11 == 0x6u128;
+    let v60 = st.get(b, regs::N);
+    let v61 = st.get(b, regs::V);
+    let v62 = b.cmp(CmpOp::Eq, v60, v61);
+    let v63 = st.get(b, regs::Z);
+    let v64 = b.konst(Width::new(1), 0x0);
+    let v65 = b.cmp(CmpOp::Eq, v63, v64);
+    let v66 = b.and(v62, v65);
+    let v73 = b.konst(Width::new(1), 1);
+    let v74 = if s58 { v66 } else { v73 };
+    let v76 = if s51 { v55 } else { v74 };
+    let v78 = if s40 { v48 } else { v76 };
+    let v80 = if s33 { v37 } else { v78 };
+    let v82 = if s26 { v30 } else { v80 };
+    let v84 = if s19 { v23 } else { v82 };
+    let v86 = if s12 { v16 } else { v84 };
+    let s88: u128 = (s3 >> 0) & 0x1;
+    let s89: bool = s88 == 0x1u128;
+    let s90: bool = s3 != 0xfu128;
+    let s91: bool = s89 && s90;
+    let v93 = b.not(v86);
+    let v96 = if s91 { v93 } else { v86 };
+    st.assume_default_fpcr();
+    let v97 = rt::Fp::new(16).guarded(Some(v96)).compare(b, v9, v10, true);
+    let v99 = b.konst(Width::new(4), s1);
+    let v100 = b.select(v96, v97, v99);
+    let v104 = b.extract(v100, 3, Width::new(1));
+    if s7 {
+        st.set(b, regs::N, v104, None);
+    }
+    let v105 = b.extract(v100, 2, Width::new(1));
+    if s7 {
+        st.set(b, regs::Z, v105, None);
+    }
+    let v106 = b.extract(v100, 1, Width::new(1));
+    if s7 {
+        st.set(b, regs::C, v106, None);
+    }
+    let v107 = b.extract(v100, 0, Width::new(1));
+    if s7 {
+        st.set(b, regs::V, v107, None);
+    }
     Ok(())
 }
 
@@ -366,6 +500,102 @@ pub(super) fn FCCMP_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FCCMP_H_floatccmp`.
+///
+/// Cut: ENV, FEAT, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCCMP_H_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCCMP_H_floatccmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    let s11: u128 = (s3 >> 1) & 0x7;
+    let s12: bool = s11 == 0x0u128;
+    let v14 = st.get(b, regs::Z);
+    let v15 = b.konst(Width::new(1), 0x1);
+    let v16 = b.cmp(CmpOp::Eq, v14, v15);
+    let s19: bool = s11 == 0x1u128;
+    let v21 = st.get(b, regs::C);
+    let v22 = b.konst(Width::new(1), 0x1);
+    let v23 = b.cmp(CmpOp::Eq, v21, v22);
+    let s26: bool = s11 == 0x2u128;
+    let v28 = st.get(b, regs::N);
+    let v29 = b.konst(Width::new(1), 0x1);
+    let v30 = b.cmp(CmpOp::Eq, v28, v29);
+    let s33: bool = s11 == 0x3u128;
+    let v35 = st.get(b, regs::V);
+    let v36 = b.konst(Width::new(1), 0x1);
+    let v37 = b.cmp(CmpOp::Eq, v35, v36);
+    let s40: bool = s11 == 0x4u128;
+    let v42 = st.get(b, regs::C);
+    let v43 = b.konst(Width::new(1), 0x1);
+    let v44 = b.cmp(CmpOp::Eq, v42, v43);
+    let v45 = st.get(b, regs::Z);
+    let v46 = b.konst(Width::new(1), 0x0);
+    let v47 = b.cmp(CmpOp::Eq, v45, v46);
+    let v48 = b.and(v44, v47);
+    let s51: bool = s11 == 0x5u128;
+    let v53 = st.get(b, regs::N);
+    let v54 = st.get(b, regs::V);
+    let v55 = b.cmp(CmpOp::Eq, v53, v54);
+    let s58: bool = s11 == 0x6u128;
+    let v60 = st.get(b, regs::N);
+    let v61 = st.get(b, regs::V);
+    let v62 = b.cmp(CmpOp::Eq, v60, v61);
+    let v63 = st.get(b, regs::Z);
+    let v64 = b.konst(Width::new(1), 0x0);
+    let v65 = b.cmp(CmpOp::Eq, v63, v64);
+    let v66 = b.and(v62, v65);
+    let v73 = b.konst(Width::new(1), 1);
+    let v74 = if s58 { v66 } else { v73 };
+    let v76 = if s51 { v55 } else { v74 };
+    let v78 = if s40 { v48 } else { v76 };
+    let v80 = if s33 { v37 } else { v78 };
+    let v82 = if s26 { v30 } else { v80 };
+    let v84 = if s19 { v23 } else { v82 };
+    let v86 = if s12 { v16 } else { v84 };
+    let s88: u128 = (s3 >> 0) & 0x1;
+    let s89: bool = s88 == 0x1u128;
+    let s90: bool = s3 != 0xfu128;
+    let s91: bool = s89 && s90;
+    let v93 = b.not(v86);
+    let v96 = if s91 { v93 } else { v86 };
+    st.assume_default_fpcr();
+    let v97 = rt::Fp::new(16)
+        .guarded(Some(v96))
+        .compare(b, v9, v10, false);
+    let v99 = b.konst(Width::new(4), s1);
+    let v100 = b.select(v96, v97, v99);
+    let v104 = b.extract(v100, 3, Width::new(1));
+    if s7 {
+        st.set(b, regs::N, v104, None);
+    }
+    let v105 = b.extract(v100, 2, Width::new(1));
+    if s7 {
+        st.set(b, regs::Z, v105, None);
+    }
+    let v106 = b.extract(v100, 1, Width::new(1));
+    if s7 {
+        st.set(b, regs::C, v106, None);
+    }
+    let v107 = b.extract(v100, 0, Width::new(1));
+    if s7 {
+        st.set(b, regs::V, v107, None);
+    }
+    Ok(())
+}
+
 /// `FCCMP_S_floatccmp`.
 ///
 /// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
@@ -497,6 +727,82 @@ pub(super) fn FCMPE_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FCMPE_HZ_floatcmp`.
+///
+/// Cut: ENV, FEAT, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMPE_HZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMPE_HZ_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::FP16);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v5 = st.v_read(b, s2 as u32, 16);
+    let v6 = b.konst(Width::new(16), 0x0);
+    st.assume_default_fpcr();
+    let v7 = rt::Fp::new(16).compare(b, v5, v6, true);
+    let v8 = b.extract(v7, 3, Width::new(1));
+    if s3 {
+        st.set(b, regs::N, v8, None);
+    }
+    let v9 = b.extract(v7, 2, Width::new(1));
+    if s3 {
+        st.set(b, regs::Z, v9, None);
+    }
+    let v10 = b.extract(v7, 1, Width::new(1));
+    if s3 {
+        st.set(b, regs::C, v10, None);
+    }
+    let v11 = b.extract(v7, 0, Width::new(1));
+    if s3 {
+        st.set(b, regs::V, v11, None);
+    }
+    Ok(())
+}
+
+/// `FCMPE_H_floatcmp`.
+///
+/// Cut: ENV, FEAT, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMPE_H_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMPE_H_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: u128 = (w >> 16) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s3 as u32, 16);
+    let v8 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(16).compare(b, v7, v8, true);
+    let v10 = b.extract(v9, 3, Width::new(1));
+    if s5 {
+        st.set(b, regs::N, v10, None);
+    }
+    let v11 = b.extract(v9, 2, Width::new(1));
+    if s5 {
+        st.set(b, regs::Z, v11, None);
+    }
+    let v12 = b.extract(v9, 1, Width::new(1));
+    if s5 {
+        st.set(b, regs::C, v12, None);
+    }
+    let v13 = b.extract(v9, 0, Width::new(1));
+    if s5 {
+        st.set(b, regs::V, v13, None);
+    }
+    Ok(())
+}
+
 /// `FCMPE_SZ_floatcmp`.
 ///
 /// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
@@ -594,6 +900,82 @@ pub(super) fn FCMP_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result
     st.set(b, regs::C, v10, None);
     let v11 = b.extract(v7, 0, Width::new(1));
     st.set(b, regs::V, v11, None);
+    Ok(())
+}
+
+/// `FCMP_HZ_floatcmp`.
+///
+/// Cut: ENV, FEAT, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMP_HZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMP_HZ_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::FP16);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v5 = st.v_read(b, s2 as u32, 16);
+    let v6 = b.konst(Width::new(16), 0x0);
+    st.assume_default_fpcr();
+    let v7 = rt::Fp::new(16).compare(b, v5, v6, false);
+    let v8 = b.extract(v7, 3, Width::new(1));
+    if s3 {
+        st.set(b, regs::N, v8, None);
+    }
+    let v9 = b.extract(v7, 2, Width::new(1));
+    if s3 {
+        st.set(b, regs::Z, v9, None);
+    }
+    let v10 = b.extract(v7, 1, Width::new(1));
+    if s3 {
+        st.set(b, regs::C, v10, None);
+    }
+    let v11 = b.extract(v7, 0, Width::new(1));
+    if s3 {
+        st.set(b, regs::V, v11, None);
+    }
+    Ok(())
+}
+
+/// `FCMP_H_floatcmp`.
+///
+/// Cut: ENV, FEAT, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMP_H_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMP_H_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: u128 = (w >> 16) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s3 as u32, 16);
+    let v8 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(16).compare(b, v7, v8, false);
+    let v10 = b.extract(v9, 3, Width::new(1));
+    if s5 {
+        st.set(b, regs::N, v10, None);
+    }
+    let v11 = b.extract(v9, 2, Width::new(1));
+    if s5 {
+        st.set(b, regs::Z, v11, None);
+    }
+    let v12 = b.extract(v9, 1, Width::new(1));
+    if s5 {
+        st.set(b, regs::C, v12, None);
+    }
+    let v13 = b.extract(v9, 0, Width::new(1));
+    if s5 {
+        st.set(b, regs::V, v13, None);
+    }
     Ok(())
 }
 
@@ -721,7 +1103,7 @@ pub(super) fn FCSEL_D_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Resul
 
 /// `FCSEL_H_floatsel`.
 ///
-/// Cut: ENV, PSTATE.NZCV, V_read, V_set.
+/// Cut: ENV, FEAT, PSTATE.NZCV, V_read, V_set.
 pub(super) fn FCSEL_H_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FCSEL_H_floatsel;
     let w = u128::from(word);
@@ -733,61 +1115,68 @@ pub(super) fn FCSEL_H_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s5: i128 = s1 as i128;
     let s6: i128 = s2 as i128;
     let s7: i128 = s4 as i128;
-    let s8: u128 = (s3 >> 1) & 0x7;
-    let s9: bool = s8 == 0x0u128;
-    let v10 = st.get(b, regs::Z);
-    let v11 = b.konst(Width::new(1), 0x1);
-    let v12 = b.cmp(CmpOp::Eq, v10, v11);
-    let s14: bool = s8 == 0x1u128;
-    let v16 = st.get(b, regs::C);
-    let v17 = b.konst(Width::new(1), 0x1);
-    let v18 = b.cmp(CmpOp::Eq, v16, v17);
-    let s21: bool = s8 == 0x2u128;
-    let v23 = st.get(b, regs::N);
-    let v24 = b.konst(Width::new(1), 0x1);
-    let v25 = b.cmp(CmpOp::Eq, v23, v24);
-    let s28: bool = s8 == 0x3u128;
-    let v30 = st.get(b, regs::V);
-    let v31 = b.konst(Width::new(1), 0x1);
-    let v32 = b.cmp(CmpOp::Eq, v30, v31);
-    let s35: bool = s8 == 0x4u128;
-    let v37 = st.get(b, regs::C);
-    let v38 = b.konst(Width::new(1), 0x1);
-    let v39 = b.cmp(CmpOp::Eq, v37, v38);
-    let v40 = st.get(b, regs::Z);
-    let v41 = b.konst(Width::new(1), 0x0);
-    let v42 = b.cmp(CmpOp::Eq, v40, v41);
-    let v43 = b.and(v39, v42);
-    let s46: bool = s8 == 0x5u128;
-    let v48 = st.get(b, regs::N);
-    let v49 = st.get(b, regs::V);
-    let v50 = b.cmp(CmpOp::Eq, v48, v49);
-    let s53: bool = s8 == 0x6u128;
-    let v55 = st.get(b, regs::N);
-    let v56 = st.get(b, regs::V);
-    let v57 = b.cmp(CmpOp::Eq, v55, v56);
-    let v58 = st.get(b, regs::Z);
-    let v59 = b.konst(Width::new(1), 0x0);
-    let v60 = b.cmp(CmpOp::Eq, v58, v59);
-    let v61 = b.and(v57, v60);
-    let v68 = b.konst(Width::new(1), 1);
-    let v69 = if s53 { v61 } else { v68 };
-    let v71 = if s46 { v50 } else { v69 };
-    let v73 = if s35 { v43 } else { v71 };
-    let v75 = if s28 { v32 } else { v73 };
-    let v77 = if s21 { v25 } else { v75 };
-    let v79 = if s14 { v18 } else { v77 };
-    let v81 = if s9 { v12 } else { v79 };
-    let s83: u128 = (s3 >> 0) & 0x1;
-    let s84: bool = s83 == 0x1u128;
-    let s85: bool = s3 != 0xfu128;
-    let s86: bool = s84 && s85;
-    let v88 = b.not(v81);
-    let v91 = if s86 { v88 } else { v81 };
-    let v92 = st.v_read(b, s6 as u32, 16);
-    let v94 = st.v_read(b, s7 as u32, 16);
-    let v95 = b.select(v91, v92, v94);
-    st.v_set(b, s5 as u32, v95, None);
+    let s8: bool = st.has(Feature::FP16);
+    let s9: bool = !s8;
+    if s9 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s10: u128 = (s3 >> 1) & 0x7;
+    let s11: bool = s10 == 0x0u128;
+    let v13 = st.get(b, regs::Z);
+    let v14 = b.konst(Width::new(1), 0x1);
+    let v15 = b.cmp(CmpOp::Eq, v13, v14);
+    let s18: bool = s10 == 0x1u128;
+    let v20 = st.get(b, regs::C);
+    let v21 = b.konst(Width::new(1), 0x1);
+    let v22 = b.cmp(CmpOp::Eq, v20, v21);
+    let s25: bool = s10 == 0x2u128;
+    let v27 = st.get(b, regs::N);
+    let v28 = b.konst(Width::new(1), 0x1);
+    let v29 = b.cmp(CmpOp::Eq, v27, v28);
+    let s32: bool = s10 == 0x3u128;
+    let v34 = st.get(b, regs::V);
+    let v35 = b.konst(Width::new(1), 0x1);
+    let v36 = b.cmp(CmpOp::Eq, v34, v35);
+    let s39: bool = s10 == 0x4u128;
+    let v41 = st.get(b, regs::C);
+    let v42 = b.konst(Width::new(1), 0x1);
+    let v43 = b.cmp(CmpOp::Eq, v41, v42);
+    let v44 = st.get(b, regs::Z);
+    let v45 = b.konst(Width::new(1), 0x0);
+    let v46 = b.cmp(CmpOp::Eq, v44, v45);
+    let v47 = b.and(v43, v46);
+    let s50: bool = s10 == 0x5u128;
+    let v52 = st.get(b, regs::N);
+    let v53 = st.get(b, regs::V);
+    let v54 = b.cmp(CmpOp::Eq, v52, v53);
+    let s57: bool = s10 == 0x6u128;
+    let v59 = st.get(b, regs::N);
+    let v60 = st.get(b, regs::V);
+    let v61 = b.cmp(CmpOp::Eq, v59, v60);
+    let v62 = st.get(b, regs::Z);
+    let v63 = b.konst(Width::new(1), 0x0);
+    let v64 = b.cmp(CmpOp::Eq, v62, v63);
+    let v65 = b.and(v61, v64);
+    let v72 = b.konst(Width::new(1), 1);
+    let v73 = if s57 { v65 } else { v72 };
+    let v75 = if s50 { v54 } else { v73 };
+    let v77 = if s39 { v47 } else { v75 };
+    let v79 = if s32 { v36 } else { v77 };
+    let v81 = if s25 { v29 } else { v79 };
+    let v83 = if s18 { v22 } else { v81 };
+    let v85 = if s11 { v15 } else { v83 };
+    let s87: u128 = (s3 >> 0) & 0x1;
+    let s88: bool = s87 == 0x1u128;
+    let s89: bool = s3 != 0xfu128;
+    let s90: bool = s88 && s89;
+    let v92 = b.not(v85);
+    let v95 = if s90 { v92 } else { v85 };
+    let v96 = st.v_read(b, s6 as u32, 16);
+    let v98 = st.v_read(b, s7 as u32, 16);
+    let v99 = b.select(v95, v96, v98);
+    if s8 {
+        st.v_set(b, s5 as u32, v99, None);
+    }
     Ok(())
 }
 
@@ -885,6 +1274,36 @@ pub(super) fn FCVTAS_32D_float2int(
     Ok(())
 }
 
+/// `FCVTAS_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAS_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAS_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::TiesAway, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTAS_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -926,6 +1345,36 @@ pub(super) fn FCVTAS_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::TiesAway, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTAS_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAS_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAS_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::TiesAway, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -973,6 +1422,36 @@ pub(super) fn FCVTAU_32D_float2int(
     Ok(())
 }
 
+/// `FCVTAU_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAU_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAU_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::TiesAway, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTAU_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1014,6 +1493,36 @@ pub(super) fn FCVTAU_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::TiesAway, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTAU_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAU_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAU_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::TiesAway, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -1061,6 +1570,36 @@ pub(super) fn FCVTMS_32D_float2int(
     Ok(())
 }
 
+/// `FCVTMS_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMS_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMS_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::Floor, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTMS_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1102,6 +1641,36 @@ pub(super) fn FCVTMS_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Floor, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTMS_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMS_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMS_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::Floor, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -1149,6 +1718,36 @@ pub(super) fn FCVTMU_32D_float2int(
     Ok(())
 }
 
+/// `FCVTMU_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMU_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMU_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::Floor, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTMU_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1190,6 +1789,36 @@ pub(super) fn FCVTMU_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Floor, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTMU_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMU_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMU_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::Floor, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -1237,6 +1866,36 @@ pub(super) fn FCVTNS_32D_float2int(
     Ok(())
 }
 
+/// `FCVTNS_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNS_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNS_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::TiesEven, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTNS_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1278,6 +1937,36 @@ pub(super) fn FCVTNS_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::TiesEven, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNS_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNS_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNS_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::TiesEven, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -1325,6 +2014,36 @@ pub(super) fn FCVTNU_32D_float2int(
     Ok(())
 }
 
+/// `FCVTNU_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNU_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNU_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::TiesEven, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTNU_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1366,6 +2085,36 @@ pub(super) fn FCVTNU_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::TiesEven, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNU_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNU_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNU_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::TiesEven, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -1413,6 +2162,36 @@ pub(super) fn FCVTPS_32D_float2int(
     Ok(())
 }
 
+/// `FCVTPS_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTPS_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTPS_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::Ceil, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTPS_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1454,6 +2233,36 @@ pub(super) fn FCVTPS_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Ceil, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTPS_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTPS_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTPS_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::Ceil, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -1501,6 +2310,36 @@ pub(super) fn FCVTPU_32D_float2int(
     Ok(())
 }
 
+/// `FCVTPU_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTPU_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTPU_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::Ceil, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTPU_32S_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -1542,6 +2381,36 @@ pub(super) fn FCVTPU_64D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Ceil, 64);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTPU_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTPU_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTPU_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::Ceil, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -2116,6 +2985,1046 @@ pub(super) fn FCVTZS_32D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Zero, 32);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTZS_32H_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZS_32H_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZS_32H_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 32, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 31, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 30, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 29, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 28, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 27, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 26, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 25, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 24, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 23, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 22, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 21, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 20, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 19, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 18, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 17, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 16, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 15, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 14, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 13, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 12, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 11, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 10, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 9, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 8, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 7, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 6, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 5, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 4, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 3, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 2, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 1, true, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTZS_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZS_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZS_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::Zero, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -3479,6 +5388,1334 @@ pub(super) fn FCVTZS_64D_float2int(
     Ok(())
 }
 
+/// `FCVTZS_64H_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZS_64H_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZS_64H_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 64, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 63, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 62, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 61, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 60, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 59, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 58, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 57, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 56, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 55, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 54, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 53, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 52, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 51, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 50, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 49, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 48, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 47, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 46, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 45, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 44, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 43, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 42, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 41, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 40, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 39, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 38, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 37, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 36, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 35, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 34, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 33, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 32, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 31, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 30, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 29, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 28, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 27, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 26, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 25, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 24, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 23, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 22, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 21, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 20, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 19, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 18, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 17, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 16, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 15, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 14, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 13, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 12, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 11, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 10, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 9, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 8, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 7, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 6, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 5, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 4, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 3, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 2, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 1, true, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTZS_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZS_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZS_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, true, FpRound::Zero, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTZS_64S_float2fix`.
 ///
 /// Split on the word bits `0x0000fc00`.
@@ -4836,6 +8073,1046 @@ pub(super) fn FCVTZU_32D_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Zero, 32);
     st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTZU_32H_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZU_32H_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZU_32H_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 32, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 31, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 30, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 29, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 28, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 27, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 26, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 25, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 24, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 23, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 22, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 21, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 20, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 19, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 18, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 17, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 16, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 15, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 14, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 13, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 12, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 11, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 10, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 9, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 8, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 7, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 6, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 5, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 4, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 3, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 2, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 1, false, FpRound::Zero, 32);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTZU_32H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZU_32H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZU_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::Zero, 32);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -6199,6 +10476,1334 @@ pub(super) fn FCVTZU_64D_float2int(
     Ok(())
 }
 
+/// `FCVTZU_64H_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZU_64H_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZU_64H_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 64, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 63, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 62, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 61, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 60, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 59, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 58, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 57, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 56, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 55, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 54, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 53, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 52, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 51, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 50, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 49, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 48, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 47, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 46, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 45, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 44, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 43, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 42, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 41, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 40, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 39, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 38, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 37, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 36, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 35, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 34, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 33, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 32, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 31, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 30, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 29, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 28, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 27, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 26, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 25, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 24, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 23, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 22, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 21, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 20, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 19, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 18, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 17, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 16, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 15, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 14, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 13, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 12, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 11, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 10, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 9, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 8, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 7, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 6, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 5, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 4, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 3, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 2, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.v_read(b, s4 as u32, 16);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::to_fixed(b, v7, 1, false, FpRound::Zero, 64);
+            if s5 {
+                st.x_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTZU_64H_float2int`.
+///
+/// Cut: ENV, FEAT, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZU_64H_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZU_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = half::to_fixed(b, v7, 0, false, FpRound::Zero, 64);
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `FCVTZU_64S_float2fix`.
 ///
 /// Split on the word bits `0x0000fc00`.
@@ -7007,6 +12612,27 @@ pub(super) fn FCVTZU_64S_float2int(
     Ok(())
 }
 
+/// `FCVT_DH_floatdp1`.
+///
+/// Cut: ENV, FPConvert__1, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FCVT_DH_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVT_DH_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v6 = rt::Fp::new(16).convert(b, v5, &rt::Fp::new(64));
+    let v7 = b.konst(Width::new(64), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
 /// `FCVT_DS_floatdp1`.
 ///
 /// Cut: ENV, FPConvert__1, IsFeatureImplemented, V_read, V_set.
@@ -7027,6 +12653,48 @@ pub(super) fn FCVT_DS_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FCVT_HD_floatdp1`.
+///
+/// Cut: ENV, FPConvert__1, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FCVT_HD_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVT_HD_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v6 = rt::Fp::new(64).convert(b, v5, &rt::Fp::new(16));
+    let v7 = b.konst(Width::new(112), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FCVT_HS_floatdp1`.
+///
+/// Cut: ENV, FPConvert__1, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FCVT_HS_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVT_HS_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v6 = rt::Fp::new(32).convert(b, v5, &rt::Fp::new(16));
+    let v7 = b.konst(Width::new(112), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
 /// `FCVT_SD_floatdp1`.
 ///
 /// Cut: ENV, FPConvert__1, IsFeatureImplemented, V_read, V_set.
@@ -7041,6 +12709,27 @@ pub(super) fn FCVT_SD_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v5 = st.v_read(b, s4 as u32, 64);
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).convert(b, v5, &rt::Fp::new(32));
+    let v7 = b.konst(Width::new(96), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FCVT_SH_floatdp1`.
+///
+/// Cut: ENV, FPConvert__1, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FCVT_SH_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVT_SH_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v6 = rt::Fp::new(16).convert(b, v5, &rt::Fp::new(32));
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
     st.v_set(b, s3 as u32, v8, None);
@@ -7067,6 +12756,37 @@ pub(super) fn FDIV_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FDIV_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPDiv, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FDIV_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FDIV_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v11 = rt::Fp::new(16).bin(b, FpOp::Div, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
     Ok(())
 }
 
@@ -7119,6 +12839,40 @@ pub(super) fn FMADD_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FMADD_H_floatdp3`.
+///
+/// Cut: ENV, FEAT, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMADD_H_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMADD_H_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let s9: bool = st.has(Feature::FP16);
+    let s10: bool = !s9;
+    if s10 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v11 = st.v_read(b, s6 as u32, 16);
+    let v12 = st.v_read(b, s7 as u32, 16);
+    let v13 = st.v_read(b, s8 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v14 = rt::Fp::new(16).mul_add(b, v11, v12, v13);
+    let v15 = b.konst(Width::new(112), 0x0);
+    let v16 = b.concat(v15, v14);
+    if s9 {
+        st.v_set(b, s5 as u32, v16, None);
+    }
+    Ok(())
+}
+
 /// `FMADD_S_floatdp3`.
 ///
 /// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
@@ -7168,6 +12922,36 @@ pub(super) fn FMAXNM_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FMAXNM_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPMaxNum, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMAXNM_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAXNM_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    let v11 = rt::Fp::new(16).max_num(b, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
+    Ok(())
+}
+
 /// `FMAXNM_S_floatdp2`.
 ///
 /// Cut: ENV, FPMaxNum, IsFeatureImplemented, V_read, V_set.
@@ -7211,6 +12995,36 @@ pub(super) fn FMAX_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMAX_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPMax, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMAX_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAX_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    let v11 = rt::Fp::new(16).max(b, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
     Ok(())
 }
 
@@ -7260,6 +13074,36 @@ pub(super) fn FMINNM_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FMINNM_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPMinNum, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMINNM_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMINNM_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    let v11 = rt::Fp::new(16).min_num(b, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
+    Ok(())
+}
+
 /// `FMINNM_S_floatdp2`.
 ///
 /// Cut: ENV, FPMinNum, IsFeatureImplemented, V_read, V_set.
@@ -7306,6 +13150,36 @@ pub(super) fn FMIN_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FMIN_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPMin, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMIN_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMIN_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    let v11 = rt::Fp::new(16).min(b, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
+    Ok(())
+}
+
 /// `FMIN_S_floatdp2`.
 ///
 /// Cut: ENV, FPMin, IsFeatureImplemented, V_read, V_set.
@@ -7331,7 +13205,7 @@ pub(super) fn FMIN_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
 
 /// `FMOV_32H_float2int`.
 ///
-/// Cut: ENV, IsFeatureImplemented, V_read, X_set.
+/// Cut: ENV, FEAT, IsFeatureImplemented, V_read, X_set.
 pub(super) fn FMOV_32H_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FMOV_32H_float2int;
     let w = u128::from(word);
@@ -7340,9 +13214,16 @@ pub(super) fn FMOV_32H_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.v_read(b, s4 as u32, 16);
-    let v6 = b.zext(v5, Width::new(32));
-    st.x_set(b, s3 as u32, v6, None);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    let v8 = b.zext(v7, Width::new(32));
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -7380,7 +13261,7 @@ pub(super) fn FMOV_64D_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
 
 /// `FMOV_64H_float2int`.
 ///
-/// Cut: ENV, IsFeatureImplemented, V_read, X_set.
+/// Cut: ENV, FEAT, IsFeatureImplemented, V_read, X_set.
 pub(super) fn FMOV_64H_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FMOV_64H_float2int;
     let w = u128::from(word);
@@ -7389,9 +13270,16 @@ pub(super) fn FMOV_64H_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.v_read(b, s4 as u32, 16);
-    let v6 = b.zext(v5, Width::new(64));
-    st.x_set(b, s3 as u32, v6, None);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    let v8 = b.zext(v7, Width::new(64));
+    if s5 {
+        st.x_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -7485,7 +13373,7 @@ pub(super) fn FMOV_D_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result
 
 /// `FMOV_H32_float2int`.
 ///
-/// Cut: ENV, IsFeatureImplemented, V_set, X_read.
+/// Cut: ENV, FEAT, IsFeatureImplemented, V_set, X_read.
 pub(super) fn FMOV_H32_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FMOV_H32_float2int;
     let w = u128::from(word);
@@ -7494,15 +13382,22 @@ pub(super) fn FMOV_H32_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.x_read(b, s4 as u32, 32);
-    let v6 = b.extract(v5, 0, Width::new(16));
-    st.v_set(b, s3 as u32, v6, None);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.x_read(b, s4 as u32, 32);
+    let v8 = b.extract(v7, 0, Width::new(16));
+    if s5 {
+        st.v_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
 /// `FMOV_H64_float2int`.
 ///
-/// Cut: ENV, IsFeatureImplemented, V_set, X_read.
+/// Cut: ENV, FEAT, IsFeatureImplemented, V_set, X_read.
 pub(super) fn FMOV_H64_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FMOV_H64_float2int;
     let w = u128::from(word);
@@ -7511,15 +13406,22 @@ pub(super) fn FMOV_H64_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.x_read(b, s4 as u32, 64);
-    let v6 = b.extract(v5, 0, Width::new(16));
-    st.v_set(b, s3 as u32, v6, None);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.x_read(b, s4 as u32, 64);
+    let v8 = b.extract(v7, 0, Width::new(16));
+    if s5 {
+        st.v_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
 /// `FMOV_H_floatdp1`.
 ///
-/// Cut: ENV, V_read, V_set.
+/// Cut: ENV, FEAT, V_read, V_set.
 pub(super) fn FMOV_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FMOV_H_floatdp1;
     let w = u128::from(word);
@@ -7528,16 +13430,23 @@ pub(super) fn FMOV_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.v_read(b, s4 as u32, 16);
-    let v6 = b.konst(Width::new(112), 0x0);
-    let v7 = b.concat(v6, v5);
-    st.v_set(b, s3 as u32, v7, None);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    let v8 = b.konst(Width::new(112), 0x0);
+    let v9 = b.concat(v8, v7);
+    if s5 {
+        st.v_set(b, s3 as u32, v9, None);
+    }
     Ok(())
 }
 
 /// `FMOV_H_floatimm`.
 ///
-/// Cut: ENV, V_set.
+/// Cut: ENV, FEAT, V_set.
 pub(super) fn FMOV_H_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FMOV_H_floatimm;
     let w = u128::from(word);
@@ -7545,20 +13454,27 @@ pub(super) fn FMOV_H_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s1: u128 = (w >> 0) & 0x1f;
     let s2: u128 = (w >> 13) & 0xff;
     let s3: i128 = s1 as i128;
-    let s4: u128 = (s2 >> 7) & 0x1;
-    let s5: u128 = (s2 >> 6) & 0x1;
-    let s6: u128 = !s5 & 0x1;
+    let s4: bool = st.has(Feature::FP16);
+    let s5: bool = !s4;
+    if s5 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s6: u128 = (s2 >> 7) & 0x1;
     let s7: u128 = (s2 >> 6) & 0x1;
-    let s8: u128 = (s7 << 1) | s7;
-    let s9: u128 = (s6 << 2) | s8;
-    let s10: u128 = (s2 >> 4) & 0x3;
-    let s11: u128 = (s9 << 2) | s10;
-    let s12: u128 = (s2 >> 0) & 0xf;
-    let s13: u128 = (s12 << 6) | 0x0u128;
-    let s14: u128 = (s4 << 5) | s11;
-    let s15: u128 = (s14 << 10) | s13;
-    let v16 = b.konst(Width::new(16), s15);
-    st.v_set(b, s3 as u32, v16, None);
+    let s8: u128 = !s7 & 0x1;
+    let s9: u128 = (s2 >> 6) & 0x1;
+    let s10: u128 = (s9 << 1) | s9;
+    let s11: u128 = (s8 << 2) | s10;
+    let s12: u128 = (s2 >> 4) & 0x3;
+    let s13: u128 = (s11 << 2) | s12;
+    let s14: u128 = (s2 >> 0) & 0xf;
+    let s15: u128 = (s14 << 6) | 0x0u128;
+    let s16: u128 = (s6 << 5) | s13;
+    let s17: u128 = (s16 << 10) | s15;
+    let v18 = b.konst(Width::new(16), s17);
+    if s4 {
+        st.v_set(b, s3 as u32, v18, None);
+    }
     Ok(())
 }
 
@@ -7678,6 +13594,44 @@ pub(super) fn FMSUB_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FMSUB_H_floatdp3`.
+///
+/// Cut: ENV, FEAT, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMSUB_H_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMSUB_H_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let s9: bool = st.has(Feature::FP16);
+    let s10: bool = !s9;
+    if s10 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v11 = st.v_read(b, s6 as u32, 16);
+    let v12 = st.v_read(b, s7 as u32, 16);
+    let v13 = st.v_read(b, s8 as u32, 16);
+    let v14 = b.extract(v12, 15, Width::new(1));
+    let v15 = b.not(v14);
+    let v16 = b.extract(v12, 0, Width::new(15));
+    let v17 = b.concat(v15, v16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v18 = rt::Fp::new(16).mul_add(b, v11, v17, v13);
+    let v19 = b.konst(Width::new(112), 0x0);
+    let v20 = b.concat(v19, v18);
+    if s9 {
+        st.v_set(b, s5 as u32, v20, None);
+    }
+    Ok(())
+}
+
 /// `FMSUB_S_floatdp3`.
 ///
 /// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
@@ -7731,6 +13685,37 @@ pub(super) fn FMUL_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FMUL_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMUL_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMUL_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v11 = rt::Fp::new(16).bin(b, FpOp::Mul, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
+    Ok(())
+}
+
 /// `FMUL_S_floatdp2`.
 ///
 /// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
@@ -7778,7 +13763,7 @@ pub(super) fn FNEG_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
 
 /// `FNEG_H_floatdp1`.
 ///
-/// Cut: ENV, IsFeatureImplemented, V_read, V_set.
+/// Cut: ENV, FEAT, IsFeatureImplemented, V_read, V_set.
 pub(super) fn FNEG_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::FNEG_H_floatdp1;
     let w = u128::from(word);
@@ -7787,14 +13772,21 @@ pub(super) fn FNEG_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s2: u128 = (w >> 5) & 0x1f;
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
-    let v5 = st.v_read(b, s4 as u32, 16);
-    let v6 = b.extract(v5, 15, Width::new(1));
-    let v7 = b.not(v6);
-    let v8 = b.extract(v5, 0, Width::new(15));
-    let v9 = b.concat(v7, v8);
-    let v10 = b.konst(Width::new(112), 0x0);
-    let v11 = b.concat(v10, v9);
-    st.v_set(b, s3 as u32, v11, None);
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    let v8 = b.extract(v7, 15, Width::new(1));
+    let v9 = b.not(v8);
+    let v10 = b.extract(v7, 0, Width::new(15));
+    let v11 = b.concat(v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s5 {
+        st.v_set(b, s3 as u32, v13, None);
+    }
     Ok(())
 }
 
@@ -7851,6 +13843,48 @@ pub(super) fn FNMADD_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v21 = b.konst(Width::new(64), 0x0);
     let v22 = b.concat(v21, v20);
     st.v_set(b, s5 as u32, v22, None);
+    Ok(())
+}
+
+/// `FNMADD_H_floatdp3`.
+///
+/// Cut: ENV, FEAT, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMADD_H_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMADD_H_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let s9: bool = st.has(Feature::FP16);
+    let s10: bool = !s9;
+    if s10 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v11 = st.v_read(b, s6 as u32, 16);
+    let v12 = st.v_read(b, s7 as u32, 16);
+    let v13 = st.v_read(b, s8 as u32, 16);
+    let v14 = b.extract(v11, 15, Width::new(1));
+    let v15 = b.not(v14);
+    let v16 = b.extract(v11, 0, Width::new(15));
+    let v17 = b.concat(v15, v16);
+    let v18 = b.extract(v12, 15, Width::new(1));
+    let v19 = b.not(v18);
+    let v20 = b.extract(v12, 0, Width::new(15));
+    let v21 = b.concat(v19, v20);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v22 = rt::Fp::new(16).mul_add(b, v17, v21, v13);
+    let v23 = b.konst(Width::new(112), 0x0);
+    let v24 = b.concat(v23, v22);
+    if s9 {
+        st.v_set(b, s5 as u32, v24, None);
+    }
     Ok(())
 }
 
@@ -7918,6 +13952,44 @@ pub(super) fn FNMSUB_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FNMSUB_H_floatdp3`.
+///
+/// Cut: ENV, FEAT, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMSUB_H_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMSUB_H_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let s9: bool = st.has(Feature::FP16);
+    let s10: bool = !s9;
+    if s10 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v11 = st.v_read(b, s6 as u32, 16);
+    let v12 = st.v_read(b, s7 as u32, 16);
+    let v13 = st.v_read(b, s8 as u32, 16);
+    let v14 = b.extract(v11, 15, Width::new(1));
+    let v15 = b.not(v14);
+    let v16 = b.extract(v11, 0, Width::new(15));
+    let v17 = b.concat(v15, v16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v18 = rt::Fp::new(16).mul_add(b, v17, v12, v13);
+    let v19 = b.konst(Width::new(112), 0x0);
+    let v20 = b.concat(v19, v18);
+    if s9 {
+        st.v_set(b, s5 as u32, v20, None);
+    }
+    Ok(())
+}
+
 /// `FNMSUB_S_floatdp3`.
 ///
 /// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
@@ -7975,6 +14047,41 @@ pub(super) fn FNMUL_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FNMUL_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMUL_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMUL_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v11 = rt::Fp::new(16).bin(b, FpOp::Mul, v9, v10);
+    let v12 = b.extract(v11, 15, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v11, 0, Width::new(15));
+    let v15 = b.concat(v13, v14);
+    let v16 = b.konst(Width::new(112), 0x0);
+    let v17 = b.concat(v16, v15);
+    if s7 {
+        st.v_set(b, s4 as u32, v17, None);
+    }
+    Ok(())
+}
+
 /// `FNMUL_S_floatdp2`.
 ///
 /// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
@@ -8022,6 +14129,34 @@ pub(super) fn FRINTA_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FRINTA_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTA_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTA_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::TiesAway);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
+    Ok(())
+}
+
 /// `FRINTA_S_floatdp1`.
 ///
 /// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
@@ -8059,6 +14194,34 @@ pub(super) fn FRINTI_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
     st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FRINTI_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTI_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTI_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::TiesEven);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
     Ok(())
 }
 
@@ -8102,6 +14265,34 @@ pub(super) fn FRINTM_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FRINTM_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTM_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTM_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::Floor);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
+    Ok(())
+}
+
 /// `FRINTM_S_floatdp1`.
 ///
 /// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
@@ -8139,6 +14330,34 @@ pub(super) fn FRINTN_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
     st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FRINTN_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTN_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTN_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::TiesEven);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
     Ok(())
 }
 
@@ -8182,6 +14401,34 @@ pub(super) fn FRINTP_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FRINTP_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTP_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTP_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::Ceil);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
+    Ok(())
+}
+
 /// `FRINTP_S_floatdp1`.
 ///
 /// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
@@ -8219,6 +14466,34 @@ pub(super) fn FRINTX_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
     st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FRINTX_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTX_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTX_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::TiesEven);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
     Ok(())
 }
 
@@ -8262,6 +14537,34 @@ pub(super) fn FRINTZ_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FRINTZ_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTZ_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTZ_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).round_int(b, v7, FpRound::Zero);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
+    Ok(())
+}
+
 /// `FRINTZ_S_floatdp1`.
 ///
 /// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
@@ -8299,6 +14602,34 @@ pub(super) fn FSQRT_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
     st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FSQRT_H_floatdp1`.
+///
+/// Cut: ENV, FEAT, FPSqrt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FSQRT_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSQRT_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.v_read(b, s4 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).sqrt(b, v7);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    if s5 {
+        st.v_set(b, s3 as u32, v10, None);
+    }
     Ok(())
 }
 
@@ -8342,6 +14673,37 @@ pub(super) fn FSUB_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FSUB_H_floatdp2`.
+///
+/// Cut: ENV, FEAT, FPSub, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FSUB_H_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSUB_H_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::FP16);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v9 = st.v_read(b, s5 as u32, 16);
+    let v10 = st.v_read(b, s6 as u32, 16);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v11 = rt::Fp::new(16).bin(b, FpOp::Sub, v9, v10);
+    let v12 = b.konst(Width::new(112), 0x0);
+    let v13 = b.concat(v12, v11);
+    if s7 {
+        st.v_set(b, s4 as u32, v13, None);
+    }
     Ok(())
 }
 
@@ -9725,6 +16087,2374 @@ pub(super) fn SCVTF_D64_float2int(
     st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, true);
     st.v_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `SCVTF_H32_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_H32_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_H32_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 32, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 31, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 30, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 29, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 28, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 27, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 26, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 25, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 24, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 23, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 22, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 21, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 20, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 19, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 18, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 17, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 16, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 15, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 14, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 13, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 12, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 11, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 10, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 9, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 8, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 7, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 6, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 5, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 4, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 3, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 2, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 1, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `SCVTF_H32_float2int`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_H32_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_H32_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.x_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).fixed_to_fp(b, v7, 0, true);
+    if s5 {
+        st.v_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
+/// `SCVTF_H64_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_H64_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_H64_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 64, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 63, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 62, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 61, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 60, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 59, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 58, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 57, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 56, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 55, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 54, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 53, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 52, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 51, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 50, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 49, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 48, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 47, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 46, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 45, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 44, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 43, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 42, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 41, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 40, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 39, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 38, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 37, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 36, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 35, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 34, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 33, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 32, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 31, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 30, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 29, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 28, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 27, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 26, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 25, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 24, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 23, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 22, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 21, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 20, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 19, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 18, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 17, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 16, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 15, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 14, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 13, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 12, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 11, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 10, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 9, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 8, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 7, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 6, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 5, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 4, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 3, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 2, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 1, true);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `SCVTF_H64_float2int`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_H64_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_H64_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.x_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).fixed_to_fp(b, v7, 0, true);
+    if s5 {
+        st.v_set(b, s3 as u32, v8, None);
+    }
     Ok(())
 }
 
@@ -12448,6 +21178,2374 @@ pub(super) fn UCVTF_D64_float2int(
     Ok(())
 }
 
+/// `UCVTF_H32_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_H32_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_H32_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            if s5 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 32, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 31, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 30, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 29, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 28, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 27, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 26, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 25, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 24, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 23, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 22, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 21, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 20, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 19, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 18, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 17, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 16, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 15, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 14, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 13, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 12, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 11, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 10, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 9, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 8, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 7, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 6, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 5, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 4, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 3, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 2, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 32);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 1, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `UCVTF_H32_float2int`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_H32_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_H32_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.x_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).fixed_to_fp(b, v7, 0, false);
+    if s5 {
+        st.v_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
+/// `UCVTF_H64_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_H64_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_H64_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 64, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 63, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 62, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 61, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 60, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 59, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 58, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 57, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 56, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 55, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 54, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 53, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 52, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 51, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 50, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 49, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 48, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 47, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 46, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 45, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 44, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 43, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 42, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 41, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 40, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 39, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 38, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 37, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 36, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 35, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 34, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 33, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 32, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 31, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 30, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 29, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 28, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 27, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 26, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 25, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 24, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 23, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 22, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 21, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 20, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 19, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 18, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 17, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 16, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 15, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 14, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 13, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 12, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 11, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 10, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 9, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 8, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 7, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 6, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 5, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 4, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 3, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 2, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let s5: bool = st.has(Feature::FP16);
+            let s6: bool = !s5;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let v7 = st.x_read(b, s4 as u32, 64);
+            st.assume_flags_slow();
+            st.assume_default_fpcr();
+            st.assume_flags_slow();
+            let v8 = half::fixed_to_half(b, v7, 1, false);
+            if s5 {
+                st.v_set(b, s3 as u32, v8, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `UCVTF_H64_float2int`.
+///
+/// Cut: ENV, FEAT, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_H64_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_H64_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::FP16);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let v7 = st.x_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    st.assume_flags_slow();
+    let v8 = rt::Fp::new(16).fixed_to_fp(b, v7, 0, false);
+    if s5 {
+        st.v_set(b, s3 as u32, v8, None);
+    }
+    Ok(())
+}
+
 /// `UCVTF_S32_float2fix`.
 ///
 /// Split on the word bits `0x0000fc00`.
@@ -13815,83 +24913,124 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FABS_H_floatdp1 => FABS_H_floatdp1,
         Encoding::FABS_S_floatdp1 => FABS_S_floatdp1,
         Encoding::FADD_D_floatdp2 => FADD_D_floatdp2,
+        Encoding::FADD_H_floatdp2 => FADD_H_floatdp2,
         Encoding::FADD_S_floatdp2 => FADD_S_floatdp2,
         Encoding::FCCMPE_D_floatccmp => FCCMPE_D_floatccmp,
+        Encoding::FCCMPE_H_floatccmp => FCCMPE_H_floatccmp,
         Encoding::FCCMPE_S_floatccmp => FCCMPE_S_floatccmp,
         Encoding::FCCMP_D_floatccmp => FCCMP_D_floatccmp,
+        Encoding::FCCMP_H_floatccmp => FCCMP_H_floatccmp,
         Encoding::FCCMP_S_floatccmp => FCCMP_S_floatccmp,
         Encoding::FCMPE_DZ_floatcmp => FCMPE_DZ_floatcmp,
         Encoding::FCMPE_D_floatcmp => FCMPE_D_floatcmp,
+        Encoding::FCMPE_HZ_floatcmp => FCMPE_HZ_floatcmp,
+        Encoding::FCMPE_H_floatcmp => FCMPE_H_floatcmp,
         Encoding::FCMPE_SZ_floatcmp => FCMPE_SZ_floatcmp,
         Encoding::FCMPE_S_floatcmp => FCMPE_S_floatcmp,
         Encoding::FCMP_DZ_floatcmp => FCMP_DZ_floatcmp,
         Encoding::FCMP_D_floatcmp => FCMP_D_floatcmp,
+        Encoding::FCMP_HZ_floatcmp => FCMP_HZ_floatcmp,
+        Encoding::FCMP_H_floatcmp => FCMP_H_floatcmp,
         Encoding::FCMP_SZ_floatcmp => FCMP_SZ_floatcmp,
         Encoding::FCMP_S_floatcmp => FCMP_S_floatcmp,
         Encoding::FCSEL_D_floatsel => FCSEL_D_floatsel,
         Encoding::FCSEL_H_floatsel => FCSEL_H_floatsel,
         Encoding::FCSEL_S_floatsel => FCSEL_S_floatsel,
         Encoding::FCVTAS_32D_float2int => FCVTAS_32D_float2int,
+        Encoding::FCVTAS_32H_float2int => FCVTAS_32H_float2int,
         Encoding::FCVTAS_32S_float2int => FCVTAS_32S_float2int,
         Encoding::FCVTAS_64D_float2int => FCVTAS_64D_float2int,
+        Encoding::FCVTAS_64H_float2int => FCVTAS_64H_float2int,
         Encoding::FCVTAS_64S_float2int => FCVTAS_64S_float2int,
         Encoding::FCVTAU_32D_float2int => FCVTAU_32D_float2int,
+        Encoding::FCVTAU_32H_float2int => FCVTAU_32H_float2int,
         Encoding::FCVTAU_32S_float2int => FCVTAU_32S_float2int,
         Encoding::FCVTAU_64D_float2int => FCVTAU_64D_float2int,
+        Encoding::FCVTAU_64H_float2int => FCVTAU_64H_float2int,
         Encoding::FCVTAU_64S_float2int => FCVTAU_64S_float2int,
         Encoding::FCVTMS_32D_float2int => FCVTMS_32D_float2int,
+        Encoding::FCVTMS_32H_float2int => FCVTMS_32H_float2int,
         Encoding::FCVTMS_32S_float2int => FCVTMS_32S_float2int,
         Encoding::FCVTMS_64D_float2int => FCVTMS_64D_float2int,
+        Encoding::FCVTMS_64H_float2int => FCVTMS_64H_float2int,
         Encoding::FCVTMS_64S_float2int => FCVTMS_64S_float2int,
         Encoding::FCVTMU_32D_float2int => FCVTMU_32D_float2int,
+        Encoding::FCVTMU_32H_float2int => FCVTMU_32H_float2int,
         Encoding::FCVTMU_32S_float2int => FCVTMU_32S_float2int,
         Encoding::FCVTMU_64D_float2int => FCVTMU_64D_float2int,
+        Encoding::FCVTMU_64H_float2int => FCVTMU_64H_float2int,
         Encoding::FCVTMU_64S_float2int => FCVTMU_64S_float2int,
         Encoding::FCVTNS_32D_float2int => FCVTNS_32D_float2int,
+        Encoding::FCVTNS_32H_float2int => FCVTNS_32H_float2int,
         Encoding::FCVTNS_32S_float2int => FCVTNS_32S_float2int,
         Encoding::FCVTNS_64D_float2int => FCVTNS_64D_float2int,
+        Encoding::FCVTNS_64H_float2int => FCVTNS_64H_float2int,
         Encoding::FCVTNS_64S_float2int => FCVTNS_64S_float2int,
         Encoding::FCVTNU_32D_float2int => FCVTNU_32D_float2int,
+        Encoding::FCVTNU_32H_float2int => FCVTNU_32H_float2int,
         Encoding::FCVTNU_32S_float2int => FCVTNU_32S_float2int,
         Encoding::FCVTNU_64D_float2int => FCVTNU_64D_float2int,
+        Encoding::FCVTNU_64H_float2int => FCVTNU_64H_float2int,
         Encoding::FCVTNU_64S_float2int => FCVTNU_64S_float2int,
         Encoding::FCVTPS_32D_float2int => FCVTPS_32D_float2int,
+        Encoding::FCVTPS_32H_float2int => FCVTPS_32H_float2int,
         Encoding::FCVTPS_32S_float2int => FCVTPS_32S_float2int,
         Encoding::FCVTPS_64D_float2int => FCVTPS_64D_float2int,
+        Encoding::FCVTPS_64H_float2int => FCVTPS_64H_float2int,
         Encoding::FCVTPS_64S_float2int => FCVTPS_64S_float2int,
         Encoding::FCVTPU_32D_float2int => FCVTPU_32D_float2int,
+        Encoding::FCVTPU_32H_float2int => FCVTPU_32H_float2int,
         Encoding::FCVTPU_32S_float2int => FCVTPU_32S_float2int,
         Encoding::FCVTPU_64D_float2int => FCVTPU_64D_float2int,
+        Encoding::FCVTPU_64H_float2int => FCVTPU_64H_float2int,
         Encoding::FCVTPU_64S_float2int => FCVTPU_64S_float2int,
         Encoding::FCVTZS_32D_float2fix => FCVTZS_32D_float2fix,
         Encoding::FCVTZS_32D_float2int => FCVTZS_32D_float2int,
+        Encoding::FCVTZS_32H_float2fix => FCVTZS_32H_float2fix,
+        Encoding::FCVTZS_32H_float2int => FCVTZS_32H_float2int,
         Encoding::FCVTZS_32S_float2fix => FCVTZS_32S_float2fix,
         Encoding::FCVTZS_32S_float2int => FCVTZS_32S_float2int,
         Encoding::FCVTZS_64D_float2fix => FCVTZS_64D_float2fix,
         Encoding::FCVTZS_64D_float2int => FCVTZS_64D_float2int,
+        Encoding::FCVTZS_64H_float2fix => FCVTZS_64H_float2fix,
+        Encoding::FCVTZS_64H_float2int => FCVTZS_64H_float2int,
         Encoding::FCVTZS_64S_float2fix => FCVTZS_64S_float2fix,
         Encoding::FCVTZS_64S_float2int => FCVTZS_64S_float2int,
         Encoding::FCVTZU_32D_float2fix => FCVTZU_32D_float2fix,
         Encoding::FCVTZU_32D_float2int => FCVTZU_32D_float2int,
+        Encoding::FCVTZU_32H_float2fix => FCVTZU_32H_float2fix,
+        Encoding::FCVTZU_32H_float2int => FCVTZU_32H_float2int,
         Encoding::FCVTZU_32S_float2fix => FCVTZU_32S_float2fix,
         Encoding::FCVTZU_32S_float2int => FCVTZU_32S_float2int,
         Encoding::FCVTZU_64D_float2fix => FCVTZU_64D_float2fix,
         Encoding::FCVTZU_64D_float2int => FCVTZU_64D_float2int,
+        Encoding::FCVTZU_64H_float2fix => FCVTZU_64H_float2fix,
+        Encoding::FCVTZU_64H_float2int => FCVTZU_64H_float2int,
         Encoding::FCVTZU_64S_float2fix => FCVTZU_64S_float2fix,
         Encoding::FCVTZU_64S_float2int => FCVTZU_64S_float2int,
+        Encoding::FCVT_DH_floatdp1 => FCVT_DH_floatdp1,
         Encoding::FCVT_DS_floatdp1 => FCVT_DS_floatdp1,
+        Encoding::FCVT_HD_floatdp1 => FCVT_HD_floatdp1,
+        Encoding::FCVT_HS_floatdp1 => FCVT_HS_floatdp1,
         Encoding::FCVT_SD_floatdp1 => FCVT_SD_floatdp1,
+        Encoding::FCVT_SH_floatdp1 => FCVT_SH_floatdp1,
         Encoding::FDIV_D_floatdp2 => FDIV_D_floatdp2,
+        Encoding::FDIV_H_floatdp2 => FDIV_H_floatdp2,
         Encoding::FDIV_S_floatdp2 => FDIV_S_floatdp2,
         Encoding::FMADD_D_floatdp3 => FMADD_D_floatdp3,
+        Encoding::FMADD_H_floatdp3 => FMADD_H_floatdp3,
         Encoding::FMADD_S_floatdp3 => FMADD_S_floatdp3,
         Encoding::FMAXNM_D_floatdp2 => FMAXNM_D_floatdp2,
+        Encoding::FMAXNM_H_floatdp2 => FMAXNM_H_floatdp2,
         Encoding::FMAXNM_S_floatdp2 => FMAXNM_S_floatdp2,
         Encoding::FMAX_D_floatdp2 => FMAX_D_floatdp2,
+        Encoding::FMAX_H_floatdp2 => FMAX_H_floatdp2,
         Encoding::FMAX_S_floatdp2 => FMAX_S_floatdp2,
         Encoding::FMINNM_D_floatdp2 => FMINNM_D_floatdp2,
+        Encoding::FMINNM_H_floatdp2 => FMINNM_H_floatdp2,
         Encoding::FMINNM_S_floatdp2 => FMINNM_S_floatdp2,
         Encoding::FMIN_D_floatdp2 => FMIN_D_floatdp2,
+        Encoding::FMIN_H_floatdp2 => FMIN_H_floatdp2,
         Encoding::FMIN_S_floatdp2 => FMIN_S_floatdp2,
         Encoding::FMOV_32H_float2int => FMOV_32H_float2int,
         Encoding::FMOV_32S_float2int => FMOV_32S_float2int,
@@ -13910,40 +25049,58 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FMOV_S_floatimm => FMOV_S_floatimm,
         Encoding::FMOV_V64I_float2int => FMOV_V64I_float2int,
         Encoding::FMSUB_D_floatdp3 => FMSUB_D_floatdp3,
+        Encoding::FMSUB_H_floatdp3 => FMSUB_H_floatdp3,
         Encoding::FMSUB_S_floatdp3 => FMSUB_S_floatdp3,
         Encoding::FMUL_D_floatdp2 => FMUL_D_floatdp2,
+        Encoding::FMUL_H_floatdp2 => FMUL_H_floatdp2,
         Encoding::FMUL_S_floatdp2 => FMUL_S_floatdp2,
         Encoding::FNEG_D_floatdp1 => FNEG_D_floatdp1,
         Encoding::FNEG_H_floatdp1 => FNEG_H_floatdp1,
         Encoding::FNEG_S_floatdp1 => FNEG_S_floatdp1,
         Encoding::FNMADD_D_floatdp3 => FNMADD_D_floatdp3,
+        Encoding::FNMADD_H_floatdp3 => FNMADD_H_floatdp3,
         Encoding::FNMADD_S_floatdp3 => FNMADD_S_floatdp3,
         Encoding::FNMSUB_D_floatdp3 => FNMSUB_D_floatdp3,
+        Encoding::FNMSUB_H_floatdp3 => FNMSUB_H_floatdp3,
         Encoding::FNMSUB_S_floatdp3 => FNMSUB_S_floatdp3,
         Encoding::FNMUL_D_floatdp2 => FNMUL_D_floatdp2,
+        Encoding::FNMUL_H_floatdp2 => FNMUL_H_floatdp2,
         Encoding::FNMUL_S_floatdp2 => FNMUL_S_floatdp2,
         Encoding::FRINTA_D_floatdp1 => FRINTA_D_floatdp1,
+        Encoding::FRINTA_H_floatdp1 => FRINTA_H_floatdp1,
         Encoding::FRINTA_S_floatdp1 => FRINTA_S_floatdp1,
         Encoding::FRINTI_D_floatdp1 => FRINTI_D_floatdp1,
+        Encoding::FRINTI_H_floatdp1 => FRINTI_H_floatdp1,
         Encoding::FRINTI_S_floatdp1 => FRINTI_S_floatdp1,
         Encoding::FRINTM_D_floatdp1 => FRINTM_D_floatdp1,
+        Encoding::FRINTM_H_floatdp1 => FRINTM_H_floatdp1,
         Encoding::FRINTM_S_floatdp1 => FRINTM_S_floatdp1,
         Encoding::FRINTN_D_floatdp1 => FRINTN_D_floatdp1,
+        Encoding::FRINTN_H_floatdp1 => FRINTN_H_floatdp1,
         Encoding::FRINTN_S_floatdp1 => FRINTN_S_floatdp1,
         Encoding::FRINTP_D_floatdp1 => FRINTP_D_floatdp1,
+        Encoding::FRINTP_H_floatdp1 => FRINTP_H_floatdp1,
         Encoding::FRINTP_S_floatdp1 => FRINTP_S_floatdp1,
         Encoding::FRINTX_D_floatdp1 => FRINTX_D_floatdp1,
+        Encoding::FRINTX_H_floatdp1 => FRINTX_H_floatdp1,
         Encoding::FRINTX_S_floatdp1 => FRINTX_S_floatdp1,
         Encoding::FRINTZ_D_floatdp1 => FRINTZ_D_floatdp1,
+        Encoding::FRINTZ_H_floatdp1 => FRINTZ_H_floatdp1,
         Encoding::FRINTZ_S_floatdp1 => FRINTZ_S_floatdp1,
         Encoding::FSQRT_D_floatdp1 => FSQRT_D_floatdp1,
+        Encoding::FSQRT_H_floatdp1 => FSQRT_H_floatdp1,
         Encoding::FSQRT_S_floatdp1 => FSQRT_S_floatdp1,
         Encoding::FSUB_D_floatdp2 => FSUB_D_floatdp2,
+        Encoding::FSUB_H_floatdp2 => FSUB_H_floatdp2,
         Encoding::FSUB_S_floatdp2 => FSUB_S_floatdp2,
         Encoding::SCVTF_D32_float2fix => SCVTF_D32_float2fix,
         Encoding::SCVTF_D32_float2int => SCVTF_D32_float2int,
         Encoding::SCVTF_D64_float2fix => SCVTF_D64_float2fix,
         Encoding::SCVTF_D64_float2int => SCVTF_D64_float2int,
+        Encoding::SCVTF_H32_float2fix => SCVTF_H32_float2fix,
+        Encoding::SCVTF_H32_float2int => SCVTF_H32_float2int,
+        Encoding::SCVTF_H64_float2fix => SCVTF_H64_float2fix,
+        Encoding::SCVTF_H64_float2int => SCVTF_H64_float2int,
         Encoding::SCVTF_S32_float2fix => SCVTF_S32_float2fix,
         Encoding::SCVTF_S32_float2int => SCVTF_S32_float2int,
         Encoding::SCVTF_S64_float2fix => SCVTF_S64_float2fix,
@@ -13952,6 +25109,10 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::UCVTF_D32_float2int => UCVTF_D32_float2int,
         Encoding::UCVTF_D64_float2fix => UCVTF_D64_float2fix,
         Encoding::UCVTF_D64_float2int => UCVTF_D64_float2int,
+        Encoding::UCVTF_H32_float2fix => UCVTF_H32_float2fix,
+        Encoding::UCVTF_H32_float2int => UCVTF_H32_float2int,
+        Encoding::UCVTF_H64_float2fix => UCVTF_H64_float2fix,
+        Encoding::UCVTF_H64_float2int => UCVTF_H64_float2int,
         Encoding::UCVTF_S32_float2fix => UCVTF_S32_float2fix,
         Encoding::UCVTF_S32_float2int => UCVTF_S32_float2int,
         Encoding::UCVTF_S64_float2fix => UCVTF_S64_float2fix,

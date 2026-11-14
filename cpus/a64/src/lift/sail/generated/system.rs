@@ -6,12 +6,14 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
+use relift_ir::{
+    AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width,
+};
 
-use crate::decode::Encoding;
+use crate::decode::{Encoding, Feature};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
+use crate::lift::sail::{GenFn, align, half};
 use crate::regs;
 
 /// `AUTIA1716_HI_hints`.
@@ -21,6 +23,9 @@ pub(super) fn AUTIA1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     const ENC: Encoding = Encoding::AUTIA1716_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    if st.has(Feature::PAuth) {
+        return Err(LiftError::Unsupported(ENC));
+    }
     Ok(())
 }
 
@@ -31,6 +36,9 @@ pub(super) fn AUTIASP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     const ENC: Encoding = Encoding::AUTIASP_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    if st.has(Feature::PAuth) {
+        return Err(LiftError::Unsupported(ENC));
+    }
     Ok(())
 }
 
@@ -41,6 +49,9 @@ pub(super) fn AUTIAZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     const ENC: Encoding = Encoding::AUTIAZ_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    if st.has(Feature::PAuth) {
+        return Err(LiftError::Unsupported(ENC));
+    }
     Ok(())
 }
 
@@ -51,6 +62,9 @@ pub(super) fn AUTIB1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     const ENC: Encoding = Encoding::AUTIB1716_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    if st.has(Feature::PAuth) {
+        return Err(LiftError::Unsupported(ENC));
+    }
     Ok(())
 }
 
@@ -61,6 +75,9 @@ pub(super) fn AUTIBSP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     const ENC: Encoding = Encoding::AUTIBSP_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    if st.has(Feature::PAuth) {
+        return Err(LiftError::Unsupported(ENC));
+    }
     Ok(())
 }
 
@@ -71,6 +88,9 @@ pub(super) fn AUTIBZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     const ENC: Encoding = Encoding::AUTIBZ_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    if st.has(Feature::PAuth) {
+        return Err(LiftError::Unsupported(ENC));
+    }
     Ok(())
 }
 
