@@ -539,5 +539,7 @@ bool hos_writable_u32(uint64_t addr);
 bool hos_write_u32(uint64_t addr, uint32_t v);
 /** @brief Atomic 32-bit compare-and-swap in guest memory. */
 bool hos_cas_u32(uint64_t addr, uint32_t *expected, uint32_t desired);
+/** @brief Stops the audio timer thread and drops audio callbacks (audio_tick.c). */
+void hos_audio_shutdown(void);
 
 #endif
