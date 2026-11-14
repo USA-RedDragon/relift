@@ -17,6 +17,11 @@ list of what bites; read it before changing anything.
   symbol lists, offsets or anything else derived from a game, and no game
   names. CI never sees game data; tests use `relift-testguest` and synthetic
   input.
+- **Decrypted dumps only.** relift reads decrypted dumps only (a `.nup` or
+  an extracted `exefs`/`romfs` tree); there are no keys or crypto code in
+  this repo, and conversion of encrypted dumps lives in a separate tool.
+  `relift/tests/workspace_charter.rs` (`no_crypto_crate_is_in_the_graph`)
+  fails any cipher crate in the graph.
 - **No GPL, AGPL or LGPL code.** Never copy from GPL projects (other
   recompilers, emulators, QEMU). MIT, Apache-2.0, BSD, ISC and 0BSD sources
   are fine with their notices kept. `cargo deny check` rejects GPL crates;
