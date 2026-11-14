@@ -15,6 +15,7 @@ pub struct Builder {
     pc: u64,
     insts: Vec<Inst>,
     widths: Vec<Option<Width>>,
+    bank: Option<u64>,
 }
 
 impl Builder {
@@ -26,7 +27,19 @@ impl Builder {
             pc,
             insts: Vec::new(),
             widths: Vec::new(),
+            bank: None,
         }
+    }
+
+    /// Marks the block as lifted from bank `bank` of its address; see
+    /// [`Block::bank`].
+    pub fn set_bank(&mut self, bank: u64) {
+        self.bank = Some(bank);
+    }
+
+    /// The bank, `None` unless [`Builder::set_bank`] set one.
+    pub fn bank(&self) -> Option<u64> {
+        self.bank
     }
 
     /// The register file.
@@ -344,6 +357,7 @@ impl Builder {
             len,
             insts: self.insts,
             exit,
+            bank: self.bank,
         };
         if let Err(e) = block.verify() {
             panic!("ill-typed block: {e}");

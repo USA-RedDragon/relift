@@ -1,5 +1,5 @@
-//! Hardware-register guest support: the guest clock, I/O accesses and
-//! sync points.
+//! Hardware-register guest support: the guest clock, I/O accesses, sync
+//! points and banked code.
 
 use relift_ir::interp::{
     self, Devices, Error, Fault, FlatMemory, GuestMemory, NoIntrinsics, Outcome, State,
@@ -473,6 +473,53 @@ fn sync_must_be_last_and_dce_keeps_it() {
     assert!(parse(text, &[file()]).is_err());
     let b = synced();
     assert_eq!(dce(&b), b);
+}
+
+fn banked(bank: Option<u64>) -> Block {
+    let mut b = Builder::new(file(), Width::W16, 0x4000);
+    if let Some(n) = bank {
+        b.set_bank(n);
+    }
+    assert_eq!(b.bank(), bank);
+    let a = b.get(Reg(0));
+    let _dead = b.not(a);
+    b.tick(4);
+    b.jump(1, 0x4001)
+}
+
+#[test]
+fn banks_print_parse_and_key_blocks() {
+    let one = banked(Some(1));
+    let two = banked(Some(0x1ff));
+    let none = banked(None);
+    for b in [&one, &two, &none] {
+        roundtrip(b);
+        assert_eq!(dce(b).bank, b.bank);
+    }
+    assert!(
+        one.to_string()
+            .starts_with("block 0x4000 len 1 regs hw addr i16 bank 0x1\n")
+    );
+    assert!(!none.to_string().contains("bank"));
+    assert_ne!(one.key(), two.key());
+    assert_eq!(one.key(), (0x4000, Some(1)));
+    assert_eq!(none.key(), (0x4000, None));
+
+    let text = "block 0x4000 len 1 regs hw bank 0x2\n  exit jump 0x4001\n";
+    let b = parse(text, &[file()]).unwrap();
+    assert_eq!((b.addr_width, b.bank), (Width::W64, Some(2)));
+    let e = parse(
+        "block 0x4000 len 1 regs hw bank 2\n  exit jump 0x4001\n",
+        &[file()],
+    )
+    .expect_err("must not parse");
+    assert_eq!((e.line, e.col), (1, 33));
+    let e = parse(
+        "block 0x4000 len 1 regs hw bank 0x2 addr i16\n  exit jump 0x4001\n",
+        &[file()],
+    )
+    .expect_err("must not parse");
+    assert_eq!((e.line, e.col), (1, 37));
 }
 
 #[test]

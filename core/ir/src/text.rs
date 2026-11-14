@@ -21,7 +21,7 @@
 //!
 //! ```text
 //! block  := header inst* exit
-//! header := "block" HEX "len" DEC "regs" NAME [ "addr" TYPE ]
+//! header := "block" HEX "len" DEC "regs" NAME [ "addr" TYPE ] [ "bank" HEX ]
 //! inst   := [ "v" N ":" TYPE "=" ] op
 //! exit   := "exit" flow next
 //! flow   := "jump" | "call" HEX | "return" | "trap" HEX
@@ -32,7 +32,8 @@
 //!
 //! `NAME` is the register file's name ([`RegFile::name`]); [`parse`] looks it
 //! up in the files it is given. The address width is omitted when it is 64
-//! bits, otherwise it is printed as `addr i32` and so on. `HEX` is `0x` and
+//! bits, otherwise it is printed as `addr i32` and so on; the bank
+//! ([`Block::bank`]) is printed only when the block has one. `HEX` is `0x` and
 //! hex digits. The exit puts the flow first so the common case reads
 //! `exit jump 0x1004`; `call` names the return address, `trap` the
 //! frontend's code, then comes where control goes next. A `select` taken
@@ -216,6 +217,9 @@ impl fmt::Display for Block {
         )?;
         if self.addr_width != Width::W64 {
             write!(f, " addr i{}", self.addr_width.bits())?;
+        }
+        if let Some(bank) = self.bank {
+            write!(f, " bank {bank:#x}")?;
         }
         writeln!(f)?;
         for (i, inst) in self.insts.iter().enumerate() {
@@ -604,6 +608,7 @@ struct Header {
     len: u32,
     regs: RegFile,
     addr_width: Width,
+    bank: Option<u64>,
 }
 
 fn parse_header(c: &mut Cursor, files: &[RegFile]) -> Result<Header, ParseError> {
@@ -621,9 +626,14 @@ fn parse_header(c: &mut Cursor, files: &[RegFile]) -> Result<Header, ParseError>
         return c.err(nt.col, format!("unknown register file `{}`", nt.text));
     };
     let mut addr_width = Width::W64;
-    if c.peek().is_some() {
+    if c.peek().is_some_and(|t| t.text == "addr") {
         c.keyword("addr")?;
         addr_width = c.ty()?;
+    }
+    let mut bank = None;
+    if c.peek().is_some() {
+        c.keyword("bank")?;
+        bank = Some(c.hex64("a bank")?);
     }
     c.end()?;
     Ok(Header {
@@ -631,6 +641,7 @@ fn parse_header(c: &mut Cursor, files: &[RegFile]) -> Result<Header, ParseError>
         len,
         regs,
         addr_width,
+        bank,
     })
 }
 
@@ -968,6 +979,7 @@ pub fn parse(text: &str, files: &[RegFile]) -> Result<Block, ParseError> {
         len: h.len,
         insts,
         exit,
+        bank: h.bank,
     };
     block.verify().map_err(|e| {
         let (line, col) = match e.at {
