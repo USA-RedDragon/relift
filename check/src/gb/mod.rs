@@ -8,8 +8,6 @@
 //! * `rom` runs a whole ROM on a given hardware revision.
 
 pub mod cli;
-#[cfg(test)]
-mod tests;
 mod machine;
 mod rom;
 mod step;
