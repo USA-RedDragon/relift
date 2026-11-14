@@ -21,12 +21,24 @@ pub fn to_fixed(
     Fp::new(64).fp_to_fixed(b, d, fbits, signed, r, out)
 }
 
-/// `FixedToFP` to half precision with `fbits` fraction bits: the integer is
+/// `FixedToFP` to half precision with `fbits` fraction bits. A 32-bit
+/// integer and its scaling are exact in double precision, so it is rounded
+/// once to half precision. A wider integer is
 /// reduced to at most 53 significant bits, keeping a sticky bit for the
 /// dropped ones (round to odd, which a second rounding to 11 bits cannot
 /// spoil), made exact in double precision and scaled there, then rounded
 /// once to half precision.
 pub fn fixed_to_half(b: &mut Builder, x: Value, fbits: u32, signed: bool) -> Value {
+    if b.width(x).bits() <= 32 {
+        let f = if signed {
+            b.fp(FpOp::FromSInt, &[x], Width::W64)
+        } else {
+            b.fp(FpOp::FromUInt, &[x], Width::W64)
+        };
+        let scale = b.konst(Width::W64, u128::from((1023 - u64::from(fbits)) << 52));
+        let f = b.fp(FpOp::Mul, &[f, scale], Width::W64);
+        return b.fp(FpOp::Convert, &[f], Width::W16);
+    }
     let x = if signed {
         b.sext(x, Width::W64)
     } else {
