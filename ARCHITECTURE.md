@@ -71,7 +71,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 
 | Band | Crate | Folder | Role |
 |---|---|---|---|
-| 0 | `relift-ir` | `core/ir` | Guest-neutral IR: values, ops, explicit flags, memory ops with width, endianness and ordering |
+| 0 | `relift-ir` | `core/ir` | Guest-neutral IR: values, ops, explicit flags, memory ops with width, endianness and ordering; cycle ticks, I/O accesses, sync points and code banks for hardware-register guests |
 | 0 | `relift-cache` | `core/cache` | Content-addressed store, stage keys, and the one file writer |
 | 0 | `relift-host` | `core/host` | The host target list that emit and build share |
 | 0 | `relift-proc` | `core/proc` | The one subprocess runner |

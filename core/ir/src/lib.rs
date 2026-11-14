@@ -13,6 +13,15 @@
 //! frontend ([`Builder::new`]), so big-endian and 32-bit guests fit without
 //! changes here.
 //!
+//! Guests that drive devices through memory-mapped registers (the Game
+//! Boy first) add four things, all unused by guests without devices: a
+//! guest cycle clock ([`Op::Tick`], [`Op::TickIf`]), I/O accesses that may
+//! reach a device register ([`Op::IoLoad`], [`Op::IoStore`], routed by the
+//! guest's [`IoMap`] and narrowed by [`classify_io`]), sync points where the
+//! runtime may run devices and an interrupt may redirect control
+//! ([`Op::Sync`]), and the bank of banked code ([`Block::bank`]). The
+//! emitter and runtime contract for them is docs/abi.md section 13.
+//!
 //! [`interp::run`] is the reference interpreter. Its semantics are the
 //! definition of every operation; the C emitter must agree with it.
 
