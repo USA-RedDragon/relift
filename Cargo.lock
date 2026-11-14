@@ -1044,6 +1044,10 @@ name = "relift-override-macros"
 version = "0.1.0"
 
 [[package]]
+name = "relift-patch"
+version = "0.1.0"
+
+[[package]]
 name = "relift-proc"
 version = "0.1.0"
 

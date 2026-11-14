@@ -34,6 +34,7 @@ relift-override = { path = "override/api" }
 relift-override-macros = { path = "override/macros" }
 relift-proc = { path = "core/proc" }
 relift-diff = { path = "core/diff" }
+relift-patch = { path = "core/patch" }
 relift-progress = { path = "core/progress" }
 relift-sail = { path = "core/sail" }
 relift-switch = { path = "guests/switch/guest" }
