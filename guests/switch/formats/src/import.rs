@@ -31,7 +31,7 @@ use crate::bytes::sha256;
 use crate::error::{Error, Result, malformed};
 use crate::npdm::Npdm;
 use crate::nso::Nso;
-use crate::nup::{Nup, PackageKind, UpdateSelect};
+use crate::nup::{Nup, PackageKind, TLV_ICON, TLV_NACP, UpdateSelect};
 use crate::storage::{FileStorage, Shared, Storage, read_vec};
 
 /// One imported module.
@@ -242,6 +242,18 @@ fn import_nup(nup: &Nup, out: &Path, opts: &Options, on: &mut dyn FnMut(Event)) 
     prepare(out)?;
     let mut report = new_report(t.version);
     report.romfs_files = t.romfs.len();
+    let packages = nup.packages();
+    let control = |ty| {
+        [t.update, t.base]
+            .into_iter()
+            .flatten()
+            .find_map(|i| packages.get(i).and_then(|p| p.tlv(ty)))
+    };
+    for (name, ty) in [(CONTROL_NACP, TLV_NACP), (CONTROL_ICON, TLV_ICON)] {
+        if let Some(bytes) = control(ty) {
+            control_file(out, name, bytes, &mut report)?;
+        }
+    }
     on(Event::Begin {
         stage: "exefs",
         files: Some(t.exefs.len() as u64),
@@ -287,10 +299,16 @@ fn import_nup(nup: &Nup, out: &Path, opts: &Options, on: &mut dyn FnMut(Event)) 
     Ok(report)
 }
 
-/// One `exefs/` plus `romfs/` directory of an extracted tree.
+/// The control data of a title, as written beside `exefs/`.
+const CONTROL_NACP: &str = "control.nacp";
+const CONTROL_ICON: &str = "icon.jpg";
+
+/// One `exefs/` plus `romfs/` directory of an extracted tree, with the
+/// control data a dump keeps beside them.
 struct Layer {
     exefs: Option<PathBuf>,
     romfs: Option<PathBuf>,
+    control: Vec<(&'static str, PathBuf)>,
 }
 
 impl Layer {
@@ -299,6 +317,11 @@ impl Layer {
         Layer {
             exefs: sub("exefs"),
             romfs: sub("romfs"),
+            control: [CONTROL_NACP, CONTROL_ICON]
+                .into_iter()
+                .map(|n| (n, dir.join(n)))
+                .filter(|(_, p)| p.is_file())
+                .collect(),
         }
     }
 
@@ -444,6 +467,18 @@ fn import_tree(
     let romfs = pick(|l| l.romfs.as_ref());
     prepare(out)?;
     let mut report = new_report(update.map_or(0, |(v, _)| *v));
+    for name in [CONTROL_NACP, CONTROL_ICON] {
+        let found = update
+            .and_then(|(_, l)| l.control.iter().find(|(n, _)| *n == name))
+            .or_else(|| {
+                tree.base
+                    .as_ref()
+                    .and_then(|l| l.control.iter().find(|(n, _)| *n == name))
+            });
+        if let Some((_, path)) = found {
+            control_file(out, name, &std::fs::read(path)?, &mut report)?;
+        }
+    }
     let exefs_files: Vec<(String, PathBuf)> = sorted_entries(exefs)?
         .into_iter()
         .filter(|(name, path)| path.is_file() && !name.starts_with('.'))
@@ -594,6 +629,13 @@ fn exefs_file(out: &Path, name: &str, bytes: &[u8], report: &mut Report) -> Resu
         sha256: crate::hex(&sha256(&flat)),
         path: rel,
     });
+    Ok(())
+}
+
+fn control_file(out: &Path, name: &str, bytes: &[u8], report: &mut Report) -> Result<()> {
+    if relift_cache::write_if_changed(&out.join(name), bytes)? {
+        report.written += 1;
+    }
     Ok(())
 }
 

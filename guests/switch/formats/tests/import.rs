@@ -336,3 +336,35 @@ fn progress_events_match_the_totals_for_a_tree_and_a_nup() {
     let names = check_events(&file, &d.join("out-nup"));
     assert_eq!(names, ["exefs", "romfs", "dlc/0100123456781001/0"]);
 }
+
+#[test]
+fn control_data_reaches_the_import_directory() {
+    use relift_switch_formats::nup::{self, BuildPackage, PackageKind, TLV_ICON, TLV_NACP};
+    let d = scratch("import-control");
+    let nacp = vec![7u8; 0x4000];
+    let icon = b"\xff\xd8jpeg".to_vec();
+    let bytes = nup::build(&[BuildPackage {
+        title_id: PROGRAM_ID,
+        version: 0,
+        kind: PackageKind::Base,
+        standalone: false,
+        files: vec![
+            ("exefs/rtld", b"x".as_slice()),
+            ("romfs/a.txt", b"a".as_slice()),
+        ],
+        empty_dirs: vec![],
+        meta: vec![(TLV_NACP, nacp.clone()), (TLV_ICON, icon.clone())],
+    }]);
+    let file = put(&d, "c.nup", &bytes);
+    let out = d.join("out");
+    import(&file, &out, &Options::default()).expect("import");
+    assert_eq!(read(out.join("control.nacp")), nacp);
+    assert_eq!(read(out.join("icon.jpg")), icon);
+
+    let (root, _) = tree("import-control-tree");
+    put(&root.join("dump/base"), "control.nacp", &nacp);
+    let out = d.join("tree-out");
+    import(&root.join("dump"), &out, &Options::default()).expect("tree import");
+    assert_eq!(read(out.join("control.nacp")), nacp);
+    assert!(!out.join("icon.jpg").exists());
+}
