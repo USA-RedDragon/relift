@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use relift_switch_formats::Error;
-use relift_switch_formats::import::{Options, Report, import};
+use relift_switch_formats::import::{Event, Options, Report, import, import_with};
 use relift_switch_formats::nso::Nso;
 use relift_switch_formats::nup::UpdateSelect;
 use relift_switch_formats::synth::{self, PROGRAM_ID};
@@ -302,4 +302,37 @@ fn an_encrypted_header_is_refused_without_a_key() {
         );
     }
     assert!(!d.join("o").exists(), "nothing is written");
+}
+
+/// Each stage's announced totals equal the bytes and files it reported.
+fn check_events(file: &Path, out: &Path) -> Vec<String> {
+    type Totals = (Option<u64>, Option<u64>, u64, u64);
+    let mut stages: Vec<(String, Totals)> = Vec::new();
+    let r = import_with(file, out, &Options::default(), &mut |e| match e {
+        Event::Begin {
+            stage,
+            files,
+            bytes,
+        } => stages.push((stage.to_string(), (files, bytes, 0, 0))),
+        Event::Chunk(n) => stages.last_mut().expect("a stage is open").1.3 += n,
+        Event::File => stages.last_mut().expect("a stage is open").1.2 += 1,
+        Event::End => {}
+    })
+    .expect("import");
+    assert!(!r.modules.is_empty());
+    for (name, (files, bytes, got_files, got_bytes)) in &stages {
+        assert_eq!(*files, Some(*got_files), "{name} files");
+        assert_eq!(*bytes, Some(*got_bytes), "{name} bytes");
+    }
+    stages.into_iter().map(|(n, _)| n).collect()
+}
+
+#[test]
+fn progress_events_match_the_totals_for_a_tree_and_a_nup() {
+    let (d, g) = tree("import-events-tree");
+    let names = check_events(&d.join("dump"), &d.join("out"));
+    assert_eq!(names, ["exefs", "romfs", "dlc/0100123456781001/0"]);
+    let file = put(&d, "game.nup", &g.nup());
+    let names = check_events(&file, &d.join("out-nup"));
+    assert_eq!(names, ["exefs", "romfs", "dlc/0100123456781001/0"]);
 }

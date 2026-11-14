@@ -103,6 +103,27 @@ pub fn quote(s: &str) -> String {
     out
 }
 
+/// What an import reports while it works, for progress output. A stage is
+/// `exefs`, `romfs` or a `dlc/<title id>/<index>` directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event<'a> {
+    /// A stage starts, with its totals when they are known up front.
+    Begin {
+        /// The stage name.
+        stage: &'a str,
+        /// Files in the stage.
+        files: Option<u64>,
+        /// Bytes in the stage.
+        bytes: Option<u64>,
+    },
+    /// This many bytes were written since the last event.
+    Chunk(u64),
+    /// One file is complete.
+    File,
+    /// The stage is complete.
+    End,
+}
+
 /// Options of an import.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -152,6 +173,21 @@ fn open(path: &Path) -> Result<Shared> {
 /// An encrypted input ([`Error::Encrypted`]), an unknown file, a layout
 /// without an exefs, a hash mismatch, a malformed file or a write error.
 pub fn import(input: &Path, out: &Path, opts: &Options) -> Result<Report> {
+    import_with(input, out, opts, &mut |_| {})
+}
+
+/// As [`import`], telling `on` about each stage and the bytes and files
+/// written in it.
+///
+/// # Errors
+///
+/// As [`import`].
+pub fn import_with(
+    input: &Path,
+    out: &Path,
+    opts: &Options,
+    on: &mut dyn FnMut(Event),
+) -> Result<Report> {
     let meta = std::fs::metadata(input).map_err(|e| {
         Error::Io(std::io::Error::new(
             e.kind(),
@@ -159,12 +195,12 @@ pub fn import(input: &Path, out: &Path, opts: &Options) -> Result<Report> {
         ))
     })?;
     if meta.is_dir() {
-        return import_tree(input, out, opts);
+        return import_tree(input, out, opts, on);
     }
     let storage = open(input)?;
     let head = read_vec(&*storage, 0, 4.min(storage.size()))?;
     if head.get(..3) == Some(&crate::nup::MAGIC[..3]) {
-        return import_nup(&Nup::open(storage)?, out, opts);
+        return import_nup(&Nup::open(storage)?, out, opts, on);
     }
     refuse_encrypted(input, &*storage)?;
     malformed(format!(
@@ -198,7 +234,7 @@ fn program_id(report: &mut Report, fallback: Option<u64>) -> Result<()> {
     Ok(())
 }
 
-fn import_nup(nup: &Nup, out: &Path, opts: &Options) -> Result<Report> {
+fn import_nup(nup: &Nup, out: &Path, opts: &Options, on: &mut dyn FnMut(Event)) -> Result<Report> {
     let t = nup.effective_title(opts.update)?;
     if t.exefs.is_empty() {
         return malformed("NUP: the selected update and the base have no exefs");
@@ -206,12 +242,26 @@ fn import_nup(nup: &Nup, out: &Path, opts: &Options) -> Result<Report> {
     prepare(out)?;
     let mut report = new_report(t.version);
     report.romfs_files = t.romfs.len();
+    on(Event::Begin {
+        stage: "exefs",
+        files: Some(t.exefs.len() as u64),
+        bytes: Some(t.exefs.iter().map(|(_, e)| e.size).sum()),
+    });
     for (name, e) in &t.exefs {
         let bytes = nup.read(e)?;
         exefs_file(out, name, &bytes, &mut report)?;
+        on(Event::Chunk(bytes.len() as u64));
+        on(Event::File);
     }
+    on(Event::End);
     program_id(&mut report, Some(t.program_id))?;
-    report.written += nup.extract_romfs(&t, &out.join("romfs"))?;
+    on(Event::Begin {
+        stage: "romfs",
+        files: Some(t.romfs.len() as u64),
+        bytes: Some(t.romfs.iter().map(|(_, e)| e.size).sum()),
+    });
+    report.written += nup.extract_romfs_with(&t, &out.join("romfs"), on)?;
+    on(Event::End);
     let mut seen: Vec<u64> = Vec::new();
     for (i, p) in nup.packages().iter().enumerate() {
         if p.record.kind != PackageKind::Addon {
@@ -224,7 +274,13 @@ fn import_nup(nup: &Nup, out: &Path, opts: &Options) -> Result<Report> {
             continue;
         };
         let rel = format!("dlc/{id:016x}/{index}");
-        report.written += nup.extract_romfs(&addon, &out.join(&rel).join("romfs"))?;
+        on(Event::Begin {
+            stage: &rel,
+            files: Some(addon.romfs.len() as u64),
+            bytes: Some(addon.romfs.iter().map(|(_, e)| e.size).sum()),
+        });
+        report.written += nup.extract_romfs_with(&addon, &out.join(&rel).join("romfs"), on)?;
+        on(Event::End);
         report.dlc.push(rel);
     }
     finish(out, &mut report)?;
@@ -333,7 +389,12 @@ fn read_tree(root: &Path) -> Result<Tree> {
     Ok(Tree { base, updates, dlc })
 }
 
-fn import_tree(root: &Path, out: &Path, opts: &Options) -> Result<Report> {
+fn import_tree(
+    root: &Path,
+    out: &Path,
+    opts: &Options,
+    on: &mut dyn FnMut(Event),
+) -> Result<Report> {
     let tree = read_tree(root)?;
     let versions = || {
         let v: Vec<String> = tree.updates.iter().map(|(v, _)| v.to_string()).collect();
@@ -383,69 +444,112 @@ fn import_tree(root: &Path, out: &Path, opts: &Options) -> Result<Report> {
     let romfs = pick(|l| l.romfs.as_ref());
     prepare(out)?;
     let mut report = new_report(update.map_or(0, |(v, _)| *v));
-    for (name, path) in sorted_entries(exefs)? {
-        if !path.is_file() || name.starts_with('.') {
-            continue;
-        }
+    let exefs_files: Vec<(String, PathBuf)> = sorted_entries(exefs)?
+        .into_iter()
+        .filter(|(name, path)| path.is_file() && !name.starts_with('.'))
+        .collect();
+    let mut exefs_bytes = 0;
+    for (_, path) in &exefs_files {
+        exefs_bytes += std::fs::metadata(path)?.len();
+    }
+    on(Event::Begin {
+        stage: "exefs",
+        files: Some(exefs_files.len() as u64),
+        bytes: Some(exefs_bytes),
+    });
+    for (name, path) in exefs_files {
         let bytes = std::fs::read(&path)?;
         exefs_file(out, &name, &bytes, &mut report)?;
+        on(Event::Chunk(bytes.len() as u64));
+        on(Event::File);
     }
+    on(Event::End);
     program_id(&mut report, None)?;
     if let Some(r) = romfs {
-        let (files, written) = copy_tree(r, &out.join("romfs"))?;
+        let (files, written) = copy_tree(r, &out.join("romfs"), "romfs", on)?;
         report.romfs_files = files;
         report.written += written;
     }
     for (id, index, romfs) in &tree.dlc {
         let rel = format!("dlc/{id:016x}/{index}");
-        report.written += copy_tree(romfs, &out.join(&rel).join("romfs"))?.1;
+        report.written += copy_tree(romfs, &out.join(&rel).join("romfs"), &rel, on)?.1;
         report.dlc.push(rel);
     }
     finish(out, &mut report)?;
     Ok(report)
 }
 
-/// Stream every file under `src` to the same path under `dst` with
-/// relift-cache's write-if-changed stream writer, keeping empty
-/// directories. Returns (files, files rewritten).
-fn copy_tree(src: &Path, dst: &Path) -> Result<(usize, usize)> {
-    const CHUNK: usize = 1 << 20;
-    let mut buf = vec![0u8; CHUNK];
-    let (mut files, mut written) = (0, 0);
-    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
-    while let Some((from, to)) = stack.pop() {
-        std::fs::create_dir_all(&to)?;
-        for (name, path) in sorted_entries(&from)? {
-            let target = to.join(&name);
+/// The files (with sizes) and directories under a root, as paths relative
+/// to it.
+struct Walk {
+    files: Vec<(PathBuf, u64)>,
+    dirs: Vec<PathBuf>,
+}
+
+fn walk_tree(src: &Path) -> Result<Walk> {
+    let (mut files, mut dirs) = (Vec::new(), Vec::new());
+    let mut stack = vec![PathBuf::new()];
+    while let Some(rel) = stack.pop() {
+        dirs.push(rel.clone());
+        for (name, path) in sorted_entries(&src.join(&rel))? {
             let meta = std::fs::metadata(&path)?;
             if meta.is_dir() {
-                stack.push((path, target));
-                continue;
-            }
-            if !meta.is_file() {
+                stack.push(rel.join(&name));
+            } else if meta.is_file() {
+                files.push((rel.join(&name), meta.len()));
+            } else {
                 return malformed(format!("{}: not a file or directory", path.display()));
-            }
-            let mut input = std::fs::File::open(&path).map_err(|e| {
-                Error::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("{}: {e}", path.display()),
-                ))
-            })?;
-            let mut w = relift_cache::StreamWriter::new(&target)?;
-            loop {
-                let n = input.read(&mut buf)?;
-                if n == 0 {
-                    break;
-                }
-                w.write_all(&buf[..n])?;
-            }
-            files += 1;
-            if w.finish()? {
-                written += 1;
             }
         }
     }
-    Ok((files, written))
+    Ok(Walk { files, dirs })
+}
+
+/// Stream every file under `src` to the same path under `dst` with
+/// relift-cache's write-if-changed stream writer, keeping empty
+/// directories, as stage `stage`. Returns (files, files rewritten).
+fn copy_tree(
+    src: &Path,
+    dst: &Path,
+    stage: &str,
+    on: &mut dyn FnMut(Event),
+) -> Result<(usize, usize)> {
+    const CHUNK: usize = 1 << 20;
+    let Walk { files: list, dirs } = walk_tree(src)?;
+    on(Event::Begin {
+        stage,
+        files: Some(list.len() as u64),
+        bytes: Some(list.iter().map(|(_, n)| n).sum()),
+    });
+    let mut buf = vec![0u8; CHUNK];
+    let mut written = 0;
+    for d in &dirs {
+        std::fs::create_dir_all(dst.join(d))?;
+    }
+    for (rel, _) in &list {
+        let path = src.join(rel);
+        let mut input = std::fs::File::open(&path).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("{}: {e}", path.display()),
+            ))
+        })?;
+        let mut w = relift_cache::StreamWriter::new(&dst.join(rel))?;
+        loop {
+            let n = input.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            w.write_all(&buf[..n])?;
+            on(Event::Chunk(n as u64));
+        }
+        if w.finish()? {
+            written += 1;
+        }
+        on(Event::File);
+    }
+    on(Event::End);
+    Ok((list.len(), written))
 }
 
 /// Write one exefs file (and, for an NSO, its module) into `out`.
