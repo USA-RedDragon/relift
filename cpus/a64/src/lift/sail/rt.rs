@@ -35,12 +35,23 @@ pub enum Kind {
 pub struct St {
     cur: Vec<Option<Value>>,
     exit: Option<(Next, Kind)>,
+    fp: bool,
 }
 
 impl St {
     /// A state that has written nothing.
     pub fn new() -> St {
         St::default()
+    }
+
+    /// Records that the instruction's semantics assume FPCR zero.
+    pub fn assume_default_fpcr(&mut self) {
+        self.fp = true;
+    }
+
+    /// Whether the instruction assumes FPCR zero.
+    pub fn assumes_default_fpcr(&self) -> bool {
+        self.fp
     }
 
     /// The current value of `r`.

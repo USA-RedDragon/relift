@@ -6,19 +6,38 @@ mod excl;
 mod fp;
 mod int;
 mod ldst;
-mod simd;
+mod simd_elem;
+mod simd_ldst_multi;
+mod simd_ldst_multi_post;
+mod simd_ldst_single;
+mod simd_misc;
+mod simd_other;
+mod simd_same;
+mod simd_shift;
 mod system;
 
 use super::GenFn;
 use crate::decode::Encoding;
 
+/// The class files, in lookup order.
+const CLASSES: [fn(Encoding) -> Option<GenFn>; 14] = [
+    int::template,
+    ldst::template,
+    excl::template,
+    branch::template,
+    system::template,
+    simd_ldst_multi::template,
+    simd_ldst_multi_post::template,
+    simd_ldst_single::template,
+    simd_same::template,
+    simd_shift::template,
+    simd_misc::template,
+    simd_elem::template,
+    simd_other::template,
+    fp::template,
+];
+
 /// The generated template of `enc`, if there is one.
 pub(super) fn template(enc: Encoding) -> Option<GenFn> {
-    int::template(enc)
-        .or_else(|| ldst::template(enc))
-        .or_else(|| excl::template(enc))
-        .or_else(|| branch::template(enc))
-        .or_else(|| system::template(enc))
-        .or_else(|| simd::template(enc))
-        .or_else(|| fp::template(enc))
+    CLASSES.iter().find_map(|t| t(enc))
 }

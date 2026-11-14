@@ -138,6 +138,36 @@ pub(super) fn ADCS_64_addsub_carry(
     Ok(())
 }
 
+/// `ADC_32_addsub_carry`.
+///
+/// Cut: PSTATE.NZCV, X_read, X_set.
+pub(super) fn ADC_32_addsub_carry(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::ADC_32_addsub_carry;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.x_read(b, s5 as u32, 32);
+    let v8 = st.x_read(b, s6 as u32, 32);
+    let v9 = st.get(b, regs::C);
+    let v10 = b.zext(v7, Width::W128);
+    let v11 = b.zext(v8, Width::W128);
+    let v12 = b.bin(BinOp::Add, v10, v11);
+    let v13 = b.zext(v9, Width::W128);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v20 = b.extract(v14, 0, Width::new(32));
+    st.x_set(b, s4 as u32, v20, None);
+    Ok(())
+}
+
 /// `ADC_64_addsub_carry`.
 ///
 /// Cut: PSTATE.NZCV, X_read, X_set.
@@ -166,6 +196,2400 @@ pub(super) fn ADC_64_addsub_carry(
     let v20 = b.extract(v14, 0, Width::new(64));
     st.x_set(b, s4 as u32, v20, None);
     Ok(())
+}
+
+/// `ADDS_32S_addsub_ext`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: PSTATE.NZCV, SP_read, X_read, X_set.
+pub(super) fn ADDS_32S_addsub_ext(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::ADDS_32S_addsub_ext;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.zext(v14, Width::new(32));
+            let v16 = b.zext(v12, Width::W128);
+            let v17 = b.zext(v15, Width::W128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.konst(Width::new(128), 0u128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.sext(v12, Width::W128);
+            let v22 = b.sext(v15, Width::W128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.konst(Width::new(128), 0u128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.extract(v20, 0, Width::new(32));
+            let v27 = b.extract(v26, 31, Width::new(1));
+            let v28 = b.konst(Width::new(32), 0x0);
+            let v29 = b.cmp(CmpOp::Eq, v26, v28);
+            let v31 = b.konst(Width::new(1), 0x1);
+            let v32 = b.konst(Width::new(1), 0x0);
+            let v33 = b.select(v29, v31, v32);
+            let v34 = b.zext(v26, Width::W128);
+            let v35 = b.cmp(CmpOp::Eq, v34, v20);
+            let v37 = b.konst(Width::new(1), 0x0);
+            let v38 = b.konst(Width::new(1), 0x1);
+            let v39 = b.select(v35, v37, v38);
+            let v40 = b.sext(v26, Width::W128);
+            let v41 = b.cmp(CmpOp::Eq, v40, v25);
+            let v43 = b.konst(Width::new(1), 0x0);
+            let v44 = b.konst(Width::new(1), 0x1);
+            let v45 = b.select(v41, v43, v44);
+            let v46 = b.concat(v27, v33);
+            let v47 = b.concat(v46, v39);
+            let v48 = b.concat(v47, v45);
+            let v49 = b.extract(v48, 3, Width::new(1));
+            st.set(b, regs::N, v49, None);
+            let v50 = b.extract(v48, 2, Width::new(1));
+            st.set(b, regs::Z, v50, None);
+            let v51 = b.extract(v48, 1, Width::new(1));
+            st.set(b, regs::C, v51, None);
+            let v52 = b.extract(v48, 0, Width::new(1));
+            st.set(b, regs::V, v52, None);
+            st.x_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00001400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.zext(v14, Width::new(32));
+            let v16 = b.zext(v12, Width::W128);
+            let v17 = b.zext(v15, Width::W128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.konst(Width::new(128), 0u128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.sext(v12, Width::W128);
+            let v22 = b.sext(v15, Width::W128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.konst(Width::new(128), 0u128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.extract(v20, 0, Width::new(32));
+            let v27 = b.extract(v26, 31, Width::new(1));
+            let v28 = b.konst(Width::new(32), 0x0);
+            let v29 = b.cmp(CmpOp::Eq, v26, v28);
+            let v31 = b.konst(Width::new(1), 0x1);
+            let v32 = b.konst(Width::new(1), 0x0);
+            let v33 = b.select(v29, v31, v32);
+            let v34 = b.zext(v26, Width::W128);
+            let v35 = b.cmp(CmpOp::Eq, v34, v20);
+            let v37 = b.konst(Width::new(1), 0x0);
+            let v38 = b.konst(Width::new(1), 0x1);
+            let v39 = b.select(v35, v37, v38);
+            let v40 = b.sext(v26, Width::W128);
+            let v41 = b.cmp(CmpOp::Eq, v40, v25);
+            let v43 = b.konst(Width::new(1), 0x0);
+            let v44 = b.konst(Width::new(1), 0x1);
+            let v45 = b.select(v41, v43, v44);
+            let v46 = b.concat(v27, v33);
+            let v47 = b.concat(v46, v39);
+            let v48 = b.concat(v47, v45);
+            let v49 = b.extract(v48, 3, Width::new(1));
+            st.set(b, regs::N, v49, None);
+            let v50 = b.extract(v48, 2, Width::new(1));
+            st.set(b, regs::Z, v50, None);
+            let v51 = b.extract(v48, 1, Width::new(1));
+            st.set(b, regs::C, v51, None);
+            let v52 = b.extract(v48, 0, Width::new(1));
+            st.set(b, regs::V, v52, None);
+            st.x_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00003400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.zext(v12, Width::W128);
+            let v15 = b.zext(v13, Width::W128);
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.konst(Width::new(128), 0u128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.sext(v12, Width::W128);
+            let v20 = b.sext(v13, Width::W128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.konst(Width::new(128), 0u128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v18, 0, Width::new(32));
+            let v25 = b.extract(v24, 31, Width::new(1));
+            let v26 = b.konst(Width::new(32), 0x0);
+            let v27 = b.cmp(CmpOp::Eq, v24, v26);
+            let v29 = b.konst(Width::new(1), 0x1);
+            let v30 = b.konst(Width::new(1), 0x0);
+            let v31 = b.select(v27, v29, v30);
+            let v32 = b.zext(v24, Width::W128);
+            let v33 = b.cmp(CmpOp::Eq, v32, v18);
+            let v35 = b.konst(Width::new(1), 0x0);
+            let v36 = b.konst(Width::new(1), 0x1);
+            let v37 = b.select(v33, v35, v36);
+            let v38 = b.sext(v24, Width::W128);
+            let v39 = b.cmp(CmpOp::Eq, v38, v23);
+            let v41 = b.konst(Width::new(1), 0x0);
+            let v42 = b.konst(Width::new(1), 0x1);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.concat(v25, v31);
+            let v45 = b.concat(v44, v37);
+            let v46 = b.concat(v45, v43);
+            let v47 = b.extract(v46, 3, Width::new(1));
+            st.set(b, regs::N, v47, None);
+            let v48 = b.extract(v46, 2, Width::new(1));
+            st.set(b, regs::Z, v48, None);
+            let v49 = b.extract(v46, 1, Width::new(1));
+            st.set(b, regs::C, v49, None);
+            let v50 = b.extract(v46, 0, Width::new(1));
+            st.set(b, regs::V, v50, None);
+            st.x_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(31));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(30));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(29));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(28));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00005400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.zext(v12, Width::W128);
+            let v15 = b.zext(v13, Width::W128);
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.konst(Width::new(128), 0u128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.sext(v12, Width::W128);
+            let v20 = b.sext(v13, Width::W128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.konst(Width::new(128), 0u128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v18, 0, Width::new(32));
+            let v25 = b.extract(v24, 31, Width::new(1));
+            let v26 = b.konst(Width::new(32), 0x0);
+            let v27 = b.cmp(CmpOp::Eq, v24, v26);
+            let v29 = b.konst(Width::new(1), 0x1);
+            let v30 = b.konst(Width::new(1), 0x0);
+            let v31 = b.select(v27, v29, v30);
+            let v32 = b.zext(v24, Width::W128);
+            let v33 = b.cmp(CmpOp::Eq, v32, v18);
+            let v35 = b.konst(Width::new(1), 0x0);
+            let v36 = b.konst(Width::new(1), 0x1);
+            let v37 = b.select(v33, v35, v36);
+            let v38 = b.sext(v24, Width::W128);
+            let v39 = b.cmp(CmpOp::Eq, v38, v23);
+            let v41 = b.konst(Width::new(1), 0x0);
+            let v42 = b.konst(Width::new(1), 0x1);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.concat(v25, v31);
+            let v45 = b.concat(v44, v37);
+            let v46 = b.concat(v45, v43);
+            let v47 = b.extract(v46, 3, Width::new(1));
+            st.set(b, regs::N, v47, None);
+            let v48 = b.extract(v46, 2, Width::new(1));
+            st.set(b, regs::Z, v48, None);
+            let v49 = b.extract(v46, 1, Width::new(1));
+            st.set(b, regs::C, v49, None);
+            let v50 = b.extract(v46, 0, Width::new(1));
+            st.set(b, regs::V, v50, None);
+            st.x_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(31));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(30));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(29));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(28));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x00007400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.sext(v14, Width::new(32));
+            let v16 = b.zext(v12, Width::W128);
+            let v17 = b.zext(v15, Width::W128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.konst(Width::new(128), 0u128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.sext(v12, Width::W128);
+            let v22 = b.sext(v15, Width::W128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.konst(Width::new(128), 0u128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.extract(v20, 0, Width::new(32));
+            let v27 = b.extract(v26, 31, Width::new(1));
+            let v28 = b.konst(Width::new(32), 0x0);
+            let v29 = b.cmp(CmpOp::Eq, v26, v28);
+            let v31 = b.konst(Width::new(1), 0x1);
+            let v32 = b.konst(Width::new(1), 0x0);
+            let v33 = b.select(v29, v31, v32);
+            let v34 = b.zext(v26, Width::W128);
+            let v35 = b.cmp(CmpOp::Eq, v34, v20);
+            let v37 = b.konst(Width::new(1), 0x0);
+            let v38 = b.konst(Width::new(1), 0x1);
+            let v39 = b.select(v35, v37, v38);
+            let v40 = b.sext(v26, Width::W128);
+            let v41 = b.cmp(CmpOp::Eq, v40, v25);
+            let v43 = b.konst(Width::new(1), 0x0);
+            let v44 = b.konst(Width::new(1), 0x1);
+            let v45 = b.select(v41, v43, v44);
+            let v46 = b.concat(v27, v33);
+            let v47 = b.concat(v46, v39);
+            let v48 = b.concat(v47, v45);
+            let v49 = b.extract(v48, 3, Width::new(1));
+            st.set(b, regs::N, v49, None);
+            let v50 = b.extract(v48, 2, Width::new(1));
+            st.set(b, regs::Z, v50, None);
+            let v51 = b.extract(v48, 1, Width::new(1));
+            st.set(b, regs::C, v51, None);
+            let v52 = b.extract(v48, 0, Width::new(1));
+            st.set(b, regs::V, v52, None);
+            st.x_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(8));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00009400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00009800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00009c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.sext(v14, Width::new(32));
+            let v16 = b.zext(v12, Width::W128);
+            let v17 = b.zext(v15, Width::W128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.konst(Width::new(128), 0u128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.sext(v12, Width::W128);
+            let v22 = b.sext(v15, Width::W128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.konst(Width::new(128), 0u128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.extract(v20, 0, Width::new(32));
+            let v27 = b.extract(v26, 31, Width::new(1));
+            let v28 = b.konst(Width::new(32), 0x0);
+            let v29 = b.cmp(CmpOp::Eq, v26, v28);
+            let v31 = b.konst(Width::new(1), 0x1);
+            let v32 = b.konst(Width::new(1), 0x0);
+            let v33 = b.select(v29, v31, v32);
+            let v34 = b.zext(v26, Width::W128);
+            let v35 = b.cmp(CmpOp::Eq, v34, v20);
+            let v37 = b.konst(Width::new(1), 0x0);
+            let v38 = b.konst(Width::new(1), 0x1);
+            let v39 = b.select(v35, v37, v38);
+            let v40 = b.sext(v26, Width::W128);
+            let v41 = b.cmp(CmpOp::Eq, v40, v25);
+            let v43 = b.konst(Width::new(1), 0x0);
+            let v44 = b.konst(Width::new(1), 0x1);
+            let v45 = b.select(v41, v43, v44);
+            let v46 = b.concat(v27, v33);
+            let v47 = b.concat(v46, v39);
+            let v48 = b.concat(v47, v45);
+            let v49 = b.extract(v48, 3, Width::new(1));
+            st.set(b, regs::N, v49, None);
+            let v50 = b.extract(v48, 2, Width::new(1));
+            st.set(b, regs::Z, v50, None);
+            let v51 = b.extract(v48, 1, Width::new(1));
+            st.set(b, regs::C, v51, None);
+            let v52 = b.extract(v48, 0, Width::new(1));
+            st.set(b, regs::V, v52, None);
+            st.x_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(16));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.sext(v16, Width::new(32));
+            let v18 = b.zext(v12, Width::W128);
+            let v19 = b.zext(v17, Width::W128);
+            let v20 = b.bin(BinOp::Add, v18, v19);
+            let v21 = b.konst(Width::new(128), 0u128);
+            let v22 = b.bin(BinOp::Add, v20, v21);
+            let v23 = b.sext(v12, Width::W128);
+            let v24 = b.sext(v17, Width::W128);
+            let v25 = b.bin(BinOp::Add, v23, v24);
+            let v26 = b.konst(Width::new(128), 0u128);
+            let v27 = b.bin(BinOp::Add, v25, v26);
+            let v28 = b.extract(v22, 0, Width::new(32));
+            let v29 = b.extract(v28, 31, Width::new(1));
+            let v30 = b.konst(Width::new(32), 0x0);
+            let v31 = b.cmp(CmpOp::Eq, v28, v30);
+            let v33 = b.konst(Width::new(1), 0x1);
+            let v34 = b.konst(Width::new(1), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.zext(v28, Width::W128);
+            let v37 = b.cmp(CmpOp::Eq, v36, v22);
+            let v39 = b.konst(Width::new(1), 0x0);
+            let v40 = b.konst(Width::new(1), 0x1);
+            let v41 = b.select(v37, v39, v40);
+            let v42 = b.sext(v28, Width::W128);
+            let v43 = b.cmp(CmpOp::Eq, v42, v27);
+            let v45 = b.konst(Width::new(1), 0x0);
+            let v46 = b.konst(Width::new(1), 0x1);
+            let v47 = b.select(v43, v45, v46);
+            let v48 = b.concat(v29, v35);
+            let v49 = b.concat(v48, v41);
+            let v50 = b.concat(v49, v47);
+            let v51 = b.extract(v50, 3, Width::new(1));
+            st.set(b, regs::N, v51, None);
+            let v52 = b.extract(v50, 2, Width::new(1));
+            st.set(b, regs::Z, v52, None);
+            let v53 = b.extract(v50, 1, Width::new(1));
+            st.set(b, regs::C, v53, None);
+            let v54 = b.extract(v50, 0, Width::new(1));
+            st.set(b, regs::V, v54, None);
+            st.x_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000bc00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.zext(v12, Width::W128);
+            let v15 = b.zext(v13, Width::W128);
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.konst(Width::new(128), 0u128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.sext(v12, Width::W128);
+            let v20 = b.sext(v13, Width::W128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.konst(Width::new(128), 0u128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v18, 0, Width::new(32));
+            let v25 = b.extract(v24, 31, Width::new(1));
+            let v26 = b.konst(Width::new(32), 0x0);
+            let v27 = b.cmp(CmpOp::Eq, v24, v26);
+            let v29 = b.konst(Width::new(1), 0x1);
+            let v30 = b.konst(Width::new(1), 0x0);
+            let v31 = b.select(v27, v29, v30);
+            let v32 = b.zext(v24, Width::W128);
+            let v33 = b.cmp(CmpOp::Eq, v32, v18);
+            let v35 = b.konst(Width::new(1), 0x0);
+            let v36 = b.konst(Width::new(1), 0x1);
+            let v37 = b.select(v33, v35, v36);
+            let v38 = b.sext(v24, Width::W128);
+            let v39 = b.cmp(CmpOp::Eq, v38, v23);
+            let v41 = b.konst(Width::new(1), 0x0);
+            let v42 = b.konst(Width::new(1), 0x1);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.concat(v25, v31);
+            let v45 = b.concat(v44, v37);
+            let v46 = b.concat(v45, v43);
+            let v47 = b.extract(v46, 3, Width::new(1));
+            st.set(b, regs::N, v47, None);
+            let v48 = b.extract(v46, 2, Width::new(1));
+            st.set(b, regs::Z, v48, None);
+            let v49 = b.extract(v46, 1, Width::new(1));
+            st.set(b, regs::C, v49, None);
+            let v50 = b.extract(v46, 0, Width::new(1));
+            st.set(b, regs::V, v50, None);
+            st.x_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(31));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(30));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(29));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(28));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000d800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000dc00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.zext(v12, Width::W128);
+            let v15 = b.zext(v13, Width::W128);
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.konst(Width::new(128), 0u128);
+            let v18 = b.bin(BinOp::Add, v16, v17);
+            let v19 = b.sext(v12, Width::W128);
+            let v20 = b.sext(v13, Width::W128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.konst(Width::new(128), 0u128);
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v18, 0, Width::new(32));
+            let v25 = b.extract(v24, 31, Width::new(1));
+            let v26 = b.konst(Width::new(32), 0x0);
+            let v27 = b.cmp(CmpOp::Eq, v24, v26);
+            let v29 = b.konst(Width::new(1), 0x1);
+            let v30 = b.konst(Width::new(1), 0x0);
+            let v31 = b.select(v27, v29, v30);
+            let v32 = b.zext(v24, Width::W128);
+            let v33 = b.cmp(CmpOp::Eq, v32, v18);
+            let v35 = b.konst(Width::new(1), 0x0);
+            let v36 = b.konst(Width::new(1), 0x1);
+            let v37 = b.select(v33, v35, v36);
+            let v38 = b.sext(v24, Width::W128);
+            let v39 = b.cmp(CmpOp::Eq, v38, v23);
+            let v41 = b.konst(Width::new(1), 0x0);
+            let v42 = b.konst(Width::new(1), 0x1);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.concat(v25, v31);
+            let v45 = b.concat(v44, v37);
+            let v46 = b.concat(v45, v43);
+            let v47 = b.extract(v46, 3, Width::new(1));
+            st.set(b, regs::N, v47, None);
+            let v48 = b.extract(v46, 2, Width::new(1));
+            st.set(b, regs::Z, v48, None);
+            let v49 = b.extract(v46, 1, Width::new(1));
+            st.set(b, regs::C, v49, None);
+            let v50 = b.extract(v46, 0, Width::new(1));
+            st.set(b, regs::V, v50, None);
+            st.x_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(31));
+            let v15 = b.konst(Width::new(1), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(30));
+            let v15 = b.konst(Width::new(2), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(29));
+            let v15 = b.konst(Width::new(3), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s5 == (31i128);
+            let v8 = st.sp_read(b);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v11 = st.x_read(b, s5 as u32, 32);
+            let v12 = if s7 { v9 } else { v11 };
+            let v13 = st.x_read(b, s6 as u32, 32);
+            let v14 = b.extract(v13, 0, Width::new(28));
+            let v15 = b.konst(Width::new(4), 0x0);
+            let v16 = b.concat(v14, v15);
+            let v17 = b.zext(v12, Width::W128);
+            let v18 = b.zext(v16, Width::W128);
+            let v19 = b.bin(BinOp::Add, v17, v18);
+            let v20 = b.konst(Width::new(128), 0u128);
+            let v21 = b.bin(BinOp::Add, v19, v20);
+            let v22 = b.sext(v12, Width::W128);
+            let v23 = b.sext(v16, Width::W128);
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.konst(Width::new(128), 0u128);
+            let v26 = b.bin(BinOp::Add, v24, v25);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.extract(v27, 31, Width::new(1));
+            let v29 = b.konst(Width::new(32), 0x0);
+            let v30 = b.cmp(CmpOp::Eq, v27, v29);
+            let v32 = b.konst(Width::new(1), 0x1);
+            let v33 = b.konst(Width::new(1), 0x0);
+            let v34 = b.select(v30, v32, v33);
+            let v35 = b.zext(v27, Width::W128);
+            let v36 = b.cmp(CmpOp::Eq, v35, v21);
+            let v38 = b.konst(Width::new(1), 0x0);
+            let v39 = b.konst(Width::new(1), 0x1);
+            let v40 = b.select(v36, v38, v39);
+            let v41 = b.sext(v27, Width::W128);
+            let v42 = b.cmp(CmpOp::Eq, v41, v26);
+            let v44 = b.konst(Width::new(1), 0x0);
+            let v45 = b.konst(Width::new(1), 0x1);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.concat(v28, v34);
+            let v48 = b.concat(v47, v40);
+            let v49 = b.concat(v48, v46);
+            let v50 = b.extract(v49, 3, Width::new(1));
+            st.set(b, regs::N, v50, None);
+            let v51 = b.extract(v49, 2, Width::new(1));
+            st.set(b, regs::Z, v51, None);
+            let v52 = b.extract(v49, 1, Width::new(1));
+            st.set(b, regs::C, v52, None);
+            let v53 = b.extract(v49, 0, Width::new(1));
+            st.set(b, regs::V, v53, None);
+            st.x_set(b, s4 as u32, v27, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000f800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000fc00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `ADDS_32S_addsub_imm`.
@@ -6991,6 +9415,119 @@ pub(super) fn CCMN_32_condcmp_imm(
     Ok(())
 }
 
+/// `CCMN_32_condcmp_reg`.
+///
+/// Cut: PSTATE.NZCV, X_read.
+pub(super) fn CCMN_32_condcmp_reg(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::CCMN_32_condcmp_reg;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let s7: u128 = (s3 >> 1) & 0x7;
+    let s8: bool = s7 == 0x0u128;
+    let v9 = st.get(b, regs::Z);
+    let v10 = b.konst(Width::new(1), 0x1);
+    let v11 = b.cmp(CmpOp::Eq, v9, v10);
+    let s13: bool = s7 == 0x1u128;
+    let v15 = st.get(b, regs::C);
+    let v16 = b.konst(Width::new(1), 0x1);
+    let v17 = b.cmp(CmpOp::Eq, v15, v16);
+    let s20: bool = s7 == 0x2u128;
+    let v22 = st.get(b, regs::N);
+    let v23 = b.konst(Width::new(1), 0x1);
+    let v24 = b.cmp(CmpOp::Eq, v22, v23);
+    let s27: bool = s7 == 0x3u128;
+    let v29 = st.get(b, regs::V);
+    let v30 = b.konst(Width::new(1), 0x1);
+    let v31 = b.cmp(CmpOp::Eq, v29, v30);
+    let s34: bool = s7 == 0x4u128;
+    let v36 = st.get(b, regs::C);
+    let v37 = b.konst(Width::new(1), 0x1);
+    let v38 = b.cmp(CmpOp::Eq, v36, v37);
+    let v39 = st.get(b, regs::Z);
+    let v40 = b.konst(Width::new(1), 0x0);
+    let v41 = b.cmp(CmpOp::Eq, v39, v40);
+    let v42 = b.and(v38, v41);
+    let s45: bool = s7 == 0x5u128;
+    let v47 = st.get(b, regs::N);
+    let v48 = st.get(b, regs::V);
+    let v49 = b.cmp(CmpOp::Eq, v47, v48);
+    let s52: bool = s7 == 0x6u128;
+    let v54 = st.get(b, regs::N);
+    let v55 = st.get(b, regs::V);
+    let v56 = b.cmp(CmpOp::Eq, v54, v55);
+    let v57 = st.get(b, regs::Z);
+    let v58 = b.konst(Width::new(1), 0x0);
+    let v59 = b.cmp(CmpOp::Eq, v57, v58);
+    let v60 = b.and(v56, v59);
+    let v67 = b.konst(Width::new(1), 1);
+    let v68 = if s52 { v60 } else { v67 };
+    let v70 = if s45 { v49 } else { v68 };
+    let v72 = if s34 { v42 } else { v70 };
+    let v74 = if s27 { v31 } else { v72 };
+    let v76 = if s20 { v24 } else { v74 };
+    let v78 = if s13 { v17 } else { v76 };
+    let v80 = if s8 { v11 } else { v78 };
+    let s82: u128 = (s3 >> 0) & 0x1;
+    let s83: bool = s82 == 0x1u128;
+    let s84: bool = s3 != 0xfu128;
+    let s85: bool = s83 && s84;
+    let v87 = b.not(v80);
+    let v90 = if s85 { v87 } else { v80 };
+    let v91 = st.x_read(b, s5 as u32, 32);
+    let v92 = st.x_read(b, s6 as u32, 32);
+    let v93 = b.zext(v91, Width::W128);
+    let v94 = b.zext(v92, Width::W128);
+    let v95 = b.bin(BinOp::Add, v93, v94);
+    let v96 = b.konst(Width::new(128), 0u128);
+    let v97 = b.bin(BinOp::Add, v95, v96);
+    let v98 = b.sext(v91, Width::W128);
+    let v99 = b.sext(v92, Width::W128);
+    let v100 = b.bin(BinOp::Add, v98, v99);
+    let v101 = b.konst(Width::new(128), 0u128);
+    let v102 = b.bin(BinOp::Add, v100, v101);
+    let v103 = b.extract(v97, 0, Width::new(32));
+    let v104 = b.extract(v103, 31, Width::new(1));
+    let v105 = b.konst(Width::new(32), 0x0);
+    let v106 = b.cmp(CmpOp::Eq, v103, v105);
+    let v110 = b.konst(Width::new(1), 0x1);
+    let v111 = b.konst(Width::new(1), 0x0);
+    let v112 = b.select(v106, v110, v111);
+    let v113 = b.zext(v103, Width::W128);
+    let v114 = b.cmp(CmpOp::Eq, v113, v97);
+    let v118 = b.konst(Width::new(1), 0x0);
+    let v119 = b.konst(Width::new(1), 0x1);
+    let v120 = b.select(v114, v118, v119);
+    let v121 = b.sext(v103, Width::W128);
+    let v122 = b.cmp(CmpOp::Eq, v121, v102);
+    let v126 = b.konst(Width::new(1), 0x0);
+    let v127 = b.konst(Width::new(1), 0x1);
+    let v128 = b.select(v122, v126, v127);
+    let v129 = b.concat(v104, v112);
+    let v130 = b.concat(v129, v120);
+    let v131 = b.concat(v130, v128);
+    let v133 = b.konst(Width::new(4), s1);
+    let v134 = b.select(v90, v131, v133);
+    let v138 = b.extract(v134, 3, Width::new(1));
+    st.set(b, regs::N, v138, None);
+    let v139 = b.extract(v134, 2, Width::new(1));
+    st.set(b, regs::Z, v139, None);
+    let v140 = b.extract(v134, 1, Width::new(1));
+    st.set(b, regs::C, v140, None);
+    let v141 = b.extract(v134, 0, Width::new(1));
+    st.set(b, regs::V, v141, None);
+    Ok(())
+}
+
 /// `CCMN_64_condcmp_imm`.
 ///
 /// Cut: PSTATE.NZCV, X_read.
@@ -7093,6 +9630,119 @@ pub(super) fn CCMN_64_condcmp_imm(
     let v131 = b.concat(v130, v128);
     let v133 = b.konst(Width::new(4), s1);
     let v134 = b.select(v89, v131, v133);
+    let v138 = b.extract(v134, 3, Width::new(1));
+    st.set(b, regs::N, v138, None);
+    let v139 = b.extract(v134, 2, Width::new(1));
+    st.set(b, regs::Z, v139, None);
+    let v140 = b.extract(v134, 1, Width::new(1));
+    st.set(b, regs::C, v140, None);
+    let v141 = b.extract(v134, 0, Width::new(1));
+    st.set(b, regs::V, v141, None);
+    Ok(())
+}
+
+/// `CCMN_64_condcmp_reg`.
+///
+/// Cut: PSTATE.NZCV, X_read.
+pub(super) fn CCMN_64_condcmp_reg(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::CCMN_64_condcmp_reg;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let s7: u128 = (s3 >> 1) & 0x7;
+    let s8: bool = s7 == 0x0u128;
+    let v9 = st.get(b, regs::Z);
+    let v10 = b.konst(Width::new(1), 0x1);
+    let v11 = b.cmp(CmpOp::Eq, v9, v10);
+    let s13: bool = s7 == 0x1u128;
+    let v15 = st.get(b, regs::C);
+    let v16 = b.konst(Width::new(1), 0x1);
+    let v17 = b.cmp(CmpOp::Eq, v15, v16);
+    let s20: bool = s7 == 0x2u128;
+    let v22 = st.get(b, regs::N);
+    let v23 = b.konst(Width::new(1), 0x1);
+    let v24 = b.cmp(CmpOp::Eq, v22, v23);
+    let s27: bool = s7 == 0x3u128;
+    let v29 = st.get(b, regs::V);
+    let v30 = b.konst(Width::new(1), 0x1);
+    let v31 = b.cmp(CmpOp::Eq, v29, v30);
+    let s34: bool = s7 == 0x4u128;
+    let v36 = st.get(b, regs::C);
+    let v37 = b.konst(Width::new(1), 0x1);
+    let v38 = b.cmp(CmpOp::Eq, v36, v37);
+    let v39 = st.get(b, regs::Z);
+    let v40 = b.konst(Width::new(1), 0x0);
+    let v41 = b.cmp(CmpOp::Eq, v39, v40);
+    let v42 = b.and(v38, v41);
+    let s45: bool = s7 == 0x5u128;
+    let v47 = st.get(b, regs::N);
+    let v48 = st.get(b, regs::V);
+    let v49 = b.cmp(CmpOp::Eq, v47, v48);
+    let s52: bool = s7 == 0x6u128;
+    let v54 = st.get(b, regs::N);
+    let v55 = st.get(b, regs::V);
+    let v56 = b.cmp(CmpOp::Eq, v54, v55);
+    let v57 = st.get(b, regs::Z);
+    let v58 = b.konst(Width::new(1), 0x0);
+    let v59 = b.cmp(CmpOp::Eq, v57, v58);
+    let v60 = b.and(v56, v59);
+    let v67 = b.konst(Width::new(1), 1);
+    let v68 = if s52 { v60 } else { v67 };
+    let v70 = if s45 { v49 } else { v68 };
+    let v72 = if s34 { v42 } else { v70 };
+    let v74 = if s27 { v31 } else { v72 };
+    let v76 = if s20 { v24 } else { v74 };
+    let v78 = if s13 { v17 } else { v76 };
+    let v80 = if s8 { v11 } else { v78 };
+    let s82: u128 = (s3 >> 0) & 0x1;
+    let s83: bool = s82 == 0x1u128;
+    let s84: bool = s3 != 0xfu128;
+    let s85: bool = s83 && s84;
+    let v87 = b.not(v80);
+    let v90 = if s85 { v87 } else { v80 };
+    let v91 = st.x_read(b, s5 as u32, 64);
+    let v92 = st.x_read(b, s6 as u32, 64);
+    let v93 = b.zext(v91, Width::W128);
+    let v94 = b.zext(v92, Width::W128);
+    let v95 = b.bin(BinOp::Add, v93, v94);
+    let v96 = b.konst(Width::new(128), 0u128);
+    let v97 = b.bin(BinOp::Add, v95, v96);
+    let v98 = b.sext(v91, Width::W128);
+    let v99 = b.sext(v92, Width::W128);
+    let v100 = b.bin(BinOp::Add, v98, v99);
+    let v101 = b.konst(Width::new(128), 0u128);
+    let v102 = b.bin(BinOp::Add, v100, v101);
+    let v103 = b.extract(v97, 0, Width::new(64));
+    let v104 = b.extract(v103, 63, Width::new(1));
+    let v105 = b.konst(Width::new(64), 0x0);
+    let v106 = b.cmp(CmpOp::Eq, v103, v105);
+    let v110 = b.konst(Width::new(1), 0x1);
+    let v111 = b.konst(Width::new(1), 0x0);
+    let v112 = b.select(v106, v110, v111);
+    let v113 = b.zext(v103, Width::W128);
+    let v114 = b.cmp(CmpOp::Eq, v113, v97);
+    let v118 = b.konst(Width::new(1), 0x0);
+    let v119 = b.konst(Width::new(1), 0x1);
+    let v120 = b.select(v114, v118, v119);
+    let v121 = b.sext(v103, Width::W128);
+    let v122 = b.cmp(CmpOp::Eq, v121, v102);
+    let v126 = b.konst(Width::new(1), 0x0);
+    let v127 = b.konst(Width::new(1), 0x1);
+    let v128 = b.select(v122, v126, v127);
+    let v129 = b.concat(v104, v112);
+    let v130 = b.concat(v129, v120);
+    let v131 = b.concat(v130, v128);
+    let v133 = b.konst(Width::new(4), s1);
+    let v134 = b.select(v90, v131, v133);
     let v138 = b.extract(v134, 3, Width::new(1));
     st.set(b, regs::N, v138, None);
     let v139 = b.extract(v134, 2, Width::new(1));
@@ -7557,6 +10207,800 @@ pub(super) fn CCMP_64_condcmp_reg(
     st.set(b, regs::C, v141, None);
     let v142 = b.extract(v135, 0, Width::new(1));
     st.set(b, regs::V, v142, None);
+    Ok(())
+}
+
+/// `CLS_32_dp_1src`.
+///
+/// Cut: X_read, X_set.
+pub(super) fn CLS_32_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::CLS_32_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.x_read(b, s4 as u32, 32);
+    let v6 = b.extract(v5, 1, Width::new(31));
+    let v7 = b.extract(v5, 0, Width::new(31));
+    let v8 = b.bin(BinOp::Xor, v6, v7);
+    let v9 = b.extract(v8, 30, Width::new(1));
+    let v10 = b.konst(Width::new(1), 0x1);
+    let v11 = b.cmp(CmpOp::Eq, v9, v10);
+    let v12 = b.not(v11);
+    let v13 = b.extract(v8, 29, Width::new(1));
+    let v14 = b.konst(Width::new(1), 0x1);
+    let v15 = b.cmp(CmpOp::Eq, v13, v14);
+    let v16 = b.and(v12, v15);
+    let v17 = b.not(v15);
+    let v18 = b.and(v12, v17);
+    let v19 = b.extract(v8, 28, Width::new(1));
+    let v20 = b.konst(Width::new(1), 0x1);
+    let v21 = b.cmp(CmpOp::Eq, v19, v20);
+    let v22 = b.and(v18, v21);
+    let v23 = b.not(v21);
+    let v24 = b.and(v18, v23);
+    let v25 = b.extract(v8, 27, Width::new(1));
+    let v26 = b.konst(Width::new(1), 0x1);
+    let v27 = b.cmp(CmpOp::Eq, v25, v26);
+    let v28 = b.and(v24, v27);
+    let v29 = b.not(v27);
+    let v30 = b.and(v24, v29);
+    let v31 = b.extract(v8, 26, Width::new(1));
+    let v32 = b.konst(Width::new(1), 0x1);
+    let v33 = b.cmp(CmpOp::Eq, v31, v32);
+    let v34 = b.and(v30, v33);
+    let v35 = b.not(v33);
+    let v36 = b.and(v30, v35);
+    let v37 = b.extract(v8, 25, Width::new(1));
+    let v38 = b.konst(Width::new(1), 0x1);
+    let v39 = b.cmp(CmpOp::Eq, v37, v38);
+    let v40 = b.and(v36, v39);
+    let v41 = b.not(v39);
+    let v42 = b.and(v36, v41);
+    let v43 = b.extract(v8, 24, Width::new(1));
+    let v44 = b.konst(Width::new(1), 0x1);
+    let v45 = b.cmp(CmpOp::Eq, v43, v44);
+    let v46 = b.and(v42, v45);
+    let v47 = b.not(v45);
+    let v48 = b.and(v42, v47);
+    let v49 = b.extract(v8, 23, Width::new(1));
+    let v50 = b.konst(Width::new(1), 0x1);
+    let v51 = b.cmp(CmpOp::Eq, v49, v50);
+    let v52 = b.and(v48, v51);
+    let v53 = b.not(v51);
+    let v54 = b.and(v48, v53);
+    let v55 = b.extract(v8, 22, Width::new(1));
+    let v56 = b.konst(Width::new(1), 0x1);
+    let v57 = b.cmp(CmpOp::Eq, v55, v56);
+    let v58 = b.and(v54, v57);
+    let v59 = b.not(v57);
+    let v60 = b.and(v54, v59);
+    let v61 = b.extract(v8, 21, Width::new(1));
+    let v62 = b.konst(Width::new(1), 0x1);
+    let v63 = b.cmp(CmpOp::Eq, v61, v62);
+    let v64 = b.and(v60, v63);
+    let v65 = b.not(v63);
+    let v66 = b.and(v60, v65);
+    let v67 = b.extract(v8, 20, Width::new(1));
+    let v68 = b.konst(Width::new(1), 0x1);
+    let v69 = b.cmp(CmpOp::Eq, v67, v68);
+    let v70 = b.and(v66, v69);
+    let v71 = b.not(v69);
+    let v72 = b.and(v66, v71);
+    let v73 = b.extract(v8, 19, Width::new(1));
+    let v74 = b.konst(Width::new(1), 0x1);
+    let v75 = b.cmp(CmpOp::Eq, v73, v74);
+    let v76 = b.and(v72, v75);
+    let v77 = b.not(v75);
+    let v78 = b.and(v72, v77);
+    let v79 = b.extract(v8, 18, Width::new(1));
+    let v80 = b.konst(Width::new(1), 0x1);
+    let v81 = b.cmp(CmpOp::Eq, v79, v80);
+    let v82 = b.and(v78, v81);
+    let v83 = b.not(v81);
+    let v84 = b.and(v78, v83);
+    let v85 = b.extract(v8, 17, Width::new(1));
+    let v86 = b.konst(Width::new(1), 0x1);
+    let v87 = b.cmp(CmpOp::Eq, v85, v86);
+    let v88 = b.and(v84, v87);
+    let v89 = b.not(v87);
+    let v90 = b.and(v84, v89);
+    let v91 = b.extract(v8, 16, Width::new(1));
+    let v92 = b.konst(Width::new(1), 0x1);
+    let v93 = b.cmp(CmpOp::Eq, v91, v92);
+    let v94 = b.and(v90, v93);
+    let v95 = b.not(v93);
+    let v96 = b.and(v90, v95);
+    let v97 = b.extract(v8, 15, Width::new(1));
+    let v98 = b.konst(Width::new(1), 0x1);
+    let v99 = b.cmp(CmpOp::Eq, v97, v98);
+    let v100 = b.and(v96, v99);
+    let v101 = b.not(v99);
+    let v102 = b.and(v96, v101);
+    let v103 = b.extract(v8, 14, Width::new(1));
+    let v104 = b.konst(Width::new(1), 0x1);
+    let v105 = b.cmp(CmpOp::Eq, v103, v104);
+    let v106 = b.and(v102, v105);
+    let v107 = b.not(v105);
+    let v108 = b.and(v102, v107);
+    let v109 = b.extract(v8, 13, Width::new(1));
+    let v110 = b.konst(Width::new(1), 0x1);
+    let v111 = b.cmp(CmpOp::Eq, v109, v110);
+    let v112 = b.and(v108, v111);
+    let v113 = b.not(v111);
+    let v114 = b.and(v108, v113);
+    let v115 = b.extract(v8, 12, Width::new(1));
+    let v116 = b.konst(Width::new(1), 0x1);
+    let v117 = b.cmp(CmpOp::Eq, v115, v116);
+    let v118 = b.and(v114, v117);
+    let v119 = b.not(v117);
+    let v120 = b.and(v114, v119);
+    let v121 = b.extract(v8, 11, Width::new(1));
+    let v122 = b.konst(Width::new(1), 0x1);
+    let v123 = b.cmp(CmpOp::Eq, v121, v122);
+    let v124 = b.and(v120, v123);
+    let v125 = b.not(v123);
+    let v126 = b.and(v120, v125);
+    let v127 = b.extract(v8, 10, Width::new(1));
+    let v128 = b.konst(Width::new(1), 0x1);
+    let v129 = b.cmp(CmpOp::Eq, v127, v128);
+    let v130 = b.and(v126, v129);
+    let v131 = b.not(v129);
+    let v132 = b.and(v126, v131);
+    let v133 = b.extract(v8, 9, Width::new(1));
+    let v134 = b.konst(Width::new(1), 0x1);
+    let v135 = b.cmp(CmpOp::Eq, v133, v134);
+    let v136 = b.and(v132, v135);
+    let v137 = b.not(v135);
+    let v138 = b.and(v132, v137);
+    let v139 = b.extract(v8, 8, Width::new(1));
+    let v140 = b.konst(Width::new(1), 0x1);
+    let v141 = b.cmp(CmpOp::Eq, v139, v140);
+    let v142 = b.and(v138, v141);
+    let v143 = b.not(v141);
+    let v144 = b.and(v138, v143);
+    let v145 = b.extract(v8, 7, Width::new(1));
+    let v146 = b.konst(Width::new(1), 0x1);
+    let v147 = b.cmp(CmpOp::Eq, v145, v146);
+    let v148 = b.and(v144, v147);
+    let v149 = b.not(v147);
+    let v150 = b.and(v144, v149);
+    let v151 = b.extract(v8, 6, Width::new(1));
+    let v152 = b.konst(Width::new(1), 0x1);
+    let v153 = b.cmp(CmpOp::Eq, v151, v152);
+    let v154 = b.and(v150, v153);
+    let v155 = b.not(v153);
+    let v156 = b.and(v150, v155);
+    let v157 = b.extract(v8, 5, Width::new(1));
+    let v158 = b.konst(Width::new(1), 0x1);
+    let v159 = b.cmp(CmpOp::Eq, v157, v158);
+    let v160 = b.and(v156, v159);
+    let v161 = b.not(v159);
+    let v162 = b.and(v156, v161);
+    let v163 = b.extract(v8, 4, Width::new(1));
+    let v164 = b.konst(Width::new(1), 0x1);
+    let v165 = b.cmp(CmpOp::Eq, v163, v164);
+    let v166 = b.and(v162, v165);
+    let v167 = b.not(v165);
+    let v168 = b.and(v162, v167);
+    let v169 = b.extract(v8, 3, Width::new(1));
+    let v170 = b.konst(Width::new(1), 0x1);
+    let v171 = b.cmp(CmpOp::Eq, v169, v170);
+    let v172 = b.and(v168, v171);
+    let v173 = b.not(v171);
+    let v174 = b.and(v168, v173);
+    let v175 = b.extract(v8, 2, Width::new(1));
+    let v176 = b.konst(Width::new(1), 0x1);
+    let v177 = b.cmp(CmpOp::Eq, v175, v176);
+    let v178 = b.and(v174, v177);
+    let v179 = b.not(v177);
+    let v180 = b.and(v174, v179);
+    let v181 = b.extract(v8, 1, Width::new(1));
+    let v182 = b.konst(Width::new(1), 0x1);
+    let v183 = b.cmp(CmpOp::Eq, v181, v182);
+    let v184 = b.and(v180, v183);
+    let v185 = b.not(v183);
+    let v186 = b.and(v180, v185);
+    let v187 = b.extract(v8, 0, Width::new(1));
+    let v188 = b.konst(Width::new(1), 0x1);
+    let v189 = b.cmp(CmpOp::Eq, v187, v188);
+    let v190 = b.and(v186, v189);
+    let v193 = b.konst(Width::new(128), 0u128);
+    let v194 = b.konst(Width::new(128), 340282366920938463463374607431768211455u128);
+    let v195 = b.select(v190, v193, v194);
+    let v196 = b.konst(Width::new(128), 1u128);
+    let v197 = b.select(v184, v196, v195);
+    let v198 = b.konst(Width::new(128), 2u128);
+    let v199 = b.select(v178, v198, v197);
+    let v200 = b.konst(Width::new(128), 3u128);
+    let v201 = b.select(v172, v200, v199);
+    let v202 = b.konst(Width::new(128), 4u128);
+    let v203 = b.select(v166, v202, v201);
+    let v204 = b.konst(Width::new(128), 5u128);
+    let v205 = b.select(v160, v204, v203);
+    let v206 = b.konst(Width::new(128), 6u128);
+    let v207 = b.select(v154, v206, v205);
+    let v208 = b.konst(Width::new(128), 7u128);
+    let v209 = b.select(v148, v208, v207);
+    let v210 = b.konst(Width::new(128), 8u128);
+    let v211 = b.select(v142, v210, v209);
+    let v212 = b.konst(Width::new(128), 9u128);
+    let v213 = b.select(v136, v212, v211);
+    let v214 = b.konst(Width::new(128), 10u128);
+    let v215 = b.select(v130, v214, v213);
+    let v216 = b.konst(Width::new(128), 11u128);
+    let v217 = b.select(v124, v216, v215);
+    let v218 = b.konst(Width::new(128), 12u128);
+    let v219 = b.select(v118, v218, v217);
+    let v220 = b.konst(Width::new(128), 13u128);
+    let v221 = b.select(v112, v220, v219);
+    let v222 = b.konst(Width::new(128), 14u128);
+    let v223 = b.select(v106, v222, v221);
+    let v224 = b.konst(Width::new(128), 15u128);
+    let v225 = b.select(v100, v224, v223);
+    let v226 = b.konst(Width::new(128), 16u128);
+    let v227 = b.select(v94, v226, v225);
+    let v228 = b.konst(Width::new(128), 17u128);
+    let v229 = b.select(v88, v228, v227);
+    let v230 = b.konst(Width::new(128), 18u128);
+    let v231 = b.select(v82, v230, v229);
+    let v232 = b.konst(Width::new(128), 19u128);
+    let v233 = b.select(v76, v232, v231);
+    let v234 = b.konst(Width::new(128), 20u128);
+    let v235 = b.select(v70, v234, v233);
+    let v236 = b.konst(Width::new(128), 21u128);
+    let v237 = b.select(v64, v236, v235);
+    let v238 = b.konst(Width::new(128), 22u128);
+    let v239 = b.select(v58, v238, v237);
+    let v240 = b.konst(Width::new(128), 23u128);
+    let v241 = b.select(v52, v240, v239);
+    let v242 = b.konst(Width::new(128), 24u128);
+    let v243 = b.select(v46, v242, v241);
+    let v244 = b.konst(Width::new(128), 25u128);
+    let v245 = b.select(v40, v244, v243);
+    let v246 = b.konst(Width::new(128), 26u128);
+    let v247 = b.select(v34, v246, v245);
+    let v248 = b.konst(Width::new(128), 27u128);
+    let v249 = b.select(v28, v248, v247);
+    let v250 = b.konst(Width::new(128), 28u128);
+    let v251 = b.select(v22, v250, v249);
+    let v252 = b.konst(Width::new(128), 29u128);
+    let v253 = b.select(v16, v252, v251);
+    let v254 = b.konst(Width::new(128), 30u128);
+    let v255 = b.select(v11, v254, v253);
+    let v256 = b.konst(Width::new(128), 1u128);
+    let v257 = b.bin(BinOp::Add, v255, v256);
+    let v258 = b.konst(Width::new(128), 31u128);
+    let v259 = b.bin(BinOp::Sub, v258, v257);
+    let v260 = b.extract(v259, 0, Width::new(32));
+    st.x_set(b, s3 as u32, v260, None);
+    Ok(())
+}
+
+/// `CLS_64_dp_1src`.
+///
+/// Cut: X_read, X_set.
+pub(super) fn CLS_64_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::CLS_64_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.x_read(b, s4 as u32, 64);
+    let v6 = b.extract(v5, 1, Width::new(63));
+    let v7 = b.extract(v5, 0, Width::new(63));
+    let v8 = b.bin(BinOp::Xor, v6, v7);
+    let v9 = b.extract(v8, 62, Width::new(1));
+    let v10 = b.konst(Width::new(1), 0x1);
+    let v11 = b.cmp(CmpOp::Eq, v9, v10);
+    let v12 = b.not(v11);
+    let v13 = b.extract(v8, 61, Width::new(1));
+    let v14 = b.konst(Width::new(1), 0x1);
+    let v15 = b.cmp(CmpOp::Eq, v13, v14);
+    let v16 = b.and(v12, v15);
+    let v17 = b.not(v15);
+    let v18 = b.and(v12, v17);
+    let v19 = b.extract(v8, 60, Width::new(1));
+    let v20 = b.konst(Width::new(1), 0x1);
+    let v21 = b.cmp(CmpOp::Eq, v19, v20);
+    let v22 = b.and(v18, v21);
+    let v23 = b.not(v21);
+    let v24 = b.and(v18, v23);
+    let v25 = b.extract(v8, 59, Width::new(1));
+    let v26 = b.konst(Width::new(1), 0x1);
+    let v27 = b.cmp(CmpOp::Eq, v25, v26);
+    let v28 = b.and(v24, v27);
+    let v29 = b.not(v27);
+    let v30 = b.and(v24, v29);
+    let v31 = b.extract(v8, 58, Width::new(1));
+    let v32 = b.konst(Width::new(1), 0x1);
+    let v33 = b.cmp(CmpOp::Eq, v31, v32);
+    let v34 = b.and(v30, v33);
+    let v35 = b.not(v33);
+    let v36 = b.and(v30, v35);
+    let v37 = b.extract(v8, 57, Width::new(1));
+    let v38 = b.konst(Width::new(1), 0x1);
+    let v39 = b.cmp(CmpOp::Eq, v37, v38);
+    let v40 = b.and(v36, v39);
+    let v41 = b.not(v39);
+    let v42 = b.and(v36, v41);
+    let v43 = b.extract(v8, 56, Width::new(1));
+    let v44 = b.konst(Width::new(1), 0x1);
+    let v45 = b.cmp(CmpOp::Eq, v43, v44);
+    let v46 = b.and(v42, v45);
+    let v47 = b.not(v45);
+    let v48 = b.and(v42, v47);
+    let v49 = b.extract(v8, 55, Width::new(1));
+    let v50 = b.konst(Width::new(1), 0x1);
+    let v51 = b.cmp(CmpOp::Eq, v49, v50);
+    let v52 = b.and(v48, v51);
+    let v53 = b.not(v51);
+    let v54 = b.and(v48, v53);
+    let v55 = b.extract(v8, 54, Width::new(1));
+    let v56 = b.konst(Width::new(1), 0x1);
+    let v57 = b.cmp(CmpOp::Eq, v55, v56);
+    let v58 = b.and(v54, v57);
+    let v59 = b.not(v57);
+    let v60 = b.and(v54, v59);
+    let v61 = b.extract(v8, 53, Width::new(1));
+    let v62 = b.konst(Width::new(1), 0x1);
+    let v63 = b.cmp(CmpOp::Eq, v61, v62);
+    let v64 = b.and(v60, v63);
+    let v65 = b.not(v63);
+    let v66 = b.and(v60, v65);
+    let v67 = b.extract(v8, 52, Width::new(1));
+    let v68 = b.konst(Width::new(1), 0x1);
+    let v69 = b.cmp(CmpOp::Eq, v67, v68);
+    let v70 = b.and(v66, v69);
+    let v71 = b.not(v69);
+    let v72 = b.and(v66, v71);
+    let v73 = b.extract(v8, 51, Width::new(1));
+    let v74 = b.konst(Width::new(1), 0x1);
+    let v75 = b.cmp(CmpOp::Eq, v73, v74);
+    let v76 = b.and(v72, v75);
+    let v77 = b.not(v75);
+    let v78 = b.and(v72, v77);
+    let v79 = b.extract(v8, 50, Width::new(1));
+    let v80 = b.konst(Width::new(1), 0x1);
+    let v81 = b.cmp(CmpOp::Eq, v79, v80);
+    let v82 = b.and(v78, v81);
+    let v83 = b.not(v81);
+    let v84 = b.and(v78, v83);
+    let v85 = b.extract(v8, 49, Width::new(1));
+    let v86 = b.konst(Width::new(1), 0x1);
+    let v87 = b.cmp(CmpOp::Eq, v85, v86);
+    let v88 = b.and(v84, v87);
+    let v89 = b.not(v87);
+    let v90 = b.and(v84, v89);
+    let v91 = b.extract(v8, 48, Width::new(1));
+    let v92 = b.konst(Width::new(1), 0x1);
+    let v93 = b.cmp(CmpOp::Eq, v91, v92);
+    let v94 = b.and(v90, v93);
+    let v95 = b.not(v93);
+    let v96 = b.and(v90, v95);
+    let v97 = b.extract(v8, 47, Width::new(1));
+    let v98 = b.konst(Width::new(1), 0x1);
+    let v99 = b.cmp(CmpOp::Eq, v97, v98);
+    let v100 = b.and(v96, v99);
+    let v101 = b.not(v99);
+    let v102 = b.and(v96, v101);
+    let v103 = b.extract(v8, 46, Width::new(1));
+    let v104 = b.konst(Width::new(1), 0x1);
+    let v105 = b.cmp(CmpOp::Eq, v103, v104);
+    let v106 = b.and(v102, v105);
+    let v107 = b.not(v105);
+    let v108 = b.and(v102, v107);
+    let v109 = b.extract(v8, 45, Width::new(1));
+    let v110 = b.konst(Width::new(1), 0x1);
+    let v111 = b.cmp(CmpOp::Eq, v109, v110);
+    let v112 = b.and(v108, v111);
+    let v113 = b.not(v111);
+    let v114 = b.and(v108, v113);
+    let v115 = b.extract(v8, 44, Width::new(1));
+    let v116 = b.konst(Width::new(1), 0x1);
+    let v117 = b.cmp(CmpOp::Eq, v115, v116);
+    let v118 = b.and(v114, v117);
+    let v119 = b.not(v117);
+    let v120 = b.and(v114, v119);
+    let v121 = b.extract(v8, 43, Width::new(1));
+    let v122 = b.konst(Width::new(1), 0x1);
+    let v123 = b.cmp(CmpOp::Eq, v121, v122);
+    let v124 = b.and(v120, v123);
+    let v125 = b.not(v123);
+    let v126 = b.and(v120, v125);
+    let v127 = b.extract(v8, 42, Width::new(1));
+    let v128 = b.konst(Width::new(1), 0x1);
+    let v129 = b.cmp(CmpOp::Eq, v127, v128);
+    let v130 = b.and(v126, v129);
+    let v131 = b.not(v129);
+    let v132 = b.and(v126, v131);
+    let v133 = b.extract(v8, 41, Width::new(1));
+    let v134 = b.konst(Width::new(1), 0x1);
+    let v135 = b.cmp(CmpOp::Eq, v133, v134);
+    let v136 = b.and(v132, v135);
+    let v137 = b.not(v135);
+    let v138 = b.and(v132, v137);
+    let v139 = b.extract(v8, 40, Width::new(1));
+    let v140 = b.konst(Width::new(1), 0x1);
+    let v141 = b.cmp(CmpOp::Eq, v139, v140);
+    let v142 = b.and(v138, v141);
+    let v143 = b.not(v141);
+    let v144 = b.and(v138, v143);
+    let v145 = b.extract(v8, 39, Width::new(1));
+    let v146 = b.konst(Width::new(1), 0x1);
+    let v147 = b.cmp(CmpOp::Eq, v145, v146);
+    let v148 = b.and(v144, v147);
+    let v149 = b.not(v147);
+    let v150 = b.and(v144, v149);
+    let v151 = b.extract(v8, 38, Width::new(1));
+    let v152 = b.konst(Width::new(1), 0x1);
+    let v153 = b.cmp(CmpOp::Eq, v151, v152);
+    let v154 = b.and(v150, v153);
+    let v155 = b.not(v153);
+    let v156 = b.and(v150, v155);
+    let v157 = b.extract(v8, 37, Width::new(1));
+    let v158 = b.konst(Width::new(1), 0x1);
+    let v159 = b.cmp(CmpOp::Eq, v157, v158);
+    let v160 = b.and(v156, v159);
+    let v161 = b.not(v159);
+    let v162 = b.and(v156, v161);
+    let v163 = b.extract(v8, 36, Width::new(1));
+    let v164 = b.konst(Width::new(1), 0x1);
+    let v165 = b.cmp(CmpOp::Eq, v163, v164);
+    let v166 = b.and(v162, v165);
+    let v167 = b.not(v165);
+    let v168 = b.and(v162, v167);
+    let v169 = b.extract(v8, 35, Width::new(1));
+    let v170 = b.konst(Width::new(1), 0x1);
+    let v171 = b.cmp(CmpOp::Eq, v169, v170);
+    let v172 = b.and(v168, v171);
+    let v173 = b.not(v171);
+    let v174 = b.and(v168, v173);
+    let v175 = b.extract(v8, 34, Width::new(1));
+    let v176 = b.konst(Width::new(1), 0x1);
+    let v177 = b.cmp(CmpOp::Eq, v175, v176);
+    let v178 = b.and(v174, v177);
+    let v179 = b.not(v177);
+    let v180 = b.and(v174, v179);
+    let v181 = b.extract(v8, 33, Width::new(1));
+    let v182 = b.konst(Width::new(1), 0x1);
+    let v183 = b.cmp(CmpOp::Eq, v181, v182);
+    let v184 = b.and(v180, v183);
+    let v185 = b.not(v183);
+    let v186 = b.and(v180, v185);
+    let v187 = b.extract(v8, 32, Width::new(1));
+    let v188 = b.konst(Width::new(1), 0x1);
+    let v189 = b.cmp(CmpOp::Eq, v187, v188);
+    let v190 = b.and(v186, v189);
+    let v191 = b.not(v189);
+    let v192 = b.and(v186, v191);
+    let v193 = b.extract(v8, 31, Width::new(1));
+    let v194 = b.konst(Width::new(1), 0x1);
+    let v195 = b.cmp(CmpOp::Eq, v193, v194);
+    let v196 = b.and(v192, v195);
+    let v197 = b.not(v195);
+    let v198 = b.and(v192, v197);
+    let v199 = b.extract(v8, 30, Width::new(1));
+    let v200 = b.konst(Width::new(1), 0x1);
+    let v201 = b.cmp(CmpOp::Eq, v199, v200);
+    let v202 = b.and(v198, v201);
+    let v203 = b.not(v201);
+    let v204 = b.and(v198, v203);
+    let v205 = b.extract(v8, 29, Width::new(1));
+    let v206 = b.konst(Width::new(1), 0x1);
+    let v207 = b.cmp(CmpOp::Eq, v205, v206);
+    let v208 = b.and(v204, v207);
+    let v209 = b.not(v207);
+    let v210 = b.and(v204, v209);
+    let v211 = b.extract(v8, 28, Width::new(1));
+    let v212 = b.konst(Width::new(1), 0x1);
+    let v213 = b.cmp(CmpOp::Eq, v211, v212);
+    let v214 = b.and(v210, v213);
+    let v215 = b.not(v213);
+    let v216 = b.and(v210, v215);
+    let v217 = b.extract(v8, 27, Width::new(1));
+    let v218 = b.konst(Width::new(1), 0x1);
+    let v219 = b.cmp(CmpOp::Eq, v217, v218);
+    let v220 = b.and(v216, v219);
+    let v221 = b.not(v219);
+    let v222 = b.and(v216, v221);
+    let v223 = b.extract(v8, 26, Width::new(1));
+    let v224 = b.konst(Width::new(1), 0x1);
+    let v225 = b.cmp(CmpOp::Eq, v223, v224);
+    let v226 = b.and(v222, v225);
+    let v227 = b.not(v225);
+    let v228 = b.and(v222, v227);
+    let v229 = b.extract(v8, 25, Width::new(1));
+    let v230 = b.konst(Width::new(1), 0x1);
+    let v231 = b.cmp(CmpOp::Eq, v229, v230);
+    let v232 = b.and(v228, v231);
+    let v233 = b.not(v231);
+    let v234 = b.and(v228, v233);
+    let v235 = b.extract(v8, 24, Width::new(1));
+    let v236 = b.konst(Width::new(1), 0x1);
+    let v237 = b.cmp(CmpOp::Eq, v235, v236);
+    let v238 = b.and(v234, v237);
+    let v239 = b.not(v237);
+    let v240 = b.and(v234, v239);
+    let v241 = b.extract(v8, 23, Width::new(1));
+    let v242 = b.konst(Width::new(1), 0x1);
+    let v243 = b.cmp(CmpOp::Eq, v241, v242);
+    let v244 = b.and(v240, v243);
+    let v245 = b.not(v243);
+    let v246 = b.and(v240, v245);
+    let v247 = b.extract(v8, 22, Width::new(1));
+    let v248 = b.konst(Width::new(1), 0x1);
+    let v249 = b.cmp(CmpOp::Eq, v247, v248);
+    let v250 = b.and(v246, v249);
+    let v251 = b.not(v249);
+    let v252 = b.and(v246, v251);
+    let v253 = b.extract(v8, 21, Width::new(1));
+    let v254 = b.konst(Width::new(1), 0x1);
+    let v255 = b.cmp(CmpOp::Eq, v253, v254);
+    let v256 = b.and(v252, v255);
+    let v257 = b.not(v255);
+    let v258 = b.and(v252, v257);
+    let v259 = b.extract(v8, 20, Width::new(1));
+    let v260 = b.konst(Width::new(1), 0x1);
+    let v261 = b.cmp(CmpOp::Eq, v259, v260);
+    let v262 = b.and(v258, v261);
+    let v263 = b.not(v261);
+    let v264 = b.and(v258, v263);
+    let v265 = b.extract(v8, 19, Width::new(1));
+    let v266 = b.konst(Width::new(1), 0x1);
+    let v267 = b.cmp(CmpOp::Eq, v265, v266);
+    let v268 = b.and(v264, v267);
+    let v269 = b.not(v267);
+    let v270 = b.and(v264, v269);
+    let v271 = b.extract(v8, 18, Width::new(1));
+    let v272 = b.konst(Width::new(1), 0x1);
+    let v273 = b.cmp(CmpOp::Eq, v271, v272);
+    let v274 = b.and(v270, v273);
+    let v275 = b.not(v273);
+    let v276 = b.and(v270, v275);
+    let v277 = b.extract(v8, 17, Width::new(1));
+    let v278 = b.konst(Width::new(1), 0x1);
+    let v279 = b.cmp(CmpOp::Eq, v277, v278);
+    let v280 = b.and(v276, v279);
+    let v281 = b.not(v279);
+    let v282 = b.and(v276, v281);
+    let v283 = b.extract(v8, 16, Width::new(1));
+    let v284 = b.konst(Width::new(1), 0x1);
+    let v285 = b.cmp(CmpOp::Eq, v283, v284);
+    let v286 = b.and(v282, v285);
+    let v287 = b.not(v285);
+    let v288 = b.and(v282, v287);
+    let v289 = b.extract(v8, 15, Width::new(1));
+    let v290 = b.konst(Width::new(1), 0x1);
+    let v291 = b.cmp(CmpOp::Eq, v289, v290);
+    let v292 = b.and(v288, v291);
+    let v293 = b.not(v291);
+    let v294 = b.and(v288, v293);
+    let v295 = b.extract(v8, 14, Width::new(1));
+    let v296 = b.konst(Width::new(1), 0x1);
+    let v297 = b.cmp(CmpOp::Eq, v295, v296);
+    let v298 = b.and(v294, v297);
+    let v299 = b.not(v297);
+    let v300 = b.and(v294, v299);
+    let v301 = b.extract(v8, 13, Width::new(1));
+    let v302 = b.konst(Width::new(1), 0x1);
+    let v303 = b.cmp(CmpOp::Eq, v301, v302);
+    let v304 = b.and(v300, v303);
+    let v305 = b.not(v303);
+    let v306 = b.and(v300, v305);
+    let v307 = b.extract(v8, 12, Width::new(1));
+    let v308 = b.konst(Width::new(1), 0x1);
+    let v309 = b.cmp(CmpOp::Eq, v307, v308);
+    let v310 = b.and(v306, v309);
+    let v311 = b.not(v309);
+    let v312 = b.and(v306, v311);
+    let v313 = b.extract(v8, 11, Width::new(1));
+    let v314 = b.konst(Width::new(1), 0x1);
+    let v315 = b.cmp(CmpOp::Eq, v313, v314);
+    let v316 = b.and(v312, v315);
+    let v317 = b.not(v315);
+    let v318 = b.and(v312, v317);
+    let v319 = b.extract(v8, 10, Width::new(1));
+    let v320 = b.konst(Width::new(1), 0x1);
+    let v321 = b.cmp(CmpOp::Eq, v319, v320);
+    let v322 = b.and(v318, v321);
+    let v323 = b.not(v321);
+    let v324 = b.and(v318, v323);
+    let v325 = b.extract(v8, 9, Width::new(1));
+    let v326 = b.konst(Width::new(1), 0x1);
+    let v327 = b.cmp(CmpOp::Eq, v325, v326);
+    let v328 = b.and(v324, v327);
+    let v329 = b.not(v327);
+    let v330 = b.and(v324, v329);
+    let v331 = b.extract(v8, 8, Width::new(1));
+    let v332 = b.konst(Width::new(1), 0x1);
+    let v333 = b.cmp(CmpOp::Eq, v331, v332);
+    let v334 = b.and(v330, v333);
+    let v335 = b.not(v333);
+    let v336 = b.and(v330, v335);
+    let v337 = b.extract(v8, 7, Width::new(1));
+    let v338 = b.konst(Width::new(1), 0x1);
+    let v339 = b.cmp(CmpOp::Eq, v337, v338);
+    let v340 = b.and(v336, v339);
+    let v341 = b.not(v339);
+    let v342 = b.and(v336, v341);
+    let v343 = b.extract(v8, 6, Width::new(1));
+    let v344 = b.konst(Width::new(1), 0x1);
+    let v345 = b.cmp(CmpOp::Eq, v343, v344);
+    let v346 = b.and(v342, v345);
+    let v347 = b.not(v345);
+    let v348 = b.and(v342, v347);
+    let v349 = b.extract(v8, 5, Width::new(1));
+    let v350 = b.konst(Width::new(1), 0x1);
+    let v351 = b.cmp(CmpOp::Eq, v349, v350);
+    let v352 = b.and(v348, v351);
+    let v353 = b.not(v351);
+    let v354 = b.and(v348, v353);
+    let v355 = b.extract(v8, 4, Width::new(1));
+    let v356 = b.konst(Width::new(1), 0x1);
+    let v357 = b.cmp(CmpOp::Eq, v355, v356);
+    let v358 = b.and(v354, v357);
+    let v359 = b.not(v357);
+    let v360 = b.and(v354, v359);
+    let v361 = b.extract(v8, 3, Width::new(1));
+    let v362 = b.konst(Width::new(1), 0x1);
+    let v363 = b.cmp(CmpOp::Eq, v361, v362);
+    let v364 = b.and(v360, v363);
+    let v365 = b.not(v363);
+    let v366 = b.and(v360, v365);
+    let v367 = b.extract(v8, 2, Width::new(1));
+    let v368 = b.konst(Width::new(1), 0x1);
+    let v369 = b.cmp(CmpOp::Eq, v367, v368);
+    let v370 = b.and(v366, v369);
+    let v371 = b.not(v369);
+    let v372 = b.and(v366, v371);
+    let v373 = b.extract(v8, 1, Width::new(1));
+    let v374 = b.konst(Width::new(1), 0x1);
+    let v375 = b.cmp(CmpOp::Eq, v373, v374);
+    let v376 = b.and(v372, v375);
+    let v377 = b.not(v375);
+    let v378 = b.and(v372, v377);
+    let v379 = b.extract(v8, 0, Width::new(1));
+    let v380 = b.konst(Width::new(1), 0x1);
+    let v381 = b.cmp(CmpOp::Eq, v379, v380);
+    let v382 = b.and(v378, v381);
+    let v385 = b.konst(Width::new(128), 0u128);
+    let v386 = b.konst(Width::new(128), 340282366920938463463374607431768211455u128);
+    let v387 = b.select(v382, v385, v386);
+    let v388 = b.konst(Width::new(128), 1u128);
+    let v389 = b.select(v376, v388, v387);
+    let v390 = b.konst(Width::new(128), 2u128);
+    let v391 = b.select(v370, v390, v389);
+    let v392 = b.konst(Width::new(128), 3u128);
+    let v393 = b.select(v364, v392, v391);
+    let v394 = b.konst(Width::new(128), 4u128);
+    let v395 = b.select(v358, v394, v393);
+    let v396 = b.konst(Width::new(128), 5u128);
+    let v397 = b.select(v352, v396, v395);
+    let v398 = b.konst(Width::new(128), 6u128);
+    let v399 = b.select(v346, v398, v397);
+    let v400 = b.konst(Width::new(128), 7u128);
+    let v401 = b.select(v340, v400, v399);
+    let v402 = b.konst(Width::new(128), 8u128);
+    let v403 = b.select(v334, v402, v401);
+    let v404 = b.konst(Width::new(128), 9u128);
+    let v405 = b.select(v328, v404, v403);
+    let v406 = b.konst(Width::new(128), 10u128);
+    let v407 = b.select(v322, v406, v405);
+    let v408 = b.konst(Width::new(128), 11u128);
+    let v409 = b.select(v316, v408, v407);
+    let v410 = b.konst(Width::new(128), 12u128);
+    let v411 = b.select(v310, v410, v409);
+    let v412 = b.konst(Width::new(128), 13u128);
+    let v413 = b.select(v304, v412, v411);
+    let v414 = b.konst(Width::new(128), 14u128);
+    let v415 = b.select(v298, v414, v413);
+    let v416 = b.konst(Width::new(128), 15u128);
+    let v417 = b.select(v292, v416, v415);
+    let v418 = b.konst(Width::new(128), 16u128);
+    let v419 = b.select(v286, v418, v417);
+    let v420 = b.konst(Width::new(128), 17u128);
+    let v421 = b.select(v280, v420, v419);
+    let v422 = b.konst(Width::new(128), 18u128);
+    let v423 = b.select(v274, v422, v421);
+    let v424 = b.konst(Width::new(128), 19u128);
+    let v425 = b.select(v268, v424, v423);
+    let v426 = b.konst(Width::new(128), 20u128);
+    let v427 = b.select(v262, v426, v425);
+    let v428 = b.konst(Width::new(128), 21u128);
+    let v429 = b.select(v256, v428, v427);
+    let v430 = b.konst(Width::new(128), 22u128);
+    let v431 = b.select(v250, v430, v429);
+    let v432 = b.konst(Width::new(128), 23u128);
+    let v433 = b.select(v244, v432, v431);
+    let v434 = b.konst(Width::new(128), 24u128);
+    let v435 = b.select(v238, v434, v433);
+    let v436 = b.konst(Width::new(128), 25u128);
+    let v437 = b.select(v232, v436, v435);
+    let v438 = b.konst(Width::new(128), 26u128);
+    let v439 = b.select(v226, v438, v437);
+    let v440 = b.konst(Width::new(128), 27u128);
+    let v441 = b.select(v220, v440, v439);
+    let v442 = b.konst(Width::new(128), 28u128);
+    let v443 = b.select(v214, v442, v441);
+    let v444 = b.konst(Width::new(128), 29u128);
+    let v445 = b.select(v208, v444, v443);
+    let v446 = b.konst(Width::new(128), 30u128);
+    let v447 = b.select(v202, v446, v445);
+    let v448 = b.konst(Width::new(128), 31u128);
+    let v449 = b.select(v196, v448, v447);
+    let v450 = b.konst(Width::new(128), 32u128);
+    let v451 = b.select(v190, v450, v449);
+    let v452 = b.konst(Width::new(128), 33u128);
+    let v453 = b.select(v184, v452, v451);
+    let v454 = b.konst(Width::new(128), 34u128);
+    let v455 = b.select(v178, v454, v453);
+    let v456 = b.konst(Width::new(128), 35u128);
+    let v457 = b.select(v172, v456, v455);
+    let v458 = b.konst(Width::new(128), 36u128);
+    let v459 = b.select(v166, v458, v457);
+    let v460 = b.konst(Width::new(128), 37u128);
+    let v461 = b.select(v160, v460, v459);
+    let v462 = b.konst(Width::new(128), 38u128);
+    let v463 = b.select(v154, v462, v461);
+    let v464 = b.konst(Width::new(128), 39u128);
+    let v465 = b.select(v148, v464, v463);
+    let v466 = b.konst(Width::new(128), 40u128);
+    let v467 = b.select(v142, v466, v465);
+    let v468 = b.konst(Width::new(128), 41u128);
+    let v469 = b.select(v136, v468, v467);
+    let v470 = b.konst(Width::new(128), 42u128);
+    let v471 = b.select(v130, v470, v469);
+    let v472 = b.konst(Width::new(128), 43u128);
+    let v473 = b.select(v124, v472, v471);
+    let v474 = b.konst(Width::new(128), 44u128);
+    let v475 = b.select(v118, v474, v473);
+    let v476 = b.konst(Width::new(128), 45u128);
+    let v477 = b.select(v112, v476, v475);
+    let v478 = b.konst(Width::new(128), 46u128);
+    let v479 = b.select(v106, v478, v477);
+    let v480 = b.konst(Width::new(128), 47u128);
+    let v481 = b.select(v100, v480, v479);
+    let v482 = b.konst(Width::new(128), 48u128);
+    let v483 = b.select(v94, v482, v481);
+    let v484 = b.konst(Width::new(128), 49u128);
+    let v485 = b.select(v88, v484, v483);
+    let v486 = b.konst(Width::new(128), 50u128);
+    let v487 = b.select(v82, v486, v485);
+    let v488 = b.konst(Width::new(128), 51u128);
+    let v489 = b.select(v76, v488, v487);
+    let v490 = b.konst(Width::new(128), 52u128);
+    let v491 = b.select(v70, v490, v489);
+    let v492 = b.konst(Width::new(128), 53u128);
+    let v493 = b.select(v64, v492, v491);
+    let v494 = b.konst(Width::new(128), 54u128);
+    let v495 = b.select(v58, v494, v493);
+    let v496 = b.konst(Width::new(128), 55u128);
+    let v497 = b.select(v52, v496, v495);
+    let v498 = b.konst(Width::new(128), 56u128);
+    let v499 = b.select(v46, v498, v497);
+    let v500 = b.konst(Width::new(128), 57u128);
+    let v501 = b.select(v40, v500, v499);
+    let v502 = b.konst(Width::new(128), 58u128);
+    let v503 = b.select(v34, v502, v501);
+    let v504 = b.konst(Width::new(128), 59u128);
+    let v505 = b.select(v28, v504, v503);
+    let v506 = b.konst(Width::new(128), 60u128);
+    let v507 = b.select(v22, v506, v505);
+    let v508 = b.konst(Width::new(128), 61u128);
+    let v509 = b.select(v16, v508, v507);
+    let v510 = b.konst(Width::new(128), 62u128);
+    let v511 = b.select(v11, v510, v509);
+    let v512 = b.konst(Width::new(128), 1u128);
+    let v513 = b.bin(BinOp::Add, v511, v512);
+    let v514 = b.konst(Width::new(128), 63u128);
+    let v515 = b.bin(BinOp::Sub, v514, v513);
+    let v516 = b.extract(v515, 0, Width::new(64));
+    st.x_set(b, s3 as u32, v516, None);
     Ok(())
 }
 
@@ -15356,6 +18800,297 @@ pub(super) fn EXTR_64_extract(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `LDAPRB_32L_memop`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPRB_32L_memop(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPRB_32L_memop;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(8), Endian::Little, Order::Acquire);
+    let v12 = b.zext(v11, Width::new(32));
+    st.x_set(b, s4 as u32, v12, None);
+    Ok(())
+}
+
+/// `LDAPR_32L_memop`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPR_32L_memop(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPR_32L_memop;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(32), Endian::Little, Order::Acquire);
+    st.x_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `LDAPR_64L_memop`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPR_64L_memop(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPR_64L_memop;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(64), Endian::Little, Order::Acquire);
+    st.x_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `LDAPURB_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPURB_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPURB_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Acquire);
+    let v16 = b.zext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDAPURH_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPURH_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPURH_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Acquire);
+    let v16 = b.zext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDAPURSB_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPURSB_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPURSB_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Acquire);
+    let v16 = b.sext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDAPURSB_64_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPURSB_64_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPURSB_64_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Acquire);
+    let v16 = b.sext(v15, Width::new(64));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDAPURSH_64_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPURSH_64_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPURSH_64_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Acquire);
+    let v16 = b.sext(v15, Width::new(64));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDAPURSW_64_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPURSW_64_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPURSW_64_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::Acquire);
+    let v16 = b.sext(v15, Width::new(64));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDAPUR_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPUR_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPUR_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::Acquire);
+    st.x_set(b, s6 as u32, v15, None);
+    Ok(())
+}
+
+/// `LDAPUR_64_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAPUR_64_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAPUR_64_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(64), Endian::Little, Order::Acquire);
+    st.x_set(b, s6 as u32, v15, None);
+    Ok(())
+}
+
 /// `LSLV_32_dp_2src`.
 ///
 /// Cut: X_read, X_set.
@@ -17052,6 +20787,68 @@ pub(super) fn SBCS_64_addsub_carry(
     Ok(())
 }
 
+/// `SBC_32_addsub_carry`.
+///
+/// Cut: PSTATE.NZCV, X_read, X_set.
+pub(super) fn SBC_32_addsub_carry(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SBC_32_addsub_carry;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.x_read(b, s5 as u32, 32);
+    let v8 = st.x_read(b, s6 as u32, 32);
+    let v9 = b.not(v8);
+    let v10 = st.get(b, regs::C);
+    let v11 = b.zext(v7, Width::W128);
+    let v12 = b.zext(v9, Width::W128);
+    let v13 = b.bin(BinOp::Add, v11, v12);
+    let v14 = b.zext(v10, Width::W128);
+    let v15 = b.bin(BinOp::Add, v13, v14);
+    let v21 = b.extract(v15, 0, Width::new(32));
+    st.x_set(b, s4 as u32, v21, None);
+    Ok(())
+}
+
+/// `SBC_64_addsub_carry`.
+///
+/// Cut: PSTATE.NZCV, X_read, X_set.
+pub(super) fn SBC_64_addsub_carry(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SBC_64_addsub_carry;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.x_read(b, s5 as u32, 64);
+    let v8 = st.x_read(b, s6 as u32, 64);
+    let v9 = b.not(v8);
+    let v10 = st.get(b, regs::C);
+    let v11 = b.zext(v7, Width::W128);
+    let v12 = b.zext(v9, Width::W128);
+    let v13 = b.bin(BinOp::Add, v11, v12);
+    let v14 = b.zext(v10, Width::W128);
+    let v15 = b.bin(BinOp::Add, v13, v14);
+    let v21 = b.extract(v15, 0, Width::new(64));
+    st.x_set(b, s4 as u32, v21, None);
+    Ok(())
+}
+
 /// `SBFM_32M_bitfield`.
 ///
 /// Cut: DecodeBitMasks, X_read, X_set.
@@ -17393,6 +21190,118 @@ pub(super) fn SMULH_64_dp_3src(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v11 = b.bin(BinOp::Mul, v9, v10);
     let v12 = b.extract(v11, 64, Width::new(64));
     st.x_set(b, s4 as u32, v12, None);
+    Ok(())
+}
+
+/// `STLURB_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLURB_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLURB_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 8);
+    b.store(v14, v15, Endian::Little, Order::Release);
+    Ok(())
+}
+
+/// `STLURH_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLURH_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLURH_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 16);
+    b.store(v14, v15, Endian::Little, Order::Release);
+    Ok(())
+}
+
+/// `STLUR_32_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLUR_32_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLUR_32_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 32);
+    b.store(v14, v15, Endian::Little, Order::Release);
+    Ok(())
+}
+
+/// `STLUR_64_ldapstl_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLUR_64_ldapstl_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLUR_64_ldapstl_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 64);
+    b.store(v14, v15, Endian::Little, Order::Release);
     Ok(())
 }
 
@@ -26006,7 +29915,9 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
         Encoding::ADCS_32_addsub_carry => ADCS_32_addsub_carry,
         Encoding::ADCS_64_addsub_carry => ADCS_64_addsub_carry,
+        Encoding::ADC_32_addsub_carry => ADC_32_addsub_carry,
         Encoding::ADC_64_addsub_carry => ADC_64_addsub_carry,
+        Encoding::ADDS_32S_addsub_ext => ADDS_32S_addsub_ext,
         Encoding::ADDS_32S_addsub_imm => ADDS_32S_addsub_imm,
         Encoding::ADDS_32_addsub_shift => ADDS_32_addsub_shift,
         Encoding::ADDS_64S_addsub_ext => ADDS_64S_addsub_ext,
@@ -26037,11 +29948,15 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::BIC_32_log_shift => BIC_32_log_shift,
         Encoding::BIC_64_log_shift => BIC_64_log_shift,
         Encoding::CCMN_32_condcmp_imm => CCMN_32_condcmp_imm,
+        Encoding::CCMN_32_condcmp_reg => CCMN_32_condcmp_reg,
         Encoding::CCMN_64_condcmp_imm => CCMN_64_condcmp_imm,
+        Encoding::CCMN_64_condcmp_reg => CCMN_64_condcmp_reg,
         Encoding::CCMP_32_condcmp_imm => CCMP_32_condcmp_imm,
         Encoding::CCMP_32_condcmp_reg => CCMP_32_condcmp_reg,
         Encoding::CCMP_64_condcmp_imm => CCMP_64_condcmp_imm,
         Encoding::CCMP_64_condcmp_reg => CCMP_64_condcmp_reg,
+        Encoding::CLS_32_dp_1src => CLS_32_dp_1src,
+        Encoding::CLS_64_dp_1src => CLS_64_dp_1src,
         Encoding::CLZ_32_dp_1src => CLZ_32_dp_1src,
         Encoding::CLZ_64_dp_1src => CLZ_64_dp_1src,
         Encoding::CRC32B_32C_dp_2src => CRC32B_32C_dp_2src,
@@ -26068,6 +29983,17 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::EOR_64_log_shift => EOR_64_log_shift,
         Encoding::EXTR_32_extract => EXTR_32_extract,
         Encoding::EXTR_64_extract => EXTR_64_extract,
+        Encoding::LDAPRB_32L_memop => LDAPRB_32L_memop,
+        Encoding::LDAPR_32L_memop => LDAPR_32L_memop,
+        Encoding::LDAPR_64L_memop => LDAPR_64L_memop,
+        Encoding::LDAPURB_32_ldapstl_unscaled => LDAPURB_32_ldapstl_unscaled,
+        Encoding::LDAPURH_32_ldapstl_unscaled => LDAPURH_32_ldapstl_unscaled,
+        Encoding::LDAPURSB_32_ldapstl_unscaled => LDAPURSB_32_ldapstl_unscaled,
+        Encoding::LDAPURSB_64_ldapstl_unscaled => LDAPURSB_64_ldapstl_unscaled,
+        Encoding::LDAPURSH_64_ldapstl_unscaled => LDAPURSH_64_ldapstl_unscaled,
+        Encoding::LDAPURSW_64_ldapstl_unscaled => LDAPURSW_64_ldapstl_unscaled,
+        Encoding::LDAPUR_32_ldapstl_unscaled => LDAPUR_32_ldapstl_unscaled,
+        Encoding::LDAPUR_64_ldapstl_unscaled => LDAPUR_64_ldapstl_unscaled,
         Encoding::LSLV_32_dp_2src => LSLV_32_dp_2src,
         Encoding::LSLV_64_dp_2src => LSLV_64_dp_2src,
         Encoding::LSRV_32_dp_2src => LSRV_32_dp_2src,
@@ -26099,6 +30025,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::RORV_64_dp_2src => RORV_64_dp_2src,
         Encoding::SBCS_32_addsub_carry => SBCS_32_addsub_carry,
         Encoding::SBCS_64_addsub_carry => SBCS_64_addsub_carry,
+        Encoding::SBC_32_addsub_carry => SBC_32_addsub_carry,
+        Encoding::SBC_64_addsub_carry => SBC_64_addsub_carry,
         Encoding::SBFM_32M_bitfield => SBFM_32M_bitfield,
         Encoding::SBFM_64M_bitfield => SBFM_64M_bitfield,
         Encoding::SDIV_32_dp_2src => SDIV_32_dp_2src,
@@ -26106,6 +30034,10 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::SMADDL_64WA_dp_3src => SMADDL_64WA_dp_3src,
         Encoding::SMSUBL_64WA_dp_3src => SMSUBL_64WA_dp_3src,
         Encoding::SMULH_64_dp_3src => SMULH_64_dp_3src,
+        Encoding::STLURB_32_ldapstl_unscaled => STLURB_32_ldapstl_unscaled,
+        Encoding::STLURH_32_ldapstl_unscaled => STLURH_32_ldapstl_unscaled,
+        Encoding::STLUR_32_ldapstl_unscaled => STLUR_32_ldapstl_unscaled,
+        Encoding::STLUR_64_ldapstl_unscaled => STLUR_64_ldapstl_unscaled,
         Encoding::SUBS_32S_addsub_ext => SUBS_32S_addsub_ext,
         Encoding::SUBS_32S_addsub_imm => SUBS_32S_addsub_imm,
         Encoding::SUBS_32_addsub_shift => SUBS_32_addsub_shift,

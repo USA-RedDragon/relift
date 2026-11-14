@@ -24,11 +24,51 @@ pub(super) fn AUTIA1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     Ok(())
 }
 
+/// `AUTIASP_HI_hints`.
+///
+/// Cut: IsFeatureImplemented.
+pub(super) fn AUTIASP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIASP_HI_hints;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    Ok(())
+}
+
+/// `AUTIAZ_HI_hints`.
+///
+/// Cut: IsFeatureImplemented.
+pub(super) fn AUTIAZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIAZ_HI_hints;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    Ok(())
+}
+
 /// `AUTIB1716_HI_hints`.
 ///
 /// Cut: IsFeatureImplemented.
 pub(super) fn AUTIB1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::AUTIB1716_HI_hints;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    Ok(())
+}
+
+/// `AUTIBSP_HI_hints`.
+///
+/// Cut: IsFeatureImplemented.
+pub(super) fn AUTIBSP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIBSP_HI_hints;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    Ok(())
+}
+
+/// `AUTIBZ_HI_hints`.
+///
+/// Cut: IsFeatureImplemented.
+pub(super) fn AUTIBZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIBZ_HI_hints;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
     Ok(())
@@ -246,7 +286,11 @@ pub(super) fn YIELD_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result<
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
         Encoding::AUTIA1716_HI_hints => AUTIA1716_HI_hints,
+        Encoding::AUTIASP_HI_hints => AUTIASP_HI_hints,
+        Encoding::AUTIAZ_HI_hints => AUTIAZ_HI_hints,
         Encoding::AUTIB1716_HI_hints => AUTIB1716_HI_hints,
+        Encoding::AUTIBSP_HI_hints => AUTIBSP_HI_hints,
+        Encoding::AUTIBZ_HI_hints => AUTIBZ_HI_hints,
         Encoding::CLREX_BN_barriers => CLREX_BN_barriers,
         Encoding::DMB_BO_barriers => DMB_BO_barriers,
         Encoding::DSB_BO_barriers => DSB_BO_barriers,

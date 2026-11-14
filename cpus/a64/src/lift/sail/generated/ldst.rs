@@ -14,6 +14,318 @@ use crate::lift::sail::GenFn;
 use crate::lift::sail::rt::{self, Kind, St, Target};
 use crate::regs;
 
+/// `LDAXP_LP32_ldstexclp`.
+///
+/// Cut: AArch64_SetExclusiveMonitors, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDAXP_LP32_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDAXP_LP32_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: i128 = s2 as i128;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s8: bool = s5 == s6;
+    if s8 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s9: bool = !s8;
+    let s10: bool = s4 == (31i128);
+    let v12 = st.sp_read(b);
+    let v15 = st.x_read(b, s4 as u32, 64);
+    let v16 = if s10 { v12 } else { v15 };
+    let v17 = if s9 {
+        b.load_exclusive(v16, Width::new(64), Endian::Little, Order::Acquire)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    let v18 = b.extract(v17, 0, Width::new(32));
+    if s9 {
+        st.x_set(b, s5 as u32, v18, None);
+    }
+    let v19 = b.extract(v17, 32, Width::new(32));
+    if s9 {
+        st.x_set(b, s6 as u32, v19, None);
+    }
+    Ok(())
+}
+
+/// `LDNP_32_ldstnapair_offs`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDNP_32_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDNP_32_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (2i128), 64);
+    let s11: bool = s6 == s7;
+    if s11 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s12: bool = !s11;
+    let s13: bool = s5 == (31i128);
+    let v15 = st.sp_read(b);
+    let v18 = st.x_read(b, s5 as u32, 64);
+    let v19 = if s13 { v15 } else { v18 };
+    let v20 = b.konst(Width::new(64), s9);
+    let v21 = b.bin(BinOp::Add, v19, v20);
+    let v22 = b.konst(Width::new(64), 0x0);
+    let v23 = b.bin(BinOp::Add, v21, v22);
+    let v24 = if s12 {
+        b.load(v23, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    let v25 = b.konst(Width::new(64), 0x4);
+    let v26 = b.bin(BinOp::Add, v21, v25);
+    let v27 = if s12 {
+        b.load(v26, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    if s12 {
+        st.x_set(b, s6 as u32, v24, None);
+    }
+    if s12 {
+        st.x_set(b, s7 as u32, v27, None);
+    }
+    Ok(())
+}
+
+/// `LDNP_64_ldstnapair_offs`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDNP_64_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDNP_64_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (3i128), 64);
+    let s11: bool = s6 == s7;
+    if s11 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s12: bool = !s11;
+    let s13: bool = s5 == (31i128);
+    let v15 = st.sp_read(b);
+    let v18 = st.x_read(b, s5 as u32, 64);
+    let v19 = if s13 { v15 } else { v18 };
+    let v20 = b.konst(Width::new(64), s9);
+    let v21 = b.bin(BinOp::Add, v19, v20);
+    let v22 = b.konst(Width::new(64), 0x0);
+    let v23 = b.bin(BinOp::Add, v21, v22);
+    let v24 = if s12 {
+        b.load(v23, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    let v25 = b.konst(Width::new(64), 0x8);
+    let v26 = b.bin(BinOp::Add, v21, v25);
+    let v27 = if s12 {
+        b.load(v26, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    if s12 {
+        st.x_set(b, s6 as u32, v24, None);
+    }
+    if s12 {
+        st.x_set(b, s7 as u32, v27, None);
+    }
+    Ok(())
+}
+
+/// `LDNP_D_ldstnapair_offs`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, V_set, X_read.
+pub(super) fn LDNP_D_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDNP_D_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (3i128), 64);
+    let s11: bool = s6 == s7;
+    if s11 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s12: bool = !s11;
+    let s13: bool = s5 == (31i128);
+    let v15 = st.sp_read(b);
+    let v18 = st.x_read(b, s5 as u32, 64);
+    let v19 = if s13 { v15 } else { v18 };
+    let v20 = b.konst(Width::new(64), s9);
+    let v21 = b.bin(BinOp::Add, v19, v20);
+    let v22 = b.konst(Width::new(64), 0x0);
+    let v23 = b.bin(BinOp::Add, v21, v22);
+    let v24 = if s12 {
+        b.load(v23, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    let v25 = b.konst(Width::new(64), 0x8);
+    let v26 = b.bin(BinOp::Add, v21, v25);
+    let v27 = if s12 {
+        b.load(v26, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    if s12 {
+        st.v_set(b, s6 as u32, v24, None);
+    }
+    if s12 {
+        st.v_set(b, s7 as u32, v27, None);
+    }
+    Ok(())
+}
+
+/// `LDNP_Q_ldstnapair_offs`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, V_set, X_read.
+pub(super) fn LDNP_Q_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDNP_Q_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (4i128), 64);
+    let s11: bool = s6 == s7;
+    if s11 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s12: bool = !s11;
+    let s13: bool = s5 == (31i128);
+    let v15 = st.sp_read(b);
+    let v18 = st.x_read(b, s5 as u32, 64);
+    let v19 = if s13 { v15 } else { v18 };
+    let v20 = b.konst(Width::new(64), s9);
+    let v21 = b.bin(BinOp::Add, v19, v20);
+    let v22 = b.konst(Width::new(64), 0x0);
+    let v23 = b.bin(BinOp::Add, v21, v22);
+    let v24 = if s12 {
+        b.load(v23, Width::new(128), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(128), 0)
+    };
+    let v25 = b.konst(Width::new(64), 0x10);
+    let v26 = b.bin(BinOp::Add, v21, v25);
+    let v27 = if s12 {
+        b.load(v26, Width::new(128), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(128), 0)
+    };
+    if s12 {
+        st.v_set(b, s6 as u32, v24, None);
+    }
+    if s12 {
+        st.v_set(b, s7 as u32, v27, None);
+    }
+    Ok(())
+}
+
+/// `LDNP_S_ldstnapair_offs`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, V_set, X_read.
+pub(super) fn LDNP_S_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDNP_S_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (2i128), 64);
+    let s11: bool = s6 == s7;
+    if s11 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s12: bool = !s11;
+    let s13: bool = s5 == (31i128);
+    let v15 = st.sp_read(b);
+    let v18 = st.x_read(b, s5 as u32, 64);
+    let v19 = if s13 { v15 } else { v18 };
+    let v20 = b.konst(Width::new(64), s9);
+    let v21 = b.bin(BinOp::Add, v19, v20);
+    let v22 = b.konst(Width::new(64), 0x0);
+    let v23 = b.bin(BinOp::Add, v21, v22);
+    let v24 = if s12 {
+        b.load(v23, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    let v25 = b.konst(Width::new(64), 0x4);
+    let v26 = b.bin(BinOp::Add, v21, v25);
+    let v27 = if s12 {
+        b.load(v26, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    if s12 {
+        st.v_set(b, s6 as u32, v24, None);
+    }
+    if s12 {
+        st.v_set(b, s7 as u32, v27, None);
+    }
+    Ok(())
+}
+
 /// `LDPSW_64_ldstpair_off`.
 ///
 /// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
@@ -143,6 +455,83 @@ pub(super) fn LDPSW_64_ldstpair_post(
     let s40: bool = s19 && s39;
     if s40 {
         st.x_set(b, s5 as u32, v36, None);
+    }
+    Ok(())
+}
+
+/// `LDPSW_64_ldstpair_pre`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, X_read, X_set.
+pub(super) fn LDPSW_64_ldstpair_pre(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDPSW_64_ldstpair_pre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (2i128), 64);
+    let s10: bool = s6 == s5;
+    let s11: bool = s7 == s5;
+    let s12: bool = s10 || s11;
+    let s13: bool = s5 != (31i128);
+    let s14: bool = s12 && s13;
+    if s14 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s15: bool = !s14;
+    let s16: bool = s6 == s7;
+    let s17: bool = s15 && s16;
+    if s17 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s18: bool = !s16;
+    let s19: bool = s15 && s18;
+    let s20: bool = s5 == (31i128);
+    let v22 = st.sp_read(b);
+    let v25 = st.x_read(b, s5 as u32, 64);
+    let v26 = if s20 { v22 } else { v25 };
+    let v27 = b.konst(Width::new(64), s9);
+    let v28 = b.bin(BinOp::Add, v26, v27);
+    let v29 = b.konst(Width::new(64), 0x0);
+    let v30 = b.bin(BinOp::Add, v28, v29);
+    let v31 = if s19 {
+        b.load(v30, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    let v32 = b.konst(Width::new(64), 0x4);
+    let v33 = b.bin(BinOp::Add, v28, v32);
+    let v34 = if s19 {
+        b.load(v33, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    let v35 = b.sext(v31, Width::new(64));
+    if s19 {
+        st.x_set(b, s6 as u32, v35, None);
+    }
+    let v36 = b.sext(v34, Width::new(64));
+    if s19 {
+        st.x_set(b, s7 as u32, v36, None);
+    }
+    let s37: bool = s5 == (31i128);
+    let s38: bool = s19 && s37;
+    if s38 {
+        st.sp_set(b, v28, None);
+    }
+    let s39: bool = !s37;
+    let s40: bool = s19 && s39;
+    if s40 {
+        st.x_set(b, s5 as u32, v28, None);
     }
     Ok(())
 }
@@ -669,6 +1058,66 @@ pub(super) fn LDP_D_ldstpair_post(
     Ok(())
 }
 
+/// `LDP_D_ldstpair_pre`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, V_set, X_read, X_set.
+pub(super) fn LDP_D_ldstpair_pre(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDP_D_ldstpair_pre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (3i128), 64);
+    let s10: bool = s6 == s7;
+    if s10 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s11: bool = !s10;
+    let s12: bool = s5 == (31i128);
+    let v14 = st.sp_read(b);
+    let v17 = st.x_read(b, s5 as u32, 64);
+    let v18 = if s12 { v14 } else { v17 };
+    let v19 = b.konst(Width::new(64), s9);
+    let v20 = b.bin(BinOp::Add, v18, v19);
+    let v21 = b.konst(Width::new(64), 0x0);
+    let v22 = b.bin(BinOp::Add, v20, v21);
+    let v23 = if s11 {
+        b.load(v22, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    let v24 = b.konst(Width::new(64), 0x8);
+    let v25 = b.bin(BinOp::Add, v20, v24);
+    let v26 = if s11 {
+        b.load(v25, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    if s11 {
+        st.v_set(b, s6 as u32, v23, None);
+    }
+    if s11 {
+        st.v_set(b, s7 as u32, v26, None);
+    }
+    let s27: bool = s5 == (31i128);
+    let s28: bool = s11 && s27;
+    if s28 {
+        st.sp_set(b, v20, None);
+    }
+    let s29: bool = !s27;
+    let s30: bool = s11 && s29;
+    if s30 {
+        st.x_set(b, s5 as u32, v20, None);
+    }
+    Ok(())
+}
+
 /// `LDP_Q_ldstpair_off`.
 ///
 /// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, V_set, X_read.
@@ -953,6 +1402,66 @@ pub(super) fn LDP_S_ldstpair_post(
     let s30: bool = s11 && s29;
     if s30 {
         st.x_set(b, s5 as u32, v26, None);
+    }
+    Ok(())
+}
+
+/// `LDP_S_ldstpair_pre`.
+///
+/// Cut: ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, V_set, X_read, X_set.
+pub(super) fn LDP_S_ldstpair_pre(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDP_S_ldstpair_pre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (2i128), 64);
+    let s10: bool = s6 == s7;
+    if s10 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s11: bool = !s10;
+    let s12: bool = s5 == (31i128);
+    let v14 = st.sp_read(b);
+    let v17 = st.x_read(b, s5 as u32, 64);
+    let v18 = if s12 { v14 } else { v17 };
+    let v19 = b.konst(Width::new(64), s9);
+    let v20 = b.bin(BinOp::Add, v18, v19);
+    let v21 = b.konst(Width::new(64), 0x0);
+    let v22 = b.bin(BinOp::Add, v20, v21);
+    let v23 = if s11 {
+        b.load(v22, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    let v24 = b.konst(Width::new(64), 0x4);
+    let v25 = b.bin(BinOp::Add, v20, v24);
+    let v26 = if s11 {
+        b.load(v25, Width::new(32), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(32), 0)
+    };
+    if s11 {
+        st.v_set(b, s6 as u32, v23, None);
+    }
+    if s11 {
+        st.v_set(b, s7 as u32, v26, None);
+    }
+    let s27: bool = s5 == (31i128);
+    let s28: bool = s11 && s27;
+    if s28 {
+        st.sp_set(b, v20, None);
+    }
+    let s29: bool = !s27;
+    let s30: bool = s11 && s29;
+    if s30 {
+        st.x_set(b, s5 as u32, v20, None);
     }
     Ok(())
 }
@@ -3751,6 +4260,70 @@ pub(super) fn LDR_BL_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Res
     Ok(())
 }
 
+/// `LDR_B_ldst_immpost`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, V_set, X_read, X_set.
+pub(super) fn LDR_B_ldst_immpost(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_B_ldst_immpost;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = b.load(v11, Width::new(8), Endian::Little, Order::Plain);
+    st.v_set(b, s6 as u32, v12, None);
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v11, v13);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v14, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v14, None);
+    }
+    Ok(())
+}
+
+/// `LDR_B_ldst_immpre`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, V_set, X_read, X_set.
+pub(super) fn LDR_B_ldst_immpre(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_B_ldst_immpre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = b.konst(Width::new(64), s4);
+    let v13 = b.bin(BinOp::Add, v11, v12);
+    let v14 = b.load(v13, Width::new(8), Endian::Little, Order::Plain);
+    st.v_set(b, s6 as u32, v14, None);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v13, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v13, None);
+    }
+    Ok(())
+}
+
 /// `LDR_B_ldst_pos`.
 ///
 /// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, V_set, X_read.
@@ -4180,6 +4753,38 @@ pub(super) fn LDR_H_ldst_immpost(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s16: bool = !s15;
     if s16 {
         st.x_set(b, s5 as u32, v14, None);
+    }
+    Ok(())
+}
+
+/// `LDR_H_ldst_immpre`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, SP_set, V_set, X_read, X_set.
+pub(super) fn LDR_H_ldst_immpre(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDR_H_ldst_immpre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = b.konst(Width::new(64), s4);
+    let v13 = b.bin(BinOp::Add, v11, v12);
+    let v14 = b.load(v13, Width::new(16), Endian::Little, Order::Plain);
+    st.v_set(b, s6 as u32, v14, None);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v13, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v13, None);
     }
     Ok(())
 }
@@ -4984,6 +5589,265 @@ pub(super) fn LDR_S_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `LDTRB_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRB_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRB_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Plain);
+    let v16 = b.zext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTRH_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRH_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRH_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Plain);
+    let v16 = b.zext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTRSB_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRSB_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRSB_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Plain);
+    let v16 = b.sext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTRSB_64_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRSB_64_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRSB_64_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(8), Endian::Little, Order::Plain);
+    let v16 = b.sext(v15, Width::new(64));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTRSH_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRSH_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRSH_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Plain);
+    let v16 = b.sext(v15, Width::new(32));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTRSH_64_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRSH_64_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRSH_64_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(16), Endian::Little, Order::Plain);
+    let v16 = b.sext(v15, Width::new(64));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTRSW_64_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTRSW_64_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTRSW_64_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::Plain);
+    let v16 = b.sext(v15, Width::new(64));
+    st.x_set(b, s6 as u32, v16, None);
+    Ok(())
+}
+
+/// `LDTR_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTR_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTR_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(32), Endian::Little, Order::Plain);
+    st.x_set(b, s6 as u32, v15, None);
+    Ok(())
+}
+
+/// `LDTR_64_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDTR_64_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDTR_64_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = b.load(v14, Width::new(64), Endian::Little, Order::Plain);
+    st.x_set(b, s6 as u32, v15, None);
+    Ok(())
+}
+
 /// `LDURB_32_ldst_unscaled`.
 ///
 /// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
@@ -5383,6 +6247,48 @@ pub(super) fn LDUR_S_ldst_unscaled(
     Ok(())
 }
 
+/// `LDXP_LP32_ldstexclp`.
+///
+/// Cut: AArch64_SetExclusiveMonitors, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDXP_LP32_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDXP_LP32_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: i128 = s2 as i128;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s8: bool = s5 == s6;
+    if s8 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s9: bool = !s8;
+    let s10: bool = s4 == (31i128);
+    let v12 = st.sp_read(b);
+    let v15 = st.x_read(b, s4 as u32, 64);
+    let v16 = if s10 { v12 } else { v15 };
+    let v17 = if s9 {
+        b.load_exclusive(v16, Width::new(64), Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::new(64), 0)
+    };
+    let v18 = b.extract(v17, 0, Width::new(32));
+    if s9 {
+        st.x_set(b, s5 as u32, v18, None);
+    }
+    let v19 = b.extract(v17, 32, Width::new(32));
+    if s9 {
+        st.x_set(b, s6 as u32, v19, None);
+    }
+    Ok(())
+}
+
 /// `PRFM_P_ldst_pos`.
 ///
 /// Cut: ENV, IsFeatureImplemented, SP_read, X_read.
@@ -5391,6 +6297,468 @@ pub(super) fn PRFM_P_ldst_pos(word: u32, b: &mut Builder, st: &mut St) -> Result
     let w = u128::from(word);
     let pc = u128::from(b.pc());
     Ok(())
+}
+
+/// `PRFM_P_ldst_regoff`.
+///
+/// Split on the word bits `0x0000b01f`.
+///
+/// Cut: ENV, IsFeatureImplemented, SP_read, X_read.
+pub(super) fn PRFM_P_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PRFM_P_ldst_regoff;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000b01f {
+        0x00000000 => Ok(()),
+        0x00000001 => Ok(()),
+        0x00000002 => Ok(()),
+        0x00000003 => Ok(()),
+        0x00000004 => Ok(()),
+        0x00000005 => Ok(()),
+        0x00000006 => Ok(()),
+        0x00000007 => Ok(()),
+        0x00000008 => Ok(()),
+        0x00000009 => Ok(()),
+        0x0000000a => Ok(()),
+        0x0000000b => Ok(()),
+        0x0000000c => Ok(()),
+        0x0000000d => Ok(()),
+        0x0000000e => Ok(()),
+        0x0000000f => Ok(()),
+        0x00000010 => Ok(()),
+        0x00000011 => Ok(()),
+        0x00000012 => Ok(()),
+        0x00000013 => Ok(()),
+        0x00000014 => Ok(()),
+        0x00000015 => Ok(()),
+        0x00000016 => Ok(()),
+        0x00000017 => Ok(()),
+        0x00000018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000001a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000001b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000001c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000001d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000001e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000001f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001000 => Ok(()),
+        0x00001001 => Ok(()),
+        0x00001002 => Ok(()),
+        0x00001003 => Ok(()),
+        0x00001004 => Ok(()),
+        0x00001005 => Ok(()),
+        0x00001006 => Ok(()),
+        0x00001007 => Ok(()),
+        0x00001008 => Ok(()),
+        0x00001009 => Ok(()),
+        0x0000100a => Ok(()),
+        0x0000100b => Ok(()),
+        0x0000100c => Ok(()),
+        0x0000100d => Ok(()),
+        0x0000100e => Ok(()),
+        0x0000100f => Ok(()),
+        0x00001010 => Ok(()),
+        0x00001011 => Ok(()),
+        0x00001012 => Ok(()),
+        0x00001013 => Ok(()),
+        0x00001014 => Ok(()),
+        0x00001015 => Ok(()),
+        0x00001016 => Ok(()),
+        0x00001017 => Ok(()),
+        0x00001018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000101a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000101b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000101c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000101d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000101e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000101f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => Ok(()),
+        0x00002001 => Ok(()),
+        0x00002002 => Ok(()),
+        0x00002003 => Ok(()),
+        0x00002004 => Ok(()),
+        0x00002005 => Ok(()),
+        0x00002006 => Ok(()),
+        0x00002007 => Ok(()),
+        0x00002008 => Ok(()),
+        0x00002009 => Ok(()),
+        0x0000200a => Ok(()),
+        0x0000200b => Ok(()),
+        0x0000200c => Ok(()),
+        0x0000200d => Ok(()),
+        0x0000200e => Ok(()),
+        0x0000200f => Ok(()),
+        0x00002010 => Ok(()),
+        0x00002011 => Ok(()),
+        0x00002012 => Ok(()),
+        0x00002013 => Ok(()),
+        0x00002014 => Ok(()),
+        0x00002015 => Ok(()),
+        0x00002016 => Ok(()),
+        0x00002017 => Ok(()),
+        0x00002018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000201a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000201b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000201c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000201d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000201e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000201f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003000 => Ok(()),
+        0x00003001 => Ok(()),
+        0x00003002 => Ok(()),
+        0x00003003 => Ok(()),
+        0x00003004 => Ok(()),
+        0x00003005 => Ok(()),
+        0x00003006 => Ok(()),
+        0x00003007 => Ok(()),
+        0x00003008 => Ok(()),
+        0x00003009 => Ok(()),
+        0x0000300a => Ok(()),
+        0x0000300b => Ok(()),
+        0x0000300c => Ok(()),
+        0x0000300d => Ok(()),
+        0x0000300e => Ok(()),
+        0x0000300f => Ok(()),
+        0x00003010 => Ok(()),
+        0x00003011 => Ok(()),
+        0x00003012 => Ok(()),
+        0x00003013 => Ok(()),
+        0x00003014 => Ok(()),
+        0x00003015 => Ok(()),
+        0x00003016 => Ok(()),
+        0x00003017 => Ok(()),
+        0x00003018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000301a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000301b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000301c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000301d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000301e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000301f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => Ok(()),
+        0x00008001 => Ok(()),
+        0x00008002 => Ok(()),
+        0x00008003 => Ok(()),
+        0x00008004 => Ok(()),
+        0x00008005 => Ok(()),
+        0x00008006 => Ok(()),
+        0x00008007 => Ok(()),
+        0x00008008 => Ok(()),
+        0x00008009 => Ok(()),
+        0x0000800a => Ok(()),
+        0x0000800b => Ok(()),
+        0x0000800c => Ok(()),
+        0x0000800d => Ok(()),
+        0x0000800e => Ok(()),
+        0x0000800f => Ok(()),
+        0x00008010 => Ok(()),
+        0x00008011 => Ok(()),
+        0x00008012 => Ok(()),
+        0x00008013 => Ok(()),
+        0x00008014 => Ok(()),
+        0x00008015 => Ok(()),
+        0x00008016 => Ok(()),
+        0x00008017 => Ok(()),
+        0x00008018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000801a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000801b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000801c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000801d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000801e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000801f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00009000 => Ok(()),
+        0x00009001 => Ok(()),
+        0x00009002 => Ok(()),
+        0x00009003 => Ok(()),
+        0x00009004 => Ok(()),
+        0x00009005 => Ok(()),
+        0x00009006 => Ok(()),
+        0x00009007 => Ok(()),
+        0x00009008 => Ok(()),
+        0x00009009 => Ok(()),
+        0x0000900a => Ok(()),
+        0x0000900b => Ok(()),
+        0x0000900c => Ok(()),
+        0x0000900d => Ok(()),
+        0x0000900e => Ok(()),
+        0x0000900f => Ok(()),
+        0x00009010 => Ok(()),
+        0x00009011 => Ok(()),
+        0x00009012 => Ok(()),
+        0x00009013 => Ok(()),
+        0x00009014 => Ok(()),
+        0x00009015 => Ok(()),
+        0x00009016 => Ok(()),
+        0x00009017 => Ok(()),
+        0x00009018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00009019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000901a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000901b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000901c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000901d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000901e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000901f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a000 => Ok(()),
+        0x0000a001 => Ok(()),
+        0x0000a002 => Ok(()),
+        0x0000a003 => Ok(()),
+        0x0000a004 => Ok(()),
+        0x0000a005 => Ok(()),
+        0x0000a006 => Ok(()),
+        0x0000a007 => Ok(()),
+        0x0000a008 => Ok(()),
+        0x0000a009 => Ok(()),
+        0x0000a00a => Ok(()),
+        0x0000a00b => Ok(()),
+        0x0000a00c => Ok(()),
+        0x0000a00d => Ok(()),
+        0x0000a00e => Ok(()),
+        0x0000a00f => Ok(()),
+        0x0000a010 => Ok(()),
+        0x0000a011 => Ok(()),
+        0x0000a012 => Ok(()),
+        0x0000a013 => Ok(()),
+        0x0000a014 => Ok(()),
+        0x0000a015 => Ok(()),
+        0x0000a016 => Ok(()),
+        0x0000a017 => Ok(()),
+        0x0000a018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a01a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a01b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a01c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a01d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a01e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a01f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b000 => Ok(()),
+        0x0000b001 => Ok(()),
+        0x0000b002 => Ok(()),
+        0x0000b003 => Ok(()),
+        0x0000b004 => Ok(()),
+        0x0000b005 => Ok(()),
+        0x0000b006 => Ok(()),
+        0x0000b007 => Ok(()),
+        0x0000b008 => Ok(()),
+        0x0000b009 => Ok(()),
+        0x0000b00a => Ok(()),
+        0x0000b00b => Ok(()),
+        0x0000b00c => Ok(()),
+        0x0000b00d => Ok(()),
+        0x0000b00e => Ok(()),
+        0x0000b00f => Ok(()),
+        0x0000b010 => Ok(()),
+        0x0000b011 => Ok(()),
+        0x0000b012 => Ok(()),
+        0x0000b013 => Ok(()),
+        0x0000b014 => Ok(()),
+        0x0000b015 => Ok(()),
+        0x0000b016 => Ok(()),
+        0x0000b017 => Ok(()),
+        0x0000b018 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b019 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b01a => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b01b => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b01c => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b01d => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b01e => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b01f => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `PRFUM_P_ldst_unscaled`.
@@ -5404,6 +6772,305 @@ pub(super) fn PRFUM_P_ldst_unscaled(
     const ENC: Encoding = Encoding::PRFUM_P_ldst_unscaled;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    Ok(())
+}
+
+/// `STLXP_SP32_ldstexclp`.
+///
+/// Cut: AArch64_ExclusiveMonitorsPass, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_set, SP_read, X_read, X_set.
+pub(super) fn STLXP_SP32_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLXP_SP32_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: i128 = s4 as i128;
+    let s10: bool = s8 == s6;
+    let s11: bool = s8 == s7;
+    let s12: bool = s10 || s11;
+    if s12 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s13: bool = !s12;
+    let s14: bool = s8 == s5;
+    let s15: bool = s5 != (31i128);
+    let s16: bool = s14 && s15;
+    let s17: bool = s13 && s16;
+    if s17 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s18: bool = !s16;
+    let s19: bool = s13 && s18;
+    let s20: bool = s5 == (31i128);
+    let v22 = st.sp_read(b);
+    let v25 = st.x_read(b, s5 as u32, 64);
+    let v26 = if s20 { v22 } else { v25 };
+    let v27 = st.x_read(b, s6 as u32, 32);
+    let v28 = st.x_read(b, s7 as u32, 32);
+    let v29 = b.concat(v28, v27);
+    let xp30 = if s19 {
+        b.store_exclusive(v26, v29, Endian::Little, Order::Release)
+    } else {
+        b.konst(Width::W1, 0)
+    };
+    let v32 = b.konst(Width::new(1), 0x0);
+    let v33 = b.konst(Width::new(1), 0x1);
+    let v34 = b.select(xp30, v32, v33);
+    let v35 = b.zext(v34, Width::new(32));
+    if s19 {
+        st.x_set(b, s8 as u32, v35, None);
+    }
+    Ok(())
+}
+
+/// `STLXP_SP64_ldstexclp`.
+///
+/// Cut: AArch64_ExclusiveMonitorsPass, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_set, SP_read, X_read, X_set.
+pub(super) fn STLXP_SP64_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLXP_SP64_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: i128 = s4 as i128;
+    let s10: bool = s8 == s6;
+    let s11: bool = s8 == s7;
+    let s12: bool = s10 || s11;
+    if s12 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s13: bool = !s12;
+    let s14: bool = s8 == s5;
+    let s15: bool = s5 != (31i128);
+    let s16: bool = s14 && s15;
+    let s17: bool = s13 && s16;
+    if s17 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s18: bool = !s16;
+    let s19: bool = s13 && s18;
+    let s20: bool = s5 == (31i128);
+    let v22 = st.sp_read(b);
+    let v25 = st.x_read(b, s5 as u32, 64);
+    let v26 = if s20 { v22 } else { v25 };
+    let v27 = st.x_read(b, s6 as u32, 64);
+    let v28 = st.x_read(b, s7 as u32, 64);
+    let v29 = b.concat(v28, v27);
+    let xp30 = if s19 {
+        b.store_exclusive(v26, v29, Endian::Little, Order::Release)
+    } else {
+        b.konst(Width::W1, 0)
+    };
+    let v32 = b.konst(Width::new(1), 0x0);
+    let v33 = b.konst(Width::new(1), 0x1);
+    let v34 = b.select(xp30, v32, v33);
+    let v35 = b.zext(v34, Width::new(32));
+    if s19 {
+        st.x_set(b, s8 as u32, v35, None);
+    }
+    Ok(())
+}
+
+/// `STNP_32_ldstnapair_offs`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STNP_32_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STNP_32_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (2i128), 64);
+    let s11: bool = s5 == (31i128);
+    let v12 = st.sp_read(b);
+    let v14 = st.x_read(b, s5 as u32, 64);
+    let v15 = if s11 { v12 } else { v14 };
+    let v16 = b.konst(Width::new(64), s9);
+    let v17 = b.bin(BinOp::Add, v15, v16);
+    let v18 = st.x_read(b, s6 as u32, 32);
+    let v19 = st.x_read(b, s7 as u32, 32);
+    let v20 = b.konst(Width::new(64), 0x0);
+    let v21 = b.bin(BinOp::Add, v17, v20);
+    b.store(v21, v18, Endian::Little, Order::Plain);
+    let v22 = b.konst(Width::new(64), 0x4);
+    let v23 = b.bin(BinOp::Add, v17, v22);
+    b.store(v23, v19, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STNP_64_ldstnapair_offs`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STNP_64_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STNP_64_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (3i128), 64);
+    let s11: bool = s5 == (31i128);
+    let v12 = st.sp_read(b);
+    let v14 = st.x_read(b, s5 as u32, 64);
+    let v15 = if s11 { v12 } else { v14 };
+    let v16 = b.konst(Width::new(64), s9);
+    let v17 = b.bin(BinOp::Add, v15, v16);
+    let v18 = st.x_read(b, s6 as u32, 64);
+    let v19 = st.x_read(b, s7 as u32, 64);
+    let v20 = b.konst(Width::new(64), 0x0);
+    let v21 = b.bin(BinOp::Add, v17, v20);
+    b.store(v21, v18, Endian::Little, Order::Plain);
+    let v22 = b.konst(Width::new(64), 0x8);
+    let v23 = b.bin(BinOp::Add, v17, v22);
+    b.store(v23, v19, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STNP_D_ldstnapair_offs`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STNP_D_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STNP_D_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (3i128), 64);
+    let s11: bool = s5 == (31i128);
+    let v12 = st.sp_read(b);
+    let v14 = st.x_read(b, s5 as u32, 64);
+    let v15 = if s11 { v12 } else { v14 };
+    let v16 = b.konst(Width::new(64), s9);
+    let v17 = b.bin(BinOp::Add, v15, v16);
+    let v18 = st.v_read(b, s6 as u32, 64);
+    let v19 = st.v_read(b, s7 as u32, 64);
+    let v20 = b.konst(Width::new(64), 0x0);
+    let v21 = b.bin(BinOp::Add, v17, v20);
+    b.store(v21, v18, Endian::Little, Order::Plain);
+    let v22 = b.konst(Width::new(64), 0x8);
+    let v23 = b.bin(BinOp::Add, v17, v22);
+    b.store(v23, v19, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STNP_Q_ldstnapair_offs`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STNP_Q_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STNP_Q_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (4i128), 64);
+    let s11: bool = s5 == (31i128);
+    let v12 = st.sp_read(b);
+    let v14 = st.x_read(b, s5 as u32, 64);
+    let v15 = if s11 { v12 } else { v14 };
+    let v16 = b.konst(Width::new(64), s9);
+    let v17 = b.bin(BinOp::Add, v15, v16);
+    let v18 = st.v_read(b, s6 as u32, 128);
+    let v19 = st.v_read(b, s7 as u32, 128);
+    let v20 = b.konst(Width::new(64), 0x0);
+    let v21 = b.bin(BinOp::Add, v17, v20);
+    b.store(v21, v18, Endian::Little, Order::Plain);
+    let v22 = b.konst(Width::new(64), 0x10);
+    let v23 = b.bin(BinOp::Add, v17, v22);
+    b.store(v23, v19, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STNP_S_ldstnapair_offs`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STNP_S_ldstnapair_offs(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STNP_S_ldstnapair_offs;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 15) & 0x7f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: u128 = rt::sext(s4, 7, 64);
+    let s9: u128 = rt::shl(s8, (2i128), 64);
+    let s11: bool = s5 == (31i128);
+    let v12 = st.sp_read(b);
+    let v14 = st.x_read(b, s5 as u32, 64);
+    let v15 = if s11 { v12 } else { v14 };
+    let v16 = b.konst(Width::new(64), s9);
+    let v17 = b.bin(BinOp::Add, v15, v16);
+    let v18 = st.v_read(b, s6 as u32, 32);
+    let v19 = st.v_read(b, s7 as u32, 32);
+    let v20 = b.konst(Width::new(64), 0x0);
+    let v21 = b.bin(BinOp::Add, v17, v20);
+    b.store(v21, v18, Endian::Little, Order::Plain);
+    let v22 = b.konst(Width::new(64), 0x4);
+    let v23 = b.bin(BinOp::Add, v17, v22);
+    b.store(v23, v19, Endian::Little, Order::Plain);
     Ok(())
 }
 
@@ -7267,6 +8934,207 @@ pub(super) fn STR_64_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Res
     }
 }
 
+/// `STR_BL_ldst_regoff`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STR_BL_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_BL_ldst_regoff;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s1 as i128;
+    let s9: i128 = s4 as i128;
+    let v10 = st.x_read(b, s9 as u32, 64);
+    let s11: bool = s7 == (31i128);
+    let v12 = st.sp_read(b);
+    let v14 = st.x_read(b, s7 as u32, 64);
+    let v15 = if s11 { v12 } else { v14 };
+    let v16 = b.bin(BinOp::Add, v15, v10);
+    let v17 = st.v_read(b, s8 as u32, 8);
+    b.store(v16, v17, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STR_B_ldst_immpost`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, SP_set, V_read, X_read, X_set.
+pub(super) fn STR_B_ldst_immpost(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_B_ldst_immpost;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = st.v_read(b, s6 as u32, 8);
+    b.store(v11, v12, Endian::Little, Order::Plain);
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v11, v13);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v14, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v14, None);
+    }
+    Ok(())
+}
+
+/// `STR_B_ldst_immpre`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, SP_set, V_read, X_read, X_set.
+pub(super) fn STR_B_ldst_immpre(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_B_ldst_immpre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = b.konst(Width::new(64), s4);
+    let v13 = b.bin(BinOp::Add, v11, v12);
+    let v14 = st.v_read(b, s6 as u32, 8);
+    b.store(v13, v14, Endian::Little, Order::Plain);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v13, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v13, None);
+    }
+    Ok(())
+}
+
+/// `STR_B_ldst_pos`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STR_B_ldst_pos(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_B_ldst_pos;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0xfff;
+    let s4: u128 = rt::shl(s3, (0i128), 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.v_read(b, s6 as u32, 8);
+    b.store(v14, v15, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STR_B_ldst_regoff`.
+///
+/// Split on the word bits `0x0000e000`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STR_B_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_B_ldst_regoff;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000e000 {
+        0x00000000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s4: u128 = (w >> 16) & 0x1f;
+            let s7: i128 = s2 as i128;
+            let s8: i128 = s1 as i128;
+            let s9: i128 = s4 as i128;
+            let v10 = st.x_read(b, s9 as u32, 64);
+            let v11 = b.extract(v10, 0, Width::new(32));
+            let v12 = b.zext(v11, Width::new(64));
+            let s13: bool = s7 == (31i128);
+            let v14 = st.sp_read(b);
+            let v16 = st.x_read(b, s7 as u32, 64);
+            let v17 = if s13 { v14 } else { v16 };
+            let v18 = b.bin(BinOp::Add, v17, v12);
+            let v19 = st.v_read(b, s8 as u32, 8);
+            b.store(v18, v19, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x00006000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s4: u128 = (w >> 16) & 0x1f;
+            let s7: i128 = s2 as i128;
+            let s8: i128 = s1 as i128;
+            let s9: i128 = s4 as i128;
+            let v10 = st.x_read(b, s9 as u32, 64);
+            let v11 = b.extract(v10, 0, Width::new(32));
+            let v12 = b.sext(v11, Width::new(64));
+            let s13: bool = s7 == (31i128);
+            let v14 = st.sp_read(b);
+            let v16 = st.x_read(b, s7 as u32, 64);
+            let v17 = if s13 { v14 } else { v16 };
+            let v18 = b.bin(BinOp::Add, v17, v12);
+            let v19 = st.v_read(b, s8 as u32, 8);
+            b.store(v18, v19, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s4: u128 = (w >> 16) & 0x1f;
+            let s7: i128 = s2 as i128;
+            let s8: i128 = s1 as i128;
+            let s9: i128 = s4 as i128;
+            let v10 = st.x_read(b, s9 as u32, 64);
+            let s11: bool = s7 == (31i128);
+            let v12 = st.sp_read(b);
+            let v14 = st.x_read(b, s7 as u32, 64);
+            let v15 = if s11 { v12 } else { v14 };
+            let v16 = b.bin(BinOp::Add, v15, v10);
+            let v17 = st.v_read(b, s8 as u32, 8);
+            b.store(v16, v17, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `STR_D_ldst_immpost`.
 ///
 /// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, SP_set, V_read, X_read, X_set.
@@ -7555,6 +9423,70 @@ pub(super) fn STR_D_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `STR_H_ldst_immpost`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, SP_set, V_read, X_read, X_set.
+pub(super) fn STR_H_ldst_immpost(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_H_ldst_immpost;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = st.v_read(b, s6 as u32, 16);
+    b.store(v11, v12, Endian::Little, Order::Plain);
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v11, v13);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v14, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v14, None);
+    }
+    Ok(())
+}
+
+/// `STR_H_ldst_immpre`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, SP_set, V_read, X_read, X_set.
+pub(super) fn STR_H_ldst_immpre(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_H_ldst_immpre;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: bool = s5 == (31i128);
+    let v8 = st.sp_read(b);
+    let v10 = st.x_read(b, s5 as u32, 64);
+    let v11 = if s7 { v8 } else { v10 };
+    let v12 = b.konst(Width::new(64), s4);
+    let v13 = b.bin(BinOp::Add, v11, v12);
+    let v14 = st.v_read(b, s6 as u32, 16);
+    b.store(v13, v14, Endian::Little, Order::Plain);
+    let s15: bool = s5 == (31i128);
+    if s15 {
+        st.sp_set(b, v13, None);
+    }
+    let s16: bool = !s15;
+    if s16 {
+        st.x_set(b, s5 as u32, v13, None);
+    }
+    Ok(())
+}
+
 /// `STR_H_ldst_pos`.
 ///
 /// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
@@ -7577,6 +9509,206 @@ pub(super) fn STR_H_ldst_pos(word: u32, b: &mut Builder, st: &mut St) -> Result<
     let v15 = st.v_read(b, s6 as u32, 16);
     b.store(v14, v15, Endian::Little, Order::Plain);
     Ok(())
+}
+
+/// `STR_H_ldst_regoff`.
+///
+/// Split on the word bits `0x0000f000`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STR_H_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STR_H_ldst_regoff;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000f000 {
+        0x00000000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let v8 = b.extract(v7, 0, Width::new(32));
+            let v9 = b.zext(v8, Width::new(64));
+            let s10: bool = s4 == (31i128);
+            let v11 = st.sp_read(b);
+            let v13 = st.x_read(b, s4 as u32, 64);
+            let v14 = if s10 { v11 } else { v13 };
+            let v15 = b.bin(BinOp::Add, v14, v9);
+            let v16 = st.v_read(b, s5 as u32, 16);
+            b.store(v15, v16, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let v8 = b.extract(v7, 0, Width::new(32));
+            let v9 = b.konst(Width::new(1), 0x0);
+            let v10 = b.concat(v8, v9);
+            let v11 = b.zext(v10, Width::new(64));
+            let s12: bool = s4 == (31i128);
+            let v13 = st.sp_read(b);
+            let v15 = st.x_read(b, s4 as u32, 64);
+            let v16 = if s12 { v13 } else { v15 };
+            let v17 = b.bin(BinOp::Add, v16, v11);
+            let v18 = st.v_read(b, s5 as u32, 16);
+            b.store(v17, v18, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let s8: bool = s4 == (31i128);
+            let v9 = st.sp_read(b);
+            let v11 = st.x_read(b, s4 as u32, 64);
+            let v12 = if s8 { v9 } else { v11 };
+            let v13 = b.bin(BinOp::Add, v12, v7);
+            let v14 = st.v_read(b, s5 as u32, 16);
+            b.store(v13, v14, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let v8 = b.extract(v7, 0, Width::new(63));
+            let v9 = b.konst(Width::new(1), 0x0);
+            let v10 = b.concat(v8, v9);
+            let s11: bool = s4 == (31i128);
+            let v12 = st.sp_read(b);
+            let v14 = st.x_read(b, s4 as u32, 64);
+            let v15 = if s11 { v12 } else { v14 };
+            let v16 = b.bin(BinOp::Add, v15, v10);
+            let v17 = st.v_read(b, s5 as u32, 16);
+            b.store(v16, v17, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x00008000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00009000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000a000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000b000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let v8 = b.extract(v7, 0, Width::new(32));
+            let v9 = b.sext(v8, Width::new(64));
+            let s10: bool = s4 == (31i128);
+            let v11 = st.sp_read(b);
+            let v13 = st.x_read(b, s4 as u32, 64);
+            let v14 = if s10 { v11 } else { v13 };
+            let v15 = b.bin(BinOp::Add, v14, v9);
+            let v16 = st.v_read(b, s5 as u32, 16);
+            b.store(v15, v16, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let v8 = b.extract(v7, 0, Width::new(32));
+            let v9 = b.konst(Width::new(1), 0x0);
+            let v10 = b.concat(v8, v9);
+            let v11 = b.sext(v10, Width::new(64));
+            let s12: bool = s4 == (31i128);
+            let v13 = st.sp_read(b);
+            let v15 = st.x_read(b, s4 as u32, 64);
+            let v16 = if s12 { v13 } else { v15 };
+            let v17 = b.bin(BinOp::Add, v16, v11);
+            let v18 = st.v_read(b, s5 as u32, 16);
+            b.store(v17, v18, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let s8: bool = s4 == (31i128);
+            let v9 = st.sp_read(b);
+            let v11 = st.x_read(b, s4 as u32, 64);
+            let v12 = if s8 { v9 } else { v11 };
+            let v13 = b.bin(BinOp::Add, v12, v7);
+            let v14 = st.v_read(b, s5 as u32, 16);
+            b.store(v13, v14, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s2 as i128;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.x_read(b, s6 as u32, 64);
+            let v8 = b.extract(v7, 0, Width::new(63));
+            let v9 = b.konst(Width::new(1), 0x0);
+            let v10 = b.concat(v8, v9);
+            let s11: bool = s4 == (31i128);
+            let v12 = st.sp_read(b);
+            let v14 = st.x_read(b, s4 as u32, 64);
+            let v15 = if s11 { v12 } else { v14 };
+            let v16 = b.bin(BinOp::Add, v15, v10);
+            let v17 = st.v_read(b, s5 as u32, 16);
+            b.store(v16, v17, Endian::Little, Order::Plain);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `STR_Q_ldst_immpost`.
@@ -8155,6 +10287,118 @@ pub(super) fn STR_S_ldst_regoff(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `STTRB_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STTRB_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STTRB_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 8);
+    b.store(v14, v15, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STTRH_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STTRH_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STTRH_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 16);
+    b.store(v14, v15, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STTR_32_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STTR_32_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STTR_32_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 32);
+    b.store(v14, v15, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STTR_64_ldst_unpriv`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STTR_64_ldst_unpriv(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STTR_64_ldst_unpriv;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.x_read(b, s6 as u32, 64);
+    b.store(v14, v15, Endian::Little, Order::Plain);
+    Ok(())
+}
+
 /// `STURB_32_ldst_unscaled`.
 ///
 /// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
@@ -8263,6 +10507,34 @@ pub(super) fn STUR_64_ldst_unscaled(
     let v13 = b.konst(Width::new(64), s4);
     let v14 = b.bin(BinOp::Add, v12, v13);
     let v15 = st.x_read(b, s6 as u32, 64);
+    b.store(v14, v15, Endian::Little, Order::Plain);
+    Ok(())
+}
+
+/// `STUR_B_ldst_unscaled`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, V_read, X_read.
+pub(super) fn STUR_B_ldst_unscaled(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STUR_B_ldst_unscaled;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0x1ff;
+    let s4: u128 = rt::sext(s3, 9, 64);
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s8: bool = s5 == (31i128);
+    let v9 = st.sp_read(b);
+    let v11 = st.x_read(b, s5 as u32, 64);
+    let v12 = if s8 { v9 } else { v11 };
+    let v13 = b.konst(Width::new(64), s4);
+    let v14 = b.bin(BinOp::Add, v12, v13);
+    let v15 = st.v_read(b, s6 as u32, 8);
     b.store(v14, v15, Endian::Little, Order::Plain);
     Ok(())
 }
@@ -8379,11 +10651,132 @@ pub(super) fn STUR_S_ldst_unscaled(
     Ok(())
 }
 
+/// `STXP_SP32_ldstexclp`.
+///
+/// Cut: AArch64_ExclusiveMonitorsPass, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_set, SP_read, X_read, X_set.
+pub(super) fn STXP_SP32_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STXP_SP32_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: i128 = s4 as i128;
+    let s10: bool = s8 == s6;
+    let s11: bool = s8 == s7;
+    let s12: bool = s10 || s11;
+    if s12 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s13: bool = !s12;
+    let s14: bool = s8 == s5;
+    let s15: bool = s5 != (31i128);
+    let s16: bool = s14 && s15;
+    let s17: bool = s13 && s16;
+    if s17 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s18: bool = !s16;
+    let s19: bool = s13 && s18;
+    let s20: bool = s5 == (31i128);
+    let v22 = st.sp_read(b);
+    let v25 = st.x_read(b, s5 as u32, 64);
+    let v26 = if s20 { v22 } else { v25 };
+    let v27 = st.x_read(b, s6 as u32, 32);
+    let v28 = st.x_read(b, s7 as u32, 32);
+    let v29 = b.concat(v28, v27);
+    let xp30 = if s19 {
+        b.store_exclusive(v26, v29, Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::W1, 0)
+    };
+    let v32 = b.konst(Width::new(1), 0x0);
+    let v33 = b.konst(Width::new(1), 0x1);
+    let v34 = b.select(xp30, v32, v33);
+    let v35 = b.zext(v34, Width::new(32));
+    if s19 {
+        st.x_set(b, s8 as u32, v35, None);
+    }
+    Ok(())
+}
+
+/// `STXP_SP64_ldstexclp`.
+///
+/// Cut: AArch64_ExclusiveMonitorsPass, ConstrainUnpredictable, ENV, IsFeatureImplemented, Mem_set, SP_read, X_read, X_set.
+pub(super) fn STXP_SP64_ldstexclp(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STXP_SP64_ldstexclp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s1 as i128;
+    let s7: i128 = s3 as i128;
+    let s8: i128 = s4 as i128;
+    let s10: bool = s8 == s6;
+    let s11: bool = s8 == s7;
+    let s12: bool = s10 || s11;
+    if s12 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s13: bool = !s12;
+    let s14: bool = s8 == s5;
+    let s15: bool = s5 != (31i128);
+    let s16: bool = s14 && s15;
+    let s17: bool = s13 && s16;
+    if s17 {
+        return Err(LiftError::Unpredictable(ENC));
+    }
+    let s18: bool = !s16;
+    let s19: bool = s13 && s18;
+    let s20: bool = s5 == (31i128);
+    let v22 = st.sp_read(b);
+    let v25 = st.x_read(b, s5 as u32, 64);
+    let v26 = if s20 { v22 } else { v25 };
+    let v27 = st.x_read(b, s6 as u32, 64);
+    let v28 = st.x_read(b, s7 as u32, 64);
+    let v29 = b.concat(v28, v27);
+    let xp30 = if s19 {
+        b.store_exclusive(v26, v29, Endian::Little, Order::Plain)
+    } else {
+        b.konst(Width::W1, 0)
+    };
+    let v32 = b.konst(Width::new(1), 0x0);
+    let v33 = b.konst(Width::new(1), 0x1);
+    let v34 = b.select(xp30, v32, v33);
+    let v35 = b.zext(v34, Width::new(32));
+    if s19 {
+        st.x_set(b, s8 as u32, v35, None);
+    }
+    Ok(())
+}
+
 /// The generated template of `enc`, if there is one.
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
+        Encoding::LDAXP_LP32_ldstexclp => LDAXP_LP32_ldstexclp,
+        Encoding::LDNP_32_ldstnapair_offs => LDNP_32_ldstnapair_offs,
+        Encoding::LDNP_64_ldstnapair_offs => LDNP_64_ldstnapair_offs,
+        Encoding::LDNP_D_ldstnapair_offs => LDNP_D_ldstnapair_offs,
+        Encoding::LDNP_Q_ldstnapair_offs => LDNP_Q_ldstnapair_offs,
+        Encoding::LDNP_S_ldstnapair_offs => LDNP_S_ldstnapair_offs,
         Encoding::LDPSW_64_ldstpair_off => LDPSW_64_ldstpair_off,
         Encoding::LDPSW_64_ldstpair_post => LDPSW_64_ldstpair_post,
+        Encoding::LDPSW_64_ldstpair_pre => LDPSW_64_ldstpair_pre,
         Encoding::LDP_32_ldstpair_off => LDP_32_ldstpair_off,
         Encoding::LDP_32_ldstpair_post => LDP_32_ldstpair_post,
         Encoding::LDP_32_ldstpair_pre => LDP_32_ldstpair_pre,
@@ -8392,11 +10785,13 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDP_64_ldstpair_pre => LDP_64_ldstpair_pre,
         Encoding::LDP_D_ldstpair_off => LDP_D_ldstpair_off,
         Encoding::LDP_D_ldstpair_post => LDP_D_ldstpair_post,
+        Encoding::LDP_D_ldstpair_pre => LDP_D_ldstpair_pre,
         Encoding::LDP_Q_ldstpair_off => LDP_Q_ldstpair_off,
         Encoding::LDP_Q_ldstpair_post => LDP_Q_ldstpair_post,
         Encoding::LDP_Q_ldstpair_pre => LDP_Q_ldstpair_pre,
         Encoding::LDP_S_ldstpair_off => LDP_S_ldstpair_off,
         Encoding::LDP_S_ldstpair_post => LDP_S_ldstpair_post,
+        Encoding::LDP_S_ldstpair_pre => LDP_S_ldstpair_pre,
         Encoding::LDRB_32BL_ldst_regoff => LDRB_32BL_ldst_regoff,
         Encoding::LDRB_32B_ldst_regoff => LDRB_32B_ldst_regoff,
         Encoding::LDRB_32_ldst_immpost => LDRB_32_ldst_immpost,
@@ -8437,6 +10832,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDR_64_ldst_pos => LDR_64_ldst_pos,
         Encoding::LDR_64_ldst_regoff => LDR_64_ldst_regoff,
         Encoding::LDR_BL_ldst_regoff => LDR_BL_ldst_regoff,
+        Encoding::LDR_B_ldst_immpost => LDR_B_ldst_immpost,
+        Encoding::LDR_B_ldst_immpre => LDR_B_ldst_immpre,
         Encoding::LDR_B_ldst_pos => LDR_B_ldst_pos,
         Encoding::LDR_B_ldst_regoff => LDR_B_ldst_regoff,
         Encoding::LDR_D_ldst_immpost => LDR_D_ldst_immpost,
@@ -8444,6 +10841,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDR_D_ldst_pos => LDR_D_ldst_pos,
         Encoding::LDR_D_ldst_regoff => LDR_D_ldst_regoff,
         Encoding::LDR_H_ldst_immpost => LDR_H_ldst_immpost,
+        Encoding::LDR_H_ldst_immpre => LDR_H_ldst_immpre,
         Encoding::LDR_H_ldst_pos => LDR_H_ldst_pos,
         Encoding::LDR_H_ldst_regoff => LDR_H_ldst_regoff,
         Encoding::LDR_Q_ldst_immpost => LDR_Q_ldst_immpost,
@@ -8454,6 +10852,15 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDR_S_ldst_immpre => LDR_S_ldst_immpre,
         Encoding::LDR_S_ldst_pos => LDR_S_ldst_pos,
         Encoding::LDR_S_ldst_regoff => LDR_S_ldst_regoff,
+        Encoding::LDTRB_32_ldst_unpriv => LDTRB_32_ldst_unpriv,
+        Encoding::LDTRH_32_ldst_unpriv => LDTRH_32_ldst_unpriv,
+        Encoding::LDTRSB_32_ldst_unpriv => LDTRSB_32_ldst_unpriv,
+        Encoding::LDTRSB_64_ldst_unpriv => LDTRSB_64_ldst_unpriv,
+        Encoding::LDTRSH_32_ldst_unpriv => LDTRSH_32_ldst_unpriv,
+        Encoding::LDTRSH_64_ldst_unpriv => LDTRSH_64_ldst_unpriv,
+        Encoding::LDTRSW_64_ldst_unpriv => LDTRSW_64_ldst_unpriv,
+        Encoding::LDTR_32_ldst_unpriv => LDTR_32_ldst_unpriv,
+        Encoding::LDTR_64_ldst_unpriv => LDTR_64_ldst_unpriv,
         Encoding::LDURB_32_ldst_unscaled => LDURB_32_ldst_unscaled,
         Encoding::LDURH_32_ldst_unscaled => LDURH_32_ldst_unscaled,
         Encoding::LDURSB_32_ldst_unscaled => LDURSB_32_ldst_unscaled,
@@ -8468,8 +10875,17 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDUR_H_ldst_unscaled => LDUR_H_ldst_unscaled,
         Encoding::LDUR_Q_ldst_unscaled => LDUR_Q_ldst_unscaled,
         Encoding::LDUR_S_ldst_unscaled => LDUR_S_ldst_unscaled,
+        Encoding::LDXP_LP32_ldstexclp => LDXP_LP32_ldstexclp,
         Encoding::PRFM_P_ldst_pos => PRFM_P_ldst_pos,
+        Encoding::PRFM_P_ldst_regoff => PRFM_P_ldst_regoff,
         Encoding::PRFUM_P_ldst_unscaled => PRFUM_P_ldst_unscaled,
+        Encoding::STLXP_SP32_ldstexclp => STLXP_SP32_ldstexclp,
+        Encoding::STLXP_SP64_ldstexclp => STLXP_SP64_ldstexclp,
+        Encoding::STNP_32_ldstnapair_offs => STNP_32_ldstnapair_offs,
+        Encoding::STNP_64_ldstnapair_offs => STNP_64_ldstnapair_offs,
+        Encoding::STNP_D_ldstnapair_offs => STNP_D_ldstnapair_offs,
+        Encoding::STNP_Q_ldstnapair_offs => STNP_Q_ldstnapair_offs,
+        Encoding::STNP_S_ldstnapair_offs => STNP_S_ldstnapair_offs,
         Encoding::STP_32_ldstpair_off => STP_32_ldstpair_off,
         Encoding::STP_32_ldstpair_post => STP_32_ldstpair_post,
         Encoding::STP_32_ldstpair_pre => STP_32_ldstpair_pre,
@@ -8502,11 +10918,19 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::STR_64_ldst_immpre => STR_64_ldst_immpre,
         Encoding::STR_64_ldst_pos => STR_64_ldst_pos,
         Encoding::STR_64_ldst_regoff => STR_64_ldst_regoff,
+        Encoding::STR_BL_ldst_regoff => STR_BL_ldst_regoff,
+        Encoding::STR_B_ldst_immpost => STR_B_ldst_immpost,
+        Encoding::STR_B_ldst_immpre => STR_B_ldst_immpre,
+        Encoding::STR_B_ldst_pos => STR_B_ldst_pos,
+        Encoding::STR_B_ldst_regoff => STR_B_ldst_regoff,
         Encoding::STR_D_ldst_immpost => STR_D_ldst_immpost,
         Encoding::STR_D_ldst_immpre => STR_D_ldst_immpre,
         Encoding::STR_D_ldst_pos => STR_D_ldst_pos,
         Encoding::STR_D_ldst_regoff => STR_D_ldst_regoff,
+        Encoding::STR_H_ldst_immpost => STR_H_ldst_immpost,
+        Encoding::STR_H_ldst_immpre => STR_H_ldst_immpre,
         Encoding::STR_H_ldst_pos => STR_H_ldst_pos,
+        Encoding::STR_H_ldst_regoff => STR_H_ldst_regoff,
         Encoding::STR_Q_ldst_immpost => STR_Q_ldst_immpost,
         Encoding::STR_Q_ldst_immpre => STR_Q_ldst_immpre,
         Encoding::STR_Q_ldst_pos => STR_Q_ldst_pos,
@@ -8515,14 +10939,21 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::STR_S_ldst_immpre => STR_S_ldst_immpre,
         Encoding::STR_S_ldst_pos => STR_S_ldst_pos,
         Encoding::STR_S_ldst_regoff => STR_S_ldst_regoff,
+        Encoding::STTRB_32_ldst_unpriv => STTRB_32_ldst_unpriv,
+        Encoding::STTRH_32_ldst_unpriv => STTRH_32_ldst_unpriv,
+        Encoding::STTR_32_ldst_unpriv => STTR_32_ldst_unpriv,
+        Encoding::STTR_64_ldst_unpriv => STTR_64_ldst_unpriv,
         Encoding::STURB_32_ldst_unscaled => STURB_32_ldst_unscaled,
         Encoding::STURH_32_ldst_unscaled => STURH_32_ldst_unscaled,
         Encoding::STUR_32_ldst_unscaled => STUR_32_ldst_unscaled,
         Encoding::STUR_64_ldst_unscaled => STUR_64_ldst_unscaled,
+        Encoding::STUR_B_ldst_unscaled => STUR_B_ldst_unscaled,
         Encoding::STUR_D_ldst_unscaled => STUR_D_ldst_unscaled,
         Encoding::STUR_H_ldst_unscaled => STUR_H_ldst_unscaled,
         Encoding::STUR_Q_ldst_unscaled => STUR_Q_ldst_unscaled,
         Encoding::STUR_S_ldst_unscaled => STUR_S_ldst_unscaled,
+        Encoding::STXP_SP32_ldstexclp => STXP_SP32_ldstexclp,
+        Encoding::STXP_SP64_ldstexclp => STXP_SP64_ldstexclp,
         _ => return None,
     })
 }
