@@ -176,7 +176,7 @@ fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
         let mut v: Vec<PathBuf> = std::fs::read_dir(&dir)
             .map_err(|e| format!("{}: {e}", dir.display()))?
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x == "c"))
+            .filter(|p| p.extension().is_some_and(|x| x == "c" || x == "S"))
             .collect();
         v.sort();
         out.extend(v);

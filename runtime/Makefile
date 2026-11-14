@@ -61,6 +61,7 @@ VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen
 RUNNER_INC := -Icore/tests
 
 CORE_SRCS := $(wildcard core/*.c) $(HOST_SRCS)
+CORE_ASM := $(wildcard core/*.S)
 CORE_HDRS := $(wildcard core/include/relift/*.h core/*.h)
 A64_SRCS := $(wildcard cpus/a64/*.c)
 A64_HDRS := $(CORE_HDRS) $(wildcard cpus/a64/include/relift/a64/*.h cpus/a64/*.h)
@@ -77,8 +78,9 @@ SWITCH_TEST_SRCS := $(wildcard guests/switch/tests/*.c)
 SWITCH_TEST_HDRS := $(wildcard guests/switch/tests/*.h)
 VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
 
-obj = $(patsubst %.c,$(BUILD)/obj/%.o,$(1))
-CORE_OBJS := $(call obj,$(CORE_SRCS))
+obj = $(patsubst %.S,$(BUILD)/obj/%.o,$(patsubst %.c,$(BUILD)/obj/%.o,$(1)))
+CORE_ASM_OBJS := $(call obj,$(CORE_ASM))
+CORE_OBJS := $(call obj,$(CORE_SRCS)) $(CORE_ASM_OBJS)
 A64_OBJS := $(call obj,$(A64_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
 VK_OBJS := $(call obj,$(VK_SRCS))
@@ -109,9 +111,13 @@ SCHED_BENCH := $(BUILD)/sched_bench
 .PHONY: all test charter gdb-test sched-bench clean
 all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS) $(CRASH_TEST)
 
-$(CORE_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
+$(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(CORE_INC) $(CFLAGS) -c $< -o $@
+
+$(CORE_ASM_OBJS): $(BUILD)/obj/%.o: %.S
+	@mkdir -p $(dir $@)
+	$(CC) $(TARGET_FLAGS) -g -c $< -o $@
 
 $(A64_OBJS): $(BUILD)/obj/%.o: %.c $(A64_HDRS)
 	@mkdir -p $(dir $@)
