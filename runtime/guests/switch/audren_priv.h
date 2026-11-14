@@ -6,7 +6,7 @@
 #ifndef RELIFT_AUDREN_PRIV_H
 #define RELIFT_AUDREN_PRIV_H
 
-#include "audio.h"
+#include "hos_audio.h"
 
 /** @brief Wave buffers per voice. */
 #define AR_WAVEBUFS 4

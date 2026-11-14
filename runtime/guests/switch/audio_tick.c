@@ -4,7 +4,7 @@
  * callback once per 5 ms frame, on absolute deadlines so the rate does not
  * drift, and skips frames after a long stall instead of bursting.
  */
-#include "audio.h"
+#include "hos_audio.h"
 
 #include <errno.h>
 #include <pthread.h>

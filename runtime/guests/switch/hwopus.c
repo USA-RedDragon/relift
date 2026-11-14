@@ -8,7 +8,7 @@
  * built with AUDIO=real. Each packet starts with an 8-byte big-endian header
  * (payload length, final range).
  */
-#include "audio.h"
+#include "hos_audio.h"
 
 #include <stdlib.h>
 #include <string.h>
