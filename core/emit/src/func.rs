@@ -14,9 +14,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use relift_guest::{Frontend, Home};
-use relift_ir::{Block, Flow, Next, Op, Reg};
+use relift_ir::{Block, Flow, Next, Op, Reg, Value};
 
-use crate::value::{Emitted, cty, emit_op, reg, val};
+use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
 use crate::{Function, Insn, Target};
 
 /// One C function of an emitted guest function.
@@ -422,8 +422,13 @@ fn emit_piece(
 fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)> {
     let mut s = String::new();
     let mut sets = Vec::new();
+    let inl = inlined(b);
+    let val = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
     for (i, inst) in b.insts.iter().enumerate() {
-        match emit_op(cx.fe, b, i).map_err(|m| (raw, m))? {
+        if inl[i].is_some() {
+            continue;
+        }
+        match emit_op(cx.fe, b, i, &inl).map_err(|m| (raw, m))? {
             Emitted::Value(e) => {
                 let ty = cty(inst.width.unwrap_or(relift_ir::Width::W1));
                 let _ = writeln!(s, "    {ty} v{i} = {e};");

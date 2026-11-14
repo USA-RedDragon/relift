@@ -84,7 +84,7 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
     assert!(s.contains("RL_MUSTTAIL return F_108(c, mem);"), "{s}");
     assert!(s.contains("rc = rl_svc(c, mem, 0x27u);"), "{s}");
     assert!(
-        s.contains("RL_MUSTTAIL return rl_indirect(c, v0)(c, mem);"),
+        s.contains("RL_MUSTTAIL return rl_indirect(c, r2)(c, mem);"),
         "{s}"
     );
     let unit = &out.files.last().expect("unit").text;
@@ -202,7 +202,7 @@ fn jump_tables_branch_to_their_targets_inside_the_function() {
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("    switch (v0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_STORE();\n    RL_MUSTTAIL return rl_indirect(c, v0)(c, mem);"),
+        s.contains("    switch (r0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_STORE();\n    RL_MUSTTAIL return rl_indirect(c, r0)(c, mem);"),
         "{s}"
     );
 }
@@ -476,7 +476,7 @@ fn a_split_function_in_parts_lands_whole_in_its_part() {
         function(0x110, &blocks[4..5]),
     ];
     let opts = Options {
-        shard_bytes: 1200,
+        shard_bytes: 1,
         piece_bytes: 1,
         parts: true,
         ..Options::default()
@@ -491,7 +491,7 @@ fn a_split_function_in_parts_lands_whole_in_its_part() {
         .iter()
         .filter(|f| f.text.contains("RL_TEXT RL_LIFTED(F_100"))
         .collect();
-    assert!(holding.len() >= 3, "{}", holding.len());
+    assert_eq!(holding.len(), 5);
     let mut defs = 0;
     for f in &holding {
         // The build puts a shard in part 1 by the names in File::fns.

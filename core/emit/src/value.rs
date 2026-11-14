@@ -62,6 +62,40 @@ pub(crate) fn lit(v: u128, w: Width) -> String {
     }
 }
 
+/// A C constant of width `w` whose type is the C type of the width, so it
+/// can stand wherever a local of that width would.
+pub(crate) fn typed_lit(v: u128, w: Width) -> String {
+    let v = v & w.mask();
+    match cty(w) {
+        "uint8_t" | "uint16_t" => format!("(({}){v:#x})", cty(w)),
+        "uint32_t" => format!("UINT32_C({v:#x})"),
+        _ => lit(v, w),
+    }
+}
+
+/// The C expressions that stand for values of `b` in place of a local:
+/// constants, and reads of registers the block does not write (sets apply
+/// when the block exits, so such a read would otherwise see the entry
+/// value through its local anyway).
+pub(crate) fn inlined(b: &Block) -> Vec<Option<String>> {
+    let written: Vec<Reg> = b
+        .insts
+        .iter()
+        .filter_map(|i| match i.op {
+            Op::Set(r, _) => Some(r),
+            _ => None,
+        })
+        .collect();
+    b.insts
+        .iter()
+        .map(|i| match i.op {
+            Op::Const(c) => Some(typed_lit(c, i.width.unwrap_or(Width::W1))),
+            Op::Get(r) if !written.contains(&r) => Some(reg(r)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The C local of value `v`.
 pub(crate) fn val(v: Value) -> String {
     format!("v{}", v.0)
@@ -93,12 +127,27 @@ pub(crate) enum Emitted {
 }
 
 /// The C for instruction `i` of `b`, or why it cannot be expressed.
-pub(crate) fn emit_op(fe: &dyn Frontend, b: &Block, i: usize) -> Result<Emitted, String> {
+///
+/// `inl` holds the expressions that stand for some values in place of
+/// their locals ([`inlined`]).
+pub(crate) fn emit_op(
+    fe: &dyn Frontend,
+    b: &Block,
+    i: usize,
+    inl: &[Option<String>],
+) -> Result<Emitted, String> {
     let inst = &b.insts[i];
     let wv = |v: Value| b.insts[v.index()].width.unwrap_or(Width::W1);
     let w = inst.width.unwrap_or(Width::W1);
     let u = wide(w);
-    let a = |v: &Value| format!("({u}){}", val(*v));
+    let val = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
+    let a = |v: &Value| {
+        if cty(wv(*v)) == u {
+            val(*v)
+        } else {
+            format!("({u}){}", val(*v))
+        }
+    };
     let e = match &inst.op {
         Op::Const(c) => fit(&lit(*c, w), w),
         Op::Get(r) => reg(*r),
