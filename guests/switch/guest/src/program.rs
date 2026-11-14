@@ -659,6 +659,7 @@ fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags:
         placed.len(),
         units.len()
     );
+    t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp_flags {
         t.push_str("#include \"a64.h\"\nint main(int argc, char **argv) { rl_a64_set_fp_flags(1); return rl_switch_main(&rl_program, argc, argv); }\n");
     } else {
