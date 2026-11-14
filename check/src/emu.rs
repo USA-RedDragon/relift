@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use relift_cpu_a64::decode::Features;
 use relift_cpu_a64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
 use relift_cpu_a64::lift::system;
 use relift_cpu_a64::lift::{self, LiftError};
@@ -208,7 +209,8 @@ pub static DCE: AtomicBool = AtomicBool::new(false);
 pub static FP_FLAGS: AtomicBool = AtomicBool::new(false);
 
 /// The A64 intrinsics the interpreter can run: the FPSR flag ones (the
-/// host's sticky flags modeled as `host`) and the hints.
+/// host's sticky flags modeled as `host`) and those of
+/// [`system::InterpIntrinsics`] (event hints, cache maintenance).
 struct A64Intrinsics {
     host: u32,
 }
@@ -225,8 +227,7 @@ impl Intrinsics for A64Intrinsics {
                 self.host = 0;
                 Ok(0)
             }
-            system::WFE | system::SEV => Ok(0),
-            _ => Err(interp::Error::UnknownIntrinsic(name)),
+            _ => system::InterpIntrinsics.call(name, args),
         }
     }
 }
@@ -240,17 +241,59 @@ pub static FPSR: AtomicBool = AtomicBool::new(false);
 pub static X18_ZERO: AtomicBool = AtomicBool::new(false);
 
 /// The oracle's CPU features, in `Features::parse` syntax (`all` for
-/// every feature). Not yet applied: the lifter on this branch lifts every
-/// encoding for every CPU.
+/// every feature): words are decoded and lifted for that CPU.
 pub static FEATURES: OnceLock<String> = OnceLock::new();
 
+/// The parsed [`FEATURES`], every feature when unset.
+pub fn features() -> Features {
+    static F: OnceLock<Features> = OnceLock::new();
+    *F.get_or_init(|| match FEATURES.get() {
+        Some(s) => Features::parse(s).unwrap_or_else(|e| panic!("oracle features: {e}")),
+        None => Features::ALL,
+    })
+}
+
+/// Whether the check is of words the oracle's CPU does not implement: they
+/// must lift to an undefined-instruction trap ([`UNDEF_TRAP`]) and fault
+/// with SIGILL on the oracle.
+pub static UNDEF: AtomicBool = AtomicBool::new(false);
+
+/// The trap code of a block that stands for an undefined instruction.
+pub const UNDEF_TRAP: u32 = 0x5544_4546;
+
+/// Whether `e` means the word is undefined on the CPU.
+pub fn is_undefined(e: &LiftError) -> bool {
+    matches!(e, LiftError::Unallocated(_) | LiftError::Undefined(_))
+}
+
 /// Lifts `w` at `pc` as the frontend does, or with the hand-written lifter
-/// under [`HAND`], then removes dead values under [`DCE`].
+/// under [`HAND`], then removes dead values under [`DCE`]. Under [`UNDEF`],
+/// an undefined word becomes a block that traps with [`UNDEF_TRAP`], as the
+/// emitter's undefined-instruction call does.
 pub fn lift(w: u32, pc: u64) -> Result<Block, LiftError> {
+    if UNDEF.load(Ordering::Relaxed) {
+        match lift_plain(w, pc) {
+            Err(e) if is_undefined(&e) => {
+                let b = relift_ir::Builder::new(regs::regs(), relift_ir::Width::W64, pc);
+                return Ok(b.finish(
+                    4,
+                    relift_ir::Exit {
+                        next: relift_ir::Next::Const(pc),
+                        flow: Flow::Trap(UNDEF_TRAP),
+                    },
+                ));
+            }
+            r => return r,
+        }
+    }
+    lift_plain(w, pc)
+}
+
+pub fn lift_plain(w: u32, pc: u64) -> Result<Block, LiftError> {
     let b = if HAND.load(Ordering::Relaxed) {
         lift::lift_hand(w, pc)?
     } else {
-        lift::lift(w, pc, &relift_cpu_a64::decode::Features::ALL)?
+        lift::lift(w, pc, &features())?
     };
     if DCE.load(Ordering::Relaxed) {
         return Ok(relift_ir::dce(&b));
@@ -350,6 +393,9 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
                     && (code == SLOW_FPCR || code == SLOW_FLAGS)
                 {
                     return Outcome::Slow(code);
+                }
+                if let Flow::Trap(UNDEF_TRAP) = o.flow {
+                    return Outcome::Fault("undefined instruction".to_string());
                 }
                 pc = o.next;
             }

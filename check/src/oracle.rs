@@ -278,12 +278,14 @@ impl Drop for Native {
     }
 }
 
-/// The Apple M2's features, as its `hw.optional.arm` sysctl lists them.
+/// The Apple M2's features, as its `hw.optional.arm` sysctl lists them,
+/// plus `LOR`: the sysctl does not list it, but FEAT_LOR is mandatory from
+/// Armv8.1 and the M2 runs LDLAR and STLLR.
 pub const M2_FEATURES: &[&str] = &[
     "FP", "AdvSIMD", "CRC32", "FlagM", "FlagM2", "FHM", "DotProd", "SHA3", "RDM", "LSE", "SHA256",
     "SHA512", "SHA1", "AES", "PMULL", "SB", "FRINTTS", "PACIMP", "LRCPC", "LRCPC2", "FCMA",
     "JSCVT", "PAuth", "PAuth2", "FPAC", "DPB", "DPB2", "BF16", "I8MM", "ECV", "LSE2", "CSV2",
-    "CSV3", "DIT", "FP16", "SSBS", "BTI",
+    "CSV3", "DIT", "FP16", "SSBS", "BTI", "LOR",
 ];
 
 /// The oracle `spec` names and the CPU features to lift for:

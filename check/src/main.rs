@@ -12,8 +12,8 @@
 //! relift-check forms <name>[,<name>...]|all [options]
 //! relift-check --oracle rustyboi step|rom ...   (Game Boy SM83, see gb/cli.rs)
 //! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
-//!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)
-//!          [--slow cmd:<argv>] [--all-slow] [--fp-flags]
+//!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
+//!          [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -27,8 +27,10 @@
 //! for the runtime's slow path (counted, and compared only with `--slow`),
 //! and every other block must still match. `--oracle` picks
 //! the machine and with it the CPU feature set (`Features::parse` syntax),
-//! which `--features` overrides; the lifter does not take a feature set
-//! yet, so it is recorded only. `--slow` names the
+//! which `--features` overrides; words decode and lift for that CPU, and a
+//! form the CPU lacks is skipped. `--undef` checks those forms instead:
+//! their words must lift to an undefined-instruction trap and fault with
+//! SIGILL on the oracle. `--slow` names the
 //! slow-path engine (`check/oracle/slow.c`, the runtime's `rl_fp_slow`): a
 //! block that leaves through its FPCR guard runs there instead and is
 //! compared with the oracle like any other; `--all-slow` sends every
@@ -45,12 +47,12 @@ mod states;
 
 use std::process::ExitCode;
 
-use relift_cpu_a64::decode::{Encoding, Insn, decode};
+use relift_cpu_a64::decode::{Encoding, Insn};
 use relift_cpu_a64::lift::{lifter, supported};
 
 use emu::{Guest, compare, interpret, lift_all};
 use oracle::{Case, Oracle};
-use states::Rng;
+use states::{Rng, decode};
 
 struct Opts {
     n: u64,
@@ -180,7 +182,15 @@ fn run_all(
         if matches!((ir, or), (emu::Outcome::Fault(_), emu::Outcome::Fault(_))) {
             rep.both_faulted += 1;
         }
-        let d = compare(ir, or);
+        let mut d = compare(ir, or);
+        if emu::UNDEF.load(std::sync::atomic::Ordering::Relaxed)
+            && d.is_empty()
+            && !matches!(or, emu::Outcome::Fault(s) if s.starts_with("signal 4 ") || s.contains("INSN_INVALID") || s.contains("EXCEPTION"))
+        {
+            d.push(format!(
+                "expected an undefined-instruction fault, oracle gave {or:?}"
+            ));
+        }
         if d.is_empty() {
             rep.matched += 1;
         } else if rep.first.is_none() {
@@ -293,7 +303,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)"
     );
     ExitCode::from(2)
 }
@@ -356,6 +366,7 @@ fn main() -> ExitCode {
             "--fpsr" => emu::FPSR.store(true, std::sync::atomic::Ordering::Relaxed),
             "--mutate" => opts.mutate = true,
             "--hand" => emu::HAND.store(true, std::sync::atomic::Ordering::Relaxed),
+            "--undef" => emu::UNDEF.store(true, std::sync::atomic::Ordering::Relaxed),
             "--dce" => emu::DCE.store(true, std::sync::atomic::Ordering::Relaxed),
             _ => return usage(),
         }

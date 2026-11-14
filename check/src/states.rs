@@ -2,7 +2,7 @@
 //! states with register patterns, flag sweeps and mapped memory windows.
 
 use crate::emu::lift;
-use relift_cpu_a64::decode::{Encoding, Insn, decode};
+use relift_cpu_a64::decode::{Encoding, Features, Insn, decode_for};
 
 use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, Guest};
 use crate::oracle::fill_window;
@@ -167,12 +167,37 @@ fn vec_half(r: &mut Rng) -> u64 {
     }
 }
 
+/// The features words are decoded for: the oracle's, or every feature
+/// under `--undef` (whose words exist only on newer CPUs).
+pub fn decode_features() -> Features {
+    if crate::emu::UNDEF.load(std::sync::atomic::Ordering::Relaxed) {
+        Features::ALL
+    } else {
+        crate::emu::features()
+    }
+}
+
+/// Decodes `w` for [`decode_features`].
+pub fn decode(w: u32) -> Option<Insn> {
+    decode_for(w, &decode_features())
+}
+
 /// A random word of `enc` whose don't-care bits are random, that decodes to
-/// `enc` and lifts, or `None` after many tries.
+/// `enc` and lifts (under `--undef`: that the oracle's CPU does not
+/// implement), or `None` after many tries.
 pub fn word_of(enc: Encoding, r: &mut Rng) -> Option<u32> {
+    let undef = crate::emu::UNDEF.load(std::sync::atomic::Ordering::Relaxed);
     for _ in 0..1000 {
         let w = enc.value() | (r.next() as u32 & !enc.mask());
-        if decode(w).map(|i| i.encoding) == Some(enc) && lift(w, CODE).is_ok() {
+        if decode(w).map(|i| i.encoding) != Some(enc) {
+            continue;
+        }
+        let ok = if undef {
+            matches!(crate::emu::lift_plain(w, CODE), Err(e) if crate::emu::is_undefined(&e))
+        } else {
+            lift(w, CODE).is_ok()
+        };
+        if ok {
             return Some(w);
         }
     }
