@@ -3,8 +3,11 @@
  * @brief Run-time data mods for a Switch program: romfs layers in front of
  * the base tree and Atmosphere dmnt cheats that write RAM every frame.
  *
- * The launcher passes the ordered mod list as $RELIFT_MODS (host path list:
- * ':' separated, ';' on Windows). Later entries win. Each entry is one of:
+ * The launcher passes the ordered mod list as repeated `--relift-mods <path>`
+ * flags (flag order is mod order) or as the `mods` array of its settings file;
+ * $RELIFT_MODS (host path list: ':' separated, ';' on Windows) is a debug
+ * override used only when no flag was given. Later entries win. Each entry is
+ * one of:
  *  - a mod folder holding romfs/ or cheats/ (an Atmosphere contents/<title id>
  *    folder, or one Ryujinx mod folder);
  *  - an Atmosphere contents folder (or the folder holding contents/): its
@@ -57,6 +60,17 @@ typedef struct rl_hos_mod_info {
  * the number of mods.
  */
 RL_RUNTIME_API size_t rl_hos_mods_set(const char *list, uint64_t program_id);
+/**
+ * @brief Like rl_hos_mods_set with the entries already split, so paths may
+ * hold any character.
+ */
+RL_RUNTIME_API size_t rl_hos_mods_set_paths(const char *const *paths, size_t n, uint64_t program_id);
+/**
+ * @brief Records the mod list the launcher passed (copied; replaces an
+ * earlier request). Applied when the file system service installs; with no
+ * request $RELIFT_MODS is used. rl_switch_main records its --relift-mods flags.
+ */
+RL_RUNTIME_API void rl_hos_mods_request(const char *const *paths, size_t n);
 /** @brief Forgets all mods and cheats. */
 RL_RUNTIME_API void rl_hos_mods_clear(void);
 /** @brief Number of active mods. */

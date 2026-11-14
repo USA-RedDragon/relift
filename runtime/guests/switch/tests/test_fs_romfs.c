@@ -672,6 +672,8 @@ TEST(mods_both_layouts_overlay_and_read_through_fsp)
         char json[1024];
         size_t need = rl_hos_mods_json(json, sizeof json);
         CHECK(need < sizeof json);
+        CHECK(strncmp(json, "{\"active\":[{\"name\":", 19) == 0);
+        CHECK(strstr(json, "\"conflicts\":[\"") != NULL);
         CHECK(strstr(json, "\"layout\":\"atmosphere\"") != NULL);
         CHECK(strstr(json, "\"layout\":\"ryujinx\"") != NULL);
         CHECK(strstr(json, "alpha wins over") != NULL);
@@ -715,6 +717,27 @@ static uint64_t held_keys(void *u)
 {
     (void)u;
     return keys_held;
+}
+
+TEST(mods_request_takes_paths_with_separators_and_keeps_order)
+{
+    char a[512], b[512];
+    const char *paths[2];
+    make_root(a, sizeof a);
+    make_root(b, sizeof b);
+    put(a, "romfs/x", "a");
+    put(b, "romfs/x", "b");
+    paths[0] = a;
+    paths[1] = b;
+    rl_hos_mods_request(paths, 2);
+    rl_hos_mods_set_paths(paths, 2, hos.cfg.program_id);
+    CHECK_EQ(rl_hos_mods_count(), 2);
+    CHECK(strcmp(rl_hos_mods_info(0)->path, a) == 0);
+    CHECK(strcmp(rl_hos_mods_info(1)->path, b) == 0);
+    rl_hos_mods_clear();
+    rl_hos_mods_request(NULL, 0);
+    tree_remove(a);
+    tree_remove(b);
 }
 
 TEST(mods_cheat_writes_ram_every_frame)

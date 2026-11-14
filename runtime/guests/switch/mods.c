@@ -284,6 +284,39 @@ size_t rl_hos_mods_set(const char *list, uint64_t program_id)
     return n;
 }
 
+size_t rl_hos_mods_set_paths(const char *const *paths, size_t n, uint64_t program_id)
+{
+    size_t r;
+    pthread_mutex_lock(&g_lock);
+    clear_locked();
+    for (size_t i = 0; i < n; i++)
+        if (paths[i] && *paths[i])
+            resolve_entry(paths[i], program_id);
+    r = g_nmods;
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
+static char **g_req;
+static size_t g_nreq;
+
+void rl_hos_mods_request(const char *const *paths, size_t n)
+{
+    pthread_mutex_lock(&g_lock);
+    for (size_t i = 0; i < g_nreq; i++)
+        free(g_req[i]);
+    free(g_req);
+    g_req = NULL;
+    g_nreq = 0;
+    if (n) {
+        g_req = calloc(n, sizeof *g_req);
+        for (size_t i = 0; g_req && i < n; i++)
+            if (paths[i] && *paths[i] && (g_req[g_nreq] = strdup(paths[i])))
+                g_nreq++;
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
 size_t rl_hos_mods_count(void)
 {
     size_t n;
@@ -705,7 +738,7 @@ size_t rl_hos_mods_json(char *buf, size_t cap)
 {
     jw w = { buf, cap, 0 };
     pthread_mutex_lock(&g_lock);
-    jput(&w, "{\"data_mods\":[");
+    jput(&w, "{\"active\":[");
     for (size_t i = 0; i < g_nmods; i++) {
         const rl_hos_mod_info *m = &g_mods[i].info;
         jput(&w, "%s{\"name\":", i ? "," : "");
@@ -731,8 +764,17 @@ size_t rl_hos_mods_json(char *buf, size_t cap)
 void rl_hos_mods_install(void)
 {
     const char *list = getenv("RELIFT_MODS");
-    if (!list || !*list)
+    const char *const *req;
+    size_t n;
+    pthread_mutex_lock(&g_lock);
+    req = (const char *const *)g_req;
+    n = g_nreq;
+    pthread_mutex_unlock(&g_lock);
+    if (n)
+        rl_hos_mods_set_paths(req, n, hos.cfg.program_id);
+    else if (list && *list)
+        rl_hos_mods_set(list, hos.cfg.program_id);
+    else
         return;
-    rl_hos_mods_set(list, hos.cfg.program_id);
     rl_hos_mods_apply_romfs(getenv("RELIFT_ROMFS"));
 }
