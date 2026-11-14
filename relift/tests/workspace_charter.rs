@@ -368,6 +368,7 @@ const CHARTERS: &[Charter] = &[
             "relift-switch-names",
             "relift-testguest",
             "serde_json",
+            "sha2",
             "toml",
             "uds_windows",
             "zstd",
