@@ -268,6 +268,22 @@ fn emit_modules(
                 pads: o.pads.clone(),
             })
             .collect();
+        let overrides: Vec<relift_emit::Override> = layout
+            .functions
+            .keys()
+            .filter_map(|&a| {
+                let k = program::known(module.bytes_at(a)?)?;
+                Some(relift_emit::Override {
+                    entry: a,
+                    host_fn: k.host_fn.into(),
+                    may_unwind: k.may_unwind,
+                    resume_point: k.resume_point,
+                })
+            })
+            .collect();
+        let flags = fpsr.begin_module(i, p, &module, &layout, &cpu, &overrides);
+        let summaries = std::sync::Mutex::new(Vec::new());
+        let fpsr_now = &fpsr;
         let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &relift_emit::Function<'_>)| {
             let group: Vec<&Outline> = ks.iter().map(|&k| all[k]).collect();
             let mut n = 0;
@@ -296,23 +312,16 @@ fn emit_modules(
                     tables: f.tables.clone(),
                     pads: f.pads.clone(),
                 };
+                if let Some(s) = fpsr_now.function(&flags, &module, all[k], f) {
+                    summaries
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push((k, s));
+                }
                 sink(k, &e);
             });
         };
-        let overrides: Vec<relift_emit::Override> = layout
-            .functions
-            .keys()
-            .filter_map(|&a| {
-                let k = program::known(module.bytes_at(a)?)?;
-                Some(relift_emit::Override {
-                    entry: a,
-                    host_fn: k.host_fn.into(),
-                    may_unwind: k.may_unwind,
-                    resume_point: k.resume_point,
-                })
-            })
-            .collect();
-        fpsr.add_module(i, p, &module, &layout, &cpu, &overrides);
+        let parts = fpsr.parts();
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         ui.begin(row, "emit");
         let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
@@ -330,7 +339,7 @@ fn emit_modules(
                 unit_name: p.name.clone(),
                 unit_symbol: unit.clone(),
                 module_base: p.base,
-                parts: fpsr.parts(),
+                parts,
                 image_id,
                 ..relift_emit::Options::default()
             },
@@ -358,6 +367,27 @@ fn emit_modules(
             },
         );
         written?;
+        let mut summaries = summaries
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if parts {
+            let mut seen = vec![false; all.len()];
+            for (k, _) in &summaries {
+                seen[*k] = true;
+            }
+            let rest: Vec<usize> = (0..all.len()).filter(|&k| !seen[k]).collect();
+            let outlines: Vec<&Outline> = rest.iter().map(|&k| all[k]).collect();
+            let more = relift_analyze::each_lifted(&cpu, &module, &outlines, |o, f| {
+                fpsr.function(&flags, &module, o, f)
+            });
+            summaries.extend(
+                rest.into_iter()
+                    .zip(more)
+                    .filter_map(|(k, s)| Some((k, s?))),
+            );
+        }
+        summaries.sort_unstable_by_key(|s| s.0);
+        fpsr.end_module(flags, summaries.into_iter().map(|s| s.1).collect());
         let out = relift_emit::Output { files, undefined };
         let shards = out
             .files
