@@ -1,15 +1,18 @@
 /**
  * @file core.h
- * @brief Guest-neutral runtime core: logging, configuration, guest memory,
- * faults, host threads, the clock and dispatch.
+ * @brief Runtime core: logging, configuration, the guest and CPU descriptors,
+ * guest memory, faults, host threads, the clock and dispatch.
  *
- * Nothing here knows about a particular guest OS. The Switch layer builds its
- * kernel on top of these pieces.
+ * The core knows no guest OS and no guest CPU. A CPU layer (runtime/cpus/)
+ * describes its context and code granule with an rl_cpu_desc; a guest layer
+ * (runtime/guests/) describes its page size, address width and clock with an
+ * rl_guest_desc and builds its OS model on top of these pieces. The core
+ * includes no header of either, and runtime/charter checks that.
  */
 #ifndef RELIFT_CORE_H
 #define RELIFT_CORE_H
 
-#include <relift/a64/abi.h>
+#include <relift/abi_core.h>
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -39,23 +42,31 @@ RL_RUNTIME_API void rl_vlog(int level, const char *tag, const char *fmt, va_list
 
 /**
  * @brief Returns true the first time it is called with a given key, false
- * afterwards. Used to report an unknown svc or service command once.
+ * afterwards. Used to report an unknown guest OS call or command once.
  */
 RL_RUNTIME_API bool rl_once(uint64_t key);
 /** @brief Forgets every key rl_once has seen (tests). */
 RL_RUNTIME_API void rl_once_reset(void);
 
+/**
+ * @brief Reports a guest OS call, service or command the guest layer does not
+ * implement: logs it as a warning the first time key is seen. Returns true
+ * when RELIFT_STRICT is set, and the guest layer then stops the guest instead
+ * of returning an error to it.
+ */
+RL_RUNTIME_API bool rl_report_unknown(uint64_t key, const char *tag, const char *fmt, ...) RL_PRINTF(3, 4);
+
 /** @brief Runtime switches read from the environment at start-up. */
 typedef struct rl_config {
-    /** @brief RELIFT_STRICT: stop on an unknown svc or service command instead of returning an error. */
+    /** @brief RELIFT_STRICT: stop on an unknown guest OS call or command instead of returning an error (rl_report_unknown). */
     bool strict;
-    /** @brief RELIFT_TRACE_SVC: log every svc and IPC request with its result and time. */
-    bool trace_svc;
+    /** @brief RELIFT_TRACE_OS: the guest layer logs every guest OS call and service request with its result and time. */
+    bool trace_os;
     /** @brief RELIFT_LOG: lowest level printed (debug, info, warn, error). */
     int log_level;
     /** @brief RELIFT_HOST_PAGE: page size the memory manager assumes, at least the real one (16384 simulates Apple hosts). */
     uint32_t host_page;
-    /** @brief RELIFT_ADDRESS_BITS: force the guest address space width (36 or 39); 0 keeps the NPDM's. */
+    /** @brief RELIFT_ADDRESS_BITS: asks the guest layer for this address space width; 0 keeps the guest's own choice. The guest layer decides which widths it accepts. */
     uint32_t address_bits;
     /** @brief True once rl_config_load has run. */
     bool loaded;
@@ -66,26 +77,94 @@ RL_RUNTIME_API rl_config *rl_cfg(void);
 /** @brief Reads the environment into rl_cfg(). Called by the runtime's init; tests may call it again. */
 RL_RUNTIME_API void rl_config_load(void);
 
+/**
+ * @brief What the guest layer tells the core about the guest platform, given
+ * to rl_core_init.
+ */
+typedef struct rl_guest_desc {
+    /** @brief Guest name for reports. */
+    const char *name;
+    /** @brief Guest page size in bytes: the granule of rl_vm_set, a power of two. */
+    uint64_t page_size;
+    /** @brief Widest guest address space the guest layer reserves, in bits (rl_vm_init refuses more). */
+    uint32_t address_bits;
+    /** @brief Rate of the guest's clock in ticks per second (rl_ns_to_ticks). */
+    uint64_t tick_hz;
+} rl_guest_desc;
+
+/**
+ * @brief What the CPU layer tells the core about its context and code, given
+ * to rl_core_init. The core never reads a register; it allocates contexts of
+ * ctx_size bytes and reaches its own fields at common_offset.
+ */
+typedef struct rl_cpu_desc {
+    /** @brief CPU name for reports. */
+    const char *name;
+    /** @brief sizeof(rl_ctx) of this CPU layer; units must carry the same value. */
+    uint32_t ctx_size;
+    /** @brief Alignment of rl_ctx, a power of two at least sizeof(void *). */
+    uint32_t ctx_align;
+    /** @brief Offset of the rl_ctx_common block in rl_ctx, 8-byte aligned. */
+    uint32_t common_offset;
+    /** @brief log2 of the code granule: guest function entries are aligned to it, and the dispatch table has one slot per granule. */
+    uint32_t code_shift;
+    /** @brief True when guest data is big-endian (rl_guest_order16 and friends swap). */
+    bool big_endian;
+    /** @brief Sets the CPU's initial state in a zeroed context (after the core filled its block), or NULL. */
+    void (*ctx_init)(rl_ctx *c);
+    /** @brief Called when a host thread binds a context (host CPU state that follows the guest's), or NULL. */
+    void (*bind)(rl_ctx *c);
+    /** @brief Writes a short register summary of c for crash reports into buf (NUL terminated), or NULL. */
+    void (*describe)(const rl_ctx *c, char *buf, size_t n);
+} rl_cpu_desc;
+
+/**
+ * @brief Sets the guest and CPU descriptors. The guest layer calls it before
+ * it reserves guest memory or creates a thread. Returns 0, or -1 when a
+ * descriptor is malformed. The descriptors must outlive the runtime.
+ */
+RL_RUNTIME_API int rl_core_init(const rl_guest_desc *guest, const rl_cpu_desc *cpu);
+/** @brief The guest descriptor, NULL before rl_core_init. */
+RL_RUNTIME_API const rl_guest_desc *rl_core_guest(void);
+/** @brief The CPU descriptor, NULL before rl_core_init. */
+RL_RUNTIME_API const rl_cpu_desc *rl_core_cpu(void);
+/** @brief The core's block of a context. */
+RL_RUNTIME_API rl_ctx_common *rl_common(rl_ctx *c);
+
+/** @brief Converts a 16-bit value between guest and host byte order (the CPU descriptor's big_endian). */
+RL_RUNTIME_API uint16_t rl_guest_order16(uint16_t v);
+/** @brief Converts a 32-bit value between guest and host byte order. */
+RL_RUNTIME_API uint32_t rl_guest_order32(uint32_t v);
+/** @brief Converts a 64-bit value between guest and host byte order. */
+RL_RUNTIME_API uint64_t rl_guest_order64(uint64_t v);
+
 /** @brief Host monotonic clock in nanoseconds. */
 RL_RUNTIME_API uint64_t rl_clock_ns(void);
-/** @brief Converts nanoseconds to RL_CNTFRQ ticks. */
+/** @brief Converts nanoseconds to guest clock ticks (rl_guest_desc.tick_hz). */
 RL_RUNTIME_API uint64_t rl_ns_to_ticks(uint64_t ns);
-/** @brief Converts RL_CNTFRQ ticks to nanoseconds. */
+/** @brief Converts guest clock ticks to nanoseconds. */
 RL_RUNTIME_API uint64_t rl_ticks_to_ns(uint64_t ticks);
 /** @brief Real host page size from the OS. */
 RL_RUNTIME_API uint32_t rl_os_page_size(void);
 
-/** @brief Guest page size every guest in scope uses. */
-#define RL_GUEST_PAGE 0x1000ull
-
-/** @brief Guest page permission bits, as Horizon encodes them. */
-enum rl_perm {
-    RL_PERM_NONE = 0,
-    RL_PERM_R = 1,
-    RL_PERM_W = 2,
-    RL_PERM_X = 4,
-    RL_PERM_RW = 3,
-    RL_PERM_RX = 5
+/**
+ * @brief Guest page permission bits: the core's own encoding, not any guest
+ * OS's. The bit positions are chosen to match no guest encoding, so a guest
+ * layer that forgets to translate its own permission values fails its tests.
+ */
+enum rl_vm_perm {
+    /** @brief No access. */
+    RL_VM_NONE = 0,
+    /** @brief Readable. */
+    RL_VM_R = 1u << 8,
+    /** @brief Writable; the host page is made readable too. */
+    RL_VM_W = 1u << 9,
+    /** @brief Executable; recorded for the guest only, never given to host memory (code is lifted). */
+    RL_VM_X = 1u << 10,
+    /** @brief Readable and writable. */
+    RL_VM_RW = RL_VM_R | RL_VM_W,
+    /** @brief Readable and executable. */
+    RL_VM_RX = RL_VM_R | RL_VM_X
 };
 
 /** @brief What an rl_vm_set does to the contents of the pages. */
@@ -102,11 +181,11 @@ enum rl_vm_content {
 typedef struct rl_vm_block {
     /** @brief First guest address. */
     uint64_t addr;
-    /** @brief Size in bytes, a multiple of RL_GUEST_PAGE. */
+    /** @brief Size in bytes, a multiple of the guest page. */
     uint64_t size;
-    /** @brief Guest-defined state (the Switch layer packs memory state and attributes here). */
+    /** @brief Opaque to the core: the guest layer's own state for the block (its memory state and attributes). */
     uint64_t tag;
-    /** @brief enum rl_perm. */
+    /** @brief enum rl_vm_perm. */
     uint32_t perm;
     /** @brief Reserved, zero. */
     uint32_t reserved;
@@ -114,7 +193,7 @@ typedef struct rl_vm_block {
 
 /**
  * @brief The guest address space: one PROT_NONE host reservation plus the
- * exact 4 KiB guest map.
+ * exact guest map at the guest page size.
  *
  * Host protection follows docs/abi.md section 2: a host page gets the union
  * of the permissions of the guest pages in it.
@@ -128,8 +207,10 @@ typedef struct rl_vm {
     uint8_t *map_start;
     /** @brief Length of the host mapping including both guards. */
     uint64_t map_len;
-    /** @brief Host page size the manager works in (real or simulated, a power of two at least 4 KiB). */
+    /** @brief Host page size the manager works in: real or simulated, raised to the guest page when that is larger. */
     uint64_t host_page;
+    /** @brief Guest page size (rl_guest_desc.page_size). */
+    uint64_t guest_page;
     /** @brief Sorted, coalesced blocks covering [0, size). */
     rl_vm_block *blocks;
     /** @brief Number of blocks in use. */
@@ -147,7 +228,8 @@ typedef struct rl_vm {
 
 /**
  * @brief Reserves a guest space of 2^bits bytes plus guards. Returns 0, or -1
- * when the host cannot reserve it (the caller then tries a smaller layout).
+ * when the host cannot reserve it (the caller then tries a smaller layout),
+ * before rl_core_init, or when bits exceeds the guest's address_bits.
  * host_page 0 means the configured or real page size.
  */
 RL_RUNTIME_API int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page);
@@ -237,12 +319,9 @@ typedef bool rl_fault_hook(const rl_fault *f);
 /** @brief Sets the guest layer's fault hook (NULL for none). */
 RL_RUNTIME_API void rl_fault_set_hook(rl_fault_hook *hook);
 
-/** @brief Default FPCR of new guest threads. */
-#define RL_FPCR_DEFAULT 0u
-
 /** @brief Runtime thread object (guest-neutral part). */
 struct rl_thread {
-    /** @brief Guest context, 64-byte aligned, owned by this object. */
+    /** @brief The CPU layer's context (rl_cpu_desc.ctx_size bytes, ctx_align aligned), owned by this object. */
     rl_ctx *ctx;
     /** @brief Guest layer's per-thread object. */
     void *guest;
@@ -256,9 +335,9 @@ struct rl_thread {
 
 /** @brief The calling host thread's runtime thread, NULL for a host-only thread. */
 RL_RUNTIME_API struct rl_thread *rl_thread_current(void);
-/** @brief Makes t the calling host thread's runtime thread and applies its FPCR. */
+/** @brief Makes t the calling host thread's runtime thread and runs the CPU layer's bind hook. */
 RL_RUNTIME_API void rl_thread_bind(struct rl_thread *t);
-/** @brief Allocates a thread object with a zeroed, aligned context (dispatch view copied in). */
+/** @brief Allocates a thread object with a zeroed, aligned context (dispatch view copied in, then the CPU layer's ctx_init); NULL before rl_core_init. */
 RL_RUNTIME_API struct rl_thread *rl_thread_alloc(void);
 /** @brief Frees a thread object and its context. */
 RL_RUNTIME_API void rl_thread_free(struct rl_thread *t);
@@ -270,10 +349,6 @@ RL_RUNTIME_API int rl_thread_spawn(struct rl_thread *t, rl_thread_body *body);
 RL_RUNTIME_API void rl_thread_join(struct rl_thread *t);
 /** @brief Detaches the host thread: it frees itself when it ends. */
 RL_RUNTIME_API void rl_thread_detach(struct rl_thread *t);
-/** @brief Sets the host FPCR to fpcr on arm64 hosts; no effect elsewhere. */
-RL_RUNTIME_API void rl_host_set_fpcr(uint32_t fpcr);
-/** @brief Reads the host FPCR on arm64 hosts; 0 elsewhere. */
-RL_RUNTIME_API uint32_t rl_host_get_fpcr(void);
 /** @brief Sleeps ns nanoseconds on the host. */
 RL_RUNTIME_API void rl_sleep_ns(uint64_t ns);
 /** @brief Yields the host thread. */
@@ -289,18 +364,23 @@ RL_RUNTIME_API void rl_process_exit(uint32_t code);
 RL_RUNTIME_API int rl_pend_exit_process(rl_ctx *c, uint32_t code);
 /** @brief Sets an RL_PEND_EXIT_THREAD record in c and returns RL_PENDING. */
 RL_RUNTIME_API int rl_pend_exit_thread(rl_ctx *c);
+/**
+ * @brief Reports a fatal guest error with the CPU layer's register summary of
+ * c appended, then sets an RL_PEND_EXIT_PROCESS record with RL_EXIT_SOFTWARE
+ * and returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...) RL_PRINTF(3, 4);
+/** @brief The shipped-build miss path: reports that no function exists at guest target and stops (rl_guest_fatal). */
+RL_RUNTIME_API int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target);
 
-/** @brief Registers units into the dispatch table. Call before any guest thread starts. Returns 0 or -1 (a unit failed its checks). */
+/** @brief Registers units into the dispatch table. Call after rl_core_init and before any guest thread starts. Returns 0 or -1 (a unit failed its checks). */
 RL_RUNTIME_API int rl_units_register(const rl_unit *const *units, uint32_t count);
 /** @brief Drops the dispatch table (tests). */
 RL_RUNTIME_API void rl_units_reset(void);
 /** @brief Copies the dispatch view into c. */
 RL_RUNTIME_API void rl_dispatch_view(rl_ctx *c);
-/**
- * @brief Calls guest code at entry from the host, as the runtime does for a
- * thread entry. Returns the lifted return code.
- */
-RL_RUNTIME_API int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry);
+/** @brief The registered function at guest address a, or NULL (host-side lookup; lifted code uses its CPU layer's inline one). */
+RL_RUNTIME_API rl_fn rl_dispatch_find(uint64_t a);
 
 /** @brief Guest memory base used by runtime entries that get only a context. */
 RL_RUNTIME_API uint8_t *rl_mem_base(void);

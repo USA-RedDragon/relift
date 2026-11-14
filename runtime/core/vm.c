@@ -1,7 +1,7 @@
 /**
  * @file vm.c
- * @brief Guest address space: reservation, the exact 4 KiB map and the host
- * protection policy of docs/abi.md section 2.
+ * @brief Guest address space: reservation, the exact map at the guest page
+ * size and the host protection policy of docs/abi.md section 2.
  *
  * Invariant: a guest page that is not mapped reads as zero. Unmapping
  * (RL_VM_DISCARD) releases whole host pages and zeroes the guest pages of
@@ -30,9 +30,9 @@ static uint64_t align_up(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1)
 static int prot_of(uint32_t perm)
 {
     int p = PROT_NONE;
-    if (perm & RL_PERM_R)
+    if (perm & RL_VM_R)
         p |= PROT_READ;
-    if (perm & RL_PERM_W)
+    if (perm & RL_VM_W)
         p |= PROT_READ | PROT_WRITE;
     return p;
 }
@@ -40,14 +40,20 @@ static int prot_of(uint32_t perm)
 int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
 {
     uint64_t real = rl_os_page_size();
+    const rl_guest_desc *g = rl_core_guest();
     memset(vm, 0, sizeof *vm);
+    if (!g || bits > g->address_bits)
+        return -1;
     if (host_page == 0)
         host_page = rl_cfg()->host_page;
     if (host_page < real)
         host_page = real;
-    if (host_page < RL_GUEST_PAGE || (host_page & (host_page - 1)))
+    if (host_page < g->page_size)
+        host_page = g->page_size;
+    if (host_page & (host_page - 1))
         return -1;
     vm->host_page = host_page;
+    vm->guest_page = g->page_size;
     vm->size = 1ull << bits;
     vm->map_len = RL_VM_GUARD_LO + vm->size + RL_VM_GUARD_HI + host_page;
     void *p = mmap(NULL, vm->map_len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -63,7 +69,7 @@ int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
         munmap(p, vm->map_len);
         return -1;
     }
-    vm->blocks[0] = (rl_vm_block){ 0, vm->size, 0, RL_PERM_NONE, 0 };
+    vm->blocks[0] = (rl_vm_block){ 0, vm->size, 0, RL_VM_NONE, 0 };
     vm->count = 1;
     return 0;
 }
@@ -217,7 +223,7 @@ static int discard(rl_vm *vm, uint64_t addr, uint64_t size)
 
 int rl_vm_set(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm, uint64_t tag, int content)
 {
-    if ((addr | size) & (RL_GUEST_PAGE - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
+    if ((addr | size) & (vm->guest_page - 1) || size == 0 || !rl_vm_contains(vm, addr, size))
         return -1;
     if (content == RL_VM_DISCARD && discard(vm, addr, size))
         return -1;

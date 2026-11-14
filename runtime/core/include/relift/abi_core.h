@@ -5,8 +5,8 @@
  * block of the context the core owns, unit registration and the dev protocol.
  *
  * Lifted code does not include this header directly: it includes its CPU
- * layer's header (relift/a64/abi.h for ARM64), which includes this one and
- * defines struct rl_ctx. The runtime core includes only this one, so it never
+ * layer's header (under runtime/cpus/), which includes this one and defines
+ * struct rl_ctx. The runtime core includes only this one, so it never
  * sees a guest register. The rationale is in docs/abi.md. Any change to a type,
  * layout, signature or constant here bumps RL_ABI_VERSION.
  */
@@ -116,7 +116,7 @@ typedef rl_fn_t *rl_fn;
 /**
  * @brief The part of every rl_ctx the core owns. A CPU layer lays these fields
  * out in this order at one offset of its rl_ctx (it may spell them as plain
- * members, as relift/a64/abi.h does) and gives the offset to the core.
+ * members of its own struct) and gives the offset to the core.
  */
 typedef struct rl_ctx_common {
     /** @brief Pending record, valid while lifted frames return RL_PENDING. */

@@ -1,6 +1,7 @@
 /**
  * @file log.c
- * @brief Logging, report-once keys, environment configuration and the clock.
+ * @brief Logging, report-once keys, the unknown-call reporter, environment
+ * configuration and the clock.
  */
 #include "core.h"
 
@@ -31,7 +32,7 @@ void rl_config_load(void)
 {
     const char *v;
     g_cfg.strict = env_flag("RELIFT_STRICT");
-    g_cfg.trace_svc = env_flag("RELIFT_TRACE_SVC");
+    g_cfg.trace_os = env_flag("RELIFT_TRACE_OS");
     g_cfg.log_level = RL_LOG_INFO;
     v = getenv("RELIFT_LOG");
     if (v) {
@@ -97,6 +98,17 @@ void rl_once_reset(void)
     pthread_mutex_unlock(&g_log_lock);
 }
 
+bool rl_report_unknown(uint64_t key, const char *tag, const char *fmt, ...)
+{
+    if (rl_once(key)) {
+        va_list ap;
+        va_start(ap, fmt);
+        rl_vlog(RL_LOG_WARN, tag, fmt, ap);
+        va_end(ap);
+    }
+    return g_cfg.strict;
+}
+
 uint64_t rl_clock_ns(void)
 {
     struct timespec ts;
@@ -106,18 +118,12 @@ uint64_t rl_clock_ns(void)
 
 uint64_t rl_ns_to_ticks(uint64_t ns)
 {
-    return (uint64_t)(((rl_u128)ns * 12u) / 625u);
+    return (uint64_t)(((rl_u128)ns * rl_core_guest()->tick_hz) / 1000000000u);
 }
 
 uint64_t rl_ticks_to_ns(uint64_t ticks)
 {
-    return (uint64_t)(((rl_u128)ticks * 625u) / 12u);
-}
-
-uint64_t rl_mrs_cntpct(rl_ctx *c)
-{
-    (void)c;
-    return rl_ns_to_ticks(rl_clock_ns());
+    return (uint64_t)(((rl_u128)ticks * 1000000000u) / rl_core_guest()->tick_hz);
 }
 
 uint32_t rl_os_page_size(void)
