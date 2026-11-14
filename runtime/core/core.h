@@ -110,6 +110,8 @@ typedef struct rl_cpu_desc {
     uint32_t code_shift;
     /** @brief True when guest data is big-endian (rl_guest_order16 and friends swap). */
     bool big_endian;
+    /** @brief Offset of the rl_time clock in rl_ctx, 8-byte aligned, or 0 for a CPU without one (rl_sync, rl_io_read). */
+    uint32_t time_offset;
     /** @brief Sets the CPU's initial state in a zeroed context (after the core filled its block), or NULL. */
     void (*ctx_init)(rl_ctx *c);
     /** @brief Called when a host thread binds a context (host CPU state that follows the guest's), or NULL. */
@@ -130,6 +132,8 @@ RL_RUNTIME_API const rl_guest_desc *rl_core_guest(void);
 RL_RUNTIME_API const rl_cpu_desc *rl_core_cpu(void);
 /** @brief The core's block of a context. */
 RL_RUNTIME_API rl_ctx_common *rl_common(rl_ctx *c);
+/** @brief The clock of a context (rl_cpu_desc.time_offset), or NULL when the CPU has none. */
+RL_RUNTIME_API rl_time *rl_ctx_time(rl_ctx *c);
 
 /** @brief Converts a 16-bit value between guest and host byte order (the CPU descriptor's big_endian). */
 RL_RUNTIME_API uint16_t rl_guest_order16(uint16_t v);
@@ -331,6 +335,8 @@ struct rl_thread {
     void *host;
     /** @brief Host thread id for reports. */
     uint64_t host_tid;
+    /** @brief The scheduler clock of this thread's CPU (rl_sched_attach), or NULL. */
+    struct rl_sched_cpu *clock;
 };
 
 /** @brief The calling host thread's runtime thread, NULL for a host-only thread. */

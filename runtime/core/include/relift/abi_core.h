@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 2u
+#define RL_ABI_VERSION 3u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0
@@ -138,6 +138,41 @@ _Static_assert(offsetof(rl_ctx_common, disp_table) == 32, "common disp_table");
 _Static_assert(offsetof(rl_ctx_common, disp_lo) == 40, "common disp_lo");
 _Static_assert(offsetof(rl_ctx_common, disp_count) == 48, "common disp_count");
 _Static_assert(sizeof(rl_ctx_common) == 56, "rl_ctx_common size");
+
+/**
+ * @brief The guest cycle clock of a CPU whose guest drives devices through
+ * registers (docs/abi.md section 13). The CPU layer puts one in its rl_ctx and
+ * gives its offset in rl_cpu_desc.time_offset. The CPU is at cycle
+ * deadline - budget. Lifted code subtracts block costs from budget and calls
+ * rl_sync at a sync point when budget is zero or below; it keeps budget in a
+ * local and stores it here before every runtime call.
+ */
+typedef struct rl_time {
+    /** @brief Cycles left until the scheduler must run. */
+    int64_t budget;
+    /** @brief The cycle at which budget reaches zero. */
+    uint64_t deadline;
+} rl_time;
+
+_Static_assert(offsetof(rl_time, budget) == 0, "time budget");
+_Static_assert(offsetof(rl_time, deadline) == 8, "time deadline");
+_Static_assert(sizeof(rl_time) == 16, "rl_time size");
+
+/** @brief The interrupt hook's answer when no interrupt is taken. */
+#define RL_NO_IRQ UINT64_MAX
+
+/**
+ * @brief Runs devices and events up to the CPU's cycle, sets a new budget
+ * and enters any interrupt the guest takes, as a nested call that returns to
+ * next. Called at a sync point when budget is zero or below, after the exit's
+ * register stores; next is the guest pc the block goes to. Returns RL_OK, or
+ * RL_PENDING to propagate the pending record.
+ */
+RL_RUNTIME_API int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next);
+/** @brief A guest read of size bytes (1, 2, 4 or 8) at an address that may be a device register, at the CPU's current cycle. */
+RL_RUNTIME_API uint64_t rl_io_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size);
+/** @brief A guest write of size bytes of value (little-endian) at an address that may be a device register, at the CPU's current cycle. */
+RL_RUNTIME_API void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value);
 
 /** @brief Defines a lifted function with the contract signature. */
 #define RL_LIFTED(name) int name(rl_ctx *restrict c, uint8_t *mem)
