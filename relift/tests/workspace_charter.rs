@@ -287,6 +287,7 @@ const CHARTERS: &[Charter] = &[
             "relift-ir",
             "relift-manifest",
             "relift-proc",
+            "relift-progress",
             "relift-switch",
             "relift-switch-formats",
             "relift-testguest",
