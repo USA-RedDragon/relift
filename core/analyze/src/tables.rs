@@ -26,6 +26,10 @@ use relift_ir::{Block, Flow, Next, Op, Reg};
 const RUN_BACK: usize = 16;
 /// The most instructions before the conditional branch in the check.
 const CMP_BACK: usize = 4;
+/// The most instructions the check skips over because they do not touch
+/// what it reads (the stores a compiler schedules between a compare and its
+/// branch).
+const SKIP_BACK: usize = 24;
 /// The largest table.
 const MAX_ENTRIES: u64 = 4096;
 
@@ -107,6 +111,42 @@ fn run(blocks: &[Arc<Block>], state: &mut State, mem: &mut Image<'_>) -> Option<
     Some(next)
 }
 
+/// Runs `blocks` in order from `state` whether or not they follow each
+/// other (the check, with independent instructions left out); the address
+/// after the last one, or `None` when an instruction faults.
+fn run_seq(blocks: &[Arc<Block>], state: &mut State, mem: &mut Image<'_>) -> Option<u64> {
+    let mut next = None;
+    for b in blocks {
+        next = Some(
+            interp::run_verified(b, state, mem, &mut NoIntrinsics, &mut NoDevices)
+                .ok()?
+                .next,
+        );
+    }
+    next
+}
+
+/// The registers `blocks`, run in order, read before writing them.
+fn reads(blocks: &[Arc<Block>]) -> BTreeSet<Reg> {
+    let mut read = BTreeSet::new();
+    let mut written = BTreeSet::new();
+    for b in blocks {
+        for i in &b.insts {
+            if let Op::Get(x) = i.op
+                && !written.contains(&x)
+            {
+                read.insert(x);
+            }
+        }
+        for i in &b.insts {
+            if let Op::Set(x, _) = i.op {
+                written.insert(x);
+            }
+        }
+    }
+    read
+}
+
 /// The targets of the computed jump `jump` at `pc`, or `None` when it is not
 /// a jump table this recognizes. `block_at` lifts the instruction at an
 /// address; `entering` gives the conditional branch of the function that
@@ -186,20 +226,30 @@ pub(crate) fn resolve(
     'cand: for r in read {
         let mut check = vec![branch.clone()];
         let mut back = branch.pc;
-        while check.len() <= CMP_BACK {
+        let mut skipped = 0;
+        while check.len() <= CMP_BACK && skipped <= SKIP_BACK {
             let Some(prev) = back.checked_sub(granule) else {
                 break;
             };
             let Some(b) = block_at(prev) else {
                 break;
             };
-            if !falls_into(&b, back) || writes(&b, r) || has_memory(&b) {
+            if !falls_into(&b, back) || writes(&b, r) {
                 break;
             }
-            if b.insts.iter().any(|i| matches!(i.op, Op::Load { .. })) {
-                break;
+            let needed = reads(&check);
+            let feeds = b
+                .insts
+                .iter()
+                .any(|i| matches!(i.op, Op::Set(x, _) if needed.contains(&x)));
+            if feeds {
+                if has_memory(&b) || b.insts.iter().any(|i| matches!(i.op, Op::Load { .. })) {
+                    break;
+                }
+                check.insert(0, b);
+            } else {
+                skipped += 1;
             }
-            check.insert(0, b);
             back = prev;
         }
         // A check that never reads the candidate decides the same way for
@@ -216,7 +266,7 @@ pub(crate) fn resolve(
         let mut targets = Vec::new();
         for idx in 0..=MAX_ENTRIES {
             let mut st = fresh(&check_seeds, r, idx);
-            let Some(after) = run(&check, &mut st, &mut mem) else {
+            let Some(after) = run_seq(&check, &mut st, &mut mem) else {
                 continue 'cand;
             };
             if after != start {
