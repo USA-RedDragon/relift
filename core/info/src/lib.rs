@@ -272,7 +272,7 @@ pub enum SettingKind {
     },
     /// Text.
     String,
-    /// A binding to a port's control; the value is `{port, control}`.
+    /// A list of host inputs for a control; the value is text such as `gamepad:south,key:z`.
     KeyBinding,
 }
 

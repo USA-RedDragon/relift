@@ -185,14 +185,6 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
-        member: "relift-info",
-        band: 2,
-        why: "the self-description types and their readers; plain data",
-        normal: &["serde", "serde_json"],
-        dev: NONE,
-        build: NONE,
-    },
-    Charter {
         member: "relift-input",
         band: 2,
         why: "the input model: ports, controls, bindings; reads the runtime's name table and renders the self-description section",
@@ -357,6 +349,7 @@ const CHARTERS: &[Charter] = &[
             "relift-guest",
             "relift-host",
             "relift-info",
+            "relift-input",
             "relift-ir",
             "relift-manifest",
             "relift-proc",

@@ -26,7 +26,7 @@ impl fmt::Display for Error {
         match self {
             Error::BadId(id) => write!(
                 f,
-                "`{id}` is not a valid id (use lowercase letters, digits, `_` and `-`)"
+                "`{id}` is not a valid id (use lowercase letters, digits and `_`)"
             ),
             Error::DuplicatePort(p) => write!(f, "port `{p}` is declared twice"),
             Error::DuplicateControl { port, control } => {

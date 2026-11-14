@@ -18,7 +18,9 @@
 //! step = 1
 //! ```
 //!
-//! A key binding's default is `"<port>:<control>"`.
+//! A key binding's value is a comma separated list of host inputs such as
+//! `"gamepad:south,key:z"` (see docs/input.md). The keys `bind.<port>.<control>`
+//! belong to the runtime, which declares one for every port control.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -30,13 +32,14 @@ use serde_json::Value;
 use crate::import::BoxError;
 
 /// The reads an override can make, with the setting type each needs.
-const READS: [(&str, &str); 6] = [
+const READS: [(&str, &str); 7] = [
     ("relift_setting_bool", "bool"),
     ("relift_setting_int", "int"),
     ("relift_setting_float", "float"),
     ("relift_setting_enum", "enum"),
     ("relift_setting_str", "string"),
     ("relift_setting_binding", "key_binding"),
+    ("relift_setting_binding_value", "key_binding"),
 ];
 
 /// Whether `key` is a valid setting key: lowercase letters, digits, `_` and
@@ -145,6 +148,9 @@ fn setting(key: &str, t: &toml::Table) -> Result<Setting, BoxError> {
         )
         .into());
     }
+    if key.starts_with("bind.") {
+        return Err(format!("{what}: keys starting with bind. belong to the input ports").into());
+    }
     let known: &[&str] = &[
         "type",
         "label",
@@ -236,18 +242,12 @@ fn setting(key: &str, t: &toml::Table) -> Result<Setting, BoxError> {
         ),
         "key_binding" => {
             let d = text(t, "default", &what)?;
-            let v = if d.is_empty() {
-                Value::Null
-            } else {
-                let Some((p, c)) = d
-                    .split_once(':')
-                    .filter(|(p, c)| !p.is_empty() && !c.is_empty() && !c.contains(':'))
-                else {
-                    return Err(format!("{what}: the default {d:?} is not <port>:<control>").into());
-                };
-                serde_json::json!({ "port": p, "control": c })
-            };
-            (SettingKind::KeyBinding, v)
+            if let Err(e) = relift_input::HostInput::parse_list(&d) {
+                return Err(
+                    format!("{what}: the default {d:?} is not a list of host inputs: {e}").into(),
+                );
+            }
+            (SettingKind::KeyBinding, Value::String(d))
         }
         "" => return Err(format!("{what}: no type").into()),
         o => {
@@ -393,11 +393,11 @@ pub fn generate_c(settings: &[Setting]) -> String {
                 );
             }
             SettingKind::KeyBinding => {
-                if let (Some(p), Some(c)) =
-                    (d.default["port"].as_str(), d.default["control"].as_str())
-                {
-                    let _ = write!(s, ", .def_str = {}", c_str(&format!("{p}:{c}")));
-                }
+                let _ = write!(
+                    s,
+                    ", .def_str = {}",
+                    c_str(d.default.as_str().unwrap_or(""))
+                );
             }
         }
         s.push_str(" },\n");
@@ -640,7 +640,7 @@ default = "a\"b"
 
 [settings.jump]
 type = "key_binding"
-default = "p1:a"
+default = "gamepad:south,key:z"
 "#;
 
     fn err(t: &str) -> String {
@@ -663,7 +663,7 @@ default = "p1:a"
         );
         assert_eq!(by("gain").default, serde_json::json!(0.5));
         assert_eq!(by("mode").default, "low");
-        assert_eq!(by("jump").default["port"], "p1");
+        assert_eq!(by("jump").default, "gamepad:south,key:z");
         assert_eq!(by("fast_text").label, "Fast text");
     }
 
@@ -725,8 +725,12 @@ default = "p1:a"
                 "not one of",
             ),
             (
-                "[settings.a]\ntype = \"key_binding\"\ndefault = \"p1\"",
-                "<port>:<control>",
+                "[settings.a]\ntype = \"key_binding\"\ndefault = \"p1:a\"",
+                "list of host inputs",
+            ),
+            (
+                "[settings.\"bind.p1.a\"]\ntype = \"key_binding\"",
+                "belong to the input ports",
             ),
             (
                 "[settings.a]\ntype = \"bool\"\nlabl = \"x\"",
@@ -754,7 +758,7 @@ default = "p1:a"
             ".def_float = 0.5, .min_float = 0.0, .max_float = 1.0, .step_float = 0.25",
             ".def_int = 1, .choices = rl_game_choices_3, .nchoices = 3",
             ".def_str = \"a\\\"b\"",
-            ".def_str = \"p1:a\"",
+            ".def_str = \"gamepad:south,key:z\"",
             "rl_settings_declare(rl_game_settings, 6)",
             "__attribute__((constructor))",
         ] {

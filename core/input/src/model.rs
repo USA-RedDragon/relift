@@ -148,7 +148,7 @@ pub(crate) fn check_id(id: &str) -> Result<(), Error> {
     let ok = !id.is_empty()
         && id
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
     if ok {
         Ok(())
     } else {
