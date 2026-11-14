@@ -27,6 +27,7 @@ relift-emit-wasm = { path = "core/emit-wasm" }
 relift-guest = { path = "core/guest" }
 relift-host = { path = "core/host" }
 relift-info = { path = "core/info" }
+relift-input = { path = "core/input" }
 relift-ir = { path = "core/ir" }
 relift-manifest = { path = "core/manifest" }
 relift-override = { path = "override/api" }

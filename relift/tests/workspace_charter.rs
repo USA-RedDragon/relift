@@ -185,6 +185,22 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-info",
+        band: 2,
+        why: "the self-description types and their readers; plain data",
+        normal: &["serde", "serde_json"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-input",
+        band: 2,
+        why: "the input model: ports, controls, bindings; reads the runtime's name table and renders the self-description section",
+        normal: &["relift-info", "toml"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-manifest",
         band: 2,
         why: "game.toml types; the guest owns its own section",

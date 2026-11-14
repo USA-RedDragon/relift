@@ -84,6 +84,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-emit` | `core/emit` | IR to C, shards, `#line` and listings, memory strategy per host target |
 | 2 | `relift-emit-wasm` | `core/emit-wasm` | IR to WebAssembly modules that share one memory and one funcref table (`docs/abi.md` section 15); not linked by `relift` yet; its tests run the modules in wasmtime against the IR interpreter |
 | 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
+| 2 | `relift-input` | `core/input` | The input model: ports, controls, `bind.<port>.<control>` bindings, extra ports from `game.toml` or a mod, the self-description `input` section and the C port declarations |
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
 | 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |

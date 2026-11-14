@@ -1012,6 +1012,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-input"
+version = "0.1.0"
+dependencies = [
+ "relift-info",
+ "toml",
+]
+
+[[package]]
 name = "relift-ir"
 version = "0.1.0"
 
