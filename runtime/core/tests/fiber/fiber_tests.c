@@ -395,7 +395,7 @@ static void test_a_hand_over_checks_the_fp_mode(const char *self)
     CHECK(r && child_spawn(self, "fp-handover", r) == 0);
     if (!r)
         return;
-#if defined(NDEBUG)
+#if !defined(RL_CHECKS)
     CHECK(!child_aborted(r) && strstr(r->out, "no abort") != NULL);
 #else
     CHECK(child_aborted(r));
