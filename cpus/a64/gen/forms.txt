@@ -323,6 +323,10 @@ FNMSUB_D_floatdp3
 FNMSUB_S_floatdp3
 FNMUL_D_floatdp2
 FNMUL_S_floatdp2
+FRECPE_asimdmisc_R
+FRECPE_asisdmisc_R
+FRECPS_asimdsame_only
+FRECPS_asisdsame_only
 FRINTA_asimdmisc_R
 FRINTA_D_floatdp1
 FRINTA_S_floatdp1
@@ -344,6 +348,10 @@ FRINTX_S_floatdp1
 FRINTZ_asimdmisc_R
 FRINTZ_D_floatdp1
 FRINTZ_S_floatdp1
+FRSQRTE_asimdmisc_R
+FRSQRTE_asisdmisc_R
+FRSQRTS_asimdsame_only
+FRSQRTS_asisdsame_only
 FSQRT_asimdmisc_R
 FSQRT_D_floatdp1
 FSQRT_S_floatdp1

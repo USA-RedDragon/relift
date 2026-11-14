@@ -17960,6 +17960,137 @@ pub(super) fn FNEG_asimdmiscfp16_R(
     }
 }
 
+/// `FRECPE_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRecipEstimate, V_read, V_set.
+pub(super) fn FRECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRECPE_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v7 = rt::Fp::new(32).recip_estimate(b, v6);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).recip_estimate(b, v10);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s3 as u32, v15, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v7 = rt::Fp::new(32).recip_estimate(b, v6);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).recip_estimate(b, v10);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_default_fpcr();
+            let v17 = rt::Fp::new(32).recip_estimate(b, v16);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_default_fpcr();
+            let v23 = rt::Fp::new(32).recip_estimate(b, v22);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_default_fpcr();
+            let v7 = rt::Fp::new(64).recip_estimate(b, v6);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(64).recip_estimate(b, v10);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRECPE_asisdmisc_R`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FPRecipEstimate, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRECPE_asisdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRECPE_asisdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).recip_estimate(b, v5);
+            let v7 = b.konst(Width::new(96), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).recip_estimate(b, v5);
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FRINTA_asimdmisc_R`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -18577,6 +18708,145 @@ pub(super) fn FRINTZ_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Res
             let v12 = b.extract(v9, 0, Width::new(64));
             let v13 = b.concat(v11, v12);
             st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRSQRTE_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRSqrtEstimate, V_read, V_set.
+pub(super) fn FRSQRTE_asimdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRSQRTE_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v7 = rt::Fp::new(32).rsqrt_estimate(b, v6);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).rsqrt_estimate(b, v10);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s3 as u32, v15, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            st.assume_default_fpcr();
+            let v7 = rt::Fp::new(32).rsqrt_estimate(b, v6);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(32).rsqrt_estimate(b, v10);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            st.assume_default_fpcr();
+            let v17 = rt::Fp::new(32).rsqrt_estimate(b, v16);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            st.assume_default_fpcr();
+            let v23 = rt::Fp::new(32).rsqrt_estimate(b, v22);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            st.assume_default_fpcr();
+            let v7 = rt::Fp::new(64).rsqrt_estimate(b, v6);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            st.assume_default_fpcr();
+            let v11 = rt::Fp::new(64).rsqrt_estimate(b, v10);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRSQRTE_asisdmisc_R`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FPRSqrtEstimate, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRSQRTE_asisdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRSQRTE_asisdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).rsqrt_estimate(b, v5);
+            let v7 = b.konst(Width::new(96), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).rsqrt_estimate(b, v5);
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -28939,6 +29209,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FMINV_asimdall_only_SD => FMINV_asimdall_only_SD,
         Encoding::FNEG_asimdmisc_R => FNEG_asimdmisc_R,
         Encoding::FNEG_asimdmiscfp16_R => FNEG_asimdmiscfp16_R,
+        Encoding::FRECPE_asimdmisc_R => FRECPE_asimdmisc_R,
+        Encoding::FRECPE_asisdmisc_R => FRECPE_asisdmisc_R,
         Encoding::FRINTA_asimdmisc_R => FRINTA_asimdmisc_R,
         Encoding::FRINTI_asimdmisc_R => FRINTI_asimdmisc_R,
         Encoding::FRINTM_asimdmisc_R => FRINTM_asimdmisc_R,
@@ -28946,6 +29218,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FRINTP_asimdmisc_R => FRINTP_asimdmisc_R,
         Encoding::FRINTX_asimdmisc_R => FRINTX_asimdmisc_R,
         Encoding::FRINTZ_asimdmisc_R => FRINTZ_asimdmisc_R,
+        Encoding::FRSQRTE_asimdmisc_R => FRSQRTE_asimdmisc_R,
+        Encoding::FRSQRTE_asisdmisc_R => FRSQRTE_asisdmisc_R,
         Encoding::FSQRT_asimdmisc_R => FSQRT_asimdmisc_R,
         Encoding::NEG_asimdmisc_R => NEG_asimdmisc_R,
         Encoding::NEG_asisdmisc_R => NEG_asisdmisc_R,
