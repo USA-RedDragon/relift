@@ -1,6 +1,7 @@
 //! Block-local optimization passes.
 
-use crate::{Block, Exit, Inst, Next, Op, Value};
+use crate::interp::{eval_bin, eval_cmp, eval_un};
+use crate::{AddrClass, Block, Exit, ExtKind, Inst, IoKind, IoMap, Next, Op, Order, Value, Width};
 
 /// Removes instructions whose values nothing observable uses.
 ///
@@ -75,6 +76,104 @@ pub fn dce(block: &Block) -> Block {
             flow: block.exit.flow,
         },
     }
+}
+
+/// Classifies the I/O accesses of `block` whose address is constant
+/// ([`constants`]) with the guest's `map`.
+///
+/// An [`Op::IoLoad`] or [`Op::IoStore`] of kind [`IoKind::Any`] at a
+/// constant address becomes a plain [`Op::Load`] or [`Op::Store`] (ordering
+/// [`Order::Plain`]) when every byte it touches is memory in `map`, and
+/// kind [`IoKind::Device`] otherwise, so the emitter needs no range check
+/// for it. Other instructions, and accesses whose address is not constant,
+/// are unchanged. The instructions keep their positions, and the result
+/// behaves the same in the interpreter as the input, given devices whose
+/// [`crate::interp::Devices::map`] is `map`.
+pub fn classify_io(block: &Block, map: &IoMap) -> Block {
+    let consts = constants(block);
+    let class = |addr: &Value, size: Option<Width>, write: bool| {
+        let a = consts[addr.index()]?;
+        let n = size?.bytes()?;
+        Some(map.classify(a as u64, n, write, block.addr_width))
+    };
+    let mut out = block.clone();
+    for inst in &mut out.insts {
+        let op = match inst.op {
+            Op::IoLoad {
+                addr,
+                endian,
+                kind: IoKind::Any,
+            } => match class(&addr, inst.width, false) {
+                Some(AddrClass::Memory) => Op::Load {
+                    addr,
+                    endian,
+                    order: Order::Plain,
+                },
+                Some(AddrClass::Device) => Op::IoLoad {
+                    addr,
+                    endian,
+                    kind: IoKind::Device,
+                },
+                None => continue,
+            },
+            Op::IoStore {
+                addr,
+                value,
+                endian,
+                kind: IoKind::Any,
+            } => match class(&addr, block.width_of(value), true) {
+                Some(AddrClass::Memory) => Op::Store {
+                    addr,
+                    value,
+                    endian,
+                    order: Order::Plain,
+                },
+                Some(AddrClass::Device) => Op::IoStore {
+                    addr,
+                    value,
+                    endian,
+                    kind: IoKind::Device,
+                },
+                None => continue,
+            },
+            _ => continue,
+        };
+        inst.op = op;
+    }
+    out
+}
+
+/// The values of `block` that are constant: built from [`Op::Const`] by
+/// pure integer operations only. Entry `n` is the value of instruction `n`
+/// when it is constant, with the semantics of [`crate::interp`].
+pub fn constants(block: &Block) -> Vec<Option<u128>> {
+    let mut out: Vec<Option<u128>> = Vec::with_capacity(block.insts.len());
+    for inst in &block.insts {
+        let k = |v: &Value| out.get(v.index()).copied().flatten();
+        let wid = |v: &Value| block.width_of(*v).unwrap_or(Width::W1);
+        let w = inst.width.unwrap_or(Width::W1);
+        let c = match &inst.op {
+            Op::Const(c) => Some(*c),
+            Op::Un(u, a) => k(a).map(|a| eval_un(*u, a, w)),
+            Op::Bin(b, x, y) => k(x).zip(k(y)).map(|(a, b2)| eval_bin(*b, a, b2, w)),
+            Op::Cmp(c, x, y) => k(x)
+                .zip(k(y))
+                .map(|(a, b2)| u128::from(eval_cmp(*c, a, b2, wid(x)))),
+            Op::Select(c, x, y) => k(c).and_then(|c| if c != 0 { k(x) } else { k(y) }),
+            Op::Ext(ExtKind::Zero, a) => k(a),
+            Op::Ext(ExtKind::Sign, a) => {
+                let s = 128 - wid(a).bits();
+                k(a).map(|x| ((((x << s) as i128) >> s) as u128) & w.mask())
+            }
+            Op::Extract(a, lo) => k(a).map(|a| (a >> lo) & w.mask()),
+            Op::Concat(h, l) => k(h)
+                .zip(k(l))
+                .map(|(h, l2)| ((h << wid(l).bits()) | l2) & w.mask()),
+            _ => None,
+        };
+        out.push(c);
+    }
+    out
 }
 
 fn remap(op: &Op, map: &[u32]) -> Op {

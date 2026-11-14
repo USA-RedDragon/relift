@@ -4,8 +4,8 @@ use relift_ir::interp::{
     self, Devices, Error, Fault, FlatMemory, GuestMemory, NoIntrinsics, Outcome, State,
 };
 use relift_ir::{
-    AddrClass, Block, Builder, CmpOp, Endian, IoKind, IoMap, IoRange, Reg, RegDecl, RegFile, Width,
-    dce, parse,
+    AddrClass, Block, Builder, CmpOp, Endian, IoKind, IoMap, IoRange, Op, Order, Reg, RegDecl,
+    RegFile, Width, classify_io, dce, opt, parse,
 };
 
 static DECLS: [RegDecl; 3] = [
@@ -269,6 +269,112 @@ fn dce_keeps_unused_io_loads() {
     let _unused = b.io_load(hl, Width::W8, Endian::Little, IoKind::Any);
     let block = b.jump(1, 0x101);
     assert_eq!(dce(&block), block);
+}
+
+fn ldh_block() -> Block {
+    let mut b = Builder::new(file(), Width::W16, 0x300);
+    let hi = b.konst(Width::W8, 0xff);
+    let n = b.konst(Width::W8, 0x44);
+    let ly = b.concat(hi, n);
+    let v = b.io_load(ly, Width::W8, Endian::Little, IoKind::Any);
+    let base = b.konst(Width::W16, 0xc000);
+    let one = b.konst(Width::W16, 1);
+    let wram = b.add(base, one);
+    b.io_store(wram, v, Endian::Little, IoKind::Any);
+    let rom = b.konst(Width::W16, 0x2000);
+    b.io_store(rom, v, Endian::Little, IoKind::Any);
+    let rd = b.io_load(rom, Width::W8, Endian::Little, IoKind::Any);
+    let hl = b.get(Reg(1));
+    let w = b.io_load(hl, Width::W8, Endian::Little, IoKind::Any);
+    let edge = b.konst(Width::W16, 0xfeff);
+    let e = b.io_load(edge, Width::W16, Endian::Little, IoKind::Any);
+    let lo = b.trunc(e, Width::W8);
+    let x = b.xor(w, rd);
+    let x = b.xor(x, lo);
+    b.set(Reg(0), x);
+    b.jump(2, 0x302)
+}
+
+#[test]
+fn constants_fold_pure_operations_only() {
+    let b = ldh_block();
+    let k = opt::constants(&b);
+    assert_eq!(k[2], Some(0xff44));
+    assert_eq!(k[6], Some(0xc001));
+    assert_eq!(k[3], None);
+    assert_eq!(k[11], None);
+}
+
+#[test]
+fn classify_io_routes_constant_addresses_and_keeps_behavior() {
+    let b = ldh_block();
+    let c = classify_io(&b, &gb_map());
+    c.verify().unwrap();
+    roundtrip(&c);
+    assert_eq!(c.insts.len(), b.insts.len());
+    let kinds: Vec<&Op> = c
+        .insts
+        .iter()
+        .map(|i| &i.op)
+        .filter(|o| {
+            matches!(
+                o,
+                Op::Load { .. } | Op::Store { .. } | Op::IoLoad { .. } | Op::IoStore { .. }
+            )
+        })
+        .collect();
+    assert!(matches!(
+        kinds[0],
+        Op::IoLoad {
+            kind: IoKind::Device,
+            ..
+        }
+    ));
+    assert!(matches!(
+        kinds[1],
+        Op::Store {
+            order: Order::Plain,
+            ..
+        }
+    ));
+    assert!(matches!(
+        kinds[2],
+        Op::IoStore {
+            kind: IoKind::Device,
+            ..
+        }
+    ));
+    assert!(matches!(kinds[3], Op::Load { .. }));
+    assert!(matches!(
+        kinds[4],
+        Op::IoLoad {
+            kind: IoKind::Any,
+            ..
+        }
+    ));
+    assert!(matches!(
+        kinds[5],
+        Op::IoLoad {
+            kind: IoKind::Device,
+            ..
+        }
+    ));
+    assert_eq!(classify_io(&c, &gb_map()), c);
+    for hl in [0xff44, 0xc001, 0x2000, 0x8000] {
+        let (ra, sa, ma, la) = run(&b, &[0, hl, 0]);
+        let (rb, sb, mb, lb) = run(&c, &[0, hl, 0]);
+        assert_eq!(ra, rb);
+        assert_eq!(sa, sb);
+        assert_eq!(ma.bytes, mb.bytes);
+        assert_eq!(la.events, lb.events);
+    }
+    let all_memory = classify_io(&b, &IoMap::memory());
+    assert!(
+        !all_memory
+            .insts
+            .iter()
+            .any(|i| matches!(i.op, Op::IoStore { .. }))
+    );
 }
 
 #[test]

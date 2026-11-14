@@ -31,6 +31,6 @@ pub use io::{AddrClass, IoMap, IoRange};
 pub use ops::{
     BinOp, CmpOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, Order, UnOp, Value, Width,
 };
-pub use opt::dce;
+pub use opt::{classify_io, dce};
 pub use regs::{Reg, RegDecl, RegFile};
 pub use text::{ParseError, parse};
