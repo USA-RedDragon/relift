@@ -552,7 +552,7 @@ int vkh_vkGetInstanceProcAddr(rl_ctx *restrict c, uint8_t *mem)
     vkf_begin(&k, c, mem);
     uint64_t gi = c->x[0];
     const char *name = vkf_ptr(&k, c->x[1]);
-    int cmd = name ? cmd_of(name) : -1;
+    int cmd = name && !vkf_swap_unsupported(name) ? cmd_of(name) : -1;
     uint64_t addr = 0;
     if (cmd >= 0) {
         uint64_t a = vkf.cfg.thunk_base + 4u * (uint64_t)cmd;
@@ -582,7 +582,7 @@ int vkh_vkGetDeviceProcAddr(rl_ctx *restrict c, uint8_t *mem)
     vkf_begin(&k, c, mem);
     vkf_obj *o = vkf_obj_of(c->x[0], VKG_KIND_VkDevice);
     const char *name = vkf_ptr(&k, c->x[1]);
-    int cmd = name ? cmd_of(name) : -1;
+    int cmd = name && !vkf_swap_unsupported(name) ? cmd_of(name) : -1;
     uint64_t addr = 0;
     if (o && cmd >= 0 && (vkg_cmds[cmd].level == 2 || cmd == VKG_vkGetDeviceProcAddr) && o->fns->f[cmd])
         addr = vkf.cfg.thunk_base + 4u * (uint64_t)cmd;
@@ -852,6 +852,10 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
+    for (uint32_t i = 0; i < ci->queueCreateInfoCount && d->nqueue_families < 16; i++) {
+        d->queue_families[d->nqueue_families] = ci->pQueueCreateInfos[i].queueFamilyIndex;
+        d->queue_counts[d->nqueue_families++] = ci->pQueueCreateInfos[i].queueCount;
+    }
     vkf_obj *o = vkf_obj_add(VKG_KIND_VkDevice, dev, pobj, &d->fns);
     o->dev = d;
     vkf_s64(&k, gout, vkf_id(o));
@@ -870,6 +874,7 @@ int vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_bad_handle(&k, VKG_vkDestroyDevice, c->x[0]);
     vkf_obj *o = k.obj;
     vkf_dev *d = o->dev;
+    vkf_swap_device_teardown(o);
     VKF_FN(k.fns, vkDestroyDevice)(dev, NULL);
     vkf_mem_device_teardown(d);
     vkf_obj_remove_children(o);

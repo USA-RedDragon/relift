@@ -54,7 +54,14 @@ typedef struct rl_vk_surface_provider {
      * vkGetInstanceProcAddr. Returns a VkResult.
      */
     int32_t (*create)(void *user, void *host_instance, void *gipa, uint64_t guest_window, uint64_t *surface);
-    /** @brief Passed to create. */
+    /**
+     * @brief Optional: the extent the guest asked for (guest; the vi layer's
+     * size), the host drawable size (host) and a counter that changes each
+     * time the host size does. NULL means both are the vi display resolution
+     * and never change.
+     */
+    void (*extent)(void *user, uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation);
+    /** @brief Passed to create and extent. */
     void *user;
 } rl_vk_surface_provider;
 

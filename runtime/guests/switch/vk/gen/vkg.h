@@ -1408,6 +1408,14 @@ int vkh_vkCreateDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkDestroyDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCreateDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkDestroyDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkDestroySwapchainKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem);
 void vkf_shadow_flush(vkf_call *k);
 void vkf_shadow_pull(vkf_call *k);
 

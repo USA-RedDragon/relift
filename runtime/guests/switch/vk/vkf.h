@@ -104,6 +104,10 @@ struct vkf_dev {
     struct vkf_map *mems;
     /** @brief Protects mems and the shadow state. */
     pthread_mutex_t lock;
+    /** @brief Queue families the device was created with, and the queue count of each. */
+    uint32_t queue_families[16], queue_counts[16];
+    /** @brief Number of entries in queue_families. */
+    uint32_t nqueue_families;
 };
 
 /** @brief A small hash map from nonzero 64-bit keys to pointers. */
@@ -234,6 +238,15 @@ void vkf_mem_device_teardown(vkf_dev *d);
 void vkf_shadow_flush(vkf_call *k);
 /** @brief Copies host-cached shadow-mapped ranges of the call's device from host to guest. */
 void vkf_shadow_pull(vkf_call *k);
+
+/** @brief Guest extent (the layer's size), host drawable extent and its generation for a surface, from the provider. */
+void vkf_surface_extent(uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation);
+/** @brief Rewrites host surface capabilities into the ones a guest swapchain on the surface gets. */
+void vkf_vi_caps(uint64_t surface, VkSurfaceCapabilitiesKHR *caps);
+/** @brief Destroys every guest swapchain of a device (before the host device goes). */
+void vkf_swap_device_teardown(const vkf_obj *dobj);
+/** @brief True for commands on swapchains the layer does not forward: their lookups return NULL. */
+bool vkf_swap_unsupported(const char *name);
 
 /** @brief Frees callback records owned by a host handle (a messenger or callback); 0 frees the unowned ones. */
 void vkf_cb_release(uint64_t owner);

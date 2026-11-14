@@ -78,6 +78,14 @@ hand_commands = [
     "vkDestroyDebugUtilsMessengerEXT",
     "vkCreateDebugReportCallbackEXT",
     "vkDestroyDebugReportCallbackEXT",
+    "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+    "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
+    "vkCreateSwapchainKHR",
+    "vkDestroySwapchainKHR",
+    "vkGetSwapchainImagesKHR",
+    "vkAcquireNextImageKHR",
+    "vkAcquireNextImage2KHR",
+    "vkQueuePresentKHR",
 ]
 # Written by hand as vkh_in_<name> and vkh_out_<name> (they hold guest callbacks).
 hand_structs = ["VkDebugUtilsMessengerCreateInfoEXT", "VkDebugReportCallbackCreateInfoEXT"]
