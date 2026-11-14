@@ -128,6 +128,13 @@ pub fn module(p: &Placed) -> Module {
                 name: None,
             });
         }
+        for a in known_routines(img, text.memory_offset as usize, text.size as usize) {
+            roots.push(Root {
+                addr: p.base.wrapping_add(a),
+                kind: RootKind::Pointer,
+                name: None,
+            });
+        }
         for a in reloc_targets(img, m.dynamic as usize, &symbols) {
             roots.push(Root {
                 addr: p.base.wrapping_add(a),
@@ -144,6 +151,21 @@ pub fn module(p: &Placed) -> Module {
         roots,
         pads,
     }
+}
+
+/// The offsets in `img[start..start + len]` where a routine [`known`]
+/// replaces begins. A tail branch into such a routine would otherwise make
+/// it part of its caller, and the override would never apply.
+fn known_routines(img: &[u8], start: usize, len: usize) -> Vec<u64> {
+    let Some(text) = img.get(start..start.saturating_add(len)) else {
+        return Vec::new();
+    };
+    let lead = LLVM_JUMPTO[0].to_le_bytes();
+    (0..text.len().saturating_sub(3))
+        .step_by(4)
+        .filter(|&o| text[o..o + 4] == lead && known(&text[o..]).is_some())
+        .map(|o| (start + o) as u64)
+        .collect()
 }
 
 /// The function starts of the unwind table at image offset `start`, as
@@ -882,6 +904,18 @@ mod tests {
         assert_eq!(known(&bytes(&with_bti)), Some(k));
         j[20] ^= 1;
         assert_eq!(known(&bytes(&j)), None);
+    }
+
+    #[test]
+    fn known_routines_are_found_in_the_text() {
+        let mut img = vec![0u8; 0x20];
+        for w in LLVM_JUMPTO {
+            img.extend_from_slice(&w.to_le_bytes());
+        }
+        img.extend_from_slice(&[0; 0x10]);
+        assert_eq!(known_routines(&img, 0, img.len()), [0x20]);
+        assert!(known_routines(&img, 0, 0x20).is_empty());
+        assert!(known_routines(&img, 0x1000, 0x20).is_empty());
     }
 
     #[test]
