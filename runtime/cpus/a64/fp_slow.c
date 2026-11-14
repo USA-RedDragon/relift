@@ -46,9 +46,16 @@ enum {
     E_RSQRTS,
 };
 
+/**
+ * @brief The FPCR an operation on width w sees. AHP selects the alternative
+ * half precision format for FCVT only; every other half precision operation
+ * unpacks and rounds as if AHP were clear (FPUnpack and FPRound clear it).
+ */
+static uint32_t fpcr_for(const rl_ctx *c, unsigned w) { return w == 16 ? c->fpcr & ~RL_FPCR_AHP : c->fpcr; }
+
 static uint64_t elem2(rl_ctx *c, unsigned w, int op, uint64_t a, uint64_t b)
 {
-    uint32_t f = c->fpcr, *s = &c->fpsr;
+    uint32_t f = fpcr_for(c, w), *s = &c->fpsr;
     switch (op) {
     case E_ADD: return rl_fpn_add(w, a, b, f, s);
     case E_SUB: return rl_fpn_sub(w, a, b, f, s);
@@ -133,9 +140,14 @@ static unsigned type_bits(unsigned type)
     }
 }
 
+/** @brief True for the widths the slow path handles: half, single and double. */
+static int fp_width(unsigned w) { return w == 16 || w == 32 || w == 64; }
+
 static uint64_t expand_imm(unsigned w, uint32_t imm8)
 {
     uint64_t sign = (imm8 >> 7) & 1u, b = (imm8 >> 6) & 1u, rest = imm8 & 0x3Fu;
+    if (w == 16)
+        return (sign << 15) | ((b ^ 1u) << 14) | (b ? 3ull << 12 : 0) | (rest << 6);
     if (w == 32)
         return (sign << 31) | ((b ^ 1u) << 30) | (b ? 0x1Full << 25 : 0) | (rest << 19);
     return (sign << 63) | ((b ^ 1u) << 62) | (b ? 0xFFull << 54 : 0) | (rest << 48);
@@ -154,10 +166,10 @@ static int scalar_dp1(rl_ctx *c, uint64_t pc, uint32_t insn)
         write_scalar(c, to, rd, rl_fp_convert(read_scalar(c, w, rn), w, to, RL_RM_FPCR, c->fpcr, &c->fpsr));
         return RL_OK;
     }
-    if (w != 32 && w != 64)
+    if (!fp_width(w))
         return unsupported(c, pc, insn);
     uint64_t a = read_scalar(c, w, rn), r;
-    uint32_t f = c->fpcr, *s = &c->fpsr;
+    uint32_t f = fpcr_for(c, w), *s = &c->fpsr;
     switch (op) {
     case 0x00: r = a; break;
     case 0x01: r = a & ~sign_bit(w); break;
@@ -181,7 +193,7 @@ static int scalar_dp2(rl_ctx *c, uint64_t pc, uint32_t insn)
     unsigned w = type_bits((insn >> 22) & 3u), op = (insn >> 12) & 15u;
     unsigned rm = (insn >> 16) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
     static const int ops[9] = { E_MUL, E_DIV, E_ADD, E_SUB, E_MAX, E_MIN, E_MAXNM, E_MINNM, E_NMUL };
-    if ((w != 32 && w != 64) || op > 8)
+    if (!fp_width(w) || op > 8)
         return unsupported(c, pc, insn);
     write_scalar(c, w, rd, elem2(c, w, ops[op], read_scalar(c, w, rn), read_scalar(c, w, rm)));
     return RL_OK;
@@ -191,14 +203,14 @@ static int scalar_dp3(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned w = type_bits((insn >> 22) & 3u), o1 = (insn >> 21) & 1u, o0 = (insn >> 15) & 1u;
     unsigned rm = (insn >> 16) & 31u, ra = (insn >> 10) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
-    if (w != 32 && w != 64)
+    if (!fp_width(w))
         return unsupported(c, pc, insn);
     uint64_t a = read_scalar(c, w, ra), n = read_scalar(c, w, rn), m = read_scalar(c, w, rm);
     if (o1)
         a ^= sign_bit(w);
     if (o0 != o1)
         n ^= sign_bit(w);
-    write_scalar(c, w, rd, rl_fpn_muladd(w, a, n, m, c->fpcr, &c->fpsr));
+    write_scalar(c, w, rd, rl_fpn_muladd(w, a, n, m, fpcr_for(c, w), &c->fpsr));
     return RL_OK;
 }
 
@@ -206,10 +218,10 @@ static int scalar_cmp(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned w = type_bits((insn >> 22) & 3u), rm = (insn >> 16) & 31u, rn = (insn >> 5) & 31u;
     unsigned opc2 = insn & 31u;
-    if ((w != 32 && w != 64) || (opc2 & 7u) || ((insn >> 14) & 3u))
+    if (!fp_width(w) || (opc2 & 7u) || ((insn >> 14) & 3u))
         return unsupported(c, pc, insn);
     uint64_t b = (opc2 & 8u) ? 0 : read_scalar(c, w, rm);
-    c->nzcv = rl_fpn_compare(w, read_scalar(c, w, rn), b, (opc2 & 16u) != 0, c->fpcr, &c->fpsr);
+    c->nzcv = rl_fpn_compare(w, read_scalar(c, w, rn), b, (opc2 & 16u) != 0, fpcr_for(c, w), &c->fpsr);
     return RL_OK;
 }
 
@@ -217,10 +229,10 @@ static int scalar_ccmp(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned w = type_bits((insn >> 22) & 3u), rm = (insn >> 16) & 31u, rn = (insn >> 5) & 31u;
     unsigned cond = (insn >> 12) & 15u;
-    if (w != 32 && w != 64)
+    if (!fp_width(w))
         return unsupported(c, pc, insn);
     if (cond_holds(c->nzcv, cond))
-        c->nzcv = rl_fpn_compare(w, read_scalar(c, w, rn), read_scalar(c, w, rm), (insn >> 4) & 1u, c->fpcr, &c->fpsr);
+        c->nzcv = rl_fpn_compare(w, read_scalar(c, w, rn), read_scalar(c, w, rm), (insn >> 4) & 1u, fpcr_for(c, w), &c->fpsr);
     else
         c->nzcv = (insn & 15u) << 28;
     return RL_OK;
@@ -229,7 +241,7 @@ static int scalar_ccmp(rl_ctx *c, uint64_t pc, uint32_t insn)
 static int scalar_sel(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned w = type_bits((insn >> 22) & 3u), rm = (insn >> 16) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
-    if (w != 32 && w != 64)
+    if (!fp_width(w))
         return unsupported(c, pc, insn);
     write_scalar(c, w, rd, read_scalar(c, w, cond_holds(c->nzcv, (insn >> 12) & 15u) ? rn : rm));
     return RL_OK;
@@ -238,7 +250,7 @@ static int scalar_sel(rl_ctx *c, uint64_t pc, uint32_t insn)
 static int scalar_imm(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned w = type_bits((insn >> 22) & 3u);
-    if (w != 32 && w != 64)
+    if (!fp_width(w))
         return unsupported(c, pc, insn);
     write_scalar(c, w, insn & 31u, expand_imm(w, (insn >> 13) & 0xFFu));
     return RL_OK;
@@ -261,10 +273,10 @@ static int scalar_int(rl_ctx *c, uint64_t pc, uint32_t insn, int fixed)
             c->v[rd].d[1] = read_gpr(c, rn);
         return RL_OK;
     }
-    if (w != 32 && w != 64)
+    if (!fp_width(w))
         return unsupported(c, pc, insn);
     if (!fixed && rmode == 0 && (opcode == 6 || opcode == 7)) {
-        if (w != ibits)
+        if (w != 16 && w != ibits)
             return unsupported(c, pc, insn);
         if (opcode == 6)
             write_gpr(c, rd, read_scalar(c, w, rn));
@@ -274,7 +286,7 @@ static int scalar_int(rl_ctx *c, uint64_t pc, uint32_t insn, int fixed)
     }
     if (rmode == 0 && (opcode == 2 || opcode == 3)) {
         uint64_t a = read_gpr(c, rn) & wmask(ibits);
-        write_scalar(c, w, rd, rl_fixed_to_fp(a, ibits, w, fbits, opcode == 3, RL_RM_FPCR, c->fpcr, &c->fpsr));
+        write_scalar(c, w, rd, rl_fixed_to_fp(a, ibits, w, fbits, opcode == 3, RL_RM_FPCR, fpcr_for(c, w), &c->fpsr));
         return RL_OK;
     }
     unsigned rm;
@@ -289,7 +301,7 @@ static int scalar_int(rl_ctx *c, uint64_t pc, uint32_t insn, int fixed)
     } else {
         return unsupported(c, pc, insn);
     }
-    uint64_t r = rl_fp_to_fixed(read_scalar(c, w, rn), w, ibits, fbits, opcode & 1u, rm, c->fpcr, &c->fpsr);
+    uint64_t r = rl_fp_to_fixed(read_scalar(c, w, rn), w, ibits, fbits, opcode & 1u, rm, fpcr_for(c, w), &c->fpsr);
     write_gpr(c, rd, r & wmask(ibits));
     return RL_OK;
 }
@@ -330,13 +342,18 @@ static int same_op(unsigned u, unsigned a, unsigned opc, int *pair, int *fma)
 }
 
 /* Three registers of the same type, vector (asimdsame) or scalar (asisdsame). */
-static int simd_same(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
+static int simd_same(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half)
 {
     unsigned q = (insn >> 30) & 1u, u = (insn >> 29) & 1u, a = (insn >> 23) & 1u, sz = (insn >> 22) & 1u;
     unsigned opc = (insn >> 11) & 31u, rm = (insn >> 16) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
-    unsigned w = sz ? 64 : 32, lanes = scalar ? 1 : (q ? 128 : 64) / w;
+    /* The half precision class has a 3-bit opcode in bits 13 to 11 that
+     * matches the low bits of the single and double opcodes (bits 15 and 14
+     * are zero, bit 22 is one). */
+    if (half)
+        opc = 0x18u | (opc & 7u);
+    unsigned w = half ? 16 : (sz ? 64 : 32), lanes = scalar ? 1 : (q ? 128 : 64) / w;
     int pair, fma, op = same_op(u, a, opc, &pair, &fma);
-    if (op < 0 || (!scalar && sz && !q) || (scalar && (pair || fma)))
+    if (op < 0 || (!half && !scalar && sz && !q) || (scalar && (pair || fma)))
         return unsupported(c, pc, insn);
     rl_v128 n = c->v[rn], m = c->v[rm], d = c->v[rd], r;
     r.q = 0;
@@ -351,7 +368,7 @@ static int simd_same(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
             uint64_t e = lane_get(&n, w, i);
             if (fma == 2)
                 e ^= sign_bit(w);
-            x = rl_fpn_muladd(w, lane_get(&d, w, i), e, lane_get(&m, w, i), c->fpcr, &c->fpsr);
+            x = rl_fpn_muladd(w, lane_get(&d, w, i), e, lane_get(&m, w, i), fpcr_for(c, w), &c->fpsr);
         } else {
             x = elem2(c, w, op, lane_get(&n, w, i), lane_get(&m, w, i));
         }
@@ -364,14 +381,14 @@ static int simd_same(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
 enum { M_CVT, M_SCVTF, M_ABS, M_NEG, M_SQRT, M_RINT, M_CMP0, M_RECPE, M_RSQRTE, M_CVTN, M_CVTL };
 
 /* Two-register miscellaneous, vector (asimdmisc) or scalar (asisdmisc). */
-static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
+static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half)
 {
     unsigned q = (insn >> 30) & 1u, u = (insn >> 29) & 1u, a = (insn >> 23) & 1u, sz = (insn >> 22) & 1u;
     unsigned opc = (insn >> 12) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
-    unsigned w = sz ? 64 : 32, lanes = scalar ? 1 : (q ? 128 : 64) / w;
+    unsigned w = half ? 16 : (sz ? 64 : 32), lanes = scalar ? 1 : (q ? 128 : 64) / w;
     int kind, exact = 0, cmp = 0;
     uint32_t rm = RL_RM_NEAREST;
-    uint32_t f = c->fpcr, *s = &c->fpsr;
+    uint32_t f = fpcr_for(c, w), *s = &c->fpsr;
     switch ((u << 6) | (a << 5) | opc) {
     case 0x16: kind = M_CVTN; break;
     case 0x17: kind = M_CVTL; break;
@@ -406,6 +423,8 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
     case 0x7F: kind = M_SQRT; break;
     default: return unsupported(c, pc, insn);
     }
+    if (half && (kind == M_CVTN || kind == M_CVTL))
+        return unsupported(c, pc, insn);
     if (kind == M_CVTN || kind == M_CVTL) {
         /* sz 0: half and single; sz 1: single and double. */
         unsigned wide = sz ? 64 : 32, narrow = sz ? 32 : 16, cnt = 64 / narrow;
@@ -428,7 +447,7 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
         c->v[rd] = r;
         return RL_OK;
     }
-    if (!scalar && sz && !q)
+    if (!half && !scalar && sz && !q)
         return unsupported(c, pc, insn);
     rl_v128 n = c->v[rn], r;
     r.q = 0;
@@ -477,29 +496,35 @@ static int pair_op(unsigned u, unsigned a, unsigned opc)
     }
 }
 
-/* Scalar pairwise (asisdpair): two elements of Vn; U is 1 for the FP forms. */
+/* Scalar pairwise (asisdpair): two elements of Vn; U is 1 for the single and
+ * double forms and 0 for the half precision ones (bit 22 is zero then). */
 static int scalar_pair(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned u = (insn >> 29) & 1u, a = (insn >> 23) & 1u, sz = (insn >> 22) & 1u, opc = (insn >> 12) & 31u;
-    unsigned rn = (insn >> 5) & 31u, rd = insn & 31u, w = sz ? 64 : 32;
-    int op = pair_op(u, a, opc);
-    if (op < 0 || !u)
+    unsigned rn = (insn >> 5) & 31u, rd = insn & 31u, w = u ? (sz ? 64 : 32) : 16;
+    int op = pair_op(1, a, opc);
+    if (op < 0 || (!u && sz))
         return unsupported(c, pc, insn);
     rl_v128 n = c->v[rn];
     write_scalar(c, w, rd, reduce(c, w, op, &n, 0, 2));
     return RL_OK;
 }
 
-/* Across lanes (asimdall): FMAXNMV, FMINNMV, FMAXV, FMINV on 4S. */
+/* Across lanes (asimdall): FMAXNMV, FMINNMV, FMAXV, FMINV on 4S (U is 1) or
+ * on 4H and 8H (U is 0, bit 22 is zero). */
 static int across(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
     unsigned q = (insn >> 30) & 1u, u = (insn >> 29) & 1u, a = (insn >> 23) & 1u, sz = (insn >> 22) & 1u;
     unsigned opc = (insn >> 12) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
-    int op = pair_op(u, a, opc);
-    if (op < 0 || op == E_ADD || !u || !q || sz)
+    int op = pair_op(1, a, opc);
+    if (op < 0 || op == E_ADD || sz || (u && !q))
         return unsupported(c, pc, insn);
     rl_v128 n = c->v[rn];
-    write_scalar(c, 32, rd, reduce(c, 32, op, &n, 0, 4));
+    if (u) {
+        write_scalar(c, 32, rd, reduce(c, 32, op, &n, 0, 4));
+    } else {
+        write_scalar(c, 16, rd, reduce(c, 16, op, &n, 0, q ? 8 : 4));
+    }
     return RL_OK;
 }
 
@@ -513,6 +538,8 @@ static int simd_shift(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
         w = 64;
     else if (immh & 4u)
         w = 32;
+    else if (immh & 2u)
+        w = 16;
     else
         return unsupported(c, pc, insn);
     unsigned fbits = 2 * w - ((immh << 3) | immb), lanes = scalar ? 1 : (q ? 128 : 64) / w;
@@ -523,9 +550,9 @@ static int simd_shift(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
     for (unsigned i = 0; i < lanes; i++) {
         uint64_t e = lane_get(&n, w, i), x;
         if (opc == 0x1C)
-            x = rl_fixed_to_fp(e, w, w, fbits, u, RL_RM_FPCR, c->fpcr, &c->fpsr);
+            x = rl_fixed_to_fp(e, w, w, fbits, u, RL_RM_FPCR, fpcr_for(c, w), &c->fpsr);
         else
-            x = rl_fp_to_fixed(e, w, w, fbits, u, RL_RM_ZERO, c->fpcr, &c->fpsr);
+            x = rl_fp_to_fixed(e, w, w, fbits, u, RL_RM_ZERO, fpcr_for(c, w), &c->fpsr);
         lane_set(&r, w, i, x);
     }
     c->v[rd] = r;
@@ -538,8 +565,13 @@ static int simd_elem(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
     unsigned q = (insn >> 30) & 1u, u = (insn >> 29) & 1u, size = (insn >> 22) & 3u, l = (insn >> 21) & 1u;
     unsigned mm = (insn >> 16) & 31u, opc = (insn >> 12) & 15u, h = (insn >> 11) & 1u;
     unsigned rn = (insn >> 5) & 31u, rd = insn & 31u;
-    unsigned w = size == 3 ? 64 : 32, index = size == 3 ? h : (h << 1) | l;
-    if (size < 2 || (size == 3 && l) || u || (opc != 1 && opc != 5 && opc != 9) || (!scalar && w == 64 && !q))
+    unsigned w = size == 3 ? 64 : (size == 0 ? 16 : 32), index = size == 3 ? h : (h << 1) | l;
+    if (size == 0) {
+        /* Half precision: Rm has four bits and bit 20 (M) extends the index. */
+        index = (h << 2) | (l << 1) | ((insn >> 20) & 1u);
+        mm &= 15u;
+    }
+    if (size == 1 || (size == 3 && l) || u || (opc != 1 && opc != 5 && opc != 9) || (!scalar && w == 64 && !q))
         return unsupported(c, pc, insn);
     unsigned lanes = scalar ? 1 : (q ? 128 : 64) / w;
     uint64_t e2 = lane_get(&c->v[mm], w, index);
@@ -548,10 +580,90 @@ static int simd_elem(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar)
     for (unsigned i = 0; i < lanes; i++) {
         uint64_t e1 = lane_get(&n, w, i), x;
         if (opc == 9)
-            x = rl_fpn_mul(w, e1, e2, c->fpcr, &c->fpsr);
+            x = rl_fpn_mul(w, e1, e2, fpcr_for(c, w), &c->fpsr);
         else
-            x = rl_fpn_muladd(w, lane_get(&d, w, i), opc == 5 ? e1 ^ sign_bit(w) : e1, e2, c->fpcr, &c->fpsr);
+            x = rl_fpn_muladd(w, lane_get(&d, w, i), opc == 5 ? e1 ^ sign_bit(w) : e1, e2, fpcr_for(c, w), &c->fpsr);
         lane_set(&r, w, i, x);
+    }
+    c->v[rd] = r;
+    return RL_OK;
+}
+
+/*
+ * BFMLALB and BFMLALT (vector and by element): four single precision lanes,
+ * each the accumulator plus the product of two bfloat16 values (the even
+ * or the odd half of each source lane, picked by Q). A bfloat16 widens to
+ * single exactly by shifting it left 16 bits, so BFMulAddH is a single
+ * precision FPMulAdd with the FPCR.
+ */
+static int bfmlal(rl_ctx *c, uint32_t insn, int by_element)
+{
+    unsigned sel = (insn >> 30) & 1u, rn = (insn >> 5) & 31u, rd = insn & 31u, rm = (insn >> 16) & 31u;
+    unsigned index = 0;
+    if (by_element) {
+        rm &= 15u;
+        index = (((insn >> 11) & 1u) << 2) | (((insn >> 21) & 1u) << 1) | ((insn >> 20) & 1u);
+    }
+    rl_v128 n = c->v[rn], m = c->v[rm], d = c->v[rd], r;
+    r.q = 0;
+    for (unsigned e = 0; e < 4; e++) {
+        uint64_t a = (uint64_t)lane_get(&n, 16, 2 * e + sel) << 16;
+        uint64_t b = (uint64_t)lane_get(&m, 16, by_element ? index : 2 * e + sel) << 16;
+        lane_set(&r, 32, e, rl_fpn_muladd(32, lane_get(&d, 32, e), a, b, c->fpcr, &c->fpsr));
+    }
+    c->v[rd] = r;
+    return RL_OK;
+}
+
+/*
+ * Complex arithmetic (FCADD, FCMLA, vector and by element): each pair of
+ * lanes is (real, imaginary). The rotation picks which operand lanes feed
+ * the two FPAdd or FPMulAdd steps and which of them are negated (FPNeg is
+ * a sign flip that raises nothing). mode 0 is FCADD, 1 is FCMLA, 2 is the
+ * by-element FCMLA.
+ */
+static int simd_complex(rl_ctx *c, uint64_t pc, uint32_t insn, int mode)
+{
+    unsigned q = (insn >> 30) & 1u, size = (insn >> 22) & 3u, rn = (insn >> 5) & 31u, rd = insn & 31u;
+    unsigned rm = (insn >> 16) & 31u, rot = mode == 0 ? (insn >> 12) & 1u : (insn >> (mode == 1 ? 11 : 13)) & 3u;
+    unsigned w = 8u << size, index = 0;
+    if (size == 0 || (q == 0 && size == 3))
+        return unsupported(c, pc, insn);
+    if (mode == 2) {
+        unsigned h = (insn >> 11) & 1u, l = (insn >> 21) & 1u;
+        rm |= ((insn >> 20) & 1u) << 4;
+        rm &= 0x1Fu;
+        if (size == 3 || (size == 2 && (l || !q)) || (size == 1 && h && !q))
+            return unsupported(c, pc, insn);
+        index = size == 1 ? (h << 1) | l : h;
+    }
+    unsigned pairs = (q ? 128 : 64) / w / 2;
+    uint32_t f = fpcr_for(c, w);
+    uint64_t sb = sign_bit(w);
+    rl_v128 n = c->v[rn], m = c->v[rm], d = c->v[rd], r;
+    r.q = 0;
+    for (unsigned e = 0; e < pairs; e++) {
+        uint64_t m0 = lane_get(&m, w, mode == 2 ? index * 2 : e * 2);
+        uint64_t m1 = lane_get(&m, w, mode == 2 ? index * 2 + 1 : e * 2 + 1);
+        uint64_t n0 = lane_get(&n, w, e * 2), n1 = lane_get(&n, w, e * 2 + 1);
+        uint64_t x0, x1;
+        if (mode == 0) {
+            uint64_t e1 = rot ? m1 : m1 ^ sb, e3 = rot ? m0 ^ sb : m0;
+            x0 = rl_fpn_add(w, n0, e1, f, &c->fpsr);
+            x1 = rl_fpn_add(w, n1, e3, f, &c->fpsr);
+        } else {
+            uint64_t e1, e2, e3, e4;
+            switch (rot) {
+            case 0: e1 = m0, e2 = n0, e3 = m1, e4 = n0; break;
+            case 1: e1 = m1 ^ sb, e2 = n1, e3 = m0, e4 = n1; break;
+            case 2: e1 = m0 ^ sb, e2 = n0, e3 = m1 ^ sb, e4 = n0; break;
+            default: e1 = m1, e2 = n1, e3 = m0 ^ sb, e4 = n1; break;
+            }
+            x0 = rl_fpn_muladd(w, lane_get(&d, w, e * 2), e2, e1, f, &c->fpsr);
+            x1 = rl_fpn_muladd(w, lane_get(&d, w, e * 2 + 1), e4, e3, f, &c->fpsr);
+        }
+        lane_set(&r, w, e * 2, x0);
+        lane_set(&r, w, e * 2 + 1, x1);
     }
     c->v[rd] = r;
     return RL_OK;
@@ -584,17 +696,35 @@ int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
     if ((insn & 0xFF000000u) == 0x1F000000u)
         return scalar_dp3(c, pc, insn);
     if ((insn & 0x9F200400u) == 0x0E200400u)
-        return simd_same(c, pc, insn, 0);
+        return simd_same(c, pc, insn, 0, 0);
     if ((insn & 0xDF200400u) == 0x5E200400u)
-        return simd_same(c, pc, insn, 1);
+        return simd_same(c, pc, insn, 1, 0);
+    if ((insn & 0x9F60C400u) == 0x0E400400u)
+        return simd_same(c, pc, insn, 0, 1);
+    if ((insn & 0xDF60C400u) == 0x5E400400u)
+        return simd_same(c, pc, insn, 1, 1);
+    if ((insn & 0x9F7E0C00u) == 0x0E780800u)
+        return simd_misc(c, pc, insn, 0, 1);
+    if ((insn & 0xDF7E0C00u) == 0x5E780800u)
+        return simd_misc(c, pc, insn, 1, 1);
     if ((insn & 0x9F3E0C00u) == 0x0E200800u)
-        return simd_misc(c, pc, insn, 0);
+        return simd_misc(c, pc, insn, 0, 0);
     if ((insn & 0xDF3E0C00u) == 0x5E200800u)
-        return simd_misc(c, pc, insn, 1);
+        return simd_misc(c, pc, insn, 1, 0);
     if ((insn & 0xDF3E0C00u) == 0x5E300800u)
         return scalar_pair(c, pc, insn);
     if ((insn & 0x9F3E0C00u) == 0x0E300800u)
         return across(c, pc, insn);
+    if ((insn & 0xBFE0FC00u) == 0x2EC0FC00u)
+        return bfmlal(c, insn, 0);
+    if ((insn & 0xBFC0F400u) == 0x0FC0F000u)
+        return bfmlal(c, insn, 1);
+    if ((insn & 0xBF20EC00u) == 0x2E00E400u)
+        return simd_complex(c, pc, insn, 0);
+    if ((insn & 0xBF20E400u) == 0x2E00C400u)
+        return simd_complex(c, pc, insn, 1);
+    if ((insn & 0xBF009400u) == 0x2F001000u)
+        return simd_complex(c, pc, insn, 2);
     if ((insn & 0x9F800400u) == 0x0F000400u && (insn & 0x00780000u))
         return simd_shift(c, pc, insn, 0);
     if ((insn & 0xDF800400u) == 0x5F000400u && (insn & 0x00780000u))

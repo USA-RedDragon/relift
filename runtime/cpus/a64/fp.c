@@ -106,7 +106,10 @@ static unp unpack(fpenv *v, const fmt *f, uint64_t bits)
         if (fr == 0)
             return u;
         if (fz_on(v, f)) {
-            v->flags |= FPSR_IDC;
+            /* FPUnpack raises Input Denormal for the single and double flush
+             * only; a half precision FZ16 flush is silent. */
+            if (f->bits != 16)
+                v->flags |= FPSR_IDC;
             return u;
         }
         u.sig = fr;
@@ -488,7 +491,10 @@ static uint64_t fp_rsqrt_est(fpenv *v, const fmt *f, uint64_t a)
         return invalid_nan(v, f);
     if (u.k == K_INF)
         return 0;
-    if (f->bits == 32) {
+    if (f->bits == 16) {
+        frac = (a & 0x3FFull) << 42;
+        ex = (int)((a >> 10) & 0x1F);
+    } else if (f->bits == 32) {
         frac = (a & 0x7FFFFFull) << 29;
         ex = (int)((a >> 23) & 0xFF);
     } else {
@@ -507,6 +513,8 @@ static uint64_t fp_rsqrt_est(fpenv *v, const fmt *f, uint64_t a)
     else
         scaled = 128u | (unsigned)((frac >> 45) & 0x7Fu);
     est = recip_sqrt_estimate(scaled);
+    if (f->bits == 16)
+        return ((uint64_t)(((44 - ex) / 2) & 0x1F) << 10) | ((uint64_t)(est & 0xFFu) << 2);
     if (f->bits == 32)
         return ((uint64_t)(((380 - ex) / 2) & 0xFF) << 23) | ((uint64_t)(est & 0xFFu) << 15);
     return ((uint64_t)(((3068 - ex) / 2) & 0x7FF) << 52) | ((uint64_t)(est & 0xFFu) << 44);
@@ -692,6 +700,9 @@ static uint64_t convert_nan(const fmt *from, const fmt *to, uint64_t a)
 
 static uint64_t fp_convert(fpenv *v, const fmt *from, const fmt *to, uint64_t a, uint32_t rmode)
 {
+    /* FPConvert unpacks and rounds with FPUnpackCV and FPRoundCV, which
+     * ignore FZ16: a half precision side is never flushed. */
+    v->fpcr &= ~FPCR_FZ16;
     unp u = unpack(v, from, a);
     int dst_ahp = ahp_on(v, to);
     v->dst_ahp = dst_ahp;
@@ -935,7 +946,7 @@ uint64_t rl_fp_to_fixed(uint64_t a, unsigned from_bits, unsigned to_bits, unsign
     fpenv v = ENV(fpcr);
     const fmt *from = fmt_of(from_bits);
     uint64_t r;
-    if (!from || (to_bits != 32 && to_bits != 64))
+    if (!from || (to_bits != 16 && to_bits != 32 && to_bits != 64))
         return 0;
     r = fp_to_fixed(&v, from, to_bits, fbits, is_unsigned, rmode, a);
     commit(&v, fpsr);
@@ -948,7 +959,7 @@ uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsign
     fpenv v = ENV(fpcr);
     const fmt *to = fmt_of(to_bits);
     uint64_t r;
-    if (!to || (from_bits != 32 && from_bits != 64))
+    if (!to || (from_bits != 16 && from_bits != 32 && from_bits != 64))
         return 0;
     r = fp_from_fixed(&v, to, a, from_bits, fbits, is_unsigned, rmode);
     commit(&v, fpsr);
