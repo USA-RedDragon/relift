@@ -244,6 +244,7 @@ pub(crate) fn emit_op(
             };
             fit(&format!("({u}){s}"), w)
         }
+        Op::Extract(x, 0) => fit(&a(x), w),
         Op::Extract(x, lo) => {
             let ux = wide(wv(*x));
             fit(&format!("(({ux}){} >> {lo})", val(*x)), w)

@@ -47,10 +47,7 @@ fn locals_labels_and_exits() {
     assert!(s.contains("RL_TEXT RL_LIFTED(F_100)\n{"), "{s}");
     assert!(s.contains("uint64_t r0 = c->x[0];"), "{s}");
     assert!(s.contains("goto L_100;"), "{s}");
-    assert!(
-        s.contains("if (v2) { goto L_10c; }\n    goto L_108;"),
-        "{s}"
-    );
+    assert!(s.contains("if (v2) { goto L_10c; }\n}\nL_108: {"), "{s}");
     assert!(s.contains("return RL_OK;"), "{s}");
     assert!(
         s.contains("#define RL_STORE() do { c->x[0] = r0; } while (0)"),
@@ -78,7 +75,7 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
     let out = emit(&Toy, &fns, &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("rc = F_108(c, mem);\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n    RL_RELOAD();\n    goto L_104;"),
+        s.contains("rc = F_108(c, mem);\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n    RL_RELOAD();\n}\nL_104: {"),
         "{s}"
     );
     assert!(s.contains("RL_MUSTTAIL return F_108(c, mem);"), "{s}");

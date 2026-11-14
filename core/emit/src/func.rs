@@ -370,7 +370,7 @@ fn emit_piece(
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
-    for &pc in pcs {
+    for (k, &pc) in pcs.iter().enumerate() {
         let start = t.len();
         let _ = writeln!(t, "{}: {{", label(pc));
         let body = match (&f.insts[&pc], blocks.get(&pc)) {
@@ -379,7 +379,14 @@ fn emit_piece(
             (Insn::Lifted { raw, .. }, None) => Err((*raw, "no block".into())),
         };
         match body {
-            Ok(s) => t.push_str(&s),
+            // A jump to the next instruction written falls through.
+            Ok(s) => match pcs.get(k + 1) {
+                Some(&n) => {
+                    let goto = format!("    goto {};\n", label(n));
+                    t.push_str(s.strip_suffix(&goto).unwrap_or(&s));
+                }
+                None => t.push_str(&s),
+            },
             Err((insn, _)) => {
                 undefined += 1;
                 let _ = writeln!(t, "    RL_STORE();\n    return {};", fe.undefined(pc, insn));
