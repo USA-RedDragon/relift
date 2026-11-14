@@ -1,13 +1,14 @@
-//! Hand-written lifting of A64 encodings to `relift-ir`.
+//! Lifting of A64 encodings to `relift-ir`, one function per encoding id.
 //!
-//! The boundary is one function per encoding id: [`lifter`] maps an
-//! [`Encoding`] to the function that lifts it, or `None`. The Sail-derived
-//! generator replaces and extends these functions later without changing
-//! [`lift`].
+//! [`lift`] uses the template generated from the Sail model ([`sail`]) when
+//! the encoding has one. A few encodings also keep a hand-written lifter
+//! ([`lifter`], [`lift_hand`]): the forms the differential checker was
+//! brought up on, kept as a cross-check of the generator.
 
 mod arith;
 mod branch;
 mod mem;
+pub mod sail;
 
 use std::fmt;
 
@@ -63,8 +64,23 @@ pub fn lift(word: u32, pc: u64) -> Result<Block, LiftError> {
     lift_insn(insn, pc)
 }
 
-/// Lifts an already decoded instruction at `pc`.
+/// Lifts an already decoded instruction at `pc`: with its generated template
+/// when it has one, else with its hand-written lifter.
 pub fn lift_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
+    if sail::has_template(insn.encoding) {
+        return sail::lift_insn(insn, pc);
+    }
+    hand_insn(insn, pc)
+}
+
+/// Lifts `word` at `pc` with its hand-written lifter only.
+pub fn lift_hand(word: u32, pc: u64) -> Result<Block, LiftError> {
+    let insn = decode(word).ok_or(LiftError::Unallocated(word))?;
+    hand_insn(insn, pc)
+}
+
+/// Lifts an already decoded instruction with its hand-written lifter.
+fn hand_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
     let f = lifter(insn.encoding).ok_or(LiftError::Unsupported(insn.encoding))?;
     let mut b = Builder::new(regs::regs(), Width::W64, pc);
     let exit = match f(insn, &mut b)? {
@@ -77,12 +93,12 @@ pub fn lift_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
     Ok(b.finish(4, exit))
 }
 
-/// The encodings that have a lifter, in specification order.
+/// The encodings that lift, in specification order.
 pub fn supported() -> impl Iterator<Item = Encoding> {
-    Encoding::all().filter(|e| lifter(*e).is_some())
+    Encoding::all().filter(|e| sail::has_template(*e) || lifter(*e).is_some())
 }
 
-/// The lifting function for `enc`, if there is one.
+/// The hand-written lifting function for `enc`, if there is one.
 pub fn lifter(enc: Encoding) -> Option<LiftFn> {
     arith::lifter(enc)
         .or_else(|| branch::lifter(enc))

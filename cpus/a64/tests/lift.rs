@@ -1,7 +1,8 @@
 //! Lifter tests on words built from field values, run in the `relift-ir`
 //! interpreter. The differential check against Unicorn lives in `check/`.
 
-use relift_cpu_a64::lift::{LiftError, lift, supported};
+use relift_cpu_a64::decode::decode;
+use relift_cpu_a64::lift::{LiftError, lift, lift_hand, lifter, sail, supported};
 use relift_cpu_a64::regs::{self, C, N, SP, V, Z};
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{Flow, Next};
@@ -153,4 +154,68 @@ fn unpredictable_and_unsupported_words_are_refused() {
         Err(LiftError::Unsupported(_))
     ));
     assert!(supported().count() > 150);
+}
+
+/// A small deterministic generator for the agreement test.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 ^ (self.0 >> 29)
+    }
+}
+
+/// Every encoding with both a hand-written lifter and a generated template
+/// computes the same state in the interpreter, from random words and states
+/// whose base registers point into the memory window.
+#[test]
+fn generated_templates_agree_with_the_hand_lifter() {
+    let mut r = Lcg(7);
+    let encs: Vec<_> = supported()
+        .filter(|e| lifter(*e).is_some() && sail::has_template(*e))
+        .collect();
+    assert!(
+        encs.len() >= 10,
+        "control: only {} encodings have both lifters",
+        encs.len()
+    );
+    for enc in encs {
+        let mut tried = 0;
+        for _ in 0..400 {
+            let w = enc.value() | (r.next() as u32 & !enc.mask());
+            if decode(w).map(|i| i.encoding) != Some(enc) {
+                continue;
+            }
+            let (Ok(h), Ok(g)) = (lift_hand(w, PC), lift(w, PC)) else {
+                continue;
+            };
+            let mut s = state();
+            for i in 0..31 {
+                setx(&mut s, i, 0x1_0000 + (r.next() & 0x7f8));
+            }
+            s.regs[SP.index()] = 0x1_0800;
+            for f in [N, Z, C, V] {
+                s.regs[f.index()] = u128::from(r.next() & 1);
+            }
+            let (mut s1, mut s2) = (s.clone(), s);
+            let (mut m1, mut m2) = (mem(), mem());
+            let o1 = interp::run(&h, &mut s1, &mut m1, &mut NoIntrinsics);
+            let o2 = interp::run(&g, &mut s2, &mut m2, &mut NoIntrinsics);
+            match (o1, o2) {
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(a.next, b.next, "{} {w:#010x}: next pc", enc.name());
+                    assert_eq!(s1.regs, s2.regs, "{} {w:#010x}: registers", enc.name());
+                    assert_eq!(m1.bytes, m2.bytes, "{} {w:#010x}: memory", enc.name());
+                }
+                (Err(_), Err(_)) => {}
+                (a, b) => panic!("{} {w:#010x}: {a:?} vs {b:?}", enc.name()),
+            }
+            tried += 1;
+        }
+        assert!(tried > 50, "control: {} ran only {tried} words", enc.name());
+    }
 }

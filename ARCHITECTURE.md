@@ -35,7 +35,16 @@ list of hard rules; read it before changing anything.
   band and exact dependencies, so a new crate or dependency needs a row
   edit. The core never reaches a CPU or a guest, CPUs reach only `core/ir`
   and `core/guest`, guests never reach each other, `override/` reaches
-  nothing in the tool, and nothing reaches `check/`.
+  nothing in the tool, and nothing reaches `check/` or a generator.
+- **Generated code is committed.** `cpus/a64/src/decode/generated.rs`
+  (from AARCHMRS) and `cpus/a64/src/lift/sail/generated/*.rs` (from sail-arm,
+  one file per instruction class, `linguist-generated` in `.gitattributes`)
+  are never edited by hand; `cpus/a64/gen/README.md` says how to regenerate
+  them, and their notices sit next to the crate manifest. CI's
+  `generated templates are current` job fetches the pinned sail-arm files,
+  reruns the generator and fails on any difference. A form joins
+  `cpus/a64/gen/forms.txt` only after `relift-check forms` passes it and its
+  mutation control.
 - **`unsafe` is forbidden** outside the roster in
   `relift/tests/unsafe_roster.rs`. Ceilings only fall.
 - **The CI gate** is `cargo clippy --workspace --all-targets --all-features
@@ -67,6 +76,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
+| 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model; run by hand, linked by nothing |
 | 2 | `relift-switch-formats` | `guests/switch/formats` | Decrypted Switch formats (romfs, NSO, NRO, NPDM, NUP) and the import of a `.nup` or an extracted dump tree |
 | 2 | `relift-switch-tools` | `guests/switch/tools` | `relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate |
 | 2 | `relift-switch-vkgen` | `guests/switch/vkgen` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; standalone (nothing depends on it) |
@@ -76,10 +86,19 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | apart 0 | `relift-override-macros` | `override/macros` | Override attribute macros for game repos |
 | apart 1 | `relift-override` | `override/api` | The Rust override API for game repos |
 
-`check/` is a separate Cargo workspace holding `relift-check`, the reference
-interpreter runner. It will link a GPL-2 emulator, so nothing in the main
-workspace may link it; `relift check` runs it as a subprocess. The root
-manifest excludes it.
+`check/` is a separate Cargo workspace holding `relift-check`, the
+differential runner: it lifts A64 words, runs them in the `relift-ir`
+interpreter and in Unicorn (GPL-2) on random states, and compares the
+registers, flags, next PC and a data window; `--mutate` breaks the first
+live operation of each lifted block and expects the comparison to catch it.
+Nothing in the main workspace may link it; `relift check` runs it as a
+subprocess. The root manifest excludes it.
+
+`relift-cpu-a64` lifts each encoding with its Sail-generated template when it
+has one, else with a hand-written lifter. The hand-written lifters cover only
+the forms the checker was brought up on, kept as a cross-check:
+`cpus/a64/tests/lift.rs` (`generated_templates_agree_with_the_hand_lifter`)
+runs both in the interpreter.
 
 There is no core names crate: Itanium remangling is the Switch guest's
 business, and the core sees only `relift_guest::Naming`.
@@ -118,6 +137,7 @@ All of these run in `cargo test` and in CI's checks job.
 | `override/` crates reach no tool crate | `workspace_charter.rs`: `override_reaches_no_tool_crate` |
 | Nothing reaches `check/`; it stays its own workspace and is excluded | `workspace_charter.rs`: `nothing_reaches_check` |
 | No cipher crate (`aes`, `ctr`, `xts-mode`, `cipher`, ...) is anywhere in the resolved graph; control: `sha2` and `digest` are found | `workspace_charter.rs`: `no_crypto_crate_is_in_the_graph` |
+| No member reaches a generator (`cpus/*/gen`) | `workspace_charter.rs`: `no_member_reaches_a_generator` |
 | The charter reads this tree and its walk recurses | `workspace_charter.rs`: `the_reader_reads_this_workspace` |
 | `unsafe_code = "forbid"` for the workspace; every member inherits it or is on the roster with its own `deny` pair | `relift/tests/unsafe_roster.rs`: `the_workspace_lint_table_forbids_unsafe_code`, `every_member_inherits_the_forbid_or_is_rostered` |
 | No `unsafe` outside the roster; each rostered crate reads exactly its ceiling | `unsafe_roster.rs`: `no_unrostered_member_spells_unsafe`, `each_rostered_crate_holds_its_unsafe_ceiling` |
