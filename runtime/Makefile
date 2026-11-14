@@ -7,6 +7,9 @@
 #   make                       clang, host target, into build/host
 #   make test                  build and run every layer's tests
 #   make charter               check that core names no guest and no CPU
+#   make AUDIO=real BUILD=build/audio   also build runtime/host (SDL3 output and libopus decoding;
+#                              needs pkg-config packages sdl3 and opus). The default is the null
+#                              output and the stub decoder, with no extra dependency.
 #   make CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 #
 # TARGET is passed as -target; leave it empty for the compiler's default.
@@ -19,6 +22,7 @@ PYTHON ?= python3
 BUILD ?= build/host
 TARGET ?=
 OPT ?= -O2
+AUDIO ?= null
 
 TARGET_FLAGS := $(if $(TARGET),-target $(TARGET),)
 MACHINE := $(if $(TARGET),$(TARGET),$(shell $(CC) -dumpmachine))
@@ -41,6 +45,11 @@ WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) -fPIC -fvisibility=hidden \
 	-fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME
 LDLIBS := -lpthread
+ifeq ($(AUDIO),real)
+HOST_SRCS := $(wildcard host/*.c)
+CFLAGS_BASE += -DRL_HOST_AUDIO $(shell pkg-config --cflags opus sdl3)
+LDLIBS += $(shell pkg-config --libs opus sdl3)
+endif
 
 # Include paths per layer: a layer sees itself and the layers below it.
 CORE_INC := -Icore/include -Icore
@@ -48,7 +57,7 @@ A64_INC := $(CORE_INC) -Icpus/a64/include -Icpus/a64
 SWITCH_INC := $(A64_INC) -Iguests/switch
 RUNNER_INC := -Icore/tests
 
-CORE_SRCS := $(wildcard core/*.c)
+CORE_SRCS := $(wildcard core/*.c) $(HOST_SRCS)
 CORE_HDRS := $(wildcard core/include/relift/*.h core/*.h)
 A64_SRCS := $(wildcard cpus/a64/*.c)
 A64_HDRS := $(CORE_HDRS) $(wildcard cpus/a64/include/relift/a64/*.h cpus/a64/*.h)
