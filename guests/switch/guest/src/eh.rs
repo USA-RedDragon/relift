@@ -235,10 +235,12 @@ fn fde_pads(img: &[u8], at: usize, data_base: usize, base: u64) -> Vec<Pad> {
     ) else {
         return Vec::new();
     };
+    let field = r.at as u64;
     let Some(lsda) = r.encoded(cie.lsda_enc, data_base) else {
         return Vec::new();
     };
-    if lsda == 0 {
+    let absent = lsda == 0 || (cie.lsda_enc & 0x70 == 0x10 && lsda == field);
+    if absent {
         return Vec::new();
     }
     call_sites(img, lsda as usize, start, data_base)
@@ -345,6 +347,15 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_zero_lsda_field_means_no_lsda() {
+        let mut t = table(&[(0x10, 4, 0x30)]);
+        let fde_at = 4 + u32::from_le_bytes(t[..4].try_into().unwrap()) as usize;
+        t[fde_at + 17..fde_at + 21].fill(0);
+        assert!(landing_pads(&t, 0, 0x8000_0000).is_empty());
+        assert_eq!(fde_starts(&t, 0), [0x1000]);
     }
 
     #[test]
