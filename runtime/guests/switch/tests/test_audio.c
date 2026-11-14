@@ -233,6 +233,7 @@ TEST(hwopus_decodes_a_packet)
 
 TEST(audout_releases_buffers_as_they_play)
 {
+    rl_audio_set_backend(rl_audio_null_backend());
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
     uint32_t h = open_service(c, heap, "audout:u");
