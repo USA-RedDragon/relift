@@ -1,13 +1,15 @@
 //! FPSR flags turn on by themselves: a program whose `MRS FPSR` result is
 //! used gets the host flags (here DZC from `1.0 / 0.0` decides whether it
-//! prints), and a program without one is built flag-free. Skipped with a
-//! note when clang is not on `PATH`.
+//! prints), and a program without one is built flag-free. Within a program
+//! only the functions whose FP can reach a read produce flags. Skipped with
+//! a note when clang is not on `PATH`.
 
 use std::path::{Path, PathBuf};
 
 use relift_switch_formats::nso::{NsoSpec, build};
 
 const MSG: &[u8] = b"divide by zero seen";
+const MSG2: &[u8] = b"fp ok";
 
 fn adr(rd: u32, off: i32) -> u32 {
     let imm = off as u32;
@@ -69,14 +71,62 @@ fn relift(dir: &Path, args: &[&str]) -> std::process::Output {
         .expect("the relift binary runs")
 }
 
+fn bl(from: u32, to: u32) -> u32 {
+    0x9400_0000 | ((to.wrapping_sub(from) >> 2) & 0x3ff_ffff)
+}
+
+const RET: u32 = 0xd65f_03c0;
+
+/// Calls B, then A, and exits. B adds 1.5 to itself and prints when it is
+/// 3.0, with no FPSR read anywhere near; A clears FPSR, divides by zero and
+/// prints when FPSR.DZC is set.
+fn two_functions() -> Vec<u8> {
+    let code = [
+        // 0x00: the entry.
+        bl(0x00, 0x10),
+        bl(0x04, 0x38),
+        svc(0x07),
+        0x1400_0000,
+        // 0x10: B.
+        0x1e2f_1001, // fmov s1, #1.5
+        0x1e21_2820, // fadd s0, s1, s1
+        0x1e21_1003, // fmov s3, #3.0
+        0x1e23_2000, // fcmp s0, s3
+        0x5400_00a1, // b.ne 0x34
+        adr(0, 0x1020 - 0x24),
+        movz(1, MSG2.len() as u32),
+        svc(0x27),
+        NOP,
+        RET,
+        // 0x38: A.
+        0xd51b_443f, // msr fpsr, xzr
+        FMOV_S1_ONE,
+        FMOV_S2_WZR,
+        FDIV_S0_S1_S2,
+        MRS_X2_FPSR,
+        tbz(2, 1, 0x5c - 0x4c),
+        adr(0, 0x1000 - 0x50),
+        movz(1, MSG.len() as u32),
+        svc(0x27),
+        RET,
+    ];
+    code.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
 /// Builds and runs the program; gives stdout, stderr and program.c.
 fn build_and_run(name: &str, read: bool) -> (String, String, String) {
+    let text = program(read);
+    build_and_run_text(name, text, MSG.to_vec())
+}
+
+/// Builds and runs `text` with `rodata`; gives stdout, stderr and program.c.
+fn build_and_run_text(name: &str, text: Vec<u8>, rodata: Vec<u8>) -> (String, String, String) {
     let root = scratch(name);
     let exefs = root.join("dump/exefs");
     std::fs::create_dir_all(&exefs).expect("the dump dir is creatable");
     let nso = build(&NsoSpec {
-        text: program(read),
-        rodata: MSG.to_vec(),
+        text,
+        rodata,
         data: vec![0; 0x10],
         bss: 0x10,
         compress: true,
@@ -111,7 +161,7 @@ fn a_program_that_reads_fpsr_gets_host_flags_without_a_setting() {
     }
     let (stdout, stderr, prog) = build_and_run("e2e-fpsr-read", true);
     assert!(
-        stderr.contains("FPSR flags on: 1 usable FPSR read,"),
+        stderr.contains("1 live reads, every region is bounded"),
         "{stderr}"
     );
     assert!(prog.contains("rl_a64_set_fp_flags(1)"));
@@ -125,7 +175,40 @@ fn a_program_that_never_reads_fpsr_stays_flag_free() {
         return;
     }
     let (stdout, stderr, prog) = build_and_run("e2e-fpsr-none", false);
-    assert!(!stderr.contains("FPSR flags on"), "{stderr}");
+    assert!(!stderr.contains("FPSR flags"), "{stderr}");
     assert!(!prog.contains("rl_a64_set_fp_flags"));
     assert_eq!(stdout, "divide by zero seen\n", "{stderr}");
+}
+
+#[test]
+fn only_the_function_whose_fp_reaches_a_read_produces_flags() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let mut rodata = MSG.to_vec();
+    rodata.resize(0x20, 0);
+    rodata.extend_from_slice(MSG2);
+    let (stdout, stderr, prog) = build_and_run_text("e2e-fpsr-two", two_functions(), rodata);
+    assert!(prog.contains("rl_a64_set_fp_flags(1)"));
+    assert!(
+        stderr.contains("FPSR flags: 1 of 3 functions, 1 live reads"),
+        "{stderr}"
+    );
+    assert_eq!(stdout, "fp ok\ndivide by zero seen\n", "{stderr}");
+    let root =
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join("e2e-fpsr-two/cache/projects/fpsr/build/host");
+    let parts = std::fs::read_to_string(root.join("c/0_main/relift_parts.h"))
+        .expect("the parts header is readable");
+    // A (0x38) is in part 1 of the shard; B (0x10) and the entry stay in
+    // the flag-free part 0.
+    let defs: Vec<&str> = parts
+        .lines()
+        .filter(|l| l.starts_with("#define RL_PART_"))
+        .collect();
+    assert_eq!(defs.len(), 1, "{parts}");
+    assert!(defs[0].contains("fn_00000038"), "{parts}");
+    assert!(parts.contains("#define RL_PART1_shard0000 1"), "{parts}");
+    assert!(root.join("obj/lifted/0_main/shard0000.p1.o").exists());
+    assert!(root.join("obj/lifted/0_main/shard0000.o").exists());
 }

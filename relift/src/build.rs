@@ -93,9 +93,8 @@ struct Emitted {
     functions: usize,
     unlifted: usize,
     unlifted_list: String,
-    /// The `MRS FPSR` sites whose result the program can use, as
-    /// (module, address); any at all turns on FPSR flag production.
-    fpsr_reads: Vec<(String, u64)>,
+    /// Which functions produce FPSR flags.
+    fpsr: crate::fpflags::Plan,
 }
 
 fn unlifted_line(module: &str, pc: u64, word: u64, message: &str) -> String {
@@ -116,8 +115,9 @@ fn emit_modules(
         functions: 0,
         unlifted: 0,
         unlifted_list: String::new(),
-        fpsr_reads: Vec::new(),
+        fpsr: crate::fpflags::Plan::default(),
     };
+    let mut fpsr = crate::fpflags::Fpsr::new(placed);
     for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
         let module = program::module(p);
         ui.begin(row, "discover");
@@ -186,29 +186,6 @@ fn emit_modules(
                 u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
             })
         };
-        let raw32 = |pc: u64| raw(pc) as u32;
-        let census: Vec<relift_cpu_a64::flags::Function<'_>> = analysis
-            .functions
-            .values()
-            .map(|f| relift_cpu_a64::flags::Function {
-                entry: f.entry,
-                insts: f
-                    .insts
-                    .iter()
-                    .map(|(&pc, i)| {
-                        let b = match i {
-                            Insn::Lifted(b) => Some(b),
-                            Insn::Failed(_) => None,
-                        };
-                        (pc, b)
-                    })
-                    .collect(),
-                raw: &raw32,
-            })
-            .collect();
-        for a in relift_cpu_a64::flags::live_fpsr_reads(&census) {
-            done.fpsr_reads.push((p.name.clone(), a));
-        }
         let fns: Vec<relift_emit::Function<'_>> = analysis
             .functions
             .values()
@@ -247,6 +224,7 @@ fn emit_modules(
                 })
             })
             .collect();
+        fpsr.add_module(i, p, &module, &analysis, &overrides);
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         ui.begin(row, "emit");
         let mut shards = 0;
@@ -259,7 +237,7 @@ fn emit_modules(
                 unit_name: p.name.clone(),
                 unit_symbol: unit.clone(),
                 module_base: p.base,
-                parts: false,
+                parts: fpsr.parts(),
             },
             &mut |d, total| {
                 shards = total;
@@ -276,6 +254,7 @@ fn emit_modules(
         );
         let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
         std::fs::create_dir_all(&dir)?;
+        fpsr.add_files(&dir, &out.files);
         for f in &out.files {
             let path = dir.join(&f.name);
             relift_cache::write_if_changed(&path, f.text.as_bytes())?;
@@ -293,6 +272,7 @@ fn emit_modules(
         );
         done.units.push(unit);
     }
+    done.fpsr = fpsr.finish()?;
     Ok(done)
 }
 
@@ -362,13 +342,10 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
     let (lifted, units) = (emitted.files, emitted.units);
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
-    let fpsr_reads = emitted.fpsr_reads;
-    let fp_flags = !fpsr_reads.is_empty();
-    if let Some((m, a)) = fpsr_reads.first() {
-        ui.note(&Line::new().text(format!(
-            "FPSR flags on: {}, first in {m} at {a:#x}",
-            noun(fpsr_reads.len() as u64, "usable FPSR read")
-        )));
+    let fpsr = emitted.fpsr;
+    let fp_flags = fpsr.flags;
+    for l in fpsr.report.lines() {
+        ui.note(&Line::new().text(l));
     }
     let prog = cdir.join("program.c");
     relift_cache::write_if_changed(
@@ -396,16 +373,16 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         .cloned()
         .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))
         .chain([inc("core/include"), inc("cpus/a64/include")])
-        // A program that reads FPSR gets its flags from host FP operations,
-        // which the compiler must then neither fold nor reorder.
-        .chain(
-            fp_flags
-                .then_some(["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"])
-                .into_iter()
-                .flatten()
-                .map(String::from),
-        )
         .collect();
+    // Code that produces FPSR flags gets them from host FP operations,
+    // which the compiler must then neither fold nor reorder.
+    let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
+    let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
+    let lifted_flags = if fpsr.program_wide {
+        flag_flags.clone()
+    } else {
+        lifted_flags
+    };
     let rt_flags: Vec<String> = base
         .iter()
         .cloned()
@@ -442,6 +419,17 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             flags: lifted_flags.clone(),
         })
         .collect();
+    for s in &fpsr.part1 {
+        compiles.push(Compile {
+            src: s.clone(),
+            obj: obj(s, "lifted").with_extension("p1.o"),
+            flags: flag_flags
+                .iter()
+                .cloned()
+                .chain(["-DRL_PART=1".to_string()])
+                .collect(),
+        });
+    }
     compiles.push(Compile {
         src: prog.clone(),
         obj: obj(&prog, "lifted"),

@@ -3,6 +3,7 @@
 
 pub mod build;
 pub mod cli;
+pub mod fpflags;
 pub mod import;
 pub mod settings;
 pub mod ui;
