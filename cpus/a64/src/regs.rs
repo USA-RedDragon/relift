@@ -87,7 +87,7 @@ static DECLS: [RegDecl; 72] = [
 
 /// The A64 register file.
 pub fn regs() -> RegFile {
-    RegFile::new(&DECLS)
+    RegFile::new("a64", &DECLS)
 }
 
 /// General register `x<n>` for `n` in 0 to 30.

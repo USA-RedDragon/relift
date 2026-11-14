@@ -273,22 +273,3 @@ impl Block {
         self.insts.get(v.index()).and_then(|i| i.width)
     }
 }
-
-impl fmt::Display for Block {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "block {:#x} len {}:", self.pc, self.len)?;
-        for (i, inst) in self.insts.iter().enumerate() {
-            match inst.width {
-                Some(w) => write!(f, "  v{i}:b{} = ", w.bits())?,
-                None => write!(f, "  ")?,
-            }
-            match &inst.op {
-                Op::Get(r) => writeln!(f, "get {}", self.regs.decl(*r).name)?,
-                Op::Set(r, v) => writeln!(f, "set {} v{}", self.regs.decl(*r).name, v.0)?,
-                Op::Const(c) => writeln!(f, "const {c:#x}")?,
-                other => writeln!(f, "{other:?}")?,
-            }
-        }
-        writeln!(f, "  exit {:?} {:?}", self.exit.next, self.exit.flow)
-    }
-}
