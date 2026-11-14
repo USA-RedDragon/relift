@@ -14,6 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#include <stdio.h>
+#endif
 
 static const rl_switch_hook *g_hooks[RL_SWITCH_HOOKS];
 static uint32_t g_nhooks;
@@ -474,6 +479,10 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 {
     (void)argc;
     (void)argv;
+#if defined(_WIN32)
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
     main_args a = { p };
     uint32_t base = g_nhooks;
     for (uint32_t i = 0; i < g_nauto; i++) {
