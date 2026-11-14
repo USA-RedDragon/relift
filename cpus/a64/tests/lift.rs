@@ -221,3 +221,19 @@ fn generated_templates_agree_with_the_hand_lifter() {
         assert!(tried > 50, "control: {} ran only {tried} words", enc.name());
     }
 }
+
+/// FCVTZS H12, H1, #15 (scalar, half precision, fixed point) writes the
+/// 16-bit result zero-extended to the whole vector register. Unicorn 2.1.5
+/// sign-extends it to 32 bits (0xffffffde); the Apple M2 and QEMU 11.1.2
+/// give 0xffde, as here.
+#[test]
+fn fcvtzs_half_to_fixed_zero_extends_unlike_unicorn() {
+    let word = 0x5f11_fc2c;
+    let n = (word >> 5) & 31;
+    let d = word & 31;
+    let mut s = state();
+    s.regs[regs::vreg(n).index()] = 0xdead_beef_0000_9440;
+    s.regs[regs::vreg(d).index()] = u128::MAX;
+    step(word, &mut s, &mut mem());
+    assert_eq!(s.regs[regs::vreg(d).index()], 0xffde);
+}
