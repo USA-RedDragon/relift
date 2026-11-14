@@ -65,6 +65,15 @@ jobs:
           "$RUNNER_TEMP/configulator/bin/configulator" --type Settings --sample --format toml --sample-file ../relift.example.toml --check
           "$RUNNER_TEMP/configulator/bin/configulator" --type Settings --markdown --markdown-file ../README.md --env-prefix RELIFT_ --env-separator _ --check
 
+      - name: generated Vulkan forwarding is current
+        run: |
+          cfg=guests/switch/vkgen/vkgen.toml
+          url=$(sed -n 's/^url = "\(.*\)"$/\1/p' "$cfg")
+          sum=$(sed -n 's/^sha256 = "\(.*\)"$/\1/p' "$cfg")
+          curl -fsSL -o "$RUNNER_TEMP/vk.xml" "$url"
+          echo "$sum  $RUNNER_TEMP/vk.xml" | sha256sum -c -
+          cargo run --locked -q -p relift-switch-vkgen -- --xml "$RUNNER_TEMP/vk.xml" --config "$cfg" --out runtime/guests/switch/vk/gen --check
+
       - name: cargo-deny
         run: |
           dir="$RUNNER_TEMP/cargo-deny"

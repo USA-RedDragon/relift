@@ -34,6 +34,15 @@ jobs:
           python3 --version
           make charter
 
+      - name: Generated Vulkan types hold the guest layout on every host target
+        working-directory: runtime/guests/switch/vk/gen
+        run: |
+          clang --version
+          for t in x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-windows-gnu aarch64-w64-windows-gnu x86_64-apple-macos aarch64-apple-macos; do
+            echo "$t"
+            clang --target="$t" -ffreestanding -std=c11 -Wall -Wextra -Wpedantic -Werror -fsyntax-only -x c vkg_types.h
+          done
+
   c-tests:
     name: C runtime (${{ matrix.os }})
     strategy:
@@ -47,13 +56,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Mesa's lavapipe for the Vulkan forwarding tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mesa-vulkan-drivers libvulkan1
+          echo "RELIFT_VK_REQUIRE=1" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
+
       - name: Build the layer libraries, the runtime libraries and each layer's tests
         working-directory: runtime
         run: |
           clang --version
           make -j2 CC=clang
 
-      - name: Run the core, a64 and Switch tests
+      - name: Run the core, a64, Switch and Vulkan forwarding tests
         working-directory: runtime
         run: make test CC=clang
 
