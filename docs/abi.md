@@ -40,9 +40,18 @@ Prototype names used in the tags:
 - Lifted C is built with `-std=c11 -O2 -ffp-contract=off`. Without
   `-ffp-contract=off` arm64 hosts fuse `a * b + c` and diverge from x86.
   [verified: memory prototype]
-- x86-64 builds pass `-mcx16`. Without it, 16-byte compare-and-swap becomes a
-  call to `__atomic_compare_exchange_16`, which may take a lock. [verified:
-  clang 23 emits `lock cmpxchg16b` with the flag and a libcall without it]
+- x86-64 builds pass `-mcx16`, and the header refuses to compile without it.
+  Without it, 16-byte compare-and-swap becomes a call to
+  `__atomic_compare_exchange_16`, which may take a lock. [verified: clang 23
+  and zig cc 0.13.0 and 0.17.1 emit `lock cmpxchg16b` with the flag and a
+  library call without it]
+- Player builds use zig cc 0.17.1 with `-O2 -fno-sanitize=undefined`, plus
+  `-mcx16` on x86-64. zig compiles and links the exclusive helpers for
+  x86-64 and arm64 Linux, Windows gnullvm and macOS; on arm64 they are inlined
+  (0.17.1) or use outline helpers that zig's compiler-rt provides (0.13.0).
+  [verified: a contended exclusives test gives correct totals on x86-64 Linux,
+  arm64 Linux under qemu, and arm64 and x86-64 (Rosetta) macOS on an Apple M2
+  Mac; Windows builds link but were not run]
 - On arm64 without `-march=...+lse`, clang emits outline atomics
   (`__aarch64_cas16_acq_rel`); these come from compiler-rt, which zig cc
   ships. [verified: disassembly; zig link not tried, open]
@@ -614,5 +623,4 @@ committed.
 11. Guard sizes against real wild-pointer patterns (2).
 12. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
-13. zig cc link of the outline atomics and `-mcx16` in the player toolchain
-    (1).
+13. Running the zig cc Windows builds (they link; not yet run) (1).

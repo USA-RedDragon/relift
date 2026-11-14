@@ -22,6 +22,9 @@
 #if UINTPTR_MAX != UINT64_MAX
 #error "relift supports 64-bit hosts only"
 #endif
+#if defined(__x86_64__) && !defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)
+#error "relift/abi.h needs -mcx16 on x86-64 so 16-byte compare-and-swap is lock-free"
+#endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
 #define RL_ABI_VERSION 1u
