@@ -51,6 +51,10 @@ pub trait Frontend {
     /// The register file of every lifted block.
     fn regs(&self) -> RegFile;
 
+    /// The registers the CPU's calling convention keeps across a call, which
+    /// analysis may assume unchanged after one.
+    fn preserved(&self) -> Vec<Reg>;
+
     /// Lifts the instruction at `pc`, whose bytes start `bytes`.
     ///
     /// # Errors
