@@ -22,7 +22,7 @@
 typedef struct rq {
     uint32_t cmd;
     bool send_pid;
-    uint8_t data[48];
+    uint8_t data[0x60];
     uint32_t dsize;
     uint64_t x_addr[2], x_size[2];
     uint32_t nx;
@@ -599,5 +599,32 @@ TEST(fs_directory_listing)
     CHECK_EQ(t_svc(x.c, SVC_CLOSE_HANDLE, h, 0, 0, 0, 0, 0), 0);
     mode = 3;
     CHECK_EQ(fs_result(&x, 9, "/nodir", NULL, &mode, 4), RL_MAKE_RESULT(2, 1));
+    tmp_clean();
+}
+
+TEST(fs_save_data_is_a_host_directory_per_user)
+{
+    fsx x;
+    rq q;
+    rs r;
+    struct stat st;
+    uint64_t in[9] = { 1, 0, 1, 0, 0, 1, 0, 0, 0 };
+    tmp_make("fs-save");
+    CHECK(fs_open(&x, g_tmp));
+    rl_hos_fs_set_save(host("/save"));
+    memset(&q, 0, sizeof q);
+    q.cmd = 51;
+    put_data(&q, in, sizeof in);
+    r = call(x.c, x.proxy, &q);
+    CHECK_EQ(r.svc_rc, 0);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    x.fs = r.move[0];
+    CHECK_EQ(fs_result(&x, 2, "/slot", NULL, NULL, 0), 0);
+    CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+    CHECK_EQ(stat(host("/save/0100000000010000/user-00000000000000010000000000000000/slot"), &st), 0);
+    CHECK(S_ISDIR(st.st_mode));
+    CHECK(stat(host("/slot"), &st) != 0);
+    rl_hos_fs_set_save(NULL);
     tmp_clean();
 }

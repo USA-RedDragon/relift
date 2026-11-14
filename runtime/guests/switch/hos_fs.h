@@ -17,6 +17,15 @@
 RL_RUNTIME_API void rl_hos_fs_init(const char *sdmc_host_dir);
 
 /**
+ * @brief Sets the host directory that holds save data; NULL or an empty
+ * string selects "./save". OpenSaveDataFileSystem serves
+ * <dir>/<program id>/user-<uid> for account saves (device, bcat, temporary
+ * and cache-<index> for the other kinds, system/<id> for system saves) and
+ * creates it on first open. rl_srv_install_fs reads it from $RELIFT_SAVE.
+ */
+RL_RUNTIME_API void rl_hos_fs_set_save(const char *dir);
+
+/**
  * @brief Sets the extracted romfs tree that OpenDataStorageByCurrentProcess
  * serves as one read-only RomFS image (romfs_image.h); NULL or an empty string
  * leaves the program without data storage. rl_srv_install_fs reads it from

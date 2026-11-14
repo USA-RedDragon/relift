@@ -125,6 +125,7 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
+| `RELIFT_SAVE=<dir>` | Host directory that holds save data (`./save`): `<program id>/user-<uid>` for account saves, `device`, `bcat`, `temporary` and `cache-<index>` for the other kinds, each created on first open |
 | `RELIFT_ROMFS=<dir>` | Extracted romfs tree served as the program's data storage (`relift run` sets it from the import) |
 | `RELIFT_DLC=<dir>` | Add-on content trees, `<16 hex digit add-on id>/<index>/romfs` (`relift run` sets it from the import) |
 | `RELIFT_DEV_SOCKET=<path>` | Dev builds (`-DRL_HOTLOAD`, made by `relift run`): the socket of relift's dev server, which builds a library for each missed address (docs/abi.md section 6). `relift run` sets it; a dev build without it stops at the first miss with exit status 70 |

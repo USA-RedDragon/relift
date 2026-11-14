@@ -8,6 +8,7 @@
  * (Filesystem services), libnx (ISC) fs_sf.h and Atmosphere's result
  * numbers for nn::fs, read as specifications.
  */
+#include "hos.h"
 #include "hos_fs.h"
 #include "fs_priv.h"
 #include "ipc.h"
@@ -46,6 +47,9 @@ enum {
 };
 
 static char g_root[PATH_MAX];
+static char g_save[PATH_MAX] = "./save";
+
+static const char *fs_root(const rl_ipc_req *r) { return r->self->state ? r->self->state : g_root; }
 
 static rl_result errno_result(int e)
 {
@@ -81,7 +85,8 @@ static rl_result host_path(const rl_ipc_req *r, uint32_t idx, char *out, size_t 
     char gp[FS_GUEST_PATH + 1];
     rl_ipc_buf b = rl_ipc_auto_in(r, idx);
     uint64_t len = b.size < FS_GUEST_PATH ? b.size : FS_GUEST_PATH;
-    size_t used = strlen(g_root);
+    const char *root = fs_root(r);
+    size_t used = strlen(root);
     const char *p;
     if (b.size == 0)
         return FS_INVALID_PATH;
@@ -94,7 +99,7 @@ static rl_result host_path(const rl_ipc_req *r, uint32_t idx, char *out, size_t 
         return FS_INVALID_PATH_FORMAT;
     if (used >= n)
         return FS_PATH_TOO_LONG;
-    memcpy(out, g_root, used);
+    memcpy(out, root, used);
     out[used] = 0;
     p = gp;
     while (*p) {
@@ -453,7 +458,7 @@ static rl_result space_size(rl_ipc_req *r, int total)
 {
     struct statvfs sv;
     uint64_t v;
-    if (statvfs(g_root, &sv) != 0)
+    if (statvfs(fs_root(r), &sv) != 0)
         return errno_result(errno);
     v = (uint64_t)(total ? sv.f_blocks : sv.f_bavail) * (uint64_t)sv.f_frsize;
     *(uint64_t *)rl_ipc_out(r, 8) = v;
@@ -500,8 +505,10 @@ static const rl_ipc_cmd fs_cmds[] = {
     { 14, "GetFileTimeStampRaw", get_file_time_stamp_raw },
 };
 
+static void fs_destroy(void *state) { free(state); }
+
 static const rl_ipc_class fs_class = { "nn::fssrv::sf::IFileSystem", fs_cmds, sizeof fs_cmds / sizeof fs_cmds[0], 0,
-                                       NULL };
+                                       fs_destroy };
 
 /** @brief The layout of the first 24 bytes of an IFile Read or Write request. */
 typedef struct file_io_in {
@@ -696,9 +703,85 @@ static rl_result get_global_access_log_mode(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+static void make_dirs(const char *path);
+
+/** @brief nn::fs::SaveDataAttribute. */
+typedef struct fs_save_attr {
+    uint64_t program_id;
+    uint64_t uid[2];
+    uint64_t system_id;
+    uint8_t type;
+    uint8_t rank;
+    uint16_t index;
+    uint8_t reserved[0x1c];
+} fs_save_attr;
+
+typedef struct fs_save_in {
+    uint64_t space;
+    fs_save_attr attr;
+} fs_save_in;
+
+/** @brief The host directory of a save data: <save root>/<program id>/<kind>. */
+static rl_result save_dir(const fs_save_attr *a, char *out, size_t n)
+{
+    uint64_t program = a->program_id ? a->program_id : hos.cfg.program_id;
+    int k;
+    switch (a->type) {
+    case 0:
+        k = snprintf(out, n, "%s/system/%016llx", g_save, (unsigned long long)a->system_id);
+        break;
+    case 1:
+        k = snprintf(out, n, "%s/%016llx/user-%016llx%016llx", g_save, (unsigned long long)program,
+                     (unsigned long long)a->uid[0], (unsigned long long)a->uid[1]);
+        break;
+    case 2:
+        k = snprintf(out, n, "%s/%016llx/bcat", g_save, (unsigned long long)program);
+        break;
+    case 3:
+        k = snprintf(out, n, "%s/%016llx/device", g_save, (unsigned long long)program);
+        break;
+    case 4:
+        k = snprintf(out, n, "%s/%016llx/temporary", g_save, (unsigned long long)program);
+        break;
+    case 5:
+        k = snprintf(out, n, "%s/%016llx/cache-%u", g_save, (unsigned long long)program, (unsigned)a->index);
+        break;
+    default:
+        return FS_INVALID_ARGUMENT;
+    }
+    return k > 0 && (size_t)k < n ? KR_SUCCESS : FS_PATH_TOO_LONG;
+}
+
+static rl_result open_save_data_file_system(rl_ipc_req *r)
+{
+    fs_save_in in;
+    char dir[PATH_MAX];
+    rl_result rc;
+    char *root;
+    rl_ipc_object *o;
+    if (!rl_ipc_in(r, &in, sizeof in))
+        return SF_RESULT_INVALID_HEADER;
+    rc = save_dir(&in.attr, dir, sizeof dir);
+    if (rc != KR_SUCCESS)
+        return rc;
+    make_dirs(dir);
+    root = strdup(dir);
+    if (!root)
+        return KR_OUT_OF_RESOURCE;
+    o = rl_ipc_object_new(&fs_class, root);
+    if (!o) {
+        free(root);
+        return KR_OUT_OF_RESOURCE;
+    }
+    return rl_ipc_push_object(r, o);
+}
+
 static const rl_ipc_cmd proxy_cmds[] = {
     { 1, "SetCurrentProcess", set_current_process },
     { 18, "OpenSdCardFileSystem", open_sd_card_file_system },
+    { 51, "OpenSaveDataFileSystem", open_save_data_file_system },
+    { 52, "OpenSaveDataFileSystemBySystemSaveDataId", open_save_data_file_system },
+    { 53, "OpenReadOnlySaveDataFileSystem", open_save_data_file_system },
     { 200, "OpenDataStorageByCurrentProcess", rl_fs_open_data_storage_current },
     { 201, "OpenDataStorageByProgramId", rl_fs_open_data_storage_program },
     { 202, "OpenDataStorageByDataId", rl_fs_open_data_storage_data_id },
@@ -729,6 +812,20 @@ void rl_hos_fs_init(const char *sdmc_host_dir)
     rl_ipc_register_service("fsp-srv", proxy_factory);
 }
 
+void rl_hos_fs_set_save(const char *dir)
+{
+    size_t n;
+    if (!dir || !*dir)
+        dir = "./save";
+    n = strlen(dir);
+    if (n >= sizeof g_save)
+        n = sizeof g_save - 1;
+    memcpy(g_save, dir, n);
+    while (n > 1 && g_save[n - 1] == '/')
+        n--;
+    g_save[n] = 0;
+}
+
 static void make_dirs(const char *path)
 {
     char buf[4096];
@@ -753,5 +850,6 @@ void rl_srv_install_fs(void)
         sdmc = "./sdmc";
     make_dirs(sdmc);
     rl_hos_fs_init(sdmc);
+    rl_hos_fs_set_save(getenv("RELIFT_SAVE"));
     rl_fs_romfs_env();
 }
