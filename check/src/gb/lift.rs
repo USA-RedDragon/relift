@@ -542,6 +542,14 @@ impl Devices for Dev {
     }
 }
 
+fn fold_echo(addr: u64) -> u64 {
+    if (0xE000..0xFE00).contains(&(addr & 0xFFFF)) {
+        addr - 0x2000
+    } else {
+        addr
+    }
+}
+
 struct Log {
     mem: FlatMemory,
     stores: Vec<(u16, u8)>,
@@ -550,17 +558,21 @@ struct Log {
 
 impl GuestMemory for Log {
     fn read(&mut self, addr: u64, buf: &mut [u8]) -> Result<(), Fault> {
-        for i in 0..buf.len() as u64 {
-            self.loads.insert((addr + i) as u16);
+        for (i, b) in buf.iter_mut().enumerate() {
+            let at = fold_echo(addr + i as u64);
+            self.loads.insert(at as u16);
+            self.mem.read(at, std::slice::from_mut(b))?;
         }
-        self.mem.read(addr, buf)
+        Ok(())
     }
 
     fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), Fault> {
         for (i, b) in data.iter().enumerate() {
-            self.stores.push(((addr + i as u64) as u16, *b));
+            let at = fold_echo(addr + i as u64);
+            self.stores.push((at as u16, *b));
+            self.mem.write(at, &[*b])?;
         }
-        self.mem.write(addr, data)
+        Ok(())
     }
 }
 
@@ -950,12 +962,13 @@ pub fn run_lift(opts: &Options) -> Result<bool, String> {
                         detected += 1;
                         t.first.get_or_insert_with(|| {
                             format!(
-                                "hw {} regs {:?} code {:02x?} seq {:?} early {:?}: {why}",
+                                "hw {} regs {:?} code {:02x?} seq {:?} early {:?} armed {}: {why}",
                                 super::machine::hardware_name(case.hardware),
                                 case.regs,
                                 case.code,
                                 case.seq,
-                                case.early
+                                case.early,
+                                case.armed
                             )
                         });
                     }

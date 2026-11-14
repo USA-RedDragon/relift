@@ -384,3 +384,18 @@ fn the_generated_lifter_matches_the_oracle() {
     };
     assert!(run_lift(&o).unwrap());
 }
+
+fn lift_one(code: u8, cases: u32) -> bool {
+    use super::lift::{Mutation, Options, run_lift};
+    run_lift(&Options {
+        cases,
+        seed: 1,
+        ..lift_options((false, code), Mutation::None)
+    })
+    .unwrap()
+}
+
+#[test]
+fn halt_bug_store_through_echo_ram_matches_the_oracle() {
+    assert!(lift_one(0x76, 64));
+}
