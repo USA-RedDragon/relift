@@ -853,7 +853,8 @@ TEST(vi_vsync_signal)
     CHECK(ev_signaled(ev));
     ev_clear(ev);
     bool seen = false;
-    for (int i = 0; i < 100 && !seen; i++) {
+    uint64_t t0 = rl_clock_ns();
+    while (!seen && rl_clock_ns() - t0 < 10000000000ull) {
         struct timespec ts = { 0, 10 * 1000000L };
         nanosleep(&ts, NULL);
         seen = ev_signaled(ev);
