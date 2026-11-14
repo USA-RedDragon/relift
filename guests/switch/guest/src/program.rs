@@ -644,11 +644,14 @@ fn image_c(i: usize) -> String {
 /// `program.c`, and per module `image<i>.c` with its `image<i>.bin`.
 /// `fp_flags` turns on FPSR flag production in the runtime before the
 /// program starts (the build's FPSR census found a read that can be used).
+/// `mods` is the C symbol of the bundled mods table (`const rl_mods`), when
+/// the build has bundled mods.
 pub fn program_files(
     placed: &[Placed],
     npdm: Option<&Npdm>,
     units: &[String],
     fp_flags: bool,
+    mods: Option<&str>,
 ) -> Vec<ProgramFile> {
     let mut out = Vec::new();
     for (i, p) in placed.iter().enumerate() {
@@ -663,15 +666,24 @@ pub fn program_files(
     }
     out.push(ProgramFile {
         name: "program.c".into(),
-        bytes: program_c(placed, npdm, units, fp_flags).into_bytes(),
+        bytes: program_c(placed, npdm, units, fp_flags, mods).into_bytes(),
     });
     out
 }
 
 /// `program.c`: the module table, the process parameters and `main`. The
 /// images live in the `image<i>.c` files [`program_files`] adds.
-fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags: bool) -> String {
+fn program_c(
+    placed: &[Placed],
+    npdm: Option<&Npdm>,
+    units: &[String],
+    fp_flags: bool,
+    mods: Option<&str>,
+) -> String {
     let mut t = String::from("#include <stdint.h>\n#include \"loader.h\"\n");
+    if let Some(m) = mods {
+        let _ = writeln!(t, "extern const rl_mods {m};");
+    }
     for u in units {
         let _ = writeln!(t, "extern const rl_unit {u};");
     }
@@ -726,9 +738,10 @@ fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags:
         .unwrap_or(CODE_START);
     let _ = write!(
         t,
-        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u }};\n",
+        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {} }};\n",
         placed.len(),
-        units.len()
+        units.len(),
+        mods.map_or_else(|| "0".to_string(), |m| format!("&{m}"))
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp_flags {
@@ -938,7 +951,7 @@ mod tests {
     #[test]
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
-        let files = program_files(&p, None, &["rl_unit_main".into()], false);
+        let files = program_files(&p, None, &["rl_unit_main".into()], false, None);
         let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["image0.bin", "image0.c", "program.c"]);
         assert_eq!(files[0].bytes, p[0].nso.image);
@@ -953,5 +966,10 @@ mod tests {
             "const rl_switch_program rl_program = { modules, 1u, UINT64_C(0x8000000), 3u, 44, 0,"
         ));
         assert!(c.contains("rl_switch_main(&rl_program, argc, argv)"));
+        assert!(c.contains("static_units, 1u, 0 };"), "{c}");
+        let files = program_files(&p, None, &[], false, Some("rl_mods_bundled"));
+        let c = String::from_utf8_lossy(&files[2].bytes);
+        assert!(c.contains("extern const rl_mods rl_mods_bundled;"), "{c}");
+        assert!(c.contains("static_units, 0u, &rl_mods_bundled };"), "{c}");
     }
 }

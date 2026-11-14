@@ -7,6 +7,7 @@
 #define RELIFT_LOADER_H
 
 #include <relift/abi_core.h>
+#include <relift/mods.h>
 
 /** @brief One NSO module as relift lifted it. All offsets are from base. */
 typedef struct rl_switch_module {
@@ -52,6 +53,8 @@ typedef struct rl_switch_program {
     const rl_unit *const *units;
     /** @brief Number of entries in units. */
     uint32_t unit_count;
+    /** @brief Bundled code mods (relift/mods.h), or NULL for none. */
+    const rl_mods *mods;
 } rl_switch_program;
 
 /**

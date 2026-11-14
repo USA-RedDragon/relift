@@ -356,6 +356,8 @@ static int link_module(const rl_switch_program *p, const rl_switch_module *m)
 
 typedef struct main_args {
     const rl_switch_program *p;
+    int argc;
+    char **argv;
 } main_args;
 
 /** @brief Tells the data mods which module is main: the one named main, else the second (after rtld), else the first. */
@@ -369,6 +371,12 @@ static void attach_mods(const rl_switch_program *p)
         m = &p->modules[p->module_count > 1 ? 1 : 0];
     if (m)
         rl_hos_mods_attach(m->base, m->build_id);
+}
+
+static void write_mod(void *user, uint64_t addr, const uint8_t *bytes, uint32_t size)
+{
+    (void)user;
+    rl_vm_kernel_write(&hos.vm, addr, bytes, size);
 }
 
 static int run_program(void *arg)
@@ -446,6 +454,12 @@ static int run_program(void *arg)
         if (link_module(p, &p->modules[i]) != 0)
             return 1;
     attach_mods(p);
+    if (p->mods) {
+        bool on[RL_MODS_MAX];
+        if (rl_mods_choose(p->mods, ((main_args *)arg)->argc, ((main_args *)arg)->argv, on) != 0)
+            return 1;
+        rl_mods_each_data(p->mods, on, write_mod, NULL);
+    }
     c = rl_hos_attach_thread(p->main_prio, p->main_core);
     if (!c) {
         rl_log(RL_LOG_ERROR, "loader", "cannot attach the main thread");
@@ -500,7 +514,7 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 #endif
     rl_switch_declare_settings();
     rl_settings_args(argc, argv);
-    main_args a = { p };
+    main_args a = { p, argc, argv };
     uint32_t base = g_nhooks;
     for (uint32_t i = 0; i < g_nauto; i++) {
         const rl_switch_hook *h = g_auto[i];

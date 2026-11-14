@@ -671,7 +671,7 @@ fn lift_and_emit(
     let ports_c = cdir.join("game_ports.c");
     relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("game.toml"))?.as_bytes())?;
     prog.push(ports_c);
-    for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags) {
+    for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags, None) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
         if f.is_c() {
