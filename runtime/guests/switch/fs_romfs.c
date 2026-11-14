@@ -29,6 +29,10 @@
 typedef struct source {
     uint64_t id;
     char *dir;
+    rl_romfs_layer *layers;
+    size_t nlayers;
+    rl_romfs_conflict_fn warn;
+    void *warn_user;
     rl_romfs_image *img;
     int err;
     bool tried;
@@ -43,6 +47,11 @@ static size_t g_naddons;
 static void source_clear(source *s)
 {
     rl_romfs_image_close(s->img);
+    for (size_t i = 0; i < s->nlayers; i++) {
+        free((char *)s->layers[i].name);
+        free((char *)s->layers[i].root);
+    }
+    free(s->layers);
     free(s->dir);
     memset(s, 0, sizeof *s);
 }
@@ -54,6 +63,37 @@ void rl_hos_fs_set_romfs(const char *dir)
     pthread_mutex_lock(&g_lock);
     source_clear(&g_main);
     g_main.dir = dup_dir(dir);
+    pthread_mutex_unlock(&g_lock);
+}
+
+void rl_hos_fs_set_romfs_layers(const rl_romfs_layer *layers, size_t n, rl_romfs_conflict_fn warn, void *user)
+{
+    rl_romfs_layer *copy = n ? calloc(n, sizeof *copy) : NULL;
+    size_t made = 0;
+    pthread_mutex_lock(&g_lock);
+    source_clear(&g_main);
+    for (; copy && made < n; made++) {
+        copy[made].base = layers[made].base;
+        copy[made].root = strdup(layers[made].root);
+        copy[made].name = strdup(layers[made].name ? layers[made].name : layers[made].root);
+        if (!copy[made].root || !copy[made].name) {
+            free((char *)copy[made].root);
+            free((char *)copy[made].name);
+            break;
+        }
+    }
+    if (copy && made == n) {
+        g_main.layers = copy;
+        g_main.nlayers = n;
+        g_main.warn = warn;
+        g_main.warn_user = user;
+    } else {
+        for (size_t i = 0; i < made; i++) {
+            free((char *)copy[i].root);
+            free((char *)copy[i].name);
+        }
+        free(copy);
+    }
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -149,13 +189,14 @@ static rl_result open_error(int e) { return e == ENOENT || e == ENOTDIR ? FS_TAR
 
 static rl_romfs_image *source_image(source *s, rl_result *rc)
 {
-    if (!s->dir) {
+    if (!s->dir && !s->nlayers) {
         *rc = FS_TARGET_NOT_FOUND;
         return NULL;
     }
     if (!s->tried) {
         s->tried = true;
-        s->img = rl_romfs_image_open(s->dir);
+        s->img = s->nlayers ? rl_romfs_image_open_layers(s->layers, s->nlayers, s->warn, s->warn_user)
+                            : rl_romfs_image_open(s->dir);
         s->err = s->img ? 0 : errno;
     }
     if (!s->img)

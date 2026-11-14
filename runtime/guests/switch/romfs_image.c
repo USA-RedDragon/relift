@@ -37,14 +37,24 @@ typedef struct img_dir {
 
 typedef struct img_file {
     uint32_t parent;
+    uint32_t layer;
     uint32_t meta;
     uint64_t data;
     uint64_t size;
     char *name;
 } img_file;
 
-struct rl_romfs_image {
+typedef struct img_layer {
+    char *name;
     char *root;
+    bool base;
+} img_layer;
+
+struct rl_romfs_image {
+    img_layer *layers;
+    uint32_t nlayers;
+    rl_romfs_conflict_fn warn;
+    void *warn_user;
     img_dir *dirs;
     uint32_t ndirs;
     img_file *files;
@@ -56,6 +66,7 @@ struct rl_romfs_image {
 
 typedef struct scan_ent {
     char *name;
+    uint32_t layer;
     bool dir;
     uint64_t size;
 } scan_ent;
@@ -101,26 +112,36 @@ static uint32_t name_hash(uint32_t parent, const char *name, size_t len, uint32_
     return h % count;
 }
 
-static bool dir_path(const rl_romfs_image *img, uint32_t d, char *buf, size_t n)
+static bool rel_path(const rl_romfs_image *img, uint32_t d, char *buf, size_t n)
 {
     size_t used;
     int w;
     if (d == 0) {
-        w = snprintf(buf, n, "%s", img->root);
-        return w >= 0 && (size_t)w < n;
+        buf[0] = 0;
+        return n > 0;
     }
-    if (!dir_path(img, img->dirs[d].parent, buf, n))
+    if (!rel_path(img, img->dirs[d].parent, buf, n))
         return false;
     used = strlen(buf);
     w = snprintf(buf + used, n - used, "/%s", img->dirs[d].name);
     return w >= 0 && (size_t)w < n - used;
 }
 
+static bool dir_path(const rl_romfs_image *img, uint32_t layer, uint32_t d, char *buf, size_t n)
+{
+    size_t used;
+    int w = snprintf(buf, n, "%s", img->layers[layer].root);
+    if (w < 0 || (size_t)w >= n)
+        return false;
+    used = (size_t)w;
+    return rel_path(img, d, buf + used, n - used);
+}
+
 static bool file_path(const rl_romfs_image *img, uint32_t f, char *buf, size_t n)
 {
     size_t used;
     int w;
-    if (!dir_path(img, img->files[f].parent, buf, n))
+    if (!dir_path(img, img->files[f].layer, img->files[f].parent, buf, n))
         return false;
     used = strlen(buf);
     w = snprintf(buf + used, n - used, "/%s", img->files[f].name);
@@ -129,7 +150,11 @@ static bool file_path(const rl_romfs_image *img, uint32_t f, char *buf, size_t n
 
 static int ent_cmp(const void *a, const void *b)
 {
-    return strcmp(((const scan_ent *)a)->name, ((const scan_ent *)b)->name);
+    const scan_ent *x = a, *y = b;
+    int c = strcmp(x->name, y->name);
+    if (c)
+        return c;
+    return x->layer < y->layer ? -1 : x->layer > y->layer;
 }
 
 static void ents_free(scan_ent *e, size_t n)
@@ -156,7 +181,7 @@ static bool push_dir(rl_romfs_image *img, uint32_t *cap, uint32_t parent, char *
     return true;
 }
 
-static bool push_file(rl_romfs_image *img, uint32_t *cap, uint32_t parent, char *name, uint64_t size)
+static bool push_file(rl_romfs_image *img, uint32_t *cap, uint32_t parent, uint32_t layer, char *name, uint64_t size)
 {
     if (img->nfiles == *cap) {
         img_file *g;
@@ -167,6 +192,7 @@ static bool push_file(rl_romfs_image *img, uint32_t *cap, uint32_t parent, char 
         img->files = g;
     }
     img->files[img->nfiles].parent = parent;
+    img->files[img->nfiles].layer = layer;
     img->files[img->nfiles].meta = 0;
     img->files[img->nfiles].data = 0;
     img->files[img->nfiles].size = size;
@@ -175,18 +201,19 @@ static bool push_file(rl_romfs_image *img, uint32_t *cap, uint32_t parent, char 
     return true;
 }
 
-static int read_dir(const rl_romfs_image *img, uint32_t d, scan_ent **out, size_t *count)
+static int read_layer_dir(const rl_romfs_image *img, uint32_t layer, uint32_t d, scan_ent **out, size_t *count,
+                          size_t *cap)
 {
     char path[PATH_MAX];
     DIR *dh;
     struct dirent *de;
-    scan_ent *e = NULL;
-    size_t n = 0, cap = 0;
-    if (!dir_path(img, d, path, sizeof path))
+    scan_ent *e = *out;
+    size_t n = *count;
+    if (!dir_path(img, layer, d, path, sizeof path))
         return ENAMETOOLONG;
     dh = opendir(path);
     if (!dh)
-        return errno;
+        return img->nlayers > 1 && (errno == ENOENT || errno == ENOTDIR) ? 0 : errno;
     while ((de = readdir(dh)) != NULL) {
         char child[PATH_MAX];
         struct stat st;
@@ -197,13 +224,14 @@ static int read_dir(const rl_romfs_image *img, uint32_t d, scan_ent **out, size_
             continue;
         if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode))
             continue;
-        if (n == cap) {
+        if (n == *cap) {
             scan_ent *g;
-            cap = cap ? cap * 2 : 16;
-            g = realloc(e, cap * sizeof *g);
+            *cap = *cap ? *cap * 2 : 16;
+            g = realloc(e, *cap * sizeof *g);
             if (!g) {
                 closedir(dh);
-                ents_free(e, n);
+                *out = e;
+                *count = n;
                 return ENOMEM;
             }
             e = g;
@@ -211,19 +239,67 @@ static int read_dir(const rl_romfs_image *img, uint32_t d, scan_ent **out, size_
         e[n].name = malloc(len + 1);
         if (!e[n].name) {
             closedir(dh);
-            ents_free(e, n);
+            *out = e;
+            *count = n;
             return ENOMEM;
         }
         memcpy(e[n].name, de->d_name, len + 1);
+        e[n].layer = layer;
         e[n].dir = S_ISDIR(st.st_mode);
         e[n].size = e[n].dir ? 0 : (uint64_t)st.st_size;
         n++;
     }
     closedir(dh);
-    if (n > 1)
-        qsort(e, n, sizeof *e, ent_cmp);
     *out = e;
     *count = n;
+    return 0;
+}
+
+static void report_conflict(const rl_romfs_image *img, uint32_t d, const scan_ent *e, size_t group_start,
+                            size_t winner)
+{
+    char rel[PATH_MAX];
+    char full[PATH_MAX];
+    if (!img->warn || !rel_path(img, d, rel, sizeof rel))
+        return;
+    if (snprintf(full, sizeof full, "%s/%s", rel, e[winner].name) >= (int)sizeof full)
+        return;
+    for (size_t i = group_start; i < winner; i++)
+        if (!img->layers[e[i].layer].base && !(e[i].dir && e[winner].dir))
+            img->warn(img->warn_user, full, img->layers[e[winner].layer].name, img->layers[e[i].layer].name);
+}
+
+static int read_dir(const rl_romfs_image *img, uint32_t d, scan_ent **out, size_t *count)
+{
+    scan_ent *e = NULL, *m = NULL;
+    size_t n = 0, cap = 0, k = 0;
+    for (uint32_t l = 0; l < img->nlayers; l++) {
+        int rc = read_layer_dir(img, l, d, &e, &n, &cap);
+        if (rc) {
+            ents_free(e, n);
+            return rc;
+        }
+    }
+    if (n > 1)
+        qsort(e, n, sizeof *e, ent_cmp);
+    m = n ? malloc(n * sizeof *m) : NULL;
+    if (n && !m) {
+        ents_free(e, n);
+        return ENOMEM;
+    }
+    for (size_t i = 0; i < n;) {
+        size_t j = i;
+        while (j + 1 < n && !strcmp(e[j + 1].name, e[i].name))
+            j++;
+        report_conflict(img, d, e, i, j);
+        m[k++] = e[j];
+        for (size_t t = i; t < j; t++)
+            free(e[t].name);
+        i = j + 1;
+    }
+    free(e);
+    *out = m;
+    *count = k;
     return 0;
 }
 
@@ -245,7 +321,7 @@ static int scan(rl_romfs_image *img)
         img->dirs[d].first_file = img->nfiles;
         for (size_t i = 0; i < n; i++) {
             bool ok = e[i].dir ? push_dir(img, &dcap, d, e[i].name)
-                               : push_file(img, &fcap, d, e[i].name, e[i].size);
+                               : push_file(img, &fcap, d, e[i].layer, e[i].name, e[i].size);
             if (!ok) {
                 ents_free(e, n);
                 return ENOMEM;
@@ -351,29 +427,56 @@ static int layout(rl_romfs_image *img)
     return 0;
 }
 
-rl_romfs_image *rl_romfs_image_open(const char *root)
+static void layers_free(img_layer *l, uint32_t n)
 {
-    rl_romfs_image *img = calloc(1, sizeof *img);
-    struct stat st;
+    for (uint32_t i = 0; i < n; i++) {
+        free(l[i].name);
+        free(l[i].root);
+    }
+    free(l);
+}
+
+rl_romfs_image *rl_romfs_image_open_layers(const rl_romfs_layer *layers, size_t n, rl_romfs_conflict_fn warn,
+                                           void *user)
+{
+    rl_romfs_image *img;
     int rc;
-    if (!img)
-        return NULL;
-    if (stat(root, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        int e = errno ? errno : ENOTDIR;
-        free(img);
-        errno = e;
+    if (n == 0 || n > UINT32_MAX) {
+        errno = EINVAL;
         return NULL;
     }
-    img->root = strdup(root);
-    if (!img->root) {
+    img = calloc(1, sizeof *img);
+    if (!img)
+        return NULL;
+    img->layers = calloc(n, sizeof *img->layers);
+    if (!img->layers) {
         free(img);
         errno = ENOMEM;
         return NULL;
     }
-    {
-        size_t n = strlen(img->root);
-        while (n > 1 && img->root[n - 1] == '/')
-            img->root[--n] = 0;
+    img->warn = warn;
+    img->warn_user = user;
+    for (size_t i = 0; i < n; i++) {
+        struct stat st;
+        size_t len;
+        if (stat(layers[i].root, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            int e = errno ? errno : ENOTDIR;
+            rl_romfs_image_close(img);
+            errno = e;
+            return NULL;
+        }
+        img->layers[i].root = strdup(layers[i].root);
+        img->layers[i].name = strdup(layers[i].name ? layers[i].name : layers[i].root);
+        img->layers[i].base = layers[i].base;
+        img->nlayers = (uint32_t)i + 1;
+        if (!img->layers[i].root || !img->layers[i].name) {
+            rl_romfs_image_close(img);
+            errno = ENOMEM;
+            return NULL;
+        }
+        len = strlen(img->layers[i].root);
+        while (len > 1 && img->layers[i].root[len - 1] == '/')
+            img->layers[i].root[--len] = 0;
     }
     rc = scan(img);
     if (!rc)
@@ -384,6 +487,12 @@ rl_romfs_image *rl_romfs_image_open(const char *root)
         return NULL;
     }
     return img;
+}
+
+rl_romfs_image *rl_romfs_image_open(const char *root)
+{
+    rl_romfs_layer l = { root, root, true };
+    return rl_romfs_image_open_layers(&l, 1, NULL, NULL);
 }
 
 void rl_romfs_image_close(rl_romfs_image *img)
@@ -397,7 +506,7 @@ void rl_romfs_image_close(rl_romfs_image *img)
     free(img->dirs);
     free(img->files);
     free(img->meta);
-    free(img->root);
+    layers_free(img->layers, img->nlayers);
     free(img);
 }
 

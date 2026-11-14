@@ -511,3 +511,91 @@ TEST(romfs_absent)
     }
     tree_remove(root);
 }
+
+typedef struct warns {
+    int n;
+    char path[4][128];
+    char winner[4][64];
+    char loser[4][64];
+} warns;
+
+static void on_conflict(void *user, const char *path, const char *winner, const char *loser)
+{
+    warns *w = user;
+    if (w->n < 4) {
+        snprintf(w->path[w->n], sizeof w->path[0], "%s", path);
+        snprintf(w->winner[w->n], sizeof w->winner[0], "%s", winner);
+        snprintf(w->loser[w->n], sizeof w->loser[0], "%s", loser);
+    }
+    w->n++;
+}
+
+static void layer_tree(const char *dir, const char *const *files)
+{
+    for (; *files; files += 2) {
+        char path[1024], *slash;
+        snprintf(path, sizeof path, "%s/%s", dir, files[0]);
+        slash = strrchr(path, '/');
+        for (char *p = path + strlen(dir) + 1; p < slash; p++)
+            if (*p == '/') {
+                *p = 0;
+                mkdir(path, 0777);
+                *p = '/';
+            }
+        *slash = 0;
+        mkdir(path, 0777);
+        write_file(dir, files[0], files[1], strlen(files[1]));
+    }
+}
+
+static bool image_has(const image *im, const char *rel, const char *want)
+{
+    uint32_t meta = lookup_file(im, rel);
+    uint64_t n = strlen(want);
+    uint8_t got[256];
+    return meta != NONE && rd64(im->fm + meta + 0x10) == n && read_image_file(im, meta, got, n) &&
+           memcmp(got, want, n) == 0;
+}
+
+TEST(romfs_layers_overlay_in_order)
+{
+    env e = boot();
+    tc_obj st;
+    image im;
+    warns w;
+    char base[512], m1[512], m2[512];
+    const char *const bf[] = { "a.txt", "base a", "keep.txt", "base keep", "d/x", "base x", "d/y", "base y", NULL };
+    const char *const f1[] = { "a.txt", "mod1 a", "d/x", "mod1 x", "new/n", "mod1 n", NULL };
+    const char *const f2[] = { "d/x", "mod2 x", "new/n", "mod2 n", "new/o", "mod2 o", NULL };
+    rl_romfs_layer layers[3];
+    memset(&w, 0, sizeof w);
+    make_root(base, sizeof base);
+    make_root(m1, sizeof m1);
+    make_root(m2, sizeof m2);
+    layer_tree(base, bf);
+    layer_tree(m1, f1);
+    layer_tree(m2, f2);
+    layers[0] = (rl_romfs_layer) { "base", base, true };
+    layers[1] = (rl_romfs_layer) { "mod1", m1, false };
+    layers[2] = (rl_romfs_layer) { "mod2", m2, false };
+    rl_hos_fs_set_romfs_layers(layers, 3, on_conflict, &w);
+    CHECK_EQ(open_cmd(&e, 200, NULL, 0, &st), 0);
+    CHECK(image_open(&im, &e, st));
+    CHECK(image_has(&im, "a.txt", "mod1 a"));
+    CHECK(image_has(&im, "keep.txt", "base keep"));
+    CHECK(image_has(&im, "d/x", "mod2 x"));
+    CHECK(image_has(&im, "d/y", "base y"));
+    CHECK(image_has(&im, "new/n", "mod2 n"));
+    CHECK(image_has(&im, "new/o", "mod2 o"));
+    CHECK_EQ(w.n, 2);
+    CHECK_EQ(strcmp(w.path[0], "/d/x"), 0);
+    CHECK_EQ(strcmp(w.winner[0], "mod2"), 0);
+    CHECK_EQ(strcmp(w.loser[0], "mod1"), 0);
+    CHECK_EQ(strcmp(w.path[1], "/new/n"), 0);
+    image_close(&im);
+    tc_close(e.c, st.handle);
+    rl_hos_fs_set_romfs(NULL);
+    tree_remove(base);
+    tree_remove(m1);
+    tree_remove(m2);
+}

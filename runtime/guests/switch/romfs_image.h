@@ -14,6 +14,8 @@
 #ifndef RELIFT_ROMFS_IMAGE_H
 #define RELIFT_ROMFS_IMAGE_H
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /** @brief An open image. Reads are safe from several threads at once. */
@@ -28,6 +30,32 @@ typedef struct rl_romfs_image rl_romfs_image;
  * the format.
  */
 rl_romfs_image *rl_romfs_image_open(const char *root);
+
+/** @brief One tree of a layered image. */
+typedef struct rl_romfs_layer {
+    /** @brief Name used in conflict reports; NULL uses root. */
+    const char *name;
+    /** @brief Extracted tree. */
+    const char *root;
+    /** @brief True for the base tree: replacing its files is not a conflict. */
+    bool base;
+} rl_romfs_layer;
+
+/**
+ * @brief Called while an image is built for each file or directory that two
+ * layers provide, when the loser is not a base layer. path is the path inside
+ * the image, winner and loser are layer names.
+ */
+typedef void (*rl_romfs_conflict_fn)(void *user, const char *path, const char *winner, const char *loser);
+
+/**
+ * @brief Builds one image from layers in order, later layers in front: for a
+ * name two layers both provide, the later one wins per file and directories
+ * merge. The result is byte-exact for the merged tree, and with one layer
+ * equals rl_romfs_image_open. Returns NULL with errno set as rl_romfs_image_open does.
+ */
+rl_romfs_image *rl_romfs_image_open_layers(const rl_romfs_layer *layers, size_t n, rl_romfs_conflict_fn warn,
+                                           void *user);
 
 /** @brief Frees the image. */
 void rl_romfs_image_close(rl_romfs_image *img);

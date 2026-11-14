@@ -5,6 +5,8 @@
 #ifndef RELIFT_HOS_FS_H
 #define RELIFT_HOS_FS_H
 
+#include "romfs_image.h"
+
 #include <relift/abi_core.h>
 
 #include <stddef.h>
@@ -41,6 +43,15 @@ RL_RUNTIME_API const char *rl_hos_fs_save_dir(void);
  * $RELIFT_ROMFS. Call before the guest opens the storage.
  */
 RL_RUNTIME_API void rl_hos_fs_set_romfs(const char *dir);
+
+/**
+ * @brief Like rl_hos_fs_set_romfs for several trees layered in order (see
+ * rl_romfs_image_open_layers): the first is normally the base tree, later ones
+ * win. warn is called while the image is built, on first use of the storage.
+ * The layers and their strings are copied.
+ */
+RL_RUNTIME_API void rl_hos_fs_set_romfs_layers(const rl_romfs_layer *layers, size_t n, rl_romfs_conflict_fn warn,
+                                               void *user);
 
 /**
  * @brief Sets the directory of the add-on content trees, laid out as
