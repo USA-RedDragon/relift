@@ -19,6 +19,8 @@ const DT_PLTRELSZ: u64 = 2;
 const DT_RELA: u64 = 7;
 const DT_RELASZ: u64 = 8;
 const DT_JMPREL: u64 = 23;
+const DT_RELRSZ: u64 = 35;
+const DT_RELR: u64 = 36;
 const R_AARCH64_ABS64: u32 = 257;
 const R_AARCH64_GLOB_DAT: u32 = 1025;
 const R_AARCH64_JUMP_SLOT: u32 = 1026;
@@ -153,6 +155,7 @@ fn reloc_targets(
 ) -> Vec<u64> {
     let mut tables = Vec::new();
     let (mut rela, mut relasz, mut jmprel, mut pltsz) = (None, 0, None, 0);
+    let (mut relr, mut relrsz) = (None, 0);
     let mut at = dynamic;
     while let (Some(tag), Some(v)) = (u64_at(img, at), u64_at(img, at + 8)) {
         match tag {
@@ -161,6 +164,8 @@ fn reloc_targets(
             DT_RELASZ => relasz = v,
             DT_JMPREL => jmprel = Some(v),
             DT_PLTRELSZ => pltsz = v,
+            DT_RELR => relr = Some(v),
+            DT_RELRSZ => relrsz = v,
             _ => {}
         }
         at += 16;
@@ -172,6 +177,9 @@ fn reloc_targets(
         tables.push((r, pltsz));
     }
     let mut out = Vec::new();
+    if let Some(r) = relr {
+        out.extend(relr_targets(img, r, relrsz));
+    }
     for (start, size) in tables {
         for i in 0..size / 24 {
             let o = (start + i * 24) as usize;
@@ -190,6 +198,31 @@ fn reloc_targets(
                 }
                 _ => {}
             }
+        }
+    }
+    out
+}
+
+/// The values the packed relative relocations (`DT_RELR`) at image offset
+/// `start` adjust: each relocated word holds its target as an image offset.
+fn relr_targets(img: &[u8], start: u64, size: u64) -> Vec<u64> {
+    let mut out = Vec::new();
+    let mut at: u64 = 0;
+    let word = |o: u64| usize::try_from(o).ok().and_then(|o| u64_at(img, o));
+    for i in 0..size / 8 {
+        let Some(e) = word(start + i * 8) else {
+            break;
+        };
+        if e & 1 == 0 {
+            out.extend(word(e));
+            at = e + 8;
+        } else {
+            for bit in 1..64 {
+                if e >> bit & 1 == 1 {
+                    out.extend(word(at + (bit - 1) * 8));
+                }
+            }
+            at += 63 * 8;
         }
     }
     out
@@ -323,6 +356,19 @@ mod tests {
         img[0xb8..0xc0].copy_from_slice(&u64::from(R_AARCH64_RELATIVE).to_le_bytes());
         img[0xc0..0xc8].copy_from_slice(&0x24u64.to_le_bytes());
         assert_eq!(reloc_targets(&img, dynamic, &[]), [0x24]);
+    }
+
+    #[test]
+    fn packed_relative_relocations() {
+        let mut img = vec![0u8; 0x200];
+        let put =
+            |img: &mut Vec<u8>, o: usize, v: u64| img[o..o + 8].copy_from_slice(&v.to_le_bytes());
+        put(&mut img, 0x100, 0x11);
+        put(&mut img, 0x108, 0x22);
+        put(&mut img, 0x118, 0x33);
+        put(&mut img, 0x180, 0x100);
+        put(&mut img, 0x188, 0b1011);
+        assert_eq!(relr_targets(&img, 0x180, 16), [0x11, 0x22, 0x33]);
     }
 
     #[test]
