@@ -1,13 +1,17 @@
 # relift C runtime
 
-The C half of relift: lifted code links against it. The contract is
-`cpus/a64/include/relift/a64/abi.h`, explained in `../docs/abi.md`.
+The C half of relift: lifted code links against it. It has three layers,
+mirroring the Rust folders (`core/`, `cpus/`, `guests/`):
 
-| Directory | What it holds |
-|---|---|
-| `core/` | Guest-neutral: guest memory reservation and the exact 4 KiB map with the host page policy of abi.md section 2, the SIGSEGV/SIGBUS handler, host threads, FPCR, the clock, the dispatch table, logging and configuration |
-| `switch/` | The Horizon kernel (handle table, events, threads, memory, shared and transfer memory, mutexes, condition variables, the address arbiter), `rl_svc`, IPC (HIPC, CMIF with domains, TIPC), `sm:` and the service registry |
-| `tests/` | C unit tests that drive the runtime through `rl_ctx` and `rl_svc` the way lifted code does |
+| Directory | Layer | What it holds |
+|---|---|---|
+| `core/` | core | Knows no guest OS and no guest CPU. Guest memory reservation and the exact map at the guest page size, with the host page policy of abi.md section 2; its own permission flags (`RL_VM_R`, `RL_VM_W`, `RL_VM_X`) and an opaque per-block guest tag; the SIGSEGV/SIGBUS handler reporting guest addresses; host threads that carry the CPU layer's context; the clock at the guest's tick rate; unit registration and the dispatch table; logging, configuration and the unknown-call reporter. `core/include/relift/abi_core.h` is the CPU-neutral half of the lifted-code contract. |
+| `cpus/a64/` | CPU | The ARM64 lifted-code ABI, `cpus/a64/include/relift/a64/abi.h` (it owns `rl_ctx`), and its runtime entries: FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, the dispatch miss entry, register summaries for crash reports, and the CPU descriptor the core allocates contexts from. Not tied to a guest OS. |
+| `guests/switch/` | guest | The Horizon kernel (handle table, events, threads, memory, shared and transfer memory, mutexes, condition variables, the address arbiter), `rl_svc`, IPC (HIPC, CMIF with domains, TIPC), `sm:` and the service registry; the NPDM-driven layout; the guest descriptor and the translation between Horizon's permission bits and the core's. |
+| `charter/` | | The check that core names no guest and no CPU (`make charter`) |
+
+Each layer sees only its own headers and those of the layers below it; core
+sees no CPU or guest header. The contract is explained in `../docs/abi.md`.
 
 ## Build and test
 
@@ -16,28 +20,54 @@ relift drives real builds. For work on the runtime itself:
 ```sh
 make -C runtime -j2 test                     # clang, host target, into runtime/build/host
 make -C runtime -j2 CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
+make -C runtime charter                      # python3, standard library only
 ```
 
-The build makes `librelift_rt.a`, `librelift_rt.so` (or `.dylib`) built with
-`RL_BUILDING_RUNTIME`, and `rt_tests`. `rt_tests [substring...]` runs the
-tests whose names contain a substring; each test runs in its own process.
-`RELIFT_TEST_NOFORK=1` runs them in one process for a debugger.
+The build makes one archive per layer (`librelift_core.a`,
+`librelift_a64.a`, `librelift_switch.a`), the whole runtime as
+`librelift_rt.a` and `librelift_rt.so` (or `.dylib`) built with
+`RL_BUILDING_RUNTIME`, and one test binary per layer, each linking only its
+layer and the ones below:
+
+- `core_tests`: the core alone, against a fake guest and CPU (8 KiB pages,
+  a 32-bit address space, a 40.5 MHz clock, big-endian data, a 2-byte code
+  granule);
+- `a64_tests`: the A64 layer over the core, with a test guest that is no OS;
+- `switch_tests`: the Switch guest, driven through `rl_ctx` and `rl_svc` the
+  way lifted code does.
+
+`<binary> [substring...]` runs the tests whose names contain a substring;
+each test runs in its own process. `RELIFT_TEST_NOFORK=1` runs them in one
+process for a debugger.
+
+## The charter
+
+`charter/check.py` fails when anything under `core/` includes a header of
+`cpus/` or `guests/`, or spells a word of its denylist (Horizon, svc, NPDM,
+`nn::`, the console's name, Horizon kernel and IPC names, ARM64 system
+registers and instruction names, guest register reads, a fixed 4 KiB page,
+the 19.2 MHz counter, the 36 and 39-bit widths). `charter/allow.txt` lists the
+allowed (file, rule) pairs with a reason each, for host words such as the
+arm64 host pc in the fault handler; an entry that no longer matches fails the
+check. Presence controls keep an empty walk or a broken rule from passing: the
+include rule must reject includes in `guests/switch` and `cpus/a64`, every
+rule must match its own sample, and the denylist must hit files there.
 
 ## Environment switches
 
 | Variable | Effect |
 |---|---|
-| `RELIFT_TRACE_SVC=1` | Log every svc and IPC command with arguments, result and time |
-| `RELIFT_STRICT=1` | Stop on an unimplemented svc or unknown service command instead of returning an error |
+| `RELIFT_TRACE_OS=1` | The guest layer logs every guest OS call and service request with arguments, result and time (Switch: every svc and IPC command) |
+| `RELIFT_STRICT=1` | Stop on an unknown guest OS call or service command instead of returning an error |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
-| `RELIFT_ADDRESS_BITS=36` | Use the 36-bit layout even when the NPDM asks for 39 bits (the fallback when the host cannot reserve 2^39 bytes) |
+| `RELIFT_ADDRESS_BITS=36` | Ask the guest layer for this address width. The Switch guest accepts 36 and 39 and uses the 36-bit layout even when the NPDM asks for 39 bits (the fallback when the host cannot reserve 2^39 bytes) |
 
 ## Known limits
 
 - Shared memory is mapped by mapping the same host pages again, so on 16 KiB
   host pages its guest address and size must be 16 KiB aligned; other
   mappings fail with an invalid address result and a one-time report.
-- 32-bit address spaces are not supported.
+- The Switch guest does not support 32-bit address spaces (the core does).
 - Guest threads run on host threads at host priority; guest priorities order
   the kernel's wait queues only.

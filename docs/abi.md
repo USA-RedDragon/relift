@@ -1,8 +1,38 @@
 # Runtime ABI contract
 
-This is the contract between relift-emitted C and the relift C runtime. The
-header is `runtime/cpus/a64/include/relift/a64/abi.h`; this file gives the reason for each
-choice. Contract version: `RL_ABI_VERSION` 1.
+This is the contract between relift-emitted C and the relift C runtime. It
+lives in two headers: `runtime/core/include/relift/abi_core.h`, the
+CPU-neutral half (export macros, return codes, the pending record, the
+context block the core owns, unit registration, the dev protocol), and
+`runtime/cpus/a64/include/relift/a64/abi.h`, the ARM64 half (`rl_ctx`,
+memory access, exclusives, barriers, dispatch lookup, system instructions,
+floating point), which includes the first. Lifted A64 code includes only the
+A64 header and builds with `-Iruntime/core/include
+-Iruntime/cpus/a64/include`. This file gives the reason for each choice.
+Contract version: `RL_ABI_VERSION` 1.
+
+## 0. Runtime layers
+
+The runtime is three C layers, mirroring the Rust folders:
+
+| Layer | Folder | Owns |
+|---|---|---|
+| core | `runtime/core` | No guest OS and no guest CPU. Guest memory (reservation, the exact map at the guest page size, the core's own permission flags, an opaque per-block guest tag), faults at guest addresses, host threads holding an opaque context, the clock at the guest tick rate, unit registration and the dispatch table, pending records, logging, configuration and the unknown-call reporter |
+| CPU | `runtime/cpus/a64` | `rl_ctx` and everything of sections 3 to 10 that names an ARM64 register or instruction: FPCR, WFE, CNTPCT and CNTFRQ, exclusives, `rl_undefined`, `rl_resume`, the miss entry, register summaries for reports |
+| guest | `runtime/guests/switch` | Horizon: the kernel, `rl_svc`, IPC, `sm:`, the NPDM-driven layout, the 4 KiB page, the 19.2 MHz counter, and the translation between Horizon's permission bits and the core's |
+
+The layers above describe themselves to the core at start-up with two small
+structs (`runtime/core/core.h`): `rl_guest_desc` (page size, widest address
+space, tick rate) and `rl_cpu_desc` (context size and alignment, the offset
+of the core's block in the context, the code granule, data byte order, and
+init, bind and describe hooks). The core reads no register: it reaches its
+own fields through the descriptor's offset, and asks the CPU layer for a
+register summary when it reports a crash. Each layer compiles with only its
+own include paths and those below it, each layer's tests link nothing above
+it, and `runtime/charter/check.py` fails when core includes a CPU or guest
+header or spells a guest or CPU word (see `runtime/README.md`). [verified:
+`core_tests` run the core against a fake guest and CPU with 8 KiB pages, a
+32-bit space, a 40.5 MHz clock, big-endian data and a 2-byte granule]
 
 Tags:
 - **[verified]**: backed by a prototype test or by a check run for this
@@ -124,8 +154,11 @@ Prototype names used in the tags:
 
 ## 3. Guest context (`rl_ctx`)
 
-One `rl_ctx` per guest thread, allocated by the runtime, 64-byte aligned.
-Lifted code reaches it only through its first parameter `c`.
+One `rl_ctx` per guest thread, allocated by the core from the A64 CPU
+descriptor, 64-byte aligned. Lifted code reaches it only through its first
+parameter `c`. The fields from `pend` to `disp_count` (offset 840, 56 bytes)
+are the core's block, `rl_ctx_common` in `abi_core.h`; static asserts tie
+their offsets to it, and the A64 descriptor gives the core offset 840.
 
 | offset | field | notes |
 |---|---|---|
@@ -251,7 +284,8 @@ int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
   the miss handler, called in place with the same arguments, so the
   emitted code is identical for hit and miss. [verified: probe, 10 million
   indirect tail calls, misaligned and out-of-range targets miss]
-- **Table shape:** one flat array with an entry per 4-byte word over the
+- **Table shape:** one flat array with an entry per code granule of the CPU
+  (`rl_cpu_desc.code_shift`; a 4-byte word for A64) over the
   guest code range of all loaded modules, zero for "no entry". Functions
   are spread through the whole text, so nearly every table page holds an
   entry and the resident cost is close to the full 2 bytes of table per byte
@@ -302,7 +336,8 @@ and reads the target from `c->pc`.
    refuses a different image id or ABI version.
 3. Send `RL_DEV_LIFT` with the target, the call site, the guest thread id,
    the reason (`RL_MISS_CALL`, `RL_MISS_JUMP`, `RL_MISS_ENTRY`,
-   `RL_MISS_RESUME`) and the thread's FPCR. `site` and `reason` are best
+   `RL_MISS_RESUME`) and the thread's floating-point mode
+   (`rl_dev_lift_req.fp_mode`; the FPCR for A64). `site` and `reason` are best
    effort and relift must not depend on them: at a miss the runtime only
    knows `c->pc` (`rl_indirect` stores nothing else), so it cannot tell an
    indirect call from an indirect jump (it sends `RL_MISS_CALL`), and the
@@ -560,12 +595,12 @@ uses LDAXR/STLXR loops.
 
 | guest | entry | kind | notes |
 |---|---|---|---|
-| `SVC #imm` | `int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)` | runtime | call boundary; arguments and results in `c`; opens the monitor; `RL_PENDING` on exit |
+| `SVC #imm` | `int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)` | runtime (guest layer) | call boundary; arguments and results in `c`; opens the monitor; `RL_PENDING` on exit |
 | `MRS TPIDR_EL0` | `rl_mrs_tpidr_el0(c)` | inline | |
 | `MSR TPIDR_EL0` | `rl_msr_tpidr_el0(c, v)` | inline | |
 | `MRS TPIDRRO_EL0` | `rl_mrs_tpidrro_el0(c)` | inline | MSR is UNDEFINED at EL0 and goes to `rl_undefined` |
-| `MRS CNTPCT_EL0`, `CNTVCT_EL0` | `uint64_t rl_mrs_cntpct(rl_ctx *c)` | runtime | host monotonic clock scaled to 19.2 MHz |
-| `MRS CNTFRQ_EL0` | `rl_mrs_cntfrq_el0()` | inline | 19,200,000 [inferred: a libnx sleep test program expects 19.2 MHz; not run on hardware] |
+| `MRS CNTPCT_EL0`, `CNTVCT_EL0` | `uint64_t rl_mrs_cntpct(rl_ctx *c)` | runtime | host monotonic clock scaled to the guest's tick rate (`rl_guest_desc.tick_hz`; 19.2 MHz for the Switch guest) |
+| `MRS CNTFRQ_EL0` | `rl_mrs_cntfrq_el0()` | inline | `RL_CNTFRQ`, 19,200,000 unless relift defines another rate for the guest; it must equal the guest's tick rate [inferred: a libnx sleep test program expects 19.2 MHz; not run on hardware] |
 | `MRS FPCR` | `rl_mrs_fpcr(c)` | inline | |
 | `MSR FPCR` | `void rl_msr_fpcr(rl_ctx *c, uint64_t v)` | runtime | section 10.1 |
 | `MRS FPSR`, `MSR FPSR` | `rl_mrs_fpsr(c)`, `rl_msr_fpsr(c, v)` | inline | |
@@ -578,7 +613,7 @@ uses LDAXR/STLXR loops.
 | `YIELD` | `rl_yield()` | inline | `pause` / `yield` plus compiler barrier |
 | `SEV`, `SEVL` | `rl_sev()` | inline | no effect: `rl_wfe` never waits unbounded |
 | `DMB`, `DSB`, `ISB` | section 9 | inline | |
-| `UDF`, `BRK`, `HLT`, unliftable | `int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)` | runtime | crash report, `RL_PEND_EXIT_PROCESS` |
+| `UDF`, `BRK`, `HLT`, unliftable | `int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)` | runtime | crash report naming the kind and immediate (`BRK #1000`), `RL_PEND_EXIT_PROCESS` |
 
 Reasons: entries that only read or write a context
 field are inline so they cost one load or store; entries that touch host
@@ -660,7 +695,11 @@ an injected crash names the right guest function]
 ## 12. Versioning
 
 - `RL_ABI_VERSION` changes with any change to a type, layout, signature,
-  constant or emitted call shape in this contract.
+  constant or emitted call shape in this contract. Splitting the header into
+  `abi_core.h` and `a64/abi.h` moved declarations and changed no layout,
+  signature, constant or call shape (the one renamed field,
+  `rl_dev_lift_req.fpcr` to `fp_mode`, keeps its offset and size), so the
+  version stayed 1.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a
@@ -675,7 +714,7 @@ committed.
 
 | check | result |
 |---|---|
-| `clang -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c-header abi.h`, default target, `--target=aarch64-linux-gnu`, `--target=x86_64-pc-windows-gnu` | clean |
+| `clang -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c-header` on `a64/abi.h` (with `abi_core.h`), default target, `--target=aarch64-linux-gnu`, `--target=x86_64-pc-windows-gnu` | clean |
 | a TU that includes the header, same three targets, plus `-Wpedantic` | clean |
 | same header check with Apple clang 21 on an Apple M2 Mac; gcc 16 `-fsyntax-only` | clean |
 | a lifted-style function using every call shape (direct call with the LSDA check, indirect call, musttail, landing-pad switch, FP fast paths) at `-O2 -Wpedantic -Werror`: x86-64 Linux, x86-64 Windows gnu, arm64 Linux, Apple clang arm64 | compiles |
