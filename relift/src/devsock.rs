@@ -1,5 +1,6 @@
-//! The local socket of the dev server: a Unix domain socket where the host
-//! has one in the standard library. Elsewhere binding fails, and `relift
+//! The local socket of the dev server: a Unix domain socket. Unix hosts use
+//! the standard library; Windows 10 1803 and later have `AF_UNIX` too, which
+//! the `uds_windows` crate wraps. Any other host cannot bind, and `relift
 //! run` says that hot-loading is not available on this host.
 
 #[cfg(unix)]
@@ -19,7 +20,24 @@ mod host {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+mod host {
+    pub use uds_windows::{UnixListener as Listener, UnixStream as Stream};
+
+    pub fn bind(path: &std::path::Path) -> std::io::Result<Listener> {
+        Listener::bind(path)
+    }
+
+    pub fn connect(path: &std::path::Path) -> std::io::Result<Stream> {
+        Stream::connect(path)
+    }
+
+    pub fn accept(l: &Listener) -> std::io::Result<Stream> {
+        l.accept().map(|(s, _)| s)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 mod host {
     /// No listener on this host.
     pub struct Listener;
