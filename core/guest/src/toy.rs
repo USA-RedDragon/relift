@@ -186,8 +186,8 @@ impl Frontend for Toy {
         Ok(b.finish(4, e))
     }
 
-    fn abi_header(&self) -> &'static str {
-        "relift/a64/abi.h"
+    fn abi_headers(&self) -> &'static [&'static str] {
+        &["relift/a64/abi.h"]
     }
 
     fn home(&self, reg: Reg) -> Home {
@@ -230,5 +230,13 @@ impl Frontend for Toy {
 
     fn fp_state(&self) -> Vec<Reg> {
         Vec::new()
+    }
+
+    fn guard_state(&self, _code: u32) -> Option<Reg> {
+        None
+    }
+
+    fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        (code == 7).then(|| format!("toy_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
     }
 }
