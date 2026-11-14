@@ -779,12 +779,11 @@ pub fn run_verified(
                 not_taken
             }
         }
-        Next::Dynamic(x) => vals[x.index()] as u64,
+        Next::Dynamic(x) => (vals[x.index()] & addr_mask) as u64,
     };
     for (slot, value) in writes {
         state.regs[slot] = value;
     }
-    let next = next & (addr_mask as u64);
     let sync = matches!(block.insts.last(), Some(Inst { op: Op::Sync, .. }));
     if sync && let Some(entry) = devices.sync(state, mem, next)? {
         return Ok(Outcome {
