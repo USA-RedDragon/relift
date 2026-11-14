@@ -1,6 +1,6 @@
 /**
  * @file override.h
- * @brief The header an override includes: settings reads.
+ * @brief The header an override includes: settings reads and port input.
  *
  * A game declares its settings in game.toml (`[settings.<key>]`). An
  * override reads them with the functions below and a string literal key.
@@ -15,6 +15,7 @@
 #define RELIFT_OVERRIDE_H
 
 #include <relift/abi_core.h>
+#include <relift/ports.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -33,11 +34,17 @@ RL_RUNTIME_API double relift_setting_float(const char *key);
 RL_RUNTIME_API uint32_t relift_setting_enum(const char *key);
 /** @brief The text of a string setting; valid for the run. */
 RL_RUNTIME_API const char *relift_setting_str(const char *key);
+/** @brief The host inputs of a key-binding setting, as list text such as "gamepad:south,key:z". */
+RL_RUNTIME_API const char *relift_setting_binding(const char *key);
+/** @brief The current value of a key-binding setting: its inputs read now, 0 to 1 (button) or -1 to 1. */
+RL_RUNTIME_API float relift_setting_binding_value(const char *key);
 /**
- * @brief The port and control names of a key-binding setting. Returns false
- * and sets both to "" when the binding has no value.
+ * @brief The current value of a control of a port: a button is 0 or 1, a
+ * trigger 0 to 1 and an axis -1 to 1. An unknown port or control reads 0.
+ * For a control read every frame, keep the result of rl_ports_find and call
+ * rl_ports_read.
  */
-RL_RUNTIME_API bool relift_setting_binding(const char *key, const char **port, const char **control);
+RL_RUNTIME_API float relift_input(const char *port, const char *control);
 
 #ifdef __cplusplus
 }

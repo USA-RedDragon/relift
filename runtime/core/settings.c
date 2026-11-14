@@ -6,6 +6,7 @@
  */
 #include <relift/override.h>
 #include <relift/settings.h>
+#include <relift/ports.h>
 
 #include "core.h"
 
@@ -32,7 +33,6 @@ typedef struct slot {
     value envval;
     char *env_text;
     bool env_warned;
-    char *port;
 } slot;
 
 static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
@@ -251,15 +251,13 @@ static bool parse_value(const rl_setting_def *d, const char *t, value *out, char
     case RL_SETTING_STRING:
         v.s = dup(t);
         break;
-    case RL_SETTING_BINDING: {
-        const char *colon = strchr(t, ':');
-        if (!colon || colon == t || !colon[1] || strchr(colon + 1, ':')) {
-            snprintf(err, errsz, "'%s' is not port:control", t);
+    case RL_SETTING_BINDING:
+        if (!rl_ports_valid_binding(t)) {
+            snprintf(err, errsz, "'%s' is not a comma separated list of host inputs such as gamepad:south,key:z", t);
             return false;
         }
         v.s = dup(t);
         break;
-    }
     }
     if ((d->type == RL_SETTING_STRING || d->type == RL_SETTING_BINDING) && !v.s) {
         snprintf(err, errsz, "out of memory");
@@ -287,7 +285,10 @@ rl_setting_status rl_settings_set(const char *key, const char *val)
     }
     value_free(&s->val);
     s->val = v;
+    const bool port_binding = s->def->type == RL_SETTING_BINDING && !strncmp(key, "bind.", 5);
     pthread_mutex_unlock(&g_lock);
+    if (port_binding)
+        rl_ports_apply_setting(key, val ? val : "");
     return RL_SETTING_OK;
 }
 
@@ -661,7 +662,6 @@ void rl_settings_reset(void)
         value_free(&g_slots[i].val);
         value_free(&g_slots[i].envval);
         free(g_slots[i].env_text);
-        free(g_slots[i].port);
     }
     for (size_t i = 0; i < g_nmods; i++)
         free(g_mods[i]);
@@ -769,29 +769,14 @@ const char *rl_setting_str(const char *key)
     return r;
 }
 
-bool rl_setting_binding(const char *key, const char **port, const char **control)
+const char *rl_setting_binding(const char *key)
 {
     pthread_mutex_lock(&g_lock);
     slot *s = typed(key, RL_SETTING_BINDING);
     value d;
-    const char *t = s ? effective(s, &d)->s : "";
-    const char *colon = strchr(t, ':');
-    bool ok = false;
-    *port = *control = "";
-    if (s && colon) {
-        size_t n = (size_t)(colon - t);
-        free(s->port);
-        s->port = malloc(n + 1);
-        if (s->port) {
-            memcpy(s->port, t, n);
-            s->port[n] = 0;
-            *port = s->port;
-            *control = colon + 1;
-            ok = true;
-        }
-    }
+    const char *r = s ? effective(s, &d)->s : "";
     pthread_mutex_unlock(&g_lock);
-    return ok;
+    return r;
 }
 
 typedef struct sink {
@@ -886,18 +871,9 @@ size_t rl_settings_schema_json(char *buf, size_t size)
         case RL_SETTING_STRING:
             put_field(&k, "default", d->def_str);
             break;
-        case RL_SETTING_BINDING: {
-            const char *t = d->def_str ? d->def_str : "";
-            const char *c = strchr(t, ':');
-            puts_(&k, ",\"default\":{\"port\":");
-            char *pn = c ? strndup(t, (size_t)(c - t)) : NULL;
-            put_json_str(&k, pn ? pn : "");
-            free(pn);
-            puts_(&k, ",\"control\":");
-            put_json_str(&k, c ? c + 1 : "");
-            puts_(&k, "}");
+        case RL_SETTING_BINDING:
+            put_field(&k, "default", d->def_str);
             break;
-        }
         }
         if (d->env)
             put_field(&k, "env", d->env);
@@ -991,9 +967,14 @@ int64_t relift_setting_int(const char *key) { return rl_setting_int(key); }
 double relift_setting_float(const char *key) { return rl_setting_float(key); }
 uint32_t relift_setting_enum(const char *key) { return rl_setting_enum(key); }
 const char *relift_setting_str(const char *key) { return rl_setting_str(key); }
-bool relift_setting_binding(const char *key, const char **port, const char **control)
+const char *relift_setting_binding(const char *key)
 {
-    return rl_setting_binding(key, port, control);
+    return rl_setting_binding(key);
+}
+
+float relift_setting_binding_value(const char *key)
+{
+    return rl_ports_read_binding(rl_setting_binding(key), 0);
 }
 
 size_t rl_settings_mod_count(void)

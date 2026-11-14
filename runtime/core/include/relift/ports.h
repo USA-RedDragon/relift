@@ -79,6 +79,10 @@ RL_RUNTIME_API void rl_ports_bind_defaults(void);
  * the key is not a binding key or the value does not apply.
  */
 RL_RUNTIME_API bool rl_ports_apply_setting(const char *key, const char *value);
+/** @brief True when text is a valid binding list (empty is valid). */
+RL_RUNTIME_API bool rl_ports_valid_binding(const char *text);
+/** @brief Reads a binding list now: the strongest of its inputs. `pad` is the gamepad a bare `gamepad` means. */
+RL_RUNTIME_API float rl_ports_read_binding(const char *text, int pad);
 /** @brief The value of a control for a snapshot. */
 RL_RUNTIME_API float rl_ports_eval(rl_control_ref ref, const rl_input_snapshot *s);
 /** @brief The value of a control now, from rl_input_sample. */

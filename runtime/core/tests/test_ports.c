@@ -6,6 +6,7 @@
 #include "runner.h"
 
 #include <relift/override.h>
+#include <relift/settings.h>
 
 static const rl_control_decl pad_controls[] = {
     { "a", RL_CONTROL_BUTTON, "gamepad:east,key:x" },
@@ -146,4 +147,37 @@ TEST(ports_an_extra_port_is_readable_through_the_override_api)
     CHECK(rl_ports_bind("dial", "turn", "mouse:right"));
     CHECK(relift_input("dial", "turn") == 0.0f);
     rl_input_set_source(NULL, NULL);
+}
+
+TEST(ports_controls_are_key_binding_settings)
+{
+    rl_settings_reset();
+    rl_ports_reset();
+    CHECK(rl_ports_declare(native, 2));
+    CHECK(!strcmp(rl_setting_binding("bind.p1.a"), "gamepad:east,key:x"));
+    CHECK_EQ(rl_settings_set("bind.p2.b", "key:q"), RL_SETTING_OK);
+    CHECK(!strcmp(rl_setting_binding("bind.p2.b"), "key:q"));
+    rl_input_snapshot s = blank();
+    s.keys[0] |= 1ull << 20;
+    CHECK(rl_ports_eval(rl_ports_find("p2", "b"), &s) == 1.0f);
+    CHECK(rl_ports_eval(rl_ports_find("p1", "b"), &s) == 0.0f);
+    CHECK_EQ(rl_settings_set("bind.p2.b", "key:nope"), RL_SETTING_INVALID);
+    CHECK(rl_ports_eval(rl_ports_find("p2", "b"), &s) == 1.0f);
+    char buf[8192];
+    rl_settings_schema_json(buf, sizeof buf);
+    CHECK(strstr(buf, "\"key\":\"bind.p1.stick_x\",\"type\":\"key_binding\""));
+    CHECK(strstr(buf, "\"default\":\"gamepad:east,key:x\""));
+}
+
+TEST(ports_a_value_set_before_the_declaration_applies)
+{
+    rl_settings_reset();
+    rl_ports_reset();
+    CHECK(rl_ports_declare(extra, 1));
+    CHECK_EQ(rl_settings_set("bind.dial.turn", "key:z"), RL_SETTING_OK);
+    rl_ports_reset();
+    CHECK(rl_ports_declare(extra, 1));
+    rl_input_snapshot s = blank();
+    s.keys[0] |= 1ull << 29;
+    CHECK(rl_ports_eval(rl_ports_find("dial", "turn"), &s) == 1.0f);
 }

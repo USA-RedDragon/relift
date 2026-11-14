@@ -2,11 +2,14 @@
  * @file ports.c
  * @brief Declared ports, bindings and control values.
  */
+#include <relift/override.h>
 #include <relift/ports.h>
 
 #include <relift/input_names.h>
+#include <relift/settings.h>
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -208,6 +211,59 @@ static bool validate(const rl_port_decl *d, uint32_t count)
     return true;
 }
 
+typedef struct setting_slot {
+    char key[96];
+    rl_setting_def def;
+    char defaults[256];
+    struct setting_slot *next;
+} setting_slot;
+
+static setting_slot *g_slots;
+
+static void declare_setting(const port *p, const control *c)
+{
+    char key[96];
+    if (snprintf(key, sizeof key, "bind.%s.%s", p->id, c->id) >= (int)sizeof key)
+        return;
+    setting_slot *t = g_slots;
+    while (t && strcmp(t->key, key))
+        t = t->next;
+    if (!t) {
+        t = calloc(1, sizeof *t);
+        if (!t)
+            return;
+        memcpy(t->key, key, sizeof key);
+        t->def.key = t->key;
+        t->def.type = RL_SETTING_BINDING;
+        t->def.label = "Binding";
+        t->def.description = "";
+        if (c->defaults && strlen(c->defaults) < sizeof t->defaults) {
+            strcpy(t->defaults, c->defaults);
+            t->def.def_str = t->defaults;
+        }
+        t->next = g_slots;
+        g_slots = t;
+    }
+    rl_settings_declare(&t->def, 1);
+}
+
+static void apply_settings(const port *p, const control *c)
+{
+    char key[96];
+    if (snprintf(key, sizeof key, "bind.%s.%s", p->id, c->id) >= (int)sizeof key)
+        return;
+    const char *v = rl_setting_binding(key);
+    if (v && *v) {
+        binding b[MAX_BINDINGS];
+        uint8_t n;
+        if (parse_list(v, b, &n)) {
+            control *w = (control *)c;
+            memcpy(w->b, b, sizeof b);
+            w->nb = n;
+        }
+    }
+}
+
 bool rl_ports_declare(const rl_port_decl *ports, uint32_t count)
 {
     pthread_mutex_lock(&g_lock);
@@ -241,6 +297,8 @@ bool rl_ports_declare(const rl_port_decl *ports, uint32_t count)
             c->kind = d->controls[j].kind;
             c->defaults = d->controls[j].defaults ? dup(d->controls[j].defaults) : NULL;
             parse_list(c->defaults, c->b, &c->nb);
+            declare_setting(p, c);
+            apply_settings(p, c);
         }
     }
     pthread_mutex_unlock(&g_lock);
@@ -377,6 +435,39 @@ static float one(const binding *b, int port_pad, const rl_input_snapshot *s)
     return v;
 }
 
+static float strongest(const binding *b, uint8_t n, int pad, uint8_t kind, const rl_input_snapshot *s)
+{
+    float best = 0.0f;
+    for (uint8_t i = 0; i < n; i++) {
+        float v = one(&b[i], pad, s);
+        if ((v < 0 ? -v : v) > (best < 0 ? -best : best))
+            best = v;
+    }
+    if (kind == RL_CONTROL_BUTTON)
+        best = best > 0.5f || best < -0.5f ? 1.0f : 0.0f;
+    else if (kind == RL_CONTROL_TRIGGER && best < 0.0f)
+        best = 0.0f;
+    return best;
+}
+
+bool rl_ports_valid_binding(const char *text)
+{
+    binding b[MAX_BINDINGS];
+    uint8_t n;
+    return text && parse_list(text, b, &n);
+}
+
+float rl_ports_read_binding(const char *text, int pad)
+{
+    binding b[MAX_BINDINGS];
+    uint8_t n;
+    if (!text || !parse_list(text, b, &n))
+        return 0.0f;
+    rl_input_snapshot s;
+    rl_input_sample(&s);
+    return strongest(b, n, pad, RL_CONTROL_AXIS, &s);
+}
+
 float rl_ports_eval(rl_control_ref ref, const rl_input_snapshot *s)
 {
     if (ref == RL_PORT_NONE)
@@ -387,15 +478,7 @@ float rl_ports_eval(rl_control_ref ref, const rl_input_snapshot *s)
     if (pi < g_nports && ci < g_ports[pi].n) {
         const port *p = &g_ports[pi];
         const control *c = &p->c[ci];
-        for (uint8_t i = 0; i < c->nb; i++) {
-            float v = one(&c->b[i], p->pad, s);
-            if ((v < 0 ? -v : v) > (best < 0 ? -best : best))
-                best = v;
-        }
-        if (c->kind == RL_CONTROL_BUTTON)
-            best = best > 0.5f || best < -0.5f ? 1.0f : 0.0f;
-        else if (c->kind == RL_CONTROL_TRIGGER && best < 0.0f)
-            best = 0.0f;
+        best = strongest(c->b, c->nb, p->pad, c->kind, s);
     }
     pthread_mutex_unlock(&g_lock);
     return best;
@@ -408,4 +491,9 @@ float rl_ports_read(rl_control_ref ref)
     rl_input_snapshot s;
     rl_input_sample(&s);
     return rl_ports_eval(ref, &s);
+}
+
+float relift_input(const char *port_id, const char *control_id)
+{
+    return rl_ports_read(rl_ports_find(port_id, control_id));
 }

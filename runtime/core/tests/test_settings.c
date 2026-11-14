@@ -22,7 +22,7 @@ static const rl_setting_def g_defs[] = {
     { .key = "gain", .type = RL_SETTING_FLOAT, .min_float = 0, .max_float = 1, .step_float = 0.25, .def_float = 0.5 },
     { .key = "mode", .type = RL_SETTING_ENUM, .choices = g_modes, .nchoices = 3, .def_int = 1 },
     { .key = "name", .type = RL_SETTING_STRING, .def_str = "anon", .env = "RL_TEST_NAME" },
-    { .key = "jump", .type = RL_SETTING_BINDING, .def_str = "pad:a" },
+    { .key = "jump", .type = RL_SETTING_BINDING, .def_str = "gamepad:south,key:z" },
     { .key = "mod.fast", .type = RL_SETTING_BOOL, .apply = RL_APPLY_START },
 };
 #define NDEFS (sizeof g_defs / sizeof g_defs[0])
@@ -58,9 +58,7 @@ TEST(settings_defaults)
     CHECK(rl_setting_float("gain") == 0.5);
     CHECK_EQ(rl_setting_enum("mode"), 1);
     CHECK(!strcmp(rl_setting_str("name"), "anon"));
-    const char *port, *control;
-    CHECK(rl_setting_binding("jump", &port, &control));
-    CHECK(!strcmp(port, "pad") && !strcmp(control, "a"));
+    CHECK(!strcmp(rl_setting_binding("jump"), "gamepad:south,key:z"));
     CHECK(!rl_setting_bool("mod.fast"));
 }
 
@@ -88,14 +86,13 @@ TEST(settings_types_ranges_and_steps)
     CHECK_EQ(rl_setting_enum("mode"), 2);
     CHECK_EQ(rl_settings_set("mode", "extreme"), RL_SETTING_INVALID);
     CHECK_EQ(rl_setting_enum("mode"), 2);
-    CHECK_EQ(rl_settings_set("jump", "pad"), RL_SETTING_INVALID);
-    CHECK_EQ(rl_settings_set("jump", ":a"), RL_SETTING_INVALID);
-    CHECK_EQ(rl_settings_set("jump", "pad:"), RL_SETTING_INVALID);
-    CHECK_EQ(rl_settings_set("jump", "pad:a:b"), RL_SETTING_INVALID);
-    CHECK_EQ(rl_settings_set("jump", "pad2:start"), RL_SETTING_OK);
-    const char *port, *control;
-    CHECK(rl_setting_binding("jump", &port, &control));
-    CHECK(!strcmp(port, "pad2") && !strcmp(control, "start"));
+    CHECK_EQ(rl_settings_set("jump", "pad:a"), RL_SETTING_INVALID);
+    CHECK_EQ(rl_settings_set("jump", "key:nope"), RL_SETTING_INVALID);
+    CHECK_EQ(rl_settings_set("jump", "gamepad:south,"), RL_SETTING_OK);
+    CHECK_EQ(rl_settings_set("jump", "gamepad2:start, mouse:left"), RL_SETTING_OK);
+    CHECK(!strcmp(rl_setting_binding("jump"), "gamepad2:start, mouse:left"));
+    CHECK_EQ(rl_settings_set("jump", ""), RL_SETTING_OK);
+    CHECK(!strcmp(rl_setting_binding("jump"), ""));
 }
 
 TEST(settings_unknown_keys_warn_and_never_fail)
@@ -114,7 +111,7 @@ TEST(settings_json_file)
 {
     fresh();
     const char *text = "{ \"hud\": false, \"scale\": 7, \"gain\": 0.25, \"mode\": \"low\","
-                       " \"name\": \"a\\\"b\\u00e9\", \"jump\": \"p:x\", \"mod.fast\": true, \"extra\": 1, \"scale2\": null }";
+                       " \"name\": \"a\\\"b\\u00e9\", \"jump\": \"key:x\", \"mod.fast\": true, \"extra\": 1, \"scale2\": null }";
     CHECK_EQ(rl_settings_load_json(text, "t"), 7);
     CHECK(!rl_setting_bool("hud"));
     CHECK_EQ(rl_setting_int("scale"), 7);
@@ -216,7 +213,7 @@ TEST(settings_schema_json)
     CHECK(strstr(buf, "\"default\":\"low\",\"choices\":[\"off\",\"low\",\"high\"]"));
     CHECK(strstr(buf, "\"env\":\"RL_TEST_NAME\""));
     CHECK(strstr(buf, "\"type\":\"key_binding\""));
-    CHECK(strstr(buf, "\"default\":{\"port\":\"pad\",\"control\":\"a\"}"));
+    CHECK(strstr(buf, "\"default\":\"gamepad:south,key:z\""));
     CHECK(buf[0] == '[' && buf[n - 1] == ']');
     char small[16];
     CHECK_EQ(rl_settings_schema_json(small, sizeof small), n);
@@ -281,9 +278,8 @@ TEST(override_api_reads_the_same_values)
     CHECK(relift_setting_float("gain") == 0.5);
     CHECK_EQ(relift_setting_enum("mode"), 1);
     CHECK(!strcmp(relift_setting_str("name"), "anon"));
-    const char *port, *control;
-    CHECK(relift_setting_binding("jump", &port, &control));
-    CHECK(!strcmp(port, "pad") && !strcmp(control, "a"));
+    CHECK(!strcmp(relift_setting_binding("jump"), "gamepad:south,key:z"));
+    CHECK(relift_setting_binding_value("jump") == 0.0f);
     CHECK_EQ(rl_settings_set("scale", "5"), RL_SETTING_OK);
     CHECK_EQ(relift_setting_int("scale"), 5);
 }

@@ -33,7 +33,7 @@ typedef enum rl_setting_type {
     RL_SETTING_ENUM = 3,
     /** @brief Any text. */
     RL_SETTING_STRING = 4,
-    /** @brief "port:control": a port name and a control name of that port. */
+    /** @brief A comma separated list of host inputs, such as "gamepad:south,key:z" (see ports.h). */
     RL_SETTING_BINDING = 5
 } rl_setting_type;
 
@@ -164,11 +164,12 @@ RL_RUNTIME_API uint32_t rl_setting_enum(const char *key);
  */
 RL_RUNTIME_API const char *rl_setting_str(const char *key);
 /**
- * @brief A key binding: the port and control names, valid like rl_setting_str.
- * Returns false and sets both to "" when the key is not a declared binding or
- * has no value.
+ * @brief The host inputs of a key binding, as the text of the list; "" when
+ * the key is not a declared binding or has no value. Valid like rl_setting_str.
+ * The setting `bind.<port id>.<control id>` of every declared control is a
+ * key binding and rebinds that control when set.
  */
-RL_RUNTIME_API bool rl_setting_binding(const char *key, const char **port, const char **control);
+RL_RUNTIME_API const char *rl_setting_binding(const char *key);
 
 /**
  * @brief Writes the schema of every declared setting as JSON into buf: an
