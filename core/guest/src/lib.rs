@@ -193,6 +193,9 @@ pub enum RootKind {
     Unwind,
     /// A code address stored in data by a relocation.
     Pointer,
+    /// A code address a dev run reached that analysis had not found (a
+    /// hot-load hint).
+    Hint,
 }
 
 /// A function entry the guest knows before analysis.
