@@ -197,7 +197,8 @@ TEST(mutex_contention)
     mutex_lock(c, S.mutex, me);
     for (int i = 0; i < 4; i++)
         CHECK_EQ(start(c, hs[i]), 0);
-    rl_sleep_ns(20000000);
+    for (int spin = 0; spin < 2000 && __atomic_load_n(word(S.mutex), __ATOMIC_SEQ_CST) != (me | HAS_LISTENERS); spin++)
+        rl_sleep_ns(1000000);
     CHECK_EQ(*word(S.mutex), me | HAS_LISTENERS);
     mutex_unlock(c, S.mutex, me);
     for (int i = 0; i < 4; i++)
@@ -451,6 +452,7 @@ TEST(wait_for_address)
         rl_sleep_ns(1000000);
     }
     CHECK_EQ(t_svc(c, SVC_SIGNAL_TO_ADDRESS, S.arb, 0, 0, 1, 0, 0), 0);
+    CHECK(wait_counter(1));
     rl_sleep_ns(20000000);
     CHECK_EQ(__atomic_load_n(word(S.counter), __ATOMIC_SEQ_CST), 1);
     CHECK_EQ(t_svc(c, SVC_SIGNAL_TO_ADDRESS, S.arb, 1, 5, 1, 0, 0), KR_INVALID_STATE);
@@ -474,13 +476,15 @@ TEST(wait_for_address)
 TEST(system_tick_and_debug)
 {
     rl_ctx *c = t_boot(NULL);
+    uint64_t t0 = rl_clock_ns();
     t_svc(c, SVC_GET_SYSTEM_TICK, 0, 0, 0, 0, 0, 0);
     uint64_t a = c->x[0];
     rl_sleep_ns(10000000);
     t_svc(c, SVC_GET_SYSTEM_TICK, 0, 0, 0, 0, 0, 0);
     uint64_t d = c->x[0] - a;
+    uint64_t t1 = rl_clock_ns();
     CHECK(d >= 192000);
-    CHECK(d < 19200000);
+    CHECK(d <= (t1 - t0) * 19200000ull / 1000000000ull + 1);
     CHECK_EQ(rl_mrs_cntfrq_el0(), 19200000);
     uint64_t heap = t_heap(c, 0x200000);
     memcpy(t_mem() + heap, "hello from the guest\n", 21);
