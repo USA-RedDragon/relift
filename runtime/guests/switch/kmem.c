@@ -149,6 +149,51 @@ rl_result rl_hos_map_segment(uint64_t addr, uint64_t size, uint32_t perm, uint32
     return rc;
 }
 
+rl_result rl_hos_reserve_at(uint64_t addr, uint64_t size)
+{
+    rl_result rc = KR_SUCCESS;
+    hos_lock();
+    if (!aligned(addr) || !aligned(size) || !size)
+        rc = KR_INVALID_ADDRESS;
+    else if (!is_free(addr, size))
+        rc = KR_INVALID_MEM_STATE;
+    else if (rl_vm_set(&hos.vm, addr, size, RL_VM_NONE, tag_of(MS_INACCESSIBLE, 0), RL_VM_DISCARD))
+        rc = KR_OUT_OF_MEMORY;
+    hos_unlock();
+    return rc;
+}
+
+rl_result rl_hos_reserve(uint64_t size, uint64_t align, uint64_t *addr)
+{
+    const hos_layout *l = &hos.lay;
+    uint64_t ends[5] = { l->code_end, l->heap_end, l->alias_end, l->stack_end, l->tlsio_end };
+    uint64_t start = 0;
+    for (int i = 0; i < 5; i++)
+        if (ends[i] > start)
+            start = ends[i];
+    if (align < HOS_PAGE)
+        align = HOS_PAGE;
+    size = align_up(size, HOS_PAGE);
+    hos_lock();
+    uint64_t a = find_free_top(start, l->aslr_end, size + align);
+    hos_unlock();
+    if (!a)
+        return KR_OUT_OF_MEMORY;
+    a = align_up(a, align);
+    rl_result rc = rl_hos_reserve_at(a, size);
+    if (rc == KR_SUCCESS)
+        *addr = a;
+    return rc;
+}
+
+int rl_hos_reserved_set(uint64_t addr, uint64_t size, uint32_t perm, int content)
+{
+    hos_lock();
+    int r = rl_vm_set(&hos.vm, addr, size, perm, tag_of(perm ? MS_NORMAL : MS_INACCESSIBLE, 0), content);
+    hos_unlock();
+    return r;
+}
+
 rl_result rl_hos_map_main_stack(uint64_t size, uint64_t *top)
 {
     rl_result rc = KR_SUCCESS;

@@ -197,11 +197,11 @@ TEST(shared_memory_16k_host_pages)
     t_meminfo mi = query(c, heap, at);
     CHECK_EQ(mi.addr, at);
     CHECK_EQ(mi.size, 0x1000);
-    CHECK_EQ(mi.type, MS_INACCESSIBLE);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE & 0xFF);
     mi = query(c, heap, at + 0x5000);
     CHECK_EQ(mi.addr, at + 0x5000);
     CHECK_EQ(mi.size, 0x3000);
-    CHECK_EQ(mi.type, MS_INACCESSIBLE);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE & 0xFF);
     CHECK_EQ(query(c, heap, at + 0x1000).type, MS_SHARED_MEMORY & 0xFF);
     CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x400000, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_MEM_STATE);
     CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x401000, 0x4000, HOS_PERM_R, 0, 0), 0);
@@ -340,7 +340,7 @@ TEST(query_memory_edges)
     CHECK_EQ(mi.type, 0);
     mi = query(c, heap, hos.lay.as_end + 5);
     CHECK_EQ(mi.addr, hos.lay.as_end);
-    CHECK_EQ(mi.type, MS_INACCESSIBLE);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE & 0xFF);
     CHECK_EQ(mi.addr + mi.size, 0);
     mi = query(c, heap, c->tpidrro_el0);
     CHECK_EQ(mi.type, MS_THREAD_LOCAL & 0xFF);
@@ -483,4 +483,30 @@ TEST(main_stack_in_a_free_block_past_the_region_end)
     CHECK_EQ(rl_hos_map_main_stack(0x100000, &top), 0u);
     CHECK(top <= hos.lay.stack_end && top - 0x100000 >= hos.lay.stack_start);
     CHECK(!t_write(top - 8, 1).faulted);
+}
+
+TEST(reserved_ranges_stay_out_of_the_guest_map)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t info = t_heap(c, 0x200000);
+    uint64_t a = 0;
+    CHECK_EQ(rl_hos_reserve(0x400000, 0x10000, &a), 0u);
+    CHECK_EQ(a & 0xFFFF, 0);
+    CHECK(a >= hos.lay.tlsio_end && a >= hos.lay.heap_end && a + 0x400000 <= hos.lay.aslr_end);
+    t_meminfo mi = query(c, info, a);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE & 0xFF);
+    CHECK_EQ(mi.perm, 0);
+    CHECK(t_write(a, 1).faulted);
+    CHECK_EQ(rl_hos_reserve_at(a, 0x1000), KR_INVALID_MEM_STATE);
+    CHECK_EQ(rl_hos_reserved_set(a + 0x1000, 0x2000, RL_VM_RW, RL_VM_FRESH), 0);
+    mi = query(c, info, a + 0x1000);
+    CHECK_EQ(mi.type, MS_NORMAL & 0xFF);
+    CHECK_EQ(mi.perm, HOS_PERM_RW);
+    CHECK(!t_write(a + 0x1000, 1).faulted);
+    CHECK_EQ(rl_hos_reserved_set(a + 0x1000, 0x2000, RL_VM_NONE, RL_VM_DISCARD), 0);
+    CHECK_EQ(query(c, info, a + 0x1000).type, MS_INACCESSIBLE);
+    CHECK(t_write(a + 0x1000, 1).faulted);
+    uint64_t code = hos.lay.code_start + 0x1000000;
+    CHECK_EQ(rl_hos_reserve_at(code, 0x4000), 0u);
+    CHECK_EQ(query(c, info, code).type, MS_INACCESSIBLE);
 }

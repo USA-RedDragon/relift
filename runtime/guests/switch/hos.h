@@ -439,6 +439,12 @@ static inline uint8_t *hos_mem(void) { return hos.vm.base; }
 
 /** @brief Maps a module segment with Horizon permission perm (enum hos_perm) and state CODE_STATIC (text, rodata) or CODE_MUTABLE (data, bss). */
 RL_RUNTIME_API rl_result rl_hos_map_segment(uint64_t addr, uint64_t size, uint32_t perm, uint32_t state);
+/** @brief Marks free pages [addr, addr+size) inaccessible so the guest never maps them (runtime-owned ranges). */
+RL_RUNTIME_API rl_result rl_hos_reserve_at(uint64_t addr, uint64_t size);
+/** @brief Reserves size bytes aligned to align above every region of the layout, inaccessible; *addr receives the start. */
+RL_RUNTIME_API rl_result rl_hos_reserve(uint64_t size, uint64_t align, uint64_t *addr);
+/** @brief Maps reserved pages with core permission perm (state NORMAL), or back to inaccessible for RL_VM_NONE; returns rl_vm_set's result. */
+RL_RUNTIME_API int rl_hos_reserved_set(uint64_t addr, uint64_t size, uint32_t perm, int content);
 /** @brief Maps the main thread stack in the stack region; *top receives its top. */
 RL_RUNTIME_API rl_result rl_hos_map_main_stack(uint64_t size, uint64_t *top);
 
