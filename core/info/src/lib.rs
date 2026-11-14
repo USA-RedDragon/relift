@@ -354,6 +354,51 @@ pub struct Mods {
     /// The run-time mod kinds this binary accepts.
     #[serde(default)]
     pub accepts: Vec<ModKind>,
+    /// The run-time data mods active in this run, filled by the running
+    /// binary and absent from the stored document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active: Vec<ActiveMod>,
+    /// Files that more than one active mod provides, one message each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<String>,
+}
+
+/// A run-time data mod in use.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveMod {
+    /// The mod folder's name.
+    pub name: String,
+    /// The mod folder.
+    pub path: String,
+    /// The folder layout: `atmosphere` or `ryujinx`.
+    pub layout: String,
+    /// Whether the mod has a romfs tree.
+    #[serde(default)]
+    pub romfs: bool,
+    /// Cheats loaded for the running program.
+    #[serde(default)]
+    pub cheats: u32,
+    /// Cheats that write lifted code and need a rebuild.
+    #[serde(default)]
+    pub cheats_need_rebuild: u32,
+}
+
+impl Mods {
+    /// The run-time mod kinds of the Switch runtime: the Atmosphere and
+    /// Ryujinx layouts, each with a romfs tree and cheats named by build id.
+    #[must_use]
+    pub fn switch_accepts() -> Vec<ModKind> {
+        let kind = |k: &str, p: &str| ModKind {
+            kind: k.into(),
+            path: p.into(),
+        };
+        vec![
+            kind("romfs", "contents/<title id>/romfs"),
+            kind("cheat", "contents/<title id>/cheats/<build id>.txt"),
+            kind("romfs", "mods/<name>/romfs"),
+            kind("cheat", "mods/<name>/cheats/<build id>.txt"),
+        ]
+    }
 }
 
 /// A code mod built in.
@@ -397,6 +442,28 @@ pub struct Save {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_mods_round_trip_and_stay_out_of_a_stored_document() {
+        let mut m = Mods {
+            accepts: Mods::switch_accepts(),
+            ..Mods::default()
+        };
+        assert_eq!(m.accepts.len(), 4);
+        let stored = serde_json::to_string(&m).unwrap();
+        assert!(!stored.contains("active") && !stored.contains("conflicts"));
+        m.active.push(ActiveMod {
+            name: "alpha".into(),
+            path: "/m/alpha".into(),
+            layout: "ryujinx".into(),
+            romfs: true,
+            cheats: 2,
+            cheats_need_rebuild: 1,
+        });
+        m.conflicts.push("/a.txt: alpha wins over beta".into());
+        let text = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<Mods>(&text).unwrap(), m);
+    }
 
     #[test]
     fn a_document_round_trips_byte_for_byte() {
