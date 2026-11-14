@@ -41,8 +41,16 @@ static void session_destroy(hos_kobj *k)
 {
     hos_session *s = (hos_session *)k;
     rl_ipc_object_unref(s->root);
-    for (int i = 0; i < 64; i++)
-        rl_ipc_object_unref(s->dom[i]);
+    hos_domain *d = NULL;
+    hos_lock();
+    if (s->dt && --s->dt->refs == 0)
+        d = s->dt;
+    hos_unlock();
+    if (d) {
+        for (int i = 0; i < 64; i++)
+            rl_ipc_object_unref(d->obj[i]);
+        free(d);
+    }
     free(s);
 }
 
@@ -324,8 +332,8 @@ static rl_result finish(msg *m, rl_ipc_req *r, int kind, rl_result rc, uint32_t 
             uint32_t id = 0;
             hos_lock();
             for (uint32_t k = 1; k < 64 && !id; k++)
-                if (!r->session->dom[k]) {
-                    r->session->dom[k] = o;
+                if (!r->session->dt->obj[k]) {
+                    r->session->dt->obj[k] = o;
                     id = k;
                 }
             hos_unlock();
@@ -357,9 +365,12 @@ static rl_result control(msg *m, rl_ipc_req *r, uint32_t *len)
         hos_lock();
         if (s->domain) {
             rc = SF_RESULT_NOT_SUPPORTED;
+        } else if (!(s->dt = calloc(1, sizeof *s->dt))) {
+            rc = KR_OUT_OF_RESOURCE;
         } else {
             s->domain = true;
-            s->dom[1] = s->root;
+            s->dt->refs = 1;
+            s->dt->obj[1] = s->root;
             rl_ipc_object_ref(s->root);
         }
         hos_unlock();
@@ -367,11 +378,11 @@ static rl_result control(msg *m, rl_ipc_req *r, uint32_t *len)
             *(uint32_t *)rl_ipc_out(r, 4) = 1;
         break;
     case 1:
-        if (!rl_ipc_in(r, &v, 4) || v >= 64 || !s->dom[v]) {
+        if (!rl_ipc_in(r, &v, 4) || v >= 64 || !s->domain || !s->dt->obj[v]) {
             rc = SF_RESULT_TARGET_NOT_FOUND;
         } else {
             uint32_t h;
-            rc = rl_ipc_session_open(s->dom[v], &h);
+            rc = rl_ipc_session_open(s->dt->obj[v], &h);
             if (rc == KR_SUCCESS)
                 r->out_move[r->n_out_move++] = h;
         }
@@ -380,6 +391,18 @@ static rl_result control(msg *m, rl_ipc_req *r, uint32_t *len)
     case 4: {
         uint32_t h;
         rc = rl_ipc_session_open(s->root, &h);
+        if (rc == KR_SUCCESS && s->domain) {
+            hos_lock();
+            hos_session *n = (hos_session *)hos_handle_get(h, KOBJ_SESSION);
+            if (n) {
+                n->domain = true;
+                n->dt = s->dt;
+                s->dt->refs++;
+            }
+            hos_unlock();
+            if (n)
+                hos_kobj_unref(&n->obj);
+        }
         if (rc == KR_SUCCESS)
             r->out_move[r->n_out_move++] = h;
         break;
@@ -414,9 +437,9 @@ static rl_result cmif(msg *m, rl_ipc_req *r, const parsed *p, uint32_t *len, boo
         memcpy(&dsize, b + start + 2, 2);
         memcpy(&oid, b + start + 4, 4);
         hos_lock();
-        rl_ipc_object *o = oid < 64 ? s->dom[oid] : NULL;
+        rl_ipc_object *o = oid < 64 ? s->dt->obj[oid] : NULL;
         if (dtype == 2 && o) {
-            s->dom[oid] = NULL;
+            s->dt->obj[oid] = NULL;
             hos_unlock();
             rl_ipc_object_unref(o);
             r->self = s->root;
@@ -440,7 +463,7 @@ static rl_result cmif(msg *m, rl_ipc_req *r, const parsed *p, uint32_t *len, boo
         for (uint32_t i = 0; i < nobj && i < RL_IPC_MAX; i++) {
             uint32_t id;
             memcpy(&id, b + payload_end + 4 * i, 4);
-            r->in_objects[r->n_in_objects++] = id < 64 ? s->dom[id] : NULL;
+            r->in_objects[r->n_in_objects++] = id < 64 ? s->dt->obj[id] : NULL;
         }
         kind = RESP_DOMAIN;
     } else {

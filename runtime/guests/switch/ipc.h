@@ -93,6 +93,14 @@ RL_RUNTIME_API void rl_ipc_object_ref(rl_ipc_object *o);
 RL_RUNTIME_API void rl_ipc_object_unref(rl_ipc_object *o);
 
 /** @brief Client session kernel object. */
+/** @brief A domain's object table, shared by every session of the domain (CloneCurrentObject on a domain session clones the session, not the domain). */
+typedef struct hos_domain {
+    /** @brief Sessions that use it. Lock taken. */
+    uint32_t refs;
+    /** @brief Objects by id (index 0 unused). */
+    rl_ipc_object *obj[64];
+} hos_domain;
+
 typedef struct hos_session {
     /** @brief Base. */
     hos_kobj obj;
@@ -100,8 +108,8 @@ typedef struct hos_session {
     rl_ipc_object *root;
     /** @brief True once converted to a domain. */
     bool domain;
-    /** @brief Domain objects by id (index 0 unused). */
-    rl_ipc_object *dom[64];
+    /** @brief The domain's objects, shared with the sessions cloned from this one (NULL until converted). */
+    struct hos_domain *dt;
     /** @brief Set by a Close request. */
     bool closed;
 } hos_session;

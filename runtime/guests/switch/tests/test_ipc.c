@@ -595,6 +595,42 @@ TEST(cmif_domain)
     CHECK_EQ(v, 2);
 }
 
+TEST(cmif_domain_clone_shares_the_domain)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = open_test_service(c, heap, false);
+    CHECK(h);
+    creq q = req(0);
+    q.type = HIPC_CONTROL;
+    CHECK_EQ(call(c, h, &q, false).result, 0);
+
+    q = req(2);
+    q.type = HIPC_CONTROL;
+    cres r = call(c, h, &q, false);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nmove, 1);
+    uint32_t clone = r.move[0];
+    uint32_t v = 0;
+    CHECK_EQ(add(c, clone, 1, 20, 22, &v), 0);
+    CHECK_EQ(v, 42);
+
+    q = req(3);
+    q.object_id = 1;
+    uint32_t five = 5;
+    put_data(&q, &five, 4);
+    r = call(c, clone, &q, true);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.nobjects, 1);
+    uint32_t sub = r.objects[0];
+    CHECK_EQ(add(c, h, sub, 1, 1, &v), 0);
+    CHECK_EQ(v, 7);
+
+    t_svc(c, SVC_CLOSE_HANDLE, clone, 0, 0, 0, 0, 0);
+    CHECK_EQ(add(c, h, sub, 2, 2, &v), 0);
+    CHECK_EQ(v, 9);
+}
+
 TEST(ipc_errors)
 {
     rl_ctx *c = t_boot(NULL);
