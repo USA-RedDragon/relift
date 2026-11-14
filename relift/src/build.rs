@@ -660,6 +660,9 @@ fn lift_and_emit(
         crate::game_settings::generate_c(&game_settings).as_bytes(),
     )?;
     prog.push(settings_c);
+    let ports_c = cdir.join("game_ports.c");
+    relift_cache::write_if_changed(&ports_c, game_ports_c(Path::new("game.toml"))?.as_bytes())?;
+    prog.push(ports_c);
     for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
@@ -1231,4 +1234,45 @@ pub fn run_run(
         )));
     }
     Ok(status.code().unwrap_or(128))
+}
+
+/// The C that declares the extra input ports of a game to the runtime: the
+/// `[input.port.*]` tables of `game.toml` on top of the Switch's native ports.
+fn game_ports_c(game_toml: &Path) -> Result<String, BoxError> {
+    let mut set = relift_input::native_ports("switch")?;
+    match std::fs::read_to_string(game_toml) {
+        Ok(text) => set.extend_from_toml("game.toml", relift_input::Origin::Game, &text)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", game_toml.display()).into()),
+    }
+    Ok(relift_input::extras_c_file(&set))
+}
+
+#[cfg(test)]
+mod ports_tests {
+    use super::game_ports_c;
+
+    #[test]
+    fn a_missing_game_toml_declares_no_extras() {
+        let c = game_ports_c(std::path::Path::new("/nonexistent/game.toml")).unwrap();
+        assert!(c.contains("rl_game_ports_count = 0;"));
+    }
+
+    #[test]
+    fn game_toml_extras_reach_the_c() {
+        let dir = std::env::temp_dir().join(format!("relift-ports-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("game.toml");
+        relift_cache::write_if_changed(
+            &path,
+            b"[input.port.dial]\nkind = \"Dial\"\n[input.port.dial.control.turn]\nkind = \"axis\"\n[input.port.p2.control.turbo]\n",
+        )
+        .unwrap();
+        let c = game_ports_c(&path).unwrap();
+        assert!(c.contains("{ \"dial\", \"Dial\", 1,"));
+        assert!(c.contains("{ \"p2\", \"Switch Pro Controller\", 1,"));
+        assert!(c.contains("\"turbo\""));
+        assert!(!c.contains("\"lstick_x\""));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

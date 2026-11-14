@@ -209,3 +209,22 @@ fn c_declarations_carry_ids_kinds_and_defaults() {
     assert!(c.contains("{ \"p1\", \"GBA pad\", 3, rl_test_ports_0 },"));
     assert!(c.contains("rl_test_ports_count = 1;"));
 }
+
+#[test]
+fn extras_hold_only_what_was_added() {
+    let mut set = pad();
+    assert!(set.extras().is_empty());
+    set.extend_from_toml(
+        "game.toml",
+        Origin::Game,
+        "[input.port.p1.control.turbo]\n[input.port.dial]\nkind = \"Dial\"\n",
+    )
+    .unwrap();
+    let e = set.extras();
+    assert_eq!(e.len(), 2);
+    assert_eq!(e[0].id, "p1");
+    assert_eq!(e[0].controls.len(), 1);
+    assert_eq!(e[1].id, "dial");
+    let c = relift_input::extras_c_file(&set);
+    assert!(c.contains("rl_ports_declare(rl_game_ports, rl_game_ports_count)"));
+}

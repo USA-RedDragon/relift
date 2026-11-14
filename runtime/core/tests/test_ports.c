@@ -181,3 +181,16 @@ TEST(ports_a_value_set_before_the_declaration_applies)
     s.keys[0] |= 1ull << 29;
     CHECK(rl_ports_eval(rl_ports_find("dial", "turn"), &s) == 1.0f);
 }
+
+TEST(ports_extras_may_be_declared_before_the_native_ports)
+{
+    rl_ports_reset();
+    rl_control_decl more[] = { { "turbo", RL_CONTROL_BUTTON, "key:t" } };
+    rl_port_decl p = { "p1", "Test pad", 1, more };
+    CHECK(rl_ports_declare(&p, 1));
+    CHECK(rl_ports_declare(native, 2));
+    CHECK_EQ(rl_ports_count(), 2);
+    CHECK_EQ(rl_ports_control_count("p1"), 5);
+    CHECK(rl_ports_find("p1", "turbo") != RL_PORT_NONE);
+    CHECK(rl_ports_find("p1", "a") != RL_PORT_NONE);
+}

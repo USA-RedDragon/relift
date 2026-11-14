@@ -221,6 +221,27 @@ impl PortSet {
         Ok(())
     }
 
+    /// What the game repo or a mod added: new ports whole, and for a native
+    /// port only its added controls.
+    pub fn extras(&self) -> Vec<Port> {
+        let mut out = Vec::new();
+        for p in &self.ports {
+            let controls: Vec<Control> = p
+                .controls
+                .iter()
+                .filter(|c| p.origin != Origin::Native || c.origin != Origin::Native)
+                .cloned()
+                .collect();
+            if p.origin != Origin::Native || !controls.is_empty() {
+                out.push(Port {
+                    controls,
+                    ..p.clone()
+                });
+            }
+        }
+        out
+    }
+
     /// Checks that a port and control exist.
     pub fn check(&self, port: &str, control: &str) -> Result<&Control, Error> {
         let p = self

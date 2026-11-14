@@ -14,7 +14,7 @@ mod names;
 mod native;
 
 pub use bind::{BindingTarget, Bindings, Device, Half, HostInput, KeyBindingSetting};
-pub use cdecl::declarations_c;
+pub use cdecl::{declarations_c, extras_c_file};
 pub use error::Error;
 pub use json::input_section;
 pub use model::{Control, ControlKind, Origin, Port, PortSet};
