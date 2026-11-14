@@ -239,7 +239,7 @@ rl_result hos_set_thread_priority(uint32_t h, int32_t prio)
     hos_thread *t = hos_thread_get(h);
     if (t) {
         t->base_prio = prio;
-        hos_sched_set_prio(t, prio);
+        hos_update_inheritance(t);
     }
     hos_unlock();
     if (!t)

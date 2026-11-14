@@ -12,7 +12,7 @@
 
 #define HAS_LISTENERS 0x40000000u
 
-static void add_mutex_waiter(hos_thread *owner, hos_thread *t)
+static void insert_waiter(hos_thread *owner, hos_thread *t)
 {
     hos_thread **p = &owner->mutex_waiters;
     while (*p && (*p)->prio <= t->prio)
@@ -22,11 +22,8 @@ static void add_mutex_waiter(hos_thread *owner, hos_thread *t)
     t->mutex_owner = owner;
 }
 
-static void remove_mutex_waiter(hos_thread *t)
+static void unlink_waiter(hos_thread *owner, hos_thread *t)
 {
-    hos_thread *owner = t->mutex_owner;
-    if (!owner)
-        return;
     for (hos_thread **p = &owner->mutex_waiters; *p; p = &(*p)->next_mutex_waiter)
         if (*p == t) {
             *p = t->next_mutex_waiter;
@@ -34,6 +31,39 @@ static void remove_mutex_waiter(hos_thread *t)
         }
     t->next_mutex_waiter = NULL;
     t->mutex_owner = NULL;
+}
+
+void hos_update_inheritance(hos_thread *t)
+{
+    for (;;) {
+        int32_t p = t->base_prio;
+        if (t->mutex_waiters && t->mutex_waiters->prio < p)
+            p = t->mutex_waiters->prio;
+        if (p == t->prio)
+            return;
+        hos_sched_set_prio(t, p);
+        hos_thread *owner = t->mutex_owner;
+        if (!owner)
+            return;
+        unlink_waiter(owner, t);
+        insert_waiter(owner, t);
+        t = owner;
+    }
+}
+
+static void add_mutex_waiter(hos_thread *owner, hos_thread *t)
+{
+    insert_waiter(owner, t);
+    hos_update_inheritance(owner);
+}
+
+static void remove_mutex_waiter(hos_thread *t)
+{
+    hos_thread *owner = t->mutex_owner;
+    if (!owner)
+        return;
+    unlink_waiter(owner, t);
+    hos_update_inheritance(owner);
 }
 
 static hos_thread *relinquish(hos_thread *cur, uint64_t addr, uint32_t *count)
@@ -54,7 +84,11 @@ static hos_thread *relinquish(hos_thread *cur, uint64_t addr, uint32_t *count)
         if (!next)
             next = w;
         else
-            add_mutex_waiter(next, w);
+            insert_waiter(next, w);
+    }
+    if (next) {
+        hos_update_inheritance(cur);
+        hos_update_inheritance(next);
     }
     return next;
 }

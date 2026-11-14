@@ -4,7 +4,7 @@
  * a higher-priority thread that becomes ready runs at the next svc and a
  * lower one waits, cores run in parallel within affinity masks, threads
  * migrate on svcSetThreadCoreMask and to idle cores, the three yields of
- * svcSleepThread, and a thread
+ * svcSleepThread, priority inheritance through a mutex, and a thread
  * blocked in a host wait leaves its core to the others. Guest thread entries
  * are host functions with the lifted signature.
  */
@@ -164,13 +164,26 @@ static int w_host_wait(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-enum { F_COUNT, F_FLAG, F_WAIT_EVENT, F_PING, F_PONG, F_MIGRATE, F_YIELD, F_FLAG_SLEEP, F_HOST_WAIT, F_N };
+static int w_lock(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    int i = idx_of(c);
+    uint32_t tag = S.handles[i];
+    uint32_t *m = (uint32_t *)(void *)(rl_mem_base() + S.mutex);
+    uint32_t v = __atomic_load_n(m, __ATOMIC_ACQUIRE);
+    if (__atomic_compare_exchange_n(m, &v, v | HAS_LISTENERS, 0, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED))
+        S.ok[i] = svc_c(c, SVC_ARBITRATE_LOCK, v, S.mutex, tag, 0) == 0 && (*m & ~HAS_LISTENERS) == tag;
+    set(&S.flag[i], 1);
+    return RL_OK;
+}
+
+enum { F_COUNT, F_FLAG, F_WAIT_EVENT, F_PING, F_PONG, F_MIGRATE, F_YIELD, F_FLAG_SLEEP, F_HOST_WAIT, F_LOCK, F_N };
 
 static rl_ctx *setup(uint64_t *heap)
 {
     rl_ctx *c = t_boot(NULL);
     static rl_fn const fns[F_N] = { w_count, w_flag,  w_wait_event,      w_ping,      w_pong,
-                                    w_migrate, w_yield, w_flag_then_sleep, w_host_wait };
+                                    w_migrate, w_yield, w_flag_then_sleep, w_host_wait, w_lock };
     uint64_t addrs[F_N];
     for (uint32_t k = 0; k < F_N; k++)
         addrs[k] = t_code(k);
@@ -356,6 +369,29 @@ TEST(yield_with_migration_pulls_a_waiting_thread_over)
     CHECK_EQ(S.ok[0], 1);
     CHECK_EQ(S.ok[1], 1);
     CHECK_EQ(S.cpu[1], 0);
+}
+
+TEST(a_mutex_owner_inherits_its_waiters_priority)
+{
+    uint64_t heap;
+    rl_ctx *c = setup(&heap);
+    uint32_t me = 0;
+    hos_lock();
+    hos_handle_add(&hos_current()->obj, &me);
+    hos_unlock();
+    *(uint32_t *)(void *)(t_mem() + S.mutex) = me;
+    hos_thread *self = hos_current();
+    uint32_t h = spawn(c, heap, F_LOCK, 0, 30, 1);
+    CHECK_EQ(start(c, h), 0);
+    for (int k = 0; k < 2000 && self->prio != 30; k++)
+        t_sleep(1000000);
+    CHECK_EQ(self->prio, 30);
+    CHECK_EQ(t_svc(c, SVC_GET_THREAD_PRIORITY, 0, HOS_CUR_THREAD, 0, 0, 0, 0), 0);
+    CHECK_EQ(c->x[1], 44);
+    CHECK_EQ(t_svc(c, SVC_ARBITRATE_UNLOCK, S.mutex, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(self->prio, 44);
+    CHECK_EQ(join(c, heap, h), 0);
+    CHECK_EQ(S.ok[0], 1);
 }
 
 TEST(a_thread_in_a_host_wait_leaves_its_core_to_the_others)

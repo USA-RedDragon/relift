@@ -589,6 +589,8 @@ void hos_sched_set_prio(hos_thread *t, int32_t prio);
 rl_result hos_sched_set_affinity(hos_thread *t, int32_t core, uint64_t mask);
 /** @brief svcGetCurrentProcessorNumber for t. Lock held. */
 int32_t hos_sched_processor(const hos_thread *t);
+/** @brief Recomputes t's dynamic priority from its base and its mutex waiters, up the owner chain. Lock held. */
+void hos_update_inheritance(hos_thread *t);
 
 /** @brief Memory svcs. */
 rl_result hos_set_heap_size(uint64_t size, uint64_t *out);
