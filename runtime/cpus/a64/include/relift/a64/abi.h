@@ -479,11 +479,11 @@ RL_RUNTIME_API uint64_t rl_fp_to_fixed(uint64_t a, unsigned from_bits, unsigned 
 RL_RUNTIME_API uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
 
 /*
- * FPSR flags on host hardware (docs/abi.md section 10.1). In a program the
- * build's FPSR census marks, lifted code is compiled with RL_FP_FLAGS and
- * strict FP semantics: host FP operations raise the host's sticky flags,
- * fp.c deposits its flags there too, and MRS FPSR ORs them, mapped to Arm
- * bits, into the FPSR slot. Programs without the mark never touch them.
+ * FPSR flags on host hardware (docs/abi.md section 10.1). The lifted
+ * functions the build's flags-live analysis marks are compiled with
+ * RL_FP_FLAGS and strict FP semantics: host FP operations raise the host's
+ * sticky flags, fp.c deposits its flags there too, and MRS FPSR ORs them,
+ * mapped to Arm bits, into the FPSR slot. Other code never reads them.
  */
 
 /** @brief 1 in lifted code of a program that produces FPSR flags (the home of the a64 frontend's FP_FLAGS slot). */
@@ -543,13 +543,13 @@ static inline uint32_t rl_mrs_fpsr_flags(uint32_t slot)
 #endif
 }
 
-/** @brief After MSR FPSR (the slot takes the value): clears the host's flags in flag-producing programs. */
-static inline void rl_msr_fpsr_flags(void)
-{
-#if defined(RL_FP_FLAGS)
-    rl_fp_host_clear();
-#endif
-}
+/**
+ * @brief After MSR FPSR (the slot takes the value): clears the host's flags.
+ * Also in code built without RL_FP_FLAGS, because a write there may start
+ * the region of a read in flag-producing code; clearing flags nothing reads
+ * changes nothing.
+ */
+static inline void rl_msr_fpsr_flags(void) { rl_fp_host_clear(); }
 
 /** @brief Raises FPSR flags an IR-built FP operation computed (compares, min/max, estimates); free without RL_FP_FLAGS. */
 static inline void rl_fp_raise(uint32_t f)
