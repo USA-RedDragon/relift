@@ -248,6 +248,7 @@ fn build_project(settings: &Settings, targets: &[String]) -> Result<Built, BoxEr
                 "-D_GNU_SOURCE",
                 "-D_DARWIN_C_SOURCE",
                 "-DRL_BUILDING_RUNTIME",
+                "-DRL_CHECKS",
             ]
             .map(String::from),
         )
