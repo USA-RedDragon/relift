@@ -1,5 +1,5 @@
 /**
- * @file audio.h
+ * @file hos_audio.h
  * @brief Audio services of the Switch guest: audren:u (the audio renderer),
  * audout:u (PCM output) and hwopus (the Opus decoder), and the timer that
  * paces them.

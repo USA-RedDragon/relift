@@ -2,7 +2,7 @@
  * @file audio_svc.c
  * @brief Registration of the audio services and guest memory access for them.
  */
-#include "audio.h"
+#include "hos_audio.h"
 
 #include <string.h>
 

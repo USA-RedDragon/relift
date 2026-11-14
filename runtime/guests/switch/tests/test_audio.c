@@ -8,7 +8,7 @@
  */
 #include "t.h"
 
-#include "audio.h"
+#include "hos_audio.h"
 
 #include <stdlib.h>
 #include <time.h>

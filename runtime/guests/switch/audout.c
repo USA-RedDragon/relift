@@ -9,7 +9,7 @@
  * released when the host has played past its end. The audio timer checks for
  * that every 5 ms and signals the buffer event.
  */
-#include "audio.h"
+#include "hos_audio.h"
 
 #include <stdlib.h>
 #include <string.h>
