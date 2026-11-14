@@ -24,5 +24,8 @@ relift-switch = { workspace = true }
 relift-switch-formats = { workspace = true }
 relift-testguest = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true
