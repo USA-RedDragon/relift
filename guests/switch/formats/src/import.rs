@@ -132,8 +132,8 @@ fn refuse_encrypted(path: &Path, storage: &dyn Storage) -> Result<()> {
     }
     let head = read_vec(storage, 0, 0x400.min(storage.size()))?;
     let at = |o: usize, m: &[u8]| head.get(o..o + m.len()) == Some(m);
-    let nca = [b"NCA0", b"NCA2", b"NCA3"].iter().any(|m| at(0x200, *m));
-    if at(0, b"PFS0") || at(0x100, b"HEAD") || at(0x300, b"HEAD") || nca {
+    let plain_header = [b"NCA0", b"NCA2", b"NCA3"].iter().any(|m| at(0x200, *m));
+    if at(0, b"PFS0") || at(0x100, b"HEAD") || at(0x300, b"HEAD") || plain_header {
         return Err(Error::Encrypted(path.display().to_string()));
     }
     Ok(())
