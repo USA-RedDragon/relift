@@ -45,6 +45,8 @@ void rl_srv_install_nv(void);
 void rl_srv_install_fs(void);
 /** @brief Registers acc:u0 with one local user, the applet manager's preselected user. */
 void rl_srv_install_acc(void);
+/** @brief Registers mm:u, the multimedia clock request service. */
+void rl_srv_install_mm(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
