@@ -16,4 +16,20 @@
  */
 RL_RUNTIME_API void rl_hos_fs_init(const char *sdmc_host_dir);
 
+/**
+ * @brief Sets the extracted romfs tree that OpenDataStorageByCurrentProcess
+ * serves as one read-only RomFS image (romfs_image.h); NULL or an empty string
+ * leaves the program without data storage. rl_srv_install_fs reads it from
+ * $RELIFT_ROMFS. Call before the guest opens the storage.
+ */
+RL_RUNTIME_API void rl_hos_fs_set_romfs(const char *dir);
+
+/**
+ * @brief Sets the directory of the add-on content trees, laid out as
+ * relift import writes them: <16 hex digit add-on id>/<index>/romfs. The
+ * guest opens an add-on by its id (index 0). rl_srv_install_fs reads it from
+ * $RELIFT_DLC.
+ */
+RL_RUNTIME_API void rl_hos_fs_set_addons(const char *dir);
+
 #endif

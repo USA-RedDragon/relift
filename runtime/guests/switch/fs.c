@@ -1,13 +1,15 @@
 /**
  * @file fs.c
  * @brief fsp-srv (IFileSystemProxy) with the SD card file system on a host
- * directory: IFileSystem, IFile and IDirectory over POSIX calls.
+ * directory: IFileSystem, IFile and IDirectory over POSIX calls. The data
+ * storages are in fs_romfs.c.
  *
  * Command ids, argument layouts and results follow switchbrew.org
  * (Filesystem services), libnx (ISC) fs_sf.h and Atmosphere's result
  * numbers for nn::fs, read as specifications.
  */
 #include "hos_fs.h"
+#include "fs_priv.h"
 #include "ipc.h"
 #include "services.h"
 
@@ -21,23 +23,6 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
-
-/** @brief nn::fs results (module 2). */
-#define FS_PATH_NOT_FOUND RL_MAKE_RESULT(2, 1)
-#define FS_PATH_ALREADY_EXISTS RL_MAKE_RESULT(2, 2)
-#define FS_TARGET_LOCKED RL_MAKE_RESULT(2, 7)
-#define FS_DIRECTORY_NOT_EMPTY RL_MAKE_RESULT(2, 8)
-#define FS_USABLE_SPACE_NOT_ENOUGH RL_MAKE_RESULT(2, 34)
-#define FS_UNEXPECTED RL_MAKE_RESULT(2, 5000)
-#define FS_INVALID_PATH RL_MAKE_RESULT(2, 6002)
-#define FS_INVALID_PATH_FORMAT RL_MAKE_RESULT(2, 6004)
-#define FS_PATH_TOO_LONG RL_MAKE_RESULT(2, 6005)
-#define FS_INVALID_OFFSET RL_MAKE_RESULT(2, 6061)
-#define FS_INVALID_SIZE RL_MAKE_RESULT(2, 6062)
-#define FS_INVALID_OPEN_MODE RL_MAKE_RESULT(2, 6072)
-#define FS_APPEND_REQUIRED RL_MAKE_RESULT(2, 6201)
-#define FS_READ_NOT_PERMITTED RL_MAKE_RESULT(2, 6202)
-#define FS_WRITE_NOT_PERMITTED RL_MAKE_RESULT(2, 6203)
 
 /** @brief Size of a guest path buffer (FspPath) in bytes. */
 #define FS_GUEST_PATH 0x301u
@@ -708,6 +693,10 @@ static rl_result disable_auto_save_data_creation(rl_ipc_req *r)
 static const rl_ipc_cmd proxy_cmds[] = {
     { 1, "SetCurrentProcess", set_current_process },
     { 18, "OpenSdCardFileSystem", open_sd_card_file_system },
+    { 200, "OpenDataStorageByCurrentProcess", rl_fs_open_data_storage_current },
+    { 201, "OpenDataStorageByProgramId", rl_fs_open_data_storage_program },
+    { 202, "OpenDataStorageByDataId", rl_fs_open_data_storage_data_id },
+    { 203, "OpenPatchDataStorageByCurrentProcess", rl_fs_open_patch_data_storage },
     { 1003, "DisableAutoSaveDataCreation", disable_auto_save_data_creation },
 };
 
@@ -755,4 +744,5 @@ void rl_srv_install_fs(void)
         sdmc = "./sdmc";
     make_dirs(sdmc);
     rl_hos_fs_init(sdmc);
+    rl_fs_romfs_env();
 }
