@@ -143,15 +143,17 @@ fn exclusive_pairs_report_status() {
 }
 
 #[test]
-fn unpredictable_and_unsupported_words_are_refused() {
+fn unpredictable_and_unallocated_words_are_refused() {
     let ldr_post_same = 0xf840_0400 | (1 << 5) | 1;
     assert!(matches!(
         lift(ldr_post_same, PC),
         Err(LiftError::Unpredictable(_))
     ));
+    let unallocated = 0x0200_0000;
+    assert!(relift_cpu_a64::decode::decode(unallocated).is_none());
     assert!(matches!(
-        lift(0x1e60_2820, PC),
-        Err(LiftError::Unsupported(_))
+        lift(unallocated, PC),
+        Err(LiftError::Unallocated(_))
     ));
     assert!(supported().count() > 150);
 }

@@ -6,7 +6,7 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, Order, UnOp, Width};
+use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
 
 use crate::decode::Encoding;
 use crate::lift::LiftError;
@@ -16407,6 +16407,261 @@ pub(super) fn FCMLT_asimdmisc_FZ(word: u32, b: &mut Builder, st: &mut St) -> Res
     }
 }
 
+/// `FCVTL_asimdmisc_L`.
+///
+/// Split on the word bits `0x00400000`.
+/// 1 of 2 arms are unsupported: FPConvert__1 on 16 bits.
+///
+/// Cut: ENV, FPConvert__1, V_read, V_set.
+pub(super) fn FCVTL_asimdmisc_L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTL_asimdmisc_L;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            return Err(LiftError::Unsupported(ENC));
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 30) & 0x1;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let s7: bool = s6 == (0i128);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v10 = st.v_read(b, s5 as u32, 128);
+            let v11 = b.extract(v10, 64, Width::new(64));
+            let v12 = if s7 { v8 } else { v11 };
+            let v13 = b.extract(v12, 0, Width::new(32));
+            let v14 = rt::Fp::new(32).convert(b, v13, &rt::Fp::new(64));
+            let v15 = b.konst(Width::new(64), 0x0);
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 32, Width::new(32));
+            let v18 = rt::Fp::new(32).convert(b, v17, &rt::Fp::new(64));
+            let v19 = b.extract(v16, 0, Width::new(64));
+            let v20 = b.concat(v18, v19);
+            st.v_set(b, s4 as u32, v20, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTN_asimdmisc_N`.
+///
+/// Split on the word bits `0x00400000`.
+/// 1 of 2 arms are unsupported: FPConvert__1 on 16 bits.
+///
+/// Cut: ENV, FPConvert__1, V_read, V_set.
+pub(super) fn FCVTN_asimdmisc_N(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTN_asimdmisc_N;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            return Err(LiftError::Unsupported(ENC));
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 30) & 0x1;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = b.extract(v7, 0, Width::new(64));
+            let v9 = rt::Fp::new(64).convert(b, v8, &rt::Fp::new(32));
+            let v10 = b.konst(Width::new(32), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 64, Width::new(64));
+            let v13 = rt::Fp::new(64).convert(b, v12, &rt::Fp::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let s16: bool = s6 == (0i128);
+            if s16 {
+                st.v_set(b, s4 as u32, v15, None);
+            }
+            let s17: bool = !s16;
+            let v18 = st.v_read(b, s4 as u32, 64);
+            let v19 = b.concat(v15, v18);
+            if s17 {
+                st.v_set(b, s4 as u32, v19, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTZS_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPToFixed, V_read, V_set.
+pub(super) fn FCVTZS_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZS_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fp_to_fixed(b, v6, 0, true, FpRound::Zero, 32);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fp_to_fixed(b, v10, 0, true, FpRound::Zero, 32);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s3 as u32, v15, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fp_to_fixed(b, v6, 0, true, FpRound::Zero, 32);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fp_to_fixed(b, v10, 0, true, FpRound::Zero, 32);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            let v17 = rt::Fp::new(32).fp_to_fixed(b, v16, 0, true, FpRound::Zero, 32);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            let v23 = rt::Fp::new(32).fp_to_fixed(b, v22, 0, true, FpRound::Zero, 32);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = rt::Fp::new(64).fp_to_fixed(b, v6, 0, true, FpRound::Zero, 64);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).fp_to_fixed(b, v10, 0, true, FpRound::Zero, 64);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCVTZU_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPToFixed, V_read, V_set.
+pub(super) fn FCVTZU_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZU_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fp_to_fixed(b, v6, 0, false, FpRound::Zero, 32);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fp_to_fixed(b, v10, 0, false, FpRound::Zero, 32);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s3 as u32, v15, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fp_to_fixed(b, v6, 0, false, FpRound::Zero, 32);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fp_to_fixed(b, v10, 0, false, FpRound::Zero, 32);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            let v17 = rt::Fp::new(32).fp_to_fixed(b, v16, 0, false, FpRound::Zero, 32);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            let v23 = rt::Fp::new(32).fp_to_fixed(b, v22, 0, false, FpRound::Zero, 32);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = rt::Fp::new(64).fp_to_fixed(b, v6, 0, false, FpRound::Zero, 64);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).fp_to_fixed(b, v10, 0, false, FpRound::Zero, 64);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FDIV_asimdsame_only`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -18330,6 +18585,87 @@ pub(super) fn FNEG_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v18 = b.extract(v12, 0, Width::new(64));
             let v19 = b.concat(v17, v18);
             st.v_set(b, s3 as u32, v19, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FRINTM_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPRoundInt, V_read, V_set.
+pub(super) fn FRINTM_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTM_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).round_int(b, v6, FpRound::Floor);
+            let v8 = b.konst(Width::new(32), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).round_int(b, v10, FpRound::Floor);
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).round_int(b, v6, FpRound::Floor);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).round_int(b, v10, FpRound::Floor);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            let v17 = rt::Fp::new(32).round_int(b, v16, FpRound::Floor);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            let v23 = rt::Fp::new(32).round_int(b, v22, FpRound::Floor);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = rt::Fp::new(64).round_int(b, v6, FpRound::Floor);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).round_int(b, v10, FpRound::Floor);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -49752,6 +50088,127 @@ pub(super) fn SADDLV_asimdall_only(
     }
 }
 
+/// `SCVTF_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FixedToFP, V_read, V_set.
+pub(super) fn SCVTF_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 0, true);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 0, true);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s3 as u32, v15, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 0, true);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 0, true);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 0, true);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 0, true);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 0, true);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 0, true);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `SCVTF_asisdmisc_R`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_read, V_set.
+pub(super) fn SCVTF_asisdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_asisdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 0, true);
+            let v7 = b.konst(Width::new(96), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, true);
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `SHA1H_SS_cryptosha2`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_read, V_set.
@@ -79296,6 +79753,127 @@ pub(super) fn UADDW_asimddiff_W(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `UCVTF_asimdmisc_R`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FixedToFP, V_read, V_set.
+pub(super) fn UCVTF_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 0, false);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 0, false);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s3 as u32, v15, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = rt::Fp::new(32).fixed_to_fp(b, v6, 0, false);
+            let v8 = b.konst(Width::new(96), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).fixed_to_fp(b, v10, 0, false);
+            let v12 = b.extract(v9, 64, Width::new(64));
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v9, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            let v16 = b.extract(v5, 64, Width::new(32));
+            let v17 = rt::Fp::new(32).fixed_to_fp(b, v16, 0, false);
+            let v18 = b.extract(v15, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v5, 96, Width::new(32));
+            let v23 = rt::Fp::new(32).fixed_to_fp(b, v22, 0, false);
+            let v24 = b.extract(v21, 0, Width::new(96));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s3 as u32, v25, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = rt::Fp::new(64).fixed_to_fp(b, v6, 0, false);
+            let v8 = b.konst(Width::new(64), 0x0);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v5, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).fixed_to_fp(b, v10, 0, false);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.concat(v11, v12);
+            st.v_set(b, s3 as u32, v13, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `UCVTF_asisdmisc_R`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_read, V_set.
+pub(super) fn UCVTF_asisdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_asisdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 0, false);
+            let v7 = b.konst(Width::new(96), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, false);
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = b.concat(v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `UMAXV_asimdall_only`.
 ///
 /// Split on the word bits `0x40c00000`.
@@ -86876,6 +87454,10 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FCMGT_asimdsame_only => FCMGT_asimdsame_only,
         Encoding::FCMLE_asimdmisc_FZ => FCMLE_asimdmisc_FZ,
         Encoding::FCMLT_asimdmisc_FZ => FCMLT_asimdmisc_FZ,
+        Encoding::FCVTL_asimdmisc_L => FCVTL_asimdmisc_L,
+        Encoding::FCVTN_asimdmisc_N => FCVTN_asimdmisc_N,
+        Encoding::FCVTZS_asimdmisc_R => FCVTZS_asimdmisc_R,
+        Encoding::FCVTZU_asimdmisc_R => FCVTZU_asimdmisc_R,
         Encoding::FDIV_asimdsame_only => FDIV_asimdsame_only,
         Encoding::FMAXNM_asimdsame_only => FMAXNM_asimdsame_only,
         Encoding::FMAXP_asimdsame_only => FMAXP_asimdsame_only,
@@ -86890,6 +87472,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FMUL_asimdsame_only => FMUL_asimdsame_only,
         Encoding::FMUL_asisdelem_R_SD => FMUL_asisdelem_R_SD,
         Encoding::FNEG_asimdmisc_R => FNEG_asimdmisc_R,
+        Encoding::FRINTM_asimdmisc_R => FRINTM_asimdmisc_R,
         Encoding::FSUB_asimdsame_only => FSUB_asimdsame_only,
         Encoding::INS_asimdins_IR_r => INS_asimdins_IR_r,
         Encoding::INS_asimdins_IV_v => INS_asimdins_IV_v,
@@ -86939,6 +87522,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::REV32_asimdmisc_R => REV32_asimdmisc_R,
         Encoding::REV64_asimdmisc_R => REV64_asimdmisc_R,
         Encoding::SADDLV_asimdall_only => SADDLV_asimdall_only,
+        Encoding::SCVTF_asimdmisc_R => SCVTF_asimdmisc_R,
+        Encoding::SCVTF_asisdmisc_R => SCVTF_asisdmisc_R,
         Encoding::SHA1H_SS_cryptosha2 => SHA1H_SS_cryptosha2,
         Encoding::SHA1SU0_VVV_cryptosha3 => SHA1SU0_VVV_cryptosha3,
         Encoding::SHA1SU1_VV_cryptosha2 => SHA1SU1_VV_cryptosha2,
@@ -86997,6 +87582,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::UADDLV_asimdall_only => UADDLV_asimdall_only,
         Encoding::UADDL_asimddiff_L => UADDL_asimddiff_L,
         Encoding::UADDW_asimddiff_W => UADDW_asimddiff_W,
+        Encoding::UCVTF_asimdmisc_R => UCVTF_asimdmisc_R,
+        Encoding::UCVTF_asisdmisc_R => UCVTF_asisdmisc_R,
         Encoding::UMAXV_asimdall_only => UMAXV_asimdall_only,
         Encoding::UMAX_asimdsame_only => UMAX_asimdsame_only,
         Encoding::UMINV_asimdall_only => UMINV_asimdall_only,
