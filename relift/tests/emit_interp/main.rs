@@ -119,6 +119,7 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
                 },
             )]),
             tables: BTreeMap::new(),
+            pads: Default::default(),
         })
         .collect();
     let out = emit(

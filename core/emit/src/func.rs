@@ -244,9 +244,11 @@ fn drop_dead_sets(
 
 /// The return addresses of the calls in `f` that are resume points.
 fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<u64> {
-    f.insts
-        .values()
-        .filter_map(|i| match i {
+    f.pads
+        .iter()
+        .copied()
+        .filter(|p| f.insts.contains_key(p))
+        .chain(f.insts.values().filter_map(|i| match i {
             Insn::Lifted { block: b, .. } => match (b.exit.flow, b.exit.next) {
                 (Flow::Call { ret }, Next::Const(t))
                     if targets.get(&t).is_some_and(|t| t.resume_point) =>
@@ -256,7 +258,7 @@ fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<
                 _ => None,
             },
             Insn::Failed(_) => None,
-        })
+        }))
         .collect()
 }
 

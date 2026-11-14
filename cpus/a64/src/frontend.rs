@@ -39,6 +39,10 @@ impl Frontend for A64 {
         Some(regs::SP)
     }
 
+    fn pad_resume(&self) -> Option<&'static str> {
+        Some("rl_pad_resume")
+    }
+
     fn preserved(&self) -> Vec<Reg> {
         (19..=29).map(regs::x).chain([regs::SP]).collect()
     }

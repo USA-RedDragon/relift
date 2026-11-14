@@ -26,6 +26,7 @@ fn function(entry: u64, blocks: &[(u64, Block)]) -> Function<'_> {
             .map(|(pc, b)| (*pc, Insn::Lifted { block: b, raw: 0 }))
             .collect::<BTreeMap<_, _>>(),
         tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
     }
 }
 
@@ -123,6 +124,7 @@ fn failures_and_unknown_intrinsics_report_undefined() {
         span: 4,
         insts: BTreeMap::from([(0x40, Insn::Failed(&fail))]),
         tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     assert!(shard(&out).contains("return rl_undefined(c, mem, UINT64_C(0x40), 0xdeadu);"));
@@ -208,6 +210,7 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
             ),
         ]),
         tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -616,4 +619,39 @@ fn a_write_every_path_overwrites_before_a_read_is_dropped() {
     // anything reads or stores it; the second's is read by the branch.
     assert!(!body("100").contains("r4 ="), "{s}");
     assert!(body("104").contains("r4 ="), "{s}");
+}
+
+#[test]
+fn landing_pads_are_resume_points_with_a_table_entry_of_their_own() {
+    let code = [
+        branch(0x02, 0, 3),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks[0..3]);
+    f.pads = BTreeSet::from([0x108]);
+    let g = function(0x10c, &blocks[3..4]);
+    let out = emit(&Toy, &[f, g], &[], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("if (c->pend.sp == r2)\n            goto lp_dispatch;"),
+        "{s}"
+    );
+    assert!(
+        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x108):\n        c->pend.kind = RL_PEND_NONE;\n        RL_RELOAD();\n        goto L_108;"),
+        "{s}"
+    );
+    assert!(
+        s.contains("RL_FN_MAY_UNWIND | RL_FN_LANDING_PADS, F_100"),
+        "{s}"
+    );
+    let unit = &out.files.last().expect("unit").text;
+    assert!(
+        unit.contains(
+            "{ UINT64_C(0x108), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, rl_toy_pad_resume },"
+        ),
+        "{unit}"
+    );
 }

@@ -64,6 +64,9 @@ pub struct Function<'a> {
     /// Known targets of computed jumps, by the jump's address; the emitter
     /// branches to those inside the function directly.
     pub tables: BTreeMap<u64, Vec<u64>>,
+    /// The landing pads in the function: resume points the unwinder enters
+    /// by a computed jump (`RL_FN_LANDING_PADS`).
+    pub pads: BTreeSet<u64>,
 }
 
 /// A host function that replaces the guest function at `entry`.
@@ -551,6 +554,19 @@ fn unit_table(
             )
         })
         .collect();
+    if let Some(resume) = fe.pad_resume() {
+        let taken: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
+        let mut pads: BTreeSet<u64> = fns.iter().flat_map(|f| f.pads.iter().copied()).collect();
+        pads.retain(|p| !taken.contains(p) && !overrides.iter().any(|o| o.entry == *p));
+        for p in pads {
+            entries.push((
+                p,
+                format!(
+                    "    {{ UINT64_C({p:#x}), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, {resume} }},"
+                ),
+            ));
+        }
+    }
     for o in overrides {
         let fl = if o.may_unwind {
             "RL_FN_OVERRIDE | RL_FN_MAY_UNWIND"

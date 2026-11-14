@@ -282,6 +282,7 @@ fn emit_modules(
                     })
                     .collect::<BTreeMap<_, _>>(),
                 tables: f.tables.clone(),
+                pads: f.pads.clone(),
             })
             .collect();
         let overrides: Vec<relift_emit::Override> = analysis

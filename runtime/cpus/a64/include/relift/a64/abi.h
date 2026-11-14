@@ -478,6 +478,14 @@ typedef struct rl_resume_regs {
 RL_RUNTIME_API int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r);
 
 /**
+ * @brief The dispatch-table function at every landing pad that is not a
+ * function entry: a computed jump to the pad stores the context, records
+ * {pc = the pad, sp = c->sp, RL_PEND_UNWIND} and returns RL_PENDING, so the
+ * host stack unwinds to the frame whose landing-pad dispatch owns the pad.
+ */
+RL_RUNTIME_API int rl_pad_resume(rl_ctx *c, uint8_t *mem);
+
+/**
  * @brief Where a guest libc's jmp_buf keeps the registers setjmp saves:
  * x19 to x30 as 12 consecutive 8-byte slots, sp, and d8 to d15 as 8
  * consecutive slots (docs/abi.md section 7.1).

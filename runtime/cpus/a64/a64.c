@@ -104,6 +104,16 @@ int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r)
     return RL_PENDING;
 }
 
+int rl_pad_resume(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->pend.pc = c->pc;
+    c->pend.sp = c->sp;
+    c->pend.kind = RL_PEND_UNWIND;
+    c->pend.code = 0;
+    return RL_PENDING;
+}
+
 uint64_t rl_mrs_cntpct(rl_ctx *c)
 {
     (void)c;

@@ -316,6 +316,7 @@ fn part<'a>(name: String, entry: u64, map: &'a BTreeMap<u64, (u32, Block)>) -> F
             })
             .collect(),
         tables: BTreeMap::new(),
+        pads: Default::default(),
     }
 }
 
