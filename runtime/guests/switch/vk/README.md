@@ -109,18 +109,82 @@ Providers:
 
 - Headless (`rl_vk_headless_surfaces`, `VK_EXT_headless_surface`): tests and
   offscreen runs. Lavapipe and NVIDIA have it.
-- SDL3 (the player, after this lane): the `vi` service owns the host window. A
-  layer that opens an `nn::vi` layer records which `SDL_Window` backs which
-  native window handle (the handle is the guest address the guest later puts in
-  `VkViSurfaceCreateInfoNN.window`). The provider's `instance_extensions` are
-  `SDL_Vulkan_GetInstanceExtensions`, and `create` looks the window up and calls
-  `SDL_Vulkan_CreateSurface(window, instance, NULL, &surface)`. The player loads
-  Vulkan through SDL (`SDL_Vulkan_LoadLibrary`, then
-  `SDL_Vulkan_GetVkGetInstanceProcAddr` into `rl_vk_config.gipa`), so the surface
-  and the forwarding layer use the same loader, the bundled MoltenVK on macOS.
-  Window size and the swapchain extent follow the host window. The guest's
-  1280x720 or 1920x1080 is the requested extent; when the host surface reports a
-  fixed `currentExtent`, the guest sees that extent.
+- Window (`rl_vk_window_surfaces`, `vk_window.c`): the player. It needs a
+  window backend that is up (`core/include/relift/window.h`; SDL3 in
+  `runtime/host/window_sdl3.c`, built with `VIDEO=sdl3`). Each `vi` layer the
+  guest draws on gets one resizable host window, opened at the layer's size
+  (`SetLayerSize`, else the display resolution) when the guest creates its
+  first surface on it. The guest's `nn::vi::NativeWindowHandle` points into
+  SDK data, so the provider maps a handle it has not seen to the layer the
+  guest opened or created last (`rl_vi_render_layer`) and remembers the pair.
+  The provider's `instance_extensions` are the backend's
+  (`SDL_Vulkan_GetInstanceExtensions`) and `create` calls
+  `SDL_Vulkan_CreateSurface`. The player loads Vulkan through the backend
+  (`SDL_Vulkan_LoadLibrary`, then `SDL_Vulkan_GetVkGetInstanceProcAddr` into
+  `rl_vk_config.gipa`), so the surface and the forwarding layer use the same
+  loader, the bundled MoltenVK on macOS. Window close asks the guest to exit
+  through `am` (`rl_am_request_exit`; a second close quits at once), and
+  focus changes go to `rl_am_set_focus`. Keyboard and gamepads reach `hid`
+  through `rl_input_publish`. SDL3 handles macOS and Windows the same way; only
+  Linux (Wayland and X11) has been run so far.
+
+## Swapchains
+
+A Switch title never sees its window change, so the guest's swapchain is not
+the host's. `vkCreateSwapchainKHR` (`vk_swap.c`) makes guest images of the
+guest's extent and format (with `TRANSFER_SRC` added) and a host swapchain on
+the host surface. `vkGetPhysicalDeviceSurfaceCapabilities*KHR` report the
+layer's size as `currentExtent`, two to eight images and identity transform.
+Acquire returns a guest image and acquires a host image with the guest's
+semaphore and fence; present submits a blit of the guest image into that host
+image (letterboxed, linear filter when the format allows) after the guest's
+wait semaphores, then presents the host image. The host swapchain is recreated
+when the provider's size generation changes (`rl_vk_surface_provider.extent`)
+or the host reports out of date or suboptimal, while no guest image is held;
+the guest never sees `VK_ERROR_OUT_OF_DATE_KHR` from a resize. Guest swapchain
+handles are ids from the layer (`0x57` in the top byte). Commands on
+swapchains the layer does not implement (`vkGetSwapchainStatusKHR`, shared,
+counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.
+
+## Loading
+
+The player adds `rl_vk_switch_hook()` with `rl_switch_add_hook` before
+`rl_switch_main`. When the process is up, the hook claims a page after the
+modules for the thunk table and a map window above the layout (both marked
+inaccessible with `rl_hos_reserve*`, so the guest's own allocations never land
+there), starts the layer and registers the thunk unit; without host Vulkan it
+does nothing and the guest's own Vulkan runs. While loading, the loader reads
+each module's dynamic section through MOD0 and asks the hook about symbols:
+
+- An undefined symbol that names a forwarded command (a module's import of
+  `vkGetInstanceProcAddr`) has its `GLOB_DAT`, `JUMP_SLOT` and `ABS64`
+  relocations written with the thunk's guest address.
+- A function a module defines with such a name (the `vulkan` module's
+  exports) gets an `RL_FN_OVERRIDE` entry at its address, so a call that
+  reaches the module's address anyway (a guest dynamic linker that binds the
+  import to the module later) runs the thunk.
+
+### Where the game's calls are intercepted
+
+At the Vulkan API, at the importing module's boundary, not below the guest's
+Vulkan driver. A title's main module imports `vkGetInstanceProcAddr` and
+nothing else from the SDK's `vulkan` module; that module is the Vulkan loader
+plus Nintendo's driver, which reaches the GPU through the ICD and `nvdrv`
+(`/dev/nvhost-*` ioctls and GPU command buffers). Forwarding at the import
+skips the guest loader and driver entirely:
+
+- The API boundary is documented and stable (`vk.xml`), so the thunks are
+  generated and every command the guest can look up is covered; the lower
+  layer is a private ioctl and command-buffer interface.
+- Below the driver the work is GPU command streams for a Maxwell GPU and
+  Maxwell shader binaries, which is the separate Maxwell emulation path, not
+  forwarding. Forwarding instead keeps the host driver's speed and its shader
+  compiler (with SPIR-V the guest hands in).
+- The guest driver would also have to be lifted and run (large, hand-tuned,
+  with its own threads), only to produce command streams the host then has to
+  decode again.
+- The `vulkan` module's exports are replaced as well as resolved, so the
+  boundary holds even when a module calls them directly.
 
 ## Tests
 
@@ -131,10 +195,20 @@ real driver. It covers instance and physical devices with pNext chains, a GPU
 clear of an image copied into a mapped buffer and read back through guest
 memory in each map mode, guest-written mapped memory copied by the GPU, faults on
 unmapped ranges, a debug messenger calling guest code, `VK_NN_vi_surface` to a
-headless swapchain with a present, and bad handles and unknown structs. With no
+headless swapchain with a present and a host resize that recreates the host
+swapchain behind the guest's, and bad handles and unknown structs. With no
 host Vulkan the tests are skipped unless `RELIFT_VK_REQUIRE` is set; CI sets it
 on Linux, where it installs Mesa's lavapipe. `RELIFT_VK_TEST_DEVICE` limits the
 device tests to devices whose name contains it.
+
+`demo/vk_present.c` is a synthetic program that goes the whole way: a
+hand-written lifted module whose only import is `vkGetInstanceProcAddr`, loaded
+by `rl_switch_main` with the hook, which creates a `vi` stray layer and sets
+its size over IPC, then an instance, a `VK_NN_vi_surface` surface, a device and
+a swapchain, clears and presents `RELIFT_DEMO_FRAMES` frames (60 by default)
+and reads the last one back through mapped memory. `make test` runs it
+headless (`RELIFT_VIDEO=none`); `make VIDEO=sdl3 BUILD=build/video vk-present`
+shows it in a window.
 
 ## Regenerating
 
@@ -149,7 +223,8 @@ the pin, the configuration or the generator means regenerating and committing
 
 ## Not done yet
 
-- The SDL3 provider and the `vi` service side (above).
+- `relift build` does not compile this folder or `runtime/host` yet, and the
+  program it emits does not add the hook.
 - Commands that take file descriptors or platform handles (`*_fd`,
   `VK_KHR_display`), which a guest cannot use on the host: their lookups return
   NULL.
