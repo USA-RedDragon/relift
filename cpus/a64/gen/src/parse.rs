@@ -450,11 +450,11 @@ impl Parser {
 
     /// A pattern.
     pub(crate) fn pat(&mut self) -> PResult<Pat> {
-        let mut p = self.pat_atom()?;
+        let mut p = self.pat_typed()?;
         loop {
             if self.at("@") {
                 self.skip()?;
-                let q = self.pat_atom()?;
+                let q = self.pat_typed()?;
                 p = match p {
                     Pat::Concat(mut ps) => {
                         ps.push(q);
@@ -462,10 +462,6 @@ impl Parser {
                     }
                     p => Pat::Concat(vec![p, q]),
                 };
-            } else if self.at(":") {
-                self.skip()?;
-                let t = self.typ()?;
-                p = Pat::Typed(Box::new(p), t);
             } else if self.at("as") {
                 self.skip()?;
                 let nm = self.ident()?;
@@ -473,6 +469,18 @@ impl Parser {
             } else {
                 break;
             }
+        }
+        Ok(p)
+    }
+
+    /// A pattern atom with its type annotations: as in Sail, `p : T` binds
+    /// tighter than `@`, so `x : bits(3) @ 0b0` is `(x : bits(3)) @ 0b0`.
+    fn pat_typed(&mut self) -> PResult<Pat> {
+        let mut p = self.pat_atom()?;
+        while self.at(":") {
+            self.skip()?;
+            let t = self.typ()?;
+            p = Pat::Typed(Box::new(p), t);
         }
         Ok(p)
     }
@@ -760,7 +768,12 @@ impl Parser {
                 guard = Some(self.expr(0)?);
             }
             self.expect("=>")?;
-            let body = self.expr(0)?;
+            let mut body = self.expr(0)?;
+            if self.at("=") {
+                self.skip()?;
+                let rhs = self.expr(0)?;
+                body = Expr::Block(vec![Stmt::Assign(body, rhs)]);
+            }
             arms.push(Arm { pat, guard, body });
             if self.at(",") {
                 self.skip()?;
@@ -1019,4 +1032,58 @@ pub fn parse_expr(text: &str) -> Result<Expr, String> {
 /// Parses `text` as a type.
 pub fn parse_typ(text: &str) -> Result<Typ, String> {
     Parser::new(text)?.typ()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pat(text: &str) -> Pat {
+        Parser::new(text)
+            .and_then(|mut p| p.pat())
+            .expect("pattern parses")
+    }
+
+    fn bits(n: i128) -> Typ {
+        Typ::App("bits".into(), vec![TypArg::Expr(Expr::Lit(Lit::Int(n)))])
+    }
+
+    fn typed(name: &str, n: i128) -> Pat {
+        Pat::Typed(Box::new(Pat::Id(name.into())), bits(n))
+    }
+
+    #[test]
+    fn a_type_annotation_binds_tighter_than_concatenation() {
+        assert_eq!(
+            pat("x : bits(3) @ 0b01 @ y : bits(2)"),
+            Pat::Concat(vec![
+                typed("x", 3),
+                Pat::Lit(Lit::Bits { width: 2, value: 1 }),
+                typed("y", 2),
+            ])
+        );
+        assert_eq!(
+            pat("(x @ y) : bits(8)"),
+            Pat::Typed(
+                Box::new(Pat::Concat(vec![Pat::Id("x".into()), Pat::Id("y".into())])),
+                bits(8)
+            )
+        );
+    }
+
+    #[test]
+    fn an_assignment_is_a_match_arm_body() {
+        let e = parse_expr("match r { 0b0 => B = v, _ => () }").expect("match parses");
+        let Expr::Match(_, arms) = e else {
+            panic!("not a match: {e:?}");
+        };
+        assert_eq!(
+            arms[0].body,
+            Expr::Block(vec![Stmt::Assign(
+                Expr::Id("B".into()),
+                Expr::Id("v".into())
+            )])
+        );
+        assert_eq!(arms[1].body, Expr::Lit(Lit::Unit));
+    }
 }
