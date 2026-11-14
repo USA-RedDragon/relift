@@ -1,5 +1,5 @@
 use relift_guest::toy::{Toy, branch, word};
-use relift_guest::{Module, Root, RootKind, Section, SectionKind};
+use relift_guest::{Module, Pad, Root, RootKind, Section, SectionKind};
 
 use super::*;
 
@@ -33,6 +33,7 @@ fn module(code: &[[u8; 4]], data: &[u8], roots: &[u64]) -> Module {
                 name: None,
             })
             .collect(),
+        pads: Vec::new(),
     }
 }
 
@@ -607,4 +608,41 @@ fn discover_more_returns_only_what_a_new_root_reaches() {
             .functions
             .is_empty()
     );
+}
+
+#[test]
+fn a_landing_pad_that_serves_a_call_joins_the_function() {
+    let mut m = module(
+        &[
+            branch(0x02, 0, 3),
+            word(0x03, 0, 0),
+            word(0x03, 0, 0),
+            word(0x03, 0, 0),
+        ],
+        &[],
+        &[BASE],
+    );
+    let plain = discover(&Toy, &m);
+    assert!(!plain.functions[&BASE].insts.contains_key(&(BASE + 8)));
+    m.pads = vec![Pad {
+        site: BASE,
+        addr: BASE + 8,
+    }];
+    let a = discover(&Toy, &m);
+    assert_eq!(entries(&a), [BASE, BASE + 12]);
+    let f = &a.functions[&BASE];
+    assert!(f.insts.contains_key(&(BASE + 8)));
+    assert_eq!(f.pads, BTreeSet::from([BASE + 8]));
+}
+
+#[test]
+fn a_pad_whose_site_is_in_no_function_is_ignored() {
+    let mut m = module(&[word(0x03, 0, 0), word(0x03, 0, 0)], &[], &[BASE]);
+    m.pads = vec![Pad {
+        site: BASE + 0x100,
+        addr: BASE + 4,
+    }];
+    let a = discover(&Toy, &m);
+    assert!(a.functions[&BASE].pads.is_empty());
+    assert_eq!(a.functions[&BASE].insts.len(), 1);
 }

@@ -71,6 +71,14 @@ pub trait Frontend {
     /// unwind target's (`c->pend.sp`); `None` for a CPU without one.
     fn stack_pointer(&self) -> Option<Reg>;
 
+    /// The host function the dispatch table holds at every landing pad, which
+    /// is not a function entry: a computed jump to a pad (an unwinder's
+    /// install step) must unwind the host stack to the frame that owns it.
+    /// `None` when the guest has no landing pads.
+    fn pad_resume(&self) -> Option<&'static str> {
+        None
+    }
+
     /// The registers the CPU's calling convention keeps across a call, which
     /// analysis may assume unchanged after one.
     fn preserved(&self) -> Vec<Reg>;
@@ -209,6 +217,16 @@ pub struct Root {
     pub name: Option<String>,
 }
 
+/// A landing pad of an unwind table: where the unwinder resumes a function
+/// when an exception passes through a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Pad {
+    /// The first address of the call-site range the pad serves.
+    pub site: u64,
+    /// The landing pad.
+    pub addr: u64,
+}
+
 /// One guest module as analysis sees it: its bytes at their load address,
 /// its sections, and the entries the guest's formats name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -223,6 +241,8 @@ pub struct Module {
     pub sections: Vec<Section>,
     /// The known entries.
     pub roots: Vec<Root>,
+    /// The landing pads of the unwind tables, by call-site address.
+    pub pads: Vec<Pad>,
 }
 
 impl Module {
@@ -257,6 +277,7 @@ mod tests {
                 kind: SectionKind::Code,
             }],
             roots: Vec::new(),
+            pads: Vec::new(),
         };
         assert_eq!(m.bytes_at(0x1006), Some(&[7u8, 8][..]));
         assert_eq!(m.bytes_at(0xfff), None);

@@ -110,7 +110,9 @@ pub fn module(p: &Placed) -> Module {
         }
     }
     let img = &nso.image;
+    let mut pads = Vec::new();
     if let Ok(Some(m)) = nso.mod0() {
+        pads = crate::eh::landing_pads(img, m.eh_frame_hdr_start as usize, p.base);
         for a in unwind_starts(img, m.eh_frame_hdr_start as usize) {
             roots.push(Root {
                 addr: p.base.wrapping_add(a),
@@ -140,6 +142,7 @@ pub fn module(p: &Placed) -> Module {
         image: nso.image.clone(),
         sections,
         roots,
+        pads,
     }
 }
 

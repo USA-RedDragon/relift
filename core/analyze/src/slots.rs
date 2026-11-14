@@ -409,6 +409,7 @@ mod tests {
                 .map(|b| (b.pc, Insn::Lifted(b.into())))
                 .collect(),
             tables: BTreeMap::new(),
+            pads: BTreeSet::new(),
         }
     }
 

@@ -88,6 +88,10 @@ impl Frontend for Toy {
         Some(Reg(2))
     }
 
+    fn pad_resume(&self) -> Option<&'static str> {
+        Some("rl_toy_pad_resume")
+    }
+
     fn preserved(&self) -> Vec<Reg> {
         vec![Reg(2)]
     }

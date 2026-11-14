@@ -1,5 +1,6 @@
 //! The Switch guest, over `relift-switch-formats` and `relift-cpu-a64`.
 
+mod eh;
 pub mod program;
 
 use relift_cpu_a64::decode::Features;

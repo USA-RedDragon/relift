@@ -63,6 +63,9 @@ pub struct Function {
     pub insts: BTreeMap<u64, Insn>,
     /// The targets of the jump tables, by the address of their computed jump.
     pub tables: BTreeMap<u64, Vec<u64>>,
+    /// The landing pads of the module's unwind tables that serve a call in
+    /// this function and lie in its extent.
+    pub pads: BTreeSet<u64>,
 }
 
 impl Function {
@@ -111,6 +114,7 @@ struct Lifter<'a> {
     fe: &'a dyn Frontend,
     module: &'a Module,
     cache: HashMap<u64, Insn>,
+    pads: BTreeMap<u64, Vec<u64>>,
 }
 
 impl Lifter<'_> {
@@ -162,14 +166,24 @@ pub fn successors(module: &Module, entries: &BTreeSet<u64>, entry: u64, insn: &I
     out
 }
 
-/// A function's instructions and its jump tables.
-type Extent = (BTreeMap<u64, Insn>, BTreeMap<u64, Vec<u64>>);
+fn module_pads(module: &Module) -> BTreeMap<u64, Vec<u64>> {
+    let mut by_site: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for p in &module.pads {
+        by_site.entry(p.site).or_default().push(p.addr);
+    }
+    by_site
+}
+
+/// A function's instructions, its jump tables and its landing pads.
+type Extent = (BTreeMap<u64, Insn>, BTreeMap<u64, Vec<u64>>, BTreeSet<u64>);
 
 /// Lifts the extent of the function at `entry`: everything reachable over
-/// [`successors`] and over the jump tables found in it.
+/// [`successors`], over the jump tables found in it and from the landing
+/// pads that serve its calls.
 fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Extent {
     let mut insts: BTreeMap<u64, Insn> = BTreeMap::new();
     let mut tables: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    let mut pads: BTreeSet<u64> = BTreeSet::new();
     let mut work = vec![entry];
     let preserved = lifter.fe.preserved();
     loop {
@@ -180,6 +194,18 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
             let i = lifter.get(pc);
             work.extend(successors(lifter.module, entries, entry, &i));
             insts.insert(pc, i);
+        }
+        let new_pads: Vec<u64> = lifter
+            .pads
+            .range(entry..)
+            .filter(|(site, _)| insts.contains_key(site))
+            .flat_map(|(_, p)| p.iter().copied())
+            .filter(|p| !pads.contains(p) && !entries.contains(p))
+            .collect();
+        if !new_pads.is_empty() {
+            pads.extend(new_pads.iter().copied());
+            work.extend(new_pads);
+            continue;
         }
         let jumps: Vec<(u64, Arc<Block>)> = insts
             .iter()
@@ -230,7 +256,8 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         }
     }
     tables.retain(|_, t| !t.is_empty());
-    (insts, tables)
+    pads.retain(|p| insts.contains_key(p));
+    (insts, tables, pads)
 }
 
 /// Direct call targets and computed code addresses in `insts`.
@@ -344,6 +371,7 @@ fn explore(
         fe,
         module,
         cache: HashMap::new(),
+        pads: module_pads(module),
     };
     let mut done: BTreeSet<u64> = skip.keys().copied().collect();
     // A function's extent stops at the entries of other functions, except
@@ -366,7 +394,7 @@ fn explore(
             break;
         }
         for e in todo {
-            let (insts, _) = extent(&mut lifter, &entries, e);
+            let (insts, _, _) = extent(&mut lifter, &entries, e);
             for (a, k) in new_entries(module, granule, &insts) {
                 kinds.entry(a).or_insert(k);
             }
@@ -389,7 +417,7 @@ fn explore(
         .into_iter()
         .enumerate()
         .map(|(n, (e, kind))| {
-            let (insts, tables) = extent(&mut lifter, &entries, e);
+            let (insts, tables, pads) = extent(&mut lifter, &entries, e);
             failed.extend(
                 insts
                     .iter()
@@ -409,6 +437,7 @@ fn explore(
                     kind,
                     insts,
                     tables,
+                    pads,
                 },
             )
         })
