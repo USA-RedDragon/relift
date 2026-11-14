@@ -36,13 +36,22 @@ fn a_tiny_program_builds_and_runs() {
     );
     let game = std::fs::read_dir(root.join("cache").join("projects"))
         .unwrap()
-        .map(|e| e.unwrap().path().join("build").join("host").join("game"))
+        .map(|e| {
+            e.unwrap()
+                .path()
+                .join("build/host/dev/rt")
+                .join(if cfg!(target_os = "macos") {
+                    "librelift_rt.dylib"
+                } else {
+                    "librelift_rt.so"
+                })
+        })
         .find(|p| p.is_file())
-        .expect("a built game");
+        .expect("the runtime library of the dev build");
     let bytes = std::fs::read(&game).unwrap();
     assert!(
         bytes.windows(17).any(|w| w == b"rl_vk_switch_hook"),
-        "the game dropped the Vulkan hook's object"
+        "the runtime library dropped the Vulkan hook's object"
     );
     assert!(!stderr.contains("vulkan-forwarding turned on"), "{stderr}");
 }

@@ -35,6 +35,49 @@ fn bne(off: i32) -> u32 {
 
 const RET: u32 = 0xd65f_03c0;
 
+fn mul(rd: u32, rn: u32, rm: u32) -> u32 {
+    0x9b00_7c00 | (rm << 16) | (rn << 5) | rd
+}
+
+fn add(rd: u32, rn: u32, rm: u32) -> u32 {
+    0x8b00_0000 | (rm << 16) | (rn << 5) | rd
+}
+
+fn blr(rn: u32) -> u32 {
+    0xd63f_0000 | (rn << 5)
+}
+
+/// The guest offset of the function only [`hidden_call`] reaches.
+pub const HIDDEN: u64 = 0x40;
+
+/// The tiny program with a call that discovery cannot follow: the loop
+/// computes the address of the function that sets the message length with
+/// a multiply, which constant propagation does not evaluate, and calls it
+/// with `blr`. Nothing else names that function, so a build misses it.
+fn hidden_call() -> Vec<u8> {
+    let code = [
+        movz(19, 3),
+        adr(0, 0x1000 - 0x04),
+        movz(8, (HIDDEN / 4) as u32),
+        movz(9, 4),
+        mul(8, 8, 9),
+        adr(10, -0x14),
+        add(8, 10, 8),
+        blr(8),
+        svc(0x27),
+        subs_imm(19, 19, 1),
+        bne(-0x24),
+        svc(0x07),
+        0x1400_0000,
+    ];
+    let mut text: Vec<u8> = code.iter().flat_map(|w| w.to_le_bytes()).collect();
+    text.resize(HIDDEN as usize, 0);
+    for w in [movz(1, MSG.len() as u32), RET] {
+        text.extend_from_slice(&w.to_le_bytes());
+    }
+    text
+}
+
 fn program(undefined: bool) -> Vec<u8> {
     let code = [
         movz(19, 3),
@@ -84,10 +127,19 @@ pub fn dump(root: &Path) -> PathBuf {
 /// As [`dump`]; with `undefined`, the called function holds one word that
 /// does not lift.
 pub fn dump_with(root: &Path, undefined: bool) -> PathBuf {
+    dump_text(root, program(undefined))
+}
+
+/// As [`dump`], with the call to a hidden function of [`hidden_call`].
+pub fn dump_hidden(root: &Path) -> PathBuf {
+    dump_text(root, hidden_call())
+}
+
+fn dump_text(root: &Path, text: Vec<u8>) -> PathBuf {
     let exefs = root.join("dump/exefs");
     std::fs::create_dir_all(&exefs).expect("the dump dir is creatable");
     let nso = build(&NsoSpec {
-        text: program(undefined),
+        text,
         rodata: MSG.to_vec(),
         data: vec![0; 0x10],
         bss: 0x10,
