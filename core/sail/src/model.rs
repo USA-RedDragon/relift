@@ -54,6 +54,9 @@ pub struct Model {
     /// choices, which the generator must not inline silently.
     pub stubs: std::collections::HashSet<String>,
     parsed: RefCell<HashMap<String, Parsed>>,
+    /// The `$relift patch` and `$relift relax` lines of the overlays
+    /// loaded, with the number of function texts each changed.
+    pub patched: Vec<(String, usize)>,
     sigs: RefCell<HashMap<String, Option<Rc<Sig>>>>,
 }
 
@@ -92,6 +95,48 @@ const LIB_FILES: &[&str] = &[
     "mono_rewrites.sail",
     "concurrency_interface.sail",
 ];
+
+/// Whether `name` matches `glob`, where `*` matches any run of characters.
+fn glob_match(glob: &str, name: &str) -> bool {
+    let parts: Vec<&str> = glob.split('*').collect();
+    if parts.len() == 1 {
+        return glob == name;
+    }
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if name.len() < first.len() + last.len() || !name.starts_with(first) || !name.ends_with(last) {
+        return false;
+    }
+    let mut rest = &name[first.len()..name.len() - last.len()];
+    for p in &parts[1..parts.len() - 1] {
+        match rest.find(p) {
+            Some(i) => rest = &rest[i + p.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Makes the bits set in `mask` match anything in the first bit-list
+/// pattern (`[b, b, ...] as name`) of a clause text; bit 0 of `mask` is the
+/// list's last element. Gives `None` when the text has no such pattern.
+fn relax_pattern(c: &str, mask: u32) -> Option<String> {
+    let e = c.find("] as ")?;
+    let s = c[..e].rfind('[')? + 1;
+    let toks: Vec<&str> = c[s..e].split(',').map(str::trim).collect();
+    let n = toks.len();
+    let new: Vec<&str> = toks
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if n - 1 - i < 32 && mask >> (n - 1 - i) & 1 == 1 {
+                "_"
+            } else {
+                t
+            }
+        })
+        .collect();
+    Some(format!("{}{}{}", &c[..s], new.join(", "), &c[e..]))
+}
 
 /// Drops `$` directives, and the lines of inactive `$ifdef` and `$ifndef`
 /// branches (nothing is defined), keeping line numbering.
@@ -214,17 +259,158 @@ impl Model {
         Ok(m)
     }
 
+    /// Loads an overlay: a `.sail` file of a CPU layer whose items replace
+    /// the model's. A `function` replaces every clause of that function; a
+    /// `function clause` of a scattered function goes before the model's
+    /// clauses of it, so it wins the clause choice; `val`, `register`,
+    /// `let`, `enum`, `struct` and the rest replace or add by name. Lines
+    /// starting with `$relift` edit the model before the items load:
+    ///
+    /// - `$relift patch GLOB FROM ==> TO`: replaces the text FROM with TO
+    ///   (`\n` for a line break) in every function whose name matches GLOB
+    ///   (`*` matches any run of characters).
+    /// - `$relift relax F NEEDLE MASK`: in the clauses of scattered function
+    ///   F whose text contains NEEDLE, the bits set in MASK (hex) of the
+    ///   first bit-list pattern match anything.
+    /// - `$relift drop_clause F NEEDLE`: removes the clauses of F whose text
+    ///   contains NEEDLE.
+    ///
+    /// Every `patch` and `relax` line is listed in [`Model::patched`] with
+    /// the number of texts it changed, so one that stops matching after a
+    /// model update shows as 0. Other `$relift` lines are the CPU layer's.
+    /// Gives the names of the replaced functions.
+    pub fn load_overlay(&mut self, path: &Path) -> std::io::Result<Vec<String>> {
+        let bytes = std::fs::read(path)?;
+        let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
+        Ok(self.overlay_text(&text))
+    }
+
+    /// [`Model::load_overlay`] on the overlay's text.
+    pub fn overlay_text(&mut self, text: &str) -> Vec<String> {
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("$relift patch ") {
+                let hit = self.patch_text(rest);
+                self.patched.push((line.to_string(), hit));
+            } else if let Some(rest) = line.strip_prefix("$relift relax ") {
+                let hit = self.relax(rest);
+                self.patched.push((line.to_string(), hit));
+            } else if let Some(rest) = line.strip_prefix("$relift drop_clause ")
+                && let Some((f, needle)) = rest.split_once(' ')
+                && let Some(list) = self.funcs.get_mut(f)
+            {
+                list.retain(|c| !c.contains(needle.trim()));
+                self.parsed.borrow_mut().remove(f);
+            }
+        }
+        let mut replaced = Vec::new();
+        let mut prepend: Vec<(String, Vec<String>)> = Vec::new();
+        for it in split_items(&preprocess(text)) {
+            let kw = first_word(&it).to_string();
+            if kw == "function" {
+                let b = it.as_bytes();
+                let Some(p) = ws1(b, "function".len()) else {
+                    continue;
+                };
+                if it[p..].starts_with("clause") {
+                    if let Some(q) = ws1(b, p + "clause".len())
+                        && let Some(e) = ident(b, q)
+                    {
+                        let name = &it[q..e];
+                        match prepend.iter_mut().find(|(n, _)| n == name) {
+                            Some((_, list)) => list.push(it.clone()),
+                            None => prepend.push((name.to_string(), vec![it.clone()])),
+                        }
+                    }
+                    continue;
+                }
+                if let Some(e) = ident(b, p) {
+                    let name = it[p..e].to_string();
+                    self.funcs.insert(name.clone(), vec![it.clone()]);
+                    self.parsed.borrow_mut().remove(&name);
+                    replaced.push(name);
+                }
+                continue;
+            }
+            if kw == "val" {
+                self.sigs.borrow_mut().clear();
+            }
+            let _ = self.add(&kw, &it);
+        }
+        for (name, mut cls) in prepend {
+            let list = self.funcs.entry(name.clone()).or_default();
+            cls.append(list);
+            *list = cls;
+            self.parsed.borrow_mut().remove(&name);
+        }
+        replaced
+    }
+
+    /// One `$relift patch` line; gives the number of texts changed.
+    fn patch_text(&mut self, rest: &str) -> usize {
+        let Some((glob, sub)) = rest.split_once(' ') else {
+            return 0;
+        };
+        let Some((from, to)) = sub.split_once(" ==> ") else {
+            return 0;
+        };
+        let from = from.trim().replace("\\n", "\n");
+        let to = to.trim().replace("\\n", "\n");
+        let mut hit = 0;
+        for (name, list) in self.funcs.iter_mut() {
+            if !glob_match(glob, name) {
+                continue;
+            }
+            for c in list.iter_mut() {
+                if c.contains(&from) {
+                    *c = c.replace(&from, &to);
+                    hit += 1;
+                }
+            }
+            self.parsed.borrow_mut().remove(name);
+        }
+        hit
+    }
+
+    /// One `$relift relax` line; gives the number of clauses changed.
+    fn relax(&mut self, rest: &str) -> usize {
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        let [group, needle, m] = f[..] else {
+            return 0;
+        };
+        let Ok(mask) = u32::from_str_radix(m.trim_start_matches("0x"), 16) else {
+            return 0;
+        };
+        let Some(list) = self.funcs.get_mut(group) else {
+            return 0;
+        };
+        let mut hit = 0;
+        for c in list.iter_mut().filter(|c| c.contains(needle)) {
+            if let Some(new) = relax_pattern(c, mask) {
+                *c = new;
+                hit += 1;
+            }
+        }
+        self.parsed.borrow_mut().remove(group);
+        hit
+    }
+
     /// Adds the items of one `.sail` file.
     pub fn load_file(&mut self, path: &Path) -> std::io::Result<()> {
         let bytes = std::fs::read(path)?;
         let text = String::from_utf8_lossy(&bytes)
             .replace("\r\n", "\n")
             .replace('\r', "\n");
-        for it in split_items(&preprocess(&text)) {
+        self.load_text(&text);
+        Ok(())
+    }
+
+    /// Adds the items of one `.sail` text.
+    pub fn load_text(&mut self, text: &str) {
+        for it in split_items(&preprocess(text)) {
             let kw = first_word(&it).to_string();
             let _ = self.add(&kw, &it);
         }
-        Ok(())
     }
 
     /// Records one top-level item; `None` when it does not have the expected
@@ -718,4 +904,56 @@ fn extern_of(raw: &str) -> Option<String> {
         }
     }
     block_at(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn globs() {
+        assert!(glob_match("exec_*", "exec_add"));
+        assert!(glob_match("*_txt", "a_txt"));
+        assert!(glob_match("a*b*c", "a_b_c"));
+        assert!(!glob_match("a*b*c", "a_c"));
+        assert!(!glob_match("ab*ba", "aba"));
+        assert!(glob_match("same", "same"));
+        assert!(!glob_match("same", "other"));
+    }
+
+    #[test]
+    fn relaxes_the_bit_list() {
+        let c = "function clause dec ([bitone, bitzero, bitzero, _] as op) = x";
+        let r = relax_pattern(c, 0b0110).expect("has a pattern");
+        assert_eq!(r, "function clause dec ([bitone, _, _, _] as op) = x");
+        assert_eq!(relax_pattern("function f x = x", 1), None);
+    }
+
+    #[test]
+    fn overlay_replaces_prepends_and_patches() {
+        let mut m = Model::default();
+        m.load_text(
+            "function f x = x + 1\n\
+             function g x = f(x) + 2\n\
+             function clause dec ([bitone, bitzero] as op) = f(0)\n\
+             function clause dec ([bitzero, bitzero] as op) = g(0)\n",
+        );
+        let replaced = m.overlay_text(
+            "$relift patch g f(x) + 2 ==> f(x) + 3\n\
+             $relift patch nothing* a ==> b\n\
+             $relift relax dec g(0) 0x2\n\
+             $relift drop_clause dec f(0)\n\
+             function f x = x + 7\n\
+             function clause dec ([bitone, bitone] as op) = f(1)\n",
+        );
+        assert_eq!(replaced, vec!["f".to_string()]);
+        assert_eq!(m.funcs["f"], vec!["function f x = x + 7".to_string()]);
+        assert!(m.funcs["g"][0].contains("f(x) + 3"));
+        let dec = &m.funcs["dec"];
+        assert_eq!(dec.len(), 2);
+        assert!(dec[0].contains("f(1)"));
+        assert!(dec[1].contains("[_, bitzero] as op"));
+        let hits: Vec<usize> = m.patched.iter().map(|p| p.1).collect();
+        assert_eq!(hits, vec![1, 0, 1]);
+    }
 }
