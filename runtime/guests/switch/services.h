@@ -31,6 +31,8 @@ void rl_srv_install_set(void);
 void rl_srv_install_am(void);
 /** @brief Installs apm, apm:sys, apm:p and psm. */
 void rl_srv_install_apm(void);
+/** @brief Installs lm, the log manager. */
+void rl_srv_install_lm(void);
 /** @brief Installs hid, hid:sys, hid:dbg and irs. */
 void rl_srv_install_hid(void);
 /** @brief Installs time:u, time:a, time:s, time:su, time:r. */
