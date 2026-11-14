@@ -156,3 +156,120 @@ pub(crate) fn code_addresses(
     }
     out
 }
+
+/// What a forward constant propagation knows about a register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fact {
+    Const(u128),
+    Unknown,
+}
+
+/// Meets `from` into `into` (a missing register is unknown); whether
+/// `into` changed.
+fn meet(into: &mut HashMap<Reg, Fact>, from: &HashMap<Reg, Fact>) -> bool {
+    let mut changed = false;
+    for (r, g) in into.iter_mut() {
+        if *g != Fact::Unknown && from.get(r) != Some(g) {
+            *g = Fact::Unknown;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// The registers known to hold one constant when each instruction of the
+/// function at `entry` starts, by forward propagation over its control flow.
+/// Nothing is known at the entry; a call or trap keeps only the `preserved`
+/// registers.
+pub(crate) fn in_states(
+    insts: &BTreeMap<u64, Insn>,
+    entry: u64,
+    preserved: &[Reg],
+) -> HashMap<u64, HashMap<Reg, u128>> {
+    let mut ins: HashMap<u64, HashMap<Reg, Fact>> = HashMap::new();
+    ins.insert(entry, HashMap::new());
+    let mut work = vec![entry];
+    let mut steps = 0usize;
+    while let Some(pc) = work.pop() {
+        steps += 1;
+        if steps > 200_000 {
+            break;
+        }
+        let Some(Insn::Lifted(b)) = insts.get(&pc) else {
+            continue;
+        };
+        let state = ins.get(&pc).cloned().unwrap_or_default();
+        let known: HashMap<Reg, u128> = state
+            .iter()
+            .filter_map(|(r, f)| match f {
+                Fact::Const(c) => Some((*r, *c)),
+                Fact::Unknown => None,
+            })
+            .collect();
+        let mut vals = Vec::with_capacity(b.insts.len());
+        let mut out = state.clone();
+        for n in 0..b.insts.len() {
+            let v = eval(b, &vals, &known, n);
+            vals.push(v);
+        }
+        for inst in &b.insts {
+            if let Op::Set(r, x) = &inst.op {
+                let f = vals[x.index()].map_or(Fact::Unknown, Fact::Const);
+                out.insert(*r, f);
+            }
+        }
+        let mut succ = Vec::new();
+        let kill = matches!(b.exit.flow, Flow::Call { .. } | Flow::Trap(_));
+        if kill {
+            for (r, f) in out.iter_mut() {
+                if !preserved.contains(r) {
+                    *f = Fact::Unknown;
+                }
+            }
+        }
+        match (b.exit.flow, b.exit.next) {
+            (Flow::Return, _) => {}
+            (Flow::Call { ret }, _) => succ.push(ret),
+            (_, Next::Const(t)) => succ.push(t),
+            (
+                _,
+                Next::Select {
+                    taken, not_taken, ..
+                },
+            ) => {
+                succ.push(taken);
+                succ.push(not_taken);
+            }
+            (_, Next::Dynamic(_)) => {}
+        }
+        for s in succ {
+            if !insts.contains_key(&s) {
+                continue;
+            }
+            match ins.get_mut(&s) {
+                None => {
+                    ins.insert(s, out.clone());
+                    work.push(s);
+                }
+                Some(e) => {
+                    if meet(e, &out) {
+                        work.push(s);
+                    }
+                }
+            }
+        }
+    }
+    ins.into_iter()
+        .map(|(pc, m)| {
+            (
+                pc,
+                m.into_iter()
+                    .filter_map(|(r, f)| match f {
+                        Fact::Const(c) => Some((r, c)),
+                        Fact::Unknown => None,
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}

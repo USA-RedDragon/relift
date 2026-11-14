@@ -154,3 +154,44 @@ fn roots_outside_code_or_misaligned_are_ignored() {
     let a = discover(&Toy, &m);
     assert_eq!(entries(&a), [BASE]);
 }
+
+#[test]
+fn jump_tables_are_resolved_into_the_function() {
+    // r1 = index; if r1 == 0 skip... toy has no compare-with-bound, so the
+    // bound comes from cmpz on a derived value: r2 = r1 - 3 (bz when r1 == 3
+    // means "out of range" for indexes 0..3).
+    let table = BASE + 0x40;
+    let m = module(
+        &[
+            word(0x04, 2, 0),              // 0x00 li r2, 0
+            word(0x05, 2, 1),              // 0x04 add r2, r1
+            word(0x09, 2, (-3i16) as u16), // 0x08 addi r2, -3
+            word(0x0d, 2, 0),              // 0x0c cmpz r2
+            branch(0x0e, 0, 8),            // 0x10 bz +8 -> 0x30
+            word(0x04, 0, table as u16),   // 0x14 li r0, table
+            word(0x05, 1, 1),              // 0x18 add r1, r1
+            word(0x05, 1, 1),              // 0x1c add r1, r1
+            word(0x05, 1, 1),              // 0x20 add r1, r1 (r1 *= 8)
+            word(0x05, 0, 1),              // 0x24 add r0, r1
+            word(0x0a, 0, 0),              // 0x28 ld r0, [r0]
+            word(0x06, 0, 0),              // 0x2c br r0
+            word(0x03, 0, 0),              // 0x30 ret
+            word(0x03, 0, 0),              // 0x34 ret
+            word(0x03, 0, 0),              // 0x38 ret
+            word(0x03, 0, 0),              // 0x3c ret
+        ],
+        &[0x1000u64 + 0x34, 0x1000 + 0x38, 0x1000 + 0x3c]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    let f = &a.functions[&BASE];
+    assert_eq!(
+        f.tables[&(BASE + 0x2c)],
+        [BASE + 0x34, BASE + 0x38, BASE + 0x3c]
+    );
+    assert!(f.insts.contains_key(&(BASE + 0x3c)));
+    assert_eq!(a.functions.len(), 1);
+}
