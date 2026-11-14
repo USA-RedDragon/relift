@@ -51,6 +51,10 @@ pub trait Frontend {
     /// The register file of every lifted block.
     fn regs(&self) -> RegFile;
 
+    /// The stack pointer, which the landing-pad check compares with the
+    /// unwind target's (`c->pend.sp`); `None` for a CPU without one.
+    fn stack_pointer(&self) -> Option<Reg>;
+
     /// The registers the CPU's calling convention keeps across a call, which
     /// analysis may assume unchanged after one.
     fn preserved(&self) -> Vec<Reg>;

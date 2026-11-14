@@ -20,6 +20,10 @@ impl Frontend for A64 {
         regs::regs()
     }
 
+    fn stack_pointer(&self) -> Option<Reg> {
+        Some(regs::SP)
+    }
+
     fn preserved(&self) -> Vec<Reg> {
         (19..=29).map(regs::x).chain([regs::SP]).collect()
     }

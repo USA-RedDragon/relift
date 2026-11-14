@@ -84,6 +84,10 @@ impl Frontend for Toy {
         RegFile::new("toy", &DECLS)
     }
 
+    fn stack_pointer(&self) -> Option<Reg> {
+        Some(Reg(2))
+    }
+
     fn preserved(&self) -> Vec<Reg> {
         vec![Reg(2)]
     }
