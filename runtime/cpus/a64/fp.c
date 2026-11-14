@@ -460,6 +460,41 @@ static uint64_t fp_round_int(fpenv *v, const fmt *f, uint64_t a, uint32_t rmode,
     return round_pack(v, f, u.sign, m, 0, RL_RM_NEAREST);
 }
 
+/** @brief FPRoundIntN: rounds to an integral value that fits a signed
+ * n-bit integer; a NaN, an infinity or an out-of-range result gives
+ * -2^(n-1) and raises Invalid Operation (and not Inexact). */
+static uint64_t fp_round_int_n(fpenv *v, const fmt *f, uint64_t a, uint32_t rmode, unsigned n)
+{
+    unp u = unpack(v, f, a);
+    unsigned rm = rm_arg(v, rmode);
+    uint64_t most_neg = (1ull << (f->bits - 1)) | ((uint64_t)(f->bias + (int)n - 1) << f->fbits);
+    rl_u128 m, lim = (rl_u128)1 << (n - 1);
+    int inexact = 0;
+    if (u.k == K_INF || is_nan(&u)) {
+        v->flags |= FPSR_IOC;
+        return most_neg;
+    }
+    if (u.k == K_ZERO)
+        return make_zero(f, u.sign);
+    if (u.e >= 64) {
+        v->flags |= FPSR_IOC;
+        return most_neg;
+    }
+    if (u.e >= 0)
+        m = (rl_u128)u.sig << (unsigned)u.e;
+    else
+        m = round_shift(u.sig, (unsigned)(-u.e), u.sign, rm, &inexact);
+    if (m > lim || (m == lim && !u.sign)) {
+        v->flags |= FPSR_IOC;
+        return most_neg;
+    }
+    if (inexact)
+        v->flags |= FPSR_IXC;
+    if (m == 0)
+        return make_zero(f, u.sign);
+    return round_pack(v, f, u.sign, m, 0, RL_RM_ZERO);
+}
+
 static unsigned recip_sqrt_estimate(unsigned a)
 {
     uint64_t b = 512, aa;
@@ -1027,6 +1062,16 @@ uint64_t rl_fpn_round_int(unsigned bits, uint64_t a, uint32_t rmode, int exact, 
 {
     FPN_BEGIN(bits)
     r = fp_round_int(&v, f, a, rmode, exact);
+    commit(&v, fpsr);
+    return r;
+}
+
+uint64_t rl_fpn_round_int_n(unsigned bits, uint64_t a, uint32_t rmode, unsigned n, uint32_t fpcr, uint32_t *fpsr)
+{
+    FPN_BEGIN(bits)
+    if (n != 32 && n != 64)
+        return 0;
+    r = fp_round_int_n(&v, f, a, rmode, n);
     commit(&v, fpsr);
     return r;
 }

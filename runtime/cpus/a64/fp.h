@@ -24,6 +24,8 @@ uint64_t rl_fpn_muladd(unsigned bits, uint64_t addend, uint64_t a, uint64_t b, u
 uint64_t rl_fpn_sqrt(unsigned bits, uint64_t a, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRoundInt with rmode from enum rl_rmode; exact for FRINTX. */
 uint64_t rl_fpn_round_int(unsigned bits, uint64_t a, uint32_t rmode, int exact, uint32_t fpcr, uint32_t *fpsr);
+/** @brief FPRoundIntN (FRINT32Z, FRINT32X, FRINT64Z, FRINT64X) to an n-bit (32 or 64) signed range. */
+uint64_t rl_fpn_round_int_n(unsigned bits, uint64_t a, uint32_t rmode, unsigned n, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRecipEstimate (FRECPE). */
 uint64_t rl_fpn_recip_est(unsigned bits, uint64_t a, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRSqrtEstimate (FRSQRTE). */

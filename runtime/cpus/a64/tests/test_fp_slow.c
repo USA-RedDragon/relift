@@ -534,6 +534,68 @@ TEST(fp_slow_vector_one_source)
     CHECK_EQ(c->v[0].s[3], 0x40400000u);
 }
 
+TEST(fp_slow_frint32_frint64_scalar)
+{
+    rl_ctx *c = boot(RP);
+    CHECK(c != NULL);
+    /* FRINT32X S0, S1 rounds per FPCR (toward plus infinity here). */
+    c->v[1].s[0] = 0x3FC00000u;
+    CHECK_EQ(run(c, 0x1E28C020u), RL_OK);
+    CHECK_EQ(c->v[0].s[0], 0x40000000u);
+    CHECK_EQ(c->fpsr, IXC);
+    /* Out of the 32-bit range: the most negative integer and Invalid only. */
+    c->fpsr = 0;
+    c->v[1].s[0] = 0x4F32D05Eu;
+    CHECK_EQ(run(c, 0x1E28C020u), RL_OK);
+    CHECK_EQ(c->v[0].s[0], 0xCF000000u);
+    CHECK_EQ(c->fpsr, IOC);
+    /* FRINT32Z: -2^31 itself fits; the next value down does not. */
+    c->fpsr = 0;
+    c->v[1].s[0] = 0xCF000000u;
+    CHECK_EQ(run(c, 0x1E284020u), RL_OK);
+    CHECK_EQ(c->v[0].s[0], 0xCF000000u);
+    CHECK_EQ(c->fpsr, 0);
+    c->v[1].s[0] = 0xCF000001u;
+    CHECK_EQ(run(c, 0x1E284020u), RL_OK);
+    CHECK_EQ(c->v[0].s[0], 0xCF000000u);
+    CHECK_EQ(c->fpsr, IOC);
+    /* FRINT64X D0, D1 of a quiet NaN. */
+    c->fpsr = 0;
+    c->v[1].d[0] = 0x7FF8000000000001ull;
+    CHECK_EQ(run(c, 0x1E69C020u), RL_OK);
+    CHECK_EQ(c->v[0].d[0], 0xC3E0000000000000ull);
+    CHECK_EQ(c->v[0].d[1], 0);
+    CHECK_EQ(c->fpsr, IOC);
+}
+
+TEST(fp_slow_frint32_frint64_vector)
+{
+    rl_ctx *c = boot(RZ | FZ);
+    CHECK(c != NULL);
+    /* FRINT32X V0.4S, V1.4S toward zero with FZ. */
+    c->v[1].s[0] = 0x40200000u;
+    c->v[1].s[1] = 0xBF000000u;
+    c->v[1].s[2] = 0x501502F9u;
+    c->v[1].s[3] = 0x00000001u;
+    CHECK_EQ(run(c, 0x6E21E820u), RL_OK);
+    CHECK_EQ(c->v[0].s[0], 0x40000000u);
+    CHECK_EQ(c->v[0].s[1], 0x80000000u);
+    CHECK_EQ(c->v[0].s[2], 0xCF000000u);
+    CHECK_EQ(c->v[0].s[3], 0);
+    CHECK_EQ(c->fpsr, IXC | IOC | IDC);
+    /* FRINT64Z V0.2D, V1.2D rounds toward zero whatever the FPCR says. */
+    c->fpcr = RP;
+    c->fpsr = 0;
+    c->v[1].d[0] = 0x43E0000000000000ull;
+    c->v[1].d[1] = 0xC00599999999999Aull;
+    CHECK_EQ(run(c, 0x4E61F820u), RL_OK);
+    CHECK_EQ(c->v[0].d[0], 0xC3E0000000000000ull);
+    CHECK_EQ(c->v[0].d[1], 0xC000000000000000ull);
+    CHECK_EQ(c->fpsr, IOC | IXC);
+    /* FRINT64Z with 2D lanes needs Q. */
+    CHECK_EQ(run(c, 0x0E61F820u), RL_PENDING);
+}
+
 TEST(fp_slow_unknown_encoding_stops)
 {
     rl_ctx *c = boot(RZ);

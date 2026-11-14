@@ -182,6 +182,14 @@ static int scalar_dp1(rl_ctx *c, uint64_t pc, uint32_t insn)
     case 0x0C: r = rl_fpn_round_int(w, a, RL_RM_AWAY, 0, f, s); break;
     case 0x0E: r = rl_fpn_round_int(w, a, RL_RM_FPCR, 1, f, s); break;
     case 0x0F: r = rl_fpn_round_int(w, a, RL_RM_FPCR, 0, f, s); break;
+    case 0x10: /* FRINT32Z, FRINT32X, FRINT64Z, FRINT64X */
+    case 0x11:
+    case 0x12:
+    case 0x13:
+        if (w == 16)
+            return unsupported(c, pc, insn);
+        r = rl_fpn_round_int_n(w, a, (op & 1u) ? RL_RM_FPCR : RL_RM_ZERO, (op & 2u) ? 64 : 32, f, s);
+        break;
     default: return unsupported(c, pc, insn);
     }
     write_scalar(c, w, rd, r);
@@ -378,7 +386,7 @@ static int simd_same(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     return RL_OK;
 }
 
-enum { M_CVT, M_SCVTF, M_ABS, M_NEG, M_SQRT, M_RINT, M_CMP0, M_RECPE, M_RSQRTE, M_CVTN, M_CVTL };
+enum { M_CVT, M_SCVTF, M_ABS, M_NEG, M_SQRT, M_RINT, M_RINTN, M_CMP0, M_RECPE, M_RSQRTE, M_CVTN, M_CVTL };
 
 /* Two-register miscellaneous, vector (asimdmisc) or scalar (asisdmisc). */
 static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half)
@@ -386,7 +394,7 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     unsigned q = (insn >> 30) & 1u, u = (insn >> 29) & 1u, a = (insn >> 23) & 1u, sz = (insn >> 22) & 1u;
     unsigned opc = (insn >> 12) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
     unsigned w = half ? 16 : (sz ? 64 : 32), lanes = scalar ? 1 : (q ? 128 : 64) / w;
-    int kind, exact = 0, cmp = 0;
+    int kind, exact = 0, cmp = 0, nbits = 32;
     uint32_t rm = RL_RM_NEAREST;
     uint32_t f = fpcr_for(c, w), *s = &c->fpsr;
     switch ((u << 6) | (a << 5) | opc) {
@@ -398,6 +406,8 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     case 0x1B: kind = M_CVT; rm = RL_RM_NEGINF; break;
     case 0x1C: kind = M_CVT; rm = RL_RM_AWAY; break;
     case 0x1D: kind = M_SCVTF; break;
+    case 0x1E: kind = M_RINTN; rm = RL_RM_ZERO; break;
+    case 0x1F: kind = M_RINTN; rm = RL_RM_ZERO; nbits = 64; break;
     case 0x2C: kind = M_CMP0; cmp = E_CMGT; break;
     case 0x2D: kind = M_CMP0; cmp = E_CMEQ; break;
     case 0x2E: kind = M_CMP0; cmp = -E_CMGT; break;
@@ -413,6 +423,8 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     case 0x5B: kind = M_CVT; rm = RL_RM_NEGINF; break;
     case 0x5C: kind = M_CVT; rm = RL_RM_AWAY; break;
     case 0x5D: kind = M_SCVTF; break;
+    case 0x5E: kind = M_RINTN; rm = RL_RM_FPCR; break;
+    case 0x5F: kind = M_RINTN; rm = RL_RM_FPCR; nbits = 64; break;
     case 0x6C: kind = M_CMP0; cmp = E_CMGE; break;
     case 0x6D: kind = M_CMP0; cmp = -E_CMGE; break;
     case 0x6F: kind = M_NEG; break;
@@ -424,6 +436,8 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
     default: return unsupported(c, pc, insn);
     }
     if (half && (kind == M_CVTN || kind == M_CVTL))
+        return unsupported(c, pc, insn);
+    if ((half || scalar) && kind == M_RINTN)
         return unsupported(c, pc, insn);
     if (kind == M_CVTN || kind == M_CVTL) {
         /* sz 0: half and single; sz 1: single and double. */
@@ -462,6 +476,7 @@ static int simd_misc(rl_ctx *c, uint64_t pc, uint32_t insn, int scalar, int half
         case M_RECPE: x = rl_fpn_recip_est(w, e, f, s); break;
         case M_RSQRTE: x = rl_fpn_rsqrt_est(w, e, f, s); break;
         case M_CMP0: x = cmp > 0 ? elem2(c, w, cmp, e, 0) : elem2(c, w, -cmp, 0, e); break;
+        case M_RINTN: x = rl_fpn_round_int_n(w, e, rm, (unsigned)nbits, f, s); break;
         default: x = rl_fpn_round_int(w, e, rm, exact, f, s); break;
         }
         lane_set(&r, w, i, x);
