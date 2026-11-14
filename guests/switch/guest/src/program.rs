@@ -340,7 +340,14 @@ pub fn known(bytes: &[u8]) -> Option<Known> {
 /// The C file that describes the placed modules to the runtime's loader
 /// and holds their images, with the process parameters from `npdm` and the
 /// lifted unit tables `units` (C symbols of `const rl_unit`) to register.
-pub fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String]) -> String {
+/// `fp_flags` turns on FPSR flag production in the runtime before the
+/// program starts (the build's FPSR census found a read that can be used).
+pub fn program_c(
+    placed: &[Placed],
+    npdm: Option<&Npdm>,
+    units: &[String],
+    fp_flags: bool,
+) -> String {
     let mut t = String::from("#include <stdint.h>\n#include \"loader.h\"\n");
     for u in units {
         let _ = writeln!(t, "extern const rl_unit {u};");
@@ -406,9 +413,13 @@ pub fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String]) -> St
         placed.len(),
         units.len()
     );
-    t.push_str(
-        "int main(int argc, char **argv) { return rl_switch_main(&rl_program, argc, argv); }\n",
-    );
+    if fp_flags {
+        t.push_str("#include \"a64.h\"\nint main(int argc, char **argv) { rl_a64_set_fp_flags(1); return rl_switch_main(&rl_program, argc, argv); }\n");
+    } else {
+        t.push_str(
+            "int main(int argc, char **argv) { return rl_switch_main(&rl_program, argc, argv); }\n",
+        );
+    }
     t
 }
 
@@ -505,7 +516,7 @@ mod tests {
     #[test]
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
-        let c = program_c(&p, None, &["rl_unit_main".into()]);
+        let c = program_c(&p, None, &["rl_unit_main".into()], false);
         assert!(c.contains("static const rl_unit *const static_units[] = { &rl_unit_main, };"));
         assert!(c.contains("static const uint8_t image0[] = {\n1,2,3,4,"));
         assert!(c.contains(
