@@ -39,7 +39,15 @@ layer and the ones below:
   granule);
 - `a64_tests`: the A64 layer over the core, with a test guest that is no OS;
 - `switch_tests`: the Switch guest, driven through `rl_ctx` and `rl_svc` the
-  way lifted code does.
+  way lifted code does;
+- `crash_test`: the crash handler alone (`core/crash.c` and its host-OS
+  part), with hand-written lifted functions in a function map that make a
+  wild guest store, run an illegal instruction or crash in host code; it
+  runs each case as a child and checks the report. It links nothing else
+  from the runtime, so it also builds on Windows:
+  `zig cc -target x86_64-windows-gnu -std=c11 -O2 -mcx16 -fno-sanitize=undefined
+  -fno-omit-frame-pointer -DRL_STATIC_RUNTIME -Icore/include -Icore
+  core/crash*.c core/tests/crash/crash_test.c -o crash_test.exe`.
 
 `<binary> [substring...]` runs the tests whose names contain a substring;
 each test runs in its own process. `RELIFT_TEST_NOFORK=1` runs them in one

@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/a64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 1.
+Contract version: `RL_ABI_VERSION` 2.
 
 ## 0. Runtime layers
 
@@ -415,7 +415,8 @@ Windows). [verified: hot-load prototype]
 
 **Registration ABI** (`rl_unit`): ABI version, `sizeof(rl_ctx)`, 32-byte
 image id, sorted `rl_fn_entry` array (guest address, guest size, flags,
-host function), optional line map, code base, name. The same record
+host function), optional line map, code base, name, and the function maps of its shards
+(section 11). The same record
 describes statically linked code: relift emits `rl_units.c` with
 `rl_static_units[]` and `rl_static_unit_count`, and the runtime fills the
 table from them at start-up.
@@ -500,7 +501,7 @@ Mac unless marked]:
 
 Guest `setjmp` and `longjmp` use the same primitive as exceptions: the
 host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
-[verified: `a64_tests jmp` on x86-64 Linux]
+[verified: `a64_tests jmp` on x86-64 Linux and an Apple M2 Mac]
 
 - **Overrides.** `rl_a64_setjmp` and `rl_a64_longjmp` (`a64/abi.h`) have
   the lifted signature and replace the guest's `setjmp` and `longjmp`
@@ -722,26 +723,118 @@ are also call boundaries. [inferred]
 
 ## 11. Crash mapping
 
-What the emitter and build provide:
-- the `rl_fn_entry` table of every unit (guest address, guest size, host
-  function), which the runtime also needs for dispatch;
-- `#line` directives that map each statement to its line in the per-module
-  listing (one guest instruction per line; CodeView caps lines at 2^24, so
-  listing lines, not raw guest addresses);
-- a host-offset to guest-address line map (`rl_line_entry`), produced by
-  relift after linking from the binary's line table and the listings,
-  embedded in the unit or written as a side file;
-- builds with `-fno-omit-frame-pointer` and unwind tables.
+### Names
 
-What the runtime does on a fault or fatal report: map the faulting host pc
-through the line map to a guest address; take the host backtrace (frame
-pointers or the host unwinder) and map each host frame that lands in a unit
-to its guest function and address; print host and guest backtraces with
-module, offset and symbol. Tail-called frames are missing, as in native
-code. The guest x29 chain in guest memory is used only from a context the
-runtime captured (svc, override entry), because at a fault the live guest
-registers are host locals. [inferred; phase 6 exit test:
-an injected crash names the right guest function]
+Lifted functions are named with C identifiers that are themselves Itanium
+mangled names inside `guest::<module>`, so lldb, perf, `addr2line -C`,
+`nm -C` and llvm-cxxfilt demangle them as guest names. A mangled guest
+symbol gets the prefix `5guest<len><module>` on its first name, and every
+substitution reference is renumbered so it names the same entity.
+Unscoped names are wrapped into nested ones, and `St`, `Sa`, `Sb`, `Ss`,
+`Si`, `So` and `Sd` at the head are written out. A clone suffix such as
+`.cold` becomes an ABI tag `sfx...` on the function's own name. A plain C
+name becomes `_ZN5guest<len><module><len><name>E`, and an unnamed function
+becomes `guest::<module>::fn_<hex address>`. `relift-switch-names`
+(`guests/switch/names`) gives a name only when it maps back to exactly the
+original module and symbol, so the map has no collisions; anything else
+uses the address name. gdb does not demangle C function names, so
+`runtime/tools/gdb/relift_frames.py` adds a frame filter for `bt`.
+[verified: synthetic round-trip corpus in `cargo test`, checked against
+`cpp_demangle`; the gdb test `make -C runtime gdb-test`]
+
+### The function map
+
+Every shard emits one `rl_fn_map` (`abi_core.h`), and the unit that links
+the shards lists them in `rl_unit.maps` and `rl_unit.map_count`.
+`rl_units_register` registers them for crash reports; a program without
+units may call `rl_fn_maps_register` itself.
+
+- `rl_fn_map`: `version` (`RL_FN_MAP_VERSION`, 1), `count`, `fns` sorted by
+  guest address with ranges that do not overlap, the guest `module` name,
+  the `shard` name, the module's guest load address `module_base` (reports
+  print `module+offset`), and `text_lo`/`text_hi`, the bounds of the host
+  section that holds only lifted functions, or NULL when unknown.
+- `rl_fn_info` (40 bytes): `guest_addr`, `guest_size`, `flags` (as in the
+  dispatch entry), `fn` (the host function), `host_sym` (the identifier the
+  emitter gave it, as above) and `guest_name` (the readable guest name,
+  the demangled guest symbol, or NULL to print `host_sym`). The runtime has
+  no demangler, so the emitter writes the readable name.
+- **Lifted-code section.** The emitter defines every lifted function with
+  `RL_TEXT` (`RL_TEXT RL_LIFTED(F) { ... }`). It puts the functions in the
+  section `relift_text` on ELF, `__TEXT,__relift_text` on Mach-O and
+  `relift$m` on COFF. Each map sets `text_lo = RL_TEXT_LO` and
+  `text_hi = RL_TEXT_HI` after `RL_TEXT_BOUNDS_DECLARE();`; on Windows one
+  translation unit per image (`rl_units.c` or the hot-load unit's own file)
+  also expands `RL_TEXT_BOUNDS_DEFINE()`, two empty functions in `relift$a`
+  and `relift$z` that the linker sorts around `relift$m`. ELF and Mach-O
+  linkers define the bounds themselves (`__start_`/`__stop_`,
+  `section$start$`/`section$end$`). Bounds are per image, so a hot-loaded
+  library's maps carry its own section. Only lifted functions may go in the
+  section: a host pc inside it belongs to the nearest function start below
+  it, so the match is exact. Without bounds the runtime takes the nearest
+  start below the pc if the pc is below the next start and less than 64 KiB
+  past it, and marks the frame `(nearest)`. [verified: `crash_test` on
+  x86-64 Linux, an Apple M2 Mac and Windows 11 x86-64]
+- **Inlining.** A function clang inlines into another in the same shard has
+  no host frame, so the guest backtrace shows its caller only. The line map
+  below will recover such frames. [inferred]
+- **Build flags.** Lifted code builds with `-fno-omit-frame-pointer
+  -mno-omit-leaf-frame-pointer` on Linux and macOS, so the frame-pointer
+  walk sees leaf frames; Windows x64 uses the unwind tables, which every
+  function has. [verified: `crash_test`]
+
+### The crash handler
+
+`runtime/core/crash.c` with `crash_posix.c` (Linux, macOS) and
+`crash_win.c` (Windows), declared in `runtime/core/crash.h`. It depends
+only on the C library and the host OS.
+
+- **POSIX:** SIGSEGV, SIGBUS (macOS arm64 raises it for `PROT_NONE`) and
+  SIGILL. The core's fault handler owns SIGSEGV and SIGBUS and calls
+  `rl_crash_signal` for a fault it cannot resolve (no catcher, no guest
+  hook). The host backtrace is a frame-pointer walk from the signal
+  context's pc and frame pointer, bounded to 64 MiB above the faulting sp;
+  host symbols come from `dladdr`. After the report the default action is
+  restored and the signal ends the process (core dumps keep working).
+- **Windows:** a vectored exception handler for access violations,
+  in-page errors and illegal or privileged instructions (C++ and other
+  exceptions pass through). The host backtrace comes from
+  `RtlLookupFunctionEntry` and `RtlVirtualUnwind` on the exception's
+  context; frames print as `module+offset`. After the report the process
+  ends with the exception code.
+- **Report** (stderr; formatted in stack buffers, so it runs in the
+  handler): the kind, the host fault address and, when it lies in the guest
+  reservation or its guards (`rl_crash_set_space`, set by
+  `rl_fault_install`), the guest address; the guest function that holds the
+  faulting pc; the guest backtrace (the host frames that land in lifted
+  code, innermost first, with guest address, module+offset and name); the
+  host backtrace with the host symbol and guest name of lifted frames; and
+  the CPU layer's register summary of the current guest thread at its last
+  call boundary. Tail-called frames are missing, as in native code.
+
+```
+[relift crash] SIGSEGV at host 0x7f01eda01230 = guest address 0x40001230, host pc 0x55efb0919d74
+[relift crash] in guest function guest 0x7100001200 test+0x1200 guest::test::wild(), host _ZN5guest4test4wildEv+0x4
+[relift crash] guest backtrace (lifted frames, innermost first; tail calls leave no frame):
+[relift crash]   #0 guest 0x7100001200 test+0x1200 guest::test::wild()
+[relift crash]   #1 guest 0x7100001100 test+0x1100 guest::test::inner()
+[relift crash]   #2 guest 0x7100001000 test+0x1000 guest::test::outer()
+[relift crash] host backtrace:
+[relift crash]   #0 0x55efb0919d74 _ZN5guest4test4wildEv+0x4 (guest::test::wild())
+...
+```
+
+### Still to come
+
+- The host-offset to guest-address line map (`rl_line_entry`), produced by
+  relift after linking from the binary's line table and the per-module
+  listings (`#line` directives, one guest instruction per line; CodeView
+  caps lines at 2^24, so listing lines, not raw guest addresses), embedded
+  in the unit or written as a side file. With it a frame names the guest
+  instruction, not only the function, and inlined frames come back.
+- The guest x29 chain in guest memory is used only from a context the
+  runtime captured (svc, override entry), because at a fault the live guest
+  registers are host locals. [inferred]
 
 ## 12. Versioning
 
@@ -751,6 +844,10 @@ an injected crash names the right guest function]
   signature, constant or call shape (the one renamed field,
   `rl_dev_lift_req.fpcr` to `fp_mode`, keeps its offset and size), so the
   version stayed 1.
+- Version 2 added the function maps (`rl_fn_info`, `rl_fn_map`,
+  `rl_unit.map_count` and `rl_unit.maps` at the end of `rl_unit`) and the
+  `RL_TEXT` placement of lifted functions (section 11). A unit written with
+  designated initializers and no maps still compiles unchanged.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a

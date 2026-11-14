@@ -4,6 +4,7 @@
  * guest faults at si_addr - base (macOS arm64 raises SIGBUS for PROT_NONE).
  */
 #include "core.h"
+#include "crash.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -61,16 +62,7 @@ static void handler(int sig, siginfo_t *si, void *uc)
     }
     if (f.in_guest && g_hook && g_hook(&f))
         return;
-    char buf[256];
-    int n;
-    if (f.in_guest)
-        n = snprintf(buf, sizeof buf, "[relift error fault] guest fault at 0x%llx (signal %d, host pc %p)\n",
-                     (unsigned long long)f.guest_addr, sig, (void *)f.host_pc);
-    else
-        n = snprintf(buf, sizeof buf, "[relift error fault] host fault at %p (signal %d, host pc %p)\n", (void *)a, sig,
-                     (void *)f.host_pc);
-    if (n > 0 && write(2, buf, (size_t)n) < 0)
-        n = 0;
+    rl_crash_signal(sig, si, uc);
     signal(sig, SIG_DFL);
 }
 
@@ -92,9 +84,24 @@ void rl_fault_thread_init(void)
         munmap(p, sz);
 }
 
+static void crash_extra(char *buf, size_t n)
+{
+    struct rl_thread *t = rl_thread_current();
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    buf[0] = 0;
+    if (!t || !t->ctx || !cpu || !cpu->describe)
+        return;
+    int w = snprintf(buf, n, "guest thread at its last call boundary: ");
+    if (w > 0 && (size_t)w < n)
+        cpu->describe(t->ctx, buf + w, n - (size_t)w);
+}
+
 void rl_fault_install(rl_vm *vm)
 {
     g_vm = vm;
+    rl_crash_set_space(vm->base, (uintptr_t)vm->map_start, vm->map_len);
+    rl_crash_set_extra(crash_extra);
+    rl_crash_install();
     rl_fault_thread_init();
     if (g_installed)
         return;
