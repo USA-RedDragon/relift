@@ -26,6 +26,39 @@
 #error "relift/abi.h needs -mcx16 on x86-64 so 16-byte compare-and-swap is lock-free"
 #endif
 
+/**
+ * @brief Marks a runtime entry point declared in this header.
+ *
+ * The runtime library is built with hidden visibility by default, so every entry
+ * a lifted or hot-loaded unit calls by name carries this. ELF and Mach-O: default
+ * visibility. Windows: dllexport while building the runtime as a DLL (define
+ * RL_BUILDING_RUNTIME), dllimport in everything else. Define RL_STATIC_RUNTIME
+ * where the runtime is linked statically into the program (shipped builds) to
+ * make it empty on Windows.
+ */
+#if defined(_WIN32) && !defined(RL_STATIC_RUNTIME)
+#if defined(RL_BUILDING_RUNTIME)
+#define RL_RUNTIME_API __declspec(dllexport)
+#else
+#define RL_RUNTIME_API __declspec(dllimport)
+#endif
+#elif defined(_WIN32)
+#define RL_RUNTIME_API
+#else
+#define RL_RUNTIME_API __attribute__((visibility("default")))
+#endif
+
+/**
+ * @brief Marks the `relift_unit` function a hot-loaded library exports.
+ *
+ * Units are built with hidden visibility; this is the only symbol they export.
+ */
+#if defined(_WIN32)
+#define RL_UNIT_EXPORT __declspec(dllexport)
+#else
+#define RL_UNIT_EXPORT __attribute__((visibility("default")))
+#endif
+
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
 #define RL_ABI_VERSION 1u
 
@@ -343,7 +376,7 @@ static inline uint32_t rl_stxp64(rl_excl *m, uint8_t *mem, uint64_t a, uint64_t 
 static inline void rl_clrex(rl_excl *m) { m->size = 0; }
 
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
-int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
+RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 
 /** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss or a misaligned target. */
 static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
@@ -381,21 +414,21 @@ typedef struct rl_resume_regs {
 } rl_resume_regs;
 
 /** @brief Install r into c, set an RL_PEND_UNWIND record and return RL_PENDING. Replaces the guest unwinder's register-install step and guest longjmp. */
-int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r);
+RL_RUNTIME_API int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r);
 /** @brief Called from a landing-pad dispatch whose switch has no case for c->pend.pc. Reports and stops. */
-_Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn_guest_addr);
+RL_RUNTIME_API _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn_guest_addr);
 
 /** @brief SVC #imm. Arguments and results in c->x and c->v; clears the monitor. Returns RL_PENDING for thread or process exit. */
-int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm);
+RL_RUNTIME_API int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm);
 /** @brief UDF, BRK, HLT, an instruction relift cannot lift, or MSR to a read-only register. Reports a guest crash; always returns RL_PENDING with RL_PEND_EXIT_PROCESS. */
-int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
+RL_RUNTIME_API int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
 
 /** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: host monotonic clock in RL_CNTFRQ ticks. */
-uint64_t rl_mrs_cntpct(rl_ctx *c);
+RL_RUNTIME_API uint64_t rl_mrs_cntpct(rl_ctx *c);
 /** @brief MSR FPCR. Stores the value; reports in dev builds when it selects a mode the lifted code was not generated for. */
-void rl_msr_fpcr(rl_ctx *c, uint64_t v);
+RL_RUNTIME_API void rl_msr_fpcr(rl_ctx *c, uint64_t v);
 /** @brief WFE: block briefly or yield the host thread. A spurious wake is allowed by the architecture. */
-void rl_wfe(rl_ctx *c);
+RL_RUNTIME_API void rl_wfe(rl_ctx *c);
 
 /** @brief MRS TPIDR_EL0. */
 static inline uint64_t rl_mrs_tpidr_el0(const rl_ctx *c) { return c->tpidr_el0; }
@@ -435,43 +468,43 @@ static inline void rl_sev(void) { __atomic_signal_fence(__ATOMIC_SEQ_CST); }
  * the default build; in the fp-exact build it points to the FPSR local and the
  * cumulative bits are ORed in.
  */
-uint32_t rl_fp32_add(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_add(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPSub, single. */
-uint32_t rl_fp32_sub(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_sub(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPMul, single. */
-uint32_t rl_fp32_mul(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_mul(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPDiv, single. */
-uint32_t rl_fp32_div(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_div(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPMulAdd, single: addend + a * b with one rounding. */
-uint32_t rl_fp32_muladd(uint32_t addend, uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_muladd(uint32_t addend, uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPSqrt, single. */
-uint32_t rl_fp32_sqrt(uint32_t a, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_sqrt(uint32_t a, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRoundInt, single (FRINT*): rmode from enum rl_rmode; exact set for FRINTX. */
-uint32_t rl_fp32_round_int(uint32_t a, uint32_t rmode, int exact, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_round_int(uint32_t a, uint32_t rmode, int exact, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRSqrtEstimate, single (FRSQRTE). */
-uint32_t rl_fp32_rsqrt_est(uint32_t a, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint32_t rl_fp32_rsqrt_est(uint32_t a, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPAdd, double. */
-uint64_t rl_fp64_add(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_add(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPSub, double. */
-uint64_t rl_fp64_sub(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_sub(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPMul, double. */
-uint64_t rl_fp64_mul(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_mul(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPDiv, double. */
-uint64_t rl_fp64_div(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_div(uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPMulAdd, double. */
-uint64_t rl_fp64_muladd(uint64_t addend, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_muladd(uint64_t addend, uint64_t a, uint64_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPSqrt, double. */
-uint64_t rl_fp64_sqrt(uint64_t a, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_sqrt(uint64_t a, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRoundInt, double. */
-uint64_t rl_fp64_round_int(uint64_t a, uint32_t rmode, int exact, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_round_int(uint64_t a, uint32_t rmode, int exact, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPRSqrtEstimate, double. */
-uint64_t rl_fp64_rsqrt_est(uint64_t a, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp64_rsqrt_est(uint64_t a, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPConvert between 16, 32 and 64-bit formats (FCVT). */
-uint64_t rl_fp_convert(uint64_t a, unsigned from_bits, unsigned to_bits, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp_convert(uint64_t a, unsigned from_bits, unsigned to_bits, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPToFixed (FCVT[NPMZA][SU], fixed-point FCVTZ[SU]): fbits fraction bits, saturating, NaN gives 0. */
-uint64_t rl_fp_to_fixed(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fp_to_fixed(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FixedToFP (SCVTF, UCVTF, fixed-point forms). */
-uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
+RL_RUNTIME_API uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
 
 /** @brief True when the host's native IEEE operation gives the guest result for this FPCR, except possibly for NaN bits. */
 static inline int rl_fp_fast(uint32_t fpcr, const uint32_t *fpsr)
@@ -653,7 +686,7 @@ typedef struct rl_unit {
     const char *name;
 } rl_unit;
 
-/** @brief Name of the function a hot-loaded library exports: `const rl_unit *relift_unit(void)`. */
+/** @brief Name of the function a hot-loaded library exports: `RL_UNIT_EXPORT const rl_unit *relift_unit(void)`. */
 #define RL_UNIT_SYMBOL "relift_unit"
 /** @brief Type of the exported RL_UNIT_SYMBOL function. */
 typedef const rl_unit *rl_unit_fn(void);
@@ -665,7 +698,13 @@ extern const uint32_t rl_static_unit_count;
 
 /** @brief Dev protocol frame magic, "RLDV" little-endian. */
 #define RL_DEV_MAGIC 0x56444C52u
-/** @brief Environment variable with the dev socket path. */
+/**
+ * @brief Environment variable with the dev socket path.
+ *
+ * The path must fit sockaddr_un.sun_path (108 bytes on Linux, 104 on macOS,
+ * including the NUL). relift picks a short path; the runtime reports a longer one
+ * as a dev path failure.
+ */
 #define RL_DEV_SOCKET_ENV "RELIFT_DEV_SOCKET"
 
 /** @brief Dev protocol message kinds. */
@@ -691,6 +730,25 @@ enum rl_miss_reason {
     /** @brief A landing pad with no case in its function's dispatch. */
     RL_MISS_RESUME = 4
 };
+
+/** @brief Values of rl_dev_reply.status. */
+enum rl_dev_status {
+    /** @brief Success. */
+    RL_DEV_OK = 0,
+    /** @brief relift failed for a reason not listed here; msg has the text. */
+    RL_DEV_ERR_INTERNAL = 1,
+    /** @brief relift refused the hello (image id or ABI version differs from the project's). */
+    RL_DEV_ERR_HELLO = 2,
+    /** @brief The lift or the compile of the library failed; msg has the compiler output. */
+    RL_DEV_ERR_COMPILE = 3
+};
+
+/**
+ * @brief Process exit status (EX_SOFTWARE) when the runtime stops on a missed-code
+ * report: a shipped build missed, or the dev path failed (no socket, path too
+ * long, refused hello, failed compile, a unit that fails the registration checks).
+ */
+#define RL_EXIT_SOFTWARE 70
 
 /** @brief Header of every dev protocol frame; payload_len bytes follow. */
 typedef struct rl_dev_hdr {
@@ -722,11 +780,15 @@ typedef struct rl_dev_hello {
 typedef struct rl_dev_lift_req {
     /** @brief Guest address that missed. */
     uint64_t target;
-    /** @brief Guest address of the instruction that branched there, 0 when unknown. */
+    /** @brief Guest address of the instruction that branched there. Best effort: 0 when unknown, and lost after a tail call. */
     uint64_t site;
     /** @brief Guest thread id. */
     uint64_t thread_id;
-    /** @brief enum rl_miss_reason. */
+    /**
+     * @brief enum rl_miss_reason. Best effort: the runtime only knows c->pc at a
+     * miss, so it cannot tell an indirect call from an indirect jump and may report
+     * RL_MISS_CALL for both. relift must not depend on it.
+     */
     uint32_t reason;
     /** @brief FPCR the thread runs with. */
     uint32_t fpcr;
@@ -734,7 +796,7 @@ typedef struct rl_dev_lift_req {
 
 /** @brief RL_DEV_HELLO_REPLY and RL_DEV_LIFT_REPLY payload head. */
 typedef struct rl_dev_reply {
-    /** @brief 0 on success; otherwise relift's error code and msg holds the text. */
+    /** @brief enum rl_dev_status; 0 on success, otherwise msg holds the text. */
     int32_t status;
     /** @brief Bytes of the UTF-8 absolute path to the shared library (no NUL). */
     uint32_t path_len;
