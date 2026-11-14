@@ -40,18 +40,47 @@ void rl_window_emit(rl_window *w, int event)
         fn(user, w, event);
 }
 
-static const rl_window_backend *wanted(void)
+static bool display_available(void)
 {
-    const char *e = getenv(RL_WINDOW_ENV);
-    if (e && !strcmp(e, "none"))
-        return NULL;
-    if (g_set)
-        return g_set;
+#if defined(__linux__) || defined(__FreeBSD__)
+    const char *w = getenv("WAYLAND_DISPLAY"), *x = getenv("DISPLAY");
+    return (w && *w) || (x && *x);
+#else
+    return true;
+#endif
+}
+
+static const rl_window_backend *host_backend(void)
+{
 #ifdef RL_HOST_VIDEO
     return rl_host_window_backend();
 #else
     return NULL;
 #endif
+}
+
+static const rl_window_backend *wanted(void)
+{
+    const char *e = getenv(RL_WINDOW_ENV);
+    if (e && (!strcmp(e, "none") || !strcmp(e, "headless")))
+        return NULL;
+    if (e && !strcmp(e, "sdl3")) {
+        const rl_window_backend *b = g_set ? g_set : host_backend();
+        if (!b)
+            rl_log(RL_LOG_WARN, "window", "%s=sdl3, but this runtime was built without SDL3; running headless",
+                   RL_WINDOW_ENV);
+        return b;
+    }
+    if (e && *e)
+        rl_log(RL_LOG_WARN, "window", "%s=%s is not headless or sdl3; choosing automatically", RL_WINDOW_ENV, e);
+    if (g_set)
+        return g_set;
+    const rl_window_backend *b = host_backend();
+    if (b && !display_available()) {
+        rl_log(RL_LOG_INFO, "window", "no display (WAYLAND_DISPLAY and DISPLAY are unset); running headless");
+        return NULL;
+    }
+    return b;
 }
 
 typedef struct body_run {

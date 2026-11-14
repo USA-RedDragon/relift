@@ -13,7 +13,7 @@
 #   make VIDEO=sdl3 BUILD=build/video   also build the SDL3 window backend (runtime/host/window_sdl3.c;
 #                              needs pkg-config package sdl3). The default has no window backend:
 #                              runs are headless and Vulkan presents to headless surfaces.
-#   make vk-present            run the synthetic Vulkan program (a window with VIDEO=sdl3)
+#   make vk-present            run the synthetic Vulkan program (a window with VIDEO=sdl3 and a display)
 #   make gdb-test              check the gdb frame filter (skips without gdb)
 #   make sched-bench           run the device scheduler microbenchmark
 #   make portable              only crash_test, fiber_tests and sched_bench: they link just the
@@ -232,7 +232,7 @@ test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
 
-test: export RELIFT_VIDEO := none
+test: export RELIFT_VIDEO := headless
 test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
@@ -243,7 +243,7 @@ test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
 	$(MAKE) --no-print-directory vk-present
 
 # The synthetic Vulkan program: a window with VIDEO=sdl3 and a display,
-# headless surfaces otherwise (make test always runs headless, RELIFT_VIDEO=none).
+# headless surfaces otherwise (make test always runs headless, RELIFT_VIDEO=headless).
 # Exit 77 means no host Vulkan (skipped).
 vk-present: $(VK_PRESENT)
 	@mkdir -p $(BUILD)/vk_present-sdmc

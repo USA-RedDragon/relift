@@ -67,7 +67,14 @@ struct rl_window_backend {
     int32_t (*vulkan_surface)(rl_window *w, void *instance, uint64_t *surface);
 };
 
-/** @brief Environment variable that selects no window backend when set to "none" (headless runs). */
+/**
+ * @brief Environment variable that picks the backend: "headless" (or "none")
+ * opens no window, "sdl3" forces the SDL3 backend even without a display
+ * variable (it still falls back to headless when SDL cannot start), anything
+ * else or unset chooses automatically: the SDL3 backend when built in and a
+ * display exists (WAYLAND_DISPLAY or DISPLAY on Linux, always elsewhere),
+ * headless otherwise.
+ */
 #define RL_WINDOW_ENV "RELIFT_VIDEO"
 
 /** @brief Sets the backend rl_window_main brings up; NULL selects the default. */
@@ -80,7 +87,7 @@ RL_RUNTIME_API void rl_window_set_events(rl_window_event_fn *fn, void *user);
 RL_RUNTIME_API void rl_window_emit(rl_window *w, int event);
 /**
  * @brief Runs body(arg) and returns its result. With a backend (built in and
- * not disabled by RELIFT_VIDEO=none) that comes up, body runs on a new host
+ * chosen as RL_WINDOW_ENV describes) that comes up, body runs on a new host
  * thread while the calling thread runs the backend's event loop; otherwise
  * body runs on the calling thread and rl_window_backend_current is NULL.
  */

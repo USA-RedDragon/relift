@@ -107,3 +107,34 @@ TEST(window_main_runs_the_loop_on_the_caller)
     CHECK_EQ(g_nevents, 1);
     rl_window_set_backend(NULL);
 }
+
+TEST(window_env_headless_and_sdl3_override)
+{
+    reset();
+    rl_window_set_backend(&g_fake);
+    seen s = { 0 };
+    setenv(RL_WINDOW_ENV, "headless", 1);
+    CHECK_EQ(rl_window_main(body, &s), 42);
+    CHECK(s.backend == NULL);
+    CHECK_EQ(g_inits, 0);
+    setenv(RL_WINDOW_ENV, "sdl3", 1);
+    CHECK_EQ(rl_window_main(body, &s), 42);
+    CHECK(s.backend == &g_fake);
+    setenv(RL_WINDOW_ENV, "bogus", 1);
+    CHECK_EQ(rl_window_main(body, &s), 42);
+    CHECK(s.backend == &g_fake);
+    reset();
+    rl_window_set_backend(NULL);
+}
+
+#ifndef RL_HOST_VIDEO
+TEST(window_env_sdl3_without_the_backend_is_headless)
+{
+    reset();
+    setenv(RL_WINDOW_ENV, "sdl3", 1);
+    seen s = { 0 };
+    CHECK_EQ(rl_window_main(body, &s), 42);
+    CHECK(s.backend == NULL);
+    reset();
+}
+#endif

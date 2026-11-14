@@ -111,7 +111,9 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_TRACE_OS=1` | The guest layer logs every guest OS call and service request with arguments, result and time (Switch: every svc and IPC command) |
 | `RELIFT_STRICT=1` | Stop on an unknown guest OS call or service command instead of returning an error |
 | `RELIFT_AUDIO=null` | In an `AUDIO=real` build, play through the null output (drains in real time, no sound) |
-| `RELIFT_VIDEO=none` | In a `VIDEO=sdl3` build, open no window: the run is headless as in the default build. Without a display the backend also falls back to headless |
+| `RELIFT_VIDEO=headless\|sdl3` | Window backend. Unset: SDL3 when the runtime was built with `VIDEO=sdl3` and a display exists (`WAYLAND_DISPLAY` or `DISPLAY` on Linux, always on macOS and Windows), headless otherwise. `headless` (or `none`) opens no window. `sdl3` skips the display check; it still falls back to headless when SDL cannot start, or when the runtime has no SDL3. A program without Vulkan symbols opens no backend whatever this says |
+| `RELIFT_VULKAN_LIBRARY=<path>` | Host Vulkan loader to use instead of the system one |
+| `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
