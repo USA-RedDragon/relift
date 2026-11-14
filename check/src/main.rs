@@ -12,7 +12,7 @@
 //! relift-check forms <name>[,<name>...]|all [options]
 //! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
 //!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
-//!          [--slow cmd:<argv>] [--all-slow]
+//!          [--slow cmd:<argv>] [--all-slow] [--fp-flags]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -31,7 +31,10 @@
 //! slow-path engine (`check/oracle/slow.c`, the runtime's `rl_fp_slow`): a
 //! block that leaves through its FPCR guard runs there instead and is
 //! compared with the oracle like any other; `--all-slow` sends every
-//! guarded block there, also with FPCR zero.
+//! guarded block there, also with FPCR zero. `--fp-flags` lifts as for a
+//! program that produces FPSR flags: blocks whose flags are built in IR
+//! (QC, compares, min/max) are compared in the interpreter, and blocks with
+//! host FP operations or a flags guard go to the slow engine.
 
 mod emu;
 mod mutate;
@@ -119,9 +122,20 @@ fn run_all(
                 .iter()
                 .any(|i| matches!(i.op, relift_ir::Op::Guard(..)))
         });
+        // In a flag-producing program, blocks with host FP operations get
+        // their flags from the host, which the interpreter does not model:
+        // they run on the slow engine, as do blocks that left by a guard.
+        let fp_ops = blocks.iter().any(|b| {
+            b.insts
+                .iter()
+                .any(|i| matches!(i.op, relift_ir::Op::Fp(..)))
+        });
+        let flags_mode = emu::FP_FLAGS.load(std::sync::atomic::Ordering::Relaxed);
         if guarded
             && let Some(sl) = slow
-            && (p.case.input.fpcr != 0 || sl.always)
+            && (p.case.input.fpcr != 0
+                || sl.always
+                || (flags_mode && (fp_ops || matches!(ir, emu::Outcome::Slow(_)))))
         {
             if p.case.input.fpcr != 0 && !matches!(ir, emu::Outcome::Slow(_)) {
                 rep.first.get_or_insert(format!(
@@ -277,7 +291,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow]"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags]"
     );
     ExitCode::from(2)
 }
@@ -333,6 +347,7 @@ fn main() -> ExitCode {
                 i += 1;
             }
             "--all-slow" => all_slow = true,
+            "--fp-flags" => emu::FP_FLAGS.store(true, std::sync::atomic::Ordering::Relaxed),
             "--fpsr" => emu::FPSR.store(true, std::sync::atomic::Ordering::Relaxed),
             "--mutate" => opts.mutate = true,
             "--hand" => emu::HAND.store(true, std::sync::atomic::Ordering::Relaxed),

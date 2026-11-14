@@ -3,10 +3,11 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use relift_cpu_a64::lift::sail::SLOW_FPCR;
+use relift_cpu_a64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
+use relift_cpu_a64::lift::system;
 use relift_cpu_a64::lift::{self, LiftError};
 use relift_cpu_a64::regs;
-use relift_ir::interp::{self, Fault, FlatMemory, GuestMemory, NoIntrinsics, State};
+use relift_ir::interp::{self, Fault, FlatMemory, GuestMemory, Intrinsics, State};
 use relift_ir::{Block, Flow};
 use unicorn_engine::RegisterARM64 as R;
 use unicorn_engine::Unicorn;
@@ -163,7 +164,7 @@ impl Emu {
             sp: uc.reg_read(R::SP)?,
             nzcv: [false; 4],
             v: [0; 32],
-            fpcr: input.fpcr,
+            fpcr: uc.reg_read(R::FPCR)?,
             fpsr: uc.reg_read(R::FPSR)? as u32,
             pc: uc.reg_read(R::PC)?,
             mem: vec![0; DATA_SIZE],
@@ -200,6 +201,35 @@ pub static HAND: AtomicBool = AtomicBool::new(false);
 
 /// Whether lifted blocks go through dead-value elimination.
 pub static DCE: AtomicBool = AtomicBool::new(false);
+
+/// Whether lifted blocks run as in a program that produces FPSR flags
+/// (`regs::FP_FLAGS` 1): blocks whose flags the host gives stay in the
+/// interpreter, the others leave for the slow path.
+pub static FP_FLAGS: AtomicBool = AtomicBool::new(false);
+
+/// The A64 intrinsics the interpreter can run: the FPSR flag ones (the
+/// host's sticky flags modeled as `host`) and the hints.
+struct A64Intrinsics {
+    host: u32,
+}
+
+impl Intrinsics for A64Intrinsics {
+    fn call(&mut self, name: &'static str, args: &[u128]) -> Result<u128, interp::Error> {
+        match name {
+            system::FP_RAISE => {
+                self.host |= args[0] as u32;
+                Ok(0)
+            }
+            system::MRS_FPSR => Ok(args[0] | u128::from(self.host)),
+            system::MSR_FPSR => {
+                self.host = 0;
+                Ok(0)
+            }
+            system::WFE | system::SEV => Ok(0),
+            _ => Err(interp::Error::UnknownIntrinsic(name)),
+        }
+    }
+}
 
 /// Whether a check compares FPSR.
 pub static FPSR: AtomicBool = AtomicBool::new(false);
@@ -297,6 +327,8 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
     }
     st.regs[regs::FPCR.index()] = u128::from(input.fpcr);
     st.regs[regs::FPSR.index()] = u128::from(input.fpsr);
+    st.regs[regs::FP_FLAGS.index()] = u128::from(FP_FLAGS.load(Ordering::Relaxed));
+    let mut intr = A64Intrinsics { host: 0 };
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
     }
@@ -312,10 +344,10 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
         if b.pc != pc {
             return Outcome::Fault(format!("control left the sequence at {pc:#x}"));
         }
-        match interp::run(b, &mut st, &mut mem, &mut NoIntrinsics) {
+        match interp::run(b, &mut st, &mut mem, &mut intr) {
             Ok(o) => {
                 if let Flow::Trap(code) = o.flow
-                    && code == SLOW_FPCR
+                    && (code == SLOW_FPCR || code == SLOW_FLAGS)
                 {
                     return Outcome::Slow(code);
                 }
@@ -329,8 +361,9 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
         sp: st.regs[regs::SP.index()] as u64,
         nzcv: [false; 4],
         v: [0; 32],
-        fpcr: input.fpcr,
-        fpsr: st.regs[regs::FPSR.index()] as u32,
+        fpcr: st.regs[regs::FPCR.index()] as u64,
+        // As MRS FPSR would read it: the slot and the host's flags.
+        fpsr: st.regs[regs::FPSR.index()] as u32 | intr.host,
         pc,
         mem: mem.data.bytes,
         mem_seed: None,
@@ -377,6 +410,11 @@ pub fn compare(ir: &Outcome, uc: &Outcome) -> Vec<String> {
                 if a.nzcv[i] != b.nzcv[i] {
                     d.push(format!("{f} ir={} or={}", a.nzcv[i], b.nzcv[i]));
                 }
+            }
+            // FPCR after MSR: the mode bits every Armv8.0 CPU implements;
+            // trap enables and other bits are IMPLEMENTATION DEFINED.
+            if FPSR.load(Ordering::Relaxed) && (a.fpcr ^ b.fpcr) & 0x07c0_0000 != 0 {
+                d.push(format!("fpcr ir={:#x} or={:#x}", a.fpcr, b.fpcr));
             }
             if FPSR.load(Ordering::Relaxed) && a.fpsr != b.fpsr {
                 d.push(format!("fpsr ir={:#x} or={:#x}", a.fpsr, b.fpsr));
