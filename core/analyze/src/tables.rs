@@ -320,13 +320,20 @@ pub(crate) fn resolve(
         base: module.base,
         bytes: &module.image,
     };
-    let fresh = |seeds: &HashMap<Reg, u128>, r: Reg, idx: u64| {
-        let mut st = State::new(body[0].regs.len());
+    let slots = body[0].regs.len();
+    let seeded = |seeds: &HashMap<Reg, u128>| {
+        let mut st = State::new(slots);
         for (s, v) in seeds {
             st.regs[s.index()] = *v;
         }
-        st.regs[r.index()] = u128::from(idx);
         st
+    };
+    let body_base = seeded(&seeds);
+    let mut st = State::new(slots);
+    let reset = |st: &mut State, base: &State, r: Reg, idx: u64| {
+        st.regs.copy_from_slice(&base.regs);
+        st.monitor = None;
+        st.regs[r.index()] = u128::from(idx);
     };
     let distinct = |t: &[u64]| t.iter().collect::<BTreeSet<_>>().len();
     let mut best: Option<Vec<u64>> = None;
@@ -363,7 +370,7 @@ pub(crate) fn resolve(
         // every index: it leaves at index 0 (no targets) or never (more
         // entries than the largest table). Either way the candidate fails,
         // so skip the 4097 runs.
-        let mut bound = r;
+        let mut tested = r;
         if !check
             .iter()
             .any(|b| b.insts.iter().any(|i| matches!(i.op, Op::Get(x) if x == r)))
@@ -390,19 +397,26 @@ pub(crate) fn resolve(
             else {
                 continue;
             };
-            bound = q;
+            tested = q;
         }
-        let check_seeds = known(check[0].pc);
-        let mut targets = Vec::new();
+        let check_base = seeded(&known(check[0].pc));
+        let mut bound = None;
         for idx in 0..=MAX_ENTRIES {
-            let mut st = fresh(&check_seeds, bound, idx);
+            reset(&mut st, &check_base, tested, idx);
             let Some(after) = run_seq(&check, &mut st, &mut mem) else {
                 continue 'cand;
             };
             if after != start {
+                bound = Some(idx);
                 break;
             }
-            let mut st = fresh(&seeds, r, idx);
+        }
+        let Some(bound) = bound.filter(|&n| n > 0) else {
+            continue;
+        };
+        let mut targets = Vec::new();
+        for idx in 0..bound {
+            reset(&mut st, &body_base, r, idx);
             let Some(t) = run_seq(&body, &mut st, &mut mem) else {
                 continue 'cand;
             };
@@ -410,9 +424,6 @@ pub(crate) fn resolve(
                 continue 'cand;
             }
             targets.push(t);
-        }
-        if targets.is_empty() || targets.len() as u64 > MAX_ENTRIES {
-            continue;
         }
         if best
             .as_ref()

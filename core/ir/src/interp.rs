@@ -625,12 +625,13 @@ pub fn run_verified(
             } => {
                 let a = (v(*addr) & addr_mask) as u64;
                 let n = width.bits() / 8;
-                let mut buf = vec![0u8; n as usize];
-                mem.read(a, &mut buf).map_err(Error::Fault)?;
+                let mut bytes = [0u8; 16];
+                let buf = &mut bytes[..n as usize];
+                mem.read(a, buf).map_err(Error::Fault)?;
                 if matches!(inst.op, Op::LoadExclusive { .. }) {
                     state.monitor = Some(Monitor { addr: a, size: n });
                 }
-                from_bytes(&buf, *endian)
+                from_bytes(buf, *endian)
             }
             Op::Store {
                 addr,
