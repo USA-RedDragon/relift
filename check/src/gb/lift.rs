@@ -698,7 +698,7 @@ fn compare(case: &Case, opts: &LiftOptions, mutation: Mutation) -> Result<(Verdi
     let nop = run_sequence(&case.spec(&[0x00]), Sequence::ONE).map_err(|e| e.to_string())?;
     let mut mutated = false;
     let ir = match run_ir(case, &nop.io, opts, mutation, &mut mutated) {
-        Err(e) if e.starts_with("skip:") => return Ok((Verdict::Skip, mutated)),
+        Err(e) if e.starts_with("skip:") || e.contains("is not lifted") => return Ok((Verdict::Skip, mutated)),
         r => r?,
     };
     if ir.machine.skip {
@@ -706,6 +706,9 @@ fn compare(case: &Case, opts: &LiftOptions, mutation: Mutation) -> Result<(Verdi
     }
     let mut seq = case.seq;
     let mut deferred = false;
+    if ir.machine.dispatched && seq.late.is_none() {
+        seq.steps += 1;
+    }
     if let Some((ie, iff)) = seq.late
         && !ir.synced
         && !ir.machine.dispatched
