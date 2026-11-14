@@ -269,29 +269,53 @@ fn step(
             let mut nt = post.clone();
             // A compare of a register's slot value with zero: on the edge
             // where they are equal the register is zero.
-            if let Some(inst) = b.insts.get(cond.index())
-                && let Op::Cmp(op @ (CmpOp::Eq | CmpOp::Ne), x, y) = inst.op
+            if let Some((r, eq)) = zero_test(b, &from, &vals, cond)
+                && matches!(state.get(&r), Some(Fact::Slot(_)))
+                && post.get(&r) == state.get(&r)
             {
-                let reg_of = |v: Value| from.get(v.index()).copied().flatten();
-                let zero = |v: Value| matches!(get(&vals, v), Some(Fact::Const(0)));
-                let r = if zero(y) {
-                    reg_of(x)
-                } else if zero(x) {
-                    reg_of(y)
-                } else {
-                    None
-                };
-                if let Some(r) = r
-                    && matches!(state.get(&r), Some(Fact::Slot(_)))
-                    && post.get(&r) == state.get(&r)
-                {
-                    let side = if op == CmpOp::Eq { &mut t } else { &mut nt };
-                    side.insert(r, Fact::Const(0));
-                }
+                let side = if eq { &mut t } else { &mut nt };
+                side.insert(r, Fact::Const(0));
             }
             vec![(taken, t), (not_taken, nt)]
         }
     }
+}
+
+/// Whether `cond` of `b` compares a register with zero, directly or through
+/// compares of that one-bit result with 0 or 1 (a frontend may test a
+/// condition that way); gives the register and whether `cond` holds when it
+/// is zero.
+fn zero_test(
+    b: &Block,
+    from: &[Option<Reg>],
+    vals: &[Option<Fact>],
+    cond: Value,
+) -> Option<(Reg, bool)> {
+    let inst = b.insts.get(cond.index())?;
+    let Op::Cmp(op @ (CmpOp::Eq | CmpOp::Ne), x, y) = inst.op else {
+        return None;
+    };
+    let konst = |v: Value| match vals.get(v.index()).copied().flatten() {
+        Some(Fact::Const(c)) => Some(c),
+        _ => None,
+    };
+    let (v, k) = match (konst(x), konst(y)) {
+        (_, Some(k)) => (x, k),
+        (Some(k), None) => (y, k),
+        (None, None) => return None,
+    };
+    let eq = op == CmpOp::Eq;
+    if k == 0
+        && let Some(r) = from.get(v.index()).copied().flatten()
+    {
+        return Some((r, eq));
+    }
+    let bit = b.insts.get(v.index())?;
+    if bit.width != Some(relift_ir::Width::W1) || !matches!(bit.op, Op::Cmp(..)) || k > 1 {
+        return None;
+    }
+    let (r, z) = zero_test(b, from, vals, v)?;
+    Some((r, z == (eq == (k == 1))))
 }
 
 #[cfg(test)]
@@ -405,6 +429,76 @@ mod tests {
         let u = uses(&f);
         assert_eq!(u.transfers, BTreeMap::from([(0x108, SLOT)]));
         assert!(u.escaped.is_empty());
+    }
+
+    #[test]
+    fn a_null_check_that_tests_a_compare_result_is_a_null_check() {
+        // cbz as (r0 == 0) == 1 and the other ways to write it; the last
+        // two hold when r0 is not zero, so their edges are swapped.
+        for (op, k, inner, swap) in [
+            (CmpOp::Eq, 1, CmpOp::Eq, false),
+            (CmpOp::Ne, 1, CmpOp::Ne, false),
+            (CmpOp::Ne, 0, CmpOp::Eq, false),
+            (CmpOp::Eq, 0, CmpOp::Ne, false),
+            (CmpOp::Ne, 1, CmpOp::Eq, true),
+            (CmpOp::Eq, 1, CmpOp::Ne, true),
+        ] {
+            let mut x = b(0x104);
+            let v = x.get(R0);
+            let z = x.konst(Width::W64, 0);
+            let c = x.cmp(inner, v, z);
+            let one = x.konst(Width::W1, k);
+            let c = x.cmp(op, c, one);
+            let (taken, not_taken) = if swap { (0x108, 0x10c) } else { (0x10c, 0x108) };
+            let test = x.finish(
+                4,
+                Exit {
+                    next: Next::Select {
+                        cond: c,
+                        taken,
+                        not_taken,
+                    },
+                    flow: Flow::Jump,
+                },
+            );
+            let f = func(vec![
+                load_slot(0x100),
+                test,
+                br(0x108, R0, Flow::Jump),
+                call(0x10c, 0x200),
+                ret(0x110),
+            ]);
+            let u = uses(&f);
+            assert_eq!(u.transfers, BTreeMap::from([(0x108, SLOT)]), "{op:?} {k}");
+            assert!(u.escaped.is_empty(), "{op:?} {k}");
+        }
+    }
+
+    #[test]
+    fn a_compare_of_a_slot_value_with_one_is_no_null_check() {
+        let mut x = b(0x104);
+        let v = x.get(R0);
+        let one = x.konst(Width::W64, 1);
+        let c = x.cmp(CmpOp::Eq, v, one);
+        let test = x.finish(
+            4,
+            Exit {
+                next: Next::Select {
+                    cond: c,
+                    taken: 0x10c,
+                    not_taken: 0x108,
+                },
+                flow: Flow::Jump,
+            },
+        );
+        let f = func(vec![
+            load_slot(0x100),
+            test,
+            br(0x108, R0, Flow::Jump),
+            call(0x10c, 0x200),
+            ret(0x110),
+        ]);
+        assert_eq!(uses(&f).escaped, BTreeSet::from([SLOT]));
     }
 
     #[test]
