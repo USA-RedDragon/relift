@@ -1,0 +1,21 @@
+[package]
+name = "relift-switch-vkgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+relift-cache = { workspace = true }
+roxmltree = { workspace = true }
+sha2 = { workspace = true }
+toml = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "relift-vkgen"
+path = "src/main.rs"
