@@ -3,8 +3,8 @@
 use std::fmt;
 
 use crate::{
-    AddrClass, BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, FpRound, Inst, IoKind, IoMap,
-    Next, Op, UnOp, Width,
+    AddrClass, BinOp, Block, CmpOp, CryptoOp, Endian, ExtKind, Flow, FpOp, FpRound, Inst, IoKind,
+    IoMap, Next, Op, UnOp, Width,
 };
 
 /// A failed guest memory access.
@@ -296,9 +296,91 @@ pub fn eval_cmp(op: CmpOp, a: u128, b: u128, w: Width) -> bool {
     }
 }
 
-/// Evaluates a floating-point operation on `arg_w`-bit operands (32 or 64)
-/// giving a `w`-bit result; the two differ only for conversions.
+/// Evaluates a cipher step.
+pub fn eval_crypto(op: CryptoOp, x: u128) -> u128 {
+    crate::crypto::eval(op, x)
+}
+
+fn fp_round(x: f64, r: FpRound) -> f64 {
+    match r {
+        FpRound::TiesEven => x.round_ties_even(),
+        FpRound::TiesAway => x.round(),
+        FpRound::Floor => x.floor(),
+        FpRound::Ceil => x.ceil(),
+        FpRound::Zero => x.trunc(),
+    }
+}
+
+/// `eval_fp` when an operand or the result is binary16 (or, for the
+/// integer conversions, a 16-bit integer).
+fn eval_fp16(op: FpOp, args: &[u128], arg_w: Width, w: Width) -> u128 {
+    let wb = w.bits();
+    let ab = arg_w.bits();
+    let f = |i: usize| -> f64 {
+        match ab {
+            16 => crate::half::to_f64(args[i] as u16),
+            32 => f64::from(f32::from_bits(args[i] as u32)),
+            _ => f64::from_bits(args[i] as u64),
+        }
+    };
+    let out = |x: f64| -> u128 {
+        match wb {
+            16 => u128::from(crate::half::from_f64(x)),
+            32 => u128::from((x as f32).to_bits()),
+            _ => u128::from(x.to_bits()),
+        }
+    };
+    match op {
+        FpOp::ToSInt(r) | FpOp::ToUInt(r) => {
+            let x = fp_round(f(0), r);
+            if x.is_nan() {
+                return 0;
+            }
+            let signed = matches!(op, FpOp::ToSInt(_));
+            let (lo, hi) = if signed {
+                (-(2f64.powi(wb as i32 - 1)), 2f64.powi(wb as i32 - 1) - 1.0)
+            } else {
+                (0.0, 2f64.powi(wb as i32) - 1.0)
+            };
+            let v = x.clamp(lo, hi) as i128;
+            (v as u128) & w.mask()
+        }
+        FpOp::FromSInt | FpOp::FromUInt => {
+            let signed = op == FpOp::FromSInt;
+            let x = args[0] & arg_w.mask();
+            if wb == 16 {
+                return u128::from(crate::half::from_int(x, ab, signed));
+            }
+            let i = if signed { sext(x, arg_w) } else { x as i128 };
+            if wb == 32 {
+                u128::from((i as f32).to_bits())
+            } else {
+                u128::from((i as f64).to_bits())
+            }
+        }
+        FpOp::Convert => out(f(0)),
+        FpOp::MulAdd => u128::from(crate::half::mul_add(
+            args[0] as u16,
+            args[1] as u16,
+            args[2] as u16,
+        )),
+        FpOp::Neg => args[0] ^ 0x8000,
+        FpOp::Abs => args[0] & 0x7fff,
+        FpOp::Add => out(f(0) + f(1)),
+        FpOp::Sub => out(f(0) - f(1)),
+        FpOp::Mul => out(f(0) * f(1)),
+        FpOp::Div => out(f(0) / f(1)),
+        FpOp::Sqrt => out(f(0).sqrt()),
+        FpOp::RoundInt(r) => out(fp_round(f(0), r)),
+    }
+}
+
+/// Evaluates a floating-point operation on `arg_w`-bit operands (16, 32 or
+/// 64) giving a `w`-bit result; the two differ only for conversions.
 pub fn eval_fp(op: FpOp, args: &[u128], arg_w: Width, w: Width) -> u128 {
+    if arg_w == Width::W16 || w == Width::W16 {
+        return eval_fp16(op, args, arg_w, w);
+    }
     let f = |i: usize| -> f64 {
         if arg_w == Width::W32 {
             f64::from(f32::from_bits(args[i] as u32))

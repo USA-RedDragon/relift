@@ -229,8 +229,9 @@ pub(crate) fn check_op(
         }
         Op::Fp(f, args) => {
             let r = need()?;
-            if r != Width::W32 && r != Width::W64 {
-                return err("floating point is 32 or 64 bits".to_string());
+            let fp = |w: Width| w == Width::W16 || w == Width::W32 || w == Width::W64;
+            if !fp(r) {
+                return err("floating point is 16, 32 or 64 bits".to_string());
             }
             if args.len() != f.arity() {
                 return err(format!("{f:?} takes {} operands", f.arity()));
@@ -238,8 +239,8 @@ pub(crate) fn check_op(
             for a in args {
                 let aw = w(*a)?;
                 if f.converts() {
-                    if aw != Width::W32 && aw != Width::W64 {
-                        return err("floating point is 32 or 64 bits".to_string());
+                    if !fp(aw) {
+                        return err("floating point is 16, 32 or 64 bits".to_string());
                     }
                 } else {
                     same(aw, r)?;

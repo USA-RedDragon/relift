@@ -28,6 +28,7 @@
 mod block;
 mod builder;
 mod crypto;
+mod half;
 pub mod interp;
 mod io;
 mod ops;

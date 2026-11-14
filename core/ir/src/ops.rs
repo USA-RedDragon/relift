@@ -195,7 +195,8 @@ pub enum FpRound {
     Zero,
 }
 
-/// Floating-point operations on IEEE 754 binary32 or binary64 bit patterns.
+/// Floating-point operations on IEEE 754 binary16, binary32 or binary64 bit
+/// patterns.
 ///
 /// Each is an IEEE primitive with one fixed meaning, so an emitter can map it
 /// to a host instruction or a libm call: round to nearest even, subnormals
@@ -385,7 +386,7 @@ pub enum Op {
     ClearExclusive,
     /// A memory fence.
     Fence(Order),
-    /// A floating-point operation of the instruction's width (32 or 64).
+    /// A floating-point operation of the instruction's width (16, 32 or 64).
     Fp(FpOp, Vec<Value>),
     /// Leaves the block before it has any effect when `cond` (one bit) is 1:
     /// the block's assumption does not hold, and the runtime runs the

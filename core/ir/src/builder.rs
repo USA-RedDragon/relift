@@ -276,7 +276,7 @@ impl Builder {
         self.push(Op::Fence(order), None);
     }
 
-    /// A floating-point operation of `width` (32 or 64).
+    /// A floating-point operation of `width` (16, 32 or 64).
     pub fn fp(&mut self, op: FpOp, args: &[Value], width: Width) -> Value {
         self.val(Op::Fp(op, args.to_vec()), width)
     }
