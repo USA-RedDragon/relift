@@ -43,6 +43,8 @@ void rl_srv_install_vi(void);
 void rl_srv_install_nv(void);
 /** @brief Registers fsp-srv with the SD card on $RELIFT_SDMC (default ./sdmc), creating it. */
 void rl_srv_install_fs(void);
+/** @brief Registers acc:u0 with one local user, the applet manager's preselected user. */
+void rl_srv_install_acc(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
