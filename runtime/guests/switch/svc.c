@@ -371,10 +371,12 @@ static int dispatch(rl_ctx *c, uint32_t imm)
     case 0x22: {
         bool stop = false;
         hos_thread *t = hos_current();
+        hos_sched_leave();
         if (imm == 0x21)
             rc = t ? hos_ipc_request(w0, t->tls, RL_IPC_MSG, &stop) : KR_INVALID_THREAD;
         else
             rc = hos_ipc_request(w2, x[0], x[1], &stop);
+        hos_sched_return();
         if (stop) {
             rl_log(RL_LOG_ERROR, "ipc", "stopping: --strict");
             return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
