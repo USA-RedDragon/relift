@@ -200,6 +200,35 @@ uint8_t *rl_gb_ram(rl_gb *g, size_t *len);
 typedef uint64_t rl_gb_time_fn(void *ctx);
 /** @brief Sets where the MBC3 clock reads host time from; fn NULL restores the system clock. The clock keeps its value. */
 void rl_gb_set_time_source(rl_gb *g, rl_gb_time_fn *fn, void *ctx);
+/** @brief Bytes of the clock record that follows the RAM in a save of a cartridge with a clock. */
+#define RL_GB_SAVE_CLOCK_BYTES 48u
+/** @brief Bytes of the battery save of g: the RAM, then the clock record when the board has a clock. 0 when the cartridge has no battery. */
+size_t rl_gb_save_size(const rl_gb *g);
+/**
+ * @brief Writes the battery save into out (rl_gb_save_size bytes). The
+ * clock record is five 32-bit little-endian registers (seconds, minutes,
+ * hours, day low, day high with halt and carry), the same five latched, and
+ * a 64-bit host time, the layout other emulators share. Clears the dirty
+ * flag. Returns the bytes written.
+ */
+size_t rl_gb_save_bytes(rl_gb *g, uint8_t *out);
+/**
+ * @brief Restores a save made by rl_gb_save_bytes. A clock keeps counting
+ * from the host time recorded in the save. Returns 0, or -1 when len fits
+ * neither the RAM alone nor the RAM with the clock record, or the
+ * cartridge has no battery.
+ */
+int rl_gb_load_bytes(rl_gb *g, const uint8_t *data, size_t len);
+/** @brief True when the RAM or the clock changed since the last save or load. */
+bool rl_gb_save_dirty(const rl_gb *g);
+/**
+ * @brief Writes the battery save to the file at path through a temporary
+ * file and a rename, so a crash leaves the old save. Returns 0, 1 when the
+ * cartridge has no battery (nothing written), or -1 on a failure.
+ */
+int rl_gb_save(rl_gb *g, const char *path);
+/** @brief Loads the battery save at path. Returns 0, 1 when the file does not exist or the cartridge has no battery, or -1 when it cannot be read or has the wrong size. */
+int rl_gb_load(rl_gb *g, const char *path);
 /** @brief True while an MBC5 rumble cartridge's motor bit is set. */
 bool rl_gb_rumble(const rl_gb *g);
 

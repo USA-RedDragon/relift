@@ -84,3 +84,42 @@ void gb_rtc_write(rl_gb *g, unsigned reg, uint8_t value)
     }
     g->rtc.seconds = (days * 24 + hour) * 3600 + min * 60 + sec;
 }
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    for (unsigned i = 0; i < 4; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static uint32_t get32(const uint8_t *p)
+{
+    uint32_t v = 0;
+    for (unsigned i = 0; i < 4; i++)
+        v |= (uint32_t)p[i] << (8 * i);
+    return v;
+}
+
+void gb_rtc_record(rl_gb *g, uint8_t *rec)
+{
+    gb_rtc_update(g);
+    for (unsigned r = 0; r < 5; r++) {
+        put32(rec + 4 * r, gb_rtc_peek(g, r));
+        put32(rec + 20 + 4 * r, g->rtc.latched[r]);
+    }
+    put32(rec + 40, (uint32_t)g->rtc.stamp);
+    put32(rec + 44, (uint32_t)(g->rtc.stamp >> 32));
+}
+
+void gb_rtc_restore(rl_gb *g, const uint8_t *rec)
+{
+    uint64_t sec = get32(rec) & 0x3Fu, min = get32(rec + 4) & 0x3Fu, hour = get32(rec + 8) & 0x1Fu;
+    uint64_t dh = get32(rec + 16);
+    uint64_t days = ((dh & 1u) << 8) | (get32(rec + 12) & 0xFFu);
+    g->rtc.seconds = (days * 24 + hour) * 3600 + min * 60 + sec;
+    g->rtc.halt = (dh & 0x40u) != 0;
+    g->rtc.carry = (dh & 0x80u) != 0;
+    for (unsigned r = 0; r < 5; r++)
+        g->rtc.latched[r] = (uint8_t)get32(rec + 20 + 4 * r);
+    g->rtc.stamp = (uint64_t)get32(rec + 40) | ((uint64_t)get32(rec + 44) << 32);
+    gb_rtc_update(g);
+}

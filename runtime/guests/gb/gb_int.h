@@ -77,6 +77,9 @@ struct rl_gb {
     /** @brief Argument of time_fn. */
     void *time_ctx;
 
+    /** @brief The RAM or the clock changed since the last save. */
+    bool dirty;
+
     /** @brief ROM bank at $0000. */
     uint32_t bank0;
     /** @brief ROM bank at $4000. */
@@ -97,6 +100,10 @@ static inline unsigned gb_wram_bank(const rl_gb *g)
 
 /** @brief Puts the controller registers at their power-on values and maps the banks. */
 void gb_reset_mapper(rl_gb *g);
+/** @brief Sets the clock from a save's record (rl_gb_save_bytes layout). */
+void gb_rtc_restore(rl_gb *g, const uint8_t *rec);
+/** @brief Writes the clock record. */
+void gb_rtc_record(rl_gb *g, uint8_t *rec);
 /** @brief Recomputes bank0, bank1, rambank and the read pages from the controller registers. */
 void gb_remap(rl_gb *g);
 /** @brief Writes the clock register that RAM bank number reg (8 to 12) selects. */

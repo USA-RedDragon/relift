@@ -167,6 +167,7 @@ void gb_ram_write(rl_gb *g, uint16_t addr, uint8_t value)
 {
     if (!g->ram_enable)
         return;
+    g->dirty = true;
     if (g->cart.mbc == RL_GB_MBC2) {
         g->ram[addr & 0x1FFu] = value & 0xFu;
         return;
