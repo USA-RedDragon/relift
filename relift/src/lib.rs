@@ -3,6 +3,7 @@
 
 pub mod build;
 pub mod cli;
+pub mod coverage;
 pub mod dev;
 pub mod devsock;
 pub mod fpflags;

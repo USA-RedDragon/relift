@@ -51,6 +51,9 @@ fn main() -> ExitCode {
             Ok(code) => return ExitCode::from(u8::try_from(code).unwrap_or(1)),
             Err(e) => Err(e),
         },
+        Command::Coverage { json, module } => {
+            relift::coverage::run(*json, module.as_deref(), &mut ui)
+        }
         _ => Err("not implemented".into()),
     };
     match result {

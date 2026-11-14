@@ -72,6 +72,17 @@ pub enum Command {
         /// A host address, guest address or symbol.
         what: String,
     },
+    /// List what discovery could not resolve: per module, functions,
+    /// instructions not lifted and every unresolved indirect call or jump,
+    /// with hints from earlier hot-load runs.
+    Coverage {
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+        /// Report only the module of this name.
+        #[arg(long, value_name = "NAME")]
+        module: Option<String>,
+    },
 }
 
 impl Command {
@@ -83,6 +94,7 @@ impl Command {
             Command::Run { .. } => "run",
             Command::Check { .. } => "check",
             Command::Where { .. } => "where",
+            Command::Coverage { .. } => "coverage",
         }
     }
 }
