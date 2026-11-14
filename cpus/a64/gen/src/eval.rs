@@ -743,6 +743,9 @@ impl<'m> Gen<'m> {
                     V::Union(c, _) => match c.as_ref() {
                         "Error_Undefined" | "Error_ReservedEncoding" => "Undefined",
                         "Error_Unpredictable" | "Error_ConstrainedUnpredictable" => "Unpredictable",
+                        // The word belongs to another encoding; the decoder
+                        // never gives it this one, so the arm is unreachable.
+                        "Error_See" => "Undefined",
                         c => return fail(format!("throw {c}")),
                     },
                     _ => return fail(format!("throw {v:?}")),

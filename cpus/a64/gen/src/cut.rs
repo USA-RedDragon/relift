@@ -9,6 +9,9 @@
 //! - FEAT: `IsFeatureImplemented`: true for the Armv8.0-A base, a lift-time
 //!   test of the CPU's `Features` (`St::has`) for the extensions in
 //!   `eval::LIFT_TIME_FEATURES`, false for every other feature.
+//!   A template that reads an absent feature refuses to lift (Unsupported)
+//!   on a CPU that has it (except `NO_EL0_EFFECT`), so no semantics of a
+//!   missing extension is silently assumed.
 //!   `HaveFP16Ext`, which `impdefs.sail` defines as true, is the same test
 //!   of `FEAT_FP16`.
 //! - MEM: memory access, ordering, the exclusive monitor and barriers
@@ -110,6 +113,13 @@ pub const CUT: &[&str] = &[
     "AESInvMixColumns",
     "Sbox",
 ];
+
+/// Absent features whose tests do not change what an EL0 instruction does
+/// here: SME (streaming mode is never entered), LSE2 (it makes pair
+/// accesses single-copy atomic, the same bytes), GCS (off unless the OS
+/// enables it), SPE (profiling) and XS (barrier variants). Every other
+/// absent feature a template reads makes it refuse CPUs that have it.
+const NO_EL0_EFFECT: &[&str] = &["FEAT_SME", "FEAT_LSE2", "FEAT_GCS", "FEAT_SPE", "FEAT_XS"];
 
 /// The table-driven cipher functions, cut whole to `relift_ir::CryptoOp`.
 pub const CRYPTO_CUT: &[(&str, relift_ir::CryptoOp)] = &[
@@ -582,6 +592,16 @@ impl Gen<'_> {
                 V::Enum(t, i) => {
                     let name = self.m.enums[t.as_ref()][*i].clone();
                     match feature(&name) {
+                        Some(false) => {
+                            if let Some(f) = relift_cpu_a64::decode::Feature::from_name(&name)
+                                && !NO_EL0_EFFECT.contains(&name.as_str())
+                            {
+                                self.line(format!(
+                                    "if st.has(Feature::{f:?}) {{ return Err(LiftError::Unsupported(ENC)); }}"
+                                ));
+                            }
+                            V::Bool(false)
+                        }
                         Some(b) => V::Bool(b),
                         None => {
                             let f = relift_cpu_a64::decode::Feature::from_name(&name)
