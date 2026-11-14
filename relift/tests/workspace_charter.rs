@@ -67,9 +67,11 @@ struct Charter {
 
 const NONE: &[&str] = &[];
 
-/// Members that ship their own binaries and that `relift` does not link, so
-/// the reachability control skips them; the absence walks still cover them.
+/// Members that ship their own binaries or are not wired into `relift` yet
+/// (`relift-cpu-sm83` until its lifter lands), so the reachability controls
+/// skip them; the absence walks still cover them.
 const STANDALONE: &[&str] = &[
+    "relift-cpu-sm83",
     "relift-gb-formats",
     "relift-gb-tools",
     "relift-switch-tools",
@@ -154,6 +156,14 @@ const CHARTERS: &[Charter] = &[
         band: 2,
         why: "the ARM64 frontend, over the IR and the guest contract only",
         normal: &["relift-guest", "relift-ir"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-cpu-sm83",
+        band: 2,
+        why: "the SM83 decoder and opcode table; describes the CPU and depends on nothing in the workspace",
+        normal: NONE,
         dev: NONE,
         build: NONE,
     },
@@ -758,9 +768,12 @@ fn cpus_reach_only_ir_and_guest() {
     let mut broken = Vec::new();
     for (id, m) in &cpus {
         let reached: Vec<_> = ws.members_reached(id);
-        for want in allowed {
+        for want in allowed
+            .iter()
+            .filter(|_| !STANDALONE.contains(&m.name.as_str()))
+        {
             assert!(
-                reached.iter().any(|(r, _)| r.rel == want),
+                reached.iter().any(|(r, _)| r.rel == *want),
                 "control: {} does not reach {want}, so the walk from it may be empty",
                 m.name
             );
