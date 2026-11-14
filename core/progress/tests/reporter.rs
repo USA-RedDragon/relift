@@ -154,3 +154,32 @@ fn live_lines_are_cut_to_the_width() {
     let last = text(&r).lines().last().unwrap_or_default().to_string();
     assert!(last.chars().count() <= 29, "{last:?}");
 }
+
+#[test]
+fn byte_counts_and_errors_in_live_mode() {
+    let (mut r, clock) = reporter(Mode::Live, false, Verbosity::Normal);
+    let a = r.row("romfs");
+    r.begin(a, "extract");
+    clock.advance(Duration::from_millis(200));
+    r.update(
+        a,
+        Metrics {
+            done: 1_500_000,
+            total: Some(3_000_000),
+            bytes: true,
+            note: Some("2/4 files".into()),
+            ..Metrics::default()
+        },
+    );
+    assert!(
+        text(&r).ends_with("[==========>         ] 1.5 MB/3.0 MB  2/4 files\n"),
+        "{:?}",
+        text(&r)
+    );
+    r.error("relift import: boom");
+    assert!(
+        text(&r).ends_with("\x1b[1A\r\x1b[Jrelift import: boom\n"),
+        "{:?}",
+        text(&r)
+    );
+}
