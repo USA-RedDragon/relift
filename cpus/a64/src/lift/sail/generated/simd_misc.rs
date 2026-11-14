@@ -19735,6 +19735,70 @@ pub(super) fn FCVTPU_asisdmiscfp16_R(
     Ok(())
 }
 
+/// `FCVTXN_asimdmisc_N`.
+///
+/// Cut: ENV, FPConvert, V_read, V_set.
+pub(super) fn FCVTXN_asimdmisc_N(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTXN_asimdmisc_N;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 30) & 0x1;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 128);
+    let v8 = b.extract(v7, 0, Width::new(64));
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v9 = rt::Fp::new(64).convert_odd(b, v8, &rt::Fp::new(32));
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    let v12 = b.extract(v7, 64, Width::new(64));
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v13 = rt::Fp::new(64).convert_odd(b, v12, &rt::Fp::new(32));
+    let v14 = b.extract(v11, 64, Width::new(64));
+    let v15 = b.concat(v14, v13);
+    let v16 = b.extract(v11, 0, Width::new(32));
+    let v17 = b.concat(v15, v16);
+    let v18 = b.extract(v17, 0, Width::new(64));
+    let s19: bool = s6 == (0i128);
+    if s19 {
+        st.v_set(b, s4 as u32, v18, None);
+    }
+    let s20: bool = !s19;
+    let v21 = st.v_read(b, s4 as u32, 64);
+    let v22 = b.concat(v18, v21);
+    if s20 {
+        st.v_set(b, s4 as u32, v22, None);
+    }
+    Ok(())
+}
+
+/// `FCVTXN_asisdmisc_N`.
+///
+/// Cut: ENV, FPConvert, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FCVTXN_asisdmisc_N(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTXN_asisdmisc_N;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_flags_slow();
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).convert_odd(b, v5, &rt::Fp::new(32));
+    let v7 = b.konst(Width::new(96), 0x0);
+    let v8 = b.concat(v7, v6);
+    let v9 = b.extract(v8, 0, Width::new(32));
+    st.v_set(b, s3 as u32, v9, None);
+    Ok(())
+}
+
 /// `FCVTZS_asimdmisc_R`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -35025,6 +35089,162 @@ pub(super) fn UQXTN_asisdmisc_N(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `URECPE_asimdmisc_R`.
+///
+/// Split on the word bits `0x40000000`.
+///
+/// Cut: ENV, UnsignedRecipEstimate, V_read, V_set.
+pub(super) fn URECPE_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::URECPE_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40000000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 22) & 0x1;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: bool = s3 == 0x1u128;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s7: bool = !s6;
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v10 = rt::urecpe(b, v9);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            let v14 = rt::urecpe(b, v13);
+            let v15 = b.extract(v12, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            if s7 {
+                st.v_set(b, s4 as u32, v16, None);
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 22) & 0x1;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: bool = s3 == 0x1u128;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s7: bool = !s6;
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v10 = rt::urecpe(b, v9);
+            let v11 = b.konst(Width::new(96), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            let v14 = rt::urecpe(b, v13);
+            let v15 = b.extract(v12, 64, Width::new(64));
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            let v19 = b.extract(v8, 64, Width::new(32));
+            let v20 = rt::urecpe(b, v19);
+            let v21 = b.extract(v18, 96, Width::new(32));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v18, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v8, 96, Width::new(32));
+            let v26 = rt::urecpe(b, v25);
+            let v27 = b.extract(v24, 0, Width::new(96));
+            let v28 = b.concat(v26, v27);
+            if s7 {
+                st.v_set(b, s4 as u32, v28, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `URSQRTE_asimdmisc_R`.
+///
+/// Split on the word bits `0x40000000`.
+///
+/// Cut: ENV, UnsignedRSqrtEstimate, V_read, V_set.
+pub(super) fn URSQRTE_asimdmisc_R(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::URSQRTE_asimdmisc_R;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40000000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 22) & 0x1;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: bool = s3 == 0x1u128;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s7: bool = !s6;
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v10 = rt::ursqrte(b, v9);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            let v14 = rt::ursqrte(b, v13);
+            let v15 = b.extract(v12, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            if s7 {
+                st.v_set(b, s4 as u32, v16, None);
+            }
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 22) & 0x1;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: bool = s3 == 0x1u128;
+            if s6 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s7: bool = !s6;
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 0, Width::new(32));
+            let v10 = rt::ursqrte(b, v9);
+            let v11 = b.konst(Width::new(96), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v8, 32, Width::new(32));
+            let v14 = rt::ursqrte(b, v13);
+            let v15 = b.extract(v12, 64, Width::new(64));
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v12, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            let v19 = b.extract(v8, 64, Width::new(32));
+            let v20 = rt::ursqrte(b, v19);
+            let v21 = b.extract(v18, 96, Width::new(32));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v18, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v8, 96, Width::new(32));
+            let v26 = rt::ursqrte(b, v25);
+            let v27 = b.extract(v24, 0, Width::new(96));
+            let v28 = b.concat(v26, v27);
+            if s7 {
+                st.v_set(b, s4 as u32, v28, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `USQADD_asimdmisc_R`.
 ///
 /// Split on the word bits `0x40c00000`.
@@ -36496,6 +36716,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FCVTPU_asimdmiscfp16_R => FCVTPU_asimdmiscfp16_R,
         Encoding::FCVTPU_asisdmisc_R => FCVTPU_asisdmisc_R,
         Encoding::FCVTPU_asisdmiscfp16_R => FCVTPU_asisdmiscfp16_R,
+        Encoding::FCVTXN_asimdmisc_N => FCVTXN_asimdmisc_N,
+        Encoding::FCVTXN_asisdmisc_N => FCVTXN_asisdmisc_N,
         Encoding::FCVTZS_asimdmisc_R => FCVTZS_asimdmisc_R,
         Encoding::FCVTZS_asimdmiscfp16_R => FCVTZS_asimdmiscfp16_R,
         Encoding::FCVTZS_asisdmisc_R => FCVTZS_asisdmisc_R,
@@ -36588,6 +36810,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::UMINV_asimdall_only => UMINV_asimdall_only,
         Encoding::UQXTN_asimdmisc_N => UQXTN_asimdmisc_N,
         Encoding::UQXTN_asisdmisc_N => UQXTN_asisdmisc_N,
+        Encoding::URECPE_asimdmisc_R => URECPE_asimdmisc_R,
+        Encoding::URSQRTE_asimdmisc_R => URSQRTE_asimdmisc_R,
         Encoding::USQADD_asimdmisc_R => USQADD_asimdmisc_R,
         Encoding::USQADD_asisdmisc_R => USQADD_asisdmisc_R,
         Encoding::XTN_asimdmisc_N => XTN_asimdmisc_N,

@@ -342,6 +342,8 @@ FCVTPU_asisdmiscfp16_R
 FCVTPU_asisdmisc_R
 FCVT_SD_floatdp1
 FCVT_SH_floatdp1
+FCVTXN_asimdmisc_N
+FCVTXN_asisdmisc_N
 FCVTZS_32D_float2fix
 FCVTZS_32D_float2int
 FCVTZS_32H_float2fix
@@ -1443,11 +1445,13 @@ UQSUB_asimdsame_only
 UQSUB_asisdsame_only
 UQXTN_asimdmisc_N
 UQXTN_asisdmisc_N
+URECPE_asimdmisc_R
 URHADD_asimdsame_only
 URSHL_asimdsame_only
 URSHL_asisdsame_only
 URSHR_asimdshf_R
 URSHR_asisdshf_R
+URSQRTE_asimdmisc_R
 URSRA_asimdshf_R
 URSRA_asisdshf_R
 USDOT_asimdelem_D
