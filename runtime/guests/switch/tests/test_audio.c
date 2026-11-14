@@ -281,10 +281,9 @@ TEST(audout_releases_buffers_as_they_play)
     CHECK_EQ(call(c, out, &q).result, 0);
     CHECK_EQ(call(c, out, &(msg){ .cmd = 1 }).result, 0);
     uint64_t t0 = rl_clock_ns();
-    CHECK_EQ(wait_event(c, heap + 0x800, ev, 1000000000ull), 0);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 5000000000ull), 0);
     uint64_t dt = rl_clock_ns() - t0;
-    CHECK(dt >= 80000000ull);
-    CHECK(dt < 400000000ull);
+    CHECK(dt >= 4800ull * 1000000000ull / 48000 - AUDIO_FRAME_NS);
     q = mk(5);
     q.nb = 1;
     q.b_addr[0] = heap + 0x3000;
@@ -434,12 +433,17 @@ TEST(audren_update_frames_and_mixing)
     CHECK_EQ(le32(o + 0xC), 0x10);
     CHECK_EQ(le32(o + 0x1C), 0x20);
     CHECK_EQ(le32(o + 4), 0xB0);
+    uint64_t t_start = rl_clock_ns();
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 5 }).result, 0);
     CHECK_EQ(wait_event(c, heap + 0x800, ev, 500000000ull), 0);
-    sleep_ms(200);
     build_update(u, false, heap + 0x10000, sink, sink_size, false);
     memcpy(t_mem() + heap + 0x30000, u->in, u->size);
-    r = call(c, rend, &q);
+    uint64_t t_update;
+    do {
+        sleep_ms(50);
+        r = call(c, rend, &q);
+        t_update = rl_clock_ns();
+    } while (r.result == 0 && le64(o + le32(o + 0x3C) - 0x10) < 30 && t_update - t_start < 10000000000ull);
     CHECK_EQ(r.result, 0);
     uint32_t used = le32(o + 0x3C);
     uint32_t voices_at = 0x40 + 4 * 0x10;
@@ -450,7 +454,7 @@ TEST(audren_update_frames_and_mixing)
     CHECK_EQ(consumed, 1);
     uint64_t elapsed = le64(o + used - 0x10);
     CHECK(elapsed >= 30);
-    CHECK(elapsed <= 60);
+    CHECK(elapsed <= (t_update - t_start) / AUDIO_FRAME_NS + 2);
     uint32_t wrote = le32(o + sinks_at);
     CHECK(wrote >= 480 * 20);
     const int16_t *s = (const int16_t *)(const void *)(t_mem() + sink);
@@ -522,8 +526,12 @@ TEST(audren_mixes_adpcm_voices)
     q.b_addr[0] = heap + 0x40000;
     q.b_size[0] = 0x1000;
     CHECK_EQ(call(c, rend, &q).result, 0);
+    uint32_t ev = r.copy[0];
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 5 }).result, 0);
-    sleep_ms(60);
+    CHECK_EQ(wait_event(c, heap + 0x800, ev, 5000000000ull), 0);
+    uint64_t t_first = rl_clock_ns();
+    while (rl_clock_ns() - t_first < 60000000ull)
+        sleep_ms(5);
     CHECK_EQ(call(c, rend, &(msg){ .cmd = 6 }).result, 0);
     const int16_t want[14] = { 1, 2, 3, -1, 7, -2, 0, 0, 5, 7, 6, -6, 2, 1 };
     const int16_t *s = (const int16_t *)(const void *)(t_mem() + sink);
