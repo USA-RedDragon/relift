@@ -527,6 +527,13 @@ impl<'a> Run<'a> {
             self.unresolved(loc, UnresolvedKind::RunsOffWindow, String::new(), false);
             return;
         }
+        if !loc.is_window() && n >= 0x4000 {
+            match self.flow(&st, n) {
+                Ok(t) => self.enter(t, st),
+                Err((k, dep)) => self.unresolved(loc, k, format!("falls into ${n:04X}"), dep),
+            }
+            return;
+        }
         if loc.is_window() != (n >= 0x4000) {
             self.unresolved(
                 loc,
