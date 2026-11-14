@@ -31,10 +31,12 @@ fn natural(w: Width) -> bool {
     matches!(w.bits(), 8 | 16 | 32 | 64 | 128)
 }
 
-/// `e` (in the wide type) reduced to width `w` and cast to its C type.
+/// `e` (in the wide type) reduced to width `w`, as the initializer of a
+/// local of its C type: a natural width needs nothing, the conversion to
+/// the local's type reduces it.
 fn fit(e: &str, w: Width) -> String {
     if natural(w) {
-        format!("({})({e})", cty(w))
+        e.to_string()
     } else {
         format!("({})(({e}) & {})", cty(w), mask(w))
     }
@@ -185,42 +187,51 @@ pub(crate) fn emit_op(
             let n = w.bits();
             let x64 = n <= 64;
             let amt = val(*y);
-            let e = match op {
-                BinOp::Add => format!("{ax} + {ay}"),
-                BinOp::Sub => format!("{ax} - {ay}"),
-                BinOp::Mul => format!("{ax} * {ay}"),
-                BinOp::And => format!("{ax} & {ay}"),
-                BinOp::Or => format!("{ax} | {ay}"),
-                BinOp::Xor => format!("{ax} ^ {ay}"),
-                BinOp::UDiv => format!("{ay} ? {ax} / {ay} : 0"),
-                BinOp::URem => format!("{ay} ? {ax} % {ay} : {ax}"),
-                BinOp::SDiv if x64 => format!("rl_e_sdiv64({ax}, {ay}, {n})"),
-                BinOp::SDiv => format!("rl_e_sdiv128({ax}, {ay}, {n})"),
-                BinOp::SRem if x64 => format!("rl_e_srem64({ax}, {ay}, {n})"),
-                BinOp::SRem => format!("rl_e_srem128({ax}, {ay}, {n})"),
-                BinOp::Shl => format!("{amt} >= {n} ? 0 : {ax} << (unsigned){amt}"),
-                BinOp::LShr => format!("{amt} >= {n} ? 0 : {ax} >> (unsigned){amt}"),
-                BinOp::AShr => {
-                    let s = sx(&val(*x), w);
-                    format!("({u})({s} >> ({amt} >= {n} ? {} : (unsigned){amt}))", n - 1)
-                }
-                BinOp::RotR if x64 => format!("rl_e_ror64({ax}, (unsigned)({amt} % {n}), {n})"),
-                BinOp::RotR => format!("rl_e_ror128({ax}, (unsigned)({amt} % {n}), {n})"),
+            // A constant shift amount below the width needs no range check.
+            let k = match b.insts[y.index()].op {
+                Op::Const(k) if k < u128::from(n) => Some(k),
+                _ => None,
+            };
+            let e = match (op, k) {
+                (BinOp::Shl, Some(k)) => format!("{ax} << {k}"),
+                (BinOp::LShr, Some(k)) => format!("{ax} >> {k}"),
+                (BinOp::AShr, Some(k)) => format!("({u})({} >> {k})", sx(&val(*x), w)),
+                _ => match op {
+                    BinOp::Add => format!("{ax} + {ay}"),
+                    BinOp::Sub => format!("{ax} - {ay}"),
+                    BinOp::Mul => format!("{ax} * {ay}"),
+                    BinOp::And => format!("{ax} & {ay}"),
+                    BinOp::Or => format!("{ax} | {ay}"),
+                    BinOp::Xor => format!("{ax} ^ {ay}"),
+                    BinOp::UDiv => format!("{ay} ? {ax} / {ay} : 0"),
+                    BinOp::URem => format!("{ay} ? {ax} % {ay} : {ax}"),
+                    BinOp::SDiv if x64 => format!("rl_e_sdiv64({ax}, {ay}, {n})"),
+                    BinOp::SDiv => format!("rl_e_sdiv128({ax}, {ay}, {n})"),
+                    BinOp::SRem if x64 => format!("rl_e_srem64({ax}, {ay}, {n})"),
+                    BinOp::SRem => format!("rl_e_srem128({ax}, {ay}, {n})"),
+                    BinOp::Shl => format!("{amt} >= {n} ? 0 : {ax} << (unsigned){amt}"),
+                    BinOp::LShr => format!("{amt} >= {n} ? 0 : {ax} >> (unsigned){amt}"),
+                    BinOp::AShr => {
+                        let s = sx(&val(*x), w);
+                        format!("({u})({s} >> ({amt} >= {n} ? {} : (unsigned){amt}))", n - 1)
+                    }
+                    BinOp::RotR if x64 => format!("rl_e_ror64({ax}, (unsigned)({amt} % {n}), {n})"),
+                    BinOp::RotR => format!("rl_e_ror128({ax}, (unsigned)({amt} % {n}), {n})"),
+                },
             };
             fit(&e, w)
         }
         Op::Cmp(op, x, y) => {
             let wx = wv(*x);
             let (vx, vy) = (val(*x), val(*y));
-            let e = match op {
+            match op {
                 CmpOp::Eq => format!("{vx} == {vy}"),
                 CmpOp::Ne => format!("{vx} != {vy}"),
                 CmpOp::Ult => format!("{vx} < {vy}"),
                 CmpOp::Ule => format!("{vx} <= {vy}"),
                 CmpOp::Slt => format!("{} < {}", sx(&vx, wx), sx(&vy, wx)),
                 CmpOp::Sle => format!("{} <= {}", sx(&vx, wx), sx(&vy, wx)),
-            };
-            format!("(uint8_t)({e})")
+            }
         }
         Op::Select(c, x, y) => format!("{} ? {} : {}", val(*c), val(*x), val(*y)),
         Op::Ext(ExtKind::Zero, x) => format!("({}){}", cty(w), val(*x)),
