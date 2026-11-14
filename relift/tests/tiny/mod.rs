@@ -84,6 +84,49 @@ const LDR_X8_X0: u32 = 0xf940_0008;
 /// `blr x8`.
 const BLR_X8: u32 = 0xd63f_0100;
 
+fn add_imm(rd: u32, rn: u32, imm: u32) -> u32 {
+    0x9100_0000 | (imm << 10) | (rn << 5) | rd
+}
+
+fn str_x(rt: u32, rn: u32) -> u32 {
+    0xf900_0000 | (rn << 5) | rt
+}
+
+/// The guest offset of the function [`diff_program`] calls.
+pub const DIFF_FN: u64 = 0x30;
+
+/// The tiny program with a function, called through `blr` so the C
+/// compiler does not inline it, that adds, then stores the sum
+/// into `.data`, which `relift diff` compares: x1 becomes the message length
+/// through two adds.
+fn diff_program() -> Vec<u8> {
+    let code = [
+        movz(19, 3),
+        adr(0, 0x1000 - 0x04),
+        adr(8, DIFF_FN as i32 - 0x08),
+        blr(8),
+        svc(0x27),
+        subs_imm(19, 19, 1),
+        bne(-0x14),
+        svc(0x07),
+        0x1400_0000,
+    ];
+    let mut text: Vec<u8> = code.iter().flat_map(|w| w.to_le_bytes()).collect();
+    text.resize(DIFF_FN as usize, 0);
+    let body = [
+        movz(1, MSG.len() as u32 / 2),
+        add(1, 1, 1),
+        add_imm(1, 1, 1),
+        adr(2, 0x2000 - 0x3c),
+        str_x(1, 2),
+        RET,
+    ];
+    for w in body {
+        text.extend_from_slice(&w.to_le_bytes());
+    }
+    text
+}
+
 fn program(undefined: bool, pointer: bool) -> Vec<u8> {
     let code = [
         movz(19, 3),
@@ -158,6 +201,11 @@ pub fn dump_hidden(root: &Path) -> PathBuf {
 /// resolve. It is for analysis only: the program does not run.
 pub fn dump_with_pointer(root: &Path) -> PathBuf {
     dump_text(root, program(false, true))
+}
+
+/// As [`dump`], with the function of [`diff_program`].
+pub fn dump_diff(root: &Path) -> PathBuf {
+    dump_text(root, diff_program())
 }
 
 fn dump_text(root: &Path, text: Vec<u8>) -> PathBuf {
