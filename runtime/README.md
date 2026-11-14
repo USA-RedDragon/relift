@@ -7,6 +7,7 @@ mirroring the Rust folders (`core/`, `cpus/`, `guests/`):
 |---|---|---|
 | `core/` | core | Knows no guest OS and no guest CPU. Guest memory reservation and the exact map at the guest page size, with the host page policy of abi.md section 2; its own permission flags (`RL_VM_R`, `RL_VM_W`, `RL_VM_X`) and an opaque per-block guest tag; the SIGSEGV/SIGBUS handler reporting guest addresses; host threads that carry the CPU layer's context; the clock at the guest's tick rate; the device scheduler for guests that drive devices through registers (`core/include/relift/sched.h`: CPU cycle clocks, devices caught up on access, timed events, interrupt lines, `rl_sync` and `rl_io_read`/`rl_io_write`), which runs every guest CPU on a fiber of one host thread (`core/fiber.h`; the stack switch is host-arch assembly in `core/fiber_x86_64_sysv.S`, `core/fiber_x86_64_win.S` and `core/fiber_aarch64.S`; abi.md section 14); unit registration and the dispatch table; logging, configuration and the unknown-call reporter; host input snapshots (`core/include/relift/input.h`) and host windows (`core/include/relift/window.h`: a window backend, its events, and `rl_window_main`, which runs the program on a second host thread while the first runs the backend's event loop). `core/include/relift/abi_core.h` is the CPU-neutral half of the lifted-code contract. |
 | `cpus/a64/` | CPU | The ARM64 lifted-code ABI, `cpus/a64/include/relift/a64/abi.h` (it owns `rl_ctx`), and its runtime entries: FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, the dispatch miss entry, register summaries for crash reports, and the CPU descriptor the core allocates contexts from. Not tied to a guest OS. |
+| `cpus/sm83/` | CPU | The SM83 (Game Boy CPU) lifted-code ABI, `cpus/sm83/include/relift/sm83/abi.h` (it owns `rl_ctx`: registers, the flag byte, IME and the EI delay, the `rl_time` clock), and its runtime entries: `rl_undefined`, `rl_trap`, EI/DI/RETI/HALT, the interrupt entry and return hooks (`rl_sm83_attach`), the thread entry `rl_sm83_run`, register summaries for crash reports and the CPU descriptor. It reads the machine's interrupt request and enable state through a callback table, so it names no console. |
 | `guests/switch/` | guest | The Horizon kernel (handle table, events, threads, memory, shared and transfer memory, mutexes, condition variables, the address arbiter), `rl_svc`, IPC (HIPC, CMIF with domains, TIPC), `sm:` and the service registry; the NPDM-driven layout; the guest descriptor and the translation between Horizon's permission bits and the core's. |
 | `guests/gb/` | guest | The Game Boy and Game Boy Color memory map over the core alone (no CPU layer yet): cartridge ROM and RAM behind the memory bank controllers (none, MBC1 with multicart wiring, MBC2, MBC3 with its clock, MBC5 with rumble), video RAM and work RAM banks, echo RAM, OAM, high RAM, battery saves to a host file, and the I/O registers routed to scheduler device slots (`rl_gb_attach`; a slot without a device gets a register-file stub). `postboot.c` holds the registers and I/O defaults each hardware revision hands a cartridge. The picture, sound, timer, serial, joypad and DMA devices are not here yet. |
 | `host/` | host | Optional backends for the core's interfaces: SDL3 audio output and libopus decoding (`core/include/relift/audio.h`), built only with `AUDIO=real`; SDL3 windows, Vulkan surfaces and input (`core/include/relift/window.h`, `input.h`), built only with `VIDEO=sdl3`. SDL3 runs the same code on Linux, macOS and Windows; only Linux (X11 and Wayland) has been run so far. |
@@ -40,7 +41,7 @@ scheduler), so they build for Windows (x86-64 and arm64), where the rest
 of the core is not ported yet; copy the `.exe` files over and run them.
 
 The build makes one archive per layer (`librelift_core.a`,
-`librelift_a64.a`, `librelift_switch.a`), the whole runtime as
+`librelift_a64.a`, `librelift_sm83.a`, `librelift_switch.a`), the whole runtime as
 `librelift_rt.a` and `librelift_rt.so` (or `.dylib`) built with
 `RL_BUILDING_RUNTIME`, and one test binary per layer, each linking only its
 layer and the ones below:
@@ -49,6 +50,7 @@ layer and the ones below:
   a 32-bit address space, a 40.5 MHz clock, big-endian data, a 2-byte code
   granule);
 - `a64_tests`: the A64 layer over the core, with a test guest that is no OS;
+- `sm83_tests`: the SM83 layer over the core and the device scheduler, with a synthetic interrupt controller and timer;
 - `switch_tests`: the Switch guest, driven through `rl_ctx` and `rl_svc` the
   way lifted code does;
 - `gb_tests`: the Game Boy memory map over the core, with synthetic cartridges,
