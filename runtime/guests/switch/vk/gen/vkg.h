@@ -1422,11 +1422,14 @@ int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem);
+void vkf_fences_wait_enter(vkf_call *k);
 void vkf_queue_enter(vkf_call *k);
-void vkf_queue_lock(vkf_call *k);
-void vkf_queue_pull_leave(vkf_call *k);
 void vkf_queue_unlock(vkf_call *k);
+void vkf_queue_wait_enter(vkf_call *k);
+void vkf_queue_wait_return(vkf_call *k);
+void vkf_semaphores_wait_enter(vkf_call *k);
 void vkf_shadow_flush(vkf_call *k);
 void vkf_shadow_pull(vkf_call *k);
+void vkf_wait_pull_return(vkf_call *k);
 
 #endif

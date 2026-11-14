@@ -2457,9 +2457,9 @@ static int vkt_vkDeviceWaitIdle(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkDeviceWaitIdle fn = (PFN_vkDeviceWaitIdle)k.fns->f[VKG_vkDeviceWaitIdle];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDeviceWaitIdle);
-    vkf_queue_lock(&k);
+    vkf_queue_wait_enter(&k);
     VkResult r = fn(a0);
-    vkf_queue_pull_leave(&k);
+    vkf_queue_wait_return(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3576,9 +3576,9 @@ static int vkt_vkQueueWaitIdle(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkQueueWaitIdle fn = (PFN_vkQueueWaitIdle)k.fns->f[VKG_vkQueueWaitIdle];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkQueueWaitIdle);
-    vkf_queue_lock(&k);
+    vkf_queue_wait_enter(&k);
     VkResult r = fn(a0);
-    vkf_queue_pull_leave(&k);
+    vkf_queue_wait_return(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3865,8 +3865,9 @@ static int vkt_vkWaitForFences(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkWaitForFences fn = (PFN_vkWaitForFences)k.fns->f[VKG_vkWaitForFences];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkWaitForFences);
+    vkf_fences_wait_enter(&k);
     VkResult r = fn(a0, a1, a2, a3, a4);
-    vkf_shadow_pull(&k);
+    vkf_wait_pull_return(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3883,8 +3884,9 @@ static int vkt_vkWaitSemaphores(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkWaitSemaphores fn = (PFN_vkWaitSemaphores)k.fns->f[VKG_vkWaitSemaphores];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkWaitSemaphores);
+    vkf_semaphores_wait_enter(&k);
     VkResult r = fn(a0, a1, a2);
-    vkf_shadow_pull(&k);
+    vkf_wait_pull_return(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }

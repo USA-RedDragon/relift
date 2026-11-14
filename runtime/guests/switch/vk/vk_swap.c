@@ -624,9 +624,11 @@ int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
         return vkf_bad_handle(&k, VKG_vkAcquireNextImageKHR, c->x[0]);
     vkf_swap *s = swap_of(c->x[1], k.obj);
     uint32_t idx = 0;
+    vkf_wait_enter(&k, c->x[2]);
     VkResult r = s && c->x[5] ? swap_acquire(s, c->x[2], (VkSemaphore)(uintptr_t)c->x[3],
                                              (VkFence)(uintptr_t)c->x[4], &idx)
                               : VK_ERROR_UNKNOWN;
+    vkf_wait_return(&k);
     if (r == VK_SUCCESS)
         rl_st32(mem, c->x[5], idx);
     c->x[0] = (uint32_t)r;
@@ -645,10 +647,13 @@ int vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem)
     uint32_t idx = 0;
     if (gi && c->x[2]) {
         vkf_swap *s = swap_of(vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, swapchain)), k.obj);
+        uint64_t timeout = vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, timeout));
+        VkSemaphore sem = (VkSemaphore)(uintptr_t)vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, semaphore));
+        VkFence fence = (VkFence)(uintptr_t)vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, fence));
+        vkf_wait_enter(&k, timeout);
         if (s)
-            r = swap_acquire(s, vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, timeout)),
-                             (VkSemaphore)(uintptr_t)vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, semaphore)),
-                             (VkFence)(uintptr_t)vkf_g64(&k, gi + offsetof(VkAcquireNextImageInfoKHR, fence)), &idx);
+            r = swap_acquire(s, timeout, sem, fence, &idx);
+        vkf_wait_return(&k);
     }
     if (r == VK_SUCCESS)
         rl_st32(mem, c->x[2], idx);
@@ -823,6 +828,7 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
         c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
         return vkf_end(&k);
     }
+    vkf_wait_enter(&k, 1);
     vkf_queue_enter(&k);
     uint32_t nwaits = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, waitSemaphoreCount));
     uint64_t gwaits = vkf_g64(&k, g + offsetof(VkPresentInfoKHR, pWaitSemaphores));
@@ -843,6 +849,7 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
             all = r;
     }
     vkf_queue_unlock(&k);
+    vkf_wait_return(&k);
     c->x[0] = (uint32_t)all;
     return vkf_end(&k);
 }

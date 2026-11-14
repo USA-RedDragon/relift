@@ -76,6 +76,7 @@ void vkf_begin(vkf_call *k, rl_ctx *c, uint8_t *mem)
     k->mark.chunk = t_arena.cur;
     k->mark.used = t_arena.cur ? t_arena.cur->used : 0;
     k->outer = t_call;
+    k->left = false;
     t_call = k;
 }
 

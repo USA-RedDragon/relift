@@ -74,6 +74,8 @@ struct vkf_call {
     int rc;
     /** @brief The call this one runs inside (a guest callback that called Vulkan again). */
     struct vkf_call *outer;
+    /** @brief The calling thread gave its core up for a host wait (vkf_wait_enter). */
+    bool left;
 };
 
 /** @brief Per-instance state. */
@@ -244,6 +246,10 @@ void vkf_queue_enter(vkf_call *k);
 
 /** @brief vkf_shadow_pull, then vkf_queue_unlock: after a queue wait. */
 void vkf_queue_pull_leave(vkf_call *k);
+/** @brief Gives the calling guest thread's core up for a host wait with a timeout other than 0. */
+void vkf_wait_enter(vkf_call *k, uint64_t timeout);
+/** @brief Ends vkf_wait_enter: waits for the core again. Call with no host lock held. */
+void vkf_wait_return(vkf_call *k);
 
 /** @brief Copies bytes to a fresh area below the guest stack pointer *sp; returns its guest address. */
 uint64_t vkf_push(vkf_call *k, uint64_t *sp, const void *src, size_t n);

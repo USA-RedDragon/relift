@@ -10,6 +10,8 @@
  */
 #include "vkf.h"
 
+#include "hos.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -158,4 +160,42 @@ void vkf_queue_pull_leave(vkf_call *k)
 {
     vkf_shadow_pull(k);
     vkf_queue_unlock(k);
+}
+
+void vkf_wait_enter(vkf_call *k, uint64_t timeout)
+{
+    if (!timeout || k->left)
+        return;
+    k->left = true;
+    hos_sched_leave();
+}
+
+void vkf_wait_return(vkf_call *k)
+{
+    if (!k->left)
+        return;
+    k->left = false;
+    hos_sched_return();
+}
+
+void vkf_fences_wait_enter(vkf_call *k) { vkf_wait_enter(k, k->c->x[4]); }
+
+void vkf_semaphores_wait_enter(vkf_call *k) { vkf_wait_enter(k, k->c->x[2]); }
+
+void vkf_wait_pull_return(vkf_call *k)
+{
+    vkf_shadow_pull(k);
+    vkf_wait_return(k);
+}
+
+void vkf_queue_wait_enter(vkf_call *k)
+{
+    vkf_wait_enter(k, 1);
+    vkf_queue_lock(k);
+}
+
+void vkf_queue_wait_return(vkf_call *k)
+{
+    vkf_queue_pull_leave(k);
+    vkf_wait_return(k);
 }
