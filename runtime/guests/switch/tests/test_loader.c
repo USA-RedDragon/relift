@@ -8,6 +8,7 @@
 #include "t.h"
 
 #include <limits.h>
+#include <ftw.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -95,7 +96,22 @@ static void fill_image(void)
     g_image[0x2000] = 0xAB;
 }
 
+static char g_base[PATH_MAX];
 static char g_sdmc[PATH_MAX];
+
+static int rm_cb(const char *path, const struct stat *st, int flag, struct FTW *ftw)
+{
+    (void)st;
+    (void)flag;
+    (void)ftw;
+    return remove(path);
+}
+
+static void remove_base(void)
+{
+    if (g_base[0])
+        nftw(g_base, rm_cb, 8, FTW_DEPTH | FTW_PHYS);
+}
 
 /** @brief Runs rl_switch_main in a child; output (stdout and stderr) goes to out, the wait status to *status. */
 static void run_program(const rl_switch_program *p, char *out, size_t n, int *status)
@@ -103,8 +119,16 @@ static void run_program(const rl_switch_program *p, char *out, size_t n, int *st
     int fds[2];
     pid_t pid;
     size_t used = 0;
-    const char *home = getenv("HOME");
-    snprintf(g_sdmc, sizeof g_sdmc, "%s/spare/relift-phase4/tmp/loader/sdmc/inner", home ? home : ".");
+    if (!g_sdmc[0]) {
+        const char *base = getenv("TMPDIR");
+        if (!base || !*base)
+            base = "/tmp";
+        snprintf(g_base, sizeof g_base, "%s/relift-loader-XXXXXX", base);
+        if (!mkdtemp(g_base))
+            _exit(2);
+        atexit(remove_base);
+        snprintf(g_sdmc, sizeof g_sdmc, "%s/sdmc/inner", g_base);
+    }
     setenv("RELIFT_SDMC", g_sdmc, 1);
     if (pipe(fds) != 0)
         _exit(2);
