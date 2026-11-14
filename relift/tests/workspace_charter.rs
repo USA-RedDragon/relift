@@ -332,6 +332,7 @@ const CHARTERS: &[Charter] = &[
             "relift-testguest",
             "serde_json",
             "toml",
+            "uds_windows",
         ],
         dev: NONE,
         build: NONE,
