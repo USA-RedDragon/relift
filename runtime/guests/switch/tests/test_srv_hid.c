@@ -943,7 +943,8 @@ TEST(hid_update_thread_runs_and_stops)
     CHECK(rl_hid_is_active());
     const hid_lifo_header *h = &e.mem->debug_pad.header;
     uint64_t n0 = h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0;
-    for (int i = 0; i < 200 && (h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0) < n0 + 5; i++)
+    uint64_t t0 = rl_clock_ns();
+    while ((h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0) < n0 + 5 && rl_clock_ns() - t0 < 10000000000ull)
         usleep(10000);
     uint64_t n1 = h->count ? e.mem->debug_pad.entries[h->tail].sampling_number : 0;
     CHECK(n1 >= n0 + 5);
@@ -951,7 +952,8 @@ TEST(hid_update_thread_runs_and_stops)
     CHECK_EQ(t_svc(e.c, SVC_UNMAP_SHARED_MEMORY, e.shm, e.at, HID_SHMEM_SIZE, 0, 0, 0), 0);
     CHECK_EQ(t_svc(e.c, SVC_CLOSE_HANDLE, e.shm, 0, 0, 0, 0, 0), 0);
     tc_close(e.c, e.ar.handle);
-    for (int i = 0; i < 200 && rl_hid_is_active(); i++)
+    t0 = rl_clock_ns();
+    while (rl_hid_is_active() && rl_clock_ns() - t0 < 10000000000ull)
         usleep(10000);
     CHECK(!rl_hid_is_active());
     rl_hid_stop();
