@@ -69,6 +69,8 @@ pub const CUT: &[&str] = &[
     "MemAtomic",
     "AArch64_SetExclusiveMonitors",
     "AArch64_ExclusiveMonitorsPass",
+    "AlignmentFault",
+    "AArch64_Abort",
     "ClearExclusiveLocal",
     "AArch64_ClearExclusiveLocal",
     "ConstrainUnpredictable",
@@ -635,8 +637,26 @@ impl Gen<'_> {
                 if self.guard.d.is_some() {
                     return fail("load under a dynamic condition");
                 }
+                if let Some((v, w, lo)) = self.excl_rest.take() {
+                    // The next part of a pair the exclusive load read whole.
+                    if lo + size * 8 > w {
+                        return fail("read past the exclusive load");
+                    }
+                    if lo + size * 8 < w {
+                        self.excl_rest = Some((v.clone(), w, lo + size * 8));
+                    }
+                    return Ok(Some(self.dy(
+                        K::Bits(size * 8),
+                        format!("b.extract({v}, {lo}, Width::new({}))", size * 8),
+                    )));
+                }
                 let order = self.order(&a[2]);
-                let excl = std::mem::take(&mut self.excl_load);
+                let mon = self.excl_load.take();
+                let excl = mon.is_some();
+                // An exclusive load reads the monitor's whole span at once
+                // (a pair of 64-bit registers reads as one 16-byte access).
+                let size = mon.map_or(size, |m| m.max(size));
+                let part = self.cint(&a[1])? as u32;
                 let f = if excl { "load_exclusive" } else { "load" };
                 if excl || order != "Plain" {
                     self.effect(format!("align::check(b, st, {x}, {size}, {excl});"));
@@ -645,6 +665,22 @@ impl Gen<'_> {
                     "b.{f}({x}, Width::new({}), Endian::Little, Order::{order})",
                     size * 8
                 );
+                if part < size {
+                    let expr = match self.guard.s.clone() {
+                        None => call,
+                        Some((s, _)) => format!(
+                            "if {s} {{ {call} }} else {{ b.konst(Width::new({}), 0) }}",
+                            size * 8
+                        ),
+                    };
+                    let whole = self.dy(K::Bits(size * 8), expr);
+                    let v = self.dx(&whole)?;
+                    self.excl_rest = Some((v.clone(), size * 8, part * 8));
+                    return Ok(Some(self.dy(
+                        K::Bits(part * 8),
+                        format!("b.extract({v}, 0, Width::new({}))", part * 8),
+                    )));
+                }
                 match self.guard.s.clone() {
                     None => self.dy(K::Bits(size * 8), call),
                     Some((s, _)) => self.dy(
@@ -753,7 +789,20 @@ impl Gen<'_> {
                 }
             }
             "AArch64_SetExclusiveMonitors" => {
-                self.excl_load = true;
+                self.excl_load = Some(self.cint(&a[1])? as u32);
+                V::Unit
+            }
+            "AlignmentFault" => V::Enum("relift_fault".into(), 0),
+            "AArch64_Abort" => {
+                // Only the alignment fault of a check written in the
+                // instruction (LDXP with 64-bit registers) reaches EL0.
+                if !matches!(&a[1], V::Enum(t, 0) if t.as_ref() == "relift_fault") {
+                    return fail("AArch64_Abort of a fault other than alignment");
+                }
+                let Some(d) = self.guard.d.clone() else {
+                    return fail("unconditional alignment fault");
+                };
+                self.effect(format!("align::fault(b, {d});"));
                 V::Unit
             }
             "AArch64_ExclusiveMonitorsPass" => {

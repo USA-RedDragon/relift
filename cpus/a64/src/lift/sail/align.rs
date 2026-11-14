@@ -33,3 +33,9 @@ pub fn check(b: &mut Builder, st: &St, addr: Value, size: u32, exclusive: bool) 
     };
     b.guard(fault, SLOW_ALIGN);
 }
+
+/// Leaves the block for [`SLOW_ALIGN`] when `fault` holds: an alignment
+/// check the instruction itself makes (LDXP with 64-bit registers).
+pub fn fault(b: &mut Builder, fault: Value) {
+    b.guard(fault, SLOW_ALIGN);
+}

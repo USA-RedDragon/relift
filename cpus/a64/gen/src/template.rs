@@ -318,7 +318,7 @@ const EFFECTS: &[&str] = &[
 /// before every effect, and a later access of a pair checks its own
 /// address. Fails when a check reads a value only an effect defines.
 fn hoist_align(lines: Vec<String>) -> Result<Vec<String>, String> {
-    let is_effect = |l: &str| EFFECTS.iter().any(|e| l.contains(e)) && !l.contains("align::check");
+    let is_effect = |l: &str| EFFECTS.iter().any(|e| l.contains(e)) && !l.contains("align::");
     let Some(first) = lines.iter().position(|l| is_effect(l)) else {
         return Ok(lines);
     };
@@ -331,7 +331,7 @@ fn hoist_align(lines: Vec<String>) -> Result<Vec<String>, String> {
         })
     };
     for i in first..lines.len() {
-        if !lines[i].contains("align::check") {
+        if !lines[i].contains("align::") {
             continue;
         }
         let mut todo = vec![i];

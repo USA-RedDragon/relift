@@ -96,8 +96,11 @@ pub struct Gen<'m> {
     pub value: u32,
     /// The cut functions this run used.
     pub used_cut: BTreeSet<&'static str>,
-    /// The next load arms the exclusive monitor.
-    pub excl_load: bool,
+    /// The next load arms the exclusive monitor for this many bytes.
+    pub excl_load: Option<u32>,
+    /// The bytes of an exclusive load not yet read: the IR value, its
+    /// width in bits and the next bit to read.
+    pub excl_rest: Option<(Rc<str>, u32, u32)>,
     /// The pending exclusive-store result, named before the store defines it.
     pub excl_pass: Option<Rc<str>>,
     /// Run the cipher functions from Sail instead of cutting them (to
@@ -194,7 +197,8 @@ impl<'m> Gen<'m> {
             known,
             value,
             used_cut: BTreeSet::new(),
-            excl_load: false,
+            excl_load: None,
+            excl_rest: None,
             excl_pass: None,
             no_cut: false,
         }

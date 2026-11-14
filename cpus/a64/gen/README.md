@@ -30,7 +30,9 @@ at lift time, and guest state becomes `relift-ir` builder calls. A value that
 must be known while generating (a width, a loop bound, the choice of decode
 clause) splits the template on the bits it depends on. The functions in
 `src/cut.rs` are not translated but written by hand: register access, the PC
-and branches, memory, the exclusive monitor and the LSE atomics, configuration
+and branches, memory, the exclusive monitor (an exclusive load of a
+pair reads as one access, and the model's own alignment abort of LDXP
+becomes the `SLOW_ALIGN` guard) and the LSE atomics,
 checks that are no-ops at EL0, `IsFeatureImplemented` (a lift-time
 `St::has` test for the extensions in `eval::LIFT_TIME_FEATURES`), the AES
 and SM4 table steps (`relift_ir::CryptoOp`, checked against the Sail tables
