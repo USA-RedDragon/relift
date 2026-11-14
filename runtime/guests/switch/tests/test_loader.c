@@ -59,8 +59,7 @@ static const rl_unit g_unit = {
     .name = "loader-test",
 };
 
-const rl_unit *const rl_static_units[] = { &g_unit };
-const uint32_t rl_static_unit_count = 1;
+static const rl_unit *const g_units[] = { &g_unit };
 
 static rl_switch_module g_module = {
     .name = "main",
@@ -85,6 +84,8 @@ static rl_switch_program g_program = {
     .main_core = 0,
     .main_stack_size = 0x100000,
     .program_id = 0x0100000000012345ull,
+    .units = g_units,
+    .unit_count = 1,
 };
 
 static void fill_image(void)
