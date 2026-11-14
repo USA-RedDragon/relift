@@ -7,7 +7,6 @@
 #include "loader.h"
 
 #include "hos.h"
-#include "vk/vk.h"
 
 #include <relift/window.h>
 
@@ -18,6 +17,17 @@
 
 static const rl_switch_hook *g_hooks[RL_SWITCH_HOOKS];
 static uint32_t g_nhooks;
+
+static const rl_switch_hook *g_auto[RL_SWITCH_HOOKS];
+static uint32_t g_nauto;
+
+int rl_switch_register_auto_hook(const rl_switch_hook *h)
+{
+    if (!h || !h->wants || g_nauto >= RL_SWITCH_HOOKS)
+        return -1;
+    g_auto[g_nauto++] = h;
+    return 0;
+}
 
 int rl_switch_add_hook(const rl_switch_hook *h)
 {
@@ -436,14 +446,16 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     (void)argc;
     (void)argv;
     main_args a = { p };
-    const rl_switch_hook *vk = rl_vk_switch_hook();
-    bool automatic = !is_added(vk) && g_nhooks < RL_SWITCH_HOOKS && wants_hook(p, vk);
-    if (automatic) {
-        g_hooks[g_nhooks++] = vk;
-        rl_log(RL_LOG_INFO, "loader", "the program uses Vulkan: forwarding is on");
+    uint32_t base = g_nhooks;
+    for (uint32_t i = 0; i < g_nauto; i++) {
+        const rl_switch_hook *h = g_auto[i];
+        if (is_added(h) || g_nhooks >= RL_SWITCH_HOOKS || !wants_hook(p, h))
+            continue;
+        g_hooks[g_nhooks++] = h;
+        rl_log(RL_LOG_INFO, "loader", "hook %s turned on by the program's symbols", h->name ? h->name : "?");
     }
     int ret = g_nhooks ? rl_window_main(run_program, &a) : run_program(&a);
-    if (automatic)
+    while (g_nhooks > base)
         g_hooks[--g_nhooks] = NULL;
     return ret;
 }

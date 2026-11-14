@@ -227,3 +227,5 @@ static const rl_switch_hook g_hook = {
 };
 
 const rl_switch_hook *rl_vk_switch_hook(void) { return &g_hook; }
+
+__attribute__((constructor)) static void register_hook(void) { (void)rl_switch_register_auto_hook(&g_hook); }

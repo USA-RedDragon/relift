@@ -148,7 +148,7 @@ counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.
 
 ## Loading
 
-`rl_switch_main` adds `rl_vk_switch_hook()` by itself; a program calls nothing.
+`vk_window.o` registers `rl_vk_switch_hook()` from a constructor (`rl_switch_register_auto_hook`) and `rl_switch_main` adds it by itself; a program calls nothing. A build must link the object (`librelift_switch_vk.a` only with `-Wl,--whole-archive`, `-force_load` or `/WHOLEARCHIVE`, since nothing else references it).
 Before it starts anything, it reads the dynamic section of every module (MOD0)
 and enables forwarding when a dynamic symbol is `vkGetInstanceProcAddr` or
 `vkGetDeviceProcAddr`, imported (the game's main module) or defined (the

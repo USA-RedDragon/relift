@@ -160,7 +160,7 @@ TEST(vk_auto_import_of_vkGetInstanceProcAddr_gets_thunks)
     g_mode = IMPORT_GIPA;
     run_child(out, sizeof out);
     CHECK(strstr(out, "RESULT thunk") != NULL);
-    CHECK(strstr(out, "forwarding is on") != NULL);
+    CHECK(strstr(out, "turned on by the program") != NULL);
 }
 
 TEST(vk_auto_definition_of_vkGetDeviceProcAddr_reserves_thunks)
@@ -179,5 +179,5 @@ TEST(vk_auto_program_without_vulkan_symbols_reserves_nothing)
     g_mode = NO_VULKAN;
     run_child(out, sizeof out);
     CHECK(strstr(out, "RESULT untouched") != NULL);
-    CHECK(strstr(out, "forwarding") == NULL);
+    CHECK(strstr(out, "turned on") == NULL);
 }

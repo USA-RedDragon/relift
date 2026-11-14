@@ -82,6 +82,15 @@ typedef struct rl_switch_hook {
     void *user;
 } rl_switch_hook;
 
+/**
+ * @brief Registers a hook with a wants function for rl_switch_main to add on
+ * its own (see "Automatic hooks"). The Vulkan forwarding code registers its
+ * hook from a constructor, so a program that links it needs no call, and a
+ * program that does not link it pays nothing. Returns 0, or -1 when the hook
+ * has no wants function or the table is full.
+ */
+RL_RUNTIME_API int rl_switch_register_auto_hook(const rl_switch_hook *h);
+
 /** @brief Most hooks rl_switch_add_hook takes. */
 #define RL_SWITCH_HOOKS 8
 
@@ -101,11 +110,12 @@ RL_RUNTIME_API int rl_switch_add_hook(const rl_switch_hook *h);
  * (rl_window_main; only when a hook runs, so only for a Vulkan program), so the calling thread can run the window event loop.
  *
  * Automatic hooks: before anything starts, the loader reads the dynamic
- * symbols of every module and adds the Vulkan forwarding hook (vk/vk.h) when
- * one is vkGetInstanceProcAddr or vkGetDeviceProcAddr, defined or imported.
- * A program without those symbols starts no hook and no window backend, so
- * it reserves nothing for Vulkan. A program may add the hook itself; it is
- * never added twice.
+ * symbols of every module and adds each hook registered with
+ * rl_switch_register_auto_hook whose wants function accepts one. The Vulkan
+ * forwarding hook (vk/vk.h) accepts vkGetInstanceProcAddr and
+ * vkGetDeviceProcAddr, defined or imported. A program without those symbols
+ * starts no hook and no window backend, so it reserves nothing for Vulkan. A
+ * program may add a hook itself; it is never added twice.
  *
  * Linking: the loader reads each module's dynamic section (through MOD0).
  * A function the module defines whose name a hook replaces gets an
