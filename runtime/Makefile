@@ -17,6 +17,9 @@
 #   make vk-present            run the synthetic Vulkan program (a window with VIDEO=sdl3 and a display)
 #   make gdb-test              check the gdb frame filter (skips without gdb)
 #   make sched-bench           run the device scheduler microbenchmark
+#   make libs                  only the libraries (static, shared and per layer), no tests: the
+#                              build for TARGET=x86_64-windows-gnu or aarch64-windows-gnu, whose
+#                              tests are POSIX programs
 #   make portable              only crash_test, fiber_tests and sched_bench: they link just the
 #                              host-portable part of the core, so they also build for Windows
 #                              (TARGET=x86_64-windows-gnu or aarch64-windows-gnu)
@@ -169,8 +172,9 @@ GBDEV_ROMS ?=
 GBDEV_FRAMES ?= 60
 GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
 
-.PHONY: all test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
+.PHONY: all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
 all: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
+libs: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(STATIC) $(SHARED)
 portable: $(PORTABLE)
 
 $(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
