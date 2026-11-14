@@ -3,7 +3,7 @@
 
 pub mod toy;
 
-use relift_ir::{Block, Reg, RegFile};
+use relift_ir::{Block, FpOp, Reg, RegFile, Width};
 
 /// How a guest turns its own symbol names into host names.
 ///
@@ -80,6 +80,25 @@ pub trait Frontend {
 
     /// The C expression of the exclusive monitor the `rl_ldx` family takes.
     fn monitor(&self) -> &'static str;
+
+    /// The C expression for floating-point operation `op` from operands of
+    /// width `from` to a result of width `to`, over the C expressions
+    /// `args`, with the guest's own rounding, NaN and saturation rules;
+    /// `reg` names the C local of a register in [`Frontend::fp_state`].
+    /// `None` leaves the operation to the emitter's generic form, which only
+    /// exists for sign operations ([`FpOp::Neg`], [`FpOp::Abs`]).
+    fn fp(
+        &self,
+        op: FpOp,
+        from: Width,
+        to: Width,
+        args: &[String],
+        reg: &dyn Fn(Reg) -> String,
+    ) -> Option<String>;
+
+    /// The registers [`Frontend::fp`] expressions read or write (the FP
+    /// control and status registers).
+    fn fp_state(&self) -> Vec<Reg>;
 }
 
 /// What a module section holds.
