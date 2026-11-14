@@ -15,6 +15,7 @@ relift-build = { workspace = true }
 relift-cache = { workspace = true }
 relift-cpu-a64 = { workspace = true }
 relift-cpu-sm83 = { workspace = true }
+relift-diff = { workspace = true }
 relift-emit = { workspace = true }
 relift-guest = { workspace = true }
 relift-host = { workspace = true }
@@ -24,6 +25,7 @@ relift-proc = { workspace = true }
 relift-progress = { workspace = true }
 relift-switch = { workspace = true }
 relift-switch-formats = { workspace = true }
+relift-switch-names = { workspace = true }
 relift-testguest = { workspace = true }
 serde_json = { workspace = true }
 

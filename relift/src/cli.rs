@@ -67,6 +67,40 @@ pub enum Command {
         /// A guest symbol or address.
         what: String,
     },
+    /// Compare one lifted function with the reference interpreter in a live run.
+    ///
+    /// Builds a dev build and runs it under gdb. At each call of the function
+    /// the same guest function runs in the interpreter from the same registers
+    /// and live guest memory, the lifted code runs with the other threads
+    /// frozen, and the registers and every page the interpreter touched are
+    /// compared. A run that reaches a system call or a runtime-provided
+    /// function is reported and not compared. Exits 1 after a mismatch and 2
+    /// when no call was compared.
+    Diff {
+        /// The function: a host name (`_ZN5guest...`), `module:symbol` (the
+        /// guest's mangled symbol) or `module+0xoffset` for an unnamed one.
+        /// With `--serve`, nothing.
+        function: Option<String>,
+        /// How many calls to compare.
+        #[arg(long, default_value_t = 1)]
+        count: u32,
+        /// How many calls to let pass first.
+        #[arg(long, default_value_t = 0)]
+        skip: u32,
+        /// Another engine to compare against, a program that speaks the
+        /// protocol of `--serve` (docs/abi.md, "Differential checks"), such
+        /// as the Unicorn one in check/.
+        #[arg(long, value_name = "COMMAND")]
+        engine: Option<String>,
+        /// Speak the protocol on standard input and output as the
+        /// interpreter engine, for a driver that runs the program.
+        #[arg(long, conflicts_with_all = ["function", "engine"])]
+        serve: bool,
+        /// Flip a bit of the Nth memory read of the interpreter run, so a
+        /// correct build must report a mismatch (a control for the tool).
+        #[arg(long, value_name = "N", default_value_t = 0)]
+        flip_read: u64,
+    },
     /// Map between a host address, a guest address and a symbol.
     Where {
         /// A host address, guest address or symbol.
@@ -93,6 +127,7 @@ impl Command {
             Command::Build { .. } => "build",
             Command::Run { .. } => "run",
             Command::Check { .. } => "check",
+            Command::Diff { .. } => "diff",
             Command::Where { .. } => "where",
             Command::Coverage { .. } => "coverage",
         }

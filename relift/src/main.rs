@@ -54,6 +54,28 @@ fn main() -> ExitCode {
         Command::Coverage { json, module } => {
             relift::coverage::run(*json, module.as_deref(), &mut ui)
         }
+        Command::Diff {
+            function,
+            count,
+            skip,
+            engine,
+            serve,
+            flip_read,
+        } => match relift::diff::run(
+            &settings,
+            &relift::diff::Request {
+                function: function.as_deref(),
+                count: *count,
+                skip: *skip,
+                engine: engine.as_deref(),
+                serve: *serve,
+                flip_read: *flip_read,
+            },
+            &mut ui,
+        ) {
+            Ok(code) => return ExitCode::from(code),
+            Err(e) => Err(e),
+        },
         _ => Err("not implemented".into()),
     };
     match result {

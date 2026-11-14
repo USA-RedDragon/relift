@@ -6,6 +6,7 @@ pub mod cli;
 pub mod coverage;
 pub mod dev;
 pub mod devsock;
+pub mod diff;
 pub mod fpflags;
 pub mod hints;
 pub mod import;

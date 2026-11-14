@@ -444,7 +444,7 @@ pub fn host_name(p: &Placed, symbol: Option<&str>, addr: u64) -> String {
 }
 
 /// The module name as a C identifier, for host names.
-fn c_module(name: &str) -> String {
+pub fn c_module(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
