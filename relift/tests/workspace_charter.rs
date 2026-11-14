@@ -67,6 +67,10 @@ struct Charter {
 
 const NONE: &[&str] = &[];
 
+/// Members that ship their own binaries and that `relift` does not link, so
+/// the reachability control skips them; the absence walks still cover them.
+const STANDALONE: &[&str] = &["relift-switch-tools"];
+
 const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-ir",
@@ -151,9 +155,27 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-switch-formats",
         band: 2,
-        why: "Switch formats; extraction writes through relift-cache",
-        normal: &["relift-cache"],
+        why: "decrypted Switch formats and the import; extraction writes through relift-cache",
+        normal: &["lz4_flex", "relift-cache", "sha2", "zstd"],
         dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-switch-tools",
+        band: 2,
+        why: "single-purpose tools for decrypted Switch files, thin wrappers over relift-switch-formats",
+        normal: &[
+            "clap",
+            "relift-cache",
+            "relift-switch-formats",
+            "serde_json",
+        ],
+        dev: &[
+            "relift-cache",
+            "relift-proc",
+            "relift-switch-formats",
+            "serde_json",
+        ],
         build: NONE,
     },
     Charter {
@@ -602,7 +624,10 @@ fn core_reaches_no_cpu_and_no_guest() {
         "control: cpus/, guests/ and testguest/ must each hold a member, or this rule checks nothing"
     );
     let from_binary = ws.closure(ws.id_of("relift"));
-    for (id, m) in &needles {
+    for (id, m) in needles
+        .iter()
+        .filter(|(_, m)| !STANDALONE.contains(&m.name.as_str()))
+    {
         assert!(
             from_binary.contains_key(*id),
             "control: the walk from relift does not find {}, so it cannot be trusted to find it from core/",
