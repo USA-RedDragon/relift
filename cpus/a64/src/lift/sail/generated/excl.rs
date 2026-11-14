@@ -194,6 +194,96 @@ pub(super) fn LDAXR_LR64_ldstexclr(
     Ok(())
 }
 
+/// `LDLARB_LR32_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDLARB_LR32_ldstord(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDLARB_LR32_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(8), Endian::Little, Order::Acquire);
+    let v12 = b.zext(v11, Width::new(32));
+    st.x_set(b, s4 as u32, v12, None);
+    Ok(())
+}
+
+/// `LDLARH_LR32_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDLARH_LR32_ldstord(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDLARH_LR32_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(16), Endian::Little, Order::Acquire);
+    let v12 = b.zext(v11, Width::new(32));
+    st.x_set(b, s4 as u32, v12, None);
+    Ok(())
+}
+
+/// `LDLAR_LR32_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDLAR_LR32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDLAR_LR32_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(32), Endian::Little, Order::Acquire);
+    st.x_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `LDLAR_LR64_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
+pub(super) fn LDLAR_LR64_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::LDLAR_LR64_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.load(v10, Width::new(64), Endian::Little, Order::Acquire);
+    st.x_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
 /// `LDXRB_LR32_ldstexclr`.
 ///
 /// Cut: AArch64_SetExclusiveMonitors, ENV, IsFeatureImplemented, Mem_read, SP_read, X_read, X_set.
@@ -289,6 +379,102 @@ pub(super) fn LDXR_LR64_ldstexclr(
     let v10 = if s6 { v7 } else { v9 };
     let v11 = b.load_exclusive(v10, Width::new(64), Endian::Little, Order::Plain);
     st.x_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `STLLRB_SL32_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLLRB_SL32_ldstord(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLLRB_SL32_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.konst(Width::new(64), 0x0);
+    let v12 = b.bin(BinOp::Add, v10, v11);
+    let v13 = st.x_read(b, s4 as u32, 8);
+    b.store(v12, v13, Endian::Little, Order::Release);
+    Ok(())
+}
+
+/// `STLLRH_SL32_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLLRH_SL32_ldstord(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLLRH_SL32_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.konst(Width::new(64), 0x0);
+    let v12 = b.bin(BinOp::Add, v10, v11);
+    let v13 = st.x_read(b, s4 as u32, 16);
+    b.store(v12, v13, Endian::Little, Order::Release);
+    Ok(())
+}
+
+/// `STLLR_SL32_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLLR_SL32_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLLR_SL32_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.konst(Width::new(64), 0x0);
+    let v12 = b.bin(BinOp::Add, v10, v11);
+    let v13 = st.x_read(b, s4 as u32, 32);
+    b.store(v12, v13, Endian::Little, Order::Release);
+    Ok(())
+}
+
+/// `STLLR_SL64_ldstord`.
+///
+/// Cut: ENV, IsFeatureImplemented, Mem_set, SP_read, X_read.
+pub(super) fn STLLR_SL64_ldstord(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::STLLR_SL64_ldstord;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s2 as i128;
+    let s4: i128 = s1 as i128;
+    let s6: bool = s3 == (31i128);
+    let v7 = st.sp_read(b);
+    let v9 = st.x_read(b, s3 as u32, 64);
+    let v10 = if s6 { v7 } else { v9 };
+    let v11 = b.konst(Width::new(64), 0x0);
+    let v12 = b.bin(BinOp::Add, v10, v11);
+    let v13 = st.x_read(b, s4 as u32, 64);
+    b.store(v12, v13, Endian::Little, Order::Release);
     Ok(())
 }
 
@@ -799,10 +985,18 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::LDAXRH_LR32_ldstexclr => LDAXRH_LR32_ldstexclr,
         Encoding::LDAXR_LR32_ldstexclr => LDAXR_LR32_ldstexclr,
         Encoding::LDAXR_LR64_ldstexclr => LDAXR_LR64_ldstexclr,
+        Encoding::LDLARB_LR32_ldstord => LDLARB_LR32_ldstord,
+        Encoding::LDLARH_LR32_ldstord => LDLARH_LR32_ldstord,
+        Encoding::LDLAR_LR32_ldstord => LDLAR_LR32_ldstord,
+        Encoding::LDLAR_LR64_ldstord => LDLAR_LR64_ldstord,
         Encoding::LDXRB_LR32_ldstexclr => LDXRB_LR32_ldstexclr,
         Encoding::LDXRH_LR32_ldstexclr => LDXRH_LR32_ldstexclr,
         Encoding::LDXR_LR32_ldstexclr => LDXR_LR32_ldstexclr,
         Encoding::LDXR_LR64_ldstexclr => LDXR_LR64_ldstexclr,
+        Encoding::STLLRB_SL32_ldstord => STLLRB_SL32_ldstord,
+        Encoding::STLLRH_SL32_ldstord => STLLRH_SL32_ldstord,
+        Encoding::STLLR_SL32_ldstord => STLLR_SL32_ldstord,
+        Encoding::STLLR_SL64_ldstord => STLLR_SL64_ldstord,
         Encoding::STLRB_SL32_ldstord => STLRB_SL32_ldstord,
         Encoding::STLRH_SL32_ldstord => STLRH_SL32_ldstord,
         Encoding::STLR_SL32_ldstord => STLR_SL32_ldstord,

@@ -35,6 +35,27 @@ pub(super) fn FABS_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FABS_H_floatdp1`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FABS_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FABS_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    let v6 = b.extract(v5, 0, Width::new(15));
+    let v7 = b.konst(Width::new(1), 0x0);
+    let v8 = b.concat(v7, v6);
+    let v9 = b.konst(Width::new(112), 0x0);
+    let v10 = b.concat(v9, v8);
+    st.v_set(b, s3 as u32, v10, None);
+    Ok(())
+}
+
 /// `FABS_S_floatdp1`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_read, V_set.
@@ -71,6 +92,7 @@ pub(super) fn FADD_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).bin(b, FpOp::Add, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -93,10 +115,173 @@ pub(super) fn FADD_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).bin(b, FpOp::Add, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FCCMPE_D_floatccmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCCMPE_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCCMPE_D_floatccmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let s9: u128 = (s3 >> 1) & 0x7;
+    let s10: bool = s9 == 0x0u128;
+    let v11 = st.get(b, regs::Z);
+    let v12 = b.konst(Width::new(1), 0x1);
+    let v13 = b.cmp(CmpOp::Eq, v11, v12);
+    let s15: bool = s9 == 0x1u128;
+    let v17 = st.get(b, regs::C);
+    let v18 = b.konst(Width::new(1), 0x1);
+    let v19 = b.cmp(CmpOp::Eq, v17, v18);
+    let s22: bool = s9 == 0x2u128;
+    let v24 = st.get(b, regs::N);
+    let v25 = b.konst(Width::new(1), 0x1);
+    let v26 = b.cmp(CmpOp::Eq, v24, v25);
+    let s29: bool = s9 == 0x3u128;
+    let v31 = st.get(b, regs::V);
+    let v32 = b.konst(Width::new(1), 0x1);
+    let v33 = b.cmp(CmpOp::Eq, v31, v32);
+    let s36: bool = s9 == 0x4u128;
+    let v38 = st.get(b, regs::C);
+    let v39 = b.konst(Width::new(1), 0x1);
+    let v40 = b.cmp(CmpOp::Eq, v38, v39);
+    let v41 = st.get(b, regs::Z);
+    let v42 = b.konst(Width::new(1), 0x0);
+    let v43 = b.cmp(CmpOp::Eq, v41, v42);
+    let v44 = b.and(v40, v43);
+    let s47: bool = s9 == 0x5u128;
+    let v49 = st.get(b, regs::N);
+    let v50 = st.get(b, regs::V);
+    let v51 = b.cmp(CmpOp::Eq, v49, v50);
+    let s54: bool = s9 == 0x6u128;
+    let v56 = st.get(b, regs::N);
+    let v57 = st.get(b, regs::V);
+    let v58 = b.cmp(CmpOp::Eq, v56, v57);
+    let v59 = st.get(b, regs::Z);
+    let v60 = b.konst(Width::new(1), 0x0);
+    let v61 = b.cmp(CmpOp::Eq, v59, v60);
+    let v62 = b.and(v58, v61);
+    let v69 = b.konst(Width::new(1), 1);
+    let v70 = if s54 { v62 } else { v69 };
+    let v72 = if s47 { v51 } else { v70 };
+    let v74 = if s36 { v44 } else { v72 };
+    let v76 = if s29 { v33 } else { v74 };
+    let v78 = if s22 { v26 } else { v76 };
+    let v80 = if s15 { v19 } else { v78 };
+    let v82 = if s10 { v13 } else { v80 };
+    let s84: u128 = (s3 >> 0) & 0x1;
+    let s85: bool = s84 == 0x1u128;
+    let s86: bool = s3 != 0xfu128;
+    let s87: bool = s85 && s86;
+    let v89 = b.not(v82);
+    let v92 = if s87 { v89 } else { v82 };
+    st.assume_default_fpcr();
+    let v93 = rt::Fp::new(64).compare(b, v7, v8);
+    let v95 = b.konst(Width::new(4), s1);
+    let v96 = b.select(v92, v93, v95);
+    let v100 = b.extract(v96, 3, Width::new(1));
+    st.set(b, regs::N, v100, None);
+    let v101 = b.extract(v96, 2, Width::new(1));
+    st.set(b, regs::Z, v101, None);
+    let v102 = b.extract(v96, 1, Width::new(1));
+    st.set(b, regs::C, v102, None);
+    let v103 = b.extract(v96, 0, Width::new(1));
+    st.set(b, regs::V, v103, None);
+    Ok(())
+}
+
+/// `FCCMPE_S_floatccmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCCMPE_S_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCCMPE_S_floatccmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let s9: u128 = (s3 >> 1) & 0x7;
+    let s10: bool = s9 == 0x0u128;
+    let v11 = st.get(b, regs::Z);
+    let v12 = b.konst(Width::new(1), 0x1);
+    let v13 = b.cmp(CmpOp::Eq, v11, v12);
+    let s15: bool = s9 == 0x1u128;
+    let v17 = st.get(b, regs::C);
+    let v18 = b.konst(Width::new(1), 0x1);
+    let v19 = b.cmp(CmpOp::Eq, v17, v18);
+    let s22: bool = s9 == 0x2u128;
+    let v24 = st.get(b, regs::N);
+    let v25 = b.konst(Width::new(1), 0x1);
+    let v26 = b.cmp(CmpOp::Eq, v24, v25);
+    let s29: bool = s9 == 0x3u128;
+    let v31 = st.get(b, regs::V);
+    let v32 = b.konst(Width::new(1), 0x1);
+    let v33 = b.cmp(CmpOp::Eq, v31, v32);
+    let s36: bool = s9 == 0x4u128;
+    let v38 = st.get(b, regs::C);
+    let v39 = b.konst(Width::new(1), 0x1);
+    let v40 = b.cmp(CmpOp::Eq, v38, v39);
+    let v41 = st.get(b, regs::Z);
+    let v42 = b.konst(Width::new(1), 0x0);
+    let v43 = b.cmp(CmpOp::Eq, v41, v42);
+    let v44 = b.and(v40, v43);
+    let s47: bool = s9 == 0x5u128;
+    let v49 = st.get(b, regs::N);
+    let v50 = st.get(b, regs::V);
+    let v51 = b.cmp(CmpOp::Eq, v49, v50);
+    let s54: bool = s9 == 0x6u128;
+    let v56 = st.get(b, regs::N);
+    let v57 = st.get(b, regs::V);
+    let v58 = b.cmp(CmpOp::Eq, v56, v57);
+    let v59 = st.get(b, regs::Z);
+    let v60 = b.konst(Width::new(1), 0x0);
+    let v61 = b.cmp(CmpOp::Eq, v59, v60);
+    let v62 = b.and(v58, v61);
+    let v69 = b.konst(Width::new(1), 1);
+    let v70 = if s54 { v62 } else { v69 };
+    let v72 = if s47 { v51 } else { v70 };
+    let v74 = if s36 { v44 } else { v72 };
+    let v76 = if s29 { v33 } else { v74 };
+    let v78 = if s22 { v26 } else { v76 };
+    let v80 = if s15 { v19 } else { v78 };
+    let v82 = if s10 { v13 } else { v80 };
+    let s84: u128 = (s3 >> 0) & 0x1;
+    let s85: bool = s84 == 0x1u128;
+    let s86: bool = s3 != 0xfu128;
+    let s87: bool = s85 && s86;
+    let v89 = b.not(v82);
+    let v92 = if s87 { v89 } else { v82 };
+    st.assume_default_fpcr();
+    let v93 = rt::Fp::new(32).compare(b, v7, v8);
+    let v95 = b.konst(Width::new(4), s1);
+    let v96 = b.select(v92, v93, v95);
+    let v100 = b.extract(v96, 3, Width::new(1));
+    st.set(b, regs::N, v100, None);
+    let v101 = b.extract(v96, 2, Width::new(1));
+    st.set(b, regs::Z, v101, None);
+    let v102 = b.extract(v96, 1, Width::new(1));
+    st.set(b, regs::C, v102, None);
+    let v103 = b.extract(v96, 0, Width::new(1));
+    st.set(b, regs::V, v103, None);
     Ok(())
 }
 
@@ -166,6 +351,7 @@ pub(super) fn FCCMP_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s87: bool = s85 && s86;
     let v89 = b.not(v82);
     let v92 = if s87 { v89 } else { v82 };
+    st.assume_default_fpcr();
     let v93 = rt::Fp::new(64).compare(b, v7, v8);
     let v95 = b.konst(Width::new(4), s1);
     let v96 = b.select(v92, v93, v95);
@@ -246,6 +432,7 @@ pub(super) fn FCCMP_S_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s87: bool = s85 && s86;
     let v89 = b.not(v82);
     let v92 = if s87 { v89 } else { v82 };
+    st.assume_default_fpcr();
     let v93 = rt::Fp::new(32).compare(b, v7, v8);
     let v95 = b.konst(Width::new(4), s1);
     let v96 = b.select(v92, v93, v95);
@@ -260,6 +447,106 @@ pub(super) fn FCCMP_S_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Resu
     Ok(())
 }
 
+/// `FCMPE_DZ_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMPE_DZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMPE_DZ_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let v3 = st.v_read(b, s2 as u32, 64);
+    let v4 = b.konst(Width::new(64), 0x0);
+    st.assume_default_fpcr();
+    let v5 = rt::Fp::new(64).compare(b, v3, v4);
+    let v6 = b.extract(v5, 3, Width::new(1));
+    st.set(b, regs::N, v6, None);
+    let v7 = b.extract(v5, 2, Width::new(1));
+    st.set(b, regs::Z, v7, None);
+    let v8 = b.extract(v5, 1, Width::new(1));
+    st.set(b, regs::C, v8, None);
+    let v9 = b.extract(v5, 0, Width::new(1));
+    st.set(b, regs::V, v9, None);
+    Ok(())
+}
+
+/// `FCMPE_D_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMPE_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMPE_D_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: u128 = (w >> 16) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s3 as u32, 64);
+    let v6 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v7 = rt::Fp::new(64).compare(b, v5, v6);
+    let v8 = b.extract(v7, 3, Width::new(1));
+    st.set(b, regs::N, v8, None);
+    let v9 = b.extract(v7, 2, Width::new(1));
+    st.set(b, regs::Z, v9, None);
+    let v10 = b.extract(v7, 1, Width::new(1));
+    st.set(b, regs::C, v10, None);
+    let v11 = b.extract(v7, 0, Width::new(1));
+    st.set(b, regs::V, v11, None);
+    Ok(())
+}
+
+/// `FCMPE_SZ_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMPE_SZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMPE_SZ_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let v3 = st.v_read(b, s2 as u32, 32);
+    let v4 = b.konst(Width::new(32), 0x0);
+    st.assume_default_fpcr();
+    let v5 = rt::Fp::new(32).compare(b, v3, v4);
+    let v6 = b.extract(v5, 3, Width::new(1));
+    st.set(b, regs::N, v6, None);
+    let v7 = b.extract(v5, 2, Width::new(1));
+    st.set(b, regs::Z, v7, None);
+    let v8 = b.extract(v5, 1, Width::new(1));
+    st.set(b, regs::C, v8, None);
+    let v9 = b.extract(v5, 0, Width::new(1));
+    st.set(b, regs::V, v9, None);
+    Ok(())
+}
+
+/// `FCMPE_S_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMPE_S_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMPE_S_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: u128 = (w >> 16) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s3 as u32, 32);
+    let v6 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v7 = rt::Fp::new(32).compare(b, v5, v6);
+    let v8 = b.extract(v7, 3, Width::new(1));
+    st.set(b, regs::N, v8, None);
+    let v9 = b.extract(v7, 2, Width::new(1));
+    st.set(b, regs::Z, v9, None);
+    let v10 = b.extract(v7, 1, Width::new(1));
+    st.set(b, regs::C, v10, None);
+    let v11 = b.extract(v7, 0, Width::new(1));
+    st.set(b, regs::V, v11, None);
+    Ok(())
+}
+
 /// `FCMP_DZ_floatcmp`.
 ///
 /// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
@@ -271,6 +558,7 @@ pub(super) fn FCMP_DZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s2: i128 = s1 as i128;
     let v3 = st.v_read(b, s2 as u32, 64);
     let v4 = b.konst(Width::new(64), 0x0);
+    st.assume_default_fpcr();
     let v5 = rt::Fp::new(64).compare(b, v3, v4);
     let v6 = b.extract(v5, 3, Width::new(1));
     st.set(b, regs::N, v6, None);
@@ -296,6 +584,7 @@ pub(super) fn FCMP_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s3 as u32, 64);
     let v6 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v7 = rt::Fp::new(64).compare(b, v5, v6);
     let v8 = b.extract(v7, 3, Width::new(1));
     st.set(b, regs::N, v8, None);
@@ -319,6 +608,7 @@ pub(super) fn FCMP_SZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s2: i128 = s1 as i128;
     let v3 = st.v_read(b, s2 as u32, 32);
     let v4 = b.konst(Width::new(32), 0x0);
+    st.assume_default_fpcr();
     let v5 = rt::Fp::new(32).compare(b, v3, v4);
     let v6 = b.extract(v5, 3, Width::new(1));
     st.set(b, regs::N, v6, None);
@@ -344,6 +634,7 @@ pub(super) fn FCMP_S_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s3 as u32, 32);
     let v6 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v7 = rt::Fp::new(32).compare(b, v5, v6);
     let v8 = b.extract(v7, 3, Width::new(1));
     st.set(b, regs::N, v8, None);
@@ -428,6 +719,78 @@ pub(super) fn FCSEL_D_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FCSEL_H_floatsel`.
+///
+/// Cut: ENV, PSTATE.NZCV, V_read, V_set.
+pub(super) fn FCSEL_H_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCSEL_H_floatsel;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s2 as i128;
+    let s7: i128 = s4 as i128;
+    let s8: u128 = (s3 >> 1) & 0x7;
+    let s9: bool = s8 == 0x0u128;
+    let v10 = st.get(b, regs::Z);
+    let v11 = b.konst(Width::new(1), 0x1);
+    let v12 = b.cmp(CmpOp::Eq, v10, v11);
+    let s14: bool = s8 == 0x1u128;
+    let v16 = st.get(b, regs::C);
+    let v17 = b.konst(Width::new(1), 0x1);
+    let v18 = b.cmp(CmpOp::Eq, v16, v17);
+    let s21: bool = s8 == 0x2u128;
+    let v23 = st.get(b, regs::N);
+    let v24 = b.konst(Width::new(1), 0x1);
+    let v25 = b.cmp(CmpOp::Eq, v23, v24);
+    let s28: bool = s8 == 0x3u128;
+    let v30 = st.get(b, regs::V);
+    let v31 = b.konst(Width::new(1), 0x1);
+    let v32 = b.cmp(CmpOp::Eq, v30, v31);
+    let s35: bool = s8 == 0x4u128;
+    let v37 = st.get(b, regs::C);
+    let v38 = b.konst(Width::new(1), 0x1);
+    let v39 = b.cmp(CmpOp::Eq, v37, v38);
+    let v40 = st.get(b, regs::Z);
+    let v41 = b.konst(Width::new(1), 0x0);
+    let v42 = b.cmp(CmpOp::Eq, v40, v41);
+    let v43 = b.and(v39, v42);
+    let s46: bool = s8 == 0x5u128;
+    let v48 = st.get(b, regs::N);
+    let v49 = st.get(b, regs::V);
+    let v50 = b.cmp(CmpOp::Eq, v48, v49);
+    let s53: bool = s8 == 0x6u128;
+    let v55 = st.get(b, regs::N);
+    let v56 = st.get(b, regs::V);
+    let v57 = b.cmp(CmpOp::Eq, v55, v56);
+    let v58 = st.get(b, regs::Z);
+    let v59 = b.konst(Width::new(1), 0x0);
+    let v60 = b.cmp(CmpOp::Eq, v58, v59);
+    let v61 = b.and(v57, v60);
+    let v68 = b.konst(Width::new(1), 1);
+    let v69 = if s53 { v61 } else { v68 };
+    let v71 = if s46 { v50 } else { v69 };
+    let v73 = if s35 { v43 } else { v71 };
+    let v75 = if s28 { v32 } else { v73 };
+    let v77 = if s21 { v25 } else { v75 };
+    let v79 = if s14 { v18 } else { v77 };
+    let v81 = if s9 { v12 } else { v79 };
+    let s83: u128 = (s3 >> 0) & 0x1;
+    let s84: bool = s83 == 0x1u128;
+    let s85: bool = s3 != 0xfu128;
+    let s86: bool = s84 && s85;
+    let v88 = b.not(v81);
+    let v91 = if s86 { v88 } else { v81 };
+    let v92 = st.v_read(b, s6 as u32, 16);
+    let v94 = st.v_read(b, s7 as u32, 16);
+    let v95 = b.select(v91, v92, v94);
+    st.v_set(b, s5 as u32, v95, None);
+    Ok(())
+}
+
 /// `FCSEL_S_floatsel`.
 ///
 /// Cut: ENV, PSTATE.NZCV, V_read, V_set.
@@ -500,6 +863,50 @@ pub(super) fn FCSEL_S_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FCVTAS_32D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAS_32D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAS_32D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::TiesAway, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTAS_32S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAS_32S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAS_32S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::TiesAway, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
 /// `FCVTAS_64D_float2int`.
 ///
 /// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
@@ -516,6 +923,7 @@ pub(super) fn FCVTAS_64D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::TiesAway, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -537,7 +945,30 @@ pub(super) fn FCVTAS_64S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::TiesAway, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTAU_32D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAU_32D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAU_32D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::TiesAway, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
@@ -558,7 +989,52 @@ pub(super) fn FCVTAU_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::TiesAway, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTAU_64D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAU_64D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAU_64D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::TiesAway, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTAU_64S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTAU_64S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTAU_64S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::TiesAway, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
@@ -579,6 +1055,7 @@ pub(super) fn FCVTMS_32D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Floor, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -600,6 +1077,7 @@ pub(super) fn FCVTMS_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::Floor, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -621,7 +1099,52 @@ pub(super) fn FCVTMS_64D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Floor, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTMS_64S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMS_64S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMS_64S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::Floor, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTMU_32D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMU_32D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMU_32D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Floor, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
@@ -642,7 +1165,228 @@ pub(super) fn FCVTMU_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::Floor, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTMU_64D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMU_64D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMU_64D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Floor, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTMU_64S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTMU_64S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTMU_64S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::Floor, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNS_32D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNS_32D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNS_32D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::TiesEven, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNS_32S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNS_32S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNS_32S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::TiesEven, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNS_64D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNS_64D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNS_64D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::TiesEven, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNS_64S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNS_64S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNS_64S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::TiesEven, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNU_32D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNU_32D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNU_32D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::TiesEven, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNU_32S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNU_32S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNU_32S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::TiesEven, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNU_64D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNU_64D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNU_64D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::TiesEven, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTNU_64S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTNU_64S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTNU_64S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::TiesEven, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
@@ -663,6 +1407,7 @@ pub(super) fn FCVTPS_32D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Ceil, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -684,6 +1429,7 @@ pub(super) fn FCVTPS_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::Ceil, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -705,7 +1451,30 @@ pub(super) fn FCVTPS_64D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Ceil, 64);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTPS_64S_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTPS_64S_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTPS_64S_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::Ceil, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
@@ -726,6 +1495,7 @@ pub(super) fn FCVTPU_32D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Ceil, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -747,7 +1517,30 @@ pub(super) fn FCVTPU_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::Ceil, 32);
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FCVTPU_64D_float2int`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTPU_64D_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTPU_64D_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Ceil, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
@@ -768,6 +1561,7 @@ pub(super) fn FCVTPU_64S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::Ceil, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -921,6 +1715,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -931,6 +1726,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -941,6 +1737,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -951,6 +1748,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -961,6 +1759,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -971,6 +1770,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -981,6 +1781,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -991,6 +1792,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1001,6 +1803,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1011,6 +1814,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1021,6 +1825,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1031,6 +1836,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1041,6 +1847,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1051,6 +1858,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1061,6 +1869,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1071,6 +1880,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1081,6 +1891,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1091,6 +1902,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1101,6 +1913,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1111,6 +1924,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1121,6 +1935,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1131,6 +1946,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1141,6 +1957,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1151,6 +1968,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1161,6 +1979,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1171,6 +1990,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1181,6 +2001,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1191,6 +2012,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1201,6 +2023,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1211,6 +2034,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1221,6 +2045,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1231,6 +2056,7 @@ pub(super) fn FCVTZS_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1255,6 +2081,7 @@ pub(super) fn FCVTZS_32D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Zero, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -1408,6 +2235,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1418,6 +2246,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1428,6 +2257,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1438,6 +2268,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1448,6 +2279,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1458,6 +2290,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1468,6 +2301,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1478,6 +2312,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1488,6 +2323,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1498,6 +2334,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1508,6 +2345,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1518,6 +2356,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1528,6 +2367,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1538,6 +2378,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1548,6 +2389,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1558,6 +2400,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1568,6 +2411,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1578,6 +2422,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1588,6 +2433,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1598,6 +2444,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1608,6 +2455,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1618,6 +2466,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1628,6 +2477,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1638,6 +2488,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1648,6 +2499,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1658,6 +2510,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1668,6 +2521,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1678,6 +2532,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1688,6 +2543,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1698,6 +2554,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1708,6 +2565,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1718,6 +2576,7 @@ pub(super) fn FCVTZS_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1742,9 +2601,732 @@ pub(super) fn FCVTZS_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::Zero, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `FCVTZS_64D_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZS_64D_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZS_64D_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 64, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 63, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 62, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 61, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 60, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 59, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 58, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 57, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 56, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 55, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 54, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 53, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 52, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 51, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 50, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 49, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 48, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 47, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 46, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 45, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 44, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 43, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 42, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 41, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 40, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 39, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 38, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 37, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 36, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 35, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 34, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 33, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `FCVTZS_64D_float2int`.
@@ -1763,6 +3345,7 @@ pub(super) fn FCVTZS_64D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, true, FpRound::Zero, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -1788,6 +3371,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 64, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1798,6 +3382,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 63, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1808,6 +3393,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 62, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1818,6 +3404,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 61, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1828,6 +3415,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 60, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1838,6 +3426,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 59, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1848,6 +3437,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 58, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1858,6 +3448,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 57, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1868,6 +3459,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 56, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1878,6 +3470,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 55, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1888,6 +3481,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 54, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1898,6 +3492,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 53, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1908,6 +3503,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 52, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1918,6 +3514,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 51, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1928,6 +3525,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 50, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1938,6 +3536,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 49, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1948,6 +3547,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 48, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1958,6 +3558,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 47, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1968,6 +3569,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 46, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1978,6 +3580,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 45, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1988,6 +3591,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 44, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -1998,6 +3602,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 43, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2008,6 +3613,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 42, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2018,6 +3624,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 41, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2028,6 +3635,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 40, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2038,6 +3646,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 39, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2048,6 +3657,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 38, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2058,6 +3668,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 37, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2068,6 +3679,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 36, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2078,6 +3690,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 35, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2088,6 +3701,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 34, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2098,6 +3712,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 33, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2108,6 +3723,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2118,6 +3734,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2128,6 +3745,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2138,6 +3756,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2148,6 +3767,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2158,6 +3778,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2168,6 +3789,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2178,6 +3800,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2188,6 +3811,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2198,6 +3822,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2208,6 +3833,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2218,6 +3844,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2228,6 +3855,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2238,6 +3866,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2248,6 +3877,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2258,6 +3888,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2268,6 +3899,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2278,6 +3910,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2288,6 +3921,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2298,6 +3932,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2308,6 +3943,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2318,6 +3954,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2328,6 +3965,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2338,6 +3976,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2348,6 +3987,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2358,6 +3998,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2368,6 +4009,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2378,6 +4020,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2388,6 +4031,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2398,6 +4042,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2408,6 +4053,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2418,6 +4064,7 @@ pub(super) fn FCVTZS_64S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, true, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2442,6 +4089,7 @@ pub(super) fn FCVTZS_64S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, true, FpRound::Zero, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -2595,6 +4243,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2605,6 +4254,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2615,6 +4265,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2625,6 +4276,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2635,6 +4287,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2645,6 +4298,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2655,6 +4309,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2665,6 +4320,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2675,6 +4331,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2685,6 +4342,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2695,6 +4353,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2705,6 +4364,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2715,6 +4375,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2725,6 +4386,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2735,6 +4397,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2745,6 +4408,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2755,6 +4419,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2765,6 +4430,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2775,6 +4441,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2785,6 +4452,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2795,6 +4463,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2805,6 +4474,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2815,6 +4485,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2825,6 +4496,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2835,6 +4507,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2845,6 +4518,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2855,6 +4529,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2865,6 +4540,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2875,6 +4551,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2885,6 +4562,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2895,6 +4573,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2905,6 +4584,7 @@ pub(super) fn FCVTZU_32D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -2929,6 +4609,7 @@ pub(super) fn FCVTZU_32D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Zero, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -3082,6 +4763,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3092,6 +4774,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3102,6 +4785,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3112,6 +4796,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3122,6 +4807,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3132,6 +4818,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3142,6 +4829,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3152,6 +4840,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3162,6 +4851,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3172,6 +4862,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3182,6 +4873,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3192,6 +4884,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3202,6 +4895,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3212,6 +4906,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3222,6 +4917,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3232,6 +4928,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3242,6 +4939,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3252,6 +4950,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3262,6 +4961,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3272,6 +4972,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3282,6 +4983,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3292,6 +4994,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3302,6 +5005,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3312,6 +5016,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3322,6 +5027,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3332,6 +5038,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3342,6 +5049,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3352,6 +5060,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3362,6 +5071,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3372,6 +5082,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3382,6 +5093,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3392,6 +5104,7 @@ pub(super) fn FCVTZU_32S_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 32);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3416,6 +5129,7 @@ pub(super) fn FCVTZU_32S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::Zero, 32);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -3441,6 +5155,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 64, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3451,6 +5166,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 63, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3461,6 +5177,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 62, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3471,6 +5188,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 61, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3481,6 +5199,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 60, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3491,6 +5210,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 59, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3501,6 +5221,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 58, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3511,6 +5232,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 57, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3521,6 +5243,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 56, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3531,6 +5254,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 55, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3541,6 +5265,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 54, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3551,6 +5276,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 53, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3561,6 +5287,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 52, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3571,6 +5298,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 51, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3581,6 +5309,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 50, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3591,6 +5320,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 49, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3601,6 +5331,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 48, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3611,6 +5342,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 47, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3621,6 +5353,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 46, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3631,6 +5364,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 45, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3641,6 +5375,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 44, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3651,6 +5386,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 43, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3661,6 +5397,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 42, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3671,6 +5408,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 41, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3681,6 +5419,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 40, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3691,6 +5430,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 39, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3701,6 +5441,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 38, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3711,6 +5452,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 37, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3721,6 +5463,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 36, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3731,6 +5474,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 35, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3741,6 +5485,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 34, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3751,6 +5496,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 33, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3761,6 +5507,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3771,6 +5518,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3781,6 +5529,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3791,6 +5540,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3801,6 +5551,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3811,6 +5562,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3821,6 +5573,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3831,6 +5584,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3841,6 +5595,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3851,6 +5606,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3861,6 +5617,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3871,6 +5628,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3881,6 +5639,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3891,6 +5650,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3901,6 +5661,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3911,6 +5672,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3921,6 +5683,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3931,6 +5694,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3941,6 +5705,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3951,6 +5716,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3961,6 +5727,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3971,6 +5738,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3981,6 +5749,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -3991,6 +5760,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4001,6 +5771,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4011,6 +5782,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4021,6 +5793,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4031,6 +5804,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4041,6 +5815,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4051,6 +5826,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4061,6 +5837,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4071,6 +5848,7 @@ pub(super) fn FCVTZU_64D_float2fix(
             let s3: i128 = s1 as i128;
             let s4: i128 = s2 as i128;
             let v5 = st.v_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
             let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 64);
             st.x_set(b, s3 as u32, v6, None);
             Ok(())
@@ -4095,9 +5873,732 @@ pub(super) fn FCVTZU_64D_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fp_to_fixed(b, v5, 0, false, FpRound::Zero, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `FCVTZU_64S_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FPToFixed, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FCVTZU_64S_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCVTZU_64S_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 64, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 63, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 62, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 61, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 60, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 59, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 58, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 57, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 56, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 55, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 54, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 53, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 52, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 51, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 50, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 49, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 48, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 47, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 46, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 45, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 44, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 43, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 42, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 41, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 40, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 39, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 38, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 37, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 36, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 35, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 34, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 33, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 32, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 31, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 30, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 29, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 28, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 27, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 26, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 25, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 24, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 23, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 22, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 21, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 20, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 19, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 18, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 17, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 16, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 15, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 14, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 13, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 12, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 11, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 10, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 9, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 8, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 7, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 6, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 5, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 4, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 3, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 2, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 1, false, FpRound::Zero, 64);
+            st.x_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `FCVTZU_64S_float2int`.
@@ -4116,6 +6617,7 @@ pub(super) fn FCVTZU_64S_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fp_to_fixed(b, v5, 0, false, FpRound::Zero, 64);
     st.x_set(b, s3 as u32, v6, None);
     Ok(())
@@ -4133,6 +6635,7 @@ pub(super) fn FCVT_DS_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).convert(b, v5, &rt::Fp::new(64));
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4152,6 +6655,7 @@ pub(super) fn FCVT_SD_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).convert(b, v5, &rt::Fp::new(32));
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4174,6 +6678,7 @@ pub(super) fn FDIV_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).bin(b, FpOp::Div, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4196,6 +6701,7 @@ pub(super) fn FDIV_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).bin(b, FpOp::Div, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4221,6 +6727,7 @@ pub(super) fn FMADD_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v9 = st.v_read(b, s6 as u32, 64);
     let v10 = st.v_read(b, s7 as u32, 64);
     let v11 = st.v_read(b, s8 as u32, 64);
+    st.assume_default_fpcr();
     let v12 = rt::Fp::new(64).mul_add(b, v9, v10, v11);
     let v13 = b.konst(Width::new(64), 0x0);
     let v14 = b.concat(v13, v12);
@@ -4246,6 +6753,7 @@ pub(super) fn FMADD_S_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v9 = st.v_read(b, s6 as u32, 32);
     let v10 = st.v_read(b, s7 as u32, 32);
     let v11 = st.v_read(b, s8 as u32, 32);
+    st.assume_default_fpcr();
     let v12 = rt::Fp::new(32).mul_add(b, v9, v10, v11);
     let v13 = b.konst(Width::new(96), 0x0);
     let v14 = b.concat(v13, v12);
@@ -4268,6 +6776,7 @@ pub(super) fn FMAXNM_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).max_num(b, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4290,6 +6799,7 @@ pub(super) fn FMAXNM_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).max_num(b, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4312,6 +6822,7 @@ pub(super) fn FMAX_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).max(b, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4334,6 +6845,7 @@ pub(super) fn FMAX_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).max(b, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4356,6 +6868,7 @@ pub(super) fn FMINNM_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).min_num(b, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4378,6 +6891,7 @@ pub(super) fn FMINNM_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).min_num(b, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4400,6 +6914,7 @@ pub(super) fn FMIN_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).min(b, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4422,10 +6937,28 @@ pub(super) fn FMIN_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).min(b, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMOV_32H_float2int`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FMOV_32H_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_32H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    let v6 = b.zext(v5, Width::new(32));
+    st.x_set(b, s3 as u32, v6, None);
     Ok(())
 }
 
@@ -4461,6 +6994,44 @@ pub(super) fn FMOV_64D_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     Ok(())
 }
 
+/// `FMOV_64H_float2int`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FMOV_64H_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_64H_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    let v6 = b.zext(v5, Width::new(64));
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FMOV_64VX_float2int`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_read, X_set.
+pub(super) fn FMOV_64VX_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_64VX_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 128);
+    let v6 = b.extract(v5, 64, Width::new(64));
+    st.x_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
 /// `FMOV_D64_float2int`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_set, X_read.
@@ -4474,6 +7045,24 @@ pub(super) fn FMOV_D64_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 64);
     st.v_set(b, s3 as u32, v5, None);
+    Ok(())
+}
+
+/// `FMOV_D_floatdp1`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn FMOV_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    let v6 = b.konst(Width::new(64), 0x0);
+    let v7 = b.concat(v6, v5);
+    st.v_set(b, s3 as u32, v7, None);
     Ok(())
 }
 
@@ -4510,6 +7099,85 @@ pub(super) fn FMOV_D_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FMOV_H32_float2int`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_set, X_read.
+pub(super) fn FMOV_H32_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_H32_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.x_read(b, s4 as u32, 32);
+    let v6 = b.extract(v5, 0, Width::new(16));
+    st.v_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FMOV_H64_float2int`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_set, X_read.
+pub(super) fn FMOV_H64_float2int(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_H64_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.x_read(b, s4 as u32, 64);
+    let v6 = b.extract(v5, 0, Width::new(16));
+    st.v_set(b, s3 as u32, v6, None);
+    Ok(())
+}
+
+/// `FMOV_H_floatdp1`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn FMOV_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    let v6 = b.konst(Width::new(112), 0x0);
+    let v7 = b.concat(v6, v5);
+    st.v_set(b, s3 as u32, v7, None);
+    Ok(())
+}
+
+/// `FMOV_H_floatimm`.
+///
+/// Cut: ENV, V_set.
+pub(super) fn FMOV_H_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_H_floatimm;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 13) & 0xff;
+    let s3: i128 = s1 as i128;
+    let s4: u128 = (s2 >> 7) & 0x1;
+    let s5: u128 = (s2 >> 6) & 0x1;
+    let s6: u128 = !s5 & 0x1;
+    let s7: u128 = (s2 >> 6) & 0x1;
+    let s8: u128 = (s7 << 1) | s7;
+    let s9: u128 = (s6 << 2) | s8;
+    let s10: u128 = (s2 >> 4) & 0x3;
+    let s11: u128 = (s9 << 2) | s10;
+    let s12: u128 = (s2 >> 0) & 0xf;
+    let s13: u128 = (s12 << 6) | 0x0u128;
+    let s14: u128 = (s4 << 5) | s11;
+    let s15: u128 = (s14 << 10) | s13;
+    let v16 = b.konst(Width::new(16), s15);
+    st.v_set(b, s3 as u32, v16, None);
+    Ok(())
+}
+
 /// `FMOV_S32_float2int`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_set, X_read.
@@ -4523,6 +7191,24 @@ pub(super) fn FMOV_S32_float2int(word: u32, b: &mut Builder, st: &mut St) -> Res
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 32);
     st.v_set(b, s3 as u32, v5, None);
+    Ok(())
+}
+
+/// `FMOV_S_floatdp1`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn FMOV_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    let v6 = b.konst(Width::new(96), 0x0);
+    let v7 = b.concat(v6, v5);
+    st.v_set(b, s3 as u32, v7, None);
     Ok(())
 }
 
@@ -4556,6 +7242,88 @@ pub(super) fn FMOV_S_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FMOV_V64I_float2int`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_read, V_set, X_read.
+pub(super) fn FMOV_V64I_float2int(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMOV_V64I_float2int;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.x_read(b, s4 as u32, 64);
+    let v6 = st.v_read(b, s3 as u32, 64);
+    let v7 = b.concat(v5, v6);
+    st.v_set(b, s3 as u32, v7, None);
+    Ok(())
+}
+
+/// `FMSUB_D_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMSUB_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMSUB_D_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 64);
+    let v10 = st.v_read(b, s7 as u32, 64);
+    let v11 = st.v_read(b, s8 as u32, 64);
+    let v12 = b.extract(v10, 63, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v10, 0, Width::new(63));
+    let v15 = b.concat(v13, v14);
+    st.assume_default_fpcr();
+    let v16 = rt::Fp::new(64).mul_add(b, v9, v15, v11);
+    let v17 = b.konst(Width::new(64), 0x0);
+    let v18 = b.concat(v17, v16);
+    st.v_set(b, s5 as u32, v18, None);
+    Ok(())
+}
+
+/// `FMSUB_S_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMSUB_S_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMSUB_S_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 32);
+    let v10 = st.v_read(b, s7 as u32, 32);
+    let v11 = st.v_read(b, s8 as u32, 32);
+    let v12 = b.extract(v10, 31, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v10, 0, Width::new(31));
+    let v15 = b.concat(v13, v14);
+    st.assume_default_fpcr();
+    let v16 = rt::Fp::new(32).mul_add(b, v9, v15, v11);
+    let v17 = b.konst(Width::new(96), 0x0);
+    let v18 = b.concat(v17, v16);
+    st.v_set(b, s5 as u32, v18, None);
+    Ok(())
+}
+
 /// `FMUL_D_floatdp2`.
 ///
 /// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
@@ -4571,6 +7339,7 @@ pub(super) fn FMUL_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).bin(b, FpOp::Mul, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4593,6 +7362,7 @@ pub(super) fn FMUL_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).bin(b, FpOp::Mul, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4622,6 +7392,28 @@ pub(super) fn FNEG_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FNEG_H_floatdp1`.
+///
+/// Cut: ENV, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNEG_H_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNEG_H_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 16);
+    let v6 = b.extract(v5, 15, Width::new(1));
+    let v7 = b.not(v6);
+    let v8 = b.extract(v5, 0, Width::new(15));
+    let v9 = b.concat(v7, v8);
+    let v10 = b.konst(Width::new(112), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s3 as u32, v11, None);
+    Ok(())
+}
+
 /// `FNEG_S_floatdp1`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_read, V_set.
@@ -4644,6 +7436,134 @@ pub(super) fn FNEG_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FNMADD_D_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMADD_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMADD_D_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 64);
+    let v10 = st.v_read(b, s7 as u32, 64);
+    let v11 = st.v_read(b, s8 as u32, 64);
+    let v12 = b.extract(v9, 63, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v9, 0, Width::new(63));
+    let v15 = b.concat(v13, v14);
+    let v16 = b.extract(v10, 63, Width::new(1));
+    let v17 = b.not(v16);
+    let v18 = b.extract(v10, 0, Width::new(63));
+    let v19 = b.concat(v17, v18);
+    st.assume_default_fpcr();
+    let v20 = rt::Fp::new(64).mul_add(b, v15, v19, v11);
+    let v21 = b.konst(Width::new(64), 0x0);
+    let v22 = b.concat(v21, v20);
+    st.v_set(b, s5 as u32, v22, None);
+    Ok(())
+}
+
+/// `FNMADD_S_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMADD_S_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMADD_S_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 32);
+    let v10 = st.v_read(b, s7 as u32, 32);
+    let v11 = st.v_read(b, s8 as u32, 32);
+    let v12 = b.extract(v9, 31, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v9, 0, Width::new(31));
+    let v15 = b.concat(v13, v14);
+    let v16 = b.extract(v10, 31, Width::new(1));
+    let v17 = b.not(v16);
+    let v18 = b.extract(v10, 0, Width::new(31));
+    let v19 = b.concat(v17, v18);
+    st.assume_default_fpcr();
+    let v20 = rt::Fp::new(32).mul_add(b, v15, v19, v11);
+    let v21 = b.konst(Width::new(96), 0x0);
+    let v22 = b.concat(v21, v20);
+    st.v_set(b, s5 as u32, v22, None);
+    Ok(())
+}
+
+/// `FNMSUB_D_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMSUB_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMSUB_D_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 64);
+    let v10 = st.v_read(b, s7 as u32, 64);
+    let v11 = st.v_read(b, s8 as u32, 64);
+    let v12 = b.extract(v9, 63, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v9, 0, Width::new(63));
+    let v15 = b.concat(v13, v14);
+    st.assume_default_fpcr();
+    let v16 = rt::Fp::new(64).mul_add(b, v15, v10, v11);
+    let v17 = b.konst(Width::new(64), 0x0);
+    let v18 = b.concat(v17, v16);
+    st.v_set(b, s5 as u32, v18, None);
+    Ok(())
+}
+
+/// `FNMSUB_S_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMSUB_S_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMSUB_S_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 32);
+    let v10 = st.v_read(b, s7 as u32, 32);
+    let v11 = st.v_read(b, s8 as u32, 32);
+    let v12 = b.extract(v9, 31, Width::new(1));
+    let v13 = b.not(v12);
+    let v14 = b.extract(v9, 0, Width::new(31));
+    let v15 = b.concat(v13, v14);
+    st.assume_default_fpcr();
+    let v16 = rt::Fp::new(32).mul_add(b, v15, v10, v11);
+    let v17 = b.konst(Width::new(96), 0x0);
+    let v18 = b.concat(v17, v16);
+    st.v_set(b, s5 as u32, v18, None);
+    Ok(())
+}
+
 /// `FNMUL_D_floatdp2`.
 ///
 /// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
@@ -4659,6 +7579,7 @@ pub(super) fn FNMUL_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).bin(b, FpOp::Mul, v7, v8);
     let v10 = b.extract(v9, 63, Width::new(1));
     let v11 = b.not(v10);
@@ -4685,6 +7606,7 @@ pub(super) fn FNMUL_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).bin(b, FpOp::Mul, v7, v8);
     let v10 = b.extract(v9, 31, Width::new(1));
     let v11 = b.not(v10);
@@ -4708,6 +7630,7 @@ pub(super) fn FRINTA_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::TiesAway);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4727,6 +7650,7 @@ pub(super) fn FRINTA_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::TiesAway);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4746,6 +7670,7 @@ pub(super) fn FRINTI_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::TiesEven);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4765,6 +7690,7 @@ pub(super) fn FRINTI_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::TiesEven);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4784,6 +7710,7 @@ pub(super) fn FRINTM_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::Floor);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4803,7 +7730,48 @@ pub(super) fn FRINTM_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::Floor);
+    let v7 = b.konst(Width::new(96), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FRINTN_D_floatdp1`.
+///
+/// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTN_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTN_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::TiesEven);
+    let v7 = b.konst(Width::new(64), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FRINTN_S_floatdp1`.
+///
+/// Cut: ENV, FPRoundInt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FRINTN_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FRINTN_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
+    let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::TiesEven);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
     st.v_set(b, s3 as u32, v8, None);
@@ -4822,6 +7790,7 @@ pub(super) fn FRINTP_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::Ceil);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4841,6 +7810,7 @@ pub(super) fn FRINTP_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::Ceil);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4860,6 +7830,7 @@ pub(super) fn FRINTX_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::TiesEven);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4879,6 +7850,7 @@ pub(super) fn FRINTX_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::TiesEven);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4898,6 +7870,7 @@ pub(super) fn FRINTZ_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).round_int(b, v5, FpRound::Zero);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4917,6 +7890,7 @@ pub(super) fn FRINTZ_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).round_int(b, v5, FpRound::Zero);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4936,6 +7910,7 @@ pub(super) fn FSQRT_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).sqrt(b, v5);
     let v7 = b.konst(Width::new(64), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4955,6 +7930,7 @@ pub(super) fn FSQRT_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.v_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).sqrt(b, v5);
     let v7 = b.konst(Width::new(96), 0x0);
     let v8 = b.concat(v7, v6);
@@ -4977,6 +7953,7 @@ pub(super) fn FSUB_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 64);
     let v8 = st.v_read(b, s6 as u32, 64);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(64).bin(b, FpOp::Sub, v7, v8);
     let v10 = b.konst(Width::new(64), 0x0);
     let v11 = b.concat(v10, v9);
@@ -4999,11 +7976,510 @@ pub(super) fn FSUB_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result
     let s6: i128 = s3 as i128;
     let v7 = st.v_read(b, s5 as u32, 32);
     let v8 = st.v_read(b, s6 as u32, 32);
+    st.assume_default_fpcr();
     let v9 = rt::Fp::new(32).bin(b, FpOp::Sub, v7, v8);
     let v10 = b.konst(Width::new(96), 0x0);
     let v11 = b.concat(v10, v9);
     st.v_set(b, s4 as u32, v11, None);
     Ok(())
+}
+
+/// `SCVTF_D32_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_D32_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_D32_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `SCVTF_D32_float2int`.
@@ -5022,9 +8498,732 @@ pub(super) fn SCVTF_D32_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, true);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `SCVTF_D64_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_D64_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_D64_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 64, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 63, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 62, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 61, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 60, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 59, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 58, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 57, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 56, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 55, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 54, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 53, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 52, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 51, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 50, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 49, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 48, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 47, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 46, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 45, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 44, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 43, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 42, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 41, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 40, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 39, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 38, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 37, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 36, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 35, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 34, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 33, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `SCVTF_D64_float2int`.
@@ -5043,9 +9242,508 @@ pub(super) fn SCVTF_D64_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, true);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `SCVTF_S32_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_S32_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_S32_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `SCVTF_S32_float2int`.
@@ -5064,9 +9762,732 @@ pub(super) fn SCVTF_S32_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 0, true);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `SCVTF_S64_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn SCVTF_S64_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::SCVTF_S64_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 64, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 63, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 62, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 61, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 60, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 59, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 58, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 57, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 56, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 55, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 54, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 53, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 52, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 51, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 50, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 49, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 48, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 47, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 46, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 45, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 44, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 43, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 42, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 41, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 40, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 39, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 38, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 37, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 36, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 35, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 34, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 33, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, true);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `SCVTF_S64_float2int`.
@@ -5085,9 +10506,508 @@ pub(super) fn SCVTF_S64_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 0, true);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `UCVTF_D32_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_D32_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_D32_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `UCVTF_D32_float2int`.
@@ -5106,9 +11026,732 @@ pub(super) fn UCVTF_D32_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, false);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `UCVTF_D64_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_D64_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_D64_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 64, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 63, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 62, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 61, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 60, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 59, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 58, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 57, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 56, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 55, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 54, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 53, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 52, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 51, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 50, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 49, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 48, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 47, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 46, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 45, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 44, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 43, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 42, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 41, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 40, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 39, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 38, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 37, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 36, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 35, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 34, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 33, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 32, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 31, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 30, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 29, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 28, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 27, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 26, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 25, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 24, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 23, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 22, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 21, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 20, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 19, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 18, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 17, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 16, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 15, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 14, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 13, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 12, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 11, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 10, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 9, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 8, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 7, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 6, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 5, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 4, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 3, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 2, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 1, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `UCVTF_D64_float2int`.
@@ -5127,9 +11770,508 @@ pub(super) fn UCVTF_D64_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(64).fixed_to_fp(b, v5, 0, false);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `UCVTF_S32_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_S32_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_S32_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00000c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00001c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00002c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00003c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007400 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007c00 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 32);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `UCVTF_S32_float2int`.
@@ -5148,9 +12290,732 @@ pub(super) fn UCVTF_S32_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 32);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 0, false);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
+}
+
+/// `UCVTF_S64_float2fix`.
+///
+/// Split on the word bits `0x0000fc00`.
+///
+/// Cut: ENV, FixedToFP, IsFeatureImplemented, V_set, X_read.
+pub(super) fn UCVTF_S64_float2fix(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UCVTF_S64_float2fix;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x0000fc00 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 64, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 63, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 62, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00000c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 61, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 60, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 59, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 58, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00001c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 57, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 56, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 55, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 54, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00002c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 53, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 52, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 51, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 50, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00003c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 49, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 48, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 47, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 46, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00004c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 45, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 44, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 43, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 42, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00005c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 41, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 40, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 39, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 38, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00006c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 37, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 36, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 35, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 34, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00007c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 33, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 32, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 31, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 30, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00008c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 29, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 28, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 27, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 26, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x00009c00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 25, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 24, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 23, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000a800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 22, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ac00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 21, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 20, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 19, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000b800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 18, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000bc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 17, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 16, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 15, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000c800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 14, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000cc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 13, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 12, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 11, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000d800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 10, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000dc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 9, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 8, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 7, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000e800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 6, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000ec00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 5, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 4, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f400 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 3, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000f800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 2, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        0x0000fc00 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.x_read(b, s4 as u32, 64);
+            st.assume_default_fpcr();
+            let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 1, false);
+            st.v_set(b, s3 as u32, v6, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `UCVTF_S64_float2int`.
@@ -5169,6 +13034,7 @@ pub(super) fn UCVTF_S64_float2int(
     let s3: i128 = s1 as i128;
     let s4: i128 = s2 as i128;
     let v5 = st.x_read(b, s4 as u32, 64);
+    st.assume_default_fpcr();
     let v6 = rt::Fp::new(32).fixed_to_fp(b, v5, 0, false);
     st.v_set(b, s3 as u32, v6, None);
     Ok(())
@@ -5178,34 +13044,62 @@ pub(super) fn UCVTF_S64_float2int(
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
         Encoding::FABS_D_floatdp1 => FABS_D_floatdp1,
+        Encoding::FABS_H_floatdp1 => FABS_H_floatdp1,
         Encoding::FABS_S_floatdp1 => FABS_S_floatdp1,
         Encoding::FADD_D_floatdp2 => FADD_D_floatdp2,
         Encoding::FADD_S_floatdp2 => FADD_S_floatdp2,
+        Encoding::FCCMPE_D_floatccmp => FCCMPE_D_floatccmp,
+        Encoding::FCCMPE_S_floatccmp => FCCMPE_S_floatccmp,
         Encoding::FCCMP_D_floatccmp => FCCMP_D_floatccmp,
         Encoding::FCCMP_S_floatccmp => FCCMP_S_floatccmp,
+        Encoding::FCMPE_DZ_floatcmp => FCMPE_DZ_floatcmp,
+        Encoding::FCMPE_D_floatcmp => FCMPE_D_floatcmp,
+        Encoding::FCMPE_SZ_floatcmp => FCMPE_SZ_floatcmp,
+        Encoding::FCMPE_S_floatcmp => FCMPE_S_floatcmp,
         Encoding::FCMP_DZ_floatcmp => FCMP_DZ_floatcmp,
         Encoding::FCMP_D_floatcmp => FCMP_D_floatcmp,
         Encoding::FCMP_SZ_floatcmp => FCMP_SZ_floatcmp,
         Encoding::FCMP_S_floatcmp => FCMP_S_floatcmp,
         Encoding::FCSEL_D_floatsel => FCSEL_D_floatsel,
+        Encoding::FCSEL_H_floatsel => FCSEL_H_floatsel,
         Encoding::FCSEL_S_floatsel => FCSEL_S_floatsel,
+        Encoding::FCVTAS_32D_float2int => FCVTAS_32D_float2int,
+        Encoding::FCVTAS_32S_float2int => FCVTAS_32S_float2int,
         Encoding::FCVTAS_64D_float2int => FCVTAS_64D_float2int,
         Encoding::FCVTAS_64S_float2int => FCVTAS_64S_float2int,
+        Encoding::FCVTAU_32D_float2int => FCVTAU_32D_float2int,
         Encoding::FCVTAU_32S_float2int => FCVTAU_32S_float2int,
+        Encoding::FCVTAU_64D_float2int => FCVTAU_64D_float2int,
+        Encoding::FCVTAU_64S_float2int => FCVTAU_64S_float2int,
         Encoding::FCVTMS_32D_float2int => FCVTMS_32D_float2int,
         Encoding::FCVTMS_32S_float2int => FCVTMS_32S_float2int,
         Encoding::FCVTMS_64D_float2int => FCVTMS_64D_float2int,
+        Encoding::FCVTMS_64S_float2int => FCVTMS_64S_float2int,
+        Encoding::FCVTMU_32D_float2int => FCVTMU_32D_float2int,
         Encoding::FCVTMU_32S_float2int => FCVTMU_32S_float2int,
+        Encoding::FCVTMU_64D_float2int => FCVTMU_64D_float2int,
+        Encoding::FCVTMU_64S_float2int => FCVTMU_64S_float2int,
+        Encoding::FCVTNS_32D_float2int => FCVTNS_32D_float2int,
+        Encoding::FCVTNS_32S_float2int => FCVTNS_32S_float2int,
+        Encoding::FCVTNS_64D_float2int => FCVTNS_64D_float2int,
+        Encoding::FCVTNS_64S_float2int => FCVTNS_64S_float2int,
+        Encoding::FCVTNU_32D_float2int => FCVTNU_32D_float2int,
+        Encoding::FCVTNU_32S_float2int => FCVTNU_32S_float2int,
+        Encoding::FCVTNU_64D_float2int => FCVTNU_64D_float2int,
+        Encoding::FCVTNU_64S_float2int => FCVTNU_64S_float2int,
         Encoding::FCVTPS_32D_float2int => FCVTPS_32D_float2int,
         Encoding::FCVTPS_32S_float2int => FCVTPS_32S_float2int,
         Encoding::FCVTPS_64D_float2int => FCVTPS_64D_float2int,
+        Encoding::FCVTPS_64S_float2int => FCVTPS_64S_float2int,
         Encoding::FCVTPU_32D_float2int => FCVTPU_32D_float2int,
         Encoding::FCVTPU_32S_float2int => FCVTPU_32S_float2int,
+        Encoding::FCVTPU_64D_float2int => FCVTPU_64D_float2int,
         Encoding::FCVTPU_64S_float2int => FCVTPU_64S_float2int,
         Encoding::FCVTZS_32D_float2fix => FCVTZS_32D_float2fix,
         Encoding::FCVTZS_32D_float2int => FCVTZS_32D_float2int,
         Encoding::FCVTZS_32S_float2fix => FCVTZS_32S_float2fix,
         Encoding::FCVTZS_32S_float2int => FCVTZS_32S_float2int,
+        Encoding::FCVTZS_64D_float2fix => FCVTZS_64D_float2fix,
         Encoding::FCVTZS_64D_float2int => FCVTZS_64D_float2int,
         Encoding::FCVTZS_64S_float2fix => FCVTZS_64S_float2fix,
         Encoding::FCVTZS_64S_float2int => FCVTZS_64S_float2int,
@@ -5215,6 +13109,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FCVTZU_32S_float2int => FCVTZU_32S_float2int,
         Encoding::FCVTZU_64D_float2fix => FCVTZU_64D_float2fix,
         Encoding::FCVTZU_64D_float2int => FCVTZU_64D_float2int,
+        Encoding::FCVTZU_64S_float2fix => FCVTZU_64S_float2fix,
         Encoding::FCVTZU_64S_float2int => FCVTZU_64S_float2int,
         Encoding::FCVT_DS_floatdp1 => FCVT_DS_floatdp1,
         Encoding::FCVT_SD_floatdp1 => FCVT_SD_floatdp1,
@@ -5230,16 +13125,33 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FMINNM_S_floatdp2 => FMINNM_S_floatdp2,
         Encoding::FMIN_D_floatdp2 => FMIN_D_floatdp2,
         Encoding::FMIN_S_floatdp2 => FMIN_S_floatdp2,
+        Encoding::FMOV_32H_float2int => FMOV_32H_float2int,
         Encoding::FMOV_32S_float2int => FMOV_32S_float2int,
         Encoding::FMOV_64D_float2int => FMOV_64D_float2int,
+        Encoding::FMOV_64H_float2int => FMOV_64H_float2int,
+        Encoding::FMOV_64VX_float2int => FMOV_64VX_float2int,
         Encoding::FMOV_D64_float2int => FMOV_D64_float2int,
+        Encoding::FMOV_D_floatdp1 => FMOV_D_floatdp1,
         Encoding::FMOV_D_floatimm => FMOV_D_floatimm,
+        Encoding::FMOV_H32_float2int => FMOV_H32_float2int,
+        Encoding::FMOV_H64_float2int => FMOV_H64_float2int,
+        Encoding::FMOV_H_floatdp1 => FMOV_H_floatdp1,
+        Encoding::FMOV_H_floatimm => FMOV_H_floatimm,
         Encoding::FMOV_S32_float2int => FMOV_S32_float2int,
+        Encoding::FMOV_S_floatdp1 => FMOV_S_floatdp1,
         Encoding::FMOV_S_floatimm => FMOV_S_floatimm,
+        Encoding::FMOV_V64I_float2int => FMOV_V64I_float2int,
+        Encoding::FMSUB_D_floatdp3 => FMSUB_D_floatdp3,
+        Encoding::FMSUB_S_floatdp3 => FMSUB_S_floatdp3,
         Encoding::FMUL_D_floatdp2 => FMUL_D_floatdp2,
         Encoding::FMUL_S_floatdp2 => FMUL_S_floatdp2,
         Encoding::FNEG_D_floatdp1 => FNEG_D_floatdp1,
+        Encoding::FNEG_H_floatdp1 => FNEG_H_floatdp1,
         Encoding::FNEG_S_floatdp1 => FNEG_S_floatdp1,
+        Encoding::FNMADD_D_floatdp3 => FNMADD_D_floatdp3,
+        Encoding::FNMADD_S_floatdp3 => FNMADD_S_floatdp3,
+        Encoding::FNMSUB_D_floatdp3 => FNMSUB_D_floatdp3,
+        Encoding::FNMSUB_S_floatdp3 => FNMSUB_S_floatdp3,
         Encoding::FNMUL_D_floatdp2 => FNMUL_D_floatdp2,
         Encoding::FNMUL_S_floatdp2 => FNMUL_S_floatdp2,
         Encoding::FRINTA_D_floatdp1 => FRINTA_D_floatdp1,
@@ -5248,6 +13160,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FRINTI_S_floatdp1 => FRINTI_S_floatdp1,
         Encoding::FRINTM_D_floatdp1 => FRINTM_D_floatdp1,
         Encoding::FRINTM_S_floatdp1 => FRINTM_S_floatdp1,
+        Encoding::FRINTN_D_floatdp1 => FRINTN_D_floatdp1,
+        Encoding::FRINTN_S_floatdp1 => FRINTN_S_floatdp1,
         Encoding::FRINTP_D_floatdp1 => FRINTP_D_floatdp1,
         Encoding::FRINTP_S_floatdp1 => FRINTP_S_floatdp1,
         Encoding::FRINTX_D_floatdp1 => FRINTX_D_floatdp1,
@@ -5258,13 +13172,21 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::FSQRT_S_floatdp1 => FSQRT_S_floatdp1,
         Encoding::FSUB_D_floatdp2 => FSUB_D_floatdp2,
         Encoding::FSUB_S_floatdp2 => FSUB_S_floatdp2,
+        Encoding::SCVTF_D32_float2fix => SCVTF_D32_float2fix,
         Encoding::SCVTF_D32_float2int => SCVTF_D32_float2int,
+        Encoding::SCVTF_D64_float2fix => SCVTF_D64_float2fix,
         Encoding::SCVTF_D64_float2int => SCVTF_D64_float2int,
+        Encoding::SCVTF_S32_float2fix => SCVTF_S32_float2fix,
         Encoding::SCVTF_S32_float2int => SCVTF_S32_float2int,
+        Encoding::SCVTF_S64_float2fix => SCVTF_S64_float2fix,
         Encoding::SCVTF_S64_float2int => SCVTF_S64_float2int,
+        Encoding::UCVTF_D32_float2fix => UCVTF_D32_float2fix,
         Encoding::UCVTF_D32_float2int => UCVTF_D32_float2int,
+        Encoding::UCVTF_D64_float2fix => UCVTF_D64_float2fix,
         Encoding::UCVTF_D64_float2int => UCVTF_D64_float2int,
+        Encoding::UCVTF_S32_float2fix => UCVTF_S32_float2fix,
         Encoding::UCVTF_S32_float2int => UCVTF_S32_float2int,
+        Encoding::UCVTF_S64_float2fix => UCVTF_S64_float2fix,
         Encoding::UCVTF_S64_float2int => UCVTF_S64_float2int,
         _ => return None,
     })
