@@ -6,7 +6,16 @@
 //! - CTRL: the PC and branches.
 //! - ENV: checks that are no-ops in the fixed configuration (EL0, AArch64,
 //!   FP and SIMD enabled, Armv8.0-A, no SPE, BRBE or GCS).
-//! - MEM: memory access, ordering and the exclusive monitor.
+//! - MEM: memory access, ordering, the exclusive monitor and barriers
+//!   (fences).
+//! - FP: arithmetic, compares, min/max, conversions, rounding to integral
+//!   values and the reciprocal and square-root estimates and steps, built by
+//!   `rt::Fp` for FPCR zero; each use marks the template as assuming it.
+//! - Also `DecodeBitMasks`, `ConstrainUnpredictable` (refused at lift time)
+//!   and the integer quotient of SDIV and UDIV.
+//!
+//! The generator refuses to inline a function of `stubs.sail` (placeholders
+//! for implementation choices) other than hints with no effect.
 
 use crate::eval::{Gen, R, fail, feature};
 use crate::value::{K, V};
