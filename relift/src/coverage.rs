@@ -2,7 +2,9 @@
 //! each module of the import it gives the functions found, the
 //! instructions that do not lift, every computed call or jump that analysis
 //! left to the dispatcher ([`relift_analyze::unresolved_transfers`]), and
-//! the hints in `game.toml` that earlier hot-load runs recorded.
+//! the hints in `game.toml` that earlier hot-load runs recorded. Discovery
+//! starts from the hints too, as the next `relift build` does, so a hint
+//! shows as lifted once the build will include it.
 //!
 //! Each unresolved transfer gets one [`Reason`], decided in this order:
 //!
@@ -401,7 +403,7 @@ pub fn run(as_json: bool, only: Option<&str>, ui: &mut Ui) -> Result<(), BoxErro
         }
         let row = ui.row(&p.name);
         ui.begin(row, "discover");
-        let module = program::module(p);
+        let module = crate::build::module_with_hints(p, &hints);
         let analysis = discover_with(&cpu, &module, &mut |e| {
             let (done, total) = match e {
                 Progress::Found { entries, .. } => (entries, None),
