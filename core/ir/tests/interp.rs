@@ -594,3 +594,22 @@ fn a_guard_after_an_effect_does_not_verify() {
     b.guard(c, 1);
     let _ = b.jump(4, 4);
 }
+
+#[test]
+fn binary16_to_integer_saturates_at_every_width() {
+    let to = |op: FpOp, h: u128, bits: u32| interp::eval_fp(op, &[h], Width::W16, Width::new(bits));
+    let s = FpOp::ToSInt(FpRound::Zero);
+    let u = FpOp::ToUInt(FpRound::Zero);
+    for bits in [16u32, 32, 64] {
+        let m = Width::new(bits).mask();
+        assert_eq!(to(s, 0x7c00, bits), m >> 1, "+inf to s{bits}");
+        assert_eq!(to(s, 0xfc00, bits), (m >> 1) + 1, "-inf to s{bits}");
+        assert_eq!(to(u, 0x7c00, bits), m, "+inf to u{bits}");
+        assert_eq!(to(u, 0xfc00, bits), 0, "-inf to u{bits}");
+        assert_eq!(to(s, 0x7e00, bits), 0, "NaN to s{bits}");
+        assert_eq!(to(s, 0xbc00, bits), m, "-1 to s{bits}");
+    }
+    assert_eq!(to(s, 0x7bff, 16), 0x7fff);
+    assert_eq!(to(u, 0x7bff, 16), 0xffe0);
+    assert_eq!(to(s, 0x7bff, 64), 65504);
+}

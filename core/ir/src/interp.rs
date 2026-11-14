@@ -337,12 +337,20 @@ fn eval_fp16(op: FpOp, args: &[u128], arg_w: Width, w: Width) -> u128 {
                 return 0;
             }
             let signed = matches!(op, FpOp::ToSInt(_));
+            // Compare with the power of two above the range, which binary64
+            // holds exactly; the largest integer of 64 bits does not.
             let (lo, hi) = if signed {
-                (-(2f64.powi(wb as i32 - 1)), 2f64.powi(wb as i32 - 1) - 1.0)
+                (-(1i128 << (wb - 1)), (1i128 << (wb - 1)) - 1)
             } else {
-                (0.0, 2f64.powi(wb as i32) - 1.0)
+                (0, (1i128 << wb) - 1)
             };
-            let v = x.clamp(lo, hi) as i128;
+            let v = if x >= (hi + 1) as f64 {
+                hi
+            } else if x <= lo as f64 {
+                lo
+            } else {
+                x as i128
+            };
             (v as u128) & w.mask()
         }
         FpOp::FromSInt | FpOp::FromUInt => {
