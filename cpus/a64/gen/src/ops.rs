@@ -459,6 +459,32 @@ impl Gen<'_> {
         let aw = a
             .width()
             .ok_or_else(|| crate::eval::err(format!("extract from {a:?}")))?;
+        if let V::Wide(ps) = &a {
+            let V::Int(l) = lo else {
+                if let V::S(_, _, d) = lo
+                    && *d != 0
+                {
+                    return Err(crate::eval::E::Split(*d));
+                }
+                return fail("wide extract at a non-concrete position");
+            };
+            let (l, hi) = (*l as u32, *l as u32 + w);
+            let mut out: Option<V> = None;
+            let mut base = 0;
+            for p in ps.iter() {
+                let pw = p.width().unwrap_or(0);
+                let (s, e) = (l.max(base), hi.min(base + pw));
+                if s < e {
+                    let piece = self.extract(p, &V::Int(i128::from(s - base)), e - s)?;
+                    out = Some(match out {
+                        None => piece,
+                        Some(o) => self.concat(&piece, &o)?,
+                    });
+                }
+                base += pw;
+            }
+            return out.ok_or_else(|| crate::eval::err("empty wide extract"));
+        }
         if let V::Int(l) = lo {
             let l = *l as u32;
             if l + w > aw {
@@ -521,8 +547,15 @@ impl Gen<'_> {
         if wl == 0 {
             return Ok(hi);
         }
-        if wh + wl > 128 {
-            return fail("concat above 128 bits");
+        if wh + wl > 128 || matches!(hi, V::Wide(_)) || matches!(lo, V::Wide(_)) {
+            let mut parts = Vec::new();
+            for v in [&lo, &hi] {
+                match v {
+                    V::Wide(ps) => parts.extend(ps.iter().cloned()),
+                    v => parts.push(v.clone()),
+                }
+            }
+            return Ok(V::Wide(Rc::new(parts)));
         }
         let w = wh + wl;
         if let (V::Bits(_, x), V::Bits(_, y)) = (&hi, &lo) {
@@ -689,6 +722,16 @@ impl Gen<'_> {
                 return Ok(V::Bf(t.clone(), Box::new(v)));
             }
             (V::Str(_), V::Str(_)) => return Ok(a.clone()),
+            (V::Wide(x), V::Wide(y))
+                if x.len() == y.len()
+                    && x.iter().zip(y.iter()).all(|(p, q)| p.width() == q.width()) =>
+            {
+                let mut out = Vec::new();
+                for (p, q) in x.iter().zip(y.iter()) {
+                    out.push(self.select(&c, p, q)?);
+                }
+                return Ok(V::Wide(Rc::new(out)));
+            }
             _ => {}
         }
         let (a, b) = (self.defd(a), self.defd(b));

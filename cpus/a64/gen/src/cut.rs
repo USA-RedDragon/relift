@@ -53,7 +53,53 @@ pub const CUT: &[&str] = &[
     "AArch64_ClearExclusiveLocal",
     "ConstrainUnpredictable",
     "DecodeBitMasks",
+    "FPAdd",
+    "FPAdd__1",
+    "FPSub",
+    "FPSub__1",
+    "FPMul",
+    "FPDiv",
+    "FPSqrt",
+    "FPMulAdd",
+    "FPMulAdd__1",
+    "FPCompare",
+    "FPCompareEQ",
+    "FPCompareGE",
+    "FPCompareGT",
+    "FPMax",
+    "FPMax__1",
+    "FPMin",
+    "FPMin__1",
+    "FPMaxNum",
+    "FPMinNum",
 ];
+
+/// The FP functions cut whole; `rt::Fp` in `relift-cpu-a64` builds them.
+const FP_CUT: &[&str] = &[
+    "FPAdd",
+    "FPAdd__1",
+    "FPSub",
+    "FPSub__1",
+    "FPMul",
+    "FPDiv",
+    "FPSqrt",
+    "FPMulAdd",
+    "FPMulAdd__1",
+    "FPCompare",
+    "FPCompareEQ",
+    "FPCompareGE",
+    "FPCompareGT",
+    "FPMax",
+    "FPMax__1",
+    "FPMin",
+    "FPMin__1",
+    "FPMaxNum",
+    "FPMinNum",
+];
+
+/// FPCR bits the floating-point cut assumes zero: FIZ, AH, FZ16, RMode, FZ,
+/// DN and AHP.
+const FPCR_FIXED: u128 = 0b11 | (1 << 19) | (0b11 << 22) | (1 << 24) | (1 << 25) | (1 << 26);
 
 fn real_parts(v: &V) -> Option<(V, V)> {
     match v {
@@ -99,6 +145,59 @@ impl Gen<'_> {
             }
             _ => return Ok(None),
         }))
+    }
+
+    fn fp_cut(&mut self, name: &str, a: &[V]) -> R<V> {
+        let nops = match name {
+            "FPSqrt" => 1,
+            "FPMulAdd" | "FPMulAdd__1" => 3,
+            _ => 2,
+        };
+        let fpcr = if name == "FPCompare" { &a[3] } else { &a[nops] };
+        let bits = match fpcr {
+            V::Bf(_, b) => (**b).clone(),
+            v => v.clone(),
+        };
+        match bits {
+            V::Bits(_, x) if x & FPCR_FIXED == 0 => {}
+            _ => return fail(format!("{name} with FPCR {bits:?}")),
+        }
+        if matches!(name, "FPMax__1" | "FPMin__1") && a.get(3) != Some(&V::Bool(false)) {
+            return fail("alternative FP min/max");
+        }
+        let w = a[0]
+            .width()
+            .ok_or_else(|| crate::eval::err("FP operand width"))?;
+        if w != 32 && w != 64 {
+            return fail(format!("{name} on {w} bits"));
+        }
+        let mut xs = Vec::new();
+        for v in &a[..nops] {
+            let v = self.bitify(v)?;
+            xs.push(self.dx(&v)?.to_string());
+        }
+        let f = format!("rt::Fp::new({w})");
+        let two = |m: &str| format!("{f}.{m}(b, {}, {})", xs[0], xs[1]);
+        let (k, call) = match name {
+            "FPAdd" | "FPAdd__1" => (K::Bits(w), two("bin").replace("(b, ", "(b, FpOp::Add, ")),
+            "FPSub" | "FPSub__1" => (K::Bits(w), two("bin").replace("(b, ", "(b, FpOp::Sub, ")),
+            "FPMul" => (K::Bits(w), two("bin").replace("(b, ", "(b, FpOp::Mul, ")),
+            "FPDiv" => (K::Bits(w), two("bin").replace("(b, ", "(b, FpOp::Div, ")),
+            "FPSqrt" => (K::Bits(w), format!("{f}.sqrt(b, {})", xs[0])),
+            "FPMulAdd" | "FPMulAdd__1" => (
+                K::Bits(w),
+                format!("{f}.mul_add(b, {}, {}, {})", xs[0], xs[1], xs[2]),
+            ),
+            "FPCompare" => (K::Bits(4), two("compare")),
+            "FPCompareEQ" => (K::Bool, two("compare_eq")),
+            "FPCompareGE" => (K::Bool, two("compare_ge")),
+            "FPCompareGT" => (K::Bool, two("compare_gt")),
+            "FPMax" | "FPMax__1" => (K::Bits(w), two("max")),
+            "FPMin" | "FPMin__1" => (K::Bits(w), two("min")),
+            "FPMaxNum" => (K::Bits(w), two("max_num")),
+            _ => (K::Bits(w), two("min_num")),
+        };
+        Ok(self.dy(k, call))
     }
 
     fn reg_no(&self, v: &V) -> R<String> {
@@ -298,6 +397,7 @@ impl Gen<'_> {
                     V::S(K::Bits(m), format!("s{k}t").into(), d),
                 ])
             }
+            n if FP_CUT.contains(&n) => return self.fp_cut(name, a).map(Some),
             "ClearExclusiveLocal" | "AArch64_ClearExclusiveLocal" => {
                 self.effect("b.clear_exclusive();".into());
                 V::Unit
