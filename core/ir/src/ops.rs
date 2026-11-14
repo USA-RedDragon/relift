@@ -214,10 +214,10 @@ pub enum FpRound {
 /// an [`Op::Guard`] on `FPCR != 0`, so with any other FPCR it leaves before
 /// any effect for the runtime's slow path (`runtime/cpus/a64/fp.c`); an
 /// emitter may hoist that check to function entry and after each write of
-/// FPCR. Known gap: no FPSR cumulative flags are produced, which is right
-/// only for code that saves and restores FPSR (`fegetenv`, `fesetenv`) but
-/// never tests the flags (`fetestexcept`); code that tests them needs the
-/// flags produced.
+/// FPCR. Exception flags are not values in the IR: a frontend that needs
+/// them maps each operation to a host operation that raises the host's
+/// sticky flags (the A64 frontend does so for programs that read FPSR, see
+/// `docs/abi.md` section 10.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FpOp {
     /// `a + b`.
