@@ -733,58 +733,81 @@ static inline int rl_fp_nan_fixup(void)
 }
 
 /**
- * @brief True when a host result needs the slow path for its flags: x86
- * detects tininess after rounding and Arm before, so a result of exactly the
- * smallest normal magnitude may lack UFC. Only in flag-producing programs.
+ * @brief In flag-producing programs, true when the host result u needs the
+ * slow path: a NaN (x86-64 NaN rules differ from Arm), or, when tiny is set,
+ * a result of exactly the smallest normal magnitude, which x86 (tininess
+ * after rounding) may give without the UFC Arm (before rounding) raises.
+ * Sums and differences pass tiny 0: every finite value is a multiple of the
+ * smallest subnormal, so a sum below the smallest normal is exact and raises
+ * no UFC on either. The test is on the result's bits, which strict FP
+ * semantics do not make dearer as they do a compare.
  */
-static inline int rl_fp_tiny_fixup(uint64_t u, unsigned bits)
+static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
 {
-#if defined(RL_FP_FLAGS) && !defined(__aarch64__)
-    uint64_t mag = bits == 32 ? (u & 0x7FFFFFFFu) : (u & 0x7FFFFFFFFFFFFFFFull);
-    return RL_UNLIKELY(mag == (bits == 32 ? 0x00800000u : 0x0010000000000000ull));
-#else
+#if defined(__aarch64__)
     (void)u;
     (void)bits;
+    (void)tiny;
     return 0;
+#else
+    uint64_t mag = bits == 32 ? (u & 0x7FFFFFFFu) : (u & 0x7FFFFFFFFFFFFFFFull);
+    uint64_t inf = bits == 32 ? 0x7F800000u : 0x7FF0000000000000ull;
+    uint64_t min = bits == 32 ? 0x00800000u : 0x0010000000000000ull;
+    return RL_UNLIKELY(mag > inf) || (tiny && RL_UNLIKELY(mag == min));
 #endif
 }
 
-#define RL_FP_BINOP(name, slow, T, U, expr)                                             \
+#if defined(RL_FP_FLAGS)
+#define RL_FP_RESULT_(slow, U, r, tiny)                                                \
+    do {                                                                               \
+        U u_;                                                                          \
+        memcpy(&u_, &r, sizeof u_);                                                    \
+        if (rl_fp_flags_fixup((uint64_t)u_, sizeof(U) * 8, tiny))                      \
+            return slow(a, b, fpcr, fpsr);                                             \
+        return u_;                                                                     \
+    } while (0)
+#else
+#define RL_FP_RESULT_(slow, U, r, tiny)                                                \
+    do {                                                                               \
+        U u_;                                                                          \
+        if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
+            return slow(a, b, fpcr, fpsr);                                             \
+        memcpy(&u_, &r, sizeof u_);                                                    \
+        return u_;                                                                     \
+    } while (0)
+#endif
+
+#define RL_FP_BINOP(name, slow, T, U, expr, tiny)                                       \
     static inline U name(U a, U b, uint32_t fpcr, uint32_t *fpsr)                      \
     {                                                                                  \
         if (!rl_fp_fast(fpcr, fpsr))                                                   \
             return slow(a, b, fpcr, fpsr);                                             \
         T x, y, r;                                                                     \
-        U u;                                                                           \
         memcpy(&x, &a, sizeof x);                                                      \
         memcpy(&y, &b, sizeof y);                                                      \
         r = (expr);                                                                    \
-        if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
-            return slow(a, b, fpcr, fpsr);                                             \
-        memcpy(&u, &r, sizeof u);                                                      \
-        if (rl_fp_tiny_fixup((uint64_t)u, sizeof(U) * 8))                              \
-            return slow(a, b, fpcr, fpsr);                                             \
-        return u;                                                                      \
+        RL_FP_RESULT_(slow, U, r, tiny);                                               \
     }
 
 /** @brief FADD single, inline fast path. */
-RL_FP_BINOP(rl_fadd32, rl_fp32_add, float, uint32_t, x + y)
+RL_FP_BINOP(rl_fadd32, rl_fp32_add, float, uint32_t, x + y, 0)
 /** @brief FSUB single, inline fast path. */
-RL_FP_BINOP(rl_fsub32, rl_fp32_sub, float, uint32_t, x - y)
+RL_FP_BINOP(rl_fsub32, rl_fp32_sub, float, uint32_t, x - y, 0)
 /** @brief FMUL single, inline fast path. */
-RL_FP_BINOP(rl_fmul32, rl_fp32_mul, float, uint32_t, x * y)
+RL_FP_BINOP(rl_fmul32, rl_fp32_mul, float, uint32_t, x * y, 1)
 /** @brief FDIV single, inline fast path. */
-RL_FP_BINOP(rl_fdiv32, rl_fp32_div, float, uint32_t, x / y)
+RL_FP_BINOP(rl_fdiv32, rl_fp32_div, float, uint32_t, x / y, 1)
 /** @brief FADD double, inline fast path. */
-RL_FP_BINOP(rl_fadd64, rl_fp64_add, double, uint64_t, x + y)
+RL_FP_BINOP(rl_fadd64, rl_fp64_add, double, uint64_t, x + y, 0)
 /** @brief FSUB double, inline fast path. */
-RL_FP_BINOP(rl_fsub64, rl_fp64_sub, double, uint64_t, x - y)
+RL_FP_BINOP(rl_fsub64, rl_fp64_sub, double, uint64_t, x - y, 0)
 /** @brief FMUL double, inline fast path. */
-RL_FP_BINOP(rl_fmul64, rl_fp64_mul, double, uint64_t, x * y)
+RL_FP_BINOP(rl_fmul64, rl_fp64_mul, double, uint64_t, x * y, 1)
 /** @brief FDIV double, inline fast path. */
-RL_FP_BINOP(rl_fdiv64, rl_fp64_div, double, uint64_t, x / y)
+RL_FP_BINOP(rl_fdiv64, rl_fp64_div, double, uint64_t, x / y, 1)
 
 #undef RL_FP_BINOP
+#undef RL_FP_RESULT_
 
 /** @brief FMADD/FMLA lane single, inline fast path: addend + a * b with one rounding. */
 static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr)
