@@ -440,8 +440,20 @@ table entries change only from NULL to a function, once. [inferred]
 
 **Implementation** (`runtime/core/devload.c`, `runtime/core/dispatch.c`,
 `relift/src/dev.rs`) [verified: `relift/tests/e2e_hotload.rs` on x86-64
-Linux and an Apple M2; Windows is not done: the runtime's core does not build
-there yet and relift has no local socket on Windows]:
+Linux, an Apple M2 and x86-64 Windows 11 24H2, where relift is a gnu-target
+build and the program and the hot-loaded libraries are built with `zig cc`
+0.17.1; the arm64 Windows runtime compiles but no arm64 Windows machine ran
+it]:
+
+- On Windows relift listens on an AF_UNIX socket through the `uds_windows`
+  crate (the standard library has none there), the runtime connects with
+  Winsock, and the dev runtime is `relift_rt.dll` beside `game.exe`, which the
+  program and every hot-loaded library link against directly (lld links a
+  DLL as an input, so no separate import library is built). The program
+  image defines the text bounds markers (`RL_TEXT_BOUNDS_DEFINE`) in its
+  main file and each hot-loaded library in its export file.
+- Without Ninja relift compiles in parallel itself, and when it finds no
+  clang it drives `zig cc`.
 
 - The guest layer sizes the dispatch table over the code of every module
   before it registers the static units (`rl_dispatch_reserve`), so a
