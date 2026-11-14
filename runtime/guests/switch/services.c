@@ -32,5 +32,6 @@ void rl_srv_install_all(void)
     rl_srv_install_fs();
     rl_srv_install_acc();
     rl_srv_install_mm();
+    rl_srv_install_csrng();
     rl_hos_audio_register();
 }

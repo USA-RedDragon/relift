@@ -51,6 +51,8 @@ void rl_switch_declare_settings(void);
 void rl_srv_install_acc(void);
 /** @brief Registers mm:u, the multimedia clock request service. */
 void rl_srv_install_mm(void);
+/** @brief Registers csrng, the random number service. */
+void rl_srv_install_csrng(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);

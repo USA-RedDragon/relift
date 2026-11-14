@@ -489,8 +489,7 @@ void rl_hos_default_config(rl_hos_config *cfg)
 
 static void fill_entropy(void)
 {
-    FILE *f = fopen("/dev/urandom", "rb");
-    if (!f || fread(hos.entropy, sizeof hos.entropy, 1, f) != 1) {
+    if (!rl_host_random(hos.entropy, sizeof hos.entropy)) {
         uint64_t s = rl_clock_ns();
         for (int i = 0; i < 4; i++) {
             s ^= s << 13;
@@ -499,8 +498,6 @@ static void fill_entropy(void)
             hos.entropy[i] = s;
         }
     }
-    if (f)
-        fclose(f);
 }
 
 int rl_hos_init(const rl_hos_config *cfg)

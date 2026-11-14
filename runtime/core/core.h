@@ -372,6 +372,8 @@ RL_RUNTIME_API void rl_thread_detach(struct rl_thread *t);
 RL_RUNTIME_API void rl_sleep_ns(uint64_t ns);
 /** @brief Yields the host thread. */
 RL_RUNTIME_API void rl_host_yield(void);
+/** @brief Fills n bytes at dst from the host's random source; returns false when it has none. */
+RL_RUNTIME_API bool rl_host_random(void *dst, size_t n);
 
 /** @brief Guest exit hook: called with the status when the guest process exits; the default ends the host process. */
 typedef void rl_exit_hook(uint32_t code);

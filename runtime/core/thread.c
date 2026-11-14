@@ -3,6 +3,9 @@
  * @brief Host threads backing guest threads, each with the CPU layer's
  * context, process exit, the pending records and fatal guest reports.
  */
+#if defined(_WIN32)
+#define _CRT_RAND_S
+#endif
 #include "core.h"
 
 #include <stdarg.h>
@@ -148,6 +151,21 @@ void rl_sleep_ns(uint64_t ns)
 
 void rl_host_yield(void) { SwitchToThread(); }
 
+bool rl_host_random(void *dst, size_t n)
+{
+    uint8_t *p = dst;
+    while (n) {
+        unsigned int v;
+        if (rand_s(&v) != 0)
+            return false;
+        size_t k = n < sizeof v ? n : sizeof v;
+        memcpy(p, &v, k);
+        p += k;
+        n -= k;
+    }
+    return true;
+}
+
 #else
 static void *spawn_main(void *p)
 {
@@ -211,6 +229,16 @@ void rl_sleep_ns(uint64_t ns)
 }
 
 void rl_host_yield(void) { sched_yield(); }
+
+bool rl_host_random(void *dst, size_t n)
+{
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (!f)
+        return false;
+    bool ok = !n || fread(dst, n, 1, f) == 1;
+    fclose(f);
+    return ok;
+}
 
 #endif
 
