@@ -7,6 +7,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+clap = { workspace = true }
+configulator-rs = { workspace = true }
+serde_yaml_ng = { workspace = true }
 relift-analyze = { workspace = true }
 relift-build = { workspace = true }
 relift-cache = { workspace = true }
