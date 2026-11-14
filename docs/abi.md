@@ -438,6 +438,35 @@ and reads the target from `c->pc`.
 Only the missing thread waits; other guest threads keep running, because
 table entries change only from NULL to a function, once. [inferred]
 
+**Implementation** (`runtime/core/devload.c`, `runtime/core/dispatch.c`,
+`relift/src/dev.rs`) [verified: `relift/tests/e2e_hotload.rs` on x86-64
+Linux]:
+
+- The guest layer sizes the dispatch table over the code of every module
+  before it registers the static units (`rl_dispatch_reserve`), so a
+  hot-loaded unit's entries fit and the table never moves while threads
+  hold it. `rl_unit_add` refuses entries outside it.
+- The image id is a SHA-256 over the modules in load order (name, load
+  address, SHA-256 of the image) and of `game.lock` when there is one. The
+  emitter writes it into every unit table; the runtime takes it from the
+  first static unit that carries one and sends it in the hello.
+- relift keeps the entries of the build (`entries.txt` in the build
+  directory, written by the lifting step) and, per request, discovers from
+  the target past those entries only (`relift_analyze::discover_more`): a
+  direct call from new code to a known function goes through `rl_indirect`
+  with a constant target, since the unit cannot name the program's
+  symbols. The new entries join the known set for later requests.
+- A unit is compiled with the flags of lifted code plus `-fPIC
+  -fvisibility=hidden -DRL_HOTLOAD`, with FPSR flags
+  (`-DRL_FP_FLAGS -ffp-exception-behavior=strict`) whenever any function of
+  the build produces them: the code was reached from where the analysis
+  could not follow, so its region cannot be bounded.
+- The runtime logs each load at info level with the time of the round trip,
+  the load and the registration; `relift run` prints the lift and compile
+  times of each request.
+- The next `relift build` adds each hint as a root (`RootKind::Hint`); the
+  FPSR analysis counts hinted roots as entered from outside.
+
 **Frames:** every message is `rl_dev_hdr` (magic `RLDV`, kind, seq,
 payload length) and a fixed payload struct; replies add `path_len` and
 `msg_len` bytes of UTF-8 after the struct. Little-endian, fixed sizes pinned

@@ -55,6 +55,21 @@ choice applies to the update packages of a `.nup`. The program ID comes from
 
 Import is not available yet. `relift-gbrom` reads and checks a ROM header, and `relift-gbrom functions` lists the functions of a ROM per mapper bank.
 
+## Building and running
+
+```sh
+relift build      # a shipped build: the runtime linked in, no code loaded at run time
+relift run        # a dev build, then run it with hot-loading on
+```
+
+Discovery cannot see every code address (a pointer the program computes, a
+jump table it does not recognize). A shipped build stops at such a miss
+with a report and exit status 70. Under `relift run` the program asks relift
+for the missed code instead: relift lifts it and everything newly reachable
+from it, compiles one shared library, the program loads it and goes on.
+relift adds each such address to the `[hints]` list in `game.toml`, and the
+next `relift build` lifts it with the rest (docs/abi.md section 6).
+
 ## Tools
 
 | Binary | Guest | Does |
