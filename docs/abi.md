@@ -803,7 +803,11 @@ only on the C library and the host OS.
   exceptions pass through). The host backtrace comes from
   `RtlLookupFunctionEntry` and `RtlVirtualUnwind` on the exception's
   context; frames print as `module+offset`. After the report the process
-  ends with the exception code.
+  ends with the exception code. A stack overflow
+  (`EXCEPTION_STACK_OVERFLOW`, 0xC00000FD) is reported too: the handler
+  first switches to a fiber of its own (section 14), because the
+  overflowed stack has only the thread's stack guarantee left, and walks the
+  overflowed stack from there.
 - **Report** (stderr; formatted in stack buffers, so it runs in the
   handler): the kind, the host fault address and, when it lies in the guest
   reservation or its guards (`rl_crash_set_space`, set by
@@ -813,6 +817,11 @@ only on the C library and the host OS.
   host backtrace with the host symbol and guest name of lifted frames; and
   the CPU layer's register summary of the current guest thread at its last
   call boundary. Tail-called frames are missing, as in native code.
+  When the faulting sp (or the fault address, for a fault in a guard page)
+  lies in a fiber's stack, a line names the fiber, which for the device
+  scheduler is the guest CPU (`on guest CPU 1 (fiber stack ...)`, or
+  `stack overflow on guest CPU 1 ...` for its guard page). The host walk
+  ends at the fiber's first frame.
 
 ```
 [relift crash] SIGSEGV at host 0x7f01eda01230 = guest address 0x40001230, host pc 0x55efb0919d74
@@ -1001,6 +1010,92 @@ emitter half is not written yet, so every emitter rule below is
   bank mapped there at run time, and an analysis that tracks bank-switch
   writes may resolve a direct call to one bank at build time.
   [open: the dispatch table shape for banked regions]
+## 14. Fibers
+
+The device scheduler (`relift/sched.h`) runs every guest CPU of a machine on
+one host thread, each on its own fiber: a host stack of its own, switched
+by a hand-written register switch in `runtime/core` (`fiber.h`, `fiber.c`,
+and the host-arch files `fiber_x86_64_sysv.S`, `fiber_x86_64_win.S`,
+`fiber_aarch64.S`). A hand-over between guest CPUs is a switch of host
+stacks, not a wake-up of another host thread.
+
+- **Why:** the earlier hand-over between one host thread per CPU through a
+  mutex and condition variable cost 3.3 to 3.7 us on Linux and 4 to 8 us on
+  an Apple M2, so a 64-tick quantum cost about 100 ns per lifted block. A
+  fiber switch costs 4 to 16 ns per round trip; ucontext (1 us, a system
+  call for the signal mask) and `SwitchToFiber` (125 ns) are slower.
+  [verified: sched-bench, below]
+- **What a switch saves:** the host ABI's callee-saved registers and
+  nothing else. x86-64 System V: rbx, rbp, r12-r15. x86-64 Windows: rbx,
+  rbp, rdi, rsi, r12-r15, xmm6-xmm15, and the TEB's StackBase, StackLimit
+  and DeallocationStack (without them `longjmp`, which checks its target
+  against the stack limits, fails with STATUS_BAD_STACK). AArch64 (Linux,
+  macOS, Windows): x19-x30 and d8-d15, plus the same TEB fields on Windows
+  (x18 holds the TEB and is not touched). The switch returns by popping the
+  return address and jumping to it (`br x30` on AArch64) rather than `ret`,
+  which the return predictor mispredicts on every switch (2x slower on
+  x86-64, 1.5x on the M2). [verified: spike measurements]
+- **No FP control is saved.** Every fiber of a thread runs in the host's
+  default FP mode (MXCSR 0x1F80 with any flags, FPCR 0): lifted code
+  assumes it, and FP slow paths that need another mode set and restore it
+  around their own work. Builds without `NDEBUG` check the mode at every
+  hand-over and abort with a message when it differs
+  (`rl_fiber_fp_mode_diff`). zig cc defines `NDEBUG` at `-O2`, so a dev
+  runtime built with zig cc needs `-UNDEBUG` to keep the check. [verified:
+  fiber_tests]
+- **Stacks:** each spawned CPU gets a reservation of `rl_sched_config.stack`
+  bytes (16 MiB by default) with a 64 KiB guard below. POSIX: the guard is
+  `PROT_NONE` and the stack is mapped read-write. Windows: up to 64 KiB are
+  committed at the top, always with a `PAGE_GUARD` page below, and the TEB
+  fields set, so Windows grows the stack page by page like a thread's, moves
+  StackLimit down, and raises STATUS_STACK_OVERFLOW at the end; the guard
+  below the stack is growth room there. A stack without a `PAGE_GUARD` page
+  overflows into reserved memory and the process ends without a report.
+  [verified: fiber_tests, crash_test on Windows 11]
+- **Signal stack:** a fault in a guard page can only be reported on another
+  stack. `rl_sched_spawn` and `rl_sched_main` install an alternate signal
+  stack on the host thread when it has none (`rl_fiber_thread_init`); on
+  Windows it sets a stack guarantee and the crash handler reports from a
+  fiber of its own. [verified: crash_test, overflow case, on x86-64 Linux,
+  an Apple M2 and Windows 11 x86-64]
+- **First frame:** a fiber starts in `rl_fiber_start`, which pushes a zero
+  frame record and marks the return address undefined in its unwind info
+  (CFI on ELF and Mach-O, SEH on Windows), so frame-pointer walks, the
+  Windows unwinder, gdb and lldb stop there cleanly.
+- **Unwinding:** lifted code returns `RL_PENDING` frame by frame on its own
+  stack, so the switch needs nothing for it; no host unwinder ever crosses
+  fibers (section 7). Host `setjmp`/`longjmp` within one fiber works.
+  [verified: fiber_tests]
+- **Debugging:** `bt` shows the running fiber. `relift-fibers` in
+  `runtime/tools/gdb/relift_frames.py` lists the live fibers (label,
+  running, parked or not started, stack range) from `rl_fiber_live`, and
+  `relift-fiber-bt N` loads the registers saved on a parked fiber's stack
+  into the innermost frame, prints its backtrace and puts them back.
+  [verified: `make gdb-test`, gdb 18.1, x86-64 Linux]
+- **Scheduler API:** `rl_sched_spawn(cpu, body, arg)` gives a CPU its
+  fiber; `rl_sched_main(s)` runs the CPUs on the calling thread until all
+  have left; `rl_sched_enter` is gone (a fiber starts only when its CPU
+  holds the run). A CPU that was not spawned runs on the calling thread's
+  own stack, which keeps the one-CPU case free of fibers. These are runtime
+  calls, not part of the lifted-code contract, so `RL_ABI_VERSION` stays 3.
+- **Not supported:** Intel CET shadow stacks and Windows CET compatibility
+  would reject any user-mode stack switch; relift binaries are not marked
+  for CET, so it does not trigger.
+
+Measured with `make sched-bench` (2 CPUs, 2 million blocks each, budget step
+4 cycles, ns per hand-over and per block):
+
+| host | quantum | threads + condvar | fibers |
+|---|---|---|---|
+| Linux x86-64 (Ryzen 9 7950X, clang 23) | 64 | 3559 ns, 111 ns per block | 54 ns, 1.70 ns per block |
+| Linux x86-64 | 4096 | 5217 ns, 2.55 ns per block | 1000 ns, 0.49 ns per block |
+| macOS arm64 (Apple M2, Apple clang 21) | 64 | 4111 ns, 128 ns per block | 61 ns, 1.9 ns per block |
+| macOS arm64 | 4096 | 8009 ns, 3.9 ns per block | 800 to 1630 ns, 0.39 to 0.80 ns per block |
+| Windows 11 24H2 x86-64 VM (zig cc 0.13) | 64 | not built (needs pthreads) | 60 to 65 ns, 1.9 to 2.0 ns per block |
+
+With 4096 ticks a hand-over is rare (about 2000 per run), so its time per
+hand-over includes cache refill and varies from run to run. Windows arm64
+builds (zig cc, llvm-mingw clang) link but were not run.
 
 ## Checks run for this contract
 
