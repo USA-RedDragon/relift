@@ -652,7 +652,15 @@ impl Gen<'_> {
         if !a.is_dyn() && !n.is_dyn() {
             let (x, s) = (self.sx(&a)?, self.sx(n)?);
             let d = a.deps() | n.deps();
-            return Ok(self.st(K::Bits(w), format!("rt::{kind}({x}, {s}, {w})"), d));
+            return Ok(self.st(
+                K::Bits(w),
+                if kind == "lshr" {
+                    format!("rt::lshr({x}, {s})")
+                } else {
+                    format!("rt::{kind}({x}, {s}, {w})")
+                },
+                d,
+            ));
         }
         let x = self.dx(&a)?;
         let s = self.dx(n)?;
