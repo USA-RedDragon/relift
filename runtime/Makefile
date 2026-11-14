@@ -35,11 +35,11 @@ endif
 WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS_ALL := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) -fPIC -fvisibility=hidden \
 	-fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME \
-	-Iinclude -Icore -Iguests/switch $(CFLAGS)
+	-Icpus/a64/include -Icore -Iguests/switch $(CFLAGS)
 LDLIBS := -lpthread
 
 RT_SRCS := $(wildcard core/*.c) $(wildcard guests/switch/*.c)
-RT_HDRS := $(wildcard include/relift/*.h) $(wildcard core/*.h) $(wildcard guests/switch/*.h)
+RT_HDRS := $(wildcard cpus/a64/include/relift/a64/*.h) $(wildcard core/*.h) $(wildcard guests/switch/*.h)
 RT_OBJS := $(patsubst %.c,$(BUILD)/obj/%.o,$(RT_SRCS))
 TEST_SRCS := $(wildcard guests/switch/tests/*.c)
 TEST_HDRS := $(wildcard guests/switch/tests/*.h)

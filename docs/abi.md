@@ -1,7 +1,7 @@
 # Runtime ABI contract
 
 This is the contract between relift-emitted C and the relift C runtime. The
-header is `runtime/include/relift/abi.h`; this file gives the reason for each
+header is `runtime/cpus/a64/include/relift/a64/abi.h`; this file gives the reason for each
 choice. Contract version: `RL_ABI_VERSION` 1.
 
 Tags:
