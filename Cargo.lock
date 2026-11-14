@@ -395,6 +395,17 @@ name = "relift-gb-formats"
 version = "0.1.0"
 
 [[package]]
+name = "relift-gb-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "relift-gb-formats",
+ "relift-proc",
+ "serde_json",
+]
+
+[[package]]
 name = "relift-guest"
 version = "0.1.0"
 dependencies = [

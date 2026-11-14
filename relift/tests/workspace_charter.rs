@@ -71,6 +71,7 @@ const NONE: &[&str] = &[];
 /// the reachability control skips them; the absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-gb-formats",
+    "relift-gb-tools",
     "relift-switch-tools",
     "relift-switch-vkgen",
 ];
@@ -162,6 +163,19 @@ const CHARTERS: &[Charter] = &[
         why: "the Game Boy cartridge format: header, mapper kinds, size codes, checksums and bank layout; reads bytes only",
         normal: NONE,
         dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-gb-tools",
+        band: 2,
+        why: "single-purpose tools for Game Boy files, thin wrappers over relift-gb-formats",
+        normal: &["clap", "relift-gb-formats", "serde_json"],
+        dev: &[
+            "relift-cache",
+            "relift-gb-formats",
+            "relift-proc",
+            "serde_json",
+        ],
         build: NONE,
     },
     Charter {
