@@ -1,1 +1,3 @@
 runtime/guests/switch/vk/gen/** linguist-generated=true
+cpus/a64/src/lift/sail/generated/*.rs linguist-generated=true
+cpus/a64/src/lift/sail/generated/mod.rs -linguist-generated

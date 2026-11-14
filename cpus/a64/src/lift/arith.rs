@@ -1,39 +1,15 @@
-use relift_ir::{BinOp, Builder, ExtKind, Op, UnOp, Value, Width};
+use relift_ir::{BinOp, Builder, Value, Width};
 
-use super::{
-    End, LiftError, LiftFn, condition_holds, read_x, read_x_sp, set_flags, sext_imm, sf_width,
-    write_x, write_x_sp,
-};
+use super::{End, LiftError, LiftFn, read_x, read_x_sp, set_flags, sf_width, write_x, write_x_sp};
 use crate::decode::{Encoding, Insn};
 
 pub(super) fn lifter(enc: Encoding) -> Option<LiftFn> {
     use Encoding::*;
     Some(match enc {
-        ADD_32_addsub_imm | ADDS_32S_addsub_imm | SUB_32_addsub_imm | SUBS_32S_addsub_imm
-        | ADD_64_addsub_imm | ADDS_64S_addsub_imm | SUB_64_addsub_imm | SUBS_64S_addsub_imm => {
-            addsub_imm
-        }
-        ADD_32_addsub_shift | ADDS_32_addsub_shift | SUB_32_addsub_shift | SUBS_32_addsub_shift
-        | ADD_64_addsub_shift | ADDS_64_addsub_shift | SUB_64_addsub_shift
-        | SUBS_64_addsub_shift => addsub_shift,
-        AND_32_log_imm | ORR_32_log_imm | EOR_32_log_imm | ANDS_32S_log_imm | AND_64_log_imm
-        | ORR_64_log_imm | EOR_64_log_imm | ANDS_64S_log_imm => log_imm,
-        AND_32_log_shift | BIC_32_log_shift | ORR_32_log_shift | ORN_32_log_shift
-        | EOR_32_log_shift | EON_32_log_shift | ANDS_32_log_shift | BICS_32_log_shift
-        | AND_64_log_shift | BIC_64_log_shift | ORR_64_log_shift | ORN_64_log_shift
-        | EOR_64_log_shift | EON_64_log_shift | ANDS_64_log_shift | BICS_64_log_shift => log_shift,
-        MOVN_32_movewide | MOVZ_32_movewide | MOVK_32_movewide | MOVN_64_movewide
-        | MOVZ_64_movewide | MOVK_64_movewide => movewide,
-        ADR_only_pcreladdr | ADRP_only_pcreladdr => pcreladdr,
-        CSEL_32_condsel | CSINC_32_condsel | CSINV_32_condsel | CSNEG_32_condsel
-        | CSEL_64_condsel | CSINC_64_condsel | CSINV_64_condsel | CSNEG_64_condsel => condsel,
-        SBFM_32M_bitfield | BFM_32M_bitfield | UBFM_32M_bitfield | SBFM_64M_bitfield
-        | BFM_64M_bitfield | UBFM_64M_bitfield => bitfield,
-        MADD_32A_dp_3src | MSUB_32A_dp_3src | MADD_64A_dp_3src | MSUB_64A_dp_3src => madd,
-        SMULH_64_dp_3src | UMULH_64_dp_3src => mulh,
-        UDIV_32_dp_2src | SDIV_32_dp_2src | UDIV_64_dp_2src | SDIV_64_dp_2src => div,
-        LSLV_32_dp_2src | LSRV_32_dp_2src | ASRV_32_dp_2src | RORV_32_dp_2src | LSLV_64_dp_2src
-        | LSRV_64_dp_2src | ASRV_64_dp_2src | RORV_64_dp_2src => shiftv,
+        ADD_32_addsub_imm | ADD_64_addsub_imm => addsub_imm,
+        SUBS_32_addsub_shift | SUBS_64_addsub_shift => addsub_shift,
+        ORR_32_log_imm | ORR_64_log_imm => log_imm,
+        MOVZ_32_movewide | MOVZ_64_movewide => movewide,
         _ => return None,
     })
 }
@@ -183,32 +159,6 @@ fn log_imm(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
     Ok(End::Next)
 }
 
-fn log_shift(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let w = sf_width(&insn);
-    let amount = insn.get("imm6");
-    if amount >= w.bits() {
-        return Err(LiftError::Undefined(insn.encoding));
-    }
-    let x = read_x(b, insn.get("Rn"), w);
-    let m = read_x(b, insn.get("Rm"), w);
-    let mut y = shift_reg(b, m, insn.get("shift"), amount);
-    if insn.get("N") == 1 {
-        y = b.not(y);
-    }
-    let opc = insn.get("opc");
-    let r = match opc {
-        0 | 3 => b.and(x, y),
-        1 => b.or(x, y),
-        _ => b.xor(x, y),
-    };
-    if opc == 3 {
-        let zero = b.konst(Width::W1, 0);
-        set_flags(b, r, zero, zero);
-    }
-    write_x(b, insn.get("Rd"), r);
-    Ok(End::Next)
-}
-
 fn movewide(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
     let w = sf_width(&insn);
     let pos = insn.get("hw") * 16;
@@ -230,141 +180,6 @@ fn movewide(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
         _ => return Err(LiftError::Undefined(insn.encoding)),
     };
     write_x(b, rd, r);
-    Ok(End::Next)
-}
-
-fn pcreladdr(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let imm = sext_imm((insn.get("immhi") << 2) | insn.get("immlo"), 21);
-    let pc = b.pc();
-    let addr = if insn.get("op") == 1 {
-        (pc & !0xfff).wrapping_add((imm << 12) as u64)
-    } else {
-        pc.wrapping_add(imm as u64)
-    };
-    let v = b.konst(Width::W64, u128::from(addr));
-    write_x(b, insn.get("Rd"), v);
-    Ok(End::Next)
-}
-
-fn condsel(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let w = sf_width(&insn);
-    let cond = condition_holds(b, insn.get("cond"));
-    let x = read_x(b, insn.get("Rn"), w);
-    let m = read_x(b, insn.get("Rm"), w);
-    let y = match (insn.get("op"), insn.get("o2")) {
-        (0, 0) => m,
-        (0, _) => {
-            let one = b.konst(w, 1);
-            b.add(m, one)
-        }
-        (_, 0) => b.not(m),
-        _ => b.un(UnOp::Neg, m),
-    };
-    let r = b.select(cond, x, y);
-    write_x(b, insn.get("Rd"), r);
-    Ok(End::Next)
-}
-
-fn bitfield(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let w = sf_width(&insn);
-    let (n, immr, imms) = (insn.get("N"), insn.get("immr"), insn.get("imms"));
-    if w == Width::W32 && (immr >= 32 || imms >= 32) {
-        return Err(LiftError::Undefined(insn.encoding));
-    }
-    let (wmask, tmask) = decode_bit_masks(n, imms, immr, false, w.bits())
-        .ok_or(LiftError::Undefined(insn.encoding))?;
-    let rd = insn.get("Rd");
-    let src = read_x(b, insn.get("Rn"), w);
-    let r = b.konst(w, u128::from(immr));
-    let rot = b.bin(BinOp::RotR, src, r);
-    let wm = b.konst(w, u128::from(wmask));
-    let tm = b.konst(w, u128::from(tmask));
-    let ntm = b.konst(w, u128::from(!tmask));
-    let result = match insn.get("opc") {
-        0 => {
-            let bot = b.and(rot, wm);
-            let sign = b.bit(src, imms);
-            let top = b.push(Op::Ext(ExtKind::Sign, sign), Some(w));
-            let hi = b.and(top, ntm);
-            let lo = b.and(bot, tm);
-            b.or(hi, lo)
-        }
-        1 => {
-            let dst = read_x(b, rd, w);
-            let nwm = b.konst(w, u128::from(!wmask));
-            let keep = b.and(dst, nwm);
-            let ins = b.and(rot, wm);
-            let bot = b.or(keep, ins);
-            let hi = b.and(dst, ntm);
-            let lo = b.and(bot, tm);
-            b.or(hi, lo)
-        }
-        _ => {
-            let bot = b.and(rot, wm);
-            b.and(bot, tm)
-        }
-    };
-    write_x(b, rd, result);
-    Ok(End::Next)
-}
-
-fn madd(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let w = sf_width(&insn);
-    let x = read_x(b, insn.get("Rn"), w);
-    let y = read_x(b, insn.get("Rm"), w);
-    let a = read_x(b, insn.get("Ra"), w);
-    let p = b.bin(BinOp::Mul, x, y);
-    let r = if insn.get("o0") == 1 {
-        b.sub(a, p)
-    } else {
-        b.add(a, p)
-    };
-    write_x(b, insn.get("Rd"), r);
-    Ok(End::Next)
-}
-
-fn mulh(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let x = read_x(b, insn.get("Rn"), Width::W64);
-    let y = read_x(b, insn.get("Rm"), Width::W64);
-    let (xw, yw) = if insn.get("U") == 1 {
-        (b.zext(x, Width::W128), b.zext(y, Width::W128))
-    } else {
-        (b.sext(x, Width::W128), b.sext(y, Width::W128))
-    };
-    let p = b.bin(BinOp::Mul, xw, yw);
-    let hi = b.extract(p, 64, Width::W64);
-    write_x(b, insn.get("Rd"), hi);
-    Ok(End::Next)
-}
-
-fn div(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let w = sf_width(&insn);
-    let x = read_x(b, insn.get("Rn"), w);
-    let y = read_x(b, insn.get("Rm"), w);
-    let op = if insn.get("o1") == 1 {
-        BinOp::SDiv
-    } else {
-        BinOp::UDiv
-    };
-    let r = b.bin(op, x, y);
-    write_x(b, insn.get("Rd"), r);
-    Ok(End::Next)
-}
-
-fn shiftv(insn: Insn, b: &mut Builder) -> Result<End, LiftError> {
-    let w = sf_width(&insn);
-    let x = read_x(b, insn.get("Rn"), w);
-    let y = read_x(b, insn.get("Rm"), w);
-    let m = b.konst(w, u128::from(w.bits() - 1));
-    let amount = b.and(y, m);
-    let op = match insn.get("op2") {
-        0 => BinOp::Shl,
-        1 => BinOp::LShr,
-        2 => BinOp::AShr,
-        _ => BinOp::RotR,
-    };
-    let r = b.bin(op, x, amount);
-    write_x(b, insn.get("Rd"), r);
     Ok(End::Next)
 }
 
