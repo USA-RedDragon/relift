@@ -146,27 +146,27 @@ pub fn module(p: &Placed) -> Module {
     }
 }
 
-/// The function starts of the `.eh_frame_hdr` search table at image offset
-/// `hdr`, as image offsets. Only the table encoding toolchains emit
-/// (`DW_EH_PE_datarel | DW_EH_PE_sdata4`) is read.
+/// The function starts of the unwind table at image offset `start`, as
+/// image offsets: the search table of an `.eh_frame_hdr` when it has the
+/// encoding toolchains emit (`DW_EH_PE_datarel | DW_EH_PE_sdata4`),
+/// otherwise the FDEs of the `.eh_frame` records, walked to their
+/// terminator (the SDK's linker script points the start symbol at the
+/// records and leaves the header empty).
 fn unwind_starts(img: &[u8], hdr: usize) -> Vec<u64> {
-    let (Some(&ver), Some(&count_enc), Some(&table_enc)) =
-        (img.get(hdr), img.get(hdr + 2), img.get(hdr + 3))
-    else {
-        return Vec::new();
-    };
-    if ver != 1 || table_enc != 0x3b || count_enc != 0x03 {
-        return Vec::new();
-    }
-    let Some(count) = u32_at(img, hdr + 8) else {
-        return Vec::new();
-    };
-    (0..count as usize)
-        .filter_map(|i| {
-            let loc = u32_at(img, hdr + 12 + i * 8)? as i32;
-            u64::try_from(hdr as i64 + i64::from(loc)).ok()
-        })
-        .collect()
+    let table = (|| {
+        let (&ver, &count_enc, &table_enc) = (img.get(hdr)?, img.get(hdr + 2)?, img.get(hdr + 3)?);
+        if ver != 1 || table_enc != 0x3b || count_enc != 0x03 {
+            return None;
+        }
+        let count = u32_at(img, hdr + 8)?;
+        (0..count as usize)
+            .map(|i| {
+                let loc = u32_at(img, hdr + 12 + i * 8)? as i32;
+                u64::try_from(hdr as i64 + i64::from(loc)).ok()
+            })
+            .collect::<Option<Vec<u64>>>()
+    })();
+    table.unwrap_or_else(|| crate::eh::fde_starts(img, hdr))
 }
 
 /// The code addresses position-independent start-up code computes with an
@@ -709,6 +709,7 @@ mod tests {
         img[0x4c..0x50].copy_from_slice(&(-0x30i32).to_le_bytes());
         img[0x54..0x58].copy_from_slice(&(-0x20i32).to_le_bytes());
         assert_eq!(unwind_starts(&img, 0x40), [0x10, 0x20]);
+        assert!(unwind_starts(&[0; 0x40], 0x20).is_empty());
         let dynamic = 0x80;
         for (k, (tag, v)) in [(DT_RELA, 0xb0u64), (DT_RELASZ, 24), (DT_NULL, 0)]
             .into_iter()

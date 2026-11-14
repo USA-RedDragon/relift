@@ -145,12 +145,31 @@ fn parse_cie(img: &[u8], at: usize, data_base: usize) -> Option<Cie> {
 /// DW_EH_PE_sdata4`); the records are walked to their zero terminator. A
 /// malformed entry gives no pads.
 pub(crate) fn landing_pads(img: &[u8], start: usize, base: u64) -> Vec<Pad> {
+    let mut out: Vec<Pad> = fdes(img, start)
+        .into_iter()
+        .flat_map(|at| fde_pads(img, at, start, base))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The function starts of the FDEs of the unwind table at image offset
+/// `start` (laid out as for [`landing_pads`]), as image offsets.
+pub(crate) fn fde_starts(img: &[u8], start: usize) -> Vec<u64> {
+    fdes(img, start)
+        .into_iter()
+        .filter_map(|at| fde_start(img, at, start))
+        .collect()
+}
+
+fn fdes(img: &[u8], start: usize) -> Vec<usize> {
     let word = |o: usize| -> Option<u32> {
         Some(u32::from_le_bytes(
             img.get(o..o.checked_add(4)?)?.try_into().ok()?,
         ))
     };
-    let (mut at, stop) = (start, img.len());
+    let mut at = start;
     if img.get(start) == Some(&1) && img.get(start + 1) == Some(&0x1b) {
         let Some(rel) = word(start + 4) else {
             return Vec::new();
@@ -161,24 +180,31 @@ pub(crate) fn landing_pads(img: &[u8], start: usize, base: u64) -> Vec<Pad> {
         at = frames;
     }
     let mut out = Vec::new();
-    while at < stop {
-        let Some(len) = word(at) else {
-            break;
-        };
+    while let Some(len) = word(at) {
         if len == 0 || len == 0xffff_ffff {
             break;
         }
         if word(at + 4).is_some_and(|id| id != 0) {
-            out.extend(fde_pads(img, at, start, base));
+            out.push(at);
         }
         at = match at.checked_add(4 + len as usize) {
             Some(n) => n,
             None => break,
         };
     }
-    out.sort();
-    out.dedup();
     out
+}
+
+fn fde_start(img: &[u8], at: usize, data_base: usize) -> Option<u64> {
+    let mut r = Reader { img, at };
+    r.fixed(4)?;
+    let id_at = r.at;
+    let id = r.fixed(4)?;
+    let cie = parse_cie(img, id_at.checked_sub(id as usize)?, data_base)?;
+    if !cie.augmented {
+        return None;
+    }
+    r.encoded(cie.fde_enc, data_base)
 }
 
 fn fde_pads(img: &[u8], at: usize, data_base: usize, base: u64) -> Vec<Pad> {
@@ -319,6 +345,14 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn the_function_starts_of_the_records_are_read() {
+        let t = table(&[(0x10, 4, 0x30)]);
+        assert_eq!(fde_starts(&t, 0), [0x1000]);
+        assert!(fde_starts(&[0, 0, 0, 0], 0).is_empty());
+        assert!(fde_starts(&[], 0).is_empty());
     }
 
     #[test]
