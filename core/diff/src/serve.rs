@@ -26,6 +26,10 @@ pub struct Outcome {
     pub steps: u64,
     /// The registers at the end, in the order of the state's.
     pub regs: Vec<Reg>,
+    /// The guest addresses the run used as its own stack frames, from the
+    /// lowest stack pointer it reached up to the entry's: the bytes there
+    /// are dead after the return and are not compared.
+    pub scratch: Option<(u64, u64)>,
 }
 
 /// A reference machine: runs one guest function from a state, reading and
@@ -96,7 +100,7 @@ fn compare_regs(engine: &[Reg], lifted: &[Reg], out: &mut String) -> bool {
 
 fn compare_pages(
     pager: &mut Pager<'_>,
-    sp: Option<u64>,
+    scratch: Option<(u64, u64)>,
     out: &mut String,
 ) -> std::io::Result<bool> {
     let ours: Vec<(u64, Vec<u8>)> = pager.touched().map(|(p, d)| (p, d.to_vec())).collect();
@@ -105,7 +109,7 @@ fn compare_pages(
         let Some(have) = pager.wire().fetch(page)? else {
             continue;
         };
-        let live = |k: usize| sp.is_none_or(|sp| page + k as u64 >= sp);
+        let live = |k: usize| scratch.is_none_or(|(lo, hi)| !(lo..hi).contains(&(page + k as u64)));
         let diffs: Vec<usize> = (0..PAGE as usize)
             .filter(|&k| have[k] != want[k] && live(k))
             .collect();
@@ -166,7 +170,7 @@ pub fn case(
                 .find(|r| r.name == "sp")
                 .map(|r| r.value as u64);
             let pages = pager.touched().count();
-            let mem = compare_pages(&mut pager, sp, &mut report)?;
+            let mem = compare_pages(&mut pager, run.scratch, &mut report)?;
             if regs && mem {
                 Verdict::Match {
                     steps: run.steps,
@@ -261,7 +265,9 @@ mod tests {
         }
     }
 
-    struct Adder;
+    struct Adder {
+        scratch: Option<(u64, u64)>,
+    }
 
     impl Engine for Adder {
         fn run(&mut self, state: &State, pager: &mut Pager<'_>, _limit: u64) -> Outcome {
@@ -274,6 +280,7 @@ mod tests {
             Outcome {
                 status: Status::Returned,
                 steps: 3,
+                scratch: self.scratch,
                 regs: vec![Reg {
                     name: "x0".into(),
                     value: x0,
@@ -289,6 +296,7 @@ mod tests {
             Outcome {
                 status: Status::Left("system call svc #7 at 0x8004010".into()),
                 steps: 1,
+                scratch: None,
                 regs: Vec::new(),
             }
         }
@@ -322,7 +330,7 @@ mod tests {
     fn a_case_that_agrees_matches() {
         let live = page(4, 5);
         let (v, sent, log) = drive(
-            &mut Adder,
+            &mut Adder { scratch: None },
             &[
                 b"STATE pc=100 stop=200 x0=9\n",
                 &ok(&page(4, 0)),
@@ -339,7 +347,7 @@ mod tests {
     #[test]
     fn a_wrong_register_and_a_wrong_page_are_named() {
         let (v, sent, _) = drive(
-            &mut Adder,
+            &mut Adder { scratch: None },
             &[
                 b"STATE pc=100 stop=200 x0=9\n",
                 &ok(&page(4, 0)),
@@ -359,13 +367,15 @@ mod tests {
     }
 
     #[test]
-    fn bytes_below_the_final_stack_pointer_are_not_compared() {
+    fn bytes_in_the_frames_the_run_used_are_not_compared() {
         let (v, _, _) = drive(
-            &mut Adder,
+            &mut Adder {
+                scratch: Some((0x1000, 0x1010)),
+            },
             &[
                 b"STATE pc=100 stop=200 x0=9\n",
                 &ok(&page(4, 0)),
-                b"AFTER x0=a sp=1010\n",
+                b"AFTER x0=a\n",
                 &ok(&page(4, 6)),
             ],
         );

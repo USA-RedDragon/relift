@@ -209,6 +209,7 @@ impl Engine for IrEngine {
         let mut cache: BTreeMap<u64, Block> = BTreeMap::new();
         let mut pc = state.pc;
         let mut steps = 0u64;
+        let mut low = sp0;
         let status = loop {
             if pc == state.stop && st.regs[regs::SP.index()] == sp0 {
                 break Status::Returned;
@@ -237,6 +238,7 @@ impl Engine for IrEngine {
                         };
                     }
                     pc = o.next;
+                    low = low.min(st.regs[regs::SP.index()]);
                 }
                 Err(e) => break Status::Failed(format!("{e} at {pc:#x}")),
             }
@@ -244,6 +246,7 @@ impl Engine for IrEngine {
         Outcome {
             status,
             steps,
+            scratch: (low < sp0).then_some((low as u64, sp0 as u64)),
             regs: store(&st),
         }
     }
