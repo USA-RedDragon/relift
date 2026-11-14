@@ -118,6 +118,14 @@ pub fn module(p: &Placed) -> Module {
                 name: None,
             });
         }
+        let text = nso.segments[0];
+        for a in inline_literal_targets(img, text.memory_offset as usize, text.size as usize) {
+            roots.push(Root {
+                addr: p.base.wrapping_add(a),
+                kind: RootKind::Pointer,
+                name: None,
+            });
+        }
         for a in reloc_targets(img, m.dynamic as usize, &symbols) {
             roots.push(Root {
                 addr: p.base.wrapping_add(a),
@@ -156,6 +164,45 @@ fn unwind_starts(img: &[u8], hdr: usize) -> Vec<u64> {
             u64::try_from(hdr as i64 + i64::from(loc)).ok()
         })
         .collect()
+}
+
+/// The code addresses position-independent start-up code computes with an
+/// inline literal, as image offsets: `bl` over one data word, then
+/// `ldr wN, [x30]`, `sxtw xN, wN`, `add xN, xN, x30` give the word's
+/// address plus the word. Code before relocation uses this (the dynamic
+/// loader and the runtime start-up) because it has no GOT to read yet.
+fn inline_literal_targets(img: &[u8], text: usize, size: usize) -> Vec<u64> {
+    const BL_PLUS_8: u32 = 0x9400_0002;
+    let end = (text + size).min(img.len());
+    let mut out = Vec::new();
+    let mut pc = text;
+    while pc + 20 <= end {
+        let (Some(bl), Some(word), Some(ldr), Some(sxtw), Some(add)) = (
+            u32_at(img, pc),
+            u32_at(img, pc + 4),
+            u32_at(img, pc + 8),
+            u32_at(img, pc + 12),
+            u32_at(img, pc + 16),
+        ) else {
+            break;
+        };
+        let n = ldr & 0x1f;
+        if bl == BL_PLUS_8
+            && ldr == 0xb940_03c0 | n
+            && sxtw == 0x9340_7c00 | (n << 5) | n
+            && add == 0x8b1e_0000 | (n << 5) | n
+        {
+            let at = (pc + 4) as i64 + i64::from(word as i32);
+            if let Ok(t) = u64::try_from(at)
+                && (text as u64..end as u64).contains(&t)
+                && t % 4 == 0
+            {
+                out.push(t);
+            }
+        }
+        pc += 4;
+    }
+    out
 }
 
 /// The values the module's relocations store, as image offsets. A PLT
@@ -721,6 +768,27 @@ mod tests {
         // Unbound, the PLT slot holds the PLT header's address: an entry.
         put(&mut img, 0x48, 0x30);
         assert_eq!(reloc_targets(&img, 0, &[]), [0x30]);
+    }
+
+    #[test]
+    fn inline_literals_name_code_addresses() {
+        let mut img = Vec::new();
+        for w in [
+            0xd503_201fu32, // 0x00 nop
+            0x9400_0002,    // 0x04 bl 0x0c
+            0x0000_0010,    // 0x08 .word 0x10 -> 0x18
+            0xb940_03c2,    // 0x0c ldr w2, [x30]
+            0x9340_7c42,    // 0x10 sxtw x2, w2
+            0x8b1e_0042,    // 0x14 add x2, x2, x30
+            0x9400_0002,    // 0x18 bl 0x20
+            0x0000_1000,    // 0x1c .word: outside the text
+            0xb940_03c3,    // 0x20 ldr w3, [x30]
+            0x9340_7c63,    // 0x24 sxtw x3, w3
+            0x8b1e_0063,    // 0x28 add x3, x3, x30
+        ] {
+            img.extend_from_slice(&w.to_le_bytes());
+        }
+        assert_eq!(inline_literal_targets(&img, 0, img.len()), [0x18]);
     }
 
     #[test]
