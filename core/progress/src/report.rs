@@ -2,7 +2,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use crate::clock::Clock;
-use crate::fmt::{bar, count, duration};
+use crate::fmt::{bar, bytes, count, duration};
 use crate::line::{Line, Paint};
 use crate::throttle::Throttle;
 
@@ -39,6 +39,8 @@ pub struct Metrics {
     pub unlifted: Option<u64>,
     /// Extra text after the counts, such as the compiler and job count.
     pub note: Option<String>,
+    /// Whether the counts are bytes (shown as `1.2 MB`) rather than items.
+    pub bytes: bool,
     /// Whether a live line shows the elapsed time.
     pub elapsed: bool,
 }
@@ -235,7 +237,11 @@ impl<W: Write> Reporter<W> {
     }
 
     /// An error: shown at every verbosity, `text` in red when color is on.
+    /// It ends the run, so the stages still running are dropped first.
     pub fn error(&mut self, text: &str) {
+        for r in &mut self.rows {
+            r.metrics = None;
+        }
         self.permanent(&Line::new().paint(Paint::Red, text));
     }
 
@@ -353,10 +359,11 @@ fn pad(s: &str, width: usize) -> String {
 }
 
 fn counts(m: &Metrics, percent: bool) -> Line {
+    let num = |n: u64| if m.bytes { bytes(n) } else { count(n) };
     let mut l = Line::new();
     match m.total {
         Some(t) => {
-            l = l.text(format!("{}/{}", count(m.done), count(t)));
+            l = l.text(format!("{}/{}", num(m.done), num(t)));
             if !m.unit.is_empty() {
                 l = l.text(format!(" {}", m.unit));
             }
@@ -365,7 +372,7 @@ fn counts(m: &Metrics, percent: bool) -> Line {
             }
         }
         None => {
-            l = l.text(count(m.done));
+            l = l.text(num(m.done));
             if !m.unit.is_empty() {
                 l = l.text(format!(" {}", m.unit));
             }
