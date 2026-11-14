@@ -41,6 +41,22 @@ pub enum Home {
     },
 }
 
+/// How the WebAssembly emitter (`relift-emit-wasm`) carries an intrinsic;
+/// the counterpart of the C that [`Frontend::intrinsic`] gives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WasmIntrinsic {
+    /// A runtime entry imported as `intrinsic.<name>`, which takes the
+    /// context and memory base before the operands.
+    Import,
+    /// No effect; only for intrinsics without a result.
+    Nop,
+    /// The constant, for intrinsics with a result and no effect.
+    Const(u128),
+    /// Zeroes the naturally aligned block of this many bytes (a power of
+    /// two and a multiple of 8) that holds the one address operand.
+    ZeroBlock(u32),
+}
+
 /// A CPU frontend: decoding and lifting, plus the facts the C emitter needs
 /// about the CPU's half of the runtime ABI.
 pub trait Frontend {
@@ -77,6 +93,13 @@ pub trait Frontend {
     /// trailing semicolon otherwise. `None` for an intrinsic it does not
     /// know.
     fn intrinsic(&self, name: &str, args: &[String]) -> Option<String>;
+
+    /// How the WebAssembly emitter carries intrinsic `name`; `None` for an
+    /// intrinsic it does not know, which the emitter reports as an error.
+    fn wasm_intrinsic(&self, name: &str) -> Option<WasmIntrinsic> {
+        let _ = name;
+        None
+    }
 
     /// An `int` C expression that enters the runtime for trap `code` (the
     /// guest's system call); a call boundary that may return `RL_PENDING`.
