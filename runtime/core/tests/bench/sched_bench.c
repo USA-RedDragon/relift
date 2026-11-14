@@ -2,18 +2,23 @@
  * @file sched_bench.c
  * @brief Microbenchmark of the device scheduler (make sched-bench): the
  * budget check of lifted code, the scheduler call, event firing, device
- * catch-up on access, rl_sync through a context and the hand-over between two
- * CPUs on two host threads. Prints nanoseconds per operation.
+ * catch-up on access, rl_sync through a context (not on Windows, where only
+ * the scheduler and the fibers of the core build) and the hand-over between
+ * two CPUs on their fibers. Prints nanoseconds per operation.
  */
-#include "core.h"
-
 #include <relift/sched.h>
 
-#include <pthread.h>
+#if !defined(_WIN32)
+#include "core.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 /** @brief Blocks per budget run. */
 #define BLOCKS 200000000ll
@@ -22,9 +27,16 @@
 
 static double now_s(void)
 {
+#if defined(_WIN32)
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / (double)f.QuadPart;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+#endif
 }
 
 static void report(const char *what, double secs, long long n)
@@ -171,6 +183,7 @@ static void bench_access(int observers, int ranges)
     rl_sched_destroy(s);
 }
 
+#if !defined(_WIN32)
 /** @brief A context with a clock for the rl_sync benchmark. */
 struct rl_ctx {
     /** @brief The core's block. */
@@ -216,14 +229,14 @@ static void bench_sync(void)
     rl_sched_destroy(s);
     rl_thread_free(th);
 }
+#endif
 
 /** @brief Blocks per CPU in the hand-over benchmark. */
 #define SWITCH_BLOCKS 2000000ll
 
-static void *switch_main(void *p)
+static void switch_main(rl_sched_cpu *k, void *p)
 {
-    rl_sched_cpu *k = p;
-    rl_sched_enter(k);
+    (void)p;
     rl_time *t = rl_sched_clock(k);
     rl_sched_run(k);
     for (long long i = 0; i < SWITCH_BLOCKS; i++) {
@@ -231,8 +244,6 @@ static void *switch_main(void *p)
         if (t->budget <= 0)
             rl_sched_run(k);
     }
-    rl_sched_leave(k);
-    return NULL;
 }
 
 static void bench_switch(uint64_t quantum)
@@ -241,12 +252,13 @@ static void bench_switch(uint64_t quantum)
     rl_sched *s = rl_sched_create(&cfg);
     rl_sched_cpu *a = rl_sched_add_cpu(s, 1);
     rl_sched_cpu *b = rl_sched_add_cpu(s, 1);
-    pthread_t ta, tb;
+    if (rl_sched_spawn(a, switch_main, NULL) != 0 || rl_sched_spawn(b, switch_main, NULL) != 0) {
+        puts("hand-over: no fiber stack");
+        rl_sched_destroy(s);
+        return;
+    }
     double t0 = now_s();
-    pthread_create(&tb, NULL, switch_main, b);
-    pthread_create(&ta, NULL, switch_main, a);
-    pthread_join(ta, NULL);
-    pthread_join(tb, NULL);
+    rl_sched_main(s);
     double t1 = now_s();
     unsigned long long sw = (unsigned long long)rl_sched_get_stats(s)->switches;
     char what[64];
@@ -266,7 +278,9 @@ int main(void)
     bench_access(0, 1);
     bench_access(3, 1);
     bench_access(0, 8);
+#if !defined(_WIN32)
     bench_sync();
+#endif
     bench_switch(64);
     bench_switch(4096);
     return 0;
