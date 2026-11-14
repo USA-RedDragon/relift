@@ -77,8 +77,9 @@ manifest excludes it.
 There is no core names crate: Itanium remangling is the Switch guest's
 business, and the core sees only `relift_guest::Naming`.
 
-The C runtime (`runtime/core`, `runtime/switch`) and the public override
-header (`include/relift/override.h`) sit outside Cargo and do not exist yet.
+The C runtime (`runtime/core`, `runtime/switch`, built and tested by
+`runtime/Makefile`, see `runtime/README.md`) sits outside Cargo. The public
+override header (`include/relift/override.h`) does not exist yet.
 
 The contract between emitted C and that runtime is the header
 `runtime/include/relift/abi.h`; `docs/abi.md` gives the reason for each choice.
