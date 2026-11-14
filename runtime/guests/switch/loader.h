@@ -26,6 +26,8 @@ typedef struct rl_switch_module {
     uint64_t data_off, data_size;
     /** @brief Zero-filled bytes right after data. */
     uint64_t bss_size;
+    /** @brief Build id as lower-case hex, NULL when unknown. Data mods match cheat files against the main module's. */
+    const char *build_id;
 } rl_switch_module;
 
 /** @brief A whole program: its modules and the settings its NPDM gives. */

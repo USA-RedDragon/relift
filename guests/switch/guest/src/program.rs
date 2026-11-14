@@ -691,7 +691,7 @@ fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags:
         let s = p.nso.segments;
         let _ = writeln!(
             t,
-            "    {{ {:?}, UINT64_C({:#x}), rl_image{i}, {}u, {}u, {}u, {}u, {}u, {}u, {}u, {}u }},",
+            "    {{ {:?}, UINT64_C({:#x}), rl_image{i}, {}u, {}u, {}u, {}u, {}u, {}u, {}u, {}u, \"{}\" }},",
             p.name,
             p.base,
             p.nso.image.len(),
@@ -701,7 +701,8 @@ fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String], fp_flags:
             s[1].size,
             s[2].memory_offset,
             s[2].size,
-            p.nso.bss_size
+            p.nso.bss_size,
+            p.nso.build_id_hex()
         );
     }
     let (space, prio, core, stack, pid) = match npdm {

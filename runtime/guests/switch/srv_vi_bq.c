@@ -7,6 +7,7 @@
  * Ryujinx.HLE/HOS/Services/SurfaceFlinger: BufferQueueCore, BufferQueueProducer,
  * BufferQueueConsumer and SurfaceFlinger's layer table.
  */
+#include "hos_mods.h"
 #include "vi.h"
 
 #include <stdlib.h>
@@ -376,6 +377,7 @@ void vi_frame_queued(vi_core *c)
     void (*fn)(uint64_t, void *) = frame_cb;
     void *user = frame_cb_user;
     pthread_mutex_unlock(&cb_lock);
+    rl_hos_mods_frame();
     if (fn)
         fn(c->layer_id, user);
 }

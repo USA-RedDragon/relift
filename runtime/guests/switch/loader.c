@@ -7,6 +7,7 @@
 #include "loader.h"
 
 #include "hos.h"
+#include "hos_mods.h"
 #include "services.h"
 
 #include <relift/settings.h>
@@ -357,6 +358,19 @@ typedef struct main_args {
     const rl_switch_program *p;
 } main_args;
 
+/** @brief Tells the data mods which module is main: the one named main, else the second (after rtld), else the first. */
+static void attach_mods(const rl_switch_program *p)
+{
+    const rl_switch_module *m = NULL;
+    for (uint32_t i = 0; i < p->module_count && !m; i++)
+        if (p->modules[i].name && !strcmp(p->modules[i].name, "main"))
+            m = &p->modules[i];
+    if (!m && p->module_count)
+        m = &p->modules[p->module_count > 1 ? 1 : 0];
+    if (m)
+        rl_hos_mods_attach(m->base, m->build_id);
+}
+
 static int run_program(void *arg)
 {
     const rl_switch_program *p = ((main_args *)arg)->p;
@@ -431,6 +445,7 @@ static int run_program(void *arg)
     for (uint32_t i = 0; i < p->module_count; i++)
         if (link_module(p, &p->modules[i]) != 0)
             return 1;
+    attach_mods(p);
     c = rl_hos_attach_thread(p->main_prio, p->main_core);
     if (!c) {
         rl_log(RL_LOG_ERROR, "loader", "cannot attach the main thread");

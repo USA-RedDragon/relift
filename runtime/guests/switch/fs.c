@@ -8,9 +8,10 @@
  * (Filesystem services), libnx (ISC) fs_sf.h and Atmosphere's result
  * numbers for nn::fs, read as specifications.
  */
+#include "fs_priv.h"
 #include "hos.h"
 #include "hos_fs.h"
-#include "fs_priv.h"
+#include "hos_mods.h"
 #include "ipc.h"
 #include "services.h"
 
@@ -916,4 +917,5 @@ void rl_srv_install_fs(void)
     }
     rl_hos_fs_set_save(save);
     rl_fs_romfs_env();
+    rl_hos_mods_install();
 }

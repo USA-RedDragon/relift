@@ -6,6 +6,7 @@
  * synthetic tree and compares every file with its source.
  */
 #include "hos_fs.h"
+#include "hos_mods.h"
 #include "tc.h"
 
 #include <errno.h>
@@ -598,4 +599,154 @@ TEST(romfs_layers_overlay_in_order)
     tree_remove(base);
     tree_remove(m1);
     tree_remove(m2);
+}
+
+static void mkdirs(const char *root, const char *rel)
+{
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", root, rel);
+    for (char *p = path + strlen(root) + 1; *p; p++)
+        if (*p == '/') {
+            *p = 0;
+            mkdir(path, 0777);
+            *p = '/';
+        }
+    mkdir(path, 0777);
+}
+
+static void put(const char *root, const char *rel, const char *text)
+{
+    char dir[1024], *slash;
+    snprintf(dir, sizeof dir, "%s", rel);
+    slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = 0;
+        mkdirs(root, dir);
+    }
+    write_file(root, rel, text, strlen(text));
+}
+
+TEST(mods_both_layouts_overlay_and_read_through_fsp)
+{
+    env e = boot();
+    tc_obj st;
+    image im;
+    char base[512], at[512], ry[512], tid[17], rel[128], list[2200];
+    size_t n;
+    make_root(base, sizeof base);
+    make_root(at, sizeof at);
+    make_root(ry, sizeof ry);
+    snprintf(tid, sizeof tid, "%016llx", (unsigned long long)hos.cfg.program_id);
+    put(base, "a.txt", "base a");
+    put(base, "dir/b.txt", "base b");
+    snprintf(rel, sizeof rel, "contents/%s/romfs/a.txt", tid);
+    put(at, rel, "atmosphere a");
+    snprintf(rel, sizeof rel, "contents/%s/romfs/dir/c.txt", tid);
+    put(at, rel, "atmosphere c");
+    snprintf(rel, sizeof rel, "contents/%s/exefs/main", tid);
+    put(at, rel, "ignored");
+    put(ry, "zeta/romfs/dir/b.txt", "ryujinx zeta b");
+    put(ry, "alpha/romfs/a.txt", "ryujinx alpha a");
+    put(ry, "empty/readme.txt", "no content");
+    snprintf(list, sizeof list, "%s:%s", at, ry);
+    n = rl_hos_mods_set(list, hos.cfg.program_id);
+    CHECK_EQ(n, 3);
+    CHECK_EQ(rl_hos_mods_info(0)->layout, RL_MOD_ATMOSPHERE);
+    CHECK_EQ(strcmp(rl_hos_mods_info(0)->name, tid), 0);
+    CHECK_EQ(rl_hos_mods_info(1)->layout, RL_MOD_RYUJINX);
+    CHECK_EQ(strcmp(rl_hos_mods_info(1)->name, "alpha"), 0);
+    CHECK_EQ(strcmp(rl_hos_mods_info(2)->name, "zeta"), 0);
+    rl_hos_mods_apply_romfs(base);
+    CHECK_EQ(open_cmd(&e, 200, NULL, 0, &st), 0);
+    CHECK(image_open(&im, &e, st));
+    CHECK(image_has(&im, "a.txt", "ryujinx alpha a"));
+    CHECK(image_has(&im, "dir/b.txt", "ryujinx zeta b"));
+    CHECK(image_has(&im, "dir/c.txt", "atmosphere c"));
+    CHECK_EQ(lookup_file(&im, "main"), NONE);
+    CHECK_EQ(rl_hos_mods_conflict_count(), 1);
+    CHECK(strstr(rl_hos_mods_conflict(0), "/a.txt") != NULL);
+    CHECK(strstr(rl_hos_mods_conflict(0), "alpha wins over") != NULL);
+    {
+        char json[1024];
+        size_t need = rl_hos_mods_json(json, sizeof json);
+        CHECK(need < sizeof json);
+        CHECK(strstr(json, "\"layout\":\"atmosphere\"") != NULL);
+        CHECK(strstr(json, "\"layout\":\"ryujinx\"") != NULL);
+        CHECK(strstr(json, "alpha wins over") != NULL);
+    }
+    image_close(&im);
+    tc_close(e.c, st.handle);
+    rl_hos_mods_clear();
+    rl_hos_fs_set_romfs(NULL);
+    tree_remove(base);
+    tree_remove(at);
+    tree_remove(ry);
+}
+
+TEST(mods_folder_forms_and_wrong_title)
+{
+    char root[512], one[512], rel[128], tid[17];
+    make_root(root, sizeof root);
+    make_root(one, sizeof one);
+    snprintf(tid, sizeof tid, "%016llx", (unsigned long long)hos.cfg.program_id);
+    snprintf(rel, sizeof rel, "contents/%s/romfs/x", tid);
+    put(root, rel, "x");
+    put(root, "contents/0100000000000999/romfs/y", "y");
+    CHECK_EQ(rl_hos_mods_set(root, hos.cfg.program_id), 1);
+    CHECK_EQ(rl_hos_mods_info(0)->layout, RL_MOD_ATMOSPHERE);
+    snprintf(rel, sizeof rel, "%s/contents", root);
+    CHECK_EQ(rl_hos_mods_set(rel, hos.cfg.program_id), 1);
+    snprintf(rel, sizeof rel, "%s/contents/0100000000000999", root);
+    CHECK_EQ(rl_hos_mods_set(rel, hos.cfg.program_id), 0);
+    CHECK_EQ(rl_hos_mods_set("/nonexistent-relift-mod", hos.cfg.program_id), 0);
+    put(one, "romfs/z", "z");
+    CHECK_EQ(rl_hos_mods_set(one, hos.cfg.program_id), 1);
+    CHECK_EQ(rl_hos_mods_info(0)->layout, RL_MOD_RYUJINX);
+    rl_hos_mods_clear();
+    tree_remove(root);
+    tree_remove(one);
+}
+
+static uint64_t keys_held;
+
+static uint64_t held_keys(void *u)
+{
+    (void)u;
+    return keys_held;
+}
+
+TEST(mods_cheat_writes_ram_every_frame)
+{
+    env e = boot();
+    char mod[512];
+    uint32_t v;
+    uint8_t *heap = t_mem() + e.heap;
+    make_root(mod, sizeof mod);
+    put(mod, "cheats/0123456789ABCDEF.txt",
+        "[Always]\n04100000 00000040 DEADBEEF\n\n{Gated}\n80000001\n04100000 00000044 00000007\n20000000\n"
+        "[Code]\n04000000 00000000 11111111\n");
+    put(mod, "cheats/FFFFFFFFFFFFFFFF.txt", "[Other build]\n04100000 00000048 00000001\n");
+    CHECK_EQ(rl_hos_mods_set(mod, hos.cfg.program_id), 1);
+    rl_hos_mods_set_keys(held_keys, NULL);
+    keys_held = 0;
+    rl_hos_mods_attach(hos.lay.code_start, "0123456789abcdef0000000000000000");
+    CHECK_EQ(rl_hos_mods_info(0)->cheats, 3);
+    CHECK_EQ(hos.lay.heap_start, e.heap);
+    rl_hos_mods_frame();
+    memcpy(&v, heap + 0x40, 4);
+    CHECK_EQ(v, 0xDEADBEEF);
+    memcpy(&v, heap + 0x44, 4);
+    CHECK_EQ(v, 0);
+    memcpy(&v, heap + 0x48, 4);
+    CHECK_EQ(v, 0);
+    memset(heap + 0x40, 0, 8);
+    keys_held = 1;
+    rl_hos_mods_frame();
+    memcpy(&v, heap + 0x40, 4);
+    CHECK_EQ(v, 0xDEADBEEF);
+    memcpy(&v, heap + 0x44, 4);
+    CHECK_EQ(v, 7);
+    rl_hos_mods_set_keys(NULL, NULL);
+    rl_hos_mods_clear();
+    tree_remove(mod);
 }
