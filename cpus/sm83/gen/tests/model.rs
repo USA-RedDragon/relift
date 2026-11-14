@@ -10,6 +10,7 @@ use relift_cpu_sm83::{BASE, CB, Mnemonic};
 
 use relift_sail::ast::{Expr, Lit, Pat, Typ, TypArg};
 use relift_sail::model::Model;
+use relift_sail::stage;
 
 fn model() -> Model {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sail/sm83.sail");
@@ -203,5 +204,33 @@ fn decode_clauses_follow_the_opcode_table() {
             cb_mnemonics(&f).contains(&want),
             "CB {op:#04x}: decodes to {f}, the table says {want:?}"
         );
+    }
+}
+
+#[test]
+fn clause_patterns_give_their_fixed_bits() {
+    let m = model();
+    for group in ["__DecodeSM83", "__DecodeSM83_CB"] {
+        let clauses = m.func(group).expect("defined").expect("parses");
+        let pats = stage::clauses(&m, group, 8);
+        let catch_all = clauses.len() - 1;
+        let n = if group == "__DecodeSM83" {
+            catch_all
+        } else {
+            clauses.len()
+        };
+        assert_eq!(pats.len(), n, "{group}: every clause but a catch-all");
+        for p in &pats {
+            for op in 0..=255u8 {
+                let mut env = HashMap::new();
+                let takes = matches(&clauses[p.index].params, 8, u128::from(op), &mut env);
+                assert_eq!(
+                    takes,
+                    u32::from(op) & p.mask == p.value,
+                    "{group} clause {} on {op:#04x}",
+                    p.index
+                );
+            }
+        }
     }
 }
