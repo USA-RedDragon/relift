@@ -4,3 +4,6 @@
 # shrinks. Host words are fine in core; guest words are not.
 core/fault.c  a64-isa  the host pc of a faulting host instruction on arm64 hosts (Linux and macOS), and macOS arm64 raising SIGBUS: the host CPU, not a guest CPU
 core/crash_posix.c  a64-isa  the host pc, sp and frame pointer of a faulting host instruction on arm64 hosts (Linux and macOS): the host CPU, not a guest CPU
+core/fiber_aarch64.S  a64-isa  the fiber switch for 64-bit Arm hosts (Linux, macOS, Windows): host-arch code that saves the host's callee-saved registers, not guest code
+core/fiber_aarch64.S  a64-system-registers  the fiber switch reads the host's FP control register to check the default mode at a hand-over: the host CPU, not a guest CPU
+core/fiber_aarch64.S  register-file  the fiber switch saves and restores the host's link register x30: the host CPU, not a guest register file
