@@ -2,7 +2,7 @@
 //! sees it while it runs, branch exits, and the integer helpers their static
 //! code uses. These are the hand-written side of the cut line.
 
-use relift_ir::{Builder, CmpOp, Exit, Flow, FpOp, Next, Reg, Value, Width};
+use relift_ir::{Builder, CmpOp, Exit, Flow, FpOp, FpRound, Next, Reg, Value, Width};
 
 use crate::regs;
 
@@ -559,5 +559,97 @@ impl Fp {
     /// `FPMinNum`.
     pub fn min_num(&self, b: &mut Builder, x: Value, y: Value) -> Value {
         self.max_min_num(b, x, y, false)
+    }
+
+    fn pow2(&self, b: &mut Builder, k: u32) -> Value {
+        let (bias, f) = if self.w == Width::W32 {
+            (127, 23)
+        } else {
+            (1023, 52)
+        };
+        self.k(b, u128::from(bias + k) << f)
+    }
+
+    /// `FPToFixed`: `x * 2^fbits` rounded by `r` to an `out`-bit integer,
+    /// saturating, NaN giving 0.
+    pub fn fp_to_fixed(
+        &self,
+        b: &mut Builder,
+        x: Value,
+        fbits: u32,
+        signed: bool,
+        r: FpRound,
+        out: u32,
+    ) -> Value {
+        let x = if fbits == 0 {
+            x
+        } else {
+            let k = self.pow2(b, fbits);
+            b.fp(FpOp::Mul, &[x, k], self.w)
+        };
+        let op = if signed {
+            FpOp::ToSInt(r)
+        } else {
+            FpOp::ToUInt(r)
+        };
+        b.fp(op, &[x], Width::new(out))
+    }
+
+    /// `FixedToFP`: the integer `x` divided by `2^fbits`, rounded to nearest
+    /// even in this format.
+    pub fn fixed_to_fp(&self, b: &mut Builder, x: Value, fbits: u32, signed: bool) -> Value {
+        let op = if signed {
+            FpOp::FromSInt
+        } else {
+            FpOp::FromUInt
+        };
+        let r = b.fp(op, &[x], self.w);
+        if fbits == 0 {
+            return r;
+        }
+        let k = self.pow2(b, fbits);
+        b.fp(FpOp::Div, &[r, k], self.w)
+    }
+
+    /// `FPRoundInt`: `x` rounded by `r` to an integral value.
+    pub fn round_int(&self, b: &mut Builder, x: Value, r: FpRound) -> Value {
+        let v = b.fp(FpOp::RoundInt(r), &[x], self.w);
+        self.nans(b, &[x], v)
+    }
+
+    /// `FPConvert` to the format `to`, rounding to nearest even; a NaN keeps
+    /// its sign and the top of its payload and becomes quiet.
+    pub fn convert(&self, b: &mut Builder, x: Value, to: &Fp) -> Value {
+        let r = b.fp(FpOp::Convert, &[x], to.w);
+        let n = self.is_nan(b, x);
+        let (fw, tw) = (self.w.bits(), to.w.bits());
+        let (ff, tf) = (
+            self.quiet.trailing_zeros() + 1,
+            to.quiet.trailing_zeros() + 1,
+        );
+        let frac = self.k(b, self.quiet * 2 - 1);
+        let fx = b.and(x, frac);
+        let s = self.k(b, self.sign);
+        let sx = b.and(x, s);
+        let (fx, sx) = if fw > tw {
+            let fsh = self.k(b, u128::from(ff - tf));
+            let ssh = self.k(b, u128::from(fw - tw));
+            let fx = b.bin(relift_ir::BinOp::LShr, fx, fsh);
+            let sx = b.bin(relift_ir::BinOp::LShr, sx, ssh);
+            (b.trunc(fx, to.w), b.trunc(sx, to.w))
+        } else {
+            let fx = b.zext(fx, to.w);
+            let sx = b.zext(sx, to.w);
+            let fsh = to.k(b, u128::from(tf - ff));
+            let ssh = to.k(b, u128::from(tw - fw));
+            (
+                b.bin(relift_ir::BinOp::Shl, fx, fsh),
+                b.bin(relift_ir::BinOp::Shl, sx, ssh),
+            )
+        };
+        let q = to.k(b, to.inf | to.quiet);
+        let nan = b.or(sx, fx);
+        let nan = b.or(nan, q);
+        b.select(n, nan, r)
     }
 }

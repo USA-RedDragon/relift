@@ -6,7 +6,7 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, Order, UnOp, Width};
+use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width};
 
 use crate::decode::Encoding;
 use crate::lift::LiftError;
@@ -47,31 +47,168 @@ pub(super) fn CLREX_BN_barriers(word: u32, b: &mut Builder, st: &mut St) -> Resu
 
 /// `DMB_BO_barriers`.
 ///
-/// Cut: .
+/// Split on the word bits `0x00000f00`.
+///
+/// Cut: DataMemoryBarrier.
 pub(super) fn DMB_BO_barriers(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::DMB_BO_barriers;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
-    Ok(())
+    match word & 0x00000f00 {
+        0x00000000 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000100 => {
+            b.fence(Order::Acquire);
+            Ok(())
+        }
+        0x00000200 => {
+            b.fence(Order::Release);
+            Ok(())
+        }
+        0x00000300 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000400 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000500 => {
+            b.fence(Order::Acquire);
+            Ok(())
+        }
+        0x00000600 => {
+            b.fence(Order::Release);
+            Ok(())
+        }
+        0x00000700 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000800 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000900 => {
+            b.fence(Order::Acquire);
+            Ok(())
+        }
+        0x00000a00 => {
+            b.fence(Order::Release);
+            Ok(())
+        }
+        0x00000b00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000c00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000d00 => {
+            b.fence(Order::Acquire);
+            Ok(())
+        }
+        0x00000e00 => {
+            b.fence(Order::Release);
+            Ok(())
+        }
+        0x00000f00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `DSB_BO_barriers`.
 ///
-/// Cut: IsFeatureImplemented.
+/// Split on the word bits `0x00000f00`.
+///
+/// Cut: DataSynchronizationBarrier, IsFeatureImplemented, SpeculativeStoreBypassBarrierToPA, SpeculativeStoreBypassBarrierToVA.
 pub(super) fn DSB_BO_barriers(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::DSB_BO_barriers;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
-    Ok(())
+    match word & 0x00000f00 {
+        0x00000000 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000100 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000200 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000300 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000400 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000500 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000600 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000700 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000800 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000900 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000a00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000b00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000c00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000d00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000e00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        0x00000f00 => {
+            b.fence(Order::SeqCst);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// `ISB_BI_barriers`.
 ///
-/// Cut: IsFeatureImplemented.
+/// Cut: InstructionSynchronizationBarrier, IsFeatureImplemented.
 pub(super) fn ISB_BI_barriers(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::ISB_BI_barriers;
     let w = u128::from(word);
     let pc = u128::from(b.pc());
+    b.fence(Order::SeqCst);
     Ok(())
 }
 
