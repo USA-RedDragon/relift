@@ -165,10 +165,6 @@ pub fn case(
             let after = parse_after(&line).map_err(io_err)?;
             let mut report = String::new();
             let regs = compare_regs(&run.regs, &after, &mut report);
-            let sp = after
-                .iter()
-                .find(|r| r.name == "sp")
-                .map(|r| r.value as u64);
             let pages = pager.touched().count();
             let mem = compare_pages(&mut pager, run.scratch, &mut report)?;
             if regs && mem {

@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 relift-cpu-a64 = { path = "../cpus/a64" }
 relift-cpu-sm83 = { path = "../cpus/sm83" }
+relift-diff = { path = "../core/diff" }
 relift-guest = { path = "../core/guest" }
 relift-ir = { path = "../core/ir" }
 relift-proc = { path = "../core/proc" }

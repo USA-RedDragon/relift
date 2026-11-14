@@ -398,6 +398,7 @@ version = "0.1.0"
 dependencies = [
  "relift-cpu-a64",
  "relift-cpu-sm83",
+ "relift-diff",
  "relift-guest",
  "relift-ir",
  "relift-proc",
@@ -409,6 +410,7 @@ dependencies = [
 name = "relift-cpu-a64"
 version = "0.1.0"
 dependencies = [
+ "relift-diff",
  "relift-guest",
  "relift-ir",
 ]
@@ -420,6 +422,10 @@ dependencies = [
  "relift-guest",
  "relift-ir",
 ]
+
+[[package]]
+name = "relift-diff"
+version = "0.1.0"
 
 [[package]]
 name = "relift-guest"
