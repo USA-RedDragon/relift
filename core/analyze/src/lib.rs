@@ -109,15 +109,59 @@ impl Analysis {
     }
 }
 
-/// Lifts and caches instructions by address.
+/// A hasher for instruction addresses.
+#[derive(Clone, Copy, Default)]
+struct PcHasher(u64);
+
+impl std::hash::Hasher for PcHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        }
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0 ^ n)
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .rotate_left(29);
+    }
+}
+
+type PcHash = std::hash::BuildHasherDefault<PcHasher>;
+
+/// Lifts and caches instructions by address, for a group of functions
+/// that one thread explores or lifts one after another.
 struct Lifter<'a> {
     fe: &'a dyn Frontend,
     module: &'a Module,
-    cache: HashMap<u64, Insn>,
-    pads: BTreeMap<u64, Vec<u64>>,
+    cache: HashMap<u64, Insn, PcHash>,
+    pads: &'a Pads,
 }
 
-impl Lifter<'_> {
+impl<'a> Lifter<'a> {
+    fn new(fe: &'a dyn Frontend, module: &'a Module, pads: &'a Pads) -> Lifter<'a> {
+        Lifter {
+            fe,
+            module,
+            cache: HashMap::default(),
+            pads,
+        }
+    }
+
+    /// Drops the cached instructions below `next`, the entry explored
+    /// next (all of them when there is none): code below an entry is
+    /// rarely part of its extent.
+    fn keep_from(&mut self, next: Option<u64>) {
+        match next {
+            Some(n) => self.cache.retain(|pc, _| *pc >= n),
+            None => self.cache.clear(),
+        }
+    }
+
     fn get(&mut self, pc: u64) -> Insn {
         if let Some(i) = self.cache.get(&pc) {
             return i.clone();
@@ -166,8 +210,13 @@ pub fn successors(module: &Module, entries: &BTreeSet<u64>, entry: u64, insn: &I
     out
 }
 
-fn module_pads(module: &Module) -> BTreeMap<u64, Vec<u64>> {
-    let mut by_site: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+/// The landing pads of a module by the address of the call they serve.
+type Pads = BTreeMap<u64, Vec<u64>>;
+
+static NO_PADS: Pads = BTreeMap::new();
+
+fn module_pads(module: &Module) -> Pads {
+    let mut by_site: Pads = BTreeMap::new();
     for p in &module.pads {
         by_site.entry(p.site).or_default().push(p.addr);
     }
@@ -309,14 +358,208 @@ pub enum Progress {
     },
 }
 
+/// One function without its lifted code: where its instructions lie, its
+/// jump tables and the instructions that failed to lift. [`Outline::lift`]
+/// lifts it again into a [`Function`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Outline {
+    /// The entry address.
+    pub entry: u64,
+    /// The symbol name, when the guest gave one.
+    pub name: Option<String>,
+    /// Why it is an entry (the first reason found, in [`EntryKind`] order).
+    pub kind: EntryKind,
+    /// The instruction addresses, as runs of `(first, count)` addresses one
+    /// granule apart, in address order.
+    pub runs: Vec<(u64, u32)>,
+    /// The targets of the jump tables, by the address of their computed jump.
+    pub tables: BTreeMap<u64, Vec<u64>>,
+    /// The landing pads that serve a call in the function and lie in its
+    /// extent.
+    pub pads: BTreeSet<u64>,
+    /// The instructions the frontend refused, by address.
+    pub failed: Vec<(u64, LiftFailure)>,
+    /// The direct calls, as `(target, return address)`, in address order.
+    pub calls: Vec<(u64, u64)>,
+    /// The address after the last instruction.
+    pub end: u64,
+    granule: u64,
+}
+
+impl Outline {
+    fn new(entry: u64, kind: EntryKind, granule: u64, ext: &Extent) -> Outline {
+        let mut runs: Vec<(u64, u32)> = Vec::new();
+        for &pc in ext.0.keys() {
+            match runs.last_mut() {
+                Some((first, n)) if *first + u64::from(*n) * granule == pc && *n < u32::MAX => {
+                    *n += 1;
+                }
+                _ => runs.push((pc, 1)),
+            }
+        }
+        let failed = ext
+            .0
+            .iter()
+            .filter_map(|(&pc, i)| match i {
+                Insn::Failed(e) => Some((pc, e.clone())),
+                Insn::Lifted(_) => None,
+            })
+            .collect();
+        let calls = ext
+            .0
+            .values()
+            .filter_map(|i| match i {
+                Insn::Lifted(b) => match (b.exit.flow, b.exit.next) {
+                    (Flow::Call { ret }, Next::Const(t)) => Some((t, ret)),
+                    _ => None,
+                },
+                Insn::Failed(_) => None,
+            })
+            .collect();
+        let end = ext
+            .0
+            .iter()
+            .next_back()
+            .map(|(pc, i)| match i {
+                Insn::Lifted(b) => pc + u64::from(b.len),
+                Insn::Failed(_) => pc + granule,
+            })
+            .unwrap_or(entry);
+        Outline {
+            entry,
+            name: None,
+            kind,
+            runs,
+            tables: ext.1.clone(),
+            pads: ext.2.clone(),
+            failed,
+            calls,
+            end,
+            granule,
+        }
+    }
+
+    /// The instruction addresses, in order.
+    pub fn pcs(&self) -> impl Iterator<Item = u64> + '_ {
+        let g = self.granule;
+        self.runs
+            .iter()
+            .flat_map(move |&(first, n)| (0..u64::from(n)).map(move |k| first + k * g))
+    }
+
+    /// The number of instructions.
+    pub fn len(&self) -> usize {
+        self.runs.iter().map(|r| r.1 as usize).sum()
+    }
+
+    /// Whether the function has no instructions.
+    pub fn is_empty(&self) -> bool {
+        self.runs.is_empty()
+    }
+
+    /// Whether `pc` is one of the function's instructions.
+    pub fn contains(&self, pc: u64) -> bool {
+        let i = self.runs.partition_point(|r| r.0 <= pc);
+        i > 0 && {
+            let (first, n) = self.runs[i - 1];
+            let off = pc - first;
+            off.is_multiple_of(self.granule) && off / self.granule < u64::from(n)
+        }
+    }
+
+    /// The guest bytes from the entry to the end of the last instruction,
+    /// as [`Function::span`] gives them.
+    pub fn span(&self) -> u64 {
+        self.end.saturating_sub(self.entry)
+    }
+
+    /// Lifts the function's instructions again with `fe` from `module`, the
+    /// frontend and module that outlined it.
+    pub fn lift(&self, fe: &dyn Frontend, module: &Module) -> Function {
+        self.lift_with(&mut Lifter::new(fe, module, &NO_PADS))
+    }
+
+    fn lift_with(&self, lifter: &mut Lifter<'_>) -> Function {
+        Function {
+            entry: self.entry,
+            name: self.name.clone(),
+            kind: self.kind,
+            insts: self.pcs().map(|pc| (pc, lifter.get(pc))).collect(),
+            tables: self.tables.clone(),
+            pads: self.pads.clone(),
+        }
+    }
+}
+
+/// `f` of each of `outlines` lifted again with `fe` from `module`, in
+/// order, on up to one thread per CPU. Functions lifted at the same time
+/// share the blocks of the instructions they have in common.
+pub fn each_lifted<R: Send>(
+    fe: &(dyn Frontend + Sync),
+    module: &Module,
+    outlines: &[&Outline],
+    f: impl Fn(&Outline, &Function) -> R + Sync,
+) -> Vec<R> {
+    grouped(outlines, |group| {
+        let mut lifter = Lifter::new(fe, module, &NO_PADS);
+        group
+            .iter()
+            .enumerate()
+            .map(|(k, o)| {
+                let r = f(o, &o.lift_with(&mut lifter));
+                match group.get(k + 1) {
+                    Some(next) => lifter.cache.retain(|pc, _| next.contains(*pc)),
+                    None => lifter.cache.clear(),
+                }
+                r
+            })
+            .collect()
+    })
+}
+
+/// The functions of one module as outlines, without their lifted code.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Layout {
+    /// The functions by entry address.
+    pub functions: BTreeMap<u64, Outline>,
+}
+
+impl Layout {
+    /// Whether `addr` is a function entry.
+    pub fn is_entry(&self, addr: u64) -> bool {
+        self.functions.contains_key(&addr)
+    }
+}
+
 /// Finds the functions of `module` with frontend `fe`.
-pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
+pub fn discover(fe: &(dyn Frontend + Sync), module: &Module) -> Analysis {
     discover_with(fe, module, &mut |_| {})
 }
 
 /// As [`discover`], calling `on` after every entry explored and every
 /// function built.
-pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Progress)) -> Analysis {
+pub fn discover_with(
+    fe: &(dyn Frontend + Sync),
+    module: &Module,
+    on: &mut dyn FnMut(Progress),
+) -> Analysis {
+    let layout = outline_with(fe, module, on);
+    Analysis {
+        functions: layout
+            .functions
+            .values()
+            .map(|o| (o.entry, o.lift(fe, module)))
+            .collect(),
+    }
+}
+
+/// Finds the functions of `module` with frontend `fe` as [`discover`] does,
+/// keeping only their outlines; calls `on` as [`discover_with`] does.
+pub fn outline_with(
+    fe: &(dyn Frontend + Sync),
+    module: &Module,
+    on: &mut dyn FnMut(Progress),
+) -> Layout {
     let granule = fe.granule();
     let mut kinds: BTreeMap<u64, EntryKind> = BTreeMap::new();
     let mut names: BTreeMap<u64, String> = BTreeMap::new();
@@ -341,7 +584,7 @@ pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Prog
 /// a known function gets a function of its own; the known one keeps its
 /// copy of the code.
 pub fn discover_more(
-    fe: &dyn Frontend,
+    fe: &(dyn Frontend + Sync),
     module: &Module,
     known: &BTreeMap<u64, EntryKind>,
     roots: &[u64],
@@ -353,28 +596,33 @@ pub fn discover_more(
             kinds.entry(r).or_insert(EntryKind::Root(RootKind::Hint));
         }
     }
-    explore(fe, module, kinds, known, &BTreeMap::new(), &mut |_| {})
+    let layout = explore(fe, module, kinds, known, &BTreeMap::new(), &mut |_| {});
+    Analysis {
+        functions: layout
+            .functions
+            .values()
+            .map(|o| (o.entry, o.lift(fe, module)))
+            .collect(),
+    }
 }
 
+/// How many entries one parallel step explores before reporting progress.
+const STEP: usize = 512;
+
 /// Explores every entry of `kinds` not in `skip` until no new entry
-/// appears, then builds the functions not in `skip`.
+/// appears, then outlines every function not in `skip`.
 fn explore(
-    fe: &dyn Frontend,
+    fe: &(dyn Frontend + Sync),
     module: &Module,
     mut kinds: BTreeMap<u64, EntryKind>,
     skip: &BTreeMap<u64, EntryKind>,
     names: &BTreeMap<u64, String>,
     on: &mut dyn FnMut(Progress),
-) -> Analysis {
+) -> Layout {
     let granule = fe.granule();
-    let mut lifter = Lifter {
-        fe,
-        module,
-        cache: HashMap::new(),
-        pads: module_pads(module),
-    };
+    let pads = module_pads(module);
     let mut done: BTreeSet<u64> = skip.keys().copied().collect();
-    let mut explored: HashMap<u64, Extent> = HashMap::new();
+    let mut explored: HashMap<u64, Outline> = HashMap::new();
     // A function's extent stops at the entries of other functions, except
     // at addresses only known as computed values: those are often labels
     // inside a function (a jump-table base or a loop head taken with adr),
@@ -394,60 +642,133 @@ fn explore(
         if todo.is_empty() {
             break;
         }
-        for e in todo {
-            let ext = extent(&mut lifter, &entries, e);
-            for (a, k) in new_entries(module, granule, &ext.0) {
-                kinds.entry(a).or_insert(k);
-            }
-            explored.insert(e, ext);
-            done.insert(e);
-            on(Progress::Found {
-                entries: kinds.len(),
-                explored: done.len(),
+        for step in todo.chunks(STEP) {
+            let found = grouped(step, |group| {
+                let mut lifter = Lifter::new(fe, module, &pads);
+                group
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &e)| {
+                        let ext = extent(&mut lifter, &entries, e);
+                        let new = new_entries(module, granule, &ext.0);
+                        let o = Outline::new(e, kinds[&e], granule, &ext);
+                        lifter.keep_from(group.get(k + 1).copied());
+                        (o, new)
+                    })
+                    .collect()
             });
+            for (&e, (o, new)) in step.iter().zip(found) {
+                for (a, k) in new {
+                    kinds.entry(a).or_insert(k);
+                }
+                explored.insert(e, o);
+                done.insert(e);
+                on(Progress::Found {
+                    entries: kinds.len(),
+                    explored: done.len(),
+                });
+            }
         }
     }
     let entries = stops(&kinds);
-    let build: Vec<(u64, EntryKind)> = kinds
-        .iter()
-        .filter(|(a, _)| !skip.contains_key(a))
-        .map(|(&a, &k)| (a, k))
-        .collect();
-    let total = build.len();
-    let mut failed: HashSet<u64> = HashSet::new();
-    let functions = build
+    let all: Vec<(u64, EntryKind)> = kinds
         .into_iter()
-        .enumerate()
-        .map(|(n, (e, kind))| {
-            let (insts, tables, pads) = match explored.remove(&e) {
-                Some(x) if x.0.keys().all(|a| *a == e || !entries.contains(a)) => x,
-                _ => extent(&mut lifter, &entries, e),
+        .filter(|(a, _)| !skip.contains_key(a))
+        .collect();
+    let total = all.len();
+    let mut failed: HashSet<u64> = HashSet::new();
+    let mut functions = BTreeMap::new();
+    let mut n = 0;
+    for step in all.chunks(STEP) {
+        let kept: Vec<Option<Outline>> = step
+            .iter()
+            .map(|(e, kind)| {
+                explored.remove(e).filter(|o| {
+                    o.kind == *kind && o.pcs().all(|a| a == *e || !entries.contains(&a))
+                })
+            })
+            .collect();
+        let redo: Vec<(u64, EntryKind)> = step
+            .iter()
+            .zip(&kept)
+            .filter(|(_, k)| k.is_none())
+            .map(|(x, _)| *x)
+            .collect();
+        let mut redone = grouped(&redo, |group| {
+            let mut lifter = Lifter::new(fe, module, &pads);
+            group
+                .iter()
+                .enumerate()
+                .map(|(k, &(e, kind))| {
+                    let o = Outline::new(e, kind, granule, &extent(&mut lifter, &entries, e));
+                    lifter.keep_from(group.get(k + 1).map(|n| n.0));
+                    o
+                })
+                .collect()
+        })
+        .into_iter();
+        for k in kept {
+            let Some(mut o) = k.or_else(|| redone.next()) else {
+                continue;
             };
-            failed.extend(
-                insts
-                    .iter()
-                    .filter(|(_, i)| matches!(i, Insn::Failed(_)))
-                    .map(|(&pc, _)| pc),
-            );
+            o.name = names.get(&o.entry).cloned();
+            failed.extend(o.failed.iter().map(|(pc, _)| *pc));
+            n += 1;
             on(Progress::Lifted {
-                done: n + 1,
+                done: n,
                 total,
                 unlifted: failed.len(),
             });
-            (
-                e,
-                Function {
-                    entry: e,
-                    name: names.get(&e).cloned(),
-                    kind,
-                    insts,
-                    tables,
-                    pads,
-                },
-            )
-        })
-        .collect();
-    Analysis { functions }
+            functions.insert(o.entry, o);
+        }
+    }
+    Layout { functions }
+}
+
+/// How many neighboring items one thread takes at a time in [`grouped`]:
+/// neighboring functions often share code, which a group lifts once.
+const GROUP: usize = 16;
+
+/// `f` of each group of up to [`GROUP`] neighboring items of `items`,
+/// flattened in order, on up to one thread per CPU; `f` gives one result
+/// per item of its group.
+fn grouped<T: Sync, R: Send>(items: &[T], f: impl Fn(&[T]) -> Vec<R> + Sync) -> Vec<R> {
+    let groups: Vec<&[T]> = items.chunks(GROUP).collect();
+    parallel(&groups, |g| f(g)).into_iter().flatten().collect()
+}
+
+/// `f` of every item of `items`, in order, on up to one thread per CPU.
+pub fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(items.len());
+    if threads <= 1 {
+        return items.iter().map(f).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(item) = items.get(i) else {
+                            break;
+                        };
+                        mine.push((i, f(item)));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    });
+    out.sort_unstable_by_key(|r| r.0);
+    out.into_iter().map(|r| r.1).collect()
 }
 
 #[cfg(test)]
