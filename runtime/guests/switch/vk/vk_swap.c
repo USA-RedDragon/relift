@@ -56,6 +56,7 @@ typedef struct vkf_swap {
     bool stale;
     bool old;
     uint64_t gen;
+    uint32_t creations;
     VkCommandPool pool;
     uint32_t pool_family;
     pthread_mutex_t lock;
@@ -92,7 +93,9 @@ static void nap(void)
 void vkf_surface_extent(uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation)
 {
     const rl_vk_surface_provider *p = vkf.cfg.surfaces;
-    vi_get_resolution(&guest[0], &guest[1]);
+    uint64_t layer = 0;
+    if (!rl_vi_render_layer(&layer) || !rl_vi_layer_size(layer, &guest[0], &guest[1]))
+        vi_get_resolution(&guest[0], &guest[1]);
     if (p && p->extent)
         p->extent(p->user, surface, guest, host, generation);
     else {
@@ -317,6 +320,7 @@ static VkResult host_create(vkf_swap *s)
     s->host_extent = e;
     s->gen = gen;
     s->stale = false;
+    s->creations++;
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "vk", "host swapchain %ux%u, format %d, %u images, for guest %ux%u", e.width, e.height,
                fmt.format, n, s->extent.width, s->extent.height);
@@ -840,6 +844,19 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
     }
     c->x[0] = (uint32_t)all;
     return vkf_end(&k);
+}
+
+bool rl_vk_swapchain_host(uint64_t guest_swapchain, uint32_t *width, uint32_t *height, uint32_t *creations)
+{
+    vkf_swap *s = swap_of(guest_swapchain, NULL);
+    if (!s)
+        return false;
+    pthread_mutex_lock(&s->lock);
+    *width = s->host_extent.width;
+    *height = s->host_extent.height;
+    *creations = s->creations;
+    pthread_mutex_unlock(&s->lock);
+    return true;
 }
 
 static const char *const g_unsupported[] = {

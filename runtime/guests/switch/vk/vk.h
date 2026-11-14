@@ -20,6 +20,7 @@
 #define RELIFT_SWITCH_VK_H
 
 #include "core.h"
+#include "loader.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -57,8 +58,8 @@ typedef struct rl_vk_surface_provider {
     /**
      * @brief Optional: the extent the guest asked for (guest; the vi layer's
      * size), the host drawable size (host) and a counter that changes each
-     * time the host size does. NULL means both are the vi display resolution
-     * and never change.
+     * time the host size does. NULL means both are the size of the vi layer
+     * the guest opened or created last and never change.
      */
     void (*extent)(void *user, uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation);
     /** @brief Passed to create and extent. */
@@ -67,6 +68,23 @@ typedef struct rl_vk_surface_provider {
 
 /** @brief A provider that creates VK_EXT_headless_surface surfaces (tests, offscreen runs). */
 RL_RUNTIME_API const rl_vk_surface_provider *rl_vk_headless_surfaces(void);
+
+/**
+ * @brief The provider that shows each vi layer in a host window of the
+ * window backend that is up (rl_window_backend_current); NULL in a headless
+ * run or when the backend has no Vulkan.
+ */
+RL_RUNTIME_API const rl_vk_surface_provider *rl_vk_window_surfaces(void);
+
+/**
+ * @brief The loader hook (rl_switch_add_hook) of the player: it starts the
+ * layer with thunks right after the modules and a mapped-memory window above
+ * the layout, the window provider when a backend is up (headless surfaces
+ * otherwise), resolves imports of Vulkan commands to thunks and replaces the
+ * Vulkan commands a module (the guest's vulkan module) defines. Without host
+ * Vulkan it does nothing and the guest's own driver runs.
+ */
+RL_RUNTIME_API const rl_switch_hook *rl_vk_switch_hook(void);
 
 /** @brief Changes guest memory map state for the forwarding layer (the guest layer takes its own lock). */
 typedef int rl_vk_vm_set_fn(void *user, uint64_t addr, uint64_t size, uint32_t perm, int content);
@@ -109,6 +127,8 @@ RL_RUNTIME_API rl_fn rl_vk_import(const char *symbol);
 RL_RUNTIME_API uint64_t rl_vk_guest_addr(const char *name);
 /** @brief Number of live guest-visible dispatchable handles (tests). */
 RL_RUNTIME_API uint32_t rl_vk_live_handles(void);
+/** @brief Size of the host swapchain behind a guest swapchain and how many host swapchains it has had (tests). */
+RL_RUNTIME_API bool rl_vk_swapchain_host(uint64_t guest_swapchain, uint32_t *width, uint32_t *height, uint32_t *creations);
 /** @brief The map mode the device behind a guest VkDevice handle uses, or -1. */
 RL_RUNTIME_API int rl_vk_device_map_mode(uint64_t guest_device);
 

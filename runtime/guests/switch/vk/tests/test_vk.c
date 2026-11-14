@@ -461,7 +461,11 @@ static void clear_and_read_back(int expect_mode)
         CHECK_EQ(VKR(G("vkAllocateMemory", dev, gput(&mai, sizeof mai), 0, gim)), VK_SUCCESS);
         CHECK_EQ(VKR(G("vkBindImageMemory", dev, image, g64(gim), 0)), VK_SUCCESS);
 
-        VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+        VkCommandPoolCreateInfo pci = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = qf,
+        };
         uint64_t gpool = galloc(8);
         CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
         uint64_t pool = g64(gpool);
@@ -659,9 +663,35 @@ TEST(vk_debug_messenger_calls_guest_code)
     G("vkDestroyInstance", g_inst, 0);
 }
 
+static uint32_t g_host_w = 64, g_host_h = 64;
+static uint64_t g_host_gen;
+
+static int32_t resizable_create(void *user, void *host_instance, void *gipa, uint64_t guest_window, uint64_t *surface)
+{
+    (void)user;
+    const rl_vk_surface_provider *h = rl_vk_headless_surfaces();
+    return h->create(h->user, host_instance, gipa, guest_window, surface);
+}
+
+static void resizable_extent(void *user, uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation)
+{
+    (void)user;
+    (void)surface;
+    guest[0] = 64;
+    guest[1] = 64;
+    host[0] = g_host_w;
+    host[1] = g_host_h;
+    *generation = g_host_gen;
+}
+
+static rl_vk_surface_provider g_resizable = { .create = resizable_create, .extent = resizable_extent };
+
 TEST(vk_vi_surface_presents_headless)
 {
-    CHECK_EQ(boot(rl_vk_headless_surfaces()), 0);
+    g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
+    g_host_w = g_host_h = 64;
+    g_host_gen = 0;
+    CHECK_EQ(boot(&g_resizable), 0);
     uint64_t gn = galloc(4);
     CHECK_EQ(VKR(G("vkEnumerateInstanceExtensionProperties", 0, gn, 0)), VK_SUCCESS);
     uint32_t n = g32(gn);
@@ -775,6 +805,31 @@ TEST(vk_vi_surface_presents_headless)
         CHECK(pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR);
         CHECK(VKR(g32(gres)) == VK_SUCCESS || VKR(g32(gres)) == VK_SUBOPTIMAL_KHR);
         fprintf(stderr, "  %s: presented image %u of %u (%dx%d swapchain, format %d)\n", name, idx, g32(gin), 64, 64, fmt.format);
+        uint32_t hw = 0, hh = 0, made = 0;
+        CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made));
+        CHECK_EQ(hw, 64);
+        CHECK_EQ(hh, 64);
+        CHECK_EQ(made, 1);
+        g_host_w = 200;
+        g_host_h = 90;
+        g_host_gen++;
+        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkResetFences", dev, 1, gput(&fence, 8))), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, UINT64_MAX, 0, fence, gidx)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+        CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made));
+        CHECK_EQ(hw, 200);
+        CHECK_EQ(hh, 90);
+        CHECK_EQ(made, 2);
+        idx = g32(gidx);
+        image = g64(gimgs + 8ull * idx);
+        CHECK_EQ(VKR(G("vkResetCommandBuffer", cb, 0)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+        barrier(cb, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, 0);
+        CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+        pi.pImageIndices = GP(gput(&idx, 4));
+        CHECK_EQ(VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi))), VK_SUCCESS);
         CHECK_EQ(VKR(G("vkDeviceWaitIdle", dev)), VK_SUCCESS);
         G("vkDestroyCommandPool", dev, g64(gpool), 0);
         G("vkDestroyFence", dev, fence, 0);
