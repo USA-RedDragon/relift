@@ -10,7 +10,6 @@
 
 #include <pthread.h>
 #include <string.h>
-#include <time.h>
 
 #define NPAD_SLOTS 9u
 #define UPDATE_NS 16666667ull
@@ -623,16 +622,14 @@ void rl_hid_update_now(void)
 static void *update_thread(void *arg)
 {
     (void)arg;
-    struct timespec next;
-    clock_gettime(CLOCK_MONOTONIC, &next);
+    uint64_t next = rl_clock_ns();
     for (;;) {
-        next.tv_nsec += (long)UPDATE_NS;
-        while (next.tv_nsec >= 1000000000L) {
-            next.tv_nsec -= 1000000000L;
-            next.tv_sec++;
-        }
-        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL) != 0)
-            ;
+        next += UPDATE_NS;
+        uint64_t now = rl_clock_ns();
+        if (now < next)
+            rl_sleep_ns(next - now);
+        else
+            next = now;
         if (__atomic_load_n(&g.stop, __ATOMIC_ACQUIRE))
             break;
         if (__atomic_load_n(&g.shm->obj.refs, __ATOMIC_ACQUIRE) <= 1)
