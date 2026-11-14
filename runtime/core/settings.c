@@ -34,6 +34,21 @@ typedef struct slot {
     char *port;
 } slot;
 
+static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
+
+static const rl_setting_def g_runtime_defs[] = {
+    {
+        .key = "video",
+        .type = RL_SETTING_ENUM,
+        .label = "Window backend",
+        .description = "auto opens SDL3 when it is built in and a display exists; sdl3 skips the display check; "
+                       "headless (or none) opens no window",
+        .env = "RELIFT_VIDEO",
+        .choices = g_video_choices,
+        .nchoices = 4,
+    },
+};
+
 static slot g_slots[RL_SETTINGS_MAX];
 static size_t g_nslots;
 static char *g_app;
@@ -512,6 +527,7 @@ static const char *flag_value(int argc, char *const *argv, int *i, const char *n
 int rl_settings_args(int argc, char *const *argv)
 {
     int applied = 0, n;
+    rl_settings_declare_runtime();
     bool file_flag = false;
     for (int i = 1; i < argc; i++) {
         bool missing = false;
@@ -557,6 +573,11 @@ int rl_settings_args(int argc, char *const *argv)
             applied++;
     }
     return applied;
+}
+
+void rl_settings_declare_runtime(void)
+{
+    rl_settings_declare(g_runtime_defs, sizeof g_runtime_defs / sizeof g_runtime_defs[0]);
 }
 
 void rl_settings_reset(void)

@@ -9,6 +9,7 @@
 #include <relift/settings.h>
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -34,8 +35,9 @@ static void fresh(void)
 
 static char *write_tmp(const char *text)
 {
-    static char path[64];
-    strcpy(path, "/tmp/rl_settings_XXXXXX");
+    static char path[512];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(path, sizeof path, "%s/rl_settings_XXXXXX", tmp && *tmp ? tmp : "/tmp");
     int fd = mkstemp(path);
     if (fd < 0)
         return NULL;
@@ -248,7 +250,8 @@ TEST(settings_user_file_is_read_only_with_an_app_and_no_launcher_file)
 {
     fresh();
     char dir[256], path[300], cmd[600];
-    snprintf(dir, sizeof dir, "/tmp/rl_home_%d", (int)getpid());
+    const char *tmp = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/rl_home_%d", tmp && *tmp ? tmp : "/tmp", (int)getpid());
     snprintf(cmd, sizeof cmd, "mkdir -p %s/.local/share/g && printf '{\"scale\": 5}' > %s/.local/share/g/settings.json", dir, dir);
     CHECK_EQ(system(cmd), 0);
     setenv("HOME", dir, 1);

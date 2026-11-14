@@ -3,12 +3,16 @@
  * @brief The one physical device the guest sees.
  *
  * The Switch has one GPU, so the guest gets one physical device and one
- * device group of it. RELIFT_VK_DEVICE picks it by a part of its name;
+ * device group of it. The vk.device setting (RELIFT_VK_DEVICE) picks it by a part of its name;
  * otherwise it is the first host device whose family 0 has graphics and
  * compute and, when the guest enabled VK_NN_vi_surface, that can present
  * through the surface provider.
  */
 #include "vkf.h"
+
+#include "services.h"
+
+#include <relift/settings.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -47,14 +51,15 @@ static VkPhysicalDevice choose(vkf_call *k, VkInstance inst)
     VkPhysicalDevice *all = vkf_alloc(k, n * sizeof *all);
     if (VKF_FN(k->fns, vkEnumeratePhysicalDevices)(inst, &n, all) < 0 || !n)
         return NULL;
-    const char *want = getenv(RL_VK_DEVICE_ENV);
+    rl_switch_declare_settings();
+    const char *want = rl_setting_str("vk.device");
     VkPhysicalDeviceProperties p;
     VkPhysicalDevice pick = NULL;
     for (uint32_t i = 0; i < n && want && *want && !pick; i++)
         if (strstr(name_of(k->fns, all[i], &p), want))
             pick = all[i];
     if (want && *want && !pick)
-        rl_log(RL_LOG_WARN, "vk", "%s=%s matches no host device; choosing one", RL_VK_DEVICE_ENV, want);
+        rl_log(RL_LOG_WARN, "vk", "vk.device=%s matches no host device; choosing one", want);
     for (uint32_t i = 0; i < n && !pick; i++)
         if (usable(k->fns, all[i]) && presents(io, all[i]))
             pick = all[i];

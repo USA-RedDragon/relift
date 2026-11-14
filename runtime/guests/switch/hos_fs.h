@@ -28,9 +28,11 @@ RL_RUNTIME_API void rl_hos_fs_init(const char *sdmc_host_dir);
  * mount works on a copy, IFileSystem::Commit makes the copy the saved state
  * atomically (a crash at any point leaves the old or the new state), and a
  * mount closed without Commit discards its writes. The saved state stays a
- * plain directory tree. rl_srv_install_fs reads it from $RELIFT_SAVE.
+ * plain directory tree. rl_srv_install_fs reads it from the save.dir setting (RELIFT_SAVE).
  */
 RL_RUNTIME_API void rl_hos_fs_set_save(const char *dir);
+/** @brief The save folder in use. */
+RL_RUNTIME_API const char *rl_hos_fs_save_dir(void);
 
 /**
  * @brief Sets the extracted romfs tree that OpenDataStorageByCurrentProcess

@@ -116,6 +116,29 @@ check. Presence controls keep an empty walk or a broken rule from passing: the
 include rule must reject includes in `guests/switch` and `cpus/a64`, every
 rule must match its own sample, and the denylist must hit files there.
 
+## Settings
+
+Run-time settings are typed keys declared with `rl_settings_declare`
+(`core/include/relift/settings.h`): bool, int and float with a range and a
+step, enum, string and key binding. The runtime declares `video`; the Switch
+layer declares `save.dir` and `vk.device`; a game adds its own from the
+`[settings]` tables of game.toml. Precedence, last wins:
+
+1. the declared default;
+2. `<user folder>/settings.json`, read only when the program names an app with
+   `rl_settings_set_app` and no `--relift-settings` flag is given;
+3. each `--relift-settings <file>` (a flat JSON object), in order;
+4. each `--relift-set key=value`, in order, whatever its place among the files;
+5. the key's environment variable, when it has one (`RELIFT_VIDEO`,
+   `RELIFT_SAVE`, `RELIFT_VK_DEVICE`).
+
+Unknown keys, values of the wrong type or outside the range, and unreadable
+files warn and are skipped; they never stop a run. The user folder is
+`$XDG_DATA_HOME/<app>` or `~/.local/share/<app>` on Linux, `~/Library/Application
+Support/<app>` on macOS and `%APPDATA%\<app>` on Windows. Without `save.dir`, a
+program that names an app keeps saves in `<user folder>/save`; otherwise
+`./save`.
+
 ## Environment switches
 
 | Variable | Effect |
@@ -123,15 +146,15 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_TRACE_OS=1` | The guest layer logs every guest OS call and service request with arguments, result and time (Switch: every svc and IPC command) |
 | `RELIFT_STRICT=1` | Stop on an unknown guest OS call or service command instead of returning an error |
 | `RELIFT_AUDIO=null` | In an `AUDIO=real` build, play through the null output (drains in real time, no sound) |
-| `RELIFT_VIDEO=headless\|sdl3` | Window backend. Unset: SDL3 when the runtime was built with `VIDEO=sdl3` and a display exists (`WAYLAND_DISPLAY` or `DISPLAY` on Linux, always on macOS and Windows), headless otherwise. `headless` (or `none`) opens no window. `sdl3` skips the display check; it still falls back to headless when SDL cannot start, or when the runtime has no SDL3. A program without Vulkan symbols opens no backend whatever this says |
+| `RELIFT_VIDEO=headless\|sdl3` | The `video` setting (an environment variable beats the flags). Window backend. Unset: SDL3 when the runtime was built with `VIDEO=sdl3` and a display exists (`WAYLAND_DISPLAY` or `DISPLAY` on Linux, always on macOS and Windows), headless otherwise. `headless` (or `none`) opens no window. `sdl3` skips the display check; it still falls back to headless when SDL cannot start, or when the runtime has no SDL3. A program without Vulkan symbols opens no backend whatever this says |
 | `RELIFT_VULKAN_LIBRARY=<path>` | Host Vulkan loader to use instead of the system one |
 | `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
-| `RELIFT_VK_DEVICE=<name part>` | Host physical device the guest sees (default: the first that has graphics and compute and can present) |
+| `RELIFT_VK_DEVICE=<name part>` | The `vk.device` setting. Host physical device the guest sees (default: the first that has graphics and compute and can present) |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_SCHED=free\|stats` | Debugging only. `free`: Switch guest threads run freely on host threads, ignoring priorities and cores (the old behavior, for comparisons). `stats`: log scheduler hand-overs, preemptions and the longest preemption delay once a second |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
-| `RELIFT_SAVE=<dir>` | Host directory that holds save data (`./save`): `<program id>/user-<uid>` for account saves, `device`, `bcat`, `temporary` and `cache-<index>` for the other kinds, each created on first open. A mount works on a copy; `Commit` swaps the copy in atomically, and a mount closed without `Commit` loses its writes |
+| `RELIFT_SAVE=<dir>` | The `save.dir` setting. Host directory that holds save data (`./save`): `<program id>/user-<uid>` for account saves, `device`, `bcat`, `temporary` and `cache-<index>` for the other kinds, each created on first open. A mount works on a copy; `Commit` swaps the copy in atomically, and a mount closed without `Commit` loses its writes |
 | `RELIFT_ROMFS=<dir>` | Extracted romfs tree served as the program's data storage (`relift run` sets it from the import) |
 | `RELIFT_DLC=<dir>` | Add-on content trees, `<16 hex digit add-on id>/<index>/romfs` (`relift run` sets it from the import) |
 | `RELIFT_DEV_SOCKET=<path>` | Dev builds (`-DRL_HOTLOAD`, made by `relift run`): the socket of relift's dev server, which builds a library for each missed address (docs/abi.md section 6). `relift run` sets it; a dev build without it stops at the first miss with exit status 70 |

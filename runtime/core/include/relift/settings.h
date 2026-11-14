@@ -104,6 +104,15 @@ typedef enum rl_setting_status {
  */
 RL_RUNTIME_API int rl_settings_declare(const rl_setting_def *defs, size_t n);
 
+/** @brief Choices of the runtime's `video` setting, as rl_setting_enum returns them. */
+enum { RL_VIDEO_AUTO, RL_VIDEO_SDL3, RL_VIDEO_HEADLESS, RL_VIDEO_NONE };
+
+/**
+ * @brief Declares the settings of the runtime core: `video` (the window
+ * backend, environment RELIFT_VIDEO). Safe to call again.
+ */
+RL_RUNTIME_API void rl_settings_declare_runtime(void);
+
 /** @brief Sets key from text, as a --relift-set would. Warns on failure. */
 RL_RUNTIME_API rl_setting_status rl_settings_set(const char *key, const char *value);
 

@@ -14,6 +14,8 @@
 #include "ipc.h"
 #include "services.h"
 
+#include <relift/settings.h>
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -741,6 +743,8 @@ static rl_result get_global_access_log_mode(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+const char *rl_hos_fs_save_dir(void) { return g_save; }
+
 static void make_dirs(const char *path);
 
 static void parent_dirs(const char *dir)
@@ -900,6 +904,16 @@ void rl_srv_install_fs(void)
         sdmc = "./sdmc";
     make_dirs(sdmc);
     rl_hos_fs_init(sdmc);
-    rl_hos_fs_set_save(getenv("RELIFT_SAVE"));
+    rl_switch_declare_settings();
+    const char *save = rl_setting_str("save.dir");
+    char user[4096], fallback[4200];
+    if (!*save && rl_settings_user_file(user, sizeof user)) {
+        char *slash = strrchr(user, '/');
+        if (slash)
+            *slash = 0;
+        snprintf(fallback, sizeof fallback, "%s/save", user);
+        save = fallback;
+    }
+    rl_hos_fs_set_save(save);
     rl_fs_romfs_env();
 }

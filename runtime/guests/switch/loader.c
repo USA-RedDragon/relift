@@ -7,7 +7,9 @@
 #include "loader.h"
 
 #include "hos.h"
+#include "services.h"
 
+#include <relift/settings.h>
 #include <relift/window.h>
 
 #include <errno.h>
@@ -477,12 +479,12 @@ static bool wants_hook(const rl_switch_program *p, const rl_switch_hook *h)
 
 int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
 #if defined(_WIN32)
     _setmode(_fileno(stdout), _O_BINARY);
     _setmode(_fileno(stderr), _O_BINARY);
 #endif
+    rl_switch_declare_settings();
+    rl_settings_args(argc, argv);
     main_args a = { p };
     uint32_t base = g_nhooks;
     for (uint32_t i = 0; i < g_nauto; i++) {

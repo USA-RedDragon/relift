@@ -60,28 +60,13 @@ static const rl_window_backend *host_backend(void)
 #endif
 }
 
-enum { VIDEO_AUTO, VIDEO_SDL3, VIDEO_HEADLESS, VIDEO_NONE };
-
-static const char *const g_video_choices[] = { "auto", "sdl3", "headless", "none" };
-
-static const rl_setting_def g_video_def = {
-    .key = "video",
-    .type = RL_SETTING_ENUM,
-    .label = "Window backend",
-    .description = "auto opens SDL3 when it is built in and a display exists; sdl3 skips the display check; "
-                   "headless (or none) opens no window",
-    .env = RL_WINDOW_ENV,
-    .choices = g_video_choices,
-    .nchoices = 4,
-};
-
 static const rl_window_backend *wanted(void)
 {
-    rl_settings_declare(&g_video_def, 1);
+    rl_settings_declare_runtime();
     uint32_t v = rl_setting_enum("video");
-    if (v == VIDEO_HEADLESS || v == VIDEO_NONE)
+    if (v == RL_VIDEO_HEADLESS || v == RL_VIDEO_NONE)
         return NULL;
-    if (v == VIDEO_SDL3) {
+    if (v == RL_VIDEO_SDL3) {
         const rl_window_backend *b = g_set ? g_set : host_backend();
         if (!b)
             rl_log(RL_LOG_WARN, "window", "video=sdl3, but this runtime was built without SDL3; running headless");
