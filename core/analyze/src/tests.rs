@@ -317,6 +317,79 @@ fn a_jump_table_body_leaves_out_loads_the_target_does_not_need() {
 }
 
 #[test]
+fn a_jump_table_body_may_store_to_the_stack() {
+    // A spill to a stack slot between the check and the table load; r2 is
+    // the stack pointer, unknown here, so running the store would fault.
+    let table = BASE + 0x48;
+    let m = module(
+        &[
+            word(0x04, 0, 0),              // 0x00 li r0, 0
+            word(0x05, 0, 1),              // 0x04 add r0, r1
+            word(0x09, 0, (-3i16) as u16), // 0x08 addi r0, -3
+            word(0x0d, 0, 0),              // 0x0c cmpz r0
+            branch(0x0e, 0, 10),           // 0x10 bz +10 -> 0x38
+            word(0x0b, 3, 2),              // 0x14 st [r2], r3
+            word(0x04, 0, table as u16),   // 0x18 li r0, table
+            word(0x05, 1, 1),              // 0x1c add r1, r1
+            word(0x05, 1, 1),              // 0x20 add r1, r1
+            word(0x05, 1, 1),              // 0x24 add r1, r1 (r1 *= 8)
+            word(0x05, 0, 1),              // 0x28 add r0, r1
+            word(0x0a, 0, 0),              // 0x2c ld r0, [r0]
+            word(0x06, 0, 0),              // 0x30 br r0
+            word(0x03, 0, 0),              // 0x34 ret
+            word(0x03, 0, 0),              // 0x38 ret
+            word(0x03, 0, 0),              // 0x3c ret
+            word(0x03, 0, 0),              // 0x40 ret
+            word(0x03, 0, 0),              // 0x44 ret
+        ],
+        &[0x1000u64 + 0x3c, 0x1000 + 0x40, 0x1000 + 0x44]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert_eq!(
+        a.functions[&BASE].tables[&(BASE + 0x30)],
+        [BASE + 0x3c, BASE + 0x40, BASE + 0x44]
+    );
+}
+
+#[test]
+fn a_jump_table_body_that_stores_through_another_register_is_left_alone() {
+    let table = BASE + 0x48;
+    let m = module(
+        &[
+            word(0x04, 0, 0),              // 0x00 li r0, 0
+            word(0x05, 0, 1),              // 0x04 add r0, r1
+            word(0x09, 0, (-3i16) as u16), // 0x08 addi r0, -3
+            word(0x0d, 0, 0),              // 0x0c cmpz r0
+            branch(0x0e, 0, 10),           // 0x10 bz +10 -> 0x38
+            word(0x0b, 3, 3),              // 0x14 st [r3], r3
+            word(0x04, 0, table as u16),   // 0x18 li r0, table
+            word(0x05, 1, 1),              // 0x1c add r1, r1
+            word(0x05, 1, 1),              // 0x20 add r1, r1
+            word(0x05, 1, 1),              // 0x24 add r1, r1 (r1 *= 8)
+            word(0x05, 0, 1),              // 0x28 add r0, r1
+            word(0x0a, 0, 0),              // 0x2c ld r0, [r0]
+            word(0x06, 0, 0),              // 0x30 br r0
+            word(0x03, 0, 0),              // 0x34 ret
+            word(0x03, 0, 0),              // 0x38 ret
+            word(0x03, 0, 0),              // 0x3c ret
+            word(0x03, 0, 0),              // 0x40 ret
+            word(0x03, 0, 0),              // 0x44 ret
+        ],
+        &[0x1000u64 + 0x3c, 0x1000 + 0x40, 0x1000 + 0x44]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert!(!a.functions[&BASE].tables.contains_key(&(BASE + 0x30)));
+}
+
+#[test]
 fn a_jump_table_entered_by_a_taken_branch() {
     let m = module(
         &[

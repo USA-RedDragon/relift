@@ -168,7 +168,6 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
     let mut insts: BTreeMap<u64, Insn> = BTreeMap::new();
     let mut tables: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
     let mut work = vec![entry];
-    let granule = lifter.fe.granule();
     let preserved = lifter.fe.preserved();
     loop {
         while let Some(pc) = work.pop() {
@@ -197,6 +196,7 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         let states = consts::in_states(&insts, entry, &preserved);
         let known = |a: u64| states.get(&a).cloned().unwrap_or_default();
         let module = lifter.module;
+        let fe = lifter.fe;
         let mut found = false;
         for (pc, b) in jumps {
             let mut at = |a: u64| match lifter.get(a) {
@@ -212,8 +212,8 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
                     Insn::Failed(_) => None,
                 })
             };
-            let t = tables::resolve(module, pc, &b, granule, &mut at, &entering, &known)
-                .unwrap_or_default();
+            let t =
+                tables::resolve(module, pc, &b, fe, &mut at, &entering, &known).unwrap_or_default();
             work.extend(
                 t.iter()
                     .copied()

@@ -5,7 +5,8 @@
 //! falls through or branches to the body), then straight-line code that loads from the table and computes the target, and
 //! the jump. Walking back from the jump over instructions that fall through
 //! into each other finds the conditional branch; the code between them is
-//! the body; its blocks the jump target does not depend on are left out.
+//! the body. It may store only to stack slots; those, and every other block
+//! the jump target does not depend on, are left out when it runs.
 //! Each register the body reads before writing it, and that the
 //! constant propagation does not know, is a candidate index. For a
 //! candidate, the check (the instructions before the branch back to the one
@@ -19,9 +20,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use relift_guest::Module;
+use relift_guest::{Frontend, Module};
 use relift_ir::interp::{self, Fault, GuestMemory, NoDevices, NoIntrinsics, State};
-use relift_ir::{Block, Flow, Next, Op, Reg};
+use relift_ir::{Block, Flow, Next, Op, Reg, Value};
 
 /// The most instructions between the conditional branch and the jump.
 const RUN_BACK: usize = 16;
@@ -133,6 +134,24 @@ fn reads(blocks: &[Arc<Block>]) -> BTreeSet<Reg> {
     read
 }
 
+/// Whether every store in `b` writes at an address made only of the stack
+/// pointer `sp` and constants: a stack slot, never the table.
+fn stores_to_stack(b: &Block, sp: Option<Reg>) -> bool {
+    fn from_sp(b: &Block, v: Value, sp: Reg) -> bool {
+        match &b.insts[v.index()].op {
+            Op::Get(r) => *r == sp,
+            Op::Const(_) => true,
+            Op::Bin(_, x, y) => from_sp(b, *x, sp) && from_sp(b, *y, sp),
+            Op::Ext(_, x) | Op::Extract(x, _) => from_sp(b, *x, sp),
+            _ => false,
+        }
+    }
+    b.insts.iter().all(|i| match i.op {
+        Op::Store { addr, .. } => sp.is_some_and(|sp| from_sp(b, addr, sp)),
+        _ => true,
+    })
+}
+
 /// The blocks of `body` the jump at its end depends on, in order: a block
 /// whose writes no later kept block reads (a load the compiler scheduled
 /// into the body for later code) is left out, so it cannot fault the run.
@@ -165,12 +184,12 @@ fn slice(body: &[Arc<Block>]) -> Vec<Arc<Block>> {
 /// a jump table this recognizes. `block_at` lifts the instruction at an
 /// address; `entering` gives the conditional branch of the function that
 /// jumps to an address; `known` gives the registers known to be constant at
-/// an address.
+/// an address. The body may store to stack slots of `fe`'s stack pointer.
 pub(crate) fn resolve(
     module: &Module,
     pc: u64,
     jump: &Block,
-    granule: u64,
+    fe: &dyn Frontend,
     block_at: &mut dyn FnMut(u64) -> Option<Arc<Block>>,
     entering: &dyn Fn(u64) -> Option<Arc<Block>>,
     known: &dyn Fn(u64) -> HashMap<Reg, u128>,
@@ -181,6 +200,8 @@ pub(crate) fn resolve(
     ) {
         return None;
     }
+    let granule = fe.granule();
+    let sp = fe.stack_pointer();
     let mut body = vec![Arc::new(jump.clone())];
     let mut at = pc;
     let branch = loop {
@@ -192,7 +213,7 @@ pub(crate) fn resolve(
             .and_then(|a| block_at(a).map(|b| (a, b)));
         match prev {
             Some((a, b)) if falls_into(&b, at) && !matches!(b.exit.next, Next::Select { .. }) => {
-                if b.insts.iter().any(|i| matches!(i.op, Op::Store { .. })) {
+                if !stores_to_stack(&b, sp) {
                     return None;
                 }
                 body.insert(0, b);
@@ -205,6 +226,12 @@ pub(crate) fn resolve(
     let start = body[0].pc;
     let seeds = known(start);
     let body = slice(&body);
+    if body
+        .iter()
+        .any(|b| b.insts.iter().any(|i| matches!(i.op, Op::Store { .. })))
+    {
+        return None;
+    }
     let mut read = Vec::new();
     let mut written = BTreeSet::new();
     for b in &body {
