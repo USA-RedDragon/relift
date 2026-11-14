@@ -111,6 +111,10 @@ pub struct Options {
     pub parts: bool,
     /// The guest's I/O map, for I/O accesses of kind `Any`.
     pub io_map: relift_ir::IoMap,
+    /// The identity of the guest image set, for `rl_unit.image_id`: the
+    /// runtime loads a hot-loaded unit only when its id matches the static
+    /// units' (docs/abi.md section 6).
+    pub image_id: [u8; 32],
 }
 
 impl Default for Options {
@@ -123,6 +127,7 @@ impl Default for Options {
             module_base: 0,
             parts: false,
             io_map: relift_ir::IoMap::memory(),
+            image_id: [0; 32],
         }
     }
 }
@@ -585,7 +590,12 @@ fn unit_table(
     }
     let _ = write!(
         t,
-        " }};\nconst rl_unit {sym};\nconst rl_unit {sym} = {{\n    RL_ABI_VERSION,\n    sizeof(rl_ctx),\n    {{ 0 }},\n    {}u,\n    0,\n    fns,\n    0,\n    0,\n    {:?},\n    {},\n    maps,\n}};\n",
+        " }};\nconst rl_unit {sym};\nconst rl_unit {sym} = {{\n    RL_ABI_VERSION,\n    sizeof(rl_ctx),\n    {{ {} }},\n    {}u,\n    0,\n    fns,\n    0,\n    0,\n    {:?},\n    {},\n    maps,\n}};\n",
+        opts.image_id
+            .iter()
+            .map(|b| format!("{b:#04x}"))
+            .collect::<Vec<_>>()
+            .join(", "),
         entries.len(),
         opts.unit_name,
         if opts.parts && !maps.is_empty() {

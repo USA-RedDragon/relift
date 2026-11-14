@@ -87,6 +87,7 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
     let unit = &out.files.last().expect("unit").text;
     assert!(unit.contains("{ UINT64_C(0x10c), 8u, RL_FN_MAY_UNWIND, F_10c },"));
     assert!(unit.contains("const rl_unit rl_unit_module = {"));
+    assert!(unit.contains("{ 0x00, 0x00, "), "{unit}");
 }
 
 #[test]
@@ -148,6 +149,7 @@ fn shards_declare_their_foreign_callees() {
             module_base: 0x100,
             parts: false,
             io_map: relift_ir::IoMap::memory(),
+            image_id: [0; 32],
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -329,11 +331,17 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         module_base: 0x100,
         parts: false,
         io_map: relift_ir::IoMap::memory(),
+        image_id: [7; 32],
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
     assert_eq!(seen, [(1, 3), (2, 3), (3, 3)]);
     assert_eq!(out.files.len(), 5);
+    let unit = &out.files.last().expect("unit").text;
+    assert!(
+        unit.contains(&format!("{{ {} }}", ["0x07"; 32].join(", "))),
+        "{unit}"
+    );
 }
 
 #[test]
