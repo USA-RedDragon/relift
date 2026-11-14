@@ -141,6 +141,38 @@ TEST(a64_brk_reports_a_breakpoint)
     CHECK(strstr(out, "breakpoint BRK #1000 (lr 0x1230, sp 0x8000)") != NULL);
 }
 
+static _Alignas(16) uint8_t g_unw_mem[0x4000];
+
+TEST(a64_unw_jumpto_installs_a_libunwind_register_block)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    uint8_t *mem = g_unw_mem;
+    const uint64_t b = 0x3000;
+    for (int i = 0; i < 30; i++)
+        rl_st64(mem, b + 8u * (uint64_t)i, 0x100u + (unsigned)i);
+    rl_st64(mem, b + 0xf0, 0xBAD);
+    rl_st64(mem, b + 0xf8, 0x7FF0);
+    rl_st64(mem, b + 0x100, 0x4444);
+    for (int i = 0; i < 32; i++)
+        rl_st64(mem, b + 0x110 + 8u * (uint64_t)i, 0xD00u + (unsigned)i);
+    c->x[0] = b;
+    c->v[3].d[1] = 0xFEED;
+    CHECK_EQ(rl_a64_unw_jumpto(c, mem), RL_PENDING);
+    CHECK_EQ(c->x[0], 0x100);
+    CHECK_EQ(c->x[1], 0x101);
+    CHECK_EQ(c->x[29], 0x11D);
+    CHECK_EQ(c->x[30], 0x4444);
+    CHECK_EQ(c->sp, 0x7FF0);
+    CHECK_EQ(c->v[0].d[0], 0xD00);
+    CHECK_EQ(c->v[9].d[0], 0xD09);
+    CHECK_EQ(c->v[31].d[0], 0xD1F);
+    CHECK_EQ(c->v[3].d[1], 0);
+    CHECK_EQ(c->pend.kind, RL_PEND_UNWIND);
+    CHECK_EQ(c->pend.pc, 0x4444);
+    CHECK_EQ(c->pend.sp, 0x7FF0);
+}
+
 TEST(a64_resume_installs_registers)
 {
     rl_ctx *c = boot();

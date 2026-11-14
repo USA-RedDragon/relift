@@ -509,29 +509,77 @@ const NEWLIB_LONGJMP: [u32; 16] = [
     0xd503_201f,
 ];
 
+/// LLVM libunwind's `__libunwind_Registers_arm64_jumpto`: loads x0 to x29,
+/// sp, the pc (into x30) and d0 to d31 from the register block at x0, then
+/// `ret`s to the pc.
+const LLVM_JUMPTO: [u32; 36] = [
+    0xa941_0c02,
+    0xa942_1404,
+    0xa943_1c06,
+    0xa944_2408,
+    0xa945_2c0a,
+    0xa946_340c,
+    0xa947_3c0e,
+    0xa948_4410,
+    0xa949_4c12,
+    0xa94a_5414,
+    0xa94b_5c16,
+    0xa94c_6418,
+    0xa94d_6c1a,
+    0xa94e_741c,
+    0xf940_801e,
+    0xf940_7c01,
+    0x9100_003f,
+    0x6d51_0400,
+    0x6d52_0c02,
+    0x6d53_1404,
+    0x6d54_1c06,
+    0x6d55_2408,
+    0x6d56_2c0a,
+    0x6d57_340c,
+    0x6d58_3c0e,
+    0x6d59_4410,
+    0x6d5a_4c12,
+    0x6d5b_5414,
+    0x6d5c_5c16,
+    0x6d5d_6418,
+    0x6d5e_6c1a,
+    0x6d5f_741c,
+    0xfd41_001e,
+    0xfd41_041f,
+    0xa940_0400,
+    0xd65f_03c0,
+];
+
 /// The override for the code at `bytes`, if it is a routine this knows.
 pub fn known(bytes: &[u8]) -> Option<Known> {
     let words: Vec<u32> = bytes
         .as_chunks::<4>()
         .0
         .iter()
-        .take(17)
+        .take(40)
         .map(|w| u32::from_le_bytes(*w))
         .collect();
     let body = match words.first() {
         Some(&BTI_C) => &words[1..],
         _ => &words[..],
     };
-    let is =
-        |pat: &[u32]| body.len() >= pat.len() - 1 && body[..pat.len() - 1] == pat[..pat.len() - 1];
-    if is(&NEWLIB_SETJMP) {
+    let is = |pat: &[u32], n: usize| body.len() >= n && body[..n] == pat[..n];
+    if is(&LLVM_JUMPTO, LLVM_JUMPTO.len()) {
+        return Some(Known {
+            host_fn: "rl_a64_unw_jumpto",
+            may_unwind: true,
+            resume_point: false,
+        });
+    }
+    if is(&NEWLIB_SETJMP, NEWLIB_SETJMP.len() - 1) {
         return Some(Known {
             host_fn: "rl_a64_setjmp",
             may_unwind: false,
             resume_point: true,
         });
     }
-    if is(&NEWLIB_LONGJMP) {
+    if is(&NEWLIB_LONGJMP, NEWLIB_LONGJMP.len() - 1) {
         return Some(Known {
             host_fn: "rl_a64_longjmp",
             may_unwind: true,
@@ -819,6 +867,21 @@ mod tests {
         assert!(lj.may_unwind && !lj.resume_point);
         sj[3] ^= 1;
         assert_eq!(known(&bytes(&sj)), None);
+    }
+
+    #[test]
+    fn llvm_libunwind_jumpto_is_recognized() {
+        let bytes = |w: &[u32]| w.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let mut j = LLVM_JUMPTO.to_vec();
+        j.push(0xa900_0000);
+        let k = known(&bytes(&j)).expect("jumpto");
+        assert_eq!(k.host_fn, "rl_a64_unw_jumpto");
+        assert!(k.may_unwind && !k.resume_point);
+        let mut with_bti = vec![BTI_C];
+        with_bti.extend_from_slice(&LLVM_JUMPTO);
+        assert_eq!(known(&bytes(&with_bti)), Some(k));
+        j[20] ^= 1;
+        assert_eq!(known(&bytes(&j)), None);
     }
 
     #[test]

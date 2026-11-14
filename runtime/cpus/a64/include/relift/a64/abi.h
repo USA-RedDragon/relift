@@ -478,6 +478,15 @@ typedef struct rl_resume_regs {
 RL_RUNTIME_API int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r);
 
 /**
+ * @brief Override of the register-install routine of LLVM libunwind's arm64
+ * resume (`RL_FN_OVERRIDE | RL_FN_MAY_UNWIND`): reads the register block at
+ * guest address x0 (x0 to x29 at 8 * n, sp at 0xf8, pc at 0x100, d0 to d31
+ * from 0x110), installs it and calls rl_resume with the block's pc and sp.
+ * Returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_a64_unw_jumpto(rl_ctx *c, uint8_t *mem);
+
+/**
  * @brief The dispatch-table function at every landing pad that is not a
  * function entry: a computed jump to the pad stores the context, records
  * {pc = the pad, sp = c->sp, RL_PEND_UNWIND} and returns RL_PENDING, so the
