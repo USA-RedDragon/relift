@@ -84,6 +84,30 @@ jobs:
           tar -xzf "$dir/deny.tgz" -C "$dir"
           "$dir/$name/cargo-deny" check
 
+  generated:
+    name: generated templates are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: fetch the pinned Sail sources
+        run: cpus/a64/gen/fetch-sail.sh "$RUNNER_TEMP/sail"
+
+      - name: regenerate and compare
+        run: |
+          cpus/a64/gen/regen.sh "$RUNNER_TEMP/sail/lib" "$RUNNER_TEMP/sail/model"
+          git diff --exit-code -- cpus/a64/src/lift/sail/generated
+
   macos:
     name: tests (macOS)
     runs-on: macos-latest
