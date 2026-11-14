@@ -53,7 +53,7 @@ choice applies to the update packages of a `.nup`. The program ID comes from
 
 ### Game Boy and Game Boy Color
 
-Import is not available yet. `relift-gbrom` reads and checks a ROM header.
+Import is not available yet. `relift-gbrom` reads and checks a ROM header, and `relift-gbrom functions` lists the functions of a ROM per mapper bank.
 
 ## Tools
 
@@ -66,7 +66,7 @@ Import is not available yet. `relift-gbrom` reads and checks a ROM header.
 | `relift-nro` | Switch | show NRO modules and extract their assets |
 | `relift-npdm` | Switch | show a `main.npdm` |
 | `relift-ir` | Switch | print the IR of A64 instruction words or NSO symbols |
-| `relift-gbrom` | Game Boy | show a ROM header and validate its checksums |
+| `relift-gbrom` | Game Boy | show a ROM header and validate its checksums; `functions` lists functions per bank, unresolved transfers and code run from RAM |
 
 ## Building
 
