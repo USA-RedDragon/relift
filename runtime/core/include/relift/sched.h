@@ -20,15 +20,20 @@
  *   an event of its own, or rl_sched_sync. Each range names the devices that
  *   may observe or affect an access to it, and an access first brings each of
  *   them, in registration order, to the access's tick.
- * - Several CPUs: each guest CPU runs on its own host thread and one runs at
+ * - Several CPUs: one host thread runs every CPU of a scheduler, each on
+ *   its own fiber (a host stack of its own, rl_sched_spawn), and one runs at
  *   a time. When a CPU would get more than `quantum` ticks ahead of another
  *   active CPU, or reaches an event the others have not reached, it hands the
- *   run to the CPU furthest behind. Events fire once every active CPU has
- *   reached them. The order depends on the clocks alone, so a run is
+ *   run to the CPU furthest behind: a switch of host stacks that takes a few
+ *   nanoseconds (docs/abi.md section 14). Events fire once every active CPU
+ *   has reached them. The order depends on the clocks alone, so a run is
  *   repeatable. With one CPU every access and event is exact to the tick.
+ * - A CPU that was not spawned runs on the stack of the host thread that
+ *   calls rl_sched_run for it; at most one CPU of a scheduler does, and not
+ *   while rl_sched_main runs. One CPU alone needs no fiber.
  *
- * Only the host thread that holds the run calls these functions; device and
- * event callbacks run on it.
+ * Only the host thread that runs the scheduler calls these functions; device
+ * and event callbacks run on it, on the fiber of the CPU that holds the run.
  */
 #ifndef RELIFT_SCHED_H
 #define RELIFT_SCHED_H
@@ -48,6 +53,8 @@
 #define RL_LINE_NONE UINT32_MAX
 /** @brief Default longest budget in ticks when no event is nearer (rl_sched_config.slice). */
 #define RL_SCHED_SLICE_DEFAULT (1ull << 20)
+/** @brief Default host stack of a spawned CPU in bytes (rl_sched_config.stack), reserved, with a guard below. */
+#define RL_SCHED_STACK_DEFAULT (16ull << 20)
 
 /** @brief A scheduler; opaque. */
 typedef struct rl_sched rl_sched;
@@ -124,6 +131,8 @@ typedef struct rl_sched_config {
     uint64_t slice;
     /** @brief Most ticks a CPU may run ahead of another active CPU; 0 means 1. */
     uint64_t quantum;
+    /** @brief Host stack bytes of each spawned CPU; 0 means RL_SCHED_STACK_DEFAULT. */
+    uint64_t stack;
 } rl_sched_config;
 
 /** @brief Counters for tests and benchmarks. */
@@ -146,7 +155,7 @@ typedef struct rl_sched_stats {
 
 /** @brief Creates a scheduler at tick 0, or NULL (out of memory). cfg may be NULL for the defaults. */
 RL_RUNTIME_API rl_sched *rl_sched_create(const rl_sched_config *cfg);
-/** @brief Frees the scheduler and its CPU records; devices and events stay the caller's. */
+/** @brief Frees the scheduler, its CPU records and their fibers; devices and events stay the caller's. Not called from a CPU's fiber. */
 RL_RUNTIME_API void rl_sched_destroy(rl_sched *s);
 /** @brief The counters. */
 RL_RUNTIME_API const rl_sched_stats *rl_sched_get_stats(const rl_sched *s);
@@ -173,9 +182,28 @@ RL_RUNTIME_API void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook);
 RL_RUNTIME_API rl_sched *rl_sched_of(const rl_sched_cpu *c);
 /** @brief The CPU that holds the run (the one whose access or sync is being served), or NULL. */
 RL_RUNTIME_API rl_sched_cpu *rl_sched_current(rl_sched *s);
-/** @brief Blocks the calling host thread until c holds the run. A CPU's host thread calls it before running lifted code. */
-RL_RUNTIME_API void rl_sched_enter(rl_sched_cpu *c);
-/** @brief Makes c inactive (its clock stops bounding the others) and hands the run on when c holds it. */
+/** @brief The code a spawned CPU runs: body(c, arg) on c's fiber. */
+typedef void rl_sched_body(rl_sched_cpu *c, void *arg);
+/**
+ * @brief Gives c its own fiber, which runs body(c, arg) once c first holds
+ * the run (body calls rl_sched_run before its first block, as the budget
+ * starts at 0). When body returns, c leaves. Call on the host thread that
+ * runs the scheduler, which also gets an alternate signal stack here if it
+ * has none. Returns 0, or -1 when body is NULL, c has a fiber, the scheduler
+ * has run or the host refuses the stack.
+ */
+RL_RUNTIME_API int rl_sched_spawn(rl_sched_cpu *c, rl_sched_body *body, void *arg);
+/**
+ * @brief Runs the CPUs on the calling host thread until no CPU holds the
+ * run, that is until every CPU has left. Returns 0, or -1 when called from a
+ * CPU's fiber or when an active CPU was not spawned.
+ */
+RL_RUNTIME_API int rl_sched_main(rl_sched *s);
+/**
+ * @brief Makes c inactive (its clock stops bounding the others) and hands the
+ * run on when c holds it. On c's own fiber it does not return. On a CPU that
+ * was not spawned it returns once no CPU holds the run.
+ */
 RL_RUNTIME_API void rl_sched_leave(rl_sched_cpu *c);
 /** @brief Changes c's ticks per cycle from its current cycle on and ends its budget. */
 RL_RUNTIME_API void rl_sched_set_ratio(rl_sched_cpu *c, uint32_t ratio);
@@ -189,8 +217,8 @@ RL_RUNTIME_API uint64_t rl_sched_time(const rl_sched *s);
 
 /**
  * @brief The budget's slow path without interrupt entry: runs due events,
- * may hand the run to another CPU and wait for it back, then sets a new
- * budget (always above zero). Returns nonzero when a raised line of c is in
+ * may hand the run to another CPU (a switch to its fiber) until the run comes
+ * back, then sets a new budget (always above zero). Returns nonzero when a raised line of c is in
  * c's mask.
  */
 RL_RUNTIME_API int rl_sched_run(rl_sched_cpu *c);

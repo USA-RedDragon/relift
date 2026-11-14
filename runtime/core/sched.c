@@ -1,68 +1,18 @@
 /**
  * @file sched.c
  * @brief The device scheduler: CPU clocks and budgets, the event queue,
- * device catch-up on access, interrupt lines, the hand-over of the run
- * between CPUs, and the lifted-code entries rl_sync, rl_io_read and
- * rl_io_write (relift/sched.h).
+ * device catch-up on access, interrupt lines and the hand-over of the run
+ * between CPUs, each on its own fiber (relift/sched.h). Needs only the C
+ * library, the host OS and the fibers; the lifted-code entries are in
+ * sync.c.
  */
-#include "core.h"
+#include "sched_int.h"
 
-#include <relift/sched.h>
-
-#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/** @brief rl_sched.holder when no CPU holds the run. */
-#define NO_HOLDER UINT32_MAX
-
-/** @brief One mapped guest range. */
-typedef struct sched_range {
-    /** @brief First guest address. */
-    uint64_t lo;
-    /** @brief Last guest address (inclusive, so a range may end at the top of the space). */
-    uint64_t hi;
-    /** @brief The device whose handlers answer. */
-    rl_device *owner;
-    /** @brief Devices caught up before an access: the owner and its observers. */
-    uint64_t sync;
-} sched_range;
-
-struct rl_sched_cpu {
-    rl_time *time;
-    rl_time own;
-    uint64_t origin_tick;
-    uint64_t origin_cycle;
-    uint32_t ratio;
-    uint32_t index;
-    uint64_t lines;
-    uint64_t mask;
-    rl_irq_hook *irq;
-    rl_sched *sched;
-    bool active;
-    bool halted;
-};
-
-struct rl_sched {
-    rl_sched_config cfg;
-    rl_sched_stats stats;
-    uint64_t time;
-    uint64_t seq;
-    rl_event **heap;
-    uint32_t qn, qcap;
-    rl_device *devs[RL_SCHED_MAX_DEVICES];
-    uint32_t ndev;
-    sched_range *ranges;
-    uint32_t nr, rcap;
-    uint32_t last;
-    rl_sched_cpu cpus[RL_SCHED_MAX_CPUS];
-    uint32_t ncpu;
-    uint32_t route[RL_SCHED_LINES];
-    uint32_t holder;
-    bool started;
-    pthread_mutex_t mu;
-    pthread_cond_t cv;
-};
+#define NO_HOLDER RL_SCHED_NO_HOLDER
 
 rl_sched *rl_sched_create(const rl_sched_config *cfg)
 {
@@ -76,8 +26,9 @@ rl_sched *rl_sched_create(const rl_sched_config *cfg)
     if (s->cfg.quantum == 0)
         s->cfg.quantum = 1;
     s->holder = NO_HOLDER;
-    pthread_mutex_init(&s->mu, NULL);
-    pthread_cond_init(&s->cv, NULL);
+    s->home_cpu = NO_HOLDER;
+    s->running = &s->home;
+    snprintf(s->home.label, sizeof s->home.label, "host thread");
     return s;
 }
 
@@ -87,8 +38,11 @@ void rl_sched_destroy(rl_sched *s)
         return;
     for (uint32_t i = 0; i < s->qn; i++)
         s->heap[i]->slot = 0;
-    pthread_cond_destroy(&s->cv);
-    pthread_mutex_destroy(&s->mu);
+    for (uint32_t i = 0; i < s->ncpu; i++)
+        if (s->cpus[i].fiber) {
+            rl_fiber_free(s->cpus[i].fiber);
+            free(s->cpus[i].fiber);
+        }
     free(s->heap);
     free(s->ranges);
     free(s);
@@ -197,7 +151,7 @@ void rl_sched_post(rl_sched *s, rl_event *e, uint64_t when)
         uint32_t cap = s->qcap ? s->qcap * 2 : 16;
         rl_event **h = realloc(s->heap, cap * sizeof *h);
         if (!h) {
-            rl_log(RL_LOG_ERROR, "sched", "out of memory queueing an event");
+            fputs("[relift sched] out of memory queueing an event\n", stderr);
             abort();
         }
         s->heap = h;
@@ -300,21 +254,60 @@ static uint32_t slowest_other(const rl_sched *s, const rl_sched_cpu *c)
     return best;
 }
 
-static void hand_to(rl_sched *s, uint32_t next)
+static rl_fiber *fiber_of(rl_sched *s, uint32_t i)
 {
-    pthread_mutex_lock(&s->mu);
-    s->holder = next;
-    s->stats.switches++;
-    pthread_cond_broadcast(&s->cv);
-    pthread_mutex_unlock(&s->mu);
+    return i == NO_HOLDER || !s->cpus[i].fiber ? &s->home : s->cpus[i].fiber;
 }
 
-static void wait_for_run(rl_sched *s, const rl_sched_cpu *c)
+static void check_fp_mode(void)
 {
-    pthread_mutex_lock(&s->mu);
-    while (s->holder != c->index)
-        pthread_cond_wait(&s->cv, &s->mu);
-    pthread_mutex_unlock(&s->mu);
+#if !defined(NDEBUG)
+    uint64_t d = rl_fiber_fp_mode_diff();
+    if (RL_UNLIKELY(d != 0)) {
+        fprintf(stderr, "[relift sched] host FP control differs from the default (bits 0x%llx) at a hand-over\n",
+                (unsigned long long)d);
+        abort();
+    }
+#endif
+}
+
+static void fatal(const char *what)
+{
+    fprintf(stderr, "[relift sched] %s\n", what);
+    abort();
+}
+
+static void claim_home(rl_sched *s, uint32_t cpu)
+{
+    if (s->in_main || (s->home_cpu != NO_HOLDER && s->home_cpu != cpu))
+        fatal("two CPUs without a fiber of their own, or one while rl_sched_main runs, share the host thread's stack");
+    s->home_cpu = cpu;
+}
+
+static void resumed(rl_sched *s)
+{
+    if (s->holder != NO_HOLDER && s->cpus[s->holder].thread && s->bind)
+        s->bind(s->cpus[s->holder].thread);
+}
+
+static void switch_to(rl_sched *s, rl_fiber *to)
+{
+    rl_fiber *from = s->running;
+    if (to == from)
+        fatal("two CPUs without a fiber of their own share the host thread's stack");
+    check_fp_mode();
+    s->running = to;
+    rl_fiber_switch(from, to);
+    resumed(s);
+}
+
+static void hand_to(rl_sched *s, uint32_t next)
+{
+    s->holder = next;
+    s->stats.switches++;
+    if (next != NO_HOLDER && !s->cpus[next].fiber)
+        claim_home(s, next);
+    switch_to(s, fiber_of(s, next));
 }
 
 rl_sched_cpu *rl_sched_add_cpu(rl_sched *s, uint32_t ratio)
@@ -334,18 +327,51 @@ rl_sched_cpu *rl_sched_add_cpu(rl_sched *s, uint32_t ratio)
     return c;
 }
 
-int rl_sched_attach(rl_sched_cpu *c, struct rl_thread *t)
+static void cpu_main(void *p)
 {
-    rl_time *tm = t && t->ctx ? rl_ctx_time(t->ctx) : NULL;
-    if (!tm)
+    rl_sched_cpu *c = p;
+    resumed(c->sched);
+    c->body(c, c->arg);
+    rl_sched_leave(c);
+    abort();
+}
+
+int rl_sched_spawn(rl_sched_cpu *c, rl_sched_body *body, void *arg)
+{
+    rl_sched *s = c->sched;
+    if (!body || c->fiber || s->started)
         return -1;
-    *tm = *c->time;
-    c->time = tm;
-    t->clock = c;
+    rl_fiber *f = malloc(sizeof *f);
+    if (!f)
+        return -1;
+    if (rl_fiber_init(f, s->cfg.stack, cpu_main, c) != 0) {
+        free(f);
+        return -1;
+    }
+    snprintf(f->label, sizeof f->label, "guest CPU %u", c->index);
+    c->fiber = f;
+    c->body = body;
+    c->arg = arg;
+    rl_fiber_thread_init();
     return 0;
 }
 
-void rl_sched_enter(rl_sched_cpu *c) { wait_for_run(c->sched, c); }
+int rl_sched_main(rl_sched *s)
+{
+    if (s->running != &s->home)
+        return -1;
+    if (s->holder == NO_HOLDER)
+        return 0;
+    for (uint32_t i = 0; i < s->ncpu; i++)
+        if (s->cpus[i].active && !s->cpus[i].fiber)
+            return -1;
+    rl_fiber_thread_init();
+    s->started = true;
+    s->in_main = true;
+    switch_to(s, fiber_of(s, s->holder));
+    s->in_main = false;
+    return 0;
+}
 
 void rl_sched_leave(rl_sched_cpu *c)
 {
@@ -370,6 +396,8 @@ int rl_sched_run(rl_sched_cpu *c)
     rl_sched *s = c->sched;
     s->started = true;
     s->stats.runs++;
+    if (RL_UNLIKELY(!c->fiber && s->home_cpu != c->index))
+        claim_home(s, c->index);
     for (;;) {
         uint64_t now = rl_sched_now(c);
         fire_due(s, frontier(s, c, now));
@@ -385,7 +413,6 @@ int rl_sched_run(rl_sched_cpu *c)
         }
         set_budget(c, now, now);
         hand_to(s, next);
-        wait_for_run(s, c);
     }
     return rl_sched_pending(c) != 0;
 }
@@ -540,51 +567,4 @@ void rl_sched_set_mask(rl_sched_cpu *c, uint64_t mask)
     c->mask = mask;
     if (c->lines & mask)
         rl_sched_break(c);
-}
-
-static rl_sched_cpu *ctx_clock(rl_ctx *c)
-{
-    struct rl_thread *t = rl_common(c)->thread;
-    return t ? t->clock : NULL;
-}
-
-int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
-{
-    rl_sched_cpu *k = ctx_clock(c);
-    if (!k)
-        return rl_guest_fatal(c, "sched", "sync point reached on a thread without a scheduler clock");
-    for (;;) {
-        if (k->time->budget <= 0)
-            rl_sched_run(k);
-        uint64_t pc = k->irq ? k->irq(c, mem, next) : RL_NO_IRQ;
-        if (pc == RL_NO_IRQ)
-            return RL_OK;
-        k->sched->stats.irqs++;
-        rl_fn fn = rl_dispatch_find(pc);
-        int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc);
-        if (r != RL_OK)
-            return RL_PENDING;
-    }
-}
-
-uint64_t rl_io_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
-{
-    (void)mem;
-    rl_sched_cpu *k = ctx_clock(c);
-    if (!k) {
-        rl_guest_fatal(c, "sched", "device read at 0x%llx on a thread without a scheduler clock", (unsigned long long)addr);
-        return 0;
-    }
-    return rl_sched_read(k, addr, size);
-}
-
-void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value)
-{
-    (void)mem;
-    rl_sched_cpu *k = ctx_clock(c);
-    if (!k) {
-        rl_guest_fatal(c, "sched", "device write at 0x%llx on a thread without a scheduler clock", (unsigned long long)addr);
-        return;
-    }
-    rl_sched_write(k, addr, size, value);
 }

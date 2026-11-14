@@ -2,14 +2,13 @@
  * @file test_sched.c
  * @brief The device scheduler against synthetic devices: a timer that raises
  * a line at a tick, a counter whose read value is the tick it is read at,
- * observers, event order, rates, halting, two CPUs on two host threads and
+ * observers, event order, rates, halting, two CPUs on their fibers and
  * the lifted-code entries rl_sync and rl_io_read.
  */
 #include "runner.h"
 
 #include <relift/sched.h>
 
-#include <pthread.h>
 #include <stdlib.h>
 
 /** @brief Charges n cycles the way lifted code does: one subtraction, one compare. */
@@ -481,6 +480,7 @@ static struct {
     uint64_t late_events;
     uint32_t log[4096];
     int nlog;
+    int main_rc;
 } g2;
 
 static uint64_t skew_of(void)
@@ -511,21 +511,19 @@ static void frontier_fire(rl_sched *s, rl_event *e, uint64_t when)
     rl_sched_post(s, e, when + 100);
 }
 
-static void *cpu_main(void *p)
+static void cpu_main(rl_sched_cpu *k, void *p)
 {
     cpu_run *r = p;
-    rl_sched_enter(r->k);
+    (void)k;
     rl_sched_run(r->k);
     for (int i = 0; i < r->blocks; i++) {
         spend(r->k, r->cost);
         rl_sched_write(r->k, 0x50, 1, r->k == g2.k[0] ? 0 : 1);
     }
     g2.active[r->k == g2.k[0] ? 0 : 1] = false;
-    rl_sched_leave(r->k);
-    return NULL;
 }
 
-/** @brief Runs two CPUs (rates 1 and 2) on two host threads; fills g2. */
+/** @brief Runs two CPUs (rates 1 and 2) on their fibers; fills g2. */
 static void run_two(uint64_t quantum)
 {
     memset(&g2, 0, sizeof g2);
@@ -540,17 +538,16 @@ static void run_two(uint64_t quantum)
     rl_event e = {.fire = frontier_fire};
     rl_sched_post(s, &e, 100);
     cpu_run r[2] = {{g2.k[0], 3, 1500}, {g2.k[1], 5, 1000}};
-    pthread_t th[2];
-    pthread_create(&th[1], NULL, cpu_main, &r[1]);
-    pthread_create(&th[0], NULL, cpu_main, &r[0]);
-    pthread_join(th[0], NULL);
-    pthread_join(th[1], NULL);
+    rl_sched_spawn(g2.k[1], cpu_main, &r[1]);
+    rl_sched_spawn(g2.k[0], cpu_main, &r[0]);
+    g2.main_rc = rl_sched_main(s);
     rl_sched_destroy(s);
 }
 
 TEST(sched_two_cpus_stay_within_the_quantum_and_repeat)
 {
     run_two(64);
+    CHECK_EQ(g2.main_rc, 0);
     CHECK_EQ(g2.nlog, 2500);
     CHECK(g2.skew_max <= 64 + 10 + 2);
     CHECK(g2.skew_max > 32);
