@@ -254,9 +254,14 @@ pub fn emit_with(
         let e = func::emit_function(fe, f, &targets, opts.piece_bytes.max(1));
         out.undefined += e.undefined;
         flags.insert(f.entry, e.flags);
+        // A shard map's range stops at the next function of the module, so
+        // maps of different shards never overlap either.
+        let span = fns
+            .get(k + 1)
+            .map_or(f.span, |n| f.span.min(n.entry.saturating_sub(f.entry)));
         let entry = MapEntry {
             entry: f.entry,
-            span: f.span,
+            span,
             flags: e.flags,
             host: String::new(),
             guest_name: f.guest_name.clone(),
