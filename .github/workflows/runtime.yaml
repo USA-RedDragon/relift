@@ -1,0 +1,55 @@
+name: Runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - runtime/**
+      - .github/workflows/runtime.yaml
+  pull_request:
+    paths:
+      - runtime/**
+      - .github/workflows/runtime.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  c-tests:
+    name: C runtime (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the static and shared libraries and the tests
+        working-directory: runtime
+        run: |
+          clang --version
+          make -j2 CC=clang
+
+      - name: Run the tests
+        working-directory: runtime
+        run: make test CC=clang
+
+      - name: Run the tests with simulated 16 KiB host pages
+        if: runner.os == 'Linux'
+        working-directory: runtime
+        env:
+          RELIFT_HOST_PAGE: "16384"
+        run: make test CC=clang
+
+      - name: Run the tests with the 36-bit layout
+        working-directory: runtime
+        env:
+          RELIFT_ADDRESS_BITS: "36"
+        run: make test CC=clang
