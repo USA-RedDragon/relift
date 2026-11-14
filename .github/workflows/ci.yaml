@@ -40,22 +40,27 @@ jobs:
           workspaces: |
             .
             check
+            guests/gb/devices
 
       - name: fmt
         run: |
           cargo fmt --all --check
           cargo fmt --manifest-path check/Cargo.toml --all --check
+          cargo fmt --manifest-path guests/gb/devices/Cargo.toml --all --check
 
       - name: clippy
         run: |
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
           cargo clippy --manifest-path check/Cargo.toml --all-targets --all-features --locked -- -D warnings
+          cargo clippy --manifest-path guests/gb/devices/Cargo.toml --all-targets --all-features --locked -- -D warnings
 
       - name: charter, unsafe roster and funnels
         run: cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
 
       - name: tests
-        run: cargo test --workspace --locked
+        run: |
+          cargo test --workspace --locked
+          cargo test --manifest-path guests/gb/devices/Cargo.toml --release --locked
 
       - name: generated config docs are current
         run: |
