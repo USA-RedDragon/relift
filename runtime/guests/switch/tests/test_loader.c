@@ -112,6 +112,8 @@ static void remove_base(void)
 {
     if (g_base[0])
         nftw(g_base, rm_cb, 8, FTW_DEPTH | FTW_PHYS);
+    g_base[0] = 0;
+    g_sdmc[0] = 0;
 }
 
 /** @brief Runs rl_switch_main in a child; output (stdout and stderr) goes to out, the wait status to *status. */
@@ -127,7 +129,6 @@ static void run_program(const rl_switch_program *p, char *out, size_t n, int *st
         snprintf(g_base, sizeof g_base, "%s/relift-loader-XXXXXX", base);
         if (!mkdtemp(g_base))
             _exit(2);
-        atexit(remove_base);
         snprintf(g_sdmc, sizeof g_sdmc, "%s/sdmc/inner", g_base);
     }
     setenv("RELIFT_SDMC", g_sdmc, 1);
@@ -179,6 +180,7 @@ TEST(loader_runs_a_module_and_prints_guest_strings)
     CHECK_EQ(count_lines(out, "PASS regs"), 1);
     CHECK_EQ(stat(g_sdmc, &st), 0);
     CHECK(S_ISDIR(st.st_mode));
+    remove_base();
 }
 
 TEST(loader_returns_the_guest_fatal_status)
@@ -190,6 +192,7 @@ TEST(loader_returns_the_guest_fatal_status)
     run_program(&g_program, out, sizeof out, &status);
     CHECK(WIFEXITED(status));
     CHECK_EQ(WEXITSTATUS(status), RL_EXIT_SOFTWARE);
+    remove_base();
 }
 
 TEST(loader_refuses_bad_programs)
@@ -232,4 +235,5 @@ TEST(loader_refuses_bad_programs)
     p.module_count = 0;
     run_program(&p, out, sizeof out, &status);
     CHECK_EQ(WEXITSTATUS(status), 1);
+    remove_base();
 }
