@@ -52,6 +52,7 @@ choice applies to the update packages of a `.nup`. The program ID comes from
 | `relift-nso` | show, list symbols of and decompress NSO modules |
 | `relift-nro` | show NRO modules and extract their assets |
 | `relift-npdm` | show a `main.npdm` |
+| `relift-gbrom` | show a Game Boy ROM header and validate its checksums |
 
 ## Building
 

@@ -78,6 +78,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
 | 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model; run by hand, linked by nothing |
 | 2 | `relift-gb-formats` | `guests/gb/formats` | Game Boy and Game Boy Color cartridge format: header, mapper kinds, ROM and RAM size codes, both checksums, bank layout; no dependencies |
+| 2 | `relift-gb-tools` | `guests/gb/tools` | `relift-gbrom`: prints a ROM's header as text or JSON and validates logo, checksums and size |
 | 2 | `relift-switch-formats` | `guests/switch/formats` | Decrypted Switch formats (romfs, NSO, NRO, NPDM, NUP) and the import of a `.nup` or an extracted dump tree |
 | 2 | `relift-switch-tools` | `guests/switch/tools` | `relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate; `relift-ir` prints the IR of A64 words or NSO symbols |
 | 2 | `relift-switch-vkgen` | `guests/switch/vkgen` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; standalone (nothing depends on it) |
