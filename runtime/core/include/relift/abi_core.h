@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 1u
+#define RL_ABI_VERSION 2u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0
@@ -183,6 +183,92 @@ typedef struct rl_line_entry {
     uint64_t guest_addr;
 } rl_line_entry;
 
+/** @brief rl_fn_map.version of this contract. */
+#define RL_FN_MAP_VERSION 1u
+
+/** @brief One lifted function in a function map: its guest range, host code and names. */
+typedef struct rl_fn_info {
+    /** @brief Guest entry address. */
+    uint64_t guest_addr;
+    /** @brief Guest bytes the function covers; [guest_addr, guest_addr + guest_size). */
+    uint32_t guest_size;
+    /** @brief enum rl_fn_flags, as in the function's rl_fn_entry. */
+    uint32_t flags;
+    /** @brief Host function. */
+    rl_fn fn;
+    /** @brief Host symbol of fn: the C identifier the emitter gave it. */
+    const char *host_sym;
+    /** @brief Readable guest name (the demangled guest symbol), or NULL to print host_sym. */
+    const char *guest_name;
+} rl_fn_info;
+
+/**
+ * @brief The function map of one shard: guest address ranges to function
+ * names and host symbols, for crash reports and backtraces (docs/abi.md
+ * section 11).
+ */
+typedef struct rl_fn_map {
+    /** @brief RL_FN_MAP_VERSION. */
+    uint32_t version;
+    /** @brief Number of entries in fns. */
+    uint32_t count;
+    /** @brief Functions, sorted by guest_addr, ranges not overlapping. */
+    const rl_fn_info *fns;
+    /** @brief Guest module the functions belong to. */
+    const char *module;
+    /** @brief Shard name for reports. */
+    const char *shard;
+    /** @brief Guest load address of the module, for module+offset in reports. */
+    uint64_t module_base;
+    /** @brief Start of the host section that holds only lifted functions (RL_TEXT_LO), or NULL when unknown. */
+    const void *text_lo;
+    /** @brief End of that section (RL_TEXT_HI), or NULL. */
+    const void *text_hi;
+} rl_fn_map;
+
+/**
+ * @brief Places a lifted function in the section that holds only lifted
+ * functions, so a host pc in [RL_TEXT_LO, RL_TEXT_HI) is lifted code and
+ * belongs to the nearest function start below it.
+ */
+#if defined(_WIN32)
+#define RL_TEXT_SECTION "relift$m"
+#elif defined(__APPLE__)
+#define RL_TEXT_SECTION "__TEXT,__relift_text,regular,pure_instructions"
+#else
+#define RL_TEXT_SECTION "relift_text"
+#endif
+/** @brief Attribute for a lifted function: `RL_TEXT RL_LIFTED(F) { ... }`. */
+#define RL_TEXT __attribute__((section(RL_TEXT_SECTION)))
+
+/**
+ * @brief Declares the bounds of the lifted-code section in a translation
+ * unit that names RL_TEXT_LO and RL_TEXT_HI. On Windows, exactly one
+ * translation unit per image also expands RL_TEXT_BOUNDS_DEFINE().
+ */
+#if defined(_WIN32)
+#define RL_TEXT_BOUNDS_DECLARE() void rl_text_lo_mark(void); void rl_text_hi_mark(void)
+#define RL_TEXT_BOUNDS_DEFINE()                                                                         \
+    __attribute__((section("relift$a"), used)) void rl_text_lo_mark(void) {}                            \
+    __attribute__((section("relift$z"), used)) void rl_text_hi_mark(void) {}
+#define RL_TEXT_LO ((const void *)rl_text_lo_mark)
+#define RL_TEXT_HI ((const void *)rl_text_hi_mark)
+#elif defined(__APPLE__)
+#define RL_TEXT_BOUNDS_DECLARE()                                                                        \
+    extern const char rl_text_lo_sym[] __asm("section$start$__TEXT$__relift_text");                     \
+    extern const char rl_text_hi_sym[] __asm("section$end$__TEXT$__relift_text")
+#define RL_TEXT_BOUNDS_DEFINE()
+#define RL_TEXT_LO ((const void *)rl_text_lo_sym)
+#define RL_TEXT_HI ((const void *)rl_text_hi_sym)
+#else
+#define RL_TEXT_BOUNDS_DECLARE()                                                                        \
+    extern const char __start_relift_text[] __attribute__((visibility("hidden")));                     \
+    extern const char __stop_relift_text[] __attribute__((visibility("hidden")))
+#define RL_TEXT_BOUNDS_DEFINE()
+#define RL_TEXT_LO ((const void *)__start_relift_text)
+#define RL_TEXT_HI ((const void *)__stop_relift_text)
+#endif
+
 /** @brief Size in bytes of rl_unit.image_id. */
 #define RL_IMAGE_ID_BYTES 32u
 
@@ -209,6 +295,10 @@ typedef struct rl_unit {
     const void *code_base;
     /** @brief Unit name for reports. */
     const char *name;
+    /** @brief Number of entries in maps. */
+    uint32_t map_count;
+    /** @brief Function maps of the unit's shards (crash reports), or NULL. */
+    const rl_fn_map *const *maps;
 } rl_unit;
 
 /** @brief Name of the function a hot-loaded library exports: `RL_UNIT_EXPORT const rl_unit *relift_unit(void)`. */
@@ -332,6 +422,8 @@ typedef struct rl_dev_reply {
 } rl_dev_reply;
 
 _Static_assert(sizeof(rl_fn_entry) == 24, "rl_fn_entry size");
+_Static_assert(sizeof(rl_fn_info) == 40, "rl_fn_info size");
+_Static_assert(sizeof(rl_fn_map) == 56, "rl_fn_map size");
 _Static_assert(sizeof(rl_dev_hdr) == 16, "rl_dev_hdr size");
 _Static_assert(sizeof(rl_dev_hello) == 48, "rl_dev_hello size");
 _Static_assert(sizeof(rl_dev_lift_req) == 32, "rl_dev_lift_req size");

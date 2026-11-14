@@ -99,9 +99,12 @@ A64_TESTS := $(BUILD)/a64_tests
 SWITCH_TESTS := $(BUILD)/switch_tests
 VK_TESTS := $(BUILD)/switch_vk_tests
 TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
+CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c)
+CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
+CRASH_TEST := $(BUILD)/crash_test
 
 .PHONY: all test charter gdb-test clean
-all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS)
+all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS) $(CRASH_TEST)
 
 $(CORE_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 	@mkdir -p $(dir $@)
@@ -155,7 +158,16 @@ $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
-test: $(TESTS)
+# The crash test links only the crash handler, so it also builds on Windows.
+$(CRASH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) -mno-omit-leaf-frame-pointer $(CORE_INC) $(CFLAGS) -c $< -o $@
+
+$(CRASH_TEST): $(CRASH_TEST_OBJS) $(CRASH_OBJS)
+	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
+
+test: $(TESTS) $(CRASH_TEST)
+	$(abspath $(CRASH_TEST))
 	$(abspath $(CORE_TESTS))
 	$(abspath $(A64_TESTS))
 	$(abspath $(SWITCH_TESTS))

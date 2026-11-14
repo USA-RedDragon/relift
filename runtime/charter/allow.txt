@@ -3,3 +3,4 @@
 # Every entry must still match (every_allowance_is_used), so this list only
 # shrinks. Host words are fine in core; guest words are not.
 core/fault.c  a64-isa  the host pc of a faulting host instruction on arm64 hosts (Linux and macOS), and macOS arm64 raising SIGBUS: the host CPU, not a guest CPU
+core/crash_posix.c  a64-isa  the host pc, sp and frame pointer of a faulting host instruction on arm64 hosts (Linux and macOS): the host CPU, not a guest CPU

@@ -5,6 +5,7 @@
  * bad-resume report of docs/abi.md sections 5 to 7.
  */
 #include "core.h"
+#include "crash.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +33,7 @@ rl_fn rl_dispatch_find(uint64_t a)
 
 void rl_units_reset(void)
 {
+    rl_fn_maps_reset();
     free(g_table);
     g_table = NULL;
     g_lo = 0;
@@ -75,6 +77,11 @@ int rl_units_register(const rl_unit *const *units, uint32_t count)
                 hi = a + gran;
         }
     }
+    for (uint32_t k = 0; k < count; k++)
+        if (units[k]->map_count && rl_fn_maps_register(units[k]->maps, units[k]->map_count) != 0) {
+            rl_log(RL_LOG_ERROR, "dispatch", "unit %s: a function map is malformed", units[k]->name ? units[k]->name : "?");
+            return -1;
+        }
     if (g_table) {
         if (g_lo < lo)
             lo = g_lo;
