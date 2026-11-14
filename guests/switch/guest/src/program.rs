@@ -345,18 +345,14 @@ pub fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String]) -> St
     for u in units {
         let _ = writeln!(t, "extern const rl_unit {u};");
     }
-    t.push_str("const rl_unit *const rl_static_units[] = {");
+    t.push_str("static const rl_unit *const static_units[] = {");
     for u in units {
         let _ = write!(t, " &{u},");
     }
     if units.is_empty() {
         t.push_str(" 0");
     }
-    let _ = writeln!(
-        t,
-        " }};\nconst uint32_t rl_static_unit_count = {}u;",
-        units.len()
-    );
+    let _ = writeln!(t, " }};");
     for (i, p) in placed.iter().enumerate() {
         let _ = write!(t, "static const uint8_t image{i}[] = {{");
         for (k, b) in p.nso.image.iter().enumerate() {
@@ -406,8 +402,9 @@ pub fn program_c(placed: &[Placed], npdm: Option<&Npdm>, units: &[String]) -> St
         .unwrap_or(CODE_START);
     let _ = write!(
         t,
-        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}) }};\n",
-        placed.len()
+        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u }};\n",
+        placed.len(),
+        units.len()
     );
     t.push_str(
         "int main(int argc, char **argv) { return rl_switch_main(&rl_program, argc, argv); }\n",
@@ -509,7 +506,7 @@ mod tests {
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
         let c = program_c(&p, None, &["rl_unit_main".into()]);
-        assert!(c.contains("const rl_unit *const rl_static_units[] = { &rl_unit_main, };"));
+        assert!(c.contains("static const rl_unit *const static_units[] = { &rl_unit_main, };"));
         assert!(c.contains("static const uint8_t image0[] = {\n1,2,3,4,"));
         assert!(c.contains(
             "const rl_switch_program rl_program = { modules, 1u, UINT64_C(0x8000000), 3u, 44, 0,"

@@ -417,9 +417,11 @@ Windows). [verified: hot-load prototype]
 image id, sorted `rl_fn_entry` array (guest address, guest size, flags,
 host function), optional line map, code base, name, and the function maps of its shards
 (section 11). The same record
-describes statically linked code: relift emits `rl_units.c` with
-`rl_static_units[]` and `rl_static_unit_count`, and the runtime fills the
-table from them at start-up.
+describes statically linked code: the emitted program file holds the unit
+table and passes it to the loader in `rl_switch_program` (`units` and
+`unit_count`), and the runtime fills its table from it at start-up. The
+runtime library names no symbol that the program provides, so it links as a
+shared library on every host.
 
 ### Shipped builds
 

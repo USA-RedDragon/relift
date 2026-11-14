@@ -306,11 +306,6 @@ typedef struct rl_unit {
 /** @brief Type of the exported RL_UNIT_SYMBOL function. */
 typedef const rl_unit *rl_unit_fn(void);
 
-/** @brief Static units of the shipped program, emitted by relift into rl_units.c. */
-extern const rl_unit *const rl_static_units[];
-/** @brief Number of entries in rl_static_units. */
-extern const uint32_t rl_static_unit_count;
-
 /** @brief Dev protocol frame magic, "RLDV" little-endian. */
 #define RL_DEV_MAGIC 0x56444C52u
 /**

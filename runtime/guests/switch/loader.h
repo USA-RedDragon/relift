@@ -46,11 +46,15 @@ typedef struct rl_switch_program {
     uint64_t main_stack_size;
     /** @brief Program id (svcGetInfo 18). */
     uint64_t program_id;
+    /** @brief Lifted units linked into the program (NULL for none, as in a hot-loading dev build). */
+    const rl_unit *const *units;
+    /** @brief Number of entries in units. */
+    uint32_t unit_count;
 } rl_switch_program;
 
 /**
  * @brief Starts the Switch guest: brings up the process with the program's
- * settings, registers the static units (rl_static_units), maps every module
+ * settings, registers the static units (p->units), maps every module
  * (text and rodata as CODE_STATIC, data and bss as CODE_MUTABLE) and copies
  * its image, registers fsp-srv on the host directory named by RELIFT_SDMC
  * ("./sdmc" when unset, created when missing), attaches the calling thread

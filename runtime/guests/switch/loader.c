@@ -14,8 +14,6 @@
 #include <sys/stat.h>
 
 /** @brief Weak so the runtime library links before the program defines its units. */
-extern const rl_unit *const rl_static_units[] __attribute__((weak));
-extern const uint32_t rl_static_unit_count __attribute__((weak));
 
 static uint64_t align_up(uint64_t v) { return (v + HOS_PAGE - 1) & ~(HOS_PAGE - 1); }
 
@@ -142,8 +140,8 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
                (unsigned long long)hos.lay.code_end);
         return 1;
     }
-    if (&rl_static_units != NULL && &rl_static_unit_count != NULL) {
-        if (rl_units_register(rl_static_units, rl_static_unit_count) != 0) {
+    if (p->units && p->unit_count) {
+        if (rl_units_register(p->units, p->unit_count) != 0) {
             rl_log(RL_LOG_ERROR, "loader", "a static unit was refused");
             return 1;
         }
