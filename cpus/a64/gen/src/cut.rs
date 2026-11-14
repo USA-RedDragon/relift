@@ -8,7 +8,7 @@
 //!   and SIMD enabled, no SPE, BRBE or GCS).
 //! - FEAT: `IsFeatureImplemented`: true for the Armv8.0-A base, a lift-time
 //!   test of the CPU's `Features` (`St::has`) for the extensions in
-//!   `eval::LIFT_TIME_FEATURES`, false for every other feature.
+//!   `LIFT_TIME_FEATURES`, false for every other feature.
 //!   A template that reads an absent feature refuses to lift (Unsupported)
 //!   on a CPU that has it (except `NO_EL0_EFFECT`), so no semantics of a
 //!   missing extension is silently assumed.

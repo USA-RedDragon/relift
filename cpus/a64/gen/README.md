@@ -23,22 +23,30 @@ architecture (sail-arm, BSD-3-Clause-Clear, see `NOTICE-sail-arm`) by the
 `relift-cpu-a64-gen` crate in this folder. Neither the generator nor the Sail
 sources are needed to build; `generated/mod.rs` is hand-written.
 
-The generator parses the Sail subset the model uses, then runs the Sail
-semantics of each encoding's decode clauses in a staged evaluator: fixed bits
-are known while generating, the other instruction bits become Rust code run
-at lift time, and guest state becomes `relift-ir` builder calls. A value that
+The generator is the A64 layer over `relift-sail` (`core/sail`), which holds
+the parser, the model tables and the staged evaluator and knows nothing of
+A64. The Sail subset the model uses is parsed there, and the Sail semantics of
+each encoding's decode clauses run in the staged evaluator: fixed bits are
+known while generating, the other instruction bits become Rust code run at
+lift time, and guest state becomes `relift-ir` builder calls. A value that
 must be known while generating (a width, a loop bound, the choice of decode
-clause) splits the template on the bits it depends on. The functions in
-`src/cut.rs` are not translated but written by hand: register access, the PC
-and branches, memory, the exclusive monitor (an exclusive load of a
-pair reads as one access, and the model's own alignment abort of LDXP
+clause) splits the template on the bits it depends on.
+
+This crate supplies what is A64: `A64` in `src/cut.rs` implements
+`relift_sail::eval::Cpu` (the cut line, the PSTATE and `FPSR.QC` handling,
+register configuration and the decode clause arguments) and
+`relift_sail::stage::Stage`, and `src/template.rs` implements
+`relift_sail::stage::Form` for the A64 encodings and decode groups. The
+functions in `src/cut.rs` are not translated but written by hand: register
+access, the PC and branches, memory, the exclusive monitor (an exclusive load
+of a pair reads as one access, and the model's own alignment abort of LDXP
 becomes the `SLOW_ALIGN` guard) and the LSE atomics,
 checks that are no-ops at EL0, `IsFeatureImplemented` (a lift-time
-`St::has` test for the extensions in `eval::LIFT_TIME_FEATURES`), the AES
+`St::has` test for the extensions in `LIFT_TIME_FEATURES` of `src/cut.rs`), the AES
 and SM4 table steps (`relift_ir::CryptoOp`, checked against the Sail tables
 on every run), the floating-point primitives, `DecodeBitMasks`, and the
 integer quotient of `SDIV` and `UDIV`. Their lift-time side is
-`src/lift/sail/rt.rs`, `half.rs` and `align.rs`. A run-time index into a
+`cpus/a64/src/lift/sail/rt.rs`, `half.rs` and `align.rs`. A run-time index into a
 value wider than 128 bits (TBL, TBX) becomes shifts of its 128-bit parts.
 
 Regenerate from the repository root:

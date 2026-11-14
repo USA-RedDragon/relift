@@ -72,6 +72,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | Band | Crate | Folder | Role |
 |---|---|---|---|
 | 0 | `relift-ir` | `core/ir` | Guest-neutral IR: values, ops, explicit flags, memory ops with width, endianness and ordering; cycle ticks, I/O accesses, sync points and code banks for hardware-register guests |
+| 0 | `relift-sail` | `core/sail` | The shared Sail frontend of the template generators: parser, model tables and the staged evaluator that turns the semantics of one encoding into a lifting template body. A CPU implements `eval::Cpu` (the cut line, register setup) and `stage::Form` (its encodings and decode groups) in its generator crate; knows no CPU and no guest |
 | 0 | `relift-cache` | `core/cache` | Content-addressed store, stage keys, and the one file writer |
 | 0 | `relift-host` | `core/host` | The host target list that emit and build share |
 | 0 | `relift-proc` | `core/proc` | The one subprocess runner |
@@ -83,7 +84,8 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
-| 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model; run by hand, linked by nothing |
+| 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
+| 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Checks that `relift-sail` reads the SM83 Sail model (`cpus/sm83/sail/sm83.sail`) and that its decode clauses match the opcode table; run by hand, linked by nothing |
 | 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder and opcode table: length, M-cycles taken and not taken, flags, bus access per cycle; no IR yet, no dependencies |
 | 2 | `relift-gb-formats` | `guests/gb/formats` | Game Boy and Game Boy Color cartridge format: header, mapper kinds, ROM and RAM size codes, both checksums, bank layout; no dependencies |
 | 2 | `relift-gb-analyze` | `guests/gb/analyze` | Function discovery across mapper banks: code locations are (bank, address), bank-register writes are tracked along paths, bank-switch trampolines are found and resolved at their call sites, jumps into RAM are reported; decode and control flow only |
