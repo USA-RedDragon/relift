@@ -21,7 +21,8 @@ cargo build --release -p relift
 git config core.hooksPath .githooks
 ```
 
-The toolchain is pinned in `rust-toolchain.toml`. See `ARCHITECTURE.md` for
+The toolchain is pinned in `rust-toolchain.toml`. Before contributing, read
+`ARCHITECTURE.md`: section 0 lists the rules that bite, and the rest covers
 how the workspace is laid out and which tests hold it in shape.
 
 ## Configuration
