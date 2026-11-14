@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # The rust-cross image, pinned by digest. Its RUST_VERSION must equal the
+  # channel in rust-toolchain.toml; the cross job checks that.
+  CROSS_IMAGE: ghcr.io/usa-reddragon/rust-cross:1.98.1@sha256:a4d9cb8c3d4a4134c36dec1df78f1b0cc760d7fe443240dd5303ee64a01996c2
+  CARGO_DENY_VERSION: 0.20.2
+  CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+
+jobs:
+  checks:
+    name: fmt, clippy, tests, charter, deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            .
+            check
+
+      - name: fmt
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path check/Cargo.toml --all --check
+
+      - name: clippy
+        run: |
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo clippy --manifest-path check/Cargo.toml --all-targets --all-features --locked -- -D warnings
+
+      - name: charter, unsafe roster and funnels
+        run: cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
+
+      - name: tests
+        run: cargo test --workspace --locked
+
+      - name: cargo-deny
+        run: |
+          dir="$RUNNER_TEMP/cargo-deny"
+          mkdir -p "$dir"
+          name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL -o "$dir/deny.tgz" "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$name.tar.gz"
+          echo "$CARGO_DENY_SHA256  $dir/deny.tgz" | sha256sum -c -
+          tar -xzf "$dir/deny.tgz" -C "$dir"
+          "$dir/$name/cargo-deny" check
+
+  macos:
+    name: tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: tests
+        run: cargo test --workspace --locked
+
+  cross:
+    name: cross ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-gnullvm
+          - aarch64-pc-windows-gnullvm
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The image is about 4.3 GiB compressed and 16 GB unpacked, more than a
+      # hosted runner has free. A job-level `container:` is pulled before any
+      # step runs, so the image is run with `docker run` after this step.
+      - name: Free disk for the cross image
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force
+          df -h /
+
+      - name: Pull the cross image
+        run: docker pull "$CROSS_IMAGE"
+
+      - name: Build relift for ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          docker run --rm -v "$PWD:/project" -w /project -e TARGET "$CROSS_IMAGE" bash -euo pipefail -c '
+            pinned=$(sed -n "s/^channel = \"\(.*\)\"$/\1/p" rust-toolchain.toml)
+            test "${RUST_VERSION:?the image must set RUST_VERSION}" = "$pinned" \
+              || { echo "::error::the image carries Rust $RUST_VERSION but rust-toolchain.toml pins $pinned"; exit 1; }
+            export RUSTUP_TOOLCHAIN="$RUST_VERSION"
+            rustup target list --installed | grep -qx "$TARGET" \
+              || { echo "::error::the image no longer ships $TARGET std"; exit 1; }
+            CARGO_TARGET_DIR=target/cross cargo build --locked --release -p relift --target "$TARGET"
+            ls -l target/cross/"$TARGET"/release/relift*
+          '
