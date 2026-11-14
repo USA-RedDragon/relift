@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use relift_cpu_sm83::{Options, Sm83, lift_bytes};
 use relift_emit::{Function, Insn, Options as EmitOptions, emit};
-use relift_guest::Frontend;
 use relift_ir::{AddrClass, IoMap, IoRange};
 
 const ROM: [u8; 15] = [
@@ -165,13 +164,13 @@ fn a_lifted_rom_with_stop_links_and_runs() {
     let mut sources = Vec::new();
     for file in &out.files {
         let p = dir.join(&file.name);
-        std::fs::write(&p, &file.text).expect("writes");
+        relift_cache::write_if_changed(&p, file.text.as_bytes()).expect("writes");
         if file.name.ends_with(".c") {
             sources.push(p);
         }
     }
     let m = dir.join("machine.c");
-    std::fs::write(&m, MACHINE).expect("writes");
+    relift_cache::write_if_changed(&m, MACHINE.as_bytes()).expect("writes");
     sources.push(m);
     let rt = root.join("runtime");
     for entry in std::fs::read_dir(rt.join("core")).expect("lists the core") {
