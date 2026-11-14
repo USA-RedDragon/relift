@@ -25,6 +25,7 @@ mod alu;
 mod cb;
 mod flow;
 mod load;
+mod sail;
 
 use core::fmt;
 
@@ -490,6 +491,24 @@ fn lift_one(cx: &mut Cx, ins: &Instruction) -> Lifted<Done> {
     }
 }
 
+/// Which lifter makes the instruction's operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Engine {
+    /// The hand-written lifter in this module.
+    Hand,
+    /// The templates generated from the Sail model.
+    Sail,
+}
+
+impl Engine {
+    fn one(self, cx: &mut Cx, ins: &Instruction) -> Lifted<Done> {
+        match self {
+            Engine::Hand => lift_one(cx, ins),
+            Engine::Sail => sail::lift_one(cx, ins),
+        }
+    }
+}
+
 /// How `ins` is lifted: at `pc`, with `next` the instruction after it (for
 /// `EI`), as the continuation of a taken conditional (`half`), and as the
 /// bug view (`view`), which sets only the addresses of continuations.
@@ -501,18 +520,20 @@ struct Plan<'a> {
     view: u64,
     /// The address the block is known by, when it is not `pc`.
     label: Option<u64>,
+    /// Which lifter makes the operations.
+    engine: Engine,
 }
 
 fn lift_plan(plan: &Plan, opts: &Options) -> Lifted<Block> {
     let ins = plan.ins;
     let mut cx = Cx::new(ins, plan.pc, plan.view, plan.half);
-    let mut done = lift_one(&mut cx, ins)?;
+    let mut done = plan.engine.one(&mut cx, ins)?;
     let mut len = u32::from(ins.length());
     if ins.opcode.mnemonic == Mnemonic::Ei && !plan.half {
         let nx = plan.next.ok_or(LiftError::NeedsNext)?;
         cx.pc = plan.pc.wrapping_add(1);
         cx.begin(nx, false);
-        done = lift_one(&mut cx, nx)?;
+        done = plan.engine.one(&mut cx, nx)?;
         if done.kind == Kind::Half {
             return Err(LiftError::Unsupported(
                 "EI before a conditional call or return",
@@ -534,6 +555,9 @@ fn lift_plan(plan: &Plan, opts: &Options) -> Lifted<Block> {
         },
     );
     let mut block = classify_io(&block, &opts.map);
+    if plan.engine == Engine::Sail {
+        block = relift_ir::dce(&block);
+    }
     let sync = match done.kind {
         Kind::Control => true,
         Kind::Half => false,
@@ -591,6 +615,7 @@ pub fn lift_with(
             half: false,
             view: 0,
             label: None,
+            engine: Engine::Hand,
         },
         opts,
     )
@@ -606,6 +631,26 @@ pub fn lift_with(
 /// The bytes end inside an instruction, the instruction is not defined, or
 /// the address names no block.
 pub fn lift_bytes(bytes: &[u8], pc: u64, opts: &Options) -> Result<Block, LiftError> {
+    lift_bytes_with(bytes, pc, opts, Engine::Hand)
+}
+
+/// As [`lift_bytes`], with each instruction's operations from the templates
+/// generated from the Sail model (`cpus/sm83/sail/sm83.sail`) instead of the
+/// hand-written lifter; the block structure is the same.
+///
+/// # Errors
+///
+/// As [`lift_bytes`].
+pub fn lift_bytes_sail(bytes: &[u8], pc: u64, opts: &Options) -> Result<Block, LiftError> {
+    lift_bytes_with(bytes, pc, opts, Engine::Sail)
+}
+
+fn lift_bytes_with(
+    bytes: &[u8],
+    pc: u64,
+    opts: &Options,
+    engine: Engine,
+) -> Result<Block, LiftError> {
     let flags = pc & (HALF | BUG);
     let real = u16::try_from(pc & 0xFFFF).map_err(|_| LiftError::Address(pc))?;
     if pc > 0x3_FFFF {
@@ -642,6 +687,7 @@ pub fn lift_bytes(bytes: &[u8], pc: u64, opts: &Options) -> Result<Block, LiftEr
             half,
             view: flags & BUG,
             label: (flags != 0).then_some(pc),
+            engine,
         },
         opts,
     )
