@@ -23,6 +23,7 @@ fn plan(dir: &Path, clang: &Path, bodies: &[&str]) -> Plan {
             obj: dir.join("obj").join(format!("f{i}.o")),
             flags: vec!["-O0".into()],
             pool: None,
+            last: false,
         });
     }
     Plan {

@@ -302,8 +302,9 @@ fn lift_summary(functions: usize, unlifted: usize) -> Line {
 
 /// Bounds the compilers' memory, with the budget at three fifths of the
 /// memory available now: those that would not fit beside `jobs - 1` others
-/// go in a `heavy` pool sized to fit, and those that need more than half
-/// the budget in a `giant` pool of depth one. Sorts `compiles` largest
+/// go in a `heavy` pool sized to fit, and those that need more than a
+/// quarter of it in a `giant` pool of depth one, after all others. Sorts
+/// `compiles` largest
 /// source first (so the long compiles start early), giants last (so
 /// everything else is done before one of them can exhaust the memory).
 /// Returns the pools to declare.
@@ -327,6 +328,7 @@ fn memory_pools(compiles: &mut Vec<Compile>, jobs: u32) -> Vec<(String, u32)> {
     }
     for &i in &s.giant {
         compiles[i].pool = Some("giant".into());
+        compiles[i].last = true;
     }
     if !s.giant.is_empty() {
         pools.push(("giant".into(), 1));
@@ -605,6 +607,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             obj: obj(s, "lifted"),
             flags: lifted_flags.clone(),
             pool: None,
+            last: false,
         })
         .collect();
     for s in &emitted.fp_part1 {
@@ -625,6 +628,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             obj: obj(s, "lifted"),
             flags: rt_flags.clone(),
             pool: None,
+            last: false,
         });
     }
     for s in runtime_sources(&rt)? {
@@ -633,6 +637,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             src: s,
             flags: rt_flags.clone(),
             pool: None,
+            last: false,
         });
     }
     compiles.extend(extras.compiles(&rt, &rt_flags, &|s| obj(s, "rt")));
