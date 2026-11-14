@@ -24,6 +24,8 @@ Prototype names used in the tags:
 - **placement prototype**: a test of Vulkan placed memory mapping, host
   pointer import and shadow buffers inside a guest reservation, on an NVIDIA
   GPU and llvmpipe on x86-64 Linux and MoltenVK on an Apple M2 Mac.
+- **16 KiB-page prototype**: copy, ownership-flip and trap-and-emulate
+  handling of 4 KiB guest mappings on 16 KiB host pages, on an Apple M2 Mac.
 - **slice prototype**: a lift, compile and compare run over a small set of
   functions, checked against a reference with many inputs.
 - **probe**: the ABI probe programs described under "Checks run for this
@@ -89,17 +91,32 @@ Prototype names used in the tags:
   SIGBUS for `PROT_NONE`). A fault address inside the reservation is a guest
   fault at `si_addr - mem`. [verified: placement prototype]
 - **16 KiB host pages.** Lifted code does not care; only the runtime's
-  memory manager does. Rules: host mappings and protections are applied at
-  host page granularity; a host page gets the union of the permissions of
-  the guest pages in it; the runtime keeps the exact 4 KiB guest state for
-  `svcQueryMemory` and friends. Consequence: a guest access to a 4 KiB page
-  the guest unmapped or protected is not caught if a neighbor in the same
-  host page is accessible. `svcMapMemory`-style aliases that are not 16 KiB
-  aligned cannot be built with host `mmap` on such hosts: the runtime stops
-  with a report. Vulkan host-pointer imports need 16 KiB alignment and size
-  on macOS. [verified: placement prototype, `mmap(FIXED)` and `mprotect` at a 4 KiB
-  offset fail with EINVAL on an Apple M2 Mac; rules inferred; open: whether
-  any guest program aliases at 4 KiB granularity]
+  memory manager does. `mmap(MAP_FIXED)` and `mprotect` at a 4 KiB offset fail
+  with EINVAL on an Apple M2 Mac [verified: placement and 16 KiB-page
+  prototypes]. The runtime keeps the exact 4 KiB guest state for
+  `svcQueryMemory` and friends, and handles each case as follows:
+  - **Module segments and permission changes with unaligned edges:** a host
+    page gets the union of the permissions of the guest pages in it.
+    Execute permission never reaches host memory (code is lifted), so only
+    read-only next to read-write over-grants, and only a guest bug notices.
+    Consequence: a guard page smaller than 16 KiB is not enforced. A strict
+    mode keeps the one mixed host page `PROT_NONE` and emulates each access
+    to it in the fault handler, at about 2 us per access.
+  - **Permission changes on 16 KiB-aligned ranges:** plain `mprotect`.
+  - **`svcMapMemory` (move semantics, e.g. stack mirrors):** copy the range to
+    the destination, make the source fault, copy back on unmap. Exact; costs
+    about 5 us for 4 KiB to 350 us for 1 MiB.
+  - **Live aliases (shared or transfer memory) that are not 16 KiB aligned:**
+    one view owns the data at full speed and an access to the other view
+    faults, copies and flips ownership (about 10 to 90 us per flip for 4 KiB
+    to 1 MiB); for small ranges with alternating fine-grained access, both
+    views stay `PROT_NONE` and every access is emulated (about 2 us). A hot
+    loop over such an alias stops with a report. Aligned live aliases use a
+    real host alias [inferred, not prototyped].
+  - Vulkan host-pointer imports need 16 KiB alignment and size on macOS.
+  [verified: 16 KiB-page prototype on an Apple M2 Mac, all correctness checks
+  including 20,000-operation random alias tests against a reference; normal
+  load 1.25 ns, emulated access about 2.06 us]
 
 ## 3. Guest context (`rl_ctx`)
 
@@ -619,7 +636,9 @@ committed.
    x86-64 Linux and arm64 macOS (8, 9).
 9. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
    preservation (which registers `rl_svc` may change besides outputs) (10).
-10. 4 KiB-granular aliasing on 16 KiB hosts (2).
+10. Whether any guest program keeps an alias that is not 16 KiB aligned live
+    while both views are in use; aligned live aliases are not yet prototyped
+    (2).
 11. Guard sizes against real wild-pointer patterns (2).
 12. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
