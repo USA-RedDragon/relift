@@ -2,7 +2,7 @@
 //! sees it while it runs, branch exits, and the integer helpers their static
 //! code uses. These are the hand-written side of the cut line.
 
-use relift_ir::{Builder, Exit, Flow, Next, Reg, Value, Width};
+use relift_ir::{Builder, CmpOp, Exit, Flow, FpOp, Next, Reg, Value, Width};
 
 use crate::regs;
 
@@ -303,4 +303,261 @@ pub fn decode_bit_masks(
         i += esize;
     }
     (w & mask(m), t & mask(m), true)
+}
+
+/// The floating-point cut: arithmetic, comparisons and min/max on 32- and
+/// 64-bit values with FPCR zero (round to nearest, no flush, NaNs
+/// propagated), as Arm's `FPProcessNaNs` and `FPDefaultNaN` describe.
+/// Exception flags (FPSR) are not produced.
+pub struct Fp {
+    w: Width,
+    sign: u128,
+    inf: u128,
+    quiet: u128,
+}
+
+impl Fp {
+    /// The format of `w` bits (32 or 64).
+    pub fn new(w: u32) -> Fp {
+        let (e, f) = if w == 32 { (8, 23) } else { (11, 52) };
+        Fp {
+            w: Width::new(w),
+            sign: 1u128 << (w - 1),
+            inf: mask(e) << f,
+            quiet: 1u128 << (f - 1),
+        }
+    }
+
+    fn k(&self, b: &mut Builder, v: u128) -> Value {
+        b.konst(self.w, v)
+    }
+
+    fn magnitude(&self, b: &mut Builder, x: Value) -> Value {
+        let m = self.k(b, !self.sign & mask(self.w.bits()));
+        b.and(x, m)
+    }
+
+    /// Whether `x` is a NaN.
+    pub fn is_nan(&self, b: &mut Builder, x: Value) -> Value {
+        let m = self.magnitude(b, x);
+        let inf = self.k(b, self.inf);
+        b.cmp(CmpOp::Ult, inf, m)
+    }
+
+    fn is_snan(&self, b: &mut Builder, x: Value) -> Value {
+        let n = self.is_nan(b, x);
+        let q = self.k(b, self.quiet);
+        let qb = b.and(x, q);
+        let z = self.k(b, 0);
+        let s = b.cmp(CmpOp::Eq, qb, z);
+        b.and(n, s)
+    }
+
+    fn is_inf(&self, b: &mut Builder, x: Value) -> Value {
+        let m = self.magnitude(b, x);
+        let inf = self.k(b, self.inf);
+        b.cmp(CmpOp::Eq, m, inf)
+    }
+
+    fn is_zero(&self, b: &mut Builder, x: Value) -> Value {
+        let m = self.magnitude(b, x);
+        let z = self.k(b, 0);
+        b.cmp(CmpOp::Eq, m, z)
+    }
+
+    fn quieted(&self, b: &mut Builder, x: Value) -> Value {
+        let q = self.k(b, self.quiet);
+        b.or(x, q)
+    }
+
+    fn default_nan(&self, b: &mut Builder) -> Value {
+        self.k(b, self.inf | self.quiet)
+    }
+
+    /// `r` with any NaN replaced by the default NaN.
+    fn canonical(&self, b: &mut Builder, r: Value) -> Value {
+        let n = self.is_nan(b, r);
+        let d = self.default_nan(b);
+        b.select(n, d, r)
+    }
+
+    /// `FPProcessNaNs` over `ops` in order, else `r`.
+    fn nans(&self, b: &mut Builder, ops: &[Value], r: Value) -> Value {
+        let mut out = r;
+        for x in ops.iter().rev() {
+            let n = self.is_nan(b, *x);
+            out = b.select(n, *x, out);
+        }
+        for x in ops.iter().rev() {
+            let s = self.is_snan(b, *x);
+            let q = self.quieted(b, *x);
+            out = b.select(s, q, out);
+        }
+        out
+    }
+
+    /// A two-operand IEEE operation with Arm NaN handling.
+    pub fn bin(&self, b: &mut Builder, op: FpOp, x: Value, y: Value) -> Value {
+        let r = b.fp(op, &[x, y], self.w);
+        let r = self.canonical(b, r);
+        self.nans(b, &[x, y], r)
+    }
+
+    /// The square root with Arm NaN handling.
+    pub fn sqrt(&self, b: &mut Builder, x: Value) -> Value {
+        let r = b.fp(FpOp::Sqrt, &[x], self.w);
+        let r = self.canonical(b, r);
+        self.nans(b, &[x], r)
+    }
+
+    /// `FPMulAdd(addend, x, y)`: `addend + x * y` with one rounding.
+    pub fn mul_add(&self, b: &mut Builder, addend: Value, x: Value, y: Value) -> Value {
+        let r = b.fp(FpOp::MulAdd, &[x, y, addend], self.w);
+        let r = self.canonical(b, r);
+        let r = self.nans(b, &[addend, x, y], r);
+        let an = self.is_nan(b, addend);
+        let asn = self.is_snan(b, addend);
+        let nasn = b.not(asn);
+        let aq = b.and(an, nasn);
+        let (ix, iy) = (self.is_inf(b, x), self.is_inf(b, y));
+        let (zx, zy) = (self.is_zero(b, x), self.is_zero(b, y));
+        let p = b.and(ix, zy);
+        let q = b.and(zx, iy);
+        let pq = b.or(p, q);
+        let invalid = b.and(aq, pq);
+        let d = self.default_nan(b);
+        b.select(invalid, d, r)
+    }
+
+    fn key(&self, b: &mut Builder, x: Value) -> Value {
+        let s = self.k(b, self.sign);
+        let sb = b.and(x, s);
+        let z = self.k(b, 0);
+        let neg = b.cmp(CmpOp::Ne, sb, z);
+        let nx = b.not(x);
+        let px = b.or(x, s);
+        b.select(neg, nx, px)
+    }
+
+    /// `(unordered, equal, less)` for `x` against `y`.
+    fn order(&self, b: &mut Builder, x: Value, y: Value) -> (Value, Value, Value) {
+        let nx = self.is_nan(b, x);
+        let ny = self.is_nan(b, y);
+        let un = b.or(nx, ny);
+        let both = b.or(x, y);
+        let bz = self.is_zero(b, both);
+        let same = b.cmp(CmpOp::Eq, x, y);
+        let eq0 = b.or(same, bz);
+        let ord = b.not(un);
+        let eq = b.and(ord, eq0);
+        let (kx, ky) = (self.key(b, x), self.key(b, y));
+        let lt0 = b.cmp(CmpOp::Ult, kx, ky);
+        let ne = b.not(eq0);
+        let lt1 = b.and(lt0, ne);
+        let lt = b.and(ord, lt1);
+        (un, eq, lt)
+    }
+
+    /// `FPCompare`: NZCV as four bits.
+    pub fn compare(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        let (un, eq, lt) = self.order(b, x, y);
+        let w4 = Width::new(4);
+        let gt = b.konst(w4, 0b0010);
+        let l = b.konst(w4, 0b1000);
+        let e = b.konst(w4, 0b0110);
+        let u = b.konst(w4, 0b0011);
+        let r = b.select(lt, l, gt);
+        let r = b.select(eq, e, r);
+        b.select(un, u, r)
+    }
+
+    /// `FPCompareEQ`, `FPCompareGE` or `FPCompareGT` (`kind` 0, 1, 2).
+    pub fn compare_bool(&self, b: &mut Builder, x: Value, y: Value, kind: u32) -> Value {
+        let (un, eq, lt) = self.order(b, x, y);
+        let ord = b.not(un);
+        match kind {
+            0 => eq,
+            1 => {
+                let nlt = b.not(lt);
+                b.and(ord, nlt)
+            }
+            _ => {
+                let nlt = b.not(lt);
+                let neq = b.not(eq);
+                let g = b.and(nlt, neq);
+                b.and(ord, g)
+            }
+        }
+    }
+
+    /// `FPMax` or `FPMin` without the alternative behaviors.
+    pub fn max_min(&self, b: &mut Builder, x: Value, y: Value, max: bool) -> Value {
+        let (_, _, lt) = self.order(b, x, y);
+        let (_, eq, _) = self.order(b, x, y);
+        let r = if max {
+            let gt0 = b.not(lt);
+            let neq = b.not(eq);
+            let gt = b.and(gt0, neq);
+            b.select(gt, x, y)
+        } else {
+            b.select(lt, x, y)
+        };
+        let both = b.or(x, y);
+        let bz = self.is_zero(b, both);
+        let z = if max { b.and(x, y) } else { b.or(x, y) };
+        let r = b.select(bz, z, r);
+        self.nans(b, &[x, y], r)
+    }
+
+    /// `FPMaxNum` or `FPMinNum`: a quiet NaN against a non-quiet-NaN operand
+    /// becomes the infinity that loses.
+    pub fn max_min_num(&self, b: &mut Builder, x: Value, y: Value, max: bool) -> Value {
+        let ninf = self.k(b, self.inf | if max { self.sign } else { 0 });
+        let (nx, ny) = (self.is_nan(b, x), self.is_nan(b, y));
+        let (sx, sy) = (self.is_snan(b, x), self.is_snan(b, y));
+        let (nsx, nsy) = (b.not(sx), b.not(sy));
+        let qx = b.and(nx, nsx);
+        let qy = b.and(ny, nsy);
+        let (nqx, nqy) = (b.not(qx), b.not(qy));
+        let rx = b.and(qx, nqy);
+        let ry = b.and(nqx, qy);
+        let x2 = b.select(rx, ninf, x);
+        let y2 = b.select(ry, ninf, y);
+        self.max_min(b, x2, y2, max)
+    }
+
+    /// `FPCompareEQ`.
+    pub fn compare_eq(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.compare_bool(b, x, y, 0)
+    }
+
+    /// `FPCompareGE`.
+    pub fn compare_ge(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.compare_bool(b, x, y, 1)
+    }
+
+    /// `FPCompareGT`.
+    pub fn compare_gt(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.compare_bool(b, x, y, 2)
+    }
+
+    /// `FPMax`.
+    pub fn max(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.max_min(b, x, y, true)
+    }
+
+    /// `FPMin`.
+    pub fn min(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.max_min(b, x, y, false)
+    }
+
+    /// `FPMaxNum`.
+    pub fn max_num(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.max_min_num(b, x, y, true)
+    }
+
+    /// `FPMinNum`.
+    pub fn min_num(&self, b: &mut Builder, x: Value, y: Value) -> Value {
+        self.max_min_num(b, x, y, false)
+    }
 }

@@ -6,7 +6,7 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, Order, UnOp, Width};
+use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, Order, UnOp, Width};
 
 use crate::decode::Encoding;
 use crate::lift::LiftError;
@@ -53,6 +53,306 @@ pub(super) fn FABS_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v9 = b.konst(Width::new(96), 0x0);
     let v10 = b.concat(v9, v8);
     st.v_set(b, s3 as u32, v10, None);
+    Ok(())
+}
+
+/// `FADD_D_floatdp2`.
+///
+/// Cut: ENV, FPAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FADD_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FADD_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).bin(b, FpOp::Add, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FADD_S_floatdp2`.
+///
+/// Cut: ENV, FPAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FADD_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FADD_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).bin(b, FpOp::Add, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FCCMP_D_floatccmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCCMP_D_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCCMP_D_floatccmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let s9: u128 = (s3 >> 1) & 0x7;
+    let s10: bool = s9 == 0x0u128;
+    let v11 = st.get(b, regs::Z);
+    let v12 = b.konst(Width::new(1), 0x1);
+    let v13 = b.cmp(CmpOp::Eq, v11, v12);
+    let s15: bool = s9 == 0x1u128;
+    let v17 = st.get(b, regs::C);
+    let v18 = b.konst(Width::new(1), 0x1);
+    let v19 = b.cmp(CmpOp::Eq, v17, v18);
+    let s22: bool = s9 == 0x2u128;
+    let v24 = st.get(b, regs::N);
+    let v25 = b.konst(Width::new(1), 0x1);
+    let v26 = b.cmp(CmpOp::Eq, v24, v25);
+    let s29: bool = s9 == 0x3u128;
+    let v31 = st.get(b, regs::V);
+    let v32 = b.konst(Width::new(1), 0x1);
+    let v33 = b.cmp(CmpOp::Eq, v31, v32);
+    let s36: bool = s9 == 0x4u128;
+    let v38 = st.get(b, regs::C);
+    let v39 = b.konst(Width::new(1), 0x1);
+    let v40 = b.cmp(CmpOp::Eq, v38, v39);
+    let v41 = st.get(b, regs::Z);
+    let v42 = b.konst(Width::new(1), 0x0);
+    let v43 = b.cmp(CmpOp::Eq, v41, v42);
+    let v44 = b.and(v40, v43);
+    let s47: bool = s9 == 0x5u128;
+    let v49 = st.get(b, regs::N);
+    let v50 = st.get(b, regs::V);
+    let v51 = b.cmp(CmpOp::Eq, v49, v50);
+    let s54: bool = s9 == 0x6u128;
+    let v56 = st.get(b, regs::N);
+    let v57 = st.get(b, regs::V);
+    let v58 = b.cmp(CmpOp::Eq, v56, v57);
+    let v59 = st.get(b, regs::Z);
+    let v60 = b.konst(Width::new(1), 0x0);
+    let v61 = b.cmp(CmpOp::Eq, v59, v60);
+    let v62 = b.and(v58, v61);
+    let v69 = b.konst(Width::new(1), 1);
+    let v70 = if s54 { v62 } else { v69 };
+    let v72 = if s47 { v51 } else { v70 };
+    let v74 = if s36 { v44 } else { v72 };
+    let v76 = if s29 { v33 } else { v74 };
+    let v78 = if s22 { v26 } else { v76 };
+    let v80 = if s15 { v19 } else { v78 };
+    let v82 = if s10 { v13 } else { v80 };
+    let s84: u128 = (s3 >> 0) & 0x1;
+    let s85: bool = s84 == 0x1u128;
+    let s86: bool = s3 != 0xfu128;
+    let s87: bool = s85 && s86;
+    let v89 = b.not(v82);
+    let v92 = if s87 { v89 } else { v82 };
+    let v93 = rt::Fp::new(64).compare(b, v7, v8);
+    let v95 = b.konst(Width::new(4), s1);
+    let v96 = b.select(v92, v93, v95);
+    let v100 = b.extract(v96, 3, Width::new(1));
+    st.set(b, regs::N, v100, None);
+    let v101 = b.extract(v96, 2, Width::new(1));
+    st.set(b, regs::Z, v101, None);
+    let v102 = b.extract(v96, 1, Width::new(1));
+    st.set(b, regs::C, v102, None);
+    let v103 = b.extract(v96, 0, Width::new(1));
+    st.set(b, regs::V, v103, None);
+    Ok(())
+}
+
+/// `FCCMP_S_floatccmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCCMP_S_floatccmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCCMP_S_floatccmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0xf;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 12) & 0xf;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s4 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let s9: u128 = (s3 >> 1) & 0x7;
+    let s10: bool = s9 == 0x0u128;
+    let v11 = st.get(b, regs::Z);
+    let v12 = b.konst(Width::new(1), 0x1);
+    let v13 = b.cmp(CmpOp::Eq, v11, v12);
+    let s15: bool = s9 == 0x1u128;
+    let v17 = st.get(b, regs::C);
+    let v18 = b.konst(Width::new(1), 0x1);
+    let v19 = b.cmp(CmpOp::Eq, v17, v18);
+    let s22: bool = s9 == 0x2u128;
+    let v24 = st.get(b, regs::N);
+    let v25 = b.konst(Width::new(1), 0x1);
+    let v26 = b.cmp(CmpOp::Eq, v24, v25);
+    let s29: bool = s9 == 0x3u128;
+    let v31 = st.get(b, regs::V);
+    let v32 = b.konst(Width::new(1), 0x1);
+    let v33 = b.cmp(CmpOp::Eq, v31, v32);
+    let s36: bool = s9 == 0x4u128;
+    let v38 = st.get(b, regs::C);
+    let v39 = b.konst(Width::new(1), 0x1);
+    let v40 = b.cmp(CmpOp::Eq, v38, v39);
+    let v41 = st.get(b, regs::Z);
+    let v42 = b.konst(Width::new(1), 0x0);
+    let v43 = b.cmp(CmpOp::Eq, v41, v42);
+    let v44 = b.and(v40, v43);
+    let s47: bool = s9 == 0x5u128;
+    let v49 = st.get(b, regs::N);
+    let v50 = st.get(b, regs::V);
+    let v51 = b.cmp(CmpOp::Eq, v49, v50);
+    let s54: bool = s9 == 0x6u128;
+    let v56 = st.get(b, regs::N);
+    let v57 = st.get(b, regs::V);
+    let v58 = b.cmp(CmpOp::Eq, v56, v57);
+    let v59 = st.get(b, regs::Z);
+    let v60 = b.konst(Width::new(1), 0x0);
+    let v61 = b.cmp(CmpOp::Eq, v59, v60);
+    let v62 = b.and(v58, v61);
+    let v69 = b.konst(Width::new(1), 1);
+    let v70 = if s54 { v62 } else { v69 };
+    let v72 = if s47 { v51 } else { v70 };
+    let v74 = if s36 { v44 } else { v72 };
+    let v76 = if s29 { v33 } else { v74 };
+    let v78 = if s22 { v26 } else { v76 };
+    let v80 = if s15 { v19 } else { v78 };
+    let v82 = if s10 { v13 } else { v80 };
+    let s84: u128 = (s3 >> 0) & 0x1;
+    let s85: bool = s84 == 0x1u128;
+    let s86: bool = s3 != 0xfu128;
+    let s87: bool = s85 && s86;
+    let v89 = b.not(v82);
+    let v92 = if s87 { v89 } else { v82 };
+    let v93 = rt::Fp::new(32).compare(b, v7, v8);
+    let v95 = b.konst(Width::new(4), s1);
+    let v96 = b.select(v92, v93, v95);
+    let v100 = b.extract(v96, 3, Width::new(1));
+    st.set(b, regs::N, v100, None);
+    let v101 = b.extract(v96, 2, Width::new(1));
+    st.set(b, regs::Z, v101, None);
+    let v102 = b.extract(v96, 1, Width::new(1));
+    st.set(b, regs::C, v102, None);
+    let v103 = b.extract(v96, 0, Width::new(1));
+    st.set(b, regs::V, v103, None);
+    Ok(())
+}
+
+/// `FCMP_DZ_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMP_DZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMP_DZ_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let v3 = st.v_read(b, s2 as u32, 64);
+    let v4 = b.konst(Width::new(64), 0x0);
+    let v5 = rt::Fp::new(64).compare(b, v3, v4);
+    let v6 = b.extract(v5, 3, Width::new(1));
+    st.set(b, regs::N, v6, None);
+    let v7 = b.extract(v5, 2, Width::new(1));
+    st.set(b, regs::Z, v7, None);
+    let v8 = b.extract(v5, 1, Width::new(1));
+    st.set(b, regs::C, v8, None);
+    let v9 = b.extract(v5, 0, Width::new(1));
+    st.set(b, regs::V, v9, None);
+    Ok(())
+}
+
+/// `FCMP_D_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMP_D_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMP_D_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: u128 = (w >> 16) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s3 as u32, 64);
+    let v6 = st.v_read(b, s4 as u32, 64);
+    let v7 = rt::Fp::new(64).compare(b, v5, v6);
+    let v8 = b.extract(v7, 3, Width::new(1));
+    st.set(b, regs::N, v8, None);
+    let v9 = b.extract(v7, 2, Width::new(1));
+    st.set(b, regs::Z, v9, None);
+    let v10 = b.extract(v7, 1, Width::new(1));
+    st.set(b, regs::C, v10, None);
+    let v11 = b.extract(v7, 0, Width::new(1));
+    st.set(b, regs::V, v11, None);
+    Ok(())
+}
+
+/// `FCMP_SZ_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMP_SZ_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMP_SZ_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let v3 = st.v_read(b, s2 as u32, 32);
+    let v4 = b.konst(Width::new(32), 0x0);
+    let v5 = rt::Fp::new(32).compare(b, v3, v4);
+    let v6 = b.extract(v5, 3, Width::new(1));
+    st.set(b, regs::N, v6, None);
+    let v7 = b.extract(v5, 2, Width::new(1));
+    st.set(b, regs::Z, v7, None);
+    let v8 = b.extract(v5, 1, Width::new(1));
+    st.set(b, regs::C, v8, None);
+    let v9 = b.extract(v5, 0, Width::new(1));
+    st.set(b, regs::V, v9, None);
+    Ok(())
+}
+
+/// `FCMP_S_floatcmp`.
+///
+/// Cut: ENV, FPCompare, PSTATE.NZCV, V_read.
+pub(super) fn FCMP_S_floatcmp(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMP_S_floatcmp;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 5) & 0x1f;
+    let s2: u128 = (w >> 16) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s3 as u32, 32);
+    let v6 = st.v_read(b, s4 as u32, 32);
+    let v7 = rt::Fp::new(32).compare(b, v5, v6);
+    let v8 = b.extract(v7, 3, Width::new(1));
+    st.set(b, regs::N, v8, None);
+    let v9 = b.extract(v7, 2, Width::new(1));
+    st.set(b, regs::Z, v9, None);
+    let v10 = b.extract(v7, 1, Width::new(1));
+    st.set(b, regs::C, v10, None);
+    let v11 = b.extract(v7, 0, Width::new(1));
+    st.set(b, regs::V, v11, None);
     Ok(())
 }
 
@@ -200,6 +500,276 @@ pub(super) fn FCSEL_S_floatsel(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `FDIV_D_floatdp2`.
+///
+/// Cut: ENV, FPDiv, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FDIV_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FDIV_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).bin(b, FpOp::Div, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FDIV_S_floatdp2`.
+///
+/// Cut: ENV, FPDiv, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FDIV_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FDIV_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).bin(b, FpOp::Div, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMADD_D_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMADD_D_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMADD_D_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 64);
+    let v10 = st.v_read(b, s7 as u32, 64);
+    let v11 = st.v_read(b, s8 as u32, 64);
+    let v12 = rt::Fp::new(64).mul_add(b, v9, v10, v11);
+    let v13 = b.konst(Width::new(64), 0x0);
+    let v14 = b.concat(v13, v12);
+    st.v_set(b, s5 as u32, v14, None);
+    Ok(())
+}
+
+/// `FMADD_S_floatdp3`.
+///
+/// Cut: ENV, FPMulAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMADD_S_floatdp3(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMADD_S_floatdp3;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 10) & 0x1f;
+    let s4: u128 = (w >> 16) & 0x1f;
+    let s5: i128 = s1 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: i128 = s2 as i128;
+    let s8: i128 = s4 as i128;
+    let v9 = st.v_read(b, s6 as u32, 32);
+    let v10 = st.v_read(b, s7 as u32, 32);
+    let v11 = st.v_read(b, s8 as u32, 32);
+    let v12 = rt::Fp::new(32).mul_add(b, v9, v10, v11);
+    let v13 = b.konst(Width::new(96), 0x0);
+    let v14 = b.concat(v13, v12);
+    st.v_set(b, s5 as u32, v14, None);
+    Ok(())
+}
+
+/// `FMAXNM_D_floatdp2`.
+///
+/// Cut: ENV, FPMaxNum, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMAXNM_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAXNM_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).max_num(b, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMAXNM_S_floatdp2`.
+///
+/// Cut: ENV, FPMaxNum, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMAXNM_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAXNM_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).max_num(b, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMAX_D_floatdp2`.
+///
+/// Cut: ENV, FPMax, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMAX_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAX_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).max(b, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMAX_S_floatdp2`.
+///
+/// Cut: ENV, FPMax, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMAX_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAX_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).max(b, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMINNM_D_floatdp2`.
+///
+/// Cut: ENV, FPMinNum, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMINNM_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMINNM_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).min_num(b, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMINNM_S_floatdp2`.
+///
+/// Cut: ENV, FPMinNum, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMINNM_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMINNM_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).min_num(b, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMIN_D_floatdp2`.
+///
+/// Cut: ENV, FPMin, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMIN_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMIN_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).min(b, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMIN_S_floatdp2`.
+///
+/// Cut: ENV, FPMin, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMIN_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMIN_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).min(b, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
 /// `FMOV_32S_float2int`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_read, X_set.
@@ -327,6 +897,50 @@ pub(super) fn FMOV_S_floatimm(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FMUL_D_floatdp2`.
+///
+/// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMUL_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMUL_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).bin(b, FpOp::Mul, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FMUL_S_floatdp2`.
+///
+/// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMUL_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMUL_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).bin(b, FpOp::Mul, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
 /// `FNEG_D_floatdp1`.
 ///
 /// Cut: ENV, IsFeatureImplemented, V_read, V_set.
@@ -371,21 +985,183 @@ pub(super) fn FNEG_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `FNMUL_D_floatdp2`.
+///
+/// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMUL_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMUL_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).bin(b, FpOp::Mul, v7, v8);
+    let v10 = b.extract(v9, 63, Width::new(1));
+    let v11 = b.not(v10);
+    let v12 = b.extract(v9, 0, Width::new(63));
+    let v13 = b.concat(v11, v12);
+    let v14 = b.konst(Width::new(64), 0x0);
+    let v15 = b.concat(v14, v13);
+    st.v_set(b, s4 as u32, v15, None);
+    Ok(())
+}
+
+/// `FNMUL_S_floatdp2`.
+///
+/// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FNMUL_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FNMUL_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).bin(b, FpOp::Mul, v7, v8);
+    let v10 = b.extract(v9, 31, Width::new(1));
+    let v11 = b.not(v10);
+    let v12 = b.extract(v9, 0, Width::new(31));
+    let v13 = b.concat(v11, v12);
+    let v14 = b.konst(Width::new(96), 0x0);
+    let v15 = b.concat(v14, v13);
+    st.v_set(b, s4 as u32, v15, None);
+    Ok(())
+}
+
+/// `FSQRT_D_floatdp1`.
+///
+/// Cut: ENV, FPSqrt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FSQRT_D_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSQRT_D_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 64);
+    let v6 = rt::Fp::new(64).sqrt(b, v5);
+    let v7 = b.konst(Width::new(64), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FSQRT_S_floatdp1`.
+///
+/// Cut: ENV, FPSqrt, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FSQRT_S_floatdp1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSQRT_S_floatdp1;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let v5 = st.v_read(b, s4 as u32, 32);
+    let v6 = rt::Fp::new(32).sqrt(b, v5);
+    let v7 = b.konst(Width::new(96), 0x0);
+    let v8 = b.concat(v7, v6);
+    st.v_set(b, s3 as u32, v8, None);
+    Ok(())
+}
+
+/// `FSUB_D_floatdp2`.
+///
+/// Cut: ENV, FPSub, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FSUB_D_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSUB_D_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 64);
+    let v8 = st.v_read(b, s6 as u32, 64);
+    let v9 = rt::Fp::new(64).bin(b, FpOp::Sub, v7, v8);
+    let v10 = b.konst(Width::new(64), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
+/// `FSUB_S_floatdp2`.
+///
+/// Cut: ENV, FPSub, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FSUB_S_floatdp2(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSUB_S_floatdp2;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let v7 = st.v_read(b, s5 as u32, 32);
+    let v8 = st.v_read(b, s6 as u32, 32);
+    let v9 = rt::Fp::new(32).bin(b, FpOp::Sub, v7, v8);
+    let v10 = b.konst(Width::new(96), 0x0);
+    let v11 = b.concat(v10, v9);
+    st.v_set(b, s4 as u32, v11, None);
+    Ok(())
+}
+
 /// The generated template of `enc`, if there is one.
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
         Encoding::FABS_D_floatdp1 => FABS_D_floatdp1,
         Encoding::FABS_S_floatdp1 => FABS_S_floatdp1,
+        Encoding::FADD_D_floatdp2 => FADD_D_floatdp2,
+        Encoding::FADD_S_floatdp2 => FADD_S_floatdp2,
+        Encoding::FCCMP_D_floatccmp => FCCMP_D_floatccmp,
+        Encoding::FCCMP_S_floatccmp => FCCMP_S_floatccmp,
+        Encoding::FCMP_DZ_floatcmp => FCMP_DZ_floatcmp,
+        Encoding::FCMP_D_floatcmp => FCMP_D_floatcmp,
+        Encoding::FCMP_SZ_floatcmp => FCMP_SZ_floatcmp,
+        Encoding::FCMP_S_floatcmp => FCMP_S_floatcmp,
         Encoding::FCSEL_D_floatsel => FCSEL_D_floatsel,
         Encoding::FCSEL_S_floatsel => FCSEL_S_floatsel,
+        Encoding::FDIV_D_floatdp2 => FDIV_D_floatdp2,
+        Encoding::FDIV_S_floatdp2 => FDIV_S_floatdp2,
+        Encoding::FMADD_D_floatdp3 => FMADD_D_floatdp3,
+        Encoding::FMADD_S_floatdp3 => FMADD_S_floatdp3,
+        Encoding::FMAXNM_D_floatdp2 => FMAXNM_D_floatdp2,
+        Encoding::FMAXNM_S_floatdp2 => FMAXNM_S_floatdp2,
+        Encoding::FMAX_D_floatdp2 => FMAX_D_floatdp2,
+        Encoding::FMAX_S_floatdp2 => FMAX_S_floatdp2,
+        Encoding::FMINNM_D_floatdp2 => FMINNM_D_floatdp2,
+        Encoding::FMINNM_S_floatdp2 => FMINNM_S_floatdp2,
+        Encoding::FMIN_D_floatdp2 => FMIN_D_floatdp2,
+        Encoding::FMIN_S_floatdp2 => FMIN_S_floatdp2,
         Encoding::FMOV_32S_float2int => FMOV_32S_float2int,
         Encoding::FMOV_64D_float2int => FMOV_64D_float2int,
         Encoding::FMOV_D64_float2int => FMOV_D64_float2int,
         Encoding::FMOV_D_floatimm => FMOV_D_floatimm,
         Encoding::FMOV_S32_float2int => FMOV_S32_float2int,
         Encoding::FMOV_S_floatimm => FMOV_S_floatimm,
+        Encoding::FMUL_D_floatdp2 => FMUL_D_floatdp2,
+        Encoding::FMUL_S_floatdp2 => FMUL_S_floatdp2,
         Encoding::FNEG_D_floatdp1 => FNEG_D_floatdp1,
         Encoding::FNEG_S_floatdp1 => FNEG_S_floatdp1,
+        Encoding::FNMUL_D_floatdp2 => FNMUL_D_floatdp2,
+        Encoding::FNMUL_S_floatdp2 => FNMUL_S_floatdp2,
+        Encoding::FSQRT_D_floatdp1 => FSQRT_D_floatdp1,
+        Encoding::FSQRT_S_floatdp1 => FSQRT_S_floatdp1,
+        Encoding::FSUB_D_floatdp2 => FSUB_D_floatdp2,
+        Encoding::FSUB_S_floatdp2 => FSUB_S_floatdp2,
         _ => return None,
     })
 }
