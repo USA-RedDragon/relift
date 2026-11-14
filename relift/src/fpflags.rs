@@ -17,6 +17,8 @@
 //!
 //! - a relative relocation's value, `DT_INIT` and `DT_FINI`;
 //! - a code address the code computes;
+//! - a hot-load hint (a root a dev run reached from code the analysis
+//!   cannot follow);
 //! - a module's entry, except the first module's, where the runtime starts
 //!   the main thread with clear flags and never enters again (it does not
 //!   deliver exceptions through it);
@@ -193,11 +195,9 @@ impl Fpsr {
                 }
             }
         }
-        if i != 0 {
-            for r in &module.roots {
-                if r.kind == RootKind::Entry {
-                    self.escaped.insert(r.addr);
-                }
+        for r in &module.roots {
+            if (i != 0 && r.kind == RootKind::Entry) || r.kind == RootKind::Hint {
+                self.escaped.insert(r.addr);
             }
         }
         let resume: BTreeSet<u64> = overrides
