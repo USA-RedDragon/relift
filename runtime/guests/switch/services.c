@@ -4,6 +4,8 @@
  */
 #include "services.h"
 
+#include "hos_audio.h"
+
 rl_result rl_srv_stub_ok(rl_ipc_req *r)
 {
     (void)r;
@@ -25,4 +27,5 @@ void rl_srv_install_all(void)
     rl_srv_install_time();
     rl_srv_install_vi();
     rl_srv_install_nv();
+    rl_hos_audio_register();
 }
