@@ -29,9 +29,43 @@ static void say(rl_ctx *c, uint8_t *mem, uint64_t addr, uint64_t len)
     (void)rl_svc(c, mem, 0x27);
 }
 
+#define IMPORTED 0x9000000ull
+
+static uint64_t g_code_free;
+
+static int lifted_export(rl_ctx *restrict c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 1;
+    return RL_OK;
+}
+
+static int host_export(rl_ctx *restrict c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[0] = 2;
+    return RL_OK;
+}
+
+static int linked_entry(rl_ctx *restrict c, uint8_t *mem)
+{
+    if (rl_ld64(mem, BASE + 0x2800) == IMPORTED && rl_ld64(mem, BASE + 0x2808) == IMPORTED + 0x10 &&
+        rl_ld64(mem, BASE + 0x2810) == 0)
+        say(c, mem, BASE + 0x1F00, 9);
+    if (rl_indirect(c, BASE + 0x100)(c, mem) == RL_OK && c->x[0] == 2 &&
+        rl_indirect(c, BASE + 0x200)(c, mem) == RL_OK && c->x[0] == 1)
+        say(c, mem, BASE + 0x1F10, 9);
+    if (g_code_free == BASE + 0x4000)
+        say(c, mem, BASE + 0x1F20, 9);
+    c->x[0] = 0;
+    return rl_svc(c, mem, 0x07);
+}
+
 static int fake_entry(rl_ctx *restrict c, uint8_t *mem)
 {
     uint64_t x1 = c->x[1];
+    if (g_mode == 2)
+        return linked_entry(c, mem);
     if (g_mode == 0) {
         say(c, mem, BASE + 0x1000, sizeof g_msg - 1);
         if (mem[BASE + 0x2000] == 0xAB && mem[BASE + 0x2FFF] == 0x00 && mem[BASE + 0x3000] == 0 &&
@@ -49,12 +83,14 @@ static int fake_entry(rl_ctx *restrict c, uint8_t *mem)
     return rl_svc(c, mem, 0x26);
 }
 
-static const rl_fn_entry g_fns[] = { { BASE, 4, 0, fake_entry } };
+static const rl_fn_entry g_fns[] = { { BASE, 4, 0, fake_entry },
+                                     { BASE + 0x100, 4, 0, lifted_export },
+                                     { BASE + 0x200, 4, 0, lifted_export } };
 
 static const rl_unit g_unit = {
     .abi_version = RL_ABI_VERSION,
     .ctx_size = sizeof(struct rl_ctx),
-    .fn_count = 1,
+    .fn_count = 3,
     .fns = g_fns,
     .name = "loader-test",
 };
@@ -95,6 +131,83 @@ static void fill_image(void)
     memcpy(g_image + 0x1100, "PASS data", 9);
     memcpy(g_image + 0x1200, "PASS regs", 9);
     g_image[0x2000] = 0xAB;
+}
+
+static int hook_start(void *user, uint64_t *code_free)
+{
+    (void)user;
+    g_code_free = *code_free;
+    if (rl_hos_reserve_at(*code_free, 0x1000) != KR_SUCCESS)
+        return -1;
+    *code_free += 0x1000;
+    return 0;
+}
+
+static uint64_t hook_import(void *user, const char *symbol)
+{
+    (void)user;
+    return strcmp(symbol, "rl_test_import") ? 0 : IMPORTED;
+}
+
+static rl_fn hook_replace(void *user, const char *symbol)
+{
+    (void)user;
+    return strcmp(symbol, "rl_test_export") ? NULL : host_export;
+}
+
+static const rl_switch_hook g_hook = {
+    .name = "loader-test",
+    .start = hook_start,
+    .import = hook_import,
+    .replace = hook_replace,
+};
+
+static void put32(uint32_t off, uint32_t v) { memcpy(g_image + off, &v, 4); }
+static void put64(uint32_t off, uint64_t v) { memcpy(g_image + off, &v, 8); }
+
+static void put_sym(uint32_t i, uint32_t name, uint16_t shndx, uint64_t value)
+{
+    uint32_t at = 0x1100 + 24 * i;
+    put32(at, name);
+    g_image[at + 4] = (uint8_t)(1u << 4 | (shndx ? 2u : 0u));
+    memcpy(g_image + at + 6, &shndx, 2);
+    put64(at + 8, value);
+}
+
+static void put_rela(uint32_t i, uint64_t off, uint32_t sym, uint32_t type, uint64_t addend)
+{
+    uint32_t at = 0x1300 + 24 * i;
+    put64(at, off);
+    put64(at + 8, (uint64_t)sym << 32 | type);
+    put64(at + 16, addend);
+}
+
+/** @brief A module with MOD0, a dynamic section, four symbols and three relocations. */
+static void fill_linked_image(void)
+{
+    static const char strtab[] = "\0rl_test_import\0rl_test_export\0other_export\0";
+    memset(g_image, 0, sizeof g_image);
+    put32(4, 0x1000);
+    memcpy(g_image + 0x1000, "MOD0", 4);
+    put32(0x1004, 0x1000);
+    put_sym(1, 1, 0, 0);
+    put_sym(2, 16, 1, 0x100);
+    put_sym(3, 31, 1, 0x200);
+    memcpy(g_image + 0x1200, strtab, sizeof strtab);
+    put_rela(0, 0x2800, 1, 1025, 0);
+    put_rela(1, 0x2808, 1, 257, 0x10);
+    put_rela(2, 0x2810, 3, 1026, 0);
+    put32(0x1400, 1);
+    put32(0x1404, 4);
+    const uint64_t dyn[][2] = { { 4, 0x1400 }, { 5, 0x1200 }, { 6, 0x1100 }, { 10, sizeof strtab }, { 7, 0x1300 },
+                                { 8, 72 }, { 0, 0 } };
+    for (unsigned i = 0; i < sizeof dyn / sizeof dyn[0]; i++) {
+        put64(0x2000 + 16 * i, dyn[i][0]);
+        put64(0x2008 + 16 * i, dyn[i][1]);
+    }
+    memcpy(g_image + 0x1F00, "PASS link", 9);
+    memcpy(g_image + 0x1F10, "PASS repl", 9);
+    memcpy(g_image + 0x1F20, "PASS hook", 9);
 }
 
 static char g_base[PATH_MAX];
@@ -235,5 +348,32 @@ TEST(loader_refuses_bad_programs)
     p.module_count = 0;
     run_program(&p, out, sizeof out, &status);
     CHECK_EQ(WEXITSTATUS(status), 1);
+    remove_base();
+}
+
+TEST(loader_links_hook_symbols)
+{
+    char out[8192];
+    int status = 0;
+    static bool added;
+    if (!added) {
+        CHECK_EQ(rl_switch_add_hook(&g_hook), 0);
+        added = true;
+    }
+    fill_linked_image();
+    g_mode = 2;
+    run_program(&g_program, out, sizeof out, &status);
+    CHECK(WIFEXITED(status));
+    CHECK_EQ(WEXITSTATUS(status), 0);
+    CHECK_EQ(count_lines(out, "PASS link"), 1);
+    CHECK_EQ(count_lines(out, "PASS repl"), 1);
+    CHECK_EQ(count_lines(out, "PASS hook"), 1);
+    CHECK(strstr(out, "replaced functions: 1, resolved imports: 2") != NULL);
+    remove_base();
+    fill_image();
+    g_mode = 0;
+    run_program(&g_program, out, sizeof out, &status);
+    CHECK_EQ(WEXITSTATUS(status), 0);
+    CHECK_EQ(count_lines(out, "PASS foo"), 1);
     remove_base();
 }

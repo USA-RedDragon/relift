@@ -1,19 +1,30 @@
 /**
  * @file loader.c
  * @brief rl_switch_main: process start-up for a lifted Switch title. Maps the
- * NSO modules relift lifted, registers the static units and fsp-srv, attaches
- * the main thread and runs the entry.
+ * NSO modules relift lifted, registers the static units and fsp-srv, links
+ * the hooks' symbols, attaches the main thread and runs the entry.
  */
 #include "loader.h"
 
 #include "hos.h"
+
+#include <relift/window.h>
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
-/** @brief Weak so the runtime library links before the program defines its units. */
+static const rl_switch_hook *g_hooks[RL_SWITCH_HOOKS];
+static uint32_t g_nhooks;
+
+int rl_switch_add_hook(const rl_switch_hook *h)
+{
+    if (!h || g_nhooks >= RL_SWITCH_HOOKS)
+        return -1;
+    g_hooks[g_nhooks++] = h;
+    return 0;
+}
 
 static uint64_t align_up(uint64_t v) { return (v + HOS_PAGE - 1) & ~(HOS_PAGE - 1); }
 
@@ -89,15 +100,228 @@ static int load_module(const rl_switch_module *m)
     return 0;
 }
 
-int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
+enum {
+    DT_NULL = 0,
+    DT_PLTRELSZ = 2,
+    DT_HASH = 4,
+    DT_STRTAB = 5,
+    DT_SYMTAB = 6,
+    DT_RELA = 7,
+    DT_RELASZ = 8,
+    DT_STRSZ = 10,
+    DT_JMPREL = 23,
+    R_ABS64 = 257,
+    R_GLOB_DAT = 1025,
+    R_JUMP_SLOT = 1026,
+    SYM_SIZE = 24,
+    RELA_SIZE = 24
+};
+
+typedef struct dyn_info {
+    uint64_t symtab, nsyms, strtab, strsz;
+    uint64_t rela[2], relasz[2];
+} dyn_info;
+
+static bool img64(const rl_switch_module *m, uint64_t off, uint64_t *v)
 {
+    if (!in_range(off, 8, m->image_size))
+        return false;
+    memcpy(v, m->image + off, 8);
+    return true;
+}
+
+static bool img32(const rl_switch_module *m, uint64_t off, uint32_t *v)
+{
+    if (!in_range(off, 4, m->image_size))
+        return false;
+    memcpy(v, m->image + off, 4);
+    return true;
+}
+
+/** @brief Reads the dynamic section MOD0 names; false when the module has none. */
+static bool dyn_of(const rl_switch_module *m, dyn_info *d)
+{
+    uint32_t mod0, magic, rel;
+    if (!img32(m, m->text_off + 4, &mod0) || !img32(m, mod0, &magic) || memcmp(&magic, "MOD0", 4) ||
+        !img32(m, (uint64_t)mod0 + 4, &rel))
+        return false;
+    uint64_t at = (uint64_t)mod0 + (uint64_t)(int64_t)(int32_t)rel, hash = 0;
+    memset(d, 0, sizeof *d);
+    for (;; at += 16) {
+        uint64_t tag, val;
+        if (!img64(m, at, &tag) || !img64(m, at + 8, &val))
+            return false;
+        if (tag == DT_NULL)
+            break;
+        switch (tag) {
+        case DT_SYMTAB:
+            d->symtab = val;
+            break;
+        case DT_STRTAB:
+            d->strtab = val;
+            break;
+        case DT_STRSZ:
+            d->strsz = val;
+            break;
+        case DT_HASH:
+            hash = val;
+            break;
+        case DT_RELA:
+            d->rela[0] = val;
+            break;
+        case DT_RELASZ:
+            d->relasz[0] = val;
+            break;
+        case DT_JMPREL:
+            d->rela[1] = val;
+            break;
+        case DT_PLTRELSZ:
+            d->relasz[1] = val;
+            break;
+        default:
+            break;
+        }
+    }
+    uint32_t nchain;
+    if (hash && img32(m, hash + 4, &nchain))
+        d->nsyms = nchain;
+    else if (d->strtab > d->symtab)
+        d->nsyms = (d->strtab - d->symtab) / SYM_SIZE;
+    return d->symtab && d->strtab && in_range(d->strtab, d->strsz, m->image_size);
+}
+
+/** @brief Name, section index and value of symbol i; NULL when it is out of range. */
+static const char *sym_of(const rl_switch_module *m, const dyn_info *d, uint64_t i, uint16_t *shndx, uint64_t *value)
+{
+    uint64_t at = d->symtab + i * SYM_SIZE;
+    uint32_t name;
+    if (i >= d->nsyms || !in_range(at, SYM_SIZE, m->image_size) || !img32(m, at, &name) || name >= d->strsz)
+        return NULL;
+    memcpy(shndx, m->image + at + 6, 2);
+    img64(m, at + 8, value);
+    const char *s = (const char *)m->image + d->strtab + name;
+    return memchr(s, 0, d->strsz - name) ? s : NULL;
+}
+
+static rl_fn hook_replace(const char *name)
+{
+    for (uint32_t h = 0; h < g_nhooks; h++)
+        if (g_hooks[h]->replace) {
+            rl_fn f = g_hooks[h]->replace(g_hooks[h]->user, name);
+            if (f)
+                return f;
+        }
+    return NULL;
+}
+
+static uint64_t hook_import(const char *name)
+{
+    for (uint32_t h = 0; h < g_nhooks; h++)
+        if (g_hooks[h]->import) {
+            uint64_t a = g_hooks[h]->import(g_hooks[h]->user, name);
+            if (a)
+                return a;
+        }
+    return 0;
+}
+
+/** @brief Replaces the module's definitions the hooks name; returns the number replaced or -1. */
+static int replace_exports(const rl_switch_module *m, const dyn_info *d)
+{
+    rl_fn_entry *e = NULL;
+    uint32_t n = 0;
+    for (uint64_t i = 1; i < d->nsyms; i++) {
+        uint16_t shndx;
+        uint64_t value;
+        const char *name = sym_of(m, d, i, &shndx, &value);
+        rl_fn f = name && shndx && value ? hook_replace(name) : NULL;
+        if (!f)
+            continue;
+        rl_fn_entry *ne = realloc(e, (n + 1) * sizeof *e);
+        if (!ne) {
+            free(e);
+            return -1;
+        }
+        e = ne;
+        e[n++] = (rl_fn_entry){ m->base + value, 4, RL_FN_OVERRIDE, f };
+    }
+    if (!n)
+        return 0;
+    rl_unit *u = calloc(1, sizeof *u);
+    if (!u) {
+        free(e);
+        return -1;
+    }
+    *u = (rl_unit){
+        .abi_version = RL_ABI_VERSION,
+        .ctx_size = sizeof(rl_ctx),
+        .fn_count = n,
+        .fns = e,
+        .name = m->name,
+    };
+    const rl_unit *list[1] = { u };
+    return rl_units_register(list, 1) == 0 ? (int)n : -1;
+}
+
+/** @brief Writes the module's relocations against undefined symbols the hooks resolve; returns how many. */
+static int resolve_imports(const rl_switch_module *m, const dyn_info *d)
+{
+    uint64_t lo, hi;
+    int n = 0;
+    module_extent(m, &lo, &hi);
+    for (int t = 0; t < 2; t++)
+        for (uint64_t at = d->rela[t]; d->rela[t] && at + RELA_SIZE <= d->rela[t] + d->relasz[t]; at += RELA_SIZE) {
+            uint64_t off, info, addend;
+            if (!img64(m, at, &off) || !img64(m, at + 8, &info) || !img64(m, at + 16, &addend))
+                break;
+            uint32_t type = (uint32_t)info;
+            if (type != R_ABS64 && type != R_GLOB_DAT && type != R_JUMP_SLOT)
+                continue;
+            uint16_t shndx;
+            uint64_t value;
+            const char *name = sym_of(m, d, info >> 32, &shndx, &value);
+            uint64_t where = m->base + off;
+            if (!name || shndx || where < lo || where + 8 > hi)
+                continue;
+            uint64_t a = hook_import(name);
+            if (!a)
+                continue;
+            a += addend;
+            rl_vm_kernel_write(&hos.vm, where, &a, 8);
+            n++;
+        }
+    return n;
+}
+
+static int link_module(const rl_switch_module *m)
+{
+    dyn_info d;
+    if (!g_nhooks || !dyn_of(m, &d))
+        return 0;
+    int replaced = replace_exports(m, &d);
+    if (replaced < 0) {
+        rl_log(RL_LOG_ERROR, "loader", "module %s: replacing its functions failed", m->name);
+        return -1;
+    }
+    int imported = resolve_imports(m, &d);
+    if (replaced || imported)
+        rl_log(RL_LOG_INFO, "loader", "module %s: hooks replaced functions: %d, resolved imports: %d", m->name,
+               replaced, imported);
+    return 0;
+}
+
+typedef struct main_args {
+    const rl_switch_program *p;
+} main_args;
+
+static int run_program(void *arg)
+{
+    const rl_switch_program *p = ((main_args *)arg)->p;
     rl_hos_config cfg;
     uint64_t lo = UINT64_MAX, hi = 0, top = 0;
     rl_ctx *c;
     rl_result rc;
     int ret;
-    (void)argc;
-    (void)argv;
     if (!p || !p->modules || p->module_count == 0) {
         rl_log(RL_LOG_ERROR, "loader", "the program has no modules");
         return 1;
@@ -140,6 +364,12 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
                (unsigned long long)hos.lay.code_end);
         return 1;
     }
+    uint64_t code_free = align_up(hi);
+    for (uint32_t h = 0; h < g_nhooks; h++)
+        if (g_hooks[h]->start && g_hooks[h]->start(g_hooks[h]->user, &code_free) != 0) {
+            rl_log(RL_LOG_ERROR, "loader", "hook %s failed to start", g_hooks[h]->name ? g_hooks[h]->name : "?");
+            return 1;
+        }
     if (p->units && p->unit_count) {
         if (rl_units_register(p->units, p->unit_count) != 0) {
             rl_log(RL_LOG_ERROR, "loader", "a static unit was refused");
@@ -150,6 +380,9 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     }
     for (uint32_t i = 0; i < p->module_count; i++)
         if (load_module(&p->modules[i]) != 0)
+            return 1;
+    for (uint32_t i = 0; i < p->module_count; i++)
+        if (link_module(&p->modules[i]) != 0)
             return 1;
     c = rl_hos_attach_thread(p->main_prio, p->main_core);
     if (!c) {
@@ -166,4 +399,12 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     if (ret != RL_OK && rl_common(c)->pend.kind == RL_PEND_EXIT_PROCESS)
         return (int)rl_common(c)->pend.code;
     return 0;
+}
+
+int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    main_args a = { p };
+    return rl_window_main(run_program, &a);
 }
