@@ -88,7 +88,10 @@ static DECLS: [RegDecl; 73] = [
 
 /// The A64 register file.
 pub fn regs() -> RegFile {
-    RegFile::new("a64", &DECLS)
+    // Built once: `RegFile::new` checks the names pairwise, and every
+    // lifted instruction asks for the file.
+    static FILE: std::sync::OnceLock<RegFile> = std::sync::OnceLock::new();
+    *FILE.get_or_init(|| RegFile::new("a64", &DECLS))
 }
 
 /// General register `x<n>` for `n` in 0 to 30.
