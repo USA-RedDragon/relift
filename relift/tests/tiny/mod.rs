@@ -209,16 +209,69 @@ pub fn dump_diff(root: &Path) -> PathBuf {
 }
 
 fn dump_text(root: &Path, text: Vec<u8>) -> PathBuf {
+    dump_nso(
+        root,
+        &NsoSpec {
+            text,
+            rodata: MSG.to_vec(),
+            data: vec![0; 0x10],
+            bss: 0x10,
+            compress: true,
+            ..NsoSpec::default()
+        },
+    )
+}
+
+const EH: &[u8] = include_bytes!("eh.bin");
+
+/// As [`dump`], with the program of `eh.s`: it throws through two frames
+/// into a catch, runs a cleanup pad that resumes, and rethrows. `llvm`
+/// picks the register installer its unwinder ends in: the LLVM libunwind
+/// shape (`ret` to the pc it loaded into x30) or the libgcc one (`br`).
+pub fn dump_eh(root: &Path, llvm: bool) -> PathBuf {
+    let mut data = vec![0u8; 0x1000];
+    data[0x10] = u8::from(llvm);
+    dump_nso(
+        root,
+        &NsoSpec {
+            text: EH[..0x1000].to_vec(),
+            rodata: EH[0x1000..].to_vec(),
+            data,
+            bss: 0x1000,
+            compress: true,
+            ..NsoSpec::default()
+        },
+    )
+}
+
+/// The bytes of `eh.bin` and whether `eh.s` still assembles to them.
+pub fn eh_matches_source() -> Option<bool> {
+    let tool = relift_build::find_tool("llvm-mc")?;
+    let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tiny");
+    let out = scratch("eh-source").join("eh.o");
+    let ok = relift_proc::command(tool)
+        .args(["-triple=aarch64", "-filetype=obj", "-o"])
+        .arg(&out)
+        .arg(here.join("eh.s"))
+        .status()
+        .ok()?
+        .success();
+    let objcopy = relift_build::find_tool("llvm-objcopy")?;
+    let bin = out.with_extension("bin");
+    let copied = relift_proc::command(objcopy)
+        .args(["-O", "binary", "--only-section=.text"])
+        .arg(&out)
+        .arg(&bin)
+        .status()
+        .ok()?
+        .success();
+    Some(ok && copied && std::fs::read(bin).ok()? == EH)
+}
+
+fn dump_nso(root: &Path, spec: &NsoSpec) -> PathBuf {
     let exefs = root.join("dump/exefs");
     std::fs::create_dir_all(&exefs).expect("the dump dir is creatable");
-    let nso = build(&NsoSpec {
-        text,
-        rodata: MSG.to_vec(),
-        data: vec![0; 0x10],
-        bss: 0x10,
-        compress: true,
-        ..NsoSpec::default()
-    });
+    let nso = build(spec);
     relift_cache::write_if_changed(&exefs.join("main"), &nso).expect("main writes");
     let npdm = relift_switch_formats::npdm::build("tiny", 0x0100_0000_0000_1234, 0x10000, &[]);
     relift_cache::write_if_changed(&exefs.join("main.npdm"), &npdm).expect("npdm writes");
