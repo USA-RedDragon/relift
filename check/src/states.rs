@@ -135,7 +135,23 @@ const F32_SPECIAL: [u32; 14] = [
 /// A random 64 bits of a vector register: as [`reg_value`], or one or two
 /// special floating-point values.
 fn vec_half(r: &mut Rng) -> u64 {
-    match r.below(4) {
+    match r.below(5) {
+        // Integer lanes at the most negative value of some element size,
+        // where saturating absolute value and negation set QC.
+        4 => {
+            let p = r.pick(&[
+                0x8080_8080_8080_8080u64,
+                0x8000_8000_8000_8000,
+                0x8000_0000_8000_0000,
+                0x8000_0000_0000_0000,
+            ]);
+            // All lanes, or some.
+            if r.chance(0.5) {
+                p
+            } else {
+                p & (r.next() | r.next())
+            }
+        }
         0 => r.pick(&F64_SPECIAL),
         1 => {
             let lane = |r: &mut Rng| {
