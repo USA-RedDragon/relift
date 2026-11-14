@@ -755,8 +755,6 @@ fn lift_and_emit(
         emitted.files.push(path);
         emitted.files.extend(stage.files.iter().cloned());
     }
-    let info = serde_json::json!({ "mods": stage.info(), "set": stage.hash() });
-    relift_cache::write_if_changed(&out.join("mods.json"), info.to_string().as_bytes())?;
     relift_cache::write_if_changed(&out.join(ENTRIES), emitted.entries.as_bytes())?;
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
@@ -774,6 +772,7 @@ fn lift_and_emit(
         name,
         game_settings.clone(),
         &game_ports(Path::new("game.toml"))?,
+        stage.info(),
     )?;
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;

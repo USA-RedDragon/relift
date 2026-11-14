@@ -114,9 +114,9 @@ fn a_user_mod_changes_the_patched_function_and_lifts_only_it() {
         "{e}"
     );
     assert_eq!(p.run(&[]), "hello\n".repeat(3));
-    let info = std::fs::read_to_string(p.root.join("cache/projects/tiny/build/host/mods.json"))
-        .expect("mods.json");
-    assert!(info.contains("\"name\":\"short\""), "{info}");
+    let info: serde_json::Value =
+        serde_json::from_str(&p.run(&["--relift-info"])).expect("--relift-info prints JSON");
+    assert_eq!(info["mods"]["code"][0]["name"], "short", "{info}");
     let other = p.root.join("other");
     put(
         &other.join(format!("exefs_patches/x/{ID}.ips")),
@@ -170,4 +170,46 @@ fn a_bundled_mod_is_switched_at_start() {
         p.run(&["--relift-set", "mod.long=true"]),
         "hello fro\n".repeat(3)
     );
+}
+
+#[test]
+fn the_stored_mods_section_lists_code_bundled_and_accepted_mods() {
+    let Some(p) = Project::new("mods-e2e-section") else {
+        return;
+    };
+    put(
+        &p.dir
+            .join(format!("mods/short/exefs_patches/short/{ID}.ips")),
+        &ips32(&[(0x30, &movz_x1(5))]),
+    );
+    p.add_game_toml(
+        "\n[[mods.bundled]]\nname = \"short\"\nlabel = \"Short\"\npatch = \"mods/short\"\n",
+    );
+    let user = p.root.join("user");
+    put(
+        &user.join(format!("exefs_patches/user/{ID}.ips")),
+        &ips32(&[(0x40, b"j")]),
+    );
+    ok(&p.build(&["--mods", user.to_str().expect("utf-8")]));
+    let data = p.root.join("data");
+    put(
+        &data.join("atmosphere/contents/0100000000000000/romfs/a.txt"),
+        b"a",
+    );
+    let info: serde_json::Value =
+        serde_json::from_str(&p.run(&["--relift-info"])).expect("--relift-info prints JSON");
+    let mods = &info["mods"];
+    assert_eq!(mods["code"][0]["name"], "user", "{info}");
+    assert_eq!(mods["bundled"][0], "mod.short", "{info}");
+    assert!(
+        !mods["accepts"].as_array().expect("accepts").is_empty(),
+        "{info}"
+    );
+    let keys: Vec<&str> = info["settings"]["game"]
+        .as_array()
+        .expect("game settings")
+        .iter()
+        .filter_map(|s| s["key"].as_str())
+        .collect();
+    assert!(keys.contains(&"mod.short"), "{keys:?}");
 }

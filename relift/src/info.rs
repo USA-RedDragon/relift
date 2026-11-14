@@ -85,6 +85,7 @@ pub fn switch_document(
     project: &str,
     settings: Vec<Setting>,
     ports: &PortSet,
+    mods: Mods,
 ) -> Result<Info, BoxError> {
     let g = game.get("game").and_then(|g| g.as_table());
     let title_id = g
@@ -139,7 +140,10 @@ pub fn switch_document(
         dlc: import.join("dlc").is_dir(),
         save_folder: true,
     };
-    info.mods.accepts = Mods::switch_accepts();
+    info.mods = Mods {
+        accepts: Mods::switch_accepts(),
+        ..mods
+    };
     info.save = Save {
         kind: "tree".into(),
         location: Some("launcher".into()),
@@ -151,7 +155,8 @@ pub fn switch_document(
 }
 
 /// The document of a Game Boy, Game Boy Color or Game Boy Advance build:
-/// the identity and save come from the cartridge header.
+/// the save comes from the cartridge header, and so does the identity,
+/// unless a ROM hack gives the patched ROM's.
 ///
 /// # Errors
 ///
@@ -161,6 +166,8 @@ pub fn handheld_document(
     gba: bool,
     settings: Vec<Setting>,
     ports: &PortSet,
+    mods: Mods,
+    hack: Option<&crate::mods::rom::RomHack>,
 ) -> Result<Info, BoxError> {
     let (id, save) = if gba {
         identity::from_gba(rom)?
@@ -168,11 +175,25 @@ pub fn handheld_document(
         identity::from_gb(rom)?
     };
     let mut info = Info::new(env!("CARGO_PKG_VERSION"));
-    info.identity = id;
+    info.identity = hack.map_or(id, |h| h.identity.clone());
     info.save = save;
+    info.mods = mods;
     info.settings = game_settings::section(settings);
     info.input = relift_input::input_section(ports);
     Ok(info)
+}
+
+/// The stored `mods` section with the run-time state a running binary
+/// reports (`rl_hos_mods_json`: `active` and `conflicts`), as one section.
+///
+/// # Errors
+///
+/// `runtime` is not the JSON object the runtime writes.
+pub fn with_runtime_mods(mut stored: Mods, runtime: &str) -> Result<Mods, BoxError> {
+    let now: Mods = serde_json::from_str(runtime)?;
+    stored.active = now.active;
+    stored.conflicts = now.conflicts;
+    Ok(stored)
 }
 
 /// The C file that embeds `info`.
@@ -255,11 +276,35 @@ mod tests {
                 "[input.port.dial]\nkind = \"Rotary dial\"\n[input.port.dial.control.turn]\nkind = \"axis\"\n",
             )
             .unwrap();
-        let info = handheld_document(&rom, true, game, &ports).unwrap();
+        let info = handheld_document(&rom, true, game, &ports, Mods::default(), None).unwrap();
         assert_eq!(info.identity.platform, "gba");
         assert_eq!(info.settings.runtime.len(), 3);
         assert_eq!(info.settings.game.len(), 1);
         let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p1", "dial"]);
+    }
+
+    #[test]
+    fn one_mods_section_holds_code_bundled_accepted_and_active_mods() {
+        let stored = Mods {
+            code: vec![relift_info::CodeMod {
+                name: "fix".into(),
+                hash: "ab".into(),
+            }],
+            bundled: vec!["mod.hd".into()],
+            accepts: Mods::switch_accepts(),
+            ..Mods::default()
+        };
+        let runtime = r#"{"active":[{"name":"alpha","path":"/m/alpha","layout":"ryujinx","romfs":true,"cheats":2,"cheats_need_rebuild":1}],"conflicts":["/a.txt: alpha wins over zeta"]}"#;
+        let m = with_runtime_mods(stored.clone(), runtime).unwrap();
+        assert_eq!(m.code, stored.code);
+        assert_eq!(m.bundled, stored.bundled);
+        assert_eq!(m.accepts.len(), 4);
+        assert_eq!(m.active[0].name, "alpha");
+        assert_eq!(m.active[0].cheats_need_rebuild, 1);
+        assert_eq!(m.conflicts.len(), 1);
+        let back: Mods = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
+        assert_eq!(back, m);
+        assert!(with_runtime_mods(stored, "3").is_err());
     }
 }
