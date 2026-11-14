@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use relift_analyze::{EntryKind, Insn, Outline, Progress, outline_with};
+use relift_analyze::{EntryKind, Insn, Outline, Progress, outline_visit};
 use relift_build::{Compile, Event, Plan};
 use relift_cpu_a64::frontend::A64;
 use relift_guest::{Root, RootKind};
@@ -193,40 +193,47 @@ fn emit_modules(
         ui.begin(row, "discover");
         let mut lifting = false;
         let mut found = 0;
-        let layout = outline_with(&cpu, &module, &mut |event| match event {
-            Progress::Found { entries, .. } => {
-                found = entries;
-                ui.update(
-                    row,
-                    Metrics {
-                        done: entries as u64,
-                        unit: "functions found",
-                        ..Metrics::default()
-                    },
-                );
-            }
-            Progress::Lifted {
-                done,
-                total,
-                unlifted,
-            } => {
-                if !lifting {
-                    lifting = true;
-                    ui.done(row, Line::new().text(noun(total as u64, "function")));
-                    ui.begin(row, "lift");
+        let mine = fpsr.slots_of(p);
+        let visit = |f: &relift_analyze::Function| fpsr.visit(&module, &mine, f);
+        let (layout, visits) = outline_visit(
+            &cpu,
+            &module,
+            &mut |event| match event {
+                Progress::Found { entries, .. } => {
+                    found = entries;
+                    ui.update(
+                        row,
+                        Metrics {
+                            done: entries as u64,
+                            unit: "functions found",
+                            ..Metrics::default()
+                        },
+                    );
                 }
-                ui.update(
-                    row,
-                    Metrics {
-                        done: done as u64,
-                        total: Some(total as u64),
-                        unit: "functions",
-                        unlifted: Some(unlifted as u64),
-                        ..Metrics::default()
-                    },
-                );
-            }
-        });
+                Progress::Lifted {
+                    done,
+                    total,
+                    unlifted,
+                } => {
+                    if !lifting {
+                        lifting = true;
+                        ui.done(row, Line::new().text(noun(total as u64, "function")));
+                        ui.begin(row, "lift");
+                    }
+                    ui.update(
+                        row,
+                        Metrics {
+                            done: done as u64,
+                            total: Some(total as u64),
+                            unit: "functions",
+                            unlifted: Some(unlifted as u64),
+                            ..Metrics::default()
+                        },
+                    );
+                }
+            },
+            &visit,
+        );
         if !lifting {
             ui.done(row, Line::new().text(noun(found as u64, "function")));
             ui.begin(row, "lift");
@@ -281,7 +288,7 @@ fn emit_modules(
                 })
             })
             .collect();
-        let flags = fpsr.begin_module(i, p, &module, &layout, &cpu, &overrides);
+        let flags = fpsr.begin_module(i, &module, &layout, visits, &cpu, &overrides);
         let summaries = std::sync::Mutex::new(Vec::new());
         let fpsr_now = &fpsr;
         let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &relift_emit::Function<'_>)| {

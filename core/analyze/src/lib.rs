@@ -569,6 +569,17 @@ pub fn outline_with(
     module: &Module,
     on: &mut dyn FnMut(Progress),
 ) -> Layout {
+    outline_visit(fe, module, on, &|_| ()).0
+}
+
+/// As [`outline_with`], also giving `visit` of each function while it is
+/// lifted, in entry order.
+pub fn outline_visit<T: Send>(
+    fe: &(dyn Frontend + Sync),
+    module: &Module,
+    on: &mut dyn FnMut(Progress),
+    visit: &(dyn Fn(&Function) -> T + Sync),
+) -> (Layout, Vec<T>) {
     let granule = fe.granule();
     let mut kinds: BTreeMap<u64, EntryKind> = BTreeMap::new();
     let mut names: BTreeMap<u64, String> = BTreeMap::new();
@@ -582,7 +593,7 @@ pub fn outline_with(
             names.entry(r.addr).or_insert_with(|| n.clone());
         }
     }
-    explore(fe, module, kinds, &BTreeMap::new(), &names, on)
+    explore(fe, module, kinds, &BTreeMap::new(), &names, on, visit)
 }
 
 /// The functions that become reachable in `module` from `roots` when
@@ -605,7 +616,15 @@ pub fn discover_more(
             kinds.entry(r).or_insert(EntryKind::Root(RootKind::Hint));
         }
     }
-    let layout = explore(fe, module, kinds, known, &BTreeMap::new(), &mut |_| {});
+    let (layout, _) = explore(
+        fe,
+        module,
+        kinds,
+        known,
+        &BTreeMap::new(),
+        &mut |_| {},
+        &|_| (),
+    );
     Analysis {
         functions: layout
             .functions
@@ -619,19 +638,33 @@ pub fn discover_more(
 const STEP: usize = 512;
 
 /// Explores every entry of `kinds` not in `skip` until no new entry
-/// appears, then outlines every function not in `skip`.
-fn explore(
+/// appears, then outlines every function not in `skip`, giving `visit` of
+/// each while it is lifted.
+fn explore<T: Send>(
     fe: &(dyn Frontend + Sync),
     module: &Module,
     mut kinds: BTreeMap<u64, EntryKind>,
     skip: &BTreeMap<u64, EntryKind>,
     names: &BTreeMap<u64, String>,
     on: &mut dyn FnMut(Progress),
-) -> Layout {
+    visit: &(dyn Fn(&Function) -> T + Sync),
+) -> (Layout, Vec<T>) {
     let granule = fe.granule();
     let pads = module_pads(module);
     let mut done: BTreeSet<u64> = skip.keys().copied().collect();
-    let mut explored: HashMap<u64, Outline> = HashMap::new();
+    let mut explored: HashMap<u64, (Outline, T)> = HashMap::new();
+    let outline = |e: u64, kind: EntryKind, ext: Extent| {
+        let o = Outline::new(e, kind, granule, &ext);
+        let f = Function {
+            entry: e,
+            name: names.get(&e).cloned(),
+            kind,
+            insts: ext.0,
+            tables: ext.1,
+            pads: ext.2,
+        };
+        (o, visit(&f))
+    };
     // A function's extent stops at the entries of other functions, except
     // at addresses only known as computed values: those are often labels
     // inside a function (a jump-table base or a loop head taken with adr),
@@ -660,7 +693,7 @@ fn explore(
                     .map(|(k, &e)| {
                         let ext = extent(&mut lifter, &entries, e);
                         let new = new_entries(module, granule, &ext.0);
-                        let o = Outline::new(e, kinds[&e], granule, &ext);
+                        let o = outline(e, kinds[&e], ext);
                         lifter.keep_from(group.get(k + 1).copied());
                         (o, new)
                     })
@@ -687,12 +720,13 @@ fn explore(
     let total = all.len();
     let mut failed: HashSet<u64> = HashSet::new();
     let mut functions = BTreeMap::new();
+    let mut visited = Vec::with_capacity(total);
     let mut n = 0;
     for step in all.chunks(STEP) {
-        let kept: Vec<Option<Outline>> = step
+        let kept: Vec<Option<(Outline, T)>> = step
             .iter()
             .map(|(e, kind)| {
-                explored.remove(e).filter(|o| {
+                explored.remove(e).filter(|(o, _)| {
                     o.kind == *kind && o.pcs().all(|a| a == *e || !entries.contains(&a))
                 })
             })
@@ -709,7 +743,7 @@ fn explore(
                 .iter()
                 .enumerate()
                 .map(|(k, &(e, kind))| {
-                    let o = Outline::new(e, kind, granule, &extent(&mut lifter, &entries, e));
+                    let o = outline(e, kind, extent(&mut lifter, &entries, e));
                     lifter.keep_from(group.get(k + 1).map(|n| n.0));
                     o
                 })
@@ -717,9 +751,10 @@ fn explore(
         })
         .into_iter();
         for k in kept {
-            let Some(mut o) = k.or_else(|| redone.next()) else {
+            let Some((mut o, v)) = k.or_else(|| redone.next()) else {
                 continue;
             };
+            visited.push(v);
             o.name = names.get(&o.entry).cloned();
             failed.extend(o.failed.iter().map(|(pc, _)| *pc));
             n += 1;
@@ -731,7 +766,7 @@ fn explore(
             functions.insert(o.entry, o);
         }
     }
-    Layout { functions }
+    (Layout { functions }, visited)
 }
 
 /// How many neighboring items one thread takes at a time in [`grouped`]:

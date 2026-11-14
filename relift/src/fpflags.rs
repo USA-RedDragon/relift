@@ -86,6 +86,10 @@ pub struct ModuleFlags {
     entries: BTreeSet<u64>,
 }
 
+/// What [`Fpsr::visit`] keeps of one function: the addresses it takes and
+/// its uses of the module's slots.
+pub type Visit = (BTreeSet<u64>, Option<relift_analyze::SlotUses>);
+
 /// One function's summary, from [`Fpsr::function`].
 pub struct FnFlags {
     func: region::Func,
@@ -173,22 +177,45 @@ impl Fpsr {
         self.on
     }
 
-    /// Starts module `i` (`p`, outlined as `layout`), whose host overrides
-    /// are `overrides`; `lift` lifts one of its functions. Every function
-    /// then goes through [`Fpsr::function`] and the results, in entry order,
-    /// to [`Fpsr::end_module`].
+    /// The loader-filled slots of module `p`, for [`Fpsr::visit`].
+    pub fn slots_of(&self, p: &Placed) -> BTreeSet<u64> {
+        let end = p.base + p.nso.image.len() as u64 + u64::from(p.nso.bss_size);
+        self.slots.range(p.base..end).map(|(&a, _)| a).collect()
+    }
+
+    /// What the analysis needs of function `f` of a module (`module`, whose
+    /// slots are `mine` from [`Fpsr::slots_of`]) before every function of
+    /// the module is known: give it to [`Fpsr::begin_module`] with the
+    /// others, in entry order.
+    pub fn visit(&self, module: &Module, mine: &BTreeSet<u64>, f: &Function) -> Visit {
+        if !self.on {
+            return (BTreeSet::new(), None);
+        }
+        let taken = relift_analyze::address_taken(module, 4, f);
+        if mine.is_empty() {
+            return (taken, None);
+        }
+        (taken, Some(relift_analyze::slot_uses(f, mine, SLOT)))
+    }
+
+    /// Starts module `i` (`module`, outlined as `layout` with `visits` of its
+    /// functions from [`Fpsr::visit`]), whose host overrides are
+    /// `overrides`; `fe` lifts its functions again. Every function then goes
+    /// through [`Fpsr::function`] and the results, in entry order, to
+    /// [`Fpsr::end_module`].
     pub fn begin_module(
         &mut self,
         i: usize,
-        p: &Placed,
         module: &Module,
         layout: &Layout,
+        visits: Vec<Visit>,
         fe: &(dyn Frontend + Sync),
         overrides: &[relift_emit::Override],
     ) -> ModuleFlags {
+        let uses = visits;
         let mut m = ModuleFlags {
             index: i,
-            base: p.base,
+            base: module.base,
             live: BTreeSet::new(),
             via: BTreeMap::new(),
             resume: BTreeSet::new(),
@@ -231,14 +258,6 @@ impl Fpsr {
             let views: Vec<flags::Function<'_>> = lifted.iter().map(|f| view(f, &raw)).collect();
             m.live = flags::live_fpsr_reads(&views).into_iter().collect();
         }
-        let end = p.base + p.nso.image.len() as u64 + u64::from(p.nso.bss_size);
-        let mine: BTreeSet<u64> = self.slots.range(p.base..end).map(|(&a, _)| a).collect();
-        let all: Vec<&Outline> = layout.functions.values().collect();
-        let uses = relift_analyze::each_lifted(fe, module, &all, |_, f| {
-            let taken = relift_analyze::address_taken(module, 4, f);
-            let u = (!mine.is_empty()).then(|| relift_analyze::slot_uses(f, &mine, SLOT));
-            (taken, u)
-        });
         for (taken, u) in uses {
             self.escaped.extend(taken);
             let Some(u) = u else {
@@ -339,19 +358,19 @@ impl Fpsr {
         }
     }
 
-    /// Takes module `i` (`p`, outlined as `layout`) whole, as
-    /// [`Fpsr::begin_module`], [`Fpsr::function`] and [`Fpsr::end_module`]
-    /// do it.
+    /// Takes module `i` (`module`, outlined as `layout` with `visits`) whole,
+    /// as [`Fpsr::begin_module`], [`Fpsr::function`] and
+    /// [`Fpsr::end_module`] do it.
     pub fn add_module(
         &mut self,
         i: usize,
-        p: &Placed,
         module: &Module,
         layout: &Layout,
+        visits: Vec<Visit>,
         fe: &(dyn Frontend + Sync),
         overrides: &[relift_emit::Override],
     ) {
-        let m = self.begin_module(i, p, module, layout, fe, overrides);
+        let m = self.begin_module(i, module, layout, visits, fe, overrides);
         let me = &*self;
         let all: Vec<&Outline> = layout.functions.values().collect();
         let fns =
