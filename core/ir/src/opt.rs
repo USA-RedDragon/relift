@@ -91,7 +91,9 @@ pub fn dce(block: &Block) -> Block {
 /// an extension or extract that keeps the width, a select on a constant
 /// condition or with equal arms, a one-bit `x == 1` or `x != 0`, the low or
 /// high part of a concat, a zero extension's low bits, and a double
-/// complement. An operation that gives a constant whatever its other
+/// complement. An extract reads through the concats, extracts and zero
+/// extensions it falls inside of, and a one-bit select between 1 and 0 is
+/// its condition or the complement. An operation that gives a constant whatever its other
 /// operand is (`x & 0`, `x * 0`, `x | ones`, a shift left or logical right
 /// by at least the width) becomes that constant, and a select exit whose
 /// condition is constant becomes a constant exit.
@@ -105,12 +107,38 @@ pub fn simplify(block: &Block) -> Block {
     let mut known: Vec<Option<u128>> = vec![None; n];
     let mut insts: Vec<Inst> = Vec::with_capacity(n);
     for (i, inst) in block.insts.iter().enumerate() {
-        let op = remap_with(&inst.op, &|v: &Value| alias[v.index()]);
+        let mut op = remap_with(&inst.op, &|v: &Value| alias[v.index()]);
         let w = inst.width.unwrap_or(Width::W1);
         let wid = |v: &Value| insts[v.index()].width.unwrap_or(Width::W1);
         let k = |v: &Value| known[v.index()];
         let is = |v: &Value, c: u128| k(v) == Some(c);
         let ones = w.mask();
+        // An extract reads through the concats, extracts and zero
+        // extensions it falls inside of.
+        while let Op::Extract(x, lo) = op {
+            let (lo32, n) = (u32::from(lo), w.bits());
+            op = match insts[x.index()].op {
+                Op::Concat(_, l) if lo32 + n <= wid(&l).bits() => Op::Extract(l, lo),
+                Op::Concat(h, l) if lo32 >= wid(&l).bits() => {
+                    Op::Extract(h, (lo32 - wid(&l).bits()) as u8)
+                }
+                Op::Extract(y, lo2) => Op::Extract(y, lo + lo2),
+                Op::Ext(ExtKind::Zero, a) if lo32 + n <= wid(&a).bits() => Op::Extract(a, lo),
+                _ => break,
+            };
+        }
+        // A one-bit select of the two constants is its condition or the
+        // condition's complement.
+        if let Op::Select(c, x, y) = op
+            && w == Width::W1
+            && wid(&c) == Width::W1
+        {
+            if is(&x, 1) && is(&y, 0) {
+                op = Op::Extract(c, 0);
+            } else if is(&x, 0) && is(&y, 1) {
+                op = Op::Un(UnOp::Not, c);
+            }
+        }
         let mut same: Option<Value> = None;
         let mut konst = match &op {
             Op::Const(c) => Some(*c),
