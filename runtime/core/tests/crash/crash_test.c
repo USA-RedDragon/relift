@@ -3,28 +3,25 @@
  * @brief The crash handler end to end: hand-written functions with the
  * lifted signature, in the lifted-code section and in a function map, make
  * a wild guest access (or run an illegal instruction, or crash in host code
- * they call). The test runs itself as a child for each case, reads the
- * child's report from a pipe and checks the guest address, the guest
- * function, the guest backtrace and the host backtrace.
+ * they call, or overflow a fiber's stack). The test runs itself as a child
+ * for each case, reads the child's report from a pipe and checks the guest
+ * address, the guest function, the guest backtrace, the host backtrace and
+ * the fiber (guest CPU) named.
  *
- * Links only the crash handler (crash.c and its host-OS part), so it builds
- * and runs on Windows, where the rest of the core is not ported yet.
+ * Links only the crash handler (crash.c and its host-OS part) and the
+ * fibers, so it builds and runs on Windows, where the rest of the core is
+ * not ported yet.
  */
+#include "child.h"
 #include "crash.h"
+#include "fiber.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <signal.h>
-#include <spawn.h>
+#if !defined(_WIN32)
 #include <sys/mman.h>
-#include <sys/wait.h>
-#include <unistd.h>
-extern char **environ;
 #endif
 
 RL_TEXT_BOUNDS_DECLARE();
@@ -37,6 +34,7 @@ enum {
     G_WILD = MODULE_BASE + 0x1200,
     G_ILL = MODULE_BASE + 0x1300,
     G_CALLS_HOST = MODULE_BASE + 0x1400,
+    G_RECURSE = MODULE_BASE + 0x1500,
     WILD_ADDR = 0x40001230ull,
     SPACE = 1ull << 31,
 };
@@ -55,6 +53,7 @@ __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test3illEv);
 __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test9callshostEv);
 __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test5innerEv);
 __attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test5outerEv);
+__attribute__((noinline)) RL_TEXT RL_LIFTED(_ZN5guest4test7recurseEv);
 
 RL_LIFTED(_ZN5guest4test4wildEv)
 {
@@ -111,12 +110,25 @@ RL_LIFTED(_ZN5guest4test5outerEv)
     return RL_OK;
 }
 
+RL_LIFTED(_ZN5guest4test7recurseEv)
+{
+    if (!mem)
+        return RL_OK;
+    volatile uint8_t frame[2048];
+    frame[0] = (uint8_t)g_sink;
+    frame[sizeof frame - 1] = (uint8_t)(uintptr_t)mem;
+    int rc = _ZN5guest4test7recurseEv(c, mem);
+    g_sink += frame[0] + frame[sizeof frame - 1];
+    return rc;
+}
+
 static const rl_fn_info g_fns[] = {
     { G_OUTER, 0x100, 0, _ZN5guest4test5outerEv, "_ZN5guest4test5outerEv", "guest::test::outer()" },
     { G_INNER, 0x100, 0, _ZN5guest4test5innerEv, "_ZN5guest4test5innerEv", "guest::test::inner()" },
     { G_WILD, 0x100, 0, _ZN5guest4test4wildEv, "_ZN5guest4test4wildEv", "guest::test::wild()" },
     { G_ILL, 0x100, 0, _ZN5guest4test3illEv, "_ZN5guest4test3illEv", "guest::test::ill()" },
     { G_CALLS_HOST, 0x100, 0, _ZN5guest4test9callshostEv, "_ZN5guest4test9callshostEv", "guest::test::callshost()" },
+    { G_RECURSE, 0x100, 0, _ZN5guest4test7recurseEv, "_ZN5guest4test7recurseEv", "guest::test::recurse()" },
 };
 
 static rl_fn_map g_map = {
@@ -138,6 +150,38 @@ static uint8_t *reserve(void)
 #endif
 }
 
+static rl_fiber g_home, g_fa, g_fb;
+static uint8_t *g_mem;
+static _Alignas(64) uint8_t g_ctx[1024];
+
+static void parked_main(void *arg)
+{
+    (void)arg;
+    for (;;)
+        rl_fiber_switch(&g_fb, &g_home);
+}
+
+static void faulting_main(void *arg)
+{
+    int rc = arg ? _ZN5guest4test7recurseEv((rl_ctx *)(void *)g_ctx, g_mem)
+                 : _ZN5guest4test5outerEv((rl_ctx *)(void *)g_ctx, g_mem);
+    fprintf(stderr, "no crash on the fiber (rc %d)\n", rc);
+    exit(4);
+}
+
+static int on_fibers(int overflow)
+{
+    rl_fiber_thread_init();
+    if (rl_fiber_init(&g_fa, overflow ? 64u << 10 : 0, faulting_main, overflow ? &g_fa : NULL) != 0 ||
+        rl_fiber_init(&g_fb, 0, parked_main, NULL) != 0)
+        return 5;
+    snprintf(g_fa.label, sizeof g_fa.label, "guest CPU 0");
+    snprintf(g_fb.label, sizeof g_fb.label, "guest CPU 1");
+    rl_fiber_switch(&g_home, &g_fb);
+    rl_fiber_switch(&g_home, &g_fa);
+    return 6;
+}
+
 static int child(const char *mode)
 {
     uint8_t *mem = reserve();
@@ -151,89 +195,25 @@ static int child(const char *mode)
         return 3;
     rl_crash_install();
     g_mode = !strcmp(mode, "ill") ? 1 : !strcmp(mode, "host") ? 2 : 0;
-    _Alignas(64) uint8_t ctx[1024];
-    memset(ctx, 0, sizeof ctx);
-    int rc = _ZN5guest4test5outerEv((rl_ctx *)(void *)ctx, mem);
+    g_mem = mem;
+    if (!strcmp(mode, "fiber"))
+        return on_fibers(0);
+    if (!strcmp(mode, "overflow"))
+        return on_fibers(1);
+    memset(g_ctx, 0, sizeof g_ctx);
+    int rc = _ZN5guest4test5outerEv((rl_ctx *)(void *)g_ctx, mem);
     fprintf(stderr, "no crash (rc %d)\n", rc);
     return 4;
 }
 
-typedef struct run {
-    char out[32768];
-    int crashed;
-    unsigned long code;
-} run;
+typedef child_run run;
 
-#if defined(_WIN32)
 static int spawn(const char *self, const char *mode, run *r)
 {
-    SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
-    HANDLE rd, wr;
-    if (!CreatePipe(&rd, &wr, &sa, 0))
-        return -1;
-    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
-    STARTUPINFOA si;
-    memset(&si, 0, sizeof si);
-    si.cb = sizeof si;
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = wr;
-    si.hStdError = wr;
-    PROCESS_INFORMATION pi;
-    char cmd[1024];
-    snprintf(cmd, sizeof cmd, "\"%s\" child %s", self, mode);
-    if (!CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
-        return -1;
-    CloseHandle(wr);
-    size_t len = 0;
-    DWORD got;
-    while (len + 1 < sizeof r->out && ReadFile(rd, r->out + len, (DWORD)(sizeof r->out - 1 - len), &got, NULL) && got)
-        len += got;
-    r->out[len] = 0;
-    CloseHandle(rd);
-    WaitForSingleObject(pi.hProcess, 30000);
-    DWORD code = 0;
-    GetExitCodeProcess(pi.hProcess, &code);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    r->code = code;
-    r->crashed = code == (DWORD)EXCEPTION_ACCESS_VIOLATION || code == (DWORD)EXCEPTION_ILLEGAL_INSTRUCTION;
-    return 0;
+    return child_spawn(self, mode, r);
 }
-#else
-static int spawn(const char *self, const char *mode, run *r)
-{
-    int fds[2];
-    if (pipe(fds) != 0)
-        return -1;
-    posix_spawn_file_actions_t fa;
-    posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_adddup2(&fa, fds[1], 2);
-    posix_spawn_file_actions_adddup2(&fa, fds[1], 1);
-    posix_spawn_file_actions_addclose(&fa, fds[0]);
-    char *argv[] = { (char *)self, (char *)"child", (char *)mode, NULL };
-    pid_t pid;
-    int e = posix_spawn(&pid, self, &fa, NULL, argv, environ);
-    posix_spawn_file_actions_destroy(&fa);
-    close(fds[1]);
-    if (e != 0) {
-        close(fds[0]);
-        return -1;
-    }
-    size_t len = 0;
-    ssize_t got;
-    while (len + 1 < sizeof r->out && (got = read(fds[0], r->out + len, sizeof r->out - 1 - len)) > 0)
-        len += (size_t)got;
-    r->out[len] = 0;
-    close(fds[0]);
-    int st = 0;
-    waitpid(pid, &st, 0);
-    r->crashed = WIFSIGNALED(st) &&
-                 (WTERMSIG(st) == SIGSEGV || WTERMSIG(st) == SIGBUS || WTERMSIG(st) == SIGILL);
-    r->code = WIFSIGNALED(st) ? (unsigned long)WTERMSIG(st) : (unsigned long)WEXITSTATUS(st);
-    return 0;
-}
-#endif
+
+#define CRASHED(r) child_crashed(r)
 
 static int g_failed;
 
@@ -273,7 +253,7 @@ static int parent(const char *self)
     if (spawn(self, "wild", r) != 0)
         return 1;
     printf("--- wild guest store ---\n%s", r->out);
-    expect(r, "wild: the child crashed", r->crashed);
+    expect(r, "wild: the child crashed", CRASHED(r));
     snprintf(line, sizeof line, "= guest address 0x%llx", (unsigned long long)WILD_ADDR);
     expect(r, "wild: report names the guest address", strstr(r->out, line) != NULL);
     expect(r, "wild: report names the faulting guest function",
@@ -284,14 +264,14 @@ static int parent(const char *self)
     if (spawn(self, "ill", r) != 0)
         return 1;
     printf("--- illegal instruction ---\n%s", r->out);
-    expect(r, "ill: the child crashed", r->crashed);
+    expect(r, "ill: the child crashed", CRASHED(r));
     expect(r, "ill: report names the guest function", strstr(r->out, "in guest function guest 0x7100001300 test+0x1300 guest::test::ill()") != NULL);
     check_backtrace(r, "guest::test::ill()");
 
     if (spawn(self, "host", r) != 0)
         return 1;
     printf("--- host crash under lifted code ---\n%s", r->out);
-    expect(r, "host: the child crashed", r->crashed);
+    expect(r, "host: the child crashed", CRASHED(r));
     expect(r, "host: fault is outside guest memory", strstr(r->out, "(outside guest memory)") != NULL);
     expect(r, "host: pc is in host code", strstr(r->out, "in host code, not in a lifted function") != NULL);
     check_backtrace(r, "guest::test::callshost()");
@@ -299,10 +279,30 @@ static int parent(const char *self)
     if (spawn(self, "nomap", r) != 0)
         return 1;
     printf("--- control: no function map registered ---\n%s", r->out);
-    expect(r, "control: the child crashed", r->crashed);
+    expect(r, "control: the child crashed", CRASHED(r));
     expect(r, "control: guest address still reported", strstr(r->out, line) != NULL);
     expect(r, "control: no guest names without a map", strstr(r->out, "guest::test::") == NULL);
     expect(r, "control: no lifted frame without a map", strstr(r->out, "(no lifted frame)") != NULL);
+
+    if (spawn(self, "fiber", r) != 0)
+        return 1;
+    printf("--- wild guest store on a fiber, another fiber parked ---\n%s", r->out);
+    expect(r, "fiber: the child crashed", CRASHED(r));
+    expect(r, "fiber: report names the guest CPU of the faulting fiber", strstr(r->out, "] on guest CPU 0 (fiber stack ") != NULL);
+    expect(r, "fiber: report does not blame the parked fiber", strstr(r->out, "guest CPU 1") == NULL);
+    expect(r, "fiber: report names the guest address", strstr(r->out, line) != NULL);
+    check_backtrace(r, "#0 guest 0x7100001200 test+0x1200 guest::test::wild()");
+    expect(r, "fiber: the host walk ends at the fiber's first frame", strstr(r->out, "  #12 ") == NULL);
+
+    if (spawn(self, "overflow", r) != 0)
+        return 1;
+    printf("--- stack overflow on a fiber ---\n%.2000s\n", r->out);
+    expect(r, "overflow: the child crashed", CRASHED(r));
+    expect(r, "overflow: report names the overflow and the guest CPU", strstr(r->out, "] stack overflow on guest CPU 0 (fiber stack ") != NULL);
+    expect(r, "overflow: report names the recursing guest function", strstr(r->out, "guest::test::recurse()") != NULL);
+#if defined(_WIN32)
+    expect(r, "overflow: Windows reports STATUS_STACK_OVERFLOW", strstr(r->out, "EXCEPTION_STACK_OVERFLOW") != NULL);
+#endif
 
     printf("%s\n", g_failed ? "crash_test: FAILED" : "crash_test: ok");
     free(r);

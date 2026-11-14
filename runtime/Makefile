@@ -12,6 +12,9 @@
 #                              output and the stub decoder, with no extra dependency.
 #   make gdb-test              check the gdb frame filter (skips without gdb)
 #   make sched-bench           run the device scheduler microbenchmark
+#   make portable              only crash_test, fiber_tests and sched_bench: they link just the
+#                              host-portable part of the core, so they also build for Windows
+#                              (TARGET=x86_64-windows-gnu or aarch64-windows-gnu)
 #   make CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 #
 # TARGET is passed as -target; leave it empty for the compiler's default.
@@ -32,6 +35,10 @@ MACHINE := $(if $(TARGET),$(TARGET),$(shell $(CC) -dumpmachine))
 ifneq ($(findstring x86_64,$(MACHINE)),)
 ARCH_FLAGS := -mcx16
 endif
+ifneq ($(findstring windows,$(MACHINE))$(findstring mingw,$(MACHINE)),)
+WINDOWS := 1
+EXE := .exe
+endif
 ifneq ($(or $(findstring macos,$(MACHINE)),$(findstring darwin,$(MACHINE)),$(findstring apple,$(MACHINE))),)
 SHLIB_EXT := dylib
 SHLIB_LDFLAGS := -dynamiclib -Wl,-install_name,@rpath/librelift_rt.dylib
@@ -44,9 +51,9 @@ ARCH_FLAGS += -fno-sanitize=undefined
 endif
 
 WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
-CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) -fPIC -fvisibility=hidden \
-	-fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME
-LDLIBS := -lpthread
+CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) $(if $(WINDOWS),-DRL_STATIC_RUNTIME,-fPIC) \
+	-fvisibility=hidden -fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME
+LDLIBS := $(if $(WINDOWS),,-lpthread)
 ifeq ($(AUDIO),real)
 HOST_SRCS := $(wildcard host/*.c)
 CFLAGS_BASE += -DRL_HOST_AUDIO $(shell pkg-config --cflags opus sdl3)
@@ -72,6 +79,7 @@ VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*
 
 FIBER_SRCS := core/fiber.c
 FIBER_ASM := $(CORE_ASM)
+SCHED_SRCS := core/sched.c
 
 RUNNER_SRCS := core/tests/runner.c
 RUNNER_HDRS := core/tests/runner.h
@@ -85,6 +93,7 @@ obj = $(patsubst %.S,$(BUILD)/obj/%.o,$(patsubst %.c,$(BUILD)/obj/%.o,$(1)))
 CORE_ASM_OBJS := $(call obj,$(CORE_ASM))
 CORE_OBJS := $(call obj,$(CORE_SRCS)) $(CORE_ASM_OBJS)
 FIBER_OBJS := $(call obj,$(FIBER_SRCS) $(FIBER_ASM))
+SCHED_OBJS := $(call obj,$(SCHED_SRCS)) $(FIBER_OBJS)
 A64_OBJS := $(call obj,$(A64_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
 VK_OBJS := $(call obj,$(VK_SRCS))
@@ -108,12 +117,16 @@ VK_TESTS := $(BUILD)/switch_vk_tests
 TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
-CRASH_TEST := $(BUILD)/crash_test
+CRASH_TEST := $(BUILD)/crash_test$(EXE)
+FIBER_TEST_OBJS := $(call obj,core/tests/fiber/fiber_tests.c)
+FIBER_TESTS := $(BUILD)/fiber_tests$(EXE)
 SCHED_BENCH_OBJS := $(call obj,core/tests/bench/sched_bench.c)
-SCHED_BENCH := $(BUILD)/sched_bench
+SCHED_BENCH := $(BUILD)/sched_bench$(EXE)
+PORTABLE := $(CRASH_TEST) $(FIBER_TESTS) $(SCHED_BENCH)
 
-.PHONY: all test charter gdb-test sched-bench clean
-all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS) $(CRASH_TEST)
+.PHONY: all test portable test-portable charter gdb-test sched-bench clean
+all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
+portable: $(PORTABLE)
 
 $(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 	@mkdir -p $(dir $@)
@@ -171,28 +184,35 @@ $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
-# The crash test links only the crash handler and the fibers, so it also
-# builds on Windows.
-$(CRASH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
+# The crash test links only the crash handler and the fibers, the fiber
+# tests the fibers and the scheduler, so both also build on Windows; so does
+# the scheduler microbenchmark, which links the whole core elsewhere.
+$(CRASH_TEST_OBJS) $(FIBER_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS) core/tests/child.h
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_BASE) -mno-omit-leaf-frame-pointer $(CORE_INC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS_BASE) -mno-omit-leaf-frame-pointer $(CORE_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
 $(CRASH_TEST): $(CRASH_TEST_OBJS) $(CRASH_OBJS)
-	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
+$(FIBER_TESTS): $(FIBER_TEST_OBJS) $(SCHED_OBJS) $(CRASH_OBJS)
+$(CRASH_TEST) $(FIBER_TESTS):
+	$(CC) $(TARGET_FLAGS) $(sort $^) -o $@ $(LDLIBS) $(if $(WINDOWS),,-lm)
 
-# The scheduler microbenchmark links only the core.
 $(SCHED_BENCH_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(CORE_INC) $(CFLAGS) -c $< -o $@
 
-$(SCHED_BENCH): $(SCHED_BENCH_OBJS) $(CORE_OBJS)
+$(SCHED_BENCH): $(SCHED_BENCH_OBJS) $(if $(WINDOWS),$(SCHED_OBJS),$(CORE_OBJS))
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
 sched-bench: $(SCHED_BENCH)
 	$(abspath $(SCHED_BENCH))
 
-test: $(TESTS) $(CRASH_TEST)
+test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
+	$(abspath $(FIBER_TESTS))
+
+test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
+	$(abspath $(CRASH_TEST))
+	$(abspath $(FIBER_TESTS))
 	$(abspath $(CORE_TESTS))
 	$(abspath $(A64_TESTS))
 	$(abspath $(SWITCH_TESTS))
