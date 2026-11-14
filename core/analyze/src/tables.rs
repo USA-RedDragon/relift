@@ -282,7 +282,14 @@ pub(crate) fn resolve(
         }
     };
     let start = body[0].pc;
-    let seeds = known(start);
+    // The body is entered from the bound check's branch, so what holds
+    // after that branch holds at the body, whatever else flows into it (a
+    // call that never returns is followed by the body in the flow graph).
+    let seeds = if branch.insts.iter().any(|i| matches!(i.op, Op::Set(..))) {
+        known(start)
+    } else {
+        known(branch.pc)
+    };
     let body = slice(&body);
     if body
         .iter()

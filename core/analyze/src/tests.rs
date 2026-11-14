@@ -536,6 +536,31 @@ fn a_jump_table_check_on_an_unrelated_register_is_left_alone() {
 }
 
 #[test]
+fn a_jump_table_base_survives_a_call_that_flows_into_the_body() {
+    // The bound check's other way out is a call whose return point is the
+    // body (a call to a function that never returns, as the flow graph
+    // sees it); the call forgets r0, but the body is entered from the
+    // branch with r0 set.
+    let m = module(
+        &[
+            word(0x04, 0, 0x1024), // 0x00 li r0, table
+            word(0x0d, 1, 0),      // 0x04 cmpz r1
+            branch(0x0e, 0, 2),    // 0x08 bz +2 -> 0x10
+            branch(0x02, 0, 5),    // 0x0c bl 0x20, returns to 0x10
+            word(0x05, 0, 1),      // 0x10 add r0, r1
+            word(0x0a, 0, 0),      // 0x14 ld r0, [r0]
+            word(0x06, 0, 0),      // 0x18 br r0
+            word(0x03, 0, 0),      // 0x1c ret
+            word(0x03, 0, 0),      // 0x20 ret
+        ],
+        &(0x1000u64 + 0x1c).to_le_bytes(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert_eq!(a.functions[&BASE].tables[&(BASE + 0x18)], [BASE + 0x1c]);
+}
+
+#[test]
 fn progress_reports_every_entry_and_function_with_real_counts() {
     let m = module(
         &[
