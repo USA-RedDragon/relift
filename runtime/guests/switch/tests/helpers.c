@@ -5,9 +5,42 @@
  */
 #include "t.h"
 
+#include <ftw.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 int t_svc_rc;
+
+static char g_sdmc[512];
+
+static int remove_one(const char *path, const struct stat *st, int flag, struct FTW *ftw)
+{
+    (void)st;
+    (void)flag;
+    (void)ftw;
+    return remove(path);
+}
+
+static void sdmc_remove(void)
+{
+    if (g_sdmc[0])
+        nftw(g_sdmc, remove_one, 16, FTW_DEPTH | FTW_PHYS);
+}
+
+__attribute__((constructor)) static void sdmc_default(void)
+{
+    if (g_sdmc[0] || getenv("RELIFT_SDMC"))
+        return;
+    const char *tmp = getenv("TMPDIR");
+    snprintf(g_sdmc, sizeof g_sdmc, "%s/relift-sdmc-XXXXXX", tmp && *tmp ? tmp : "/tmp");
+    if (!mkdtemp(g_sdmc)) {
+        fprintf(stderr, "  mkdtemp %s failed\n", g_sdmc);
+        exit(2);
+    }
+    setenv("RELIFT_SDMC", g_sdmc, 1);
+    atexit(sdmc_remove);
+}
 
 rl_ctx *t_boot(const rl_hos_config *cfg)
 {
