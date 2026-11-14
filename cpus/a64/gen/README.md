@@ -42,8 +42,9 @@ Regenerate from the repository root:
 SHA-256 in `sources.txt`) from sail-arm at
 `5416ef6b43e9527c38dc71fb752259c1d01a47e1` and rems-project/sail at
 `c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456`. CI runs both and fails when the
-committed files differ. If the committed output stops compiling, copy
-`placeholder.rs` over each class file first so the generator builds again.
+committed files differ. `regen.sh` first replaces each class file with
+`placeholder.rs`, so the generator builds even when the old output no longer
+compiles against `rt.rs`.
 
 `forms.txt` lists the encodings to generate; the generator fails when any of
 them does not generate. `try` prints the template of named encodings or why

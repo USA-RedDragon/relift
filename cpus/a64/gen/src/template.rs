@@ -127,6 +127,8 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
         }
         let combos = 1u32 << split.count_ones();
         let mut arms = Vec::new();
+        let mut failed: Vec<String> = Vec::new();
+        let mut good = 0u32;
         let mut cut = std::collections::BTreeSet::new();
         for i in 0..combos {
             let val = deposit(i, split);
@@ -153,6 +155,7 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
             let mut lines = g.take();
             match r {
                 Ok(()) => {
+                    good += 1;
                     if excl.is_some() {
                         return Err("exclusive monitor check without a store".into());
                     }
@@ -166,10 +169,17 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
                     split |= d;
                     continue 'outer;
                 }
-                Err(E::Fail(e)) => return Err(e),
+                Err(E::Fail(e)) if split == 0 => return Err(e),
+                Err(E::Fail(e)) => {
+                    failed.push(e);
+                    lines = vec!["return Err(LiftError::Unsupported(ENC));".to_string()];
+                }
                 Err(E::NoMatch) => return Err("unmatched call".into()),
             }
             arms.push((val, dead_lines(lines)));
+        }
+        if !failed.is_empty() && good == 0 {
+            return Err(failed.swap_remove(0));
         }
         let mut code = String::new();
         let name = enc.name();
@@ -177,6 +187,14 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
         if split != 0 {
             let _ = writeln!(code, "///");
             let _ = writeln!(code, "/// Split on the word bits `{split:#010x}`.");
+            if let Some(e) = failed.first() {
+                let _ = writeln!(
+                    code,
+                    "/// {} of {combos} arms are unsupported: {}.",
+                    failed.len(),
+                    e.replace('`', "'")
+                );
+            }
         }
         let _ = writeln!(code, "///");
         let _ = writeln!(

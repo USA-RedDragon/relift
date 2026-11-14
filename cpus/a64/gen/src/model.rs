@@ -50,6 +50,9 @@ pub struct Model {
     pub types: HashMap<String, String>,
     /// Union constructor to its union.
     pub unions: HashMap<String, String>,
+    /// Functions defined in `stubs.sail`: placeholders for implementation
+    /// choices, which the generator must not inline silently.
+    pub stubs: std::collections::HashSet<String>,
     parsed: RefCell<HashMap<String, Parsed>>,
     sigs: RefCell<HashMap<String, Option<Rc<Sig>>>>,
 }
@@ -216,7 +219,16 @@ impl Model {
             }
         }
         for f in SRC_FILES {
+            let before: std::collections::HashSet<String> = m.funcs.keys().cloned().collect();
             m.load_file(&src.join(f))?;
+            if *f == "stubs.sail" {
+                m.stubs = m
+                    .funcs
+                    .keys()
+                    .filter(|k| !before.contains(*k))
+                    .cloned()
+                    .collect();
+            }
         }
         Ok(m)
     }

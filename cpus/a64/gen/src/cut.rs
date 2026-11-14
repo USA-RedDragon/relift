@@ -72,6 +72,17 @@ pub const CUT: &[&str] = &[
     "FPMin__1",
     "FPMaxNum",
     "FPMinNum",
+    "DataMemoryBarrier",
+    "DataSynchronizationBarrier",
+    "InstructionSynchronizationBarrier",
+    "SpeculationBarrier",
+    "SpeculativeStoreBypassBarrierToVA",
+    "SpeculativeStoreBypassBarrierToPA",
+    "FPToFixed",
+    "FixedToFP",
+    "FPConvert",
+    "FPConvert__1",
+    "FPRoundInt",
 ];
 
 /// The FP functions cut whole; `rt::Fp` in `relift-cpu-a64` builds them.
@@ -196,6 +207,105 @@ impl Gen<'_> {
             "FPMin" | "FPMin__1" => (K::Bits(w), two("min")),
             "FPMaxNum" => (K::Bits(w), two("max_num")),
             _ => (K::Bits(w), two("min_num")),
+        };
+        Ok(self.dy(k, call))
+    }
+
+    fn fp_fpcr_ok(&self, name: &str, fpcr: &V) -> R<()> {
+        let bits = match fpcr {
+            V::Bf(_, b) => (**b).clone(),
+            v => v.clone(),
+        };
+        match bits {
+            V::Bits(_, x) if x & FPCR_FIXED == 0 => Ok(()),
+            _ => fail(format!("{name} with FPCR {bits:?}")),
+        }
+    }
+
+    /// The `FpRound` of a concrete `FPRounding`, or a split on its bits.
+    fn fp_round(&self, v: &V) -> R<&'static str> {
+        let i = match v {
+            V::Enum(_, i) => *i,
+            V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+            _ => return fail(format!("rounding {v:?}")),
+        };
+        let names = &self.m.enums["FPRounding"];
+        Ok(match names[i].as_str() {
+            "FPRounding_TIEEVEN" => "TiesEven",
+            "FPRounding_TIEAWAY" => "TiesAway",
+            "FPRounding_NEGINF" => "Floor",
+            "FPRounding_POSINF" => "Ceil",
+            "FPRounding_ZERO" => "Zero",
+            r => return fail(format!("rounding {r}")),
+        })
+    }
+
+    fn fp_convert(&mut self, name: &str, a: &[V]) -> R<V> {
+        let fpw = |w: u32| -> R<u32> {
+            if w == 32 || w == 64 {
+                Ok(w)
+            } else {
+                fail(format!("{name} on {w} bits"))
+            }
+        };
+        let x = self.bitify(&a[0])?;
+        let iw = fpw(x
+            .width()
+            .ok_or_else(|| crate::eval::err("FP operand width"))?)?;
+        let xs = self.dx(&x)?.to_string();
+        let (k, call) = match name {
+            "FPToFixed" | "FixedToFP" => {
+                self.fp_fpcr_ok(name, &a[3])?;
+                let fbits = self.cint(&a[1])?;
+                let unsigned = match &a[2] {
+                    V::Bool(u) => *u,
+                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    v => return fail(format!("signedness {v:?}")),
+                };
+                let r = self.fp_round(&a[4])?;
+                let ow = fpw(self.cint(&a[5])? as u32)?;
+                let signed = !unsigned;
+                if name == "FPToFixed" {
+                    (
+                        K::Bits(ow),
+                        format!(
+                            "rt::Fp::new({iw}).fp_to_fixed(b, {xs}, {fbits}, {signed}, FpRound::{r}, {ow})"
+                        ),
+                    )
+                } else {
+                    if r != "TiesEven" {
+                        return fail(format!("{name} rounding {r}"));
+                    }
+                    (
+                        K::Bits(ow),
+                        format!("rt::Fp::new({ow}).fixed_to_fp(b, {xs}, {fbits}, {signed})"),
+                    )
+                }
+            }
+            "FPConvert" | "FPConvert__1" => {
+                self.fp_fpcr_ok(name, &a[1])?;
+                let ow_v = if name == "FPConvert" {
+                    if self.fp_round(&a[2])? != "TiesEven" {
+                        return fail("FPConvert rounding");
+                    }
+                    &a[3]
+                } else {
+                    &a[2]
+                };
+                let ow = fpw(self.cint(ow_v)? as u32)?;
+                (
+                    K::Bits(ow),
+                    format!("rt::Fp::new({iw}).convert(b, {xs}, &rt::Fp::new({ow}))"),
+                )
+            }
+            _ => {
+                self.fp_fpcr_ok(name, &a[1])?;
+                let r = self.fp_round(&a[2])?;
+                (
+                    K::Bits(iw),
+                    format!("rt::Fp::new({iw}).round_int(b, {xs}, FpRound::{r})"),
+                )
+            }
         };
         Ok(self.dy(k, call))
     }
@@ -398,6 +508,32 @@ impl Gen<'_> {
                 ])
             }
             n if FP_CUT.contains(&n) => return self.fp_cut(name, a).map(Some),
+            "FPToFixed" | "FixedToFP" | "FPConvert" | "FPConvert__1" | "FPRoundInt" => {
+                return self.fp_convert(name, a).map(Some);
+            }
+            "DataMemoryBarrier" | "DataSynchronizationBarrier" => {
+                let order = match a.get(1) {
+                    Some(V::Enum(t, i)) if name == "DataMemoryBarrier" => {
+                        match self.m.enums[t.as_ref()][*i].as_str() {
+                            "MBReqTypes_Reads" => "Acquire",
+                            "MBReqTypes_Writes" => "Release",
+                            _ => "SeqCst",
+                        }
+                    }
+                    Some(V::Enum(..)) => "SeqCst",
+                    Some(V::S(_, _, d)) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    v => return fail(format!("{name} types {v:?}")),
+                };
+                self.effect(format!("b.fence(Order::{order});"));
+                V::Unit
+            }
+            "InstructionSynchronizationBarrier"
+            | "SpeculationBarrier"
+            | "SpeculativeStoreBypassBarrierToVA"
+            | "SpeculativeStoreBypassBarrierToPA" => {
+                self.effect("b.fence(Order::SeqCst);".into());
+                V::Unit
+            }
             "ClearExclusiveLocal" | "AArch64_ClearExclusiveLocal" => {
                 self.effect("b.clear_exclusive();".into());
                 V::Unit
