@@ -113,6 +113,11 @@ jobs:
           cpus/a64/gen/regen.sh "$RUNNER_TEMP/sail/lib" "$RUNNER_TEMP/sail/model"
           git diff --exit-code -- cpus/a64/src/lift/sail/generated
 
+      - name: regenerate and compare the SM83 templates
+        run: |
+          cpus/sm83/gen/regen.sh "$RUNNER_TEMP/sail/lib"
+          git diff --exit-code -- cpus/sm83/src/lift/sail/generated.rs
+
   macos:
     name: tests (macOS)
     runs-on: macos-latest

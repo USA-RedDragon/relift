@@ -44,10 +44,11 @@ list of hard rules; read it before changing anything.
 - **Generated code is committed.** `cpus/a64/src/decode/generated.rs`
   (from AARCHMRS) and `cpus/a64/src/lift/sail/generated/*.rs` (from sail-arm,
   one file per instruction class, `linguist-generated` in `.gitattributes`)
-  are never edited by hand; `cpus/a64/gen/README.md` says how to regenerate
-  them, and their notices sit next to the crate manifest. CI's
-  `generated templates are current` job fetches the pinned sail-arm files,
-  reruns the generator and fails on any difference. A form joins
+  and `cpus/sm83/src/lift/sail/generated.rs` (from our SM83 Sail model) are
+  never edited by hand; `cpus/a64/gen/README.md` and
+  `cpus/sm83/gen/README.md` say how to regenerate them, and their notices sit next to the crate manifest. CI's
+  `generated templates are current` job fetches the pinned Sail files,
+  reruns both generators and fails on any difference. A form joins
   `cpus/a64/gen/forms.txt` only after `relift-check forms` passes it and its
   mutation control on an oracle that implements its features.
 - **`unsafe` is forbidden** outside the roster in
@@ -85,7 +86,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
 | 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
-| 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Checks that `relift-sail` reads the SM83 Sail model (`cpus/sm83/sail/sm83.sail`) and that its decode clauses match the opcode table; run by hand, linked by nothing |
+| 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder and opcode table: length, M-cycles taken and not taken, flags, bus access per cycle; no IR yet, no dependencies |
 | 2 | `relift-gb-formats` | `guests/gb/formats` | Game Boy and Game Boy Color cartridge format: header, mapper kinds, ROM and RAM size codes, both checksums, bank layout; no dependencies |
 | 2 | `relift-gb-analyze` | `guests/gb/analyze` | Function discovery across mapper banks: code locations are (bank, address), bank-register writes are tracked along paths, bank-switch trampolines are found and resolved at their call sites, jumps into RAM are reported; decode and control flow only |
