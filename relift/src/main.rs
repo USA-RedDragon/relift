@@ -41,6 +41,13 @@ fn main() -> ExitCode {
     };
     let result = match &cli.command {
         Command::Import { dump, update } => relift::import::run(&settings, dump, update.as_deref()),
+        Command::Build { target } => relift::build::run_build(&settings, target),
+        Command::Run {
+            target, trace_os, ..
+        } => match relift::build::run_run(&settings, target.as_deref(), *trace_os) {
+            Ok(code) => return ExitCode::from(u8::try_from(code).unwrap_or(1)),
+            Err(e) => Err(e),
+        },
         _ => Err("not implemented".into()),
     };
     match result {
