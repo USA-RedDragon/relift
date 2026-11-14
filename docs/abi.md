@@ -361,6 +361,33 @@ no one function or file grows past what clang can compile in a few GB.
   return code of the function it finally calls. No extra code.
   [verified for the hit path by the probe; miss path inferred]
 
+## 5.1 Linking between modules
+
+A title with several modules (a dynamic loader, the program, SDK and
+middleware libraries) links them at run time: the guest's own loader walks
+the loaded modules, applies their relocations, resolves each import against
+the other modules' exports and fills the GOT. relift lifts that loader like
+any other module and lets it do this work, instead of resolving imports at
+build time. [decided]
+
+- **What the runtime provides:** every module mapped at the address it was
+  lifted for, text reported by the memory query as static code with
+  read and execute permission (the guest loader finds modules that way),
+  and one dispatch table over the code of all modules, so a call through a
+  GOT slot the guest loader filled is an ordinary indirect call.
+- **Why not build-time linking:** the guest loader also runs the init
+  arrays and picks the definition that wins when several modules export one
+  name; doing that in relift would copy behavior the guest already
+  carries, and it would have to match the guest's lookup order exactly.
+  Lifting it costs only the loader's few functions. Cross-module calls stay
+  indirect (one table load each, section 5); build-time rewriting of PLT
+  stubs to direct calls remains possible later as an optimization when the
+  winning definition is known.
+- **Discovery:** exported functions are roots of their own module, so the
+  targets the guest loader writes into GOT slots are lifted entries. A slot
+  that resolves to a function no module exports goes to the miss path
+  (section 6).
+
 ## 6. Missed code
 
 `int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)` has the lifted signature
