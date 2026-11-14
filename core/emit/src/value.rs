@@ -88,6 +88,8 @@ pub(crate) enum Emitted {
     Stmt(String),
     /// A register write, applied when the block exits.
     Set(Reg, String),
+    /// A guard: leave for slow path `code` when the value is 1.
+    Guard(Value, u32),
 }
 
 /// The C for instruction `i` of `b`, or why it cannot be expressed.
@@ -101,6 +103,7 @@ pub(crate) fn emit_op(fe: &dyn Frontend, b: &Block, i: usize) -> Result<Emitted,
         Op::Const(c) => fit(&lit(*c, w), w),
         Op::Get(r) => reg(*r),
         Op::Set(r, v) => return Ok(Emitted::Set(*r, val(*v))),
+        Op::Guard(c, code) => return Ok(Emitted::Guard(*c, *code)),
         Op::Un(op, x) => {
             let x64 = w.bits() <= 64;
             let ax = a(x);
