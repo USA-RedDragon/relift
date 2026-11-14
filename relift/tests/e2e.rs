@@ -34,6 +34,17 @@ fn a_tiny_program_builds_and_runs() {
             && stderr.contains("built 2 functions, 0 instructions not lifted"),
         "{stderr}"
     );
+    let game = std::fs::read_dir(root.join("cache").join("projects"))
+        .unwrap()
+        .map(|e| e.unwrap().path().join("build").join("host").join("game"))
+        .find(|p| p.is_file())
+        .expect("a built game");
+    let bytes = std::fs::read(&game).unwrap();
+    assert!(
+        bytes.windows(17).any(|w| w == b"rl_vk_switch_hook"),
+        "the game dropped the Vulkan hook's object"
+    );
+    assert!(!stderr.contains("vulkan-forwarding turned on"), "{stderr}");
 }
 
 /// The same program with every function split into one C function per
