@@ -107,6 +107,7 @@ pub const CUT: &[&str] = &[
     "FPConvert",
     "FPConvert__1",
     "FPRoundInt",
+    "FPRoundIntN",
     "AESSubBytes",
     "AESInvSubBytes",
     "AESMixColumns",
@@ -462,6 +463,21 @@ impl Gen<'_> {
                     format!("rt::Fp::new({iw}).convert(b, {xs}, &rt::Fp::new({ow}))"),
                 )
             }
+            "FPRoundIntN" => {
+                self.fp_fpcr_ok(name, &a[1])?;
+                let r = self.fp_round(&a[2])?;
+                let n = self.cint(&a[3])?;
+                if n != 32 && n != 64 {
+                    return fail(format!("{name} to {n} bits"));
+                }
+                // The invalid flag of an out-of-range result is not a host
+                // flag of the rounding.
+                self.line("st.assume_flags_slow();".into());
+                (
+                    K::Bits(iw),
+                    format!("rt::Fp::new({iw}).round_int_n(b, {xs}, FpRound::{r}, {n})"),
+                )
+            }
             _ => {
                 self.fp_fpcr_ok(name, &a[1])?;
                 let r = self.fp_round(&a[2])?;
@@ -777,7 +793,8 @@ impl Gen<'_> {
             "FPRecipEstimate" | "FPRSqrtEstimate" | "FPRecipStepFused" | "FPRSqrtStepFused" => {
                 return self.fp_estimate(name, a).map(Some);
             }
-            "FPToFixed" | "FixedToFP" | "FPConvert" | "FPConvert__1" | "FPRoundInt" => {
+            "FPToFixed" | "FixedToFP" | "FPConvert" | "FPConvert__1" | "FPRoundInt"
+            | "FPRoundIntN" => {
                 return self.fp_convert(name, a).map(Some);
             }
             n if CRYPTO_CUT.iter().any(|(c, _)| *c == n) => {

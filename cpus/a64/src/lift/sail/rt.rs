@@ -739,6 +739,22 @@ impl Fp {
         self.nans(b, &[x], v)
     }
 
+    /// `FPRoundIntN` (FRINT32*, FRINT64*): `x` rounded to an integral value
+    /// by `r`; a NaN, an infinity or a result outside the `n`-bit signed
+    /// range gives the most negative `n`-bit integer, `-2^(n-1)`.
+    pub fn round_int_n(&self, b: &mut Builder, x: Value, r: FpRound, n: u32) -> Value {
+        let v = b.fp(FpOp::RoundInt(r), &[x], self.w);
+        let f = self.quiet.trailing_zeros() + 1;
+        let bias = (self.inf >> f) >> 1;
+        // |v| >= 2^(n-1) in its bits, with NaNs and infinities above.
+        let lim = (bias + u128::from(n) - 1) << f;
+        let m = self.magnitude(b, v);
+        let l = self.k(b, lim);
+        let out = b.cmp(CmpOp::Ule, l, m);
+        let k = self.k(b, self.sign | lim);
+        b.select(out, k, v)
+    }
+
     /// `FPConvert` to the format `to`, rounding to nearest even; a NaN keeps
     /// its sign and the top of its payload and becomes quiet.
     pub fn convert(&self, b: &mut Builder, x: Value, to: &Fp) -> Value {
