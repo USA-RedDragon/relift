@@ -280,8 +280,12 @@ fn on_a_terminal(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Option<Stri
         line.push_str(&quote(a));
     }
     let mut cmd = relift_proc::command(script);
-    cmd.args(["-qec", &line, "/dev/null"])
-        .env_remove("NO_COLOR")
+    if cfg!(any(target_os = "macos", target_os = "freebsd")) {
+        cmd.args(["-q", "/dev/null", "sh", "-c", &line]);
+    } else {
+        cmd.args(["-qec", &line, "/dev/null"]);
+    }
+    cmd.env_remove("NO_COLOR")
         .env_remove("CI")
         .env_remove("RELIFT_COLOR")
         .env("TERM", "xterm-256color")
