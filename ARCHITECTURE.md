@@ -83,12 +83,25 @@ manifest excludes it.
 There is no core names crate: Itanium remangling is the Switch guest's
 business, and the core sees only `relift_guest::Naming`.
 
-The C runtime (`runtime/core`, `runtime/switch`, built and tested by
-`runtime/Makefile`, see `runtime/README.md`) sits outside Cargo. The public
-override header (`include/relift/override.h`) does not exist yet.
+The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
+(see `runtime/README.md`), in three layers that mirror the Rust folders:
 
-The contract between emitted C and that runtime is the header
-`runtime/cpus/a64/include/relift/a64/abi.h`; `docs/abi.md` gives the reason for each choice.
+| Layer | Folder | Owns |
+|---|---|---|
+| core | `runtime/core` | Guest memory with its own permission flags, faults at guest addresses, host threads with an opaque CPU context, the clock, dispatch, logging and configuration; knows no guest OS and no guest CPU |
+| CPU | `runtime/cpus/a64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
+| guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:`, the NPDM layout, Horizon's page, clock and permission encodings |
+
+The layers above tell the core their page size, address width, tick rate,
+context layout, code granule and byte order through two descriptor structs
+at start-up. Each layer builds with only its own include paths and those
+below it, and each layer's tests link nothing above it. The public override
+header (`include/relift/override.h`) does not exist yet.
+
+The contract between emitted C and that runtime is
+`runtime/cpus/a64/include/relift/a64/abi.h`, over the CPU-neutral
+`runtime/core/include/relift/abi_core.h`; `docs/abi.md` gives the reason for
+each choice.
 
 ## 2. Structural rules and the tests that enforce them
 
@@ -111,6 +124,7 @@ All of these run in `cargo test` and in CI's checks job.
 | The funnel opt-out appears once per owning crate and nowhere else; no crate has its own `clippy.toml` | `relift/tests/funnels.rs` |
 | No GPL, AGPL or LGPL crate; crates.io only | `deny.toml` (`cargo deny check` in CI) |
 | The generated config table in `README.md` and `relift.example.toml` match the settings struct | CI step "generated config docs are current"; `relift/tests/cli.rs`: `the_example_config_loads` |
+| The C runtime core (`runtime/core`) includes no header of `runtime/cpus` or `runtime/guests` and spells no guest OS or CPU word outside `runtime/charter/allow.txt` | `runtime/charter/check.py` (`make -C runtime charter`, the Runtime workflow's charter job); each layer's test binary links nothing above it |
 
 The cut edges are folder rules read from each member's manifest path, so a
 new crate under `core/` or `guests/` is covered without editing the test.
