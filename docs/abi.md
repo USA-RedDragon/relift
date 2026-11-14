@@ -1197,10 +1197,12 @@ interrupts. A64 code uses none of this: the Switch CPU layer has no clock
 operations below. The IR side is defined by the reference interpreter
 (`core/ir/src/interp.rs`, `run_with` and the `Devices` trait) and checked by
 `core/ir/tests/hw.rs`; the runtime side lives in `runtime/core/sched.c` and
-`relift/sched.h`. [verified: IR semantics by `core/ir/tests/hw.rs`; the
-C emitter half is not written yet, so every emitter rule below is
-[inferred] for C until it is; the WebAssembly emitter follows them,
-checked by `core/emit-wasm/tests/diff/` (section 15)]
+`relift/sched.h`. [verified: IR semantics by `core/ir/tests/hw.rs`; the C
+emitter by `relift/tests/emit_hw.rs`, which compiles random blocks of every
+operation below next to a mock scheduler and compares registers, memory, the
+clock, device events and the exit with the interpreter, with a mutation
+control; the WebAssembly emitter follows the same rules, checked by
+`core/emit-wasm/tests/diff/` (section 15)]
 
 ### IR operations
 
