@@ -11,6 +11,7 @@ relift-cpu-a64 = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }
 relift-switch-formats = { workspace = true }
+relift-switch-names = { workspace = true }
 
 [lints]
 workspace = true

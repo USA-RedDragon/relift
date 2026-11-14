@@ -155,6 +155,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be95d4a884358a21a199689323c29e9256b4a1b315e22f183d155422041d3a9a"
 
 [[package]]
+name = "cpp_demangle"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0667304c32ea56cb4cd6d2d7c0cfe9a2f8041229db8c033af7f8d69492429def"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,6 +435,7 @@ dependencies = [
  "relift-guest",
  "relift-ir",
  "relift-switch-formats",
+ "relift-switch-names",
 ]
 
 [[package]]
@@ -436,6 +446,14 @@ dependencies = [
  "relift-cache",
  "sha2",
  "zstd",
+]
+
+[[package]]
+name = "relift-switch-names"
+version = "0.1.0"
+dependencies = [
+ "cpp_demangle",
+ "relift-guest",
 ]
 
 [[package]]

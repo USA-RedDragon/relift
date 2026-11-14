@@ -189,6 +189,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-switch-names",
+        band: 2,
+        why: "Switch symbols as host names, over the guest contract's naming trait only",
+        normal: &["relift-guest"],
+        dev: &["cpp_demangle"],
+        build: NONE,
+    },
+    Charter {
         member: "relift-switch",
         band: 2,
         why: "the Switch guest over its formats and the ARM64 frontend",
@@ -197,6 +205,7 @@ const CHARTERS: &[Charter] = &[
             "relift-guest",
             "relift-ir",
             "relift-switch-formats",
+            "relift-switch-names",
         ],
         dev: NONE,
         build: NONE,
