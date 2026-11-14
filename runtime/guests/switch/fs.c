@@ -49,7 +49,15 @@ enum {
 static char g_root[PATH_MAX];
 static char g_save[PATH_MAX] = "./save";
 
-static const char *fs_root(const rl_ipc_req *r) { return r->self->state ? r->self->state : g_root; }
+static const char *fs_root(const rl_ipc_req *r)
+{
+    return r->self->state ? rl_save_root(r->self->state) : g_root;
+}
+
+static rl_result need_write(const rl_ipc_req *r)
+{
+    return r->self->state && rl_save_read_only(r->self->state) ? FS_WRITE_NOT_PERMITTED : KR_SUCCESS;
+}
 
 static rl_result errno_result(int e)
 {
@@ -137,6 +145,8 @@ static rl_result stat_path(const char *path, struct stat *st)
 
 static rl_result create_file(rl_ipc_req *r)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     struct {
         uint32_t option;
         uint32_t pad;
@@ -167,6 +177,8 @@ static rl_result create_file(rl_ipc_req *r)
 
 static rl_result delete_file(rl_ipc_req *r)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     char path[PATH_MAX];
     struct stat st;
     rl_result rc = host_path(r, 0, path, sizeof path);
@@ -181,6 +193,8 @@ static rl_result delete_file(rl_ipc_req *r)
 
 static rl_result create_directory(rl_ipc_req *r)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     char path[PATH_MAX];
     rl_result rc = host_path(r, 0, path, sizeof path);
     if (rc != KR_SUCCESS)
@@ -190,6 +204,8 @@ static rl_result create_directory(rl_ipc_req *r)
 
 static rl_result delete_directory(rl_ipc_req *r)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     char path[PATH_MAX];
     rl_result rc = host_path(r, 0, path, sizeof path);
     if (rc != KR_SUCCESS)
@@ -229,6 +245,8 @@ static rl_result remove_tree(const char *dir, int keep_dir)
 
 static rl_result delete_directory_recursively(rl_ipc_req *r)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     char path[PATH_MAX];
     rl_result rc = host_path(r, 0, path, sizeof path);
     if (rc != KR_SUCCESS)
@@ -238,6 +256,8 @@ static rl_result delete_directory_recursively(rl_ipc_req *r)
 
 static rl_result clean_directory_recursively(rl_ipc_req *r)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     char path[PATH_MAX];
     rl_result rc = host_path(r, 0, path, sizeof path);
     if (rc != KR_SUCCESS)
@@ -247,6 +267,8 @@ static rl_result clean_directory_recursively(rl_ipc_req *r)
 
 static rl_result rename_kind(rl_ipc_req *r, int want_dir)
 {
+    if (need_write(r) != KR_SUCCESS)
+        return need_write(r);
     char from[PATH_MAX], to[PATH_MAX];
     struct stat st;
     rl_result rc = host_path(r, 0, from, sizeof from);
@@ -354,6 +376,8 @@ static rl_result open_file(rl_ipc_req *r)
         return rc;
     if ((mode & ~7u) != 0 || (mode & (FS_MODE_READ | FS_MODE_WRITE)) == 0)
         return FS_INVALID_OPEN_MODE;
+    if ((mode & FS_MODE_WRITE) && need_write(r) != KR_SUCCESS)
+        return need_write(r);
     if ((mode & FS_MODE_READ) && (mode & FS_MODE_WRITE))
         flags = O_RDWR;
     else
@@ -450,8 +474,14 @@ static rl_result open_directory(rl_ipc_req *r)
 
 static rl_result commit(rl_ipc_req *r)
 {
-    (void)r;
-    return KR_SUCCESS;
+    rl_save_mount *m = r->self->state;
+    int e;
+    if (!m)
+        return KR_SUCCESS;
+    if (rl_save_read_only(m))
+        return KR_SUCCESS;
+    e = rl_save_commit(m);
+    return e ? errno_result(e) : KR_SUCCESS;
 }
 
 static rl_result space_size(rl_ipc_req *r, int total)
@@ -505,7 +535,11 @@ static const rl_ipc_cmd fs_cmds[] = {
     { 14, "GetFileTimeStampRaw", get_file_time_stamp_raw },
 };
 
-static void fs_destroy(void *state) { free(state); }
+static void fs_destroy(void *state)
+{
+    if (state)
+        rl_save_close(state);
+}
 
 static const rl_ipc_class fs_class = { "nn::fssrv::sf::IFileSystem", fs_cmds, sizeof fs_cmds / sizeof fs_cmds[0], 0,
                                        fs_destroy };
@@ -705,6 +739,16 @@ static rl_result get_global_access_log_mode(rl_ipc_req *r)
 
 static void make_dirs(const char *path);
 
+static void parent_dirs(const char *dir)
+{
+    char parent[PATH_MAX];
+    const char *slash = strrchr(dir, '/');
+    if (!slash || slash == dir)
+        return;
+    snprintf(parent, sizeof parent, "%.*s", (int)(slash - dir), dir);
+    make_dirs(parent);
+}
+
 /** @brief nn::fs::SaveDataAttribute. */
 typedef struct fs_save_attr {
     uint64_t program_id;
@@ -757,20 +801,22 @@ static rl_result open_save_data_file_system(rl_ipc_req *r)
     fs_save_in in;
     char dir[PATH_MAX];
     rl_result rc;
-    char *root;
+    rl_save_mount *mount;
     rl_ipc_object *o;
+    int e, mode;
     if (!rl_ipc_in(r, &in, sizeof in))
         return SF_RESULT_INVALID_HEADER;
     rc = save_dir(&in.attr, dir, sizeof dir);
     if (rc != KR_SUCCESS)
         return rc;
-    make_dirs(dir);
-    root = strdup(dir);
-    if (!root)
-        return KR_OUT_OF_RESOURCE;
-    o = rl_ipc_object_new(&fs_class, root);
+    parent_dirs(dir);
+    mode = r->cmd == 53 ? RL_SAVE_READONLY : in.attr.type == 4 ? RL_SAVE_DIRECT : RL_SAVE_JOURNALED;
+    e = rl_save_open(dir, mode, &mount);
+    if (e)
+        return errno_result(e);
+    o = rl_ipc_object_new(&fs_class, mount);
     if (!o) {
-        free(root);
+        rl_save_close(mount);
         return KR_OUT_OF_RESOURCE;
     }
     return rl_ipc_push_object(r, o);
