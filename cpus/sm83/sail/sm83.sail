@@ -486,7 +486,7 @@ function execute_ADD_SP_e () -> unit = {
 function execute_DAA () -> unit = {
     let a = A;
     let adj6 : bool = FH == 0b1 | (FN == 0b0 & unsigned(a & 0x0F) > 9);
-    let adj60 : bool = FC == 0b1 | (FN == 0b0 & unsigned(a) > 0x99);
+    let adj60 : bool = FC == 0b1 | (FN == 0b0 & unsigned(a) > 153);
     let adjust : bits(8) = (if adj6 then 0x06 else 0x00) | (if adj60 then 0x60 else 0x00);
     let res = if FN == 0b1 then a - adjust else a + adjust;
     A = res;
