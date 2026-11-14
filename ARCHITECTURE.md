@@ -80,6 +80,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-switch-formats` | `guests/switch/formats` | Decrypted Switch formats (romfs, NSO, NRO, NPDM, NUP) and the import of a `.nup` or an extracted dump tree |
 | 2 | `relift-switch-tools` | `guests/switch/tools` | `relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate; `relift-ir` prints the IR of A64 words or NSO symbols |
 | 2 | `relift-switch-vkgen` | `guests/switch/vkgen` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; standalone (nothing depends on it) |
+| 2 | `relift-switch-names` | `guests/switch/names` | Switch symbol names as host names: Itanium names remangled into `guest::<module>`, the address fallback, and the reverse map |
 | 2 | `relift-switch` | `guests/switch/guest` | The Switch guest, over its formats and `relift-cpu-a64` |
 | 2 | `relift-testguest` | `testguest` | Tiny synthetic guest the core is tested against |
 | 3 | `relift` | `relift` | The binary: settings, command dispatch, guest registry |
@@ -104,7 +105,8 @@ the forms the checker was brought up on, kept as a cross-check:
 runs both in the interpreter.
 
 There is no core names crate: Itanium remangling is the Switch guest's
-business, and the core sees only `relift_guest::Naming`.
+business (`relift-switch-names`), and the core sees only
+`relift_guest::Naming`.
 
 The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 (see `runtime/README.md`), in three layers that mirror the Rust folders:
