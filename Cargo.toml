@@ -26,6 +26,7 @@ relift-emit = { path = "core/emit" }
 relift-emit-wasm = { path = "core/emit-wasm" }
 relift-guest = { path = "core/guest" }
 relift-host = { path = "core/host" }
+relift-info = { path = "core/info" }
 relift-ir = { path = "core/ir" }
 relift-manifest = { path = "core/manifest" }
 relift-override = { path = "override/api" }
@@ -46,6 +47,7 @@ configulator-rs = "=0.4.1"
 cpp_demangle = "=0.5.1"
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["safe-decode", "safe-encode", "std"] }
 roxmltree = "=0.21.2"
+serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 uds_windows = "=1.2.1"
 sha2 = "=0.11.1"
