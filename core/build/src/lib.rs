@@ -80,11 +80,13 @@ fn nj(p: &Path) -> String {
         .replace(':', "$:")
 }
 
-/// The text of `build.ninja` for `plan`.
+/// The text of `build.ninja` for `plan`. The link reads its objects from a
+/// response file: ninja runs each command as one `sh -c` string, which
+/// Linux caps at 128 KiB, and a game's thousands of shard objects pass it.
 pub fn ninja_file(plan: &Plan) -> String {
     let cc: Vec<String> = plan.cc.iter().map(|s| sh(s)).collect();
     let mut t = format!(
-        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc $in -o $out $libs\n  description = link $out\n\n",
+        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
         cc.join(" ")
     );
     for c in &plan.compiles {
@@ -347,6 +349,10 @@ mod tests {
     #[test]
     fn ninja_file_escapes_paths_and_quotes_flags() {
         let t = ninja_file(&plan());
+        assert!(
+            t.contains("command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n"),
+            "{t}"
+        );
         assert!(
             t.contains("build obj/a.o: cc c/a$ b.c\n  flags = -O2 '-DX=\"y\"'"),
             "{t}"
