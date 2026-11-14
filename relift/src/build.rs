@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use relift_analyze::{Insn, Progress, discover_with};
 use relift_build::{Compile, Event, Plan};
 use relift_cpu_a64::frontend::A64;
-use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration};
+use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration, noun};
 use relift_switch::program::{self, Placed};
 use relift_switch_formats::npdm::Npdm;
 use relift_switch_formats::nso::Nso;
@@ -138,10 +138,7 @@ fn emit_modules(
             } => {
                 if !lifting {
                     lifting = true;
-                    ui.done(
-                        row,
-                        Line::new().text(format!("{} functions", count(total as u64))),
-                    );
+                    ui.done(row, Line::new().text(noun(total as u64, "function")));
                     ui.begin(row, "lift");
                 }
                 ui.update(
@@ -157,10 +154,7 @@ fn emit_modules(
             }
         });
         if !lifting {
-            ui.done(
-                row,
-                Line::new().text(format!("{} functions", count(found as u64))),
-            );
+            ui.done(row, Line::new().text(noun(found as u64, "function")));
             ui.begin(row, "lift");
         }
         let mut failed = BTreeMap::new();
@@ -264,9 +258,9 @@ fn emit_modules(
         ui.done(
             row,
             Line::new().text(format!(
-                "{} shards, {} overrides",
-                count(shards as u64),
-                count(overrides.len() as u64)
+                "{}, {}",
+                noun(shards as u64, "shard"),
+                noun(overrides.len() as u64, "override")
             )),
         );
         done.units.push(unit);
@@ -281,7 +275,7 @@ fn lift_summary(functions: usize, unlifted: usize) -> Line {
         Paint::Plain
     };
     Line::new()
-        .text(format!("{} functions, ", count(functions as u64)))
+        .text(format!("{}, ", noun(functions as u64, "function")))
         .paint(paint, format!("{} unlifted", count(unlifted as u64)))
 }
 
@@ -477,7 +471,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         if finished == 0 {
             Line::new().text(format!("up to date, {note}"))
         } else {
-            Line::new().text(format!("{} files, {note}", count(finished as u64)))
+            Line::new().text(format!("{}, {note}", noun(finished as u64, "file")))
         },
     );
     summarize(
@@ -499,7 +493,7 @@ fn summarize(ui: &mut Ui, functions: usize, unlifted: usize, list: &Path, exe: &
     ui.summary(
         &Line::new()
             .paint(Paint::Green, "built")
-            .text(format!(" {} functions, ", count(functions as u64)))
+            .text(format!(" {}, ", noun(functions as u64, "function")))
             .paint(
                 paint,
                 format!("{} instructions not lifted", count(unlifted as u64)),
