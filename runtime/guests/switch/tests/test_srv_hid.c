@@ -64,7 +64,7 @@ static uint32_t cmd_aruid(env *e, uint32_t cmd)
     return rc_of(tc_send(e->c, e->hid, q));
 }
 
-static bool start_with(env *e, bool manual)
+static bool start_at(env *e, bool manual, uint64_t shift)
 {
     memset(e, 0, sizeof *e);
     e->c = t_boot(NULL);
@@ -84,12 +84,14 @@ static bool start_with(env *e, bool manual)
     if (rc_of(r) != 0 || r.ncopy != 1)
         return false;
     e->shm = r.copy[0];
-    e->at = t_free_map_addr();
+    e->at = t_free_map_addr() + shift;
     if (t_svc(e->c, SVC_MAP_SHARED_MEMORY, e->shm, e->at, HID_SHMEM_SIZE, HOS_PERM_R, 0, 0) != 0)
         return false;
     e->mem = (const hid_shared_memory *)(const void *)(t_mem() + e->at);
     return true;
 }
+
+static bool start_with(env *e, bool manual) { return start_at(e, manual, 0); }
 
 static bool start(env *e) { return start_with(e, true); }
 
@@ -202,6 +204,26 @@ TEST(hid_applet_resource_handle_twice)
     CHECK_EQ(t_svc(e.c, SVC_MAP_SHARED_MEMORY, r.copy[0], at2, HID_SHMEM_SIZE, HOS_PERM_R, 0, 0), 0);
     e.mem = (const hid_shared_memory *)(const void *)(t_mem() + at2);
     CHECK_EQ(rc_of(tc_send(e.c, e.ar, tc_new(1))), SF_RESULT_UNKNOWN_COMMAND);
+    rl_hid_stop();
+}
+
+TEST(hid_shared_memory_inside_a_host_page)
+{
+    env e;
+    CHECK(start_at(&e, true, 0x1000));
+    CHECK_EQ(e.mem->debug_pad.header.buffer_count, 17);
+    CHECK_EQ(e.mem->npads[0].state.full_key.header.buffer_count, 17);
+    CHECK_EQ(cmd_aruid(&e, 103), 0);
+    rl_input_snapshot s = blank();
+    s.pads[0].buttons = 1u << RL_BTN_EAST;
+    publish(&s);
+    rl_hid_update_now();
+    hid_npad_state st[17];
+    CHECK_EQ(GET_STATES(e.mem->npads[0].state.full_key, st, 17), 16);
+    CHECK_EQ(st[0].buttons, HID_BTN_A);
+    CHECK(!t_read(e.at + HID_SHMEM_SIZE - 1).faulted);
+    CHECK_EQ(t_svc(e.c, SVC_MAP_SHARED_MEMORY, e.shm, e.at + 0x400000 - 0x1000, HID_SHMEM_SIZE, HOS_PERM_R, 0, 0),
+             hos.vm.host_page > 0x1000 ? KR_INVALID_MEM_STATE : 0u);
     rl_hid_stop();
 }
 

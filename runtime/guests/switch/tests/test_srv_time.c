@@ -135,7 +135,8 @@ static bool time_initialize(env *e, const char *name, libnx_time *t)
         return false;
     t->shm_handle = r.copy[0];
     static uint64_t mapped;
-    uint64_t at = t_free_map_addr() + (mapped++ % 8) * 0x10000;
+    uint64_t at = t_free_map_addr() + (mapped % 8) * 0x10000 + 0x1000;
+    mapped++;
     if (t_svc(e->c, SVC_MAP_SHARED_MEMORY, t->shm_handle, at, 0x1000, HOS_PERM_R, 0, 0) != 0)
         return false;
     t->shm = t_mem() + at;
