@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use relift_manifest::{Game, ModuleRef};
-use relift_progress::{Line, Metrics, Paint, bytes, count, duration};
+use relift_progress::{Line, Metrics, Paint, bytes, count, duration, noun};
 use relift_switch_formats::import::{Event, Options, import_with};
 use relift_switch_formats::nup::UpdateSelect;
 
@@ -114,7 +114,7 @@ pub fn run(
             stage.update(ui, "");
         }
         Event::End => {
-            let mut text = format!("{} files, {}", count(stage.files), bytes(stage.bytes));
+            let mut text = format!("{}, {}", noun(stage.files, "file"), bytes(stage.bytes));
             if let Some(l) = &stage.label {
                 text = format!("{l}: {text}");
             }
@@ -142,13 +142,13 @@ pub fn run(
         relift_cache::write_if_changed(&manifest, game.to_toml().as_bytes())?
     };
     ui.summary(&Line::new().paint(Paint::Green, "imported").text(format!(
-        " title {:016x} v{}, {} modules, {} romfs files, {} DLC, {} files written into {}{}, {}",
+        " title {:016x} v{}, {}, {}, {} DLC, {} written into {}{}, {}",
         report.program_id,
         report.version,
-        report.modules.len(),
-        report.romfs_files,
+        noun(report.modules.len() as u64, "module"),
+        noun(report.romfs_files as u64, "romfs file"),
         report.dlc.len(),
-        report.written,
+        noun(report.written as u64, "file"),
         out.display(),
         if wrote_manifest {
             "; wrote game.toml"
