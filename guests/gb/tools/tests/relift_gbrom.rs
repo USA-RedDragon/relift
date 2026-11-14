@@ -111,3 +111,59 @@ fn bad_inputs_fail_with_one_line() {
     let missing = gbrom(&d, &["nope.gb"]);
     assert_eq!(missing.status.code(), Some(1));
 }
+
+fn banked_rom() -> Vec<u8> {
+    let mut rom = synth::rom(&Spec {
+        cart_type: 0x19,
+        rom_size: 0x02,
+        ..Spec::default()
+    });
+    rom[..0x100].fill(0xFF);
+    rom[0x150..].fill(0xFF);
+    rom[0x150..0x159].copy_from_slice(&[0x3E, 0x02, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x40, 0xC9]);
+    rom[0x8000] = 0xC9;
+    synth::fix_checksums(&mut rom);
+    rom
+}
+
+#[test]
+fn functions_lists_functions_per_bank_as_json() {
+    let d = dir("gbrom-functions");
+    let p = put(&d, "a.gb", &banked_rom());
+    let v = json(&gbrom(&d, &["functions", path(&p), "--json"]));
+    assert_eq!(v["mapper"], "mbc5");
+    assert_eq!(v["function_count"], 2);
+    let banks = v["banks"].as_array().expect("banks");
+    assert_eq!(banks[2]["functions"], 1);
+    assert_eq!(banks[2]["bytes"], 1);
+    assert_eq!(v["functions"][1]["entry"]["text"], "02:4000");
+    assert!(v["unresolved"].as_array().expect("list").is_empty());
+}
+
+#[test]
+fn functions_prints_text_and_summary_hides_the_list() {
+    let d = dir("gbrom-functions-text");
+    let p = put(&d, "a.gb", &banked_rom());
+    let full = gbrom(&d, &["functions", path(&p)]);
+    let text = String::from_utf8_lossy(&full.stdout).into_owned();
+    assert!(text.contains("02:4000"), "{text}");
+    let short = gbrom(&d, &["functions", path(&p), "--summary"]);
+    let text = String::from_utf8_lossy(&short.stdout).into_owned();
+    assert!(text.contains("bank 02: 1 functions"), "{text}");
+    assert!(!text.contains("02:4000 "), "{text}");
+}
+
+#[test]
+fn functions_strict_fails_on_an_unresolved_transfer() {
+    let d = dir("gbrom-functions-strict");
+    let mut rom = banked_rom();
+    rom[0x150..0x15A]
+        .copy_from_slice(&[0xFA, 0x00, 0xC0, 0x6F, 0x26, 0x40, 0xE9, 0x00, 0x00, 0x00]);
+    synth::fix_checksums(&mut rom);
+    let p = put(&d, "a.gb", &rom);
+    assert!(gbrom(&d, &["functions", path(&p)]).status.success());
+    let out = gbrom(&d, &["functions", path(&p), "--strict"]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&gbrom(&d, &["functions", path(&p), "--json"]));
+    assert_eq!(v["unresolved_by_kind"]["indirect-jump"], 1);
+}

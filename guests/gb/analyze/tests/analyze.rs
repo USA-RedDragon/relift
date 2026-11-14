@@ -137,6 +137,29 @@ fn an_unbanked_cartridge_resolves_the_window_from_a_vector() {
 }
 
 #[test]
+fn a_call_through_a_jump_helper_with_a_variable_address_is_listed() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x300, &[0xE9])
+        .put(
+            0,
+            0x150,
+            &[0xFA, 0x00, 0xC0, 0x6F, 0x26, 0x00, 0xCD, 0x00, 0x03, 0xC9],
+        )
+        .analyze();
+    assert_eq!(kinds(&r), vec![UnresolvedKind::IndirectCall]);
+}
+
+#[test]
+fn an_unused_vector_is_not_a_root() {
+    let r = Cart::new(0x19, 0x02)
+        .put(0, 0x150, &[0xC9])
+        .put(0, 0x58, &[0xFC])
+        .analyze();
+    assert!(r.unresolved.is_empty());
+    assert!(!has(&r, 0, 0x58));
+}
+
+#[test]
 fn a_vector_cannot_assume_a_bank() {
     let r = Cart::new(0x19, 0x04)
         .put(0, 0x150, &[0xC9])

@@ -20,9 +20,9 @@ pub enum UnresolvedKind {
     /// A call through a bank-switch routine whose bank argument is not
     /// constant.
     TrampolineBank,
-    /// A call through a routine that jumps to `hl` whose address is not
-    /// constant.
-    TrampolineTarget,
+    /// A call through a routine that jumps to `hl`, with an address that is
+    /// not constant.
+    IndirectCall,
     /// An unused opcode.
     Illegal,
     /// An instruction runs past the end of its bank window.
@@ -41,7 +41,7 @@ impl UnresolvedKind {
             UnresolvedKind::IndirectJump => "indirect-jump",
             UnresolvedKind::DynamicBankWrite => "dynamic-bank-write",
             UnresolvedKind::TrampolineBank => "trampoline-bank",
-            UnresolvedKind::TrampolineTarget => "trampoline-target",
+            UnresolvedKind::IndirectCall => "indirect-call",
             UnresolvedKind::Illegal => "illegal-opcode",
             UnresolvedKind::RunsOffWindow => "runs-off-window",
             UnresolvedKind::OutsideRom => "outside-rom",

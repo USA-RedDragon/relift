@@ -443,7 +443,7 @@ impl Run<'_> {
                 self.out.parametric = true;
                 self.unresolved(
                     site,
-                    UnresolvedKind::TrampolineTarget,
+                    UnresolvedKind::IndirectCall,
                     format!("target address of the call to {target} not constant"),
                 );
                 None

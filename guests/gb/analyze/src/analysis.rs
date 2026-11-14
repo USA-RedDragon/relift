@@ -104,7 +104,10 @@ impl Driver<'_> {
         start.regs = [Val::Top; 7];
         self.add_entry(Loc::fixed(0x100), start, Origin::Root);
         for v in VECTORS {
-            if rom.get(usize::from(v)).is_some_and(|b| *b != 0xFF) {
+            let used = rom.get(usize::from(v)).is_some_and(|b| {
+                *b != 0xFF && !relift_cpu_sm83::BASE[usize::from(*b)].is_illegal()
+            });
+            if used {
                 let mut s = State::reset(&self.model);
                 s.lo = None;
                 s.hi = None;
