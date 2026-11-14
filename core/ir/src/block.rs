@@ -197,11 +197,11 @@ pub(crate) fn check_op(
             let sum = w(*h)?.bits() + w(*l)?.bits();
             same(need()?, Width::try_new(sum).ok_or("concat wider than 128")?)
         }
-        Op::Load { addr, .. } | Op::LoadExclusive { addr, .. } => {
+        Op::Load { addr, .. } | Op::LoadExclusive { addr, .. } | Op::IoLoad { addr, .. } => {
             same(w(*addr)?, addr_width)?;
             bytes(need()?)
         }
-        Op::Store { addr, value, .. } => {
+        Op::Store { addr, value, .. } | Op::IoStore { addr, value, .. } => {
             none()?;
             same(w(*addr)?, addr_width)?;
             bytes(w(*value)?)

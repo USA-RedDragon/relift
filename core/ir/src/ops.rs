@@ -277,6 +277,16 @@ impl FpOp {
     }
 }
 
+/// What an I/O access ([`Op::IoLoad`], [`Op::IoStore`]) is known to reach.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IoKind {
+    /// Memory or a device register, decided at run time by the guest's
+    /// [`crate::IoMap`].
+    Any,
+    /// A device register: the access always goes to the device hook.
+    Device,
+}
+
 /// One IR operation. Operands are earlier [`Value`]s of the same block.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
@@ -369,6 +379,32 @@ pub enum Op {
     /// does nothing otherwise: the extra cost of a taken branch, or of one
     /// data-dependent step.
     TickIf(Value, u32),
+    /// Reads the instruction's width (whole bytes) at `addr`, where a device
+    /// register may live: an address the guest's [`crate::IoMap`] calls
+    /// memory reads like [`Op::Load`] with plain ordering, any other goes to
+    /// the device hook, which first brings the devices up to the current
+    /// cycle. A device read may change device state, so it is never
+    /// removed even when its value is unused.
+    IoLoad {
+        /// The address, of the block's address width.
+        addr: Value,
+        /// The byte order.
+        endian: Endian,
+        /// What the access is known to reach.
+        kind: IoKind,
+    },
+    /// Writes `value` (whole bytes) at `addr`, where a device register may
+    /// live; routed like [`Op::IoLoad`], with the map's write classes.
+    IoStore {
+        /// The address, of the block's address width.
+        addr: Value,
+        /// The value written.
+        value: Value,
+        /// The byte order.
+        endian: Endian,
+        /// What the access is known to reach.
+        kind: IoKind,
+    },
 }
 
 impl Op {
@@ -388,8 +424,12 @@ impl Op {
             }
             Op::Bin(_, a, b) | Op::Cmp(_, a, b) | Op::Concat(a, b) => vec![*a, *b],
             Op::Select(c, a, b) => vec![*c, *a, *b],
-            Op::Load { addr, .. } | Op::LoadExclusive { addr, .. } => vec![*addr],
-            Op::Store { addr, value, .. } | Op::StoreExclusive { addr, value, .. } => {
+            Op::Load { addr, .. } | Op::LoadExclusive { addr, .. } | Op::IoLoad { addr, .. } => {
+                vec![*addr]
+            }
+            Op::Store { addr, value, .. }
+            | Op::StoreExclusive { addr, value, .. }
+            | Op::IoStore { addr, value, .. } => {
                 vec![*addr, *value]
             }
             Op::Fp(_, args) | Op::Intrinsic(_, args) => args.clone(),
@@ -397,7 +437,8 @@ impl Op {
     }
 
     /// Whether the operation has an effect besides its result: state, memory,
-    /// the monitor, the guest clock, or an intrinsic the IR cannot see into.
+    /// the monitor, the guest clock, devices, or an intrinsic the IR cannot
+    /// see into.
     pub fn has_effect(&self) -> bool {
         matches!(
             self,
@@ -412,6 +453,8 @@ impl Op {
                 | Op::Guard(..)
                 | Op::Tick(_)
                 | Op::TickIf(..)
+                | Op::IoLoad { .. }
+                | Op::IoStore { .. }
         )
     }
 }

@@ -1,7 +1,7 @@
 use crate::block::check_op;
 use crate::{
-    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, Next, Op, Order, Reg, RegFile,
-    UnOp, Value, Width,
+    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, Inst, IoKind, Next, Op, Order, Reg,
+    RegFile, UnOp, Value, Width,
 };
 
 /// Builds a [`Block`] one operation at a time, checking widths as it goes.
@@ -277,6 +277,26 @@ impl Builder {
     /// [`Op::TickIf`].
     pub fn tick_if(&mut self, cond: Value, cycles: u32) {
         self.push(Op::TickIf(cond, cycles), None);
+    }
+
+    /// Loads `width` bits from `addr`, where a device register may live; see
+    /// [`Op::IoLoad`].
+    pub fn io_load(&mut self, addr: Value, width: Width, endian: Endian, kind: IoKind) -> Value {
+        self.val(Op::IoLoad { addr, endian, kind }, width)
+    }
+
+    /// Stores `value` at `addr`, where a device register may live; see
+    /// [`Op::IoStore`].
+    pub fn io_store(&mut self, addr: Value, value: Value, endian: Endian, kind: IoKind) {
+        self.push(
+            Op::IoStore {
+                addr,
+                value,
+                endian,
+                kind,
+            },
+            None,
+        );
     }
 
     /// Calls a named intrinsic.
