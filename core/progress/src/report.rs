@@ -334,6 +334,9 @@ impl<W: Write> Reporter<W> {
         let Some(m) = &r.metrics else {
             return;
         };
+        if m.total.is_some_and(|t| m.done >= t) {
+            return;
+        }
         let line = Self::stage_line(
             self.label_width,
             &r.label,

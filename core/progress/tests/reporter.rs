@@ -48,7 +48,6 @@ fn plain_mode_writes_throttled_lines_and_a_line_per_finished_stage() {
         \x20 nnrtld discover 40 functions  0.1 s\n\
         \x20 main   lift     10/100 functions (10%)  0 unlifted  1.0 s\n\
         \x20 main   lift     20/100 functions (20%)  0 unlifted  3.0 s\n\
-        \x20 main   lift     100/100 functions (100%)  0 unlifted  4.0 s\n\
         \x20 main   lift     100 functions, 3 unlifted  4.0 s\n";
     assert_eq!(text(&r), want);
 }
