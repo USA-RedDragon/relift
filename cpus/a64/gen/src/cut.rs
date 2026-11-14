@@ -358,8 +358,11 @@ impl Gen<'_> {
             }
         };
         self.line("st.assume_default_fpcr();".into());
-        // The estimates' and steps' flags are built in no IR yet.
-        self.line("st.assume_flags_slow();".into());
+        if w == 16 && !name.ends_with("Estimate") {
+            // The steps' binary16 multiply-adds use the runtime's software
+            // helpers, which raise no host flags.
+            self.line("st.assume_flags_slow();".into());
+        }
         Ok(self.dy(K::Bits(w), call))
     }
 
@@ -437,11 +440,6 @@ impl Gen<'_> {
                 let r = self.fp_round(&a[4])?;
                 let ow = fpw(self.cint(&a[5])? as u32)?;
                 let signed = !unsigned;
-                if fbits != 0 {
-                    // The scaling multiply or divide raises flags Arm's
-                    // exact scaling does not.
-                    self.line("st.assume_flags_slow();".into());
-                }
                 if name == "FPToFixed" && iw == 16 {
                     (
                         K::Bits(ow),
@@ -516,9 +514,14 @@ impl Gen<'_> {
             _ => {
                 self.fp_fpcr_ok(name, &a[1])?;
                 let r = self.fp_round(&a[2])?;
+                let exact = match &a[3] {
+                    V::Bool(e) => *e,
+                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    v => return fail(format!("FPRoundInt exact {v:?}")),
+                };
                 (
                     K::Bits(iw),
-                    format!("rt::Fp::new({iw}).round_int(b, {xs}, FpRound::{r})"),
+                    format!("rt::Fp::new({iw}).round_int(b, {xs}, FpRound::{r}, {exact})"),
                 )
             }
         };

@@ -130,9 +130,17 @@ impl St {
         b.trunc(v, w)
     }
 
-    /// Writes `X[n]` zero-extended; 31 discards the value.
+    /// Writes `X[n]` zero-extended; 31 discards the value. A discarded
+    /// floating-point result still raises its FPSR flags, so it is kept
+    /// alive by a flag raise that depends on it and is always zero.
     pub fn x_set(&mut self, b: &mut Builder, n: u32, v: Value, g: Option<Value>) {
         if n >= 31 {
+            if self.fp {
+                let never = b.cmp(CmpOp::Ult, v, v);
+                let w32 = Width::W32;
+                let m = b.zext(never, w32);
+                b.intrinsic(crate::lift::system::FP_RAISE, &[m], None);
+            }
             return;
         }
         let v = b.zext(v, Width::W64);
@@ -374,13 +382,20 @@ pub fn decode_bit_masks(
     (w & mask(m), t & mask(m), true)
 }
 
+/// FPSR cumulative flag bits.
+const FPSR_IOC: u128 = 0x01;
+const FPSR_DZC: u128 = 0x02;
+const FPSR_OFC: u128 = 0x04;
+const FPSR_IXC: u128 = 0x10;
+
 /// The floating-point cut: arithmetic, comparisons and min/max on 16-, 32-
 /// and 64-bit values with FPCR zero (round to nearest, no flush, NaNs
 /// propagated), as Arm's `FPProcessNaNs` and `FPDefaultNaN` describe.
-/// FPSR flags: the IEEE operations raise them on the host; compares and
-/// min/max raise IOC through `system::FP_RAISE`, under the condition the
-/// instruction runs them in ([`Fp::guarded`]); the estimates, steps and
-/// fixed-point scalings leave for the slow path in flag-producing programs.
+/// FPSR flags: the IEEE operations raise them on the host; compares,
+/// min/max and the estimates raise theirs through `system::FP_RAISE`, under
+/// the condition the instruction runs them in ([`Fp::guarded`]); the steps
+/// and fixed-point scalings run only the host operations whose flags Arm
+/// raises.
 pub struct Fp {
     w: Width,
     sign: u128,
@@ -555,13 +570,27 @@ impl Fp {
     /// Raises IOC (FPSR bit 0) when `cond` is 1, in programs that produce
     /// FPSR flags (`system::FP_RAISE`; free in the others).
     fn raise_ioc(&self, b: &mut Builder, cond: Value) {
-        let cond = match self.guard {
-            Some(g) => b.and(cond, g),
-            None => cond,
-        };
-        let one = b.konst(Width::W32, 1);
+        self.raise(b, &[(cond, FPSR_IOC)]);
+    }
+
+    /// Raises the FPSR flags of each `(cond, bits)` whose `cond` is 1, as
+    /// [`Fp::raise_ioc`] does.
+    fn raise(&self, b: &mut Builder, flags: &[(Value, u128)]) {
         let zero = b.konst(Width::W32, 0);
-        let m = b.select(cond, one, zero);
+        let mut m = None;
+        for &(cond, bits) in flags {
+            let cond = match self.guard {
+                Some(g) => b.and(cond, g),
+                None => cond,
+            };
+            let k = b.konst(Width::W32, bits);
+            let f = b.select(cond, k, zero);
+            m = Some(match m {
+                Some(m) => b.or(m, f),
+                None => f,
+            });
+        }
+        let m = m.unwrap_or(zero);
         b.intrinsic(crate::lift::system::FP_RAISE, &[m], None);
     }
 
@@ -701,7 +730,10 @@ impl Fp {
     }
 
     /// `FPToFixed`: `x * 2^fbits` rounded by `r` to an `out`-bit integer,
-    /// saturating, NaN giving 0.
+    /// saturating, NaN giving 0. A finite `x` of at least `2^(out - fbits)`
+    /// saturates; scaling it could overflow and raise OFC and IXC, which
+    /// Arm's exact scaling does not, so it is scaled as the smallest such
+    /// value of its sign.
     pub fn fp_to_fixed(
         &self,
         b: &mut Builder,
@@ -714,6 +746,17 @@ impl Fp {
         let x = if fbits == 0 {
             x
         } else {
+            let f = self.frac_bits();
+            let bias = (self.inf >> f) >> 1;
+            let lim = self.k(b, (bias + u128::from(out - fbits)) << f);
+            let m = self.magnitude(b, x);
+            let big = b.cmp(CmpOp::Ule, lim, m);
+            let n = self.is_nan(b, x);
+            let num = b.not(n);
+            let sat = b.and(big, num);
+            let s = self.sign_of(b, x);
+            let edge = b.or(s, lim);
+            let x = b.select(sat, edge, x);
             let k = self.pow2(b, fbits);
             b.fp(FpOp::Mul, &[x, k], self.w)
         };
@@ -741,9 +784,17 @@ impl Fp {
         b.fp(FpOp::Div, &[r, k], self.w)
     }
 
-    /// `FPRoundInt`: `x` rounded by `r` to an integral value.
-    pub fn round_int(&self, b: &mut Builder, x: Value, r: FpRound) -> Value {
+    /// `FPRoundInt`: `x` rounded by `r` to an integral value; `exact`
+    /// (FRINTX) raises IXC when that changes the value.
+    pub fn round_int(&self, b: &mut Builder, x: Value, r: FpRound, exact: bool) -> Value {
         let v = b.fp(FpOp::RoundInt(r), &[x], self.w);
+        if exact {
+            let n = self.is_nan(b, x);
+            let num = b.not(n);
+            let moved = b.cmp(CmpOp::Ne, v, x);
+            let ixc = b.and(num, moved);
+            self.raise(b, &[(ixc, FPSR_IXC)]);
+        }
         self.nans(b, &[x], v)
     }
 
@@ -913,6 +964,14 @@ impl Fp {
         let r = b.select(tiny, sinf, normal);
         let isinf = self.is_inf(b, x);
         let r = b.select(isinf, sign, r);
+        let sn = self.is_snan(b, x);
+        let iz = self.is_zero(b, x);
+        let nz = b.not(iz);
+        let ovf = b.and(tiny, nz);
+        self.raise(
+            b,
+            &[(sn, FPSR_IOC), (iz, FPSR_DZC), (ovf, FPSR_OFC | FPSR_IXC)],
+        );
         self.nans(b, &[x], r)
     }
 
@@ -954,9 +1013,20 @@ impl Fp {
         let inf = self.k(b, self.inf);
         let sinf = b.or(sign, inf);
         let r = b.select(iz, sinf, r);
+        let sn = self.is_snan(b, x);
+        let n = self.is_nan(b, x);
+        let num = b.not(n);
+        let nz = b.not(iz);
+        let negnum = b.and(neg, num);
+        let negnum = b.and(negnum, nz);
+        let ioc = b.or(sn, negnum);
+        self.raise(b, &[(ioc, FPSR_IOC), (iz, FPSR_DZC)]);
         self.nans(b, &[x], r)
     }
 
+    /// The fused steps. Only the computation whose result is chosen gets the
+    /// operands and the others get zeros, which raise nothing, so the host
+    /// raises the flags of that one alone, as Arm does.
     fn step(
         &self,
         b: &mut Builder,
@@ -978,26 +1048,35 @@ impl Fp {
         let sxs = b.and(sx, s);
         let inf = self.k(b, self.inf);
         let sinf = b.or(sxs, inf);
+        let zero = self.k(b, 0);
+        let ox = b.select(inv, zero, nx);
+        let oy = b.select(inv, zero, y);
         let kb = self.k(b, base);
-        let r = b.fp(FpOp::MulAdd, &[nx, y, kb], self.w);
         let r = if halve {
             let half = self.k(b, self.pick(0x3800, 0x3f00_0000, 0x3fe0_0000_0000_0000));
             let two = self.k(b, self.pick(0x4000, 0x4000_0000, 0x4000_0000_0000_0000));
-            let slow = b.fp(FpOp::Div, &[r, two], self.w);
             let kh = self.k(b, special);
             let f = self.frac_bits();
             let lowest = self.k(b, 2u128 << f);
             let (mx, my) = (self.magnitude(b, nx), self.magnitude(b, y));
             let xn = b.cmp(CmpOp::Ule, lowest, mx);
             let yn = b.cmp(CmpOp::Ule, lowest, my);
-            let hx = b.fp(FpOp::Mul, &[nx, half], self.w);
-            let hy = b.fp(FpOp::Mul, &[y, half], self.w);
-            let rx = b.fp(FpOp::MulAdd, &[hx, y, kh], self.w);
-            let ry = b.fp(FpOp::MulAdd, &[nx, hy, kh], self.w);
+            let nxn = b.not(xn);
+            let on_y = b.and(nxn, yn);
+            let either = b.or(xn, yn);
+            let (fx, fy) = (b.select(either, zero, ox), b.select(either, zero, oy));
+            let full = b.fp(FpOp::MulAdd, &[fx, fy, kb], self.w);
+            let slow = b.fp(FpOp::Div, &[full, two], self.w);
+            let (ax, ay) = (b.select(xn, ox, zero), b.select(xn, oy, zero));
+            let hx = b.fp(FpOp::Mul, &[ax, half], self.w);
+            let rx = b.fp(FpOp::MulAdd, &[hx, ay, kh], self.w);
+            let (bx, by) = (b.select(on_y, ox, zero), b.select(on_y, oy, zero));
+            let hy = b.fp(FpOp::Mul, &[by, half], self.w);
+            let ry = b.fp(FpOp::MulAdd, &[bx, hy, kh], self.w);
             let r = b.select(yn, ry, slow);
             b.select(xn, rx, r)
         } else {
-            r
+            b.fp(FpOp::MulAdd, &[ox, oy, kb], self.w)
         };
         let r = b.select(anyinf, sinf, r);
         let sp = self.k(b, special);
