@@ -20,7 +20,7 @@ mod term;
 mod throttle;
 
 pub use clock::{Clock, ManualClock, SystemClock};
-pub use fmt::{bar, bytes, count, duration};
+pub use fmt::{bar, bytes, count, duration, noun};
 pub use line::{Line, Paint};
 pub use report::{Metrics, Mode, Reporter, Verbosity};
 pub use term::{ColorChoice, Terminal};
