@@ -300,6 +300,30 @@ fn lift_summary(functions: usize, unlifted: usize) -> Line {
         .paint(paint, format!("{} unlifted", count(unlifted as u64)))
 }
 
+/// Bounds the compilers' memory: sorts `compiles` largest source first (so
+/// the long compiles start early) and puts those that would not fit beside
+/// `jobs - 1` others in a `heavy` pool sized to fit, with the budget at
+/// three fifths of the memory available now. Returns the pools to declare.
+fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, u32)> {
+    let size = |c: &Compile| std::fs::metadata(&c.src).map_or(0, |m| m.len());
+    compiles.sort_by_cached_key(|c| std::cmp::Reverse(size(c)));
+    let Some(avail) = relift_build::available_memory() else {
+        return Vec::new();
+    };
+    let needs: Vec<u64> = compiles
+        .iter()
+        .map(|c| relift_build::compile_memory(size(c)))
+        .collect();
+    let s = relift_build::schedule(&needs, jobs, avail / 5 * 3);
+    if s.heavy.is_empty() {
+        return Vec::new();
+    }
+    for &i in &s.heavy {
+        compiles[i].pool = Some("heavy".into());
+    }
+    vec![("heavy".into(), s.heavy_depth)]
+}
+
 fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
     let mut out = Vec::new();
     for layer in ["core", "cpus/a64", "guests/switch"] {
@@ -446,6 +470,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             src: s.clone(),
             obj: obj(s, "lifted"),
             flags: lifted_flags.clone(),
+            pool: None,
         })
         .collect();
     for s in &fpsr.part1 {
@@ -457,6 +482,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
                 .cloned()
                 .chain(["-DRL_PART=1".to_string()])
                 .collect(),
+            pool: None,
         });
     }
     for s in &prog {
@@ -464,6 +490,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             src: s.clone(),
             obj: obj(s, "lifted"),
             flags: rt_flags.clone(),
+            pool: None,
         });
     }
     for s in runtime_sources(&rt)? {
@@ -471,11 +498,19 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             obj: obj(&s, "rt"),
             src: s,
             flags: rt_flags.clone(),
+            pool: None,
         });
     }
     compiles.extend(extras.compiles(&rt, &rt_flags, &|s| obj(s, "rt")));
     let clang = tool(&settings.toolchain.clang, "clang").ok_or("no clang on PATH")?;
     let exe = out.join("game");
+    let ninja = tool(&settings.toolchain.ninja, "ninja");
+    let jobs = if ninja.is_some() {
+        relift_build::job_count(settings.jobs)
+    } else {
+        1
+    };
+    let pools = memory_pools(&mut compiles, jobs);
     let plan = Plan {
         cc: vec![clang.display().to_string()],
         compiles,
@@ -485,12 +520,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             .into_iter()
             .chain(extras.libs())
             .collect(),
-    };
-    let ninja = tool(&settings.toolchain.ninja, "ninja");
-    let jobs = if ninja.is_some() {
-        relift_build::job_count(settings.jobs)
-    } else {
-        1
+        pools,
     };
     let note = format!(
         "{} {}, -j{jobs}",
@@ -512,29 +542,23 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
     ui.update(compile_row, compile.clone());
     let mut finished = 0;
     let verbose = ui.verbosity() == Verbosity::Verbose;
-    relift_build::build_with(
-        &plan,
-        &out,
-        ninja.as_deref(),
-        settings.jobs,
-        &mut |e| match e {
-            Event::Tick => ui.tick(),
-            Event::Step { done, total, what } => {
-                finished = done;
-                ui.update(
-                    compile_row,
-                    Metrics {
-                        done: done as u64,
-                        total: Some(total as u64),
-                        ..compile.clone()
-                    },
-                );
-                if verbose {
-                    ui.detail(&Line::new().text(format!("  {what}")));
-                }
+    relift_build::build_with(&plan, &out, ninja.as_deref(), jobs, &mut |e| match e {
+        Event::Tick => ui.tick(),
+        Event::Step { done, total, what } => {
+            finished = done;
+            ui.update(
+                compile_row,
+                Metrics {
+                    done: done as u64,
+                    total: Some(total as u64),
+                    ..compile.clone()
+                },
+            );
+            if verbose {
+                ui.detail(&Line::new().text(format!("  {what}")));
             }
-        },
-    )?;
+        }
+    })?;
     ui.done(
         compile_row,
         if finished == 0 {

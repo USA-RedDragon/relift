@@ -22,6 +22,7 @@ fn plan(dir: &Path, clang: &Path, bodies: &[&str]) -> Plan {
             src,
             obj: dir.join("obj").join(format!("f{i}.o")),
             flags: vec!["-O0".into()],
+            pool: None,
         });
     }
     Plan {
@@ -29,6 +30,7 @@ fn plan(dir: &Path, clang: &Path, bodies: &[&str]) -> Plan {
         compiles,
         output: dir.join("game"),
         link_flags: Vec::new(),
+        pools: Vec::new(),
     }
 }
 

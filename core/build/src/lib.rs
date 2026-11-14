@@ -19,6 +19,9 @@ pub struct Compile {
     pub obj: PathBuf,
     /// The compiler flags, besides `-c`, `-o` and the dependency flags.
     pub flags: Vec<String>,
+    /// The Ninja pool that limits how many of these run at once (`None`:
+    /// only the job count limits it).
+    pub pool: Option<String>,
 }
 
 /// What to build.
@@ -32,6 +35,59 @@ pub struct Plan {
     pub output: PathBuf,
     /// Link flags after the objects (libraries).
     pub link_flags: Vec<String>,
+    /// Ninja pools by name, with their depth.
+    pub pools: Vec<(String, u32)>,
+}
+
+/// The memory a compiler needs for a source file, estimated from its size:
+/// a fixed start-up cost plus a cost per byte of C, measured with clang 23
+/// at `-O2 -gline-tables-only` on lifted code (about 100 bytes of memory per
+/// byte of C, rounded up).
+pub fn compile_memory(source_bytes: u64) -> u64 {
+    const BASE: u64 = 96 << 20;
+    const PER_BYTE: u64 = 120;
+    BASE.saturating_add(source_bytes.saturating_mul(PER_BYTE))
+}
+
+/// The memory the system can give new processes now (`MemAvailable` on
+/// Linux), or `None` where it is not known.
+pub fn available_memory() -> Option<u64> {
+    let t = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = t.lines().find(|l| l.starts_with("MemAvailable:"))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb.saturating_mul(1024))
+}
+
+/// How to run compiles of estimated memory `needs` with `jobs` jobs in
+/// `budget` bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Schedule {
+    /// The jobs to run at once.
+    pub jobs: u32,
+    /// The indices into `needs` of the heavy compiles, which run in a pool.
+    pub heavy: Vec<usize>,
+    /// How many heavy compiles run at once.
+    pub heavy_depth: u32,
+}
+
+/// Splits compiles so their memory stays within `budget`: half the budget
+/// goes to light compiles (each at most `budget / 2 / jobs`), which may all
+/// run at once, and half to the heavy ones, which share a pool deep enough
+/// for that half to hold the largest of them (at least one).
+pub fn schedule(needs: &[u64], jobs: u32, budget: u64) -> Schedule {
+    let jobs = jobs.max(1);
+    let half = budget / 2;
+    let light_max = half / u64::from(jobs);
+    let heavy: Vec<usize> = (0..needs.len()).filter(|&i| needs[i] > light_max).collect();
+    let largest = heavy.iter().map(|&i| needs[i]).max().unwrap_or(1).max(1);
+    let depth = u32::try_from(half / largest)
+        .unwrap_or(u32::MAX)
+        .clamp(1, jobs);
+    Schedule {
+        jobs,
+        heavy,
+        heavy_depth: depth,
+    }
 }
 
 /// Why a build failed.
@@ -89,6 +145,9 @@ pub fn ninja_file(plan: &Plan) -> String {
         "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
         cc.join(" ")
     );
+    for (name, depth) in &plan.pools {
+        let _ = writeln!(t, "pool {name}\n  depth = {depth}\n");
+    }
     for c in &plan.compiles {
         let flags: Vec<String> = c.flags.iter().map(|s| sh(s)).collect();
         let _ = writeln!(
@@ -98,6 +157,9 @@ pub fn ninja_file(plan: &Plan) -> String {
             nj(&c.src),
             flags.join(" ")
         );
+        if let Some(p) = &c.pool {
+            let _ = writeln!(t, "  pool = {p}");
+        }
     }
     let objs: Vec<String> = plan.compiles.iter().map(|c| nj(&c.obj)).collect();
     let libs: Vec<String> = plan.link_flags.iter().map(|s| sh(s)).collect();
@@ -340,10 +402,42 @@ mod tests {
                 src: "c/a b.c".into(),
                 obj: "obj/a.o".into(),
                 flags: vec!["-O2".into(), "-DX=\"y\"".into()],
+                pool: None,
             }],
             output: "game".into(),
             link_flags: vec!["-lm".into()],
+            pools: Vec::new(),
         }
+    }
+
+    #[test]
+    fn pools_are_declared_and_used() {
+        let mut p = plan();
+        p.pools = vec![("heavy".into(), 2)];
+        p.compiles[0].pool = Some("heavy".into());
+        let t = ninja_file(&p);
+        assert!(t.contains("pool heavy\n  depth = 2\n"), "{t}");
+        assert!(t.contains("  pool = heavy\n"), "{t}");
+    }
+
+    #[test]
+    fn schedule_puts_large_compiles_in_a_shallow_pool() {
+        const G: u64 = 1 << 30;
+        // 16 jobs in 16 GiB: light compiles are at most 0.5 GiB.
+        let needs = [G / 4, 3 * G, G / 8, 4 * G, G / 2];
+        let s = schedule(&needs, 16, 16 * G);
+        assert_eq!(s.jobs, 16);
+        assert_eq!(s.heavy, vec![1, 3]);
+        assert_eq!(s.heavy_depth, 2);
+        // One compile larger than half the budget still runs, alone.
+        assert_eq!(schedule(&[40 * G], 8, 16 * G).heavy_depth, 1);
+        assert!(schedule(&[G / 8; 4], 4, 16 * G).heavy.is_empty());
+    }
+
+    #[test]
+    fn compile_memory_grows_with_the_source() {
+        assert!(compile_memory(8 << 20) > compile_memory(1 << 20));
+        assert!(compile_memory(8 << 20) >= 900 << 20);
     }
 
     #[test]
