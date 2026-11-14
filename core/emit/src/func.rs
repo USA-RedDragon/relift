@@ -105,10 +105,11 @@ impl Ctx<'_> {
     }
 }
 
-/// The block as the emitter writes it: without the values nothing
+/// The block as the emitter writes it: constants folded, operations that
+/// give an operand unchanged dropped, and without the values nothing
 /// observable uses.
 fn prepare(b: &Block) -> Block {
-    relift_ir::dce(b)
+    relift_ir::dce(&relift_ir::simplify(b))
 }
 
 /// The return addresses of the calls in `f` that are resume points.

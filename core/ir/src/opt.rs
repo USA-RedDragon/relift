@@ -1,7 +1,10 @@
 //! Block-local optimization passes.
 
 use crate::interp::{eval_bin, eval_cmp, eval_un};
-use crate::{AddrClass, Block, Exit, ExtKind, Inst, IoKind, IoMap, Next, Op, Order, Value, Width};
+use crate::{
+    AddrClass, BinOp, Block, CmpOp, Exit, ExtKind, Inst, IoKind, IoMap, Next, Op, Order, UnOp,
+    Value, Width,
+};
 
 /// Removes instructions whose values nothing observable uses.
 ///
@@ -62,6 +65,178 @@ pub fn dce(block: &Block) -> Block {
             cond: r(cond),
             taken,
             not_taken,
+        },
+        Next::Dynamic(v) => Next::Dynamic(r(v)),
+    };
+    Block {
+        regs: block.regs,
+        addr_width: block.addr_width,
+        pc: block.pc,
+        len: block.len,
+        insts,
+        exit: Exit {
+            next,
+            flow: block.exit.flow,
+        },
+        bank: block.bank,
+    }
+}
+
+/// Folds constants and drops operations that give one of their operands.
+///
+/// A pure integer operation whose operands are all constant
+/// ([`constants`]) becomes [`Op::Const`]. An operation that gives one of
+/// its operands unchanged is replaced by that operand at every use: `x + 0`,
+/// `x - 0`, `x | 0`, `x ^ 0`, `x & ones`, `x * 1`, shifts and rotates by 0,
+/// an extension or extract that keeps the width, a select on a constant
+/// condition or with equal arms, a one-bit `x == 1` or `x != 0`, the low or
+/// high part of a concat, a zero extension's low bits, and a double
+/// complement. An operation that gives a constant whatever its other
+/// operand is (`x & 0`, `x * 0`, `x | ones`, a shift left or logical right
+/// by at least the width) becomes that constant, and a select exit whose
+/// condition is constant becomes a constant exit.
+///
+/// Instructions with effects stay in place with their operands replaced,
+/// so the result behaves the same in the interpreter as the input. The
+/// replaced instructions stay too (unused); [`dce`] removes them.
+pub fn simplify(block: &Block) -> Block {
+    let n = block.insts.len();
+    let mut alias: Vec<Value> = (0..n as u32).map(Value).collect();
+    let mut known: Vec<Option<u128>> = vec![None; n];
+    let mut insts: Vec<Inst> = Vec::with_capacity(n);
+    for (i, inst) in block.insts.iter().enumerate() {
+        let op = remap_with(&inst.op, &|v: &Value| alias[v.index()]);
+        let w = inst.width.unwrap_or(Width::W1);
+        let wid = |v: &Value| insts[v.index()].width.unwrap_or(Width::W1);
+        let k = |v: &Value| known[v.index()];
+        let is = |v: &Value, c: u128| k(v) == Some(c);
+        let ones = w.mask();
+        let mut same: Option<Value> = None;
+        let mut konst = match &op {
+            Op::Const(c) => Some(*c),
+            Op::Un(u, a) => k(a).map(|a| eval_un(*u, a, w)),
+            Op::Bin(b, x, y) => k(x).zip(k(y)).map(|(a, b2)| eval_bin(*b, a, b2, w)),
+            Op::Cmp(c, x, y) => k(x)
+                .zip(k(y))
+                .map(|(a, b2)| u128::from(eval_cmp(*c, a, b2, wid(x)))),
+            Op::Ext(ExtKind::Zero, a) => k(a),
+            Op::Ext(ExtKind::Sign, a) => {
+                let s = 128 - wid(a).bits();
+                k(a).map(|x| ((((x << s) as i128) >> s) as u128) & w.mask())
+            }
+            Op::Extract(a, lo) => k(a).map(|a| (a >> lo) & w.mask()),
+            Op::Concat(h, l) => k(h)
+                .zip(k(l))
+                .map(|(h, l2)| ((h << wid(l).bits()) | l2) & w.mask()),
+            _ => None,
+        };
+        if konst.is_none() {
+            match &op {
+                Op::Bin(b, x, y) => match b {
+                    BinOp::Add | BinOp::Or | BinOp::Xor if is(x, 0) => same = Some(*y),
+                    BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Or
+                    | BinOp::Xor
+                    | BinOp::Shl
+                    | BinOp::LShr
+                    | BinOp::AShr
+                    | BinOp::RotR
+                        if is(y, 0) =>
+                    {
+                        same = Some(*x);
+                    }
+                    BinOp::And if is(x, ones) => same = Some(*y),
+                    BinOp::And if is(y, ones) => same = Some(*x),
+                    BinOp::Mul if is(x, 1) => same = Some(*y),
+                    BinOp::Mul if is(y, 1) => same = Some(*x),
+                    BinOp::And | BinOp::Mul if is(x, 0) || is(y, 0) => konst = Some(0),
+                    BinOp::Or if is(x, ones) || is(y, ones) => konst = Some(ones),
+                    BinOp::Shl | BinOp::LShr if k(y).is_some_and(|a| a >= u128::from(w.bits())) => {
+                        konst = Some(0);
+                    }
+                    _ => {}
+                },
+                Op::Un(UnOp::Not, x) => {
+                    if let Op::Un(UnOp::Not, y) = insts[x.index()].op {
+                        same = Some(y);
+                    }
+                }
+                Op::Cmp(CmpOp::Eq, x, y) if w == Width::W1 && wid(x) == Width::W1 => {
+                    if is(y, 1) {
+                        same = Some(*x);
+                    } else if is(x, 1) {
+                        same = Some(*y);
+                    }
+                }
+                Op::Cmp(CmpOp::Ne, x, y) if wid(x) == Width::W1 => {
+                    if is(y, 0) {
+                        same = Some(*x);
+                    } else if is(x, 0) {
+                        same = Some(*y);
+                    }
+                }
+                Op::Select(c, x, y) => {
+                    if x == y {
+                        same = Some(*x);
+                    } else if let Some(c) = k(c) {
+                        same = Some(if c != 0 { *x } else { *y });
+                    }
+                }
+                Op::Ext(_, x) if wid(x) == w => same = Some(*x),
+                Op::Extract(x, lo) => {
+                    if *lo == 0 && wid(x) == w {
+                        same = Some(*x);
+                    } else {
+                        match insts[x.index()].op {
+                            Op::Concat(_, l) if *lo == 0 && wid(&l) == w => same = Some(l),
+                            Op::Concat(h, l)
+                                if u32::from(*lo) == wid(&l).bits() && wid(&h) == w =>
+                            {
+                                same = Some(h);
+                            }
+                            Op::Ext(ExtKind::Zero, a) if *lo == 0 && wid(&a) == w => {
+                                same = Some(a);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(v) = same {
+            alias[i] = v;
+            known[i] = k(&v);
+        }
+        let pure = !op.has_effect() && !matches!(op, Op::Fp(..));
+        let op = match konst {
+            Some(c) if pure && inst.width.is_some() => {
+                let c = c & ones;
+                known[i] = Some(c);
+                Op::Const(c)
+            }
+            _ => op,
+        };
+        insts.push(Inst {
+            op,
+            width: inst.width,
+        });
+    }
+    let r = |v: Value| alias[v.index()];
+    let next = match block.exit.next {
+        Next::Const(a) => Next::Const(a),
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => match known[r(cond).index()] {
+            Some(c) => Next::Const(if c != 0 { taken } else { not_taken }),
+            None => Next::Select {
+                cond: r(cond),
+                taken,
+                not_taken,
+            },
         },
         Next::Dynamic(v) => Next::Dynamic(r(v)),
     };
@@ -178,7 +353,10 @@ pub fn constants(block: &Block) -> Vec<Option<u128>> {
 }
 
 fn remap(op: &Op, map: &[u32]) -> Op {
-    let r = |v: &Value| Value(map[v.index()]);
+    remap_with(op, &|v: &Value| Value(map[v.index()]))
+}
+
+fn remap_with(op: &Op, r: &dyn Fn(&Value) -> Value) -> Op {
     match op {
         Op::Const(c) => Op::Const(*c),
         Op::Get(g) => Op::Get(*g),
