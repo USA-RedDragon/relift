@@ -387,6 +387,7 @@ static void shmem_destroy(hos_kobj *o)
 {
     hos_shmem *s = (hos_shmem *)o;
     rl_shm_destroy(&s->shm);
+    pthread_mutex_destroy(&s->lock);
     free(s);
 }
 
@@ -400,6 +401,7 @@ hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm)
         free(s);
         return NULL;
     }
+    pthread_mutex_init(&s->lock, NULL);
     hos_kobj_init(&s->obj, KOBJ_SHARED_MEMORY, shmem_destroy);
     s->size = size;
     s->user_perm = user_perm;
@@ -410,6 +412,14 @@ uint8_t *rl_hos_shmem_ptr(hos_shmem *s)
 {
     return s->shm.host;
 }
+
+uint8_t *rl_hos_shmem_lock(hos_shmem *s)
+{
+    pthread_mutex_lock(&s->lock);
+    return s->shm.host;
+}
+
+void rl_hos_shmem_unlock(hos_shmem *s) { pthread_mutex_unlock(&s->lock); }
 
 static int shmem_view(const hos_shmem *s, uint64_t addr)
 {

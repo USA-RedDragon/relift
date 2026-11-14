@@ -573,6 +573,20 @@ static void update_all(const rl_input_snapshot *s)
     }
 }
 
+static bool mem_enter(void)
+{
+    if (!g.shm)
+        return false;
+    g.mem = (hid_shared_memory *)(void *)rl_hos_shmem_lock(g.shm);
+    return true;
+}
+
+static void mem_leave(void)
+{
+    if (g.shm)
+        rl_hos_shmem_unlock(g.shm);
+}
+
 static void signal_events(uint32_t mask)
 {
     for (uint32_t i = 0; i < NPAD_SLOTS; i++)
@@ -596,11 +610,12 @@ void rl_hid_update_now(void)
     rl_input_snapshot s;
     rl_input_sample(&s);
     pthread_mutex_lock(&g_m);
-    if (!g.mem) {
+    if (!mem_enter()) {
         pthread_mutex_unlock(&g_m);
         return;
     }
     uint32_t changed = update_locked(&s);
+    mem_leave();
     pthread_mutex_unlock(&g_m);
     signal_events(changed);
 }
@@ -648,8 +663,9 @@ hos_shmem *hid_core_open(void)
             return NULL;
         }
         g.shm = s;
-        g.mem = (hid_shared_memory *)(void *)rl_hos_shmem_ptr(s);
+        mem_enter();
         shm_init(g.mem);
+        mem_leave();
     }
     hos_kobj_ref(&g.shm->obj);
     hos_shmem *ret = g.shm;
@@ -718,7 +734,7 @@ void hid_core_activate(enum hid_device d)
     pthread_mutex_lock(&g_m);
     g.active[d] = true;
     uint32_t changed = 0;
-    if (g.mem) {
+    if (mem_enter()) {
         for (uint32_t i = 0; i < HID_LIFO_ENTRIES; i++) {
             switch (d) {
             case HID_DEV_DEBUG_PAD: {
@@ -752,6 +768,7 @@ void hid_core_activate(enum hid_device d)
                 break;
             }
         }
+        mem_leave();
     }
     pthread_mutex_unlock(&g_m);
     signal_events(changed);
@@ -810,8 +827,10 @@ uint64_t hid_core_joy_hold(void)
 void hid_core_set_assignment(uint32_t slot, uint32_t mode)
 {
     pthread_mutex_lock(&g_m);
-    if (g.mem && slot < HID_NPADS)
+    if (slot < HID_NPADS && mem_enter()) {
         g.mem->npads[slot].state.joy_assignment_mode = mode;
+        mem_leave();
+    }
     pthread_mutex_unlock(&g_m);
 }
 
@@ -830,7 +849,11 @@ hos_revent *hid_core_style_event(uint32_t slot)
 uint8_t hid_core_footer_type(uint32_t slot)
 {
     pthread_mutex_lock(&g_m);
-    uint8_t v = g.mem && slot < HID_NPADS ? g.mem->npads[slot].state.applet_footer_ui_type : 0;
+    uint8_t v = 0;
+    if (slot < HID_NPADS && mem_enter()) {
+        v = g.mem->npads[slot].state.applet_footer_ui_type;
+        mem_leave();
+    }
     pthread_mutex_unlock(&g_m);
     return v;
 }

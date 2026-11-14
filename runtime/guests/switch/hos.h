@@ -284,6 +284,8 @@ typedef struct hos_shmem {
     uint64_t size;
     /** @brief Host pages. */
     rl_shm shm;
+    /** @brief Held by service threads that write the bytes without the kernel lock. */
+    pthread_mutex_t lock;
     /** @brief Guest addresses of the mapped views, 0 for a free slot. */
     uint64_t views[HOS_SHMEM_VIEWS];
     /** @brief Horizon permission the guest may map it with (enum hos_perm). */
@@ -474,6 +476,10 @@ RL_RUNTIME_API void rl_hos_event_clear(hos_revent *e);
 RL_RUNTIME_API hos_shmem *rl_hos_shmem_create(uint64_t size, uint32_t user_perm);
 /** @brief Host pointer to a shared memory object's bytes (always writable, coherent with every guest view). */
 RL_RUNTIME_API uint8_t *rl_hos_shmem_ptr(hos_shmem *s);
+/** @brief Locks the object's bytes in place and returns the host pointer to them; pair with rl_hos_shmem_unlock. */
+RL_RUNTIME_API uint8_t *rl_hos_shmem_lock(hos_shmem *s);
+/** @brief Ends rl_hos_shmem_lock. */
+RL_RUNTIME_API void rl_hos_shmem_unlock(hos_shmem *s);
 
 /** @brief Wakes threads waiting on o if it is signaled. Lock held. */
 void hos_sync_signal(hos_kobj *o);
