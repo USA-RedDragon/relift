@@ -1,4 +1,4 @@
-//! The sail-arm model as tables: top-level items are split cheaply from the
+//! A Sail model as tables: top-level items are split cheaply from the
 //! `.sail` files, and function bodies and `val` signatures are parsed lazily.
 
 use std::cell::RefCell;
@@ -91,26 +91,6 @@ const LIB_FILES: &[&str] = &[
     "reverse_endianness.sail",
     "mono_rewrites.sail",
     "concurrency_interface.sail",
-];
-
-/// The model files the A64 generator reads, in load order.
-pub const A64_SRC_FILES: &[&str] = &[
-    "prelude.sail",
-    "decode_start.sail",
-    "builtins.sail",
-    "v8_base.sail",
-    "stubs.sail",
-    "interrupts.sail",
-    "interface.sail",
-    "no_devices.sail",
-    "impdefs.sail",
-    "mem.sail",
-    "sysregs_autogen.sail",
-    "sysregs.sail",
-    "reset.sail",
-    "instrs64.sail",
-    "decode_end.sail",
-    "fetch.sail",
 ];
 
 /// Drops `$` directives, and the lines of inactive `$ifdef` and `$ifndef`
@@ -234,7 +214,8 @@ impl Model {
         Ok(m)
     }
 
-    fn load_file(&mut self, path: &Path) -> std::io::Result<()> {
+    /// Adds the items of one `.sail` file.
+    pub fn load_file(&mut self, path: &Path) -> std::io::Result<()> {
         let bytes = std::fs::read(path)?;
         let text = String::from_utf8_lossy(&bytes)
             .replace("\r\n", "\n")

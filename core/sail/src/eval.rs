@@ -79,7 +79,7 @@ impl Guard {
 /// The per-CPU layer of the evaluator: the cut line (Sail functions replaced
 /// by hand-written code), register configuration and the few model writes
 /// that are not plain guest state. `Self` is also the per-run state the
-/// cut keeps (for A64, the exclusive monitor bookkeeping).
+/// cut keeps.
 pub trait Cpu: Default + Sized {
     /// Runs the cut function `name`, or gives `None` when it is not cut.
     fn cut(g: &mut Gen<'_, Self>, name: &str, a: &[V], hint: Option<u32>) -> R<Option<V>>;
@@ -104,6 +104,34 @@ pub trait Cpu: Default + Sized {
     /// generic rule.
     fn assign_index(_g: &mut Gen<'_, Self>, _base: &Expr, _index: &Expr, _v: &V) -> Option<R<()>> {
         None
+    }
+
+    /// Whether `name` is a register the model does not declare.
+    fn is_register(_name: &str) -> bool {
+        false
+    }
+
+    /// Reads the field `field` of `base` itself; `None` for the generic
+    /// rule.
+    fn read_field(_g: &mut Gen<'_, Self>, _base: &Expr, _field: &str) -> Option<R<V>> {
+        None
+    }
+
+    /// Handles an assignment to `base.field` itself; `None` for the
+    /// generic rule.
+    fn assign_field(_g: &mut Gen<'_, Self>, _base: &Expr, _field: &str, _v: &V) -> Option<R<()>> {
+        None
+    }
+
+    /// The width of `base.field` when it is an assignment target the
+    /// generic rule cannot evaluate.
+    fn field_width(_base: &Expr, _field: &str) -> Option<u32> {
+        None
+    }
+
+    /// The arguments a decode clause takes, given the instruction word.
+    fn decode_args(word: V) -> Vec<V> {
+        vec![word]
     }
 }
 
@@ -371,8 +399,7 @@ impl<'m, C: Cpu> Gen<'m, C> {
         }
         if self.m.registers.contains_key(name)
             || self.m.lets.contains_key(name)
-            || name == "SEE"
-            || name == "__BranchTaken"
+            || C::is_register(name)
         {
             return self.reg_get(name);
         }
@@ -388,38 +415,10 @@ impl<'m, C: Cpu> Gen<'m, C> {
         Ok(v)
     }
 
-    /// The PSTATE every template starts from: every field zero.
-    pub fn default_pstate(&self) -> R<V> {
-        let fields = self
-            .m
-            .structs
-            .get("ProcState")
-            .ok_or_else(|| err("no ProcState"))?;
-        let mut f = Vec::new();
-        for (n, _) in fields {
-            let w = match n.as_str() {
-                "EL" | "BTYPE" => 2,
-                "GE" => 4,
-                "IT" => 8,
-                "M" => 5,
-                _ => 1,
-            };
-            f.push((n.clone(), V::Bits(w, 0)));
-        }
-        Ok(V::Struct("ProcState".into(), Rc::new(f)))
-    }
-
     /// The initial value of register `name`.
     pub fn init_reg(&mut self, name: &str) -> R<V> {
         if let Some(r) = C::init_reg(self, name) {
             return r;
-        }
-        match name {
-            "PSTATE" => return self.default_pstate(),
-            "SEE" => return Ok(V::Int(-1)),
-            "__BranchTaken" | "SPESampleInFlight" | "InGuardedPage" => return Ok(V::Bool(false)),
-            "BTypeNext" => return Ok(V::Bits(2, 0)),
-            _ => {}
         }
         if let Some((_, Some(init))) = self.m.registers.get(name) {
             let init = init.clone();
@@ -456,9 +455,7 @@ impl<'m, C: Cpu> Gen<'m, C> {
             self.locals.insert(name.to_string(), v);
             return Ok(());
         }
-        if self.m.registers.contains_key(name)
-            || matches!(name, "SEE" | "__BranchTaken" | "BTypeNext")
-        {
+        if self.m.registers.contains_key(name) || C::is_register(name) {
             self.regs.insert(name.to_string(), v);
             return Ok(());
         }
@@ -795,13 +792,8 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 Ok(b)
             }
             Expr::Field(base, f) => {
-                if let Expr::Id(n) = base.as_ref()
-                    && n == "PSTATE"
-                    && matches!(f.as_str(), "N" | "Z" | "C" | "V")
-                {
-                    self.used_cut.insert("PSTATE.NZCV");
-                    let r = f.to_string();
-                    return Ok(self.dy(K::Bits(1), format!("st.get(b, regs::{r})")));
+                if let Some(r) = C::read_field(self, base, f) {
+                    return r;
                 }
                 let base = self.eval(base, None)?;
                 self.field(&base, f)
@@ -1081,10 +1073,9 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 let mut ws = Vec::new();
                 for p in &parts {
                     let w = if let Expr::Field(b, f) = p
-                        && matches!(b.as_ref(), Expr::Id(n) if n == "PSTATE")
-                        && matches!(f.as_str(), "N" | "Z" | "C" | "V")
+                        && let Some(w) = C::field_width(b, f)
                     {
-                        1
+                        w
                     } else {
                         let save = self.out.len();
                         let cur = self.eval(p, None)?;
@@ -1102,16 +1093,8 @@ impl<'m, C: Cpu> Gen<'m, C> {
                 Ok(())
             }
             Expr::Field(b, f) => {
-                if let Expr::Id(n) = b.as_ref()
-                    && n == "PSTATE"
-                    && matches!(f.as_str(), "N" | "Z" | "C" | "V")
-                {
-                    self.used_cut.insert("PSTATE.NZCV");
-                    let v = self.bitify(&v)?;
-                    let x = self.dx(&v)?;
-                    let g = self.gd();
-                    self.effect(format!("st.set(b, regs::{f}, {x}, {g});"));
-                    return Ok(());
+                if let Some(r) = C::assign_field(self, b, f, &v) {
+                    return r;
                 }
                 let base = self.eval(b, None)?;
                 let nb = match base {
@@ -1716,18 +1699,15 @@ impl<'m, C: Cpu> Gen<'m, C> {
 }
 
 impl<C: Cpu> Gen<'_, C> {
-    /// Runs one decode clause (`__DecodeA64_*`, `__DecodeA32_*`,
-    /// `__DecodeT16`) on the template's word of `word_bits` bits.
+    /// Runs one decode clause on the template's word of `word_bits` bits.
     pub fn run_decode(&mut self, c: &crate::ast::Clause, word_bits: u32) -> R<()> {
         self.frames.push(Vec::new());
-        let argv = V::tuple(vec![
-            V::S(K::Bits(64), "pc".into(), 0),
-            V::S(
-                K::Bits(word_bits),
-                "w".into(),
-                !self.known & mask(word_bits) as u32,
-            ),
-        ]);
+        let word = V::S(
+            K::Bits(word_bits),
+            "w".into(),
+            !self.known & mask(word_bits) as u32,
+        );
+        let argv = V::tuple(C::decode_args(word));
         let cond = self.pat_cond(&c.params, &argv)?;
         if cond != V::Bool(true) {
             return fail(format!("decode clause pattern is {cond:?}"));

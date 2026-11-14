@@ -31,7 +31,7 @@
 use std::rc::Rc;
 
 use relift_sail::ast::Expr;
-use relift_sail::eval::{Cpu, Gen, R, fail};
+use relift_sail::eval::{Cpu, Gen, R, err, fail};
 use relift_sail::stage::Stage;
 use relift_sail::value::{K, V};
 
@@ -123,19 +123,78 @@ const STUBS_OK: &[&str] = &[
     "Hint_PreloadInstr",
 ];
 
+/// The model files the A64 generator reads, in load order.
+pub const A64_SRC_FILES: &[&str] = &[
+    "prelude.sail",
+    "decode_start.sail",
+    "builtins.sail",
+    "v8_base.sail",
+    "stubs.sail",
+    "interrupts.sail",
+    "interface.sail",
+    "no_devices.sail",
+    "impdefs.sail",
+    "mem.sail",
+    "sysregs_autogen.sail",
+    "sysregs.sail",
+    "reset.sail",
+    "instrs64.sail",
+    "decode_end.sail",
+    "fetch.sail",
+];
+
 impl Cpu for A64 {
     fn cut(g: &mut Gen<'_, A64>, name: &str, a: &[V], hint: Option<u32>) -> R<Option<V>> {
         cut(g, name, a, hint)
     }
 
     fn init_reg(g: &mut Gen<'_, A64>, name: &str) -> Option<R<V>> {
-        if name == "__ThisInstrEnc" {
-            return Some(match g.m.enum_of.get("__A64") {
+        match name {
+            "__ThisInstrEnc" => Some(match g.m.enum_of.get("__A64") {
                 Some((t, i)) => Ok(V::Enum(t.as_str().into(), *i)),
                 None => fail("no __A64"),
-            });
+            }),
+            "PSTATE" => Some(default_pstate(g)),
+            "SEE" => Some(Ok(V::Int(-1))),
+            "__BranchTaken" | "SPESampleInFlight" | "InGuardedPage" => Some(Ok(V::Bool(false))),
+            "BTypeNext" => Some(Ok(V::Bits(2, 0))),
+            _ => None,
         }
-        None
+    }
+
+    fn is_register(name: &str) -> bool {
+        matches!(name, "SEE" | "__BranchTaken" | "BTypeNext")
+    }
+
+    fn read_field(g: &mut Gen<'_, A64>, b: &Expr, f: &str) -> Option<R<V>> {
+        if !is_flag(b, f) {
+            return None;
+        }
+        g.used_cut.insert("PSTATE.NZCV");
+        Some(Ok(g.dy(K::Bits(1), format!("st.get(b, regs::{f})"))))
+    }
+
+    fn assign_field(g: &mut Gen<'_, A64>, b: &Expr, f: &str, v: &V) -> Option<R<()>> {
+        if !is_flag(b, f) {
+            return None;
+        }
+        g.used_cut.insert("PSTATE.NZCV");
+        let r = (|| {
+            let v = g.bitify(v)?;
+            let x = g.dx(&v)?;
+            let gd = g.gd();
+            g.effect(format!("st.set(b, regs::{f}, {x}, {gd});"));
+            Ok(())
+        })();
+        Some(r)
+    }
+
+    fn field_width(b: &Expr, f: &str) -> Option<u32> {
+        is_flag(b, f).then_some(1)
+    }
+
+    fn decode_args(word: V) -> Vec<V> {
+        vec![V::S(K::Bits(64), "pc".into(), 0), word]
     }
 
     fn reg_config(name: &str) -> u128 {
@@ -164,6 +223,29 @@ impl Cpu for A64 {
         g.effect(format!("st.set_qc(b, {gd});"));
         Some(Ok(()))
     }
+}
+
+fn is_flag(b: &Expr, f: &str) -> bool {
+    matches!(b, Expr::Id(n) if n == "PSTATE") && matches!(f, "N" | "Z" | "C" | "V")
+}
+
+fn default_pstate(g: &Gen<'_, A64>) -> R<V> {
+    let fields =
+        g.m.structs
+            .get("ProcState")
+            .ok_or_else(|| err("no ProcState"))?;
+    let mut f = Vec::new();
+    for (n, _) in fields {
+        let w = match n.as_str() {
+            "EL" | "BTYPE" => 2,
+            "GE" => 4,
+            "IT" => 8,
+            "M" => 5,
+            _ => 1,
+        };
+        f.push((n.clone(), V::Bits(w, 0)));
+    }
+    Ok(V::Struct("ProcState".into(), Rc::new(f)))
 }
 
 impl Stage for A64 {

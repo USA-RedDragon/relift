@@ -152,7 +152,7 @@ fn real_main() -> ExitCode {
         eprintln!("usage: see the crate documentation");
         return ExitCode::from(2);
     }
-    let m = match model::Model::load(args[1].as_ref(), args[2].as_ref(), model::A64_SRC_FILES) {
+    let m = match model::Model::load(args[1].as_ref(), args[2].as_ref(), cut::A64_SRC_FILES) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("cannot load the model: {e}");

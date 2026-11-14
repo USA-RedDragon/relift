@@ -15,7 +15,7 @@ pub trait Form {
     /// `Encoding::<name>` is its id.
     fn name(&self) -> String;
     /// The word bits fixed for every word of the encoding, plus any bits the
-    /// CPU layer fixes while generating (for A32, the condition).
+    /// CPU layer fixes while generating.
     fn mask(&self) -> u32;
     /// Their values.
     fn value(&self) -> u32;
@@ -58,7 +58,7 @@ const PURE_CALLS: &[&str] = &[
 pub trait Stage: Cpu {
     /// State reads of the CPU's `St` without effects.
     const PURE_READS: &'static [&'static str] = &[];
-    /// Checks a finished run; A64 refuses an exclusive check without a store.
+    /// Checks a finished run; a CPU layer refuses a run that left work undone.
     fn finish_run(_g: &Gen<'_, Self>) -> Result<(), String> {
         Ok(())
     }

@@ -1,5 +1,5 @@
-//! Tokenizer and recursive-descent parser for the Sail subset the sail-arm
-//! model uses. Anything outside that subset is a parse error.
+//! Tokenizer and recursive-descent parser for the Sail subset the models
+//! in use need. Anything outside that subset is a parse error.
 
 use crate::ast::{Arm, Dir, Expr, Lit, Pat, Stmt, Typ, TypArg};
 
