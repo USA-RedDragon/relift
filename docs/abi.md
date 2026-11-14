@@ -1772,6 +1772,66 @@ guards, an exact `fma64` for engines without one (the stand-in uses the
 host's), shared memory with the threads proposal (atomics above), and
 linking a guest's device model.
 
+## 16. Differential checks
+
+`relift diff FUNCTION` compares one lifted function with a reference engine
+inside a live run. FUNCTION is a host name (`_ZN5guest...`), `module:symbol`
+(the guest's mangled symbol) or `module+0xoffset` for an unnamed function.
+
+1. relift makes a dev build and starts it under gdb with
+   `runtime/tools/gdb/relift_diff.py` (the script also works by hand:
+   `source` it, then `relift-diff SYMBOL [COUNT [SKIP]]`).
+2. At each call, the script reads the `rl_ctx` in the first argument and
+   finds the function's guest address from the dispatch table slot that holds
+   the host function. It starts the engine and sends `STATE pc=<hex>
+   stop=<hex> name=<hex>...` (x0 to x30, sp, nzcv, fpcr, tpidr_el0,
+   tpidrro_el0, v0 to v31; the return address in x30 is `stop`).
+3. The engine runs the function from that state. It asks for each guest page
+   it touches with `R <page hex>`; the script answers `OK\n` and 4096 bytes
+   or `NO\n` from the live process. The engine keeps its own copy, so the
+   process is not changed.
+4. The engine answers `RAN ok steps=N`, `RAN left` or `RAN failed`. It stops
+   with `left` at a system call (`svc`) and at any address that is not guest
+   code, which is where a runtime-provided function (a Vulkan thunk, for
+   example) lives; the report names the call and nothing is compared. A step
+   limit, an unliftable instruction or a fault is `failed`.
+5. After `RAN ok` the script freezes every other thread
+   (`scheduler-locking on`), runs the lifted function to its return
+   (`finish`), unfreezes, and sends `AFTER name=<hex>...` with the registers
+   in the context. nzcv and the thread registers are not sent: the ABI stores
+   NZCV only where a callee reads it.
+6. The engine compares the registers, then fetches every page it touched
+   again from the process and compares the bytes. Bytes in the stack frames
+   the function used (from the lowest stack pointer it reached up to the
+   entry's) are dead after the return and are skipped. `RESULT match`,
+   `RESULT mismatch` or `RESULT stopped` ends the case; the report (first
+   differing registers, then pages with the byte count and the first
+   differing address) goes to the engine's standard error.
+
+The command exits 0 when every compared call matched, 1 after any mismatch
+and 2 when no call was compared. `--count` and `--skip` choose calls.
+
+Engines: the default is `relift diff --serve`, the `relift-ir` interpreter
+over the A64 lifter (`relift-cpu-a64`), so it needs no GPL code. `--engine
+COMMAND` runs another program that speaks the same protocol; `check/` builds
+one on Unicorn (`relift-diff-unicorn`), which is GPL and so is not linked by
+anything else. `--flip-read N` flips a bit of the Nth memory read of the
+interpreter run: a control, a correct build must then report a mismatch.
+`RELIFT_EMIT_TEST_FAULT=<guest address hex>` makes a build emit the first
+add of that function as a subtract, the miscompile the end-to-end test looks
+for.
+
+Limits: only the function runs, so state other threads change during the
+call is seen by the lifted code and not the engine, which shows as a
+mismatch; a function that calls a runtime-provided function is not
+compared (check its callees one by one); the function must not be inlined
+into its callers by the C compiler (dev builds do not inline across guest
+functions that are reached through the dispatch table). [verified: the tiny
+program in `relift/tests/e2e_diff.rs` (match, test fault, system call) and
+`check/tests/diff_unicorn.rs`; the prototype it comes from matched 40 of 40
+keyframe calls and functions of up to 9.6k guest instructions in a game and
+caught a flipped read in 5 of 5 calls]
+
 ## Checks run for this contract
 
 All with clang 23.1.1 on Linux unless noted. Probe sources are scratch, not
