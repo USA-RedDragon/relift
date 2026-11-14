@@ -80,6 +80,8 @@ void gb_remap(rl_gb *g)
     g->rd[0xD] = g->wram + gb_wram_bank(g) * 0x1000u;
     g->rd[0xE] = g->wram;
     g->rd[0xF] = NULL;
+    if (g->has_bus)
+        memset(g->rd, 0, sizeof g->rd);
 }
 
 void gb_reset_mapper(rl_gb *g)

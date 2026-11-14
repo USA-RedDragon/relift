@@ -96,6 +96,10 @@ struct rl_gb {
     uint32_t bank1;
     /** @brief External RAM bank at $A000. */
     uint32_t rambank;
+    /** @brief The external bus (rl_gb_set_bus), valid when has_bus. */
+    rl_gb_bus bus;
+    /** @brief An external bus owns the memory. */
+    bool has_bus;
     /** @brief The scheduler, once attached. */
     rl_sched *sched;
     /** @brief The device of each slot. */

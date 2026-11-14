@@ -174,6 +174,27 @@ void rl_gb_boot_state_for(rl_gb_model model, bool color_mode, const uint8_t *rom
 /** @brief The Game Boy memory. */
 typedef struct rl_gb rl_gb;
 
+/** @brief An external owner of the memory behind the I/O registers: the exact device library (gbdev.h) keeps video RAM, OAM, work RAM and the cartridge itself, because the picture unit and the DMA engines read and write them. */
+typedef struct rl_gb_bus {
+    /** @brief Reads the byte at addr, one M-cycle of the instruction in flight. */
+    uint8_t (*read)(void *ctx, uint16_t addr);
+    /** @brief Writes the byte at addr, one M-cycle of the instruction in flight. */
+    void (*write)(void *ctx, uint16_t addr, uint8_t value);
+    /** @brief Reads the byte at addr with no timing effect (for rl_gb_peek), or NULL for $FF. */
+    uint8_t (*peek)(void *ctx, uint16_t addr);
+    /** @brief Passed to the three. */
+    void *ctx;
+} rl_gb_bus;
+
+/**
+ * @brief Hands every access outside the I/O registers (the ones the
+ * scheduler's devices own) to bus instead of this layer's own memory, which
+ * is then unused: no direct read pages, no controller, no save. NULL goes
+ * back to the own memory. The controller registers and RAM contents of this
+ * layer are not carried over, so set a bus right after rl_gb_create.
+ */
+void rl_gb_set_bus(rl_gb *g, const rl_gb_bus *bus);
+
 /** @brief The post-boot state of g (rl_gb_boot_state_for for its model and cartridge). */
 const rl_gb_boot *rl_gb_boot_of(const rl_gb *g);
 /**

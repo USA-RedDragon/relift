@@ -51,8 +51,18 @@ void rl_gb_destroy(rl_gb *g)
 rl_gb_model rl_gb_get_model(const rl_gb *g) { return g->model; }
 bool rl_gb_color_mode(const rl_gb *g) { return g->color; }
 
+void rl_gb_set_bus(rl_gb *g, const rl_gb_bus *bus)
+{
+    g->has_bus = bus != NULL;
+    if (bus)
+        g->bus = *bus;
+    gb_remap(g);
+}
+
 static uint8_t read_slow(rl_gb *g, rl_sched_cpu *c, uint16_t addr)
 {
+    if (g->has_bus && !gb_is_io(addr))
+        return g->bus.read(g->bus.ctx, addr);
     if (gb_is_io(addr))
         return g->sched && c ? (uint8_t)rl_sched_read(c, addr, 1) : 0xFF;
     if (addr >= 0xA000 && addr < 0xC000)
@@ -80,10 +90,19 @@ uint8_t rl_gb_read(rl_gb *g, rl_sched_cpu *c, uint16_t addr)
     return read_slow(g, c, addr);
 }
 
-uint8_t rl_gb_peek(const rl_gb *g, uint16_t addr) { return rl_gb_read((rl_gb *)(uintptr_t)g, NULL, addr); }
+uint8_t rl_gb_peek(const rl_gb *g, uint16_t addr)
+{
+    if (g->has_bus)
+        return !gb_is_io(addr) && g->bus.peek ? g->bus.peek(g->bus.ctx, addr) : 0xFF;
+    return rl_gb_read((rl_gb *)(uintptr_t)g, NULL, addr);
+}
 
 void rl_gb_write(rl_gb *g, rl_sched_cpu *c, uint16_t addr, uint8_t value)
 {
+    if (g->has_bus && !gb_is_io(addr)) {
+        g->bus.write(g->bus.ctx, addr, value);
+        return;
+    }
     switch (addr >> 12) {
     case 0x0:
     case 0x1:
