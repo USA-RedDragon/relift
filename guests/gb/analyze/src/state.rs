@@ -95,7 +95,7 @@ impl State {
     }
 
     pub(crate) fn window_bank(&self, model: &BankModel) -> Option<Result<u16, u16>> {
-        model.resolve(self.lo?, self.hi).map(|r| r.map_err(|e| e.0))
+        model.resolve(self.lo, self.hi).map(|r| r.map_err(|e| e.0))
     }
 }
 

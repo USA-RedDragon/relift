@@ -126,6 +126,17 @@ fn mbc1_zero_selects_bank_one_and_upper_bits_join() {
 }
 
 #[test]
+fn an_unbanked_cartridge_resolves_the_window_from_a_vector() {
+    let r = Cart::new(0x00, 0x00)
+        .put(0, 0x150, &[0xC9])
+        .put(0, 0x40, &[0xCD, 0x00, 0x40, 0xD9])
+        .put(1, 0x4000, &[0xC9])
+        .analyze();
+    assert!(has(&r, 1, 0x4000));
+    assert!(r.unresolved.is_empty());
+}
+
+#[test]
 fn a_vector_cannot_assume_a_bank() {
     let r = Cart::new(0x19, 0x04)
         .put(0, 0x150, &[0xC9])

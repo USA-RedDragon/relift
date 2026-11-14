@@ -98,7 +98,11 @@ impl BankModel {
     /// # Errors
     ///
     /// The bank is not in the image.
-    pub fn resolve(&self, lo: u16, hi: Option<u8>) -> Option<Result<u16, OutOfRange>> {
+    pub fn resolve(&self, lo: Option<u16>, hi: Option<u8>) -> Option<Result<u16, OutOfRange>> {
+        if self.kind == MapperKind::None {
+            return Some(Ok(1));
+        }
+        let lo = lo?;
         match hi {
             Some(h) => Some(self.effective(lo, h)),
             None if !self.hi_matters() => Some(self.effective(lo, 0)),
@@ -193,6 +197,12 @@ mod tests {
         let m = BankModel::new(MapperKind::Mbc2, 16).expect("modelled");
         assert_eq!(m.classify(0x2100), Some(BankReg::Lo));
         assert_eq!(m.classify(0x2000), None);
+    }
+
+    #[test]
+    fn an_unbanked_cartridge_always_maps_bank_one() {
+        let m = BankModel::new(MapperKind::None, 2).expect("modelled");
+        assert_eq!(m.resolve(None, None), Some(Ok(1)));
     }
 
     #[test]
