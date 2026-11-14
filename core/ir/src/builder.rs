@@ -25,8 +25,8 @@ impl Builder {
             regs,
             addr_width,
             pc,
-            insts: Vec::new(),
-            widths: Vec::new(),
+            insts: Vec::with_capacity(32),
+            widths: Vec::with_capacity(32),
             bank: None,
         }
     }
