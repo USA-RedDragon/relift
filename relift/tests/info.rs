@@ -45,6 +45,7 @@ fn the_section_and_the_flag_give_the_same_document() {
     assert_eq!(info.identity.platform, "switch");
     assert_eq!(info.identity.title_id.as_deref(), Some("0100000000001234"));
     assert_eq!(info.identity.modules.len(), 1);
+    assert_eq!(info.mods.accepts, relift_info::Mods::switch_accepts());
     let cli = tiny::relift(&project, &["--cache-dir", &cache, "info"]);
     assert!(
         cli.status.success(),

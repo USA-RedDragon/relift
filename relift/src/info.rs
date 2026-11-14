@@ -5,7 +5,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use relift_info::{Identity, Info, ModuleId, Needs, Repo, Save, TreeNeed, embed, section};
+use relift_info::{Identity, Info, Mods, ModuleId, Needs, Repo, Save, TreeNeed, embed, section};
 use relift_switch::program::Placed;
 use sha2::{Digest, Sha256};
 
@@ -133,6 +133,7 @@ pub fn switch_document(
         dlc: import.join("dlc").is_dir(),
         save_folder: true,
     };
+    info.mods.accepts = Mods::switch_accepts();
     info.save = Save {
         kind: "tree".into(),
         location: Some("launcher".into()),
