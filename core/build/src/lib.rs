@@ -68,17 +68,26 @@ pub struct Schedule {
     pub heavy: Vec<usize>,
     /// How many heavy compiles run at once.
     pub heavy_depth: u32,
+    /// The indices of the giant compiles (each larger than half the
+    /// budget), which run one at a time in a pool of their own.
+    pub giant: Vec<usize>,
 }
 
 /// Splits compiles so their memory stays within `budget`: half the budget
 /// goes to light compiles (each at most `budget / 2 / jobs`), which may all
 /// run at once, and half to the heavy ones, which share a pool deep enough
-/// for that half to hold the largest of them (at least one).
+/// for that half to hold the largest of them (at least one). A giant, one
+/// that alone needs more than half the budget, cannot fit beside anything;
+/// giants get a pool of depth one and do not count toward the heavy depth,
+/// so one giant does not serialize every other heavy compile.
 pub fn schedule(needs: &[u64], jobs: u32, budget: u64) -> Schedule {
     let jobs = jobs.max(1);
     let half = budget / 2;
     let light_max = half / u64::from(jobs);
-    let heavy: Vec<usize> = (0..needs.len()).filter(|&i| needs[i] > light_max).collect();
+    let giant: Vec<usize> = (0..needs.len()).filter(|&i| needs[i] > half).collect();
+    let heavy: Vec<usize> = (0..needs.len())
+        .filter(|&i| needs[i] > light_max && needs[i] <= half)
+        .collect();
     let largest = heavy.iter().map(|&i| needs[i]).max().unwrap_or(1).max(1);
     let depth = u32::try_from(half / largest)
         .unwrap_or(u32::MAX)
@@ -87,6 +96,7 @@ pub fn schedule(needs: &[u64], jobs: u32, budget: u64) -> Schedule {
         jobs,
         heavy,
         heavy_depth: depth,
+        giant,
     }
 }
 
@@ -429,8 +439,11 @@ mod tests {
         assert_eq!(s.jobs, 16);
         assert_eq!(s.heavy, vec![1, 3]);
         assert_eq!(s.heavy_depth, 2);
-        // One compile larger than half the budget still runs, alone.
-        assert_eq!(schedule(&[40 * G], 8, 16 * G).heavy_depth, 1);
+        // A giant gets its own pool and leaves the heavy depth alone.
+        let s = schedule(&[40 * G, 2 * G, 2 * G], 8, 16 * G);
+        assert_eq!(s.giant, vec![0]);
+        assert_eq!(s.heavy, vec![1, 2]);
+        assert_eq!(s.heavy_depth, 4);
         assert!(schedule(&[G / 8; 4], 4, 16 * G).heavy.is_empty());
     }
 

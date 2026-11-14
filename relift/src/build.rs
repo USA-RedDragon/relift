@@ -300,11 +300,14 @@ fn lift_summary(functions: usize, unlifted: usize) -> Line {
         .paint(paint, format!("{} unlifted", count(unlifted as u64)))
 }
 
-/// Bounds the compilers' memory: sorts `compiles` largest source first (so
-/// the long compiles start early) and puts those that would not fit beside
-/// `jobs - 1` others in a `heavy` pool sized to fit, with the budget at
-/// three fifths of the memory available now. Returns the pools to declare.
-fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, u32)> {
+/// Bounds the compilers' memory, with the budget at three fifths of the
+/// memory available now: those that would not fit beside `jobs - 1` others
+/// go in a `heavy` pool sized to fit, and those that need more than half
+/// the budget in a `giant` pool of depth one. Sorts `compiles` largest
+/// source first (so the long compiles start early), giants last (so
+/// everything else is done before one of them can exhaust the memory).
+/// Returns the pools to declare.
+fn memory_pools(compiles: &mut Vec<Compile>, jobs: u32) -> Vec<(String, u32)> {
     let size = |c: &Compile| std::fs::metadata(&c.src).map_or(0, |m| m.len());
     compiles.sort_by_cached_key(|c| std::cmp::Reverse(size(c)));
     let Some(avail) = relift_build::available_memory() else {
@@ -315,13 +318,23 @@ fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, u32)> {
         .map(|c| relift_build::compile_memory(size(c)))
         .collect();
     let s = relift_build::schedule(&needs, jobs, avail / 5 * 3);
-    if s.heavy.is_empty() {
-        return Vec::new();
-    }
+    let mut pools = Vec::new();
     for &i in &s.heavy {
         compiles[i].pool = Some("heavy".into());
     }
-    vec![("heavy".into(), s.heavy_depth)]
+    if !s.heavy.is_empty() {
+        pools.push(("heavy".into(), s.heavy_depth));
+    }
+    for &i in &s.giant {
+        compiles[i].pool = Some("giant".into());
+    }
+    if !s.giant.is_empty() {
+        pools.push(("giant".into(), 1));
+        // Sorted largest first, so the giants are the first entries.
+        let giants: Vec<Compile> = compiles.drain(..s.giant.len()).collect();
+        compiles.extend(giants);
+    }
+    pools
 }
 
 fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
