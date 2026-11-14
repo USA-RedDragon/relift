@@ -10,8 +10,9 @@
 //! ```text
 //! relift-check insn <hex>[,<hex>...] [options]
 //! relift-check forms <name>[,<name>...]|all [options]
+//! relift-check --oracle rustyboi step|rom ...   (Game Boy SM83, see gb/cli.rs)
 //! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
-//!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
+//!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)
 //!          [--slow cmd:<argv>] [--all-slow] [--fp-flags]
 //! ```
 //!
@@ -37,6 +38,7 @@
 //! host FP operations or a flags guard go to the slow engine.
 
 mod emu;
+mod gb;
 mod mutate;
 mod oracle;
 mod states;
@@ -291,13 +293,16 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags]"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags]"
     );
     ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = gb::cli::dispatch(&args) {
+        return code;
+    }
     if args.len() < 2 {
         return usage();
     }
