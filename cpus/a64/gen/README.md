@@ -10,8 +10,10 @@ Regenerate from the repository root (stdlib Python only):
 
 The generator prints the number of leaves it emitted (4429 for release
 2026-09) and fails on any encodeset, value or condition shape it does not
-understand. `IsFeatureImplemented` is treated as true; every other field
-constraint becomes a predicate in `generated::condition`.
+understand. Every field constraint and feature test (`IsFeatureImplemented`)
+becomes a predicate in `generated::condition` over the word and the CPU's
+`Features`; the feature names become the `Feature` enum (plus `FEAT_PMULL`,
+which only the Sail semantics test).
 
 # A64 lifting templates from Sail
 

@@ -312,3 +312,32 @@ fn encodings_without_ties_among_matches() {
 fn named_lookup_helper_finds_encodings() {
     assert_eq!(named("NOP_HI_hints"), Encoding::NOP_HI_hints);
 }
+
+#[test]
+fn features_gate_encodings() {
+    let a57 = Features::CORTEX_A57;
+    let on = |w: u32, f: &Features| decode_for(w, f).map(|i| i.encoding.name());
+    assert_eq!(on(0xb8bf_c020, &Features::ALL), Some("LDAPR_32L_memop"));
+    assert_eq!(on(0xb8bf_c020, &a57), None);
+    let lrcpc = a57.with(Feature::LRCPC);
+    assert_eq!(on(0xb8bf_c020, &lrcpc), Some("LDAPR_32L_memop"));
+    assert_eq!(on(0x88a0_7c41, &a57), None);
+    assert_eq!(on(0x5ac0_2020, &a57), None);
+    assert_eq!(on(0x4e28_4820, &a57), Some("AESE_B_cryptoaes"));
+    assert_eq!(on(0x4e28_4820, &Features::ARMV8_0), None);
+    assert_eq!(on(0xd503_233f, &Features::ALL), Some("PACIASP_HI_hints"));
+    assert_eq!(on(0xd503_233f, &a57), Some("HINT_HM_hints"));
+    assert_eq!(named("LDAPR_32L_memop").features(), &[Feature::LRCPC]);
+}
+
+#[test]
+fn feature_sets_parse() {
+    let f = Features::parse("cortex-a57, FEAT_LSE, LRCPC, -CRC32").expect("parses");
+    assert!(f.has(Feature::LSE) && f.has(Feature::LRCPC) && f.has(Feature::AES));
+    assert!(!f.has(Feature::CRC32));
+    assert!(Features::ALL.contains(&f));
+    assert!(!Features::CORTEX_A57.contains(&f));
+    assert!(Features::parse("FEAT_NOPE").is_err());
+    assert_eq!(Feature::from_name("FEAT_LSE"), Some(Feature::LSE));
+    assert_eq!(Feature::LSE.name(), "FEAT_LSE");
+}

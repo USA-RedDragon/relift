@@ -4,8 +4,8 @@ Usage: python3 -I aarchmrs_decoder.py <Instructions.json> <generated.rs>
 
 Reads every Instruction leaf under the A64 InstructionSet, merges the encodesets
 of the leaf and its ancestors into a fixed mask and value, folds the node
-conditions (IsFeatureImplemented is always true) into per-leaf Rust predicates
-over the 32-bit word, and writes the tables. Any shape it does not understand
+conditions, feature tests (IsFeatureImplemented) included, into per-leaf Rust
+predicates over the 32-bit word and the CPU's features, and writes the tables. Any shape it does not understand
 is a hard error. Source: Arm AARCHMRS, BSD-3-Clause, see NOTICE-AARCHMRS.
 """
 
@@ -17,6 +17,9 @@ LEAF = "Instruction.Instruction"
 GROUP = "Instruction.InstructionGroup"
 ALIAS = "Instruction.InstructionAlias"
 ISET = "Instruction.InstructionSet"
+# Features the Sail semantics test (so a template can branch on them) but no
+# AARCHMRS encoding condition names.
+EXTRA_FEATURES = ["FEAT_PMULL"]
 IDENT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
@@ -159,7 +162,13 @@ def lower(node, scope):
     if t == "AST.Function":
         if node["name"] != "IsFeatureImplemented":
             fail("function", node)
-        return const_bool(True)
+        args = node["arguments"]
+        if len(args) != 1 or args[0]["_type"] != "AST.Identifier":
+            fail("IsFeatureImplemented argument", node)
+        name = args[0]["value"]
+        if not name.startswith("FEAT_") or not IDENT_RE.match(name):
+            fail("feature name %r" % name, node)
+        return ("feat", name)
     if t == "AST.UnaryOp":
         if node["op"] != "!":
             fail("unary op", node)
@@ -197,12 +206,28 @@ def lower(node, scope):
     fail("AST node type", node)
 
 
+def mentions(c):
+    """The features a condition tests."""
+    if c[0] == "feat":
+        return {c[1]}
+    if c[0] == "not":
+        return mentions(c[1])
+    if c[0] in ("and", "or"):
+        out = set()
+        for y in c[1]:
+            out |= mentions(y)
+        return out
+    return set()
+
+
 def render(x):
     k = x[0]
     if k == "const":
         return "true" if x[1] else "false"
     if k == "cmp":
         return "w & 0x%08x == 0x%08x" % (x[1], x[2])
+    if k == "feat":
+        return "f.has(Feature::%s)" % x[1][len("FEAT_"):]
     if k == "eqf":
         return "(w >> %d) & 0x%x == (w >> %d) & 0x%x" % (x[1], x[3], x[2], x[3])
     if k == "not":
@@ -292,12 +317,16 @@ def generate(src):
     fieldtab, fieldlist_ix = [], {}
     rows = []
     conds = []
-    cond_ix = {}
+    features, feature_ix = [], {}
+    needs = []
     for node, mask, value, fields, chain, cs, path in leaves:
         if not path:
             fail("leaf directly under A64", node["name"])
         scope = Scope(chain, mask, value)
         c = mk_nary("and", [lower(x, scope) for x in cs])
+        feats = tuple(sorted(mentions(c)))
+        for f in feats:
+            intern(features, feature_ix, f)
         if c == const_bool(False):
             fail("leaf condition is never true", node["name"])
         key = tuple(fields)
@@ -318,6 +347,13 @@ def generate(src):
         )
         if c != const_bool(True):
             conds.append((node["name"], render(c)))
+        needs.append(feats)
+
+    for f in EXTRA_FEATURES:
+        intern(features, feature_ix, f)
+    features.sort()
+    featsets, featset_ix = [], {}
+    need_index = [intern(featsets, featset_ix, f) for f in needs]
 
     n = len(leaves)
     out = []
@@ -331,7 +367,7 @@ def generate(src):
     w("//! `python3 -I cpus/a64/gen/aarchmrs_decoder.py Instructions.json cpus/a64/src/decode/generated.rs`")
     w("//! followed by `cargo fmt -p relift-cpu-a64`.")
     w("")
-    w("use super::Field;")
+    w("use super::{Features, Field};")
     w("")
     w("/// Every A64 encoding leaf of the specification, named as in AARCHMRS.")
     w("#[allow(non_camel_case_types)]")
@@ -413,8 +449,41 @@ def generate(src):
         w('    f("%s", %d, %d),' % (nm, lo, width))
     w("];")
     w("")
-    w("/// Whether the field constraints of `e` hold for `w`; the fixed bits are checked elsewhere.")
-    w("pub(super) fn condition(e: Encoding, w: u32) -> bool {")
+    w("/// An architecture feature some encoding needs, named as in AARCHMRS")
+    w("/// without the `FEAT_` prefix.")
+    w("#[allow(non_camel_case_types)]")
+    w("#[repr(u8)]")
+    w("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]")
+    w("pub enum Feature {")
+    for f in features:
+        w("    %s," % f[len("FEAT_"):])
+    w("}")
+    w("")
+    w("pub(super) const FEATURE_COUNT: usize = %d;" % len(features))
+    w("")
+    w("pub(super) static FEATURES: [Feature; FEATURE_COUNT] = [")
+    for f in features:
+        w("    Feature::%s," % f[len("FEAT_"):])
+    w("];")
+    w("")
+    w("pub(super) static FEATURE_NAMES: [&str; FEATURE_COUNT] = [")
+    for f in features:
+        w('    "%s",' % f)
+    w("];")
+    w("")
+    w("pub(super) static MENTIONS_INDEX: [u16; COUNT] = [")
+    for i in need_index:
+        w("    %d," % i)
+    w("];")
+    w("")
+    w("pub(super) static MENTIONS: [&[Feature]; %d] = [" % len(featsets))
+    for fs in featsets:
+        w("    &[%s]," % ", ".join("Feature::%s" % f[len("FEAT_"):] for f in fs))
+    w("];")
+    w("")
+    w("/// Whether the field and feature constraints of `e` hold for `w` on a CPU")
+    w("/// with the features `f`; the fixed bits are checked elsewhere.")
+    w("pub(super) fn condition(e: Encoding, w: u32, f: &Features) -> bool {")
     w("    match e {")
     for nm, expr in conds:
         w("        Encoding::%s => %s," % (nm, expr))

@@ -3,12 +3,14 @@
 //! [`decode`] maps a 32-bit word to the [`Encoding`] leaf of the specification
 //! with the most fixed bits whose field constraints hold.
 
+mod features;
 mod generated;
 #[cfg(test)]
 mod tests;
 
 use std::sync::OnceLock;
 
+pub use features::{Feature, Features};
 pub use generated::Encoding;
 
 /// A named bit field of an encoding: `width` bits starting at bit `lo`.
@@ -90,9 +92,21 @@ impl Encoding {
         matches!(self.group(), "sve" | "sme")
     }
 
-    /// Whether `word` matches the fixed bits and the field constraints of this encoding.
+    /// Whether `word` matches the fixed bits and the field constraints of
+    /// this encoding, with every feature implemented.
     pub fn matches(self, word: u32) -> bool {
-        word & self.mask() == self.value() && generated::condition(self, word)
+        self.matches_on(word, &Features::ALL)
+    }
+
+    /// Whether `word` matches this encoding on a CPU with the features `f`.
+    pub fn matches_on(self, word: u32, f: &Features) -> bool {
+        word & self.mask() == self.value() && generated::condition(self, word, f)
+    }
+
+    /// The features the encoding's conditions test. On most encodings they
+    /// are all required; a few accept either of two features.
+    pub fn features(self) -> &'static [Feature] {
+        generated::MENTIONS[usize::from(generated::MENTIONS_INDEX[self as usize])]
     }
 }
 
@@ -167,18 +181,26 @@ fn index() -> &'static Index {
     })
 }
 
-/// Decodes `word` to the matching encoding with the most fixed bits.
+/// Decodes `word` to the matching encoding with the most fixed bits, with
+/// every feature implemented ([`Features::ALL`]).
 ///
 /// Returns `None` for unallocated words. Equally specific matches resolve to
 /// the one earlier in the specification; [`matching`] lists all matches.
 pub fn decode(word: u32) -> Option<Insn> {
+    decode_for(word, &Features::ALL)
+}
+
+/// Decodes `word` on a CPU with the features `f`: encodings whose feature
+/// tests fail do not exist there, so a word in a hint space falls back to
+/// the plain hint and any other such word is unallocated (`None`).
+pub fn decode_for(word: u32, f: &Features) -> Option<Insn> {
     let idx = index();
     let key = (word >> KEY_SHIFT) as usize;
     let lo = idx.starts[key] as usize;
     let hi = idx.starts[key + 1] as usize;
     idx.entries[lo..hi]
         .iter()
-        .find(|e| word & e.mask == e.value && generated::condition(e.encoding, word))
+        .find(|e| word & e.mask == e.value && generated::condition(e.encoding, word, f))
         .map(|e| Insn {
             word,
             encoding: e.encoding,
@@ -193,7 +215,9 @@ pub fn matching(word: u32) -> Vec<Encoding> {
     let hi = idx.starts[key + 1] as usize;
     idx.entries[lo..hi]
         .iter()
-        .filter(|e| word & e.mask == e.value && generated::condition(e.encoding, word))
+        .filter(|e| {
+            word & e.mask == e.value && generated::condition(e.encoding, word, &Features::ALL)
+        })
         .map(|e| e.encoding)
         .collect()
 }
