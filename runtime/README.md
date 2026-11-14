@@ -5,7 +5,7 @@ mirroring the Rust folders (`core/`, `cpus/`, `guests/`):
 
 | Directory | Layer | What it holds |
 |---|---|---|
-| `core/` | core | Knows no guest OS and no guest CPU. Guest memory reservation and the exact map at the guest page size, with the host page policy of abi.md section 2; its own permission flags (`RL_VM_R`, `RL_VM_W`, `RL_VM_X`) and an opaque per-block guest tag; the SIGSEGV/SIGBUS handler reporting guest addresses; host threads that carry the CPU layer's context; the clock at the guest's tick rate; unit registration and the dispatch table; logging, configuration and the unknown-call reporter. `core/include/relift/abi_core.h` is the CPU-neutral half of the lifted-code contract. |
+| `core/` | core | Knows no guest OS and no guest CPU. Guest memory reservation and the exact map at the guest page size, with the host page policy of abi.md section 2; its own permission flags (`RL_VM_R`, `RL_VM_W`, `RL_VM_X`) and an opaque per-block guest tag; the SIGSEGV/SIGBUS handler reporting guest addresses; host threads that carry the CPU layer's context; the clock at the guest's tick rate; the device scheduler for guests that drive devices through registers (`core/include/relift/sched.h`: CPU cycle clocks, devices caught up on access, timed events, interrupt lines, `rl_sync` and `rl_io_read`/`rl_io_write`); unit registration and the dispatch table; logging, configuration and the unknown-call reporter. `core/include/relift/abi_core.h` is the CPU-neutral half of the lifted-code contract. |
 | `cpus/a64/` | CPU | The ARM64 lifted-code ABI, `cpus/a64/include/relift/a64/abi.h` (it owns `rl_ctx`), and its runtime entries: FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, the dispatch miss entry, register summaries for crash reports, and the CPU descriptor the core allocates contexts from. Not tied to a guest OS. |
 | `guests/switch/` | guest | The Horizon kernel (handle table, events, threads, memory, shared and transfer memory, mutexes, condition variables, the address arbiter), `rl_svc`, IPC (HIPC, CMIF with domains, TIPC), `sm:` and the service registry; the NPDM-driven layout; the guest descriptor and the translation between Horizon's permission bits and the core's. |
 | `host/` | host | Optional backends for the core's audio interfaces (`core/include/relift/audio.h`): SDL3 output and libopus decoding. Built only with `AUDIO=real` |
@@ -26,6 +26,7 @@ make -C runtime -j2 CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 make -C runtime charter                      # python3, standard library only
 make -C runtime -j2 AUDIO=real BUILD=build/audio test   # also builds host/ (pkg-config: sdl3 opus)
 make -C runtime gdb-test                     # skips when gdb is missing
+make -C runtime sched-bench                  # device scheduler microbenchmark
 ```
 
 The build makes one archive per layer (`librelift_core.a`,
