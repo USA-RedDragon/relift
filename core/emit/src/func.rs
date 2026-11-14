@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use relift_guest::{Frontend, Home};
-use relift_ir::{Block, Flow, IoMap, Next, Op, Reg, Value};
+use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 
 use crate::time;
 use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
@@ -119,6 +119,20 @@ impl Ctx<'_> {
 /// The block as the emitter writes it: constants folded, operations that
 /// give an operand unchanged dropped, and without the values nothing
 /// observable uses.
+/// The test hook of `Options::test_fault`: the first add, in address order,
+/// becomes a subtract.
+fn miscompile_first_add(blocks: &mut BTreeMap<u64, Block>) {
+    let hit = blocks.values_mut().find_map(|b| {
+        b.insts.iter_mut().find_map(|i| match &mut i.op {
+            Op::Bin(op @ BinOp::Add, ..) => Some(op),
+            _ => None,
+        })
+    });
+    if let Some(op) = hit {
+        *op = BinOp::Sub;
+    }
+}
+
 fn prepare(b: &Block) -> Block {
     relift_ir::dce(&relift_ir::simplify(b))
 }
@@ -316,9 +330,10 @@ pub(crate) fn emit_function(
     targets: &BTreeMap<u64, Target>,
     piece_bytes: usize,
     io: &IoMap,
+    test_fault: bool,
 ) -> Emitted1 {
     let resumes = resume_points(f, targets);
-    let blocks: BTreeMap<u64, Block> = f
+    let mut blocks: BTreeMap<u64, Block> = f
         .insts
         .iter()
         .filter_map(|(&pc, i)| match i {
@@ -326,6 +341,9 @@ pub(crate) fn emit_function(
             Insn::Failed(_) => None,
         })
         .collect();
+    if test_fault {
+        miscompile_first_add(&mut blocks);
+    }
     let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
     let env = Env {

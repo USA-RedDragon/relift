@@ -20,7 +20,7 @@ use crate::ui::Ui;
 
 /// The runtime sources this binary was built beside, used when the
 /// `runtime-dir` setting is empty.
-const RUNTIME_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../runtime");
+pub(crate) const RUNTIME_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../runtime");
 
 /// The order the Switch loader maps exefs slots in.
 fn slot_rank(slot: &str) -> u32 {
@@ -348,6 +348,7 @@ fn emit_modules(
                 module_base: p.base,
                 parts,
                 image_id,
+                test_fault: test_fault(),
                 ..relift_emit::Options::default()
             },
             &mut |d, total| {
@@ -423,6 +424,12 @@ fn emit_modules(
 }
 
 /// `n` KiB in bytes, at least one.
+/// The guest address in `RELIFT_EMIT_TEST_FAULT`, the emitter's test hook.
+fn test_fault() -> Option<u64> {
+    let v = std::env::var("RELIFT_EMIT_TEST_FAULT").ok()?;
+    u64::from_str_radix(v.trim_start_matches("0x"), 16).ok()
+}
+
 fn kib(n: u32) -> usize {
     (n as usize).max(1) << 10
 }

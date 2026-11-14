@@ -118,6 +118,10 @@ pub struct Options {
     /// runtime loads a hot-loaded unit only when its id matches the static
     /// units' (docs/abi.md section 6).
     pub image_id: [u8; 32],
+    /// A test hook, set only through `RELIFT_EMIT_TEST_FAULT`: the guest
+    /// entry of a function whose first integer add is emitted as a subtract.
+    /// It is the miscompile `relift diff` must find.
+    pub test_fault: Option<u64>,
 }
 
 impl Default for Options {
@@ -131,6 +135,7 @@ impl Default for Options {
             parts: false,
             io_map: relift_ir::IoMap::memory(),
             image_id: [0; 32],
+            test_fault: None,
         }
     }
 }
@@ -230,7 +235,14 @@ pub fn emit_with(
         &mut |ks, targets| {
             ks.iter()
                 .map(|&k| {
-                    func::emit_function(fe, &fns[k], targets, opts.piece_bytes.max(1), &opts.io_map)
+                    func::emit_function(
+                        fe,
+                        &fns[k],
+                        targets,
+                        opts.piece_bytes.max(1),
+                        &opts.io_map,
+                        opts.test_fault == Some(fns[k].entry),
+                    )
                 })
                 .collect()
         },
@@ -310,6 +322,7 @@ pub fn emit_streamed(
                         targets,
                         opts.piece_bytes.max(1),
                         &opts.io_map,
+                        opts.test_fault == Some(f.entry),
                     ));
                 });
                 out
