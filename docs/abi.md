@@ -573,11 +573,29 @@ Mac unless marked]:
   - libgcc (libnx): `_Unwind_RaiseException`, `_Unwind_Resume` and
     friends end in the `__builtin_eh_return` epilogue: restore x19-x28 and
     d8-d15, pop the frame, then `add sp, sp, x5; br x6` (x5 the stack
-    adjustment, x6 the landing pad, x0-x3 the exception data). The emitter
-    recognizes the fixed pair `add sp, sp, x5; br x6` and emits `rl_resume`
-    with the current registers, `sp + x5` and `pc = x6`. [verified:
-    disassembly of a libnx C++ exceptions test program built with
-    devkitA64]
+    adjustment, x6 the landing pad, x0-x3 the exception data). No pattern
+    is recognized: the jump is an ordinary computed jump, and what makes it
+    an unwind is its target (next item). [verified: disassembly of a libnx
+    C++ exceptions test program built with devkitA64]
+- **A landing pad is a dispatch-table entry that unwinds.** The unit table
+  has, at every landing pad of the unwind tables that lies in a lifted
+  function and is not itself a function entry, an entry with
+  `RL_FN_MAY_UNWIND | RL_FN_FRAGMENT` and the CPU layer's `rl_pad_resume`
+  (`Frontend::pad_resume`). A computed jump or call to the pad (an
+  unwinder's `br x6`, whatever its shape) therefore reaches
+  `rl_pad_resume`, which records `pend = {pc = the pad, sp = c->sp,
+  RL_PEND_UNWIND}` and returns `RL_PENDING`; the host stack unwinds to the
+  frame whose `lp_dispatch` has a case for that pad and whose sp local
+  equals `c->sp`. Normal indirect calls pay nothing, and a direct call to
+  a pad does not occur. The registers the unwinder installed are in `c`
+  (the jump stores the context first), and `lp_dispatch` reloads them.
+- **Pads come from the unwind tables** (`.eh_frame` call-site tables in
+  `.gcc_except_table`). A pad whose call-site range starts at an
+  instruction of a function joins that function's extent as a root, is a
+  resume point of it (`RL_FN_LANDING_PADS`, a case in `lp_dispatch`) and
+  makes the check after every call of that function compare sp. A pad
+  that is already a function entry (a hot-load hint) stays one. [verified:
+  libnx `cxx_exceptions`]
 - **d8-d15** are in `c->v` and in `rl_resume_regs`, so a landing pad sees
   the values the unwinder restored. [inferred; the exceptions prototype did not track FP
   registers]
