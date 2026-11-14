@@ -447,6 +447,10 @@ name = "relift-proc"
 version = "0.1.0"
 
 [[package]]
+name = "relift-progress"
+version = "0.1.0"
+
+[[package]]
 name = "relift-switch"
 version = "0.1.0"
 dependencies = [

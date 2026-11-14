@@ -112,6 +112,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-progress",
+        band: 0,
+        why: "live and plain progress lines, color rules and throttling; writes to a sink it is given, a leaf",
+        normal: NONE,
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-guest",
         band: 1,
         why: "the guest contract and vocabulary, over the IR only",
