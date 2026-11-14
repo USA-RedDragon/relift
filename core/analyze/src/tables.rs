@@ -16,6 +16,7 @@
 //! targets wins.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use relift_guest::Module;
 use relift_ir::interp::{self, Fault, GuestMemory, NoDevices, NoIntrinsics, State};
@@ -93,7 +94,7 @@ impl GuestMemory for Image<'_> {
 
 /// Runs `blocks` (lifted, so verified when built) in order from `state`; the address after the last one, or
 /// `None` when the path leaves the sequence or an instruction faults.
-fn run(blocks: &[Block], state: &mut State, mem: &mut Image<'_>) -> Option<u64> {
+fn run(blocks: &[Arc<Block>], state: &mut State, mem: &mut Image<'_>) -> Option<u64> {
     let mut next = blocks.first()?.pc;
     for b in blocks {
         if b.pc != next {
@@ -116,8 +117,8 @@ pub(crate) fn resolve(
     pc: u64,
     jump: &Block,
     granule: u64,
-    block_at: &mut dyn FnMut(u64) -> Option<Block>,
-    entering: &dyn Fn(u64) -> Option<Block>,
+    block_at: &mut dyn FnMut(u64) -> Option<Arc<Block>>,
+    entering: &dyn Fn(u64) -> Option<Arc<Block>>,
     known: &dyn Fn(u64) -> HashMap<Reg, u128>,
 ) -> Option<Vec<u64>> {
     if !matches!(
@@ -126,7 +127,7 @@ pub(crate) fn resolve(
     ) {
         return None;
     }
-    let mut body = vec![jump.clone()];
+    let mut body = vec![Arc::new(jump.clone())];
     let mut at = pc;
     let branch = loop {
         if body.len() > RUN_BACK {

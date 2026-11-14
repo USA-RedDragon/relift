@@ -200,13 +200,13 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         let mut found = false;
         for (pc, b) in jumps {
             let mut at = |a: u64| match lifter.get(a) {
-                Insn::Lifted(b) => Some(Block::clone(&b)),
+                Insn::Lifted(b) => Some(b),
                 Insn::Failed(_) => None,
             };
             let entering = |a: u64| {
                 insts.values().find_map(|i| match i {
                     Insn::Lifted(b) => match b.exit.next {
-                        Next::Select { taken, .. } if taken == a => Some(Block::clone(b)),
+                        Next::Select { taken, .. } if taken == a => Some(b.clone()),
                         _ => None,
                     },
                     Insn::Failed(_) => None,
