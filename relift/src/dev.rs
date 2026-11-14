@@ -399,7 +399,14 @@ impl Server {
             let mut h = [0u8; 16];
             match s.read_exact(&mut h) {
                 Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
+                    ) =>
+                {
+                    return Ok(());
+                }
                 Err(e) => return Err(e.into()),
             }
             let h = Header::parse(&h)?;
