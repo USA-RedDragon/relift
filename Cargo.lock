@@ -924,6 +924,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gb-analyze"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-sm83",
+ "relift-gb-formats",
+]
+
+[[package]]
 name = "relift-gb-formats"
 version = "0.1.0"
 
@@ -933,6 +941,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-gb-analyze",
  "relift-gb-formats",
  "relift-proc",
  "serde_json",
