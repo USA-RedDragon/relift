@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 relift-cpu-a64 = { workspace = true }
+relift-ir = { workspace = true }
 
 [lints]
 workspace = true

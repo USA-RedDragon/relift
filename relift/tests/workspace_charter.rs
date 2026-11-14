@@ -275,8 +275,8 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-cpu-a64-gen",
         band: 3,
-        why: "the A64 template generator over the decoder, run by hand; nothing links it",
-        normal: &["relift-cpu-a64"],
+        why: "the A64 template generator over the decoder and the IR, run by hand; nothing links it",
+        normal: &["relift-cpu-a64", "relift-ir"],
         dev: NONE,
         build: NONE,
     },

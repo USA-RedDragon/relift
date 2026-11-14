@@ -48,7 +48,7 @@ const SAIL_ARM: &str = "5416ef6b43e9527c38dc71fb752259c1d01a47e1";
 const SAIL_LIB: &str = "c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456";
 
 /// The output files, one per instruction class.
-const CLASSES: [&str; 14] = [
+const CLASSES: [&str; 15] = [
     "int",
     "ldst",
     "excl",
@@ -58,6 +58,7 @@ const CLASSES: [&str; 14] = [
     "simd_ldst_multi_post",
     "simd_ldst_single",
     "simd_same",
+    "simd_same_ext",
     "simd_shift",
     "simd_misc",
     "simd_elem",
@@ -97,6 +98,13 @@ fn simd_class(name: &str) -> &'static str {
         "asisdlse" => "simd_ldst_multi",
         "asisdlsep" => "simd_ldst_multi_post",
         "asisdlso" | "asisdlsop" => "simd_ldst_single",
+        g if g.starts_with("asimdsame2")
+            || g.starts_with("asisdsame2")
+            || g.ends_with("fp16")
+                && (g.starts_with("asimdsame") || g.starts_with("asisdsame")) =>
+        {
+            "simd_same_ext"
+        }
         g if g.starts_with("asimdsame") || g.starts_with("asisdsame") => "simd_same",
         "asimdshf" | "asisdshf" => "simd_shift",
         g if g.starts_with("asimdmisc")
@@ -122,11 +130,11 @@ fn header(class: &str) -> String {
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, UnOp, Width}};
+use relift_ir::{{AtomicOp, BinOp, Builder, CmpOp, CryptoOp, Endian, FpOp, FpRound, Order, UnOp, Width}};
 
-use crate::decode::Encoding;
+use crate::decode::{{Encoding, Feature}};
 use crate::lift::LiftError;
-use crate::lift::sail::GenFn;
+use crate::lift::sail::{{GenFn, half}};
 use crate::lift::sail::rt::{{self, Kind, St, Target}};
 use crate::regs;
 ",
@@ -150,6 +158,12 @@ fn real_main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if matches!(args[0].as_str(), "try" | "gen")
+        && let Err(e) = cut::verify_crypto(&m)
+    {
+        eprintln!("the cipher cut differs from the model: {e}");
+        return ExitCode::FAILURE;
+    }
     match args[0].as_str() {
         "parse-all" => {
             let (ok, bad) = m.parse_all();

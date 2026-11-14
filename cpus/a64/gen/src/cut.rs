@@ -4,13 +4,18 @@
 //!
 //! - STATE: guest register access, through the template's `St`.
 //! - CTRL: the PC and branches.
-//! - ENV: checks that are no-ops in the fixed configuration (EL0, AArch64,
-//!   FP and SIMD enabled, Armv8.0-A, no SPE, BRBE or GCS).
+//! - ENV: checks that are no-ops in every configuration (EL0, AArch64, FP
+//!   and SIMD enabled, no SPE, BRBE or GCS).
+//! - FEAT: `IsFeatureImplemented`: true for the Armv8.0-A base, a lift-time
+//!   test of the CPU's `Features` (`St::has`) for the extensions in
+//!   `eval::LIFT_TIME_FEATURES`, false for every other feature.
 //! - MEM: memory access, ordering, the exclusive monitor and barriers
 //!   (fences).
 //! - FP: arithmetic, compares, min/max, conversions, rounding to integral
 //!   values and the reciprocal and square-root estimates and steps, built by
 //!   `rt::Fp` for FPCR zero; each use marks the template as assuming it.
+//! - CRYPTO: the table-driven AES and SM4 steps, as `relift_ir::CryptoOp`;
+//!   `verify_crypto` checks them against the Sail tables while generating.
 //! - Also `DecodeBitMasks`, `ConstrainUnpredictable` (refused at lift time)
 //!   and the integer quotient of SDIV and UDIV.
 //!
@@ -56,6 +61,7 @@ pub const CUT: &[&str] = &[
     "Mem_set",
     "Mem_set__1",
     "Mem_set__2",
+    "MemAtomic",
     "AArch64_SetExclusiveMonitors",
     "AArch64_ExclusiveMonitorsPass",
     "ClearExclusiveLocal",
@@ -96,7 +102,55 @@ pub const CUT: &[&str] = &[
     "FPConvert",
     "FPConvert__1",
     "FPRoundInt",
+    "AESSubBytes",
+    "AESInvSubBytes",
+    "AESMixColumns",
+    "AESInvMixColumns",
+    "Sbox",
 ];
+
+/// The table-driven cipher functions, cut whole to `relift_ir::CryptoOp`.
+pub const CRYPTO_CUT: &[(&str, relift_ir::CryptoOp)] = &[
+    ("AESSubBytes", relift_ir::CryptoOp::AesSubBytes),
+    ("AESInvSubBytes", relift_ir::CryptoOp::AesInvSubBytes),
+    ("AESMixColumns", relift_ir::CryptoOp::AesMixColumns),
+    ("AESInvMixColumns", relift_ir::CryptoOp::AesInvMixColumns),
+    ("Sbox", relift_ir::CryptoOp::Sm4Sbox),
+];
+
+/// Checks each cipher cut against the Sail function it replaces, run on
+/// concrete values: every byte value in every position (the functions
+/// work bytewise or, for MixColumns, are linear over GF(2), so the basis
+/// vectors decide them). Fails with the first difference.
+pub fn verify_crypto(m: &crate::model::Model) -> Result<(), String> {
+    for (name, op) in CRYPTO_CUT {
+        let w = op.width().bits();
+        let mut inputs: Vec<u128> = Vec::new();
+        if name.contains("MixColumns") {
+            inputs.extend((0..128).map(|i| 1u128 << i));
+        } else {
+            for x in 0..256u128 {
+                let mut v = 0;
+                for k in 0..w / 8 {
+                    v |= ((x + u128::from(k) * 37) & 0xff) << (8 * k);
+                }
+                inputs.push(v);
+            }
+        }
+        for x in inputs {
+            let mut g = Gen::new(m, 0, 0);
+            g.no_cut = true;
+            let got = g
+                .call(name, vec![V::Bits(w, x)], None)
+                .map_err(|e| format!("{name}({x:#x}) does not evaluate: {e:?}"))?;
+            let want = relift_ir::interp::eval_crypto(*op, x);
+            if got != V::Bits(w, want) {
+                return Err(format!("{name}({x:#x}): Sail {got:?}, cut {want:#x}"));
+            }
+        }
+    }
+    Ok(())
+}
 
 /// The FP functions cut whole; `rt::Fp` in `relift-cpu-a64` builds them.
 const FP_CUT: &[&str] = &[
@@ -119,6 +173,22 @@ const FP_CUT: &[&str] = &[
     "FPMin__1",
     "FPMaxNum",
     "FPMinNum",
+];
+
+/// The `fp_cut` operations whose binary16 form maps to a software helper
+/// of the runtime (`a64/fp16.h`), which raises no host FPSR flags: in a
+/// program that produces flags their blocks take the slow path. Compares
+/// and min/max build their flags in IR at every width.
+const HALF_SOFT: &[&str] = &[
+    "FPAdd",
+    "FPAdd__1",
+    "FPSub",
+    "FPSub__1",
+    "FPMul",
+    "FPDiv",
+    "FPSqrt",
+    "FPMulAdd",
+    "FPMulAdd__1",
 ];
 
 /// FPCR bits the floating-point cut assumes zero: FIZ, AH, FZ16, RMode, FZ,
@@ -192,7 +262,7 @@ impl Gen<'_> {
         let w = a[0]
             .width()
             .ok_or_else(|| crate::eval::err("FP operand width"))?;
-        if w != 32 && w != 64 {
+        if w != 16 && w != 32 && w != 64 {
             return fail(format!("{name} on {w} bits"));
         }
         let mut xs = Vec::new();
@@ -235,6 +305,11 @@ impl Gen<'_> {
             _ => (K::Bits(w), two("min_num")),
         };
         self.line("st.assume_default_fpcr();".into());
+        if w == 16 && HALF_SOFT.contains(&name) {
+            // The runtime's binary16 helpers compute in software and
+            // raise no host flags.
+            self.line("st.assume_flags_slow();".into());
+        }
         Ok(self.dy(k, call))
     }
 
@@ -246,7 +321,7 @@ impl Gen<'_> {
         let w = x
             .width()
             .ok_or_else(|| crate::eval::err("FP operand width"))?;
-        if w != 32 && w != 64 {
+        if w != 16 && w != 32 && w != 64 {
             return fail(format!("{name} on {w} bits"));
         }
         let xs = self.dx(&x)?.to_string();
@@ -301,7 +376,7 @@ impl Gen<'_> {
 
     fn fp_convert(&mut self, name: &str, a: &[V]) -> R<V> {
         let fpw = |w: u32| -> R<u32> {
-            if w == 32 || w == 64 {
+            if w == 16 || w == 32 || w == 64 {
                 Ok(w)
             } else {
                 fail(format!("{name} on {w} bits"))
@@ -329,12 +404,25 @@ impl Gen<'_> {
                     // exact scaling does not.
                     self.line("st.assume_flags_slow();".into());
                 }
-                if name == "FPToFixed" {
+                if name == "FPToFixed" && iw == 16 {
+                    (
+                        K::Bits(ow),
+                        format!("half::to_fixed(b, {xs}, {fbits}, {signed}, FpRound::{r}, {ow})"),
+                    )
+                } else if name == "FPToFixed" {
                     (
                         K::Bits(ow),
                         format!(
                             "rt::Fp::new({iw}).fp_to_fixed(b, {xs}, {fbits}, {signed}, FpRound::{r}, {ow})"
                         ),
+                    )
+                } else if ow == 16 && fbits != 0 {
+                    if r != "TiesEven" {
+                        return fail(format!("{name} rounding {r}"));
+                    }
+                    (
+                        K::Bits(16),
+                        format!("half::fixed_to_half(b, {xs}, {fbits}, {signed})"),
                     )
                 } else {
                     if r != "TiesEven" {
@@ -372,6 +460,15 @@ impl Gen<'_> {
             }
         };
         self.line("st.assume_default_fpcr();".into());
+        let ow = match k {
+            K::Bits(w) => w,
+            _ => 0,
+        };
+        if iw == 16 || ow == 16 {
+            // Conversions from or to binary16 use the runtime's software
+            // helpers, which raise no host flags.
+            self.line("st.assume_flags_slow();".into());
+        }
         Ok(self.dy(k, call))
     }
 
@@ -400,6 +497,9 @@ impl Gen<'_> {
 
     /// Runs the cut function `name`, or gives `None` when `name` is not cut.
     pub fn cut(&mut self, name: &str, a: &[V], _hint: Option<u32>) -> R<Option<V>> {
+        if self.no_cut && CRYPTO_CUT.iter().any(|(n, _)| *n == name) {
+            return Ok(None);
+        }
         if let Some(v) = self.real(name, a)? {
             self.used_cut.insert("REAL");
             return Ok(Some(v));
@@ -473,7 +573,17 @@ impl Gen<'_> {
                 V::Unit
             }
             "IsFeatureImplemented" => match &a[0] {
-                V::Enum(t, i) => V::Bool(feature(&self.m.enums[t.as_ref()][*i])),
+                V::Enum(t, i) => {
+                    let name = self.m.enums[t.as_ref()][*i].clone();
+                    match feature(&name) {
+                        Some(b) => V::Bool(b),
+                        None => {
+                            let f = relift_cpu_a64::decode::Feature::from_name(&name)
+                                .ok_or_else(|| crate::eval::err(format!("no Feature {name}")))?;
+                            self.st(K::Bool, format!("st.has(Feature::{f:?})"), 0)
+                        }
+                    }
+                }
                 _ => return fail("symbolic feature"),
             },
             "Mem_read" | "Mem_read__1" | "Mem_read__2" => {
@@ -535,6 +645,59 @@ impl Gen<'_> {
                 ));
                 V::Unit
             }
+            "MemAtomic" => {
+                let V::Struct(_, f) = &a[3] else {
+                    return fail("MemAtomic access descriptor");
+                };
+                let modop = f
+                    .iter()
+                    .find(|(k, _)| k == "modop")
+                    .map(|(_, v)| v.clone())
+                    .ok_or_else(|| crate::eval::err("no modop"))?;
+                let op = match &modop {
+                    V::Enum(t, i) => self.m.enums[t.as_ref()][*i].clone(),
+                    V::S(_, _, d) if *d != 0 => return Err(crate::eval::E::Split(*d)),
+                    _ => return fail(format!("MemAtomic modop {modop:?}")),
+                };
+                let atomic = match op.as_str() {
+                    "MemAtomicOp_ADD" => "Add",
+                    "MemAtomicOp_BIC" => "Clear",
+                    "MemAtomicOp_EOR" => "Xor",
+                    "MemAtomicOp_ORR" => "Or",
+                    "MemAtomicOp_SMAX" => "SMax",
+                    "MemAtomicOp_SMIN" => "SMin",
+                    "MemAtomicOp_UMAX" => "UMax",
+                    "MemAtomicOp_UMIN" => "UMin",
+                    "MemAtomicOp_SWP" => "Swap",
+                    "MemAtomicOp_CAS" => "",
+                    _ => return fail(format!("MemAtomic {op}")),
+                };
+                let addr = self.extend(&a[0], 64, false)?;
+                let v = self.bitify(&a[2])?;
+                let w = v.width().ok_or_else(|| crate::eval::err("atomic width"))?;
+                let x = self.dx(&addr)?;
+                let y = self.dx(&v)?;
+                if self.guard.d.is_some() {
+                    return fail("atomic under a dynamic condition");
+                }
+                let order = self.order(&a[3]);
+                let call = if atomic.is_empty() {
+                    let c = self.bitify(&a[1])?;
+                    let cx = self.dx(&c)?;
+                    format!("b.compare_swap({x}, {cx}, {y}, Endian::Little, Order::{order})")
+                } else {
+                    format!(
+                        "b.atomic_rmw(AtomicOp::{atomic}, {x}, {y}, Endian::Little, Order::{order})"
+                    )
+                };
+                match self.guard.s.clone() {
+                    None => self.dy(K::Bits(w), call),
+                    Some((s, _)) => self.dy(
+                        K::Bits(w),
+                        format!("if {s} {{ {call} }} else {{ b.konst(Width::new({w}), 0) }}"),
+                    ),
+                }
+            }
             "AArch64_SetExclusiveMonitors" => {
                 self.excl_load = true;
                 V::Unit
@@ -578,6 +741,18 @@ impl Gen<'_> {
             }
             "FPToFixed" | "FixedToFP" | "FPConvert" | "FPConvert__1" | "FPRoundInt" => {
                 return self.fp_convert(name, a).map(Some);
+            }
+            n if CRYPTO_CUT.iter().any(|(c, _)| *c == n) => {
+                let op = CRYPTO_CUT.iter().find(|(c, _)| *c == n).expect("listed").1;
+                let x = self.bitify(&a[0])?;
+                if x.width() != Some(op.width().bits()) {
+                    return fail(format!("{name} on {:?} bits", x.width()));
+                }
+                let xs = self.dx(&x)?;
+                self.dy(
+                    K::Bits(op.width().bits()),
+                    format!("b.crypto(CryptoOp::{op:?}, {xs})"),
+                )
             }
             "DataMemoryBarrier" | "DataSynchronizationBarrier" => {
                 let order = match a.get(1) {

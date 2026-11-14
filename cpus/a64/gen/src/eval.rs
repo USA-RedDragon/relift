@@ -97,16 +97,16 @@ pub struct Gen<'m> {
     pub excl_load: bool,
     /// The pending exclusive-store result, named before the store defines it.
     pub excl_pass: Option<Rc<str>>,
+    /// Run the cipher functions from Sail instead of cutting them (to
+    /// check the cut).
+    pub no_cut: bool,
 }
 
-const FEATURES: &[&str] = &[
+/// Features every configuration has: Armv8.0-A with floating point and
+/// Advanced SIMD, AArch64 at every exception level.
+const BASE_FEATURES: &[&str] = &[
     "FEAT_AdvSIMD",
     "FEAT_FP",
-    "FEAT_AES",
-    "FEAT_PMULL",
-    "FEAT_SHA1",
-    "FEAT_SHA256",
-    "FEAT_CRC32",
     "FEAT_AA64EL0",
     "FEAT_AA64EL1",
     "FEAT_AA64EL2",
@@ -118,6 +118,53 @@ const FEATURES: &[&str] = &[
     "FEAT_AA32EL0",
 ];
 
+/// Optional features a template may test at lift time (`St::has`): the
+/// user-visible instruction-set extensions relift lifts. Every other
+/// feature is absent in every configuration.
+const LIFT_TIME_FEATURES: &[&str] = &[
+    "FEAT_AES",
+    "FEAT_PMULL",
+    "FEAT_SHA1",
+    "FEAT_SHA256",
+    "FEAT_SHA512",
+    "FEAT_SHA3",
+    "FEAT_SM3",
+    "FEAT_SM4",
+    "FEAT_CRC32",
+    "FEAT_LSE",
+    "FEAT_LSE128",
+    "FEAT_RDM",
+    "FEAT_FP16",
+    "FEAT_FHM",
+    "FEAT_DotProd",
+    "FEAT_I8MM",
+    "FEAT_BF16",
+    "FEAT_FCMA",
+    "FEAT_JSCVT",
+    "FEAT_FRINTTS",
+    "FEAT_FlagM",
+    "FEAT_FlagM2",
+    "FEAT_LRCPC",
+    "FEAT_LRCPC2",
+    "FEAT_LRCPC3",
+    "FEAT_CSSC",
+    "FEAT_HBC",
+    "FEAT_SB",
+];
+
+/// How a template sees a feature: `Some(true)` for a base feature,
+/// `Some(false)` for one no configuration has, `None` for one tested at
+/// lift time.
+pub fn feature(name: &str) -> Option<bool> {
+    if BASE_FEATURES.contains(&name) {
+        return Some(true);
+    }
+    if LIFT_TIME_FEATURES.contains(&name) {
+        return None;
+    }
+    Some(false)
+}
+
 /// Stubs of `stubs.sail` whose empty body is right for a user-mode guest:
 /// hints with no architectural effect.
 const STUBS_OK: &[&str] = &[
@@ -126,11 +173,6 @@ const STUBS_OK: &[&str] = &[
     "Hint_PreloadDataForWrite",
     "Hint_PreloadInstr",
 ];
-
-/// Whether a feature is in the fixed Armv8.0-A configuration.
-pub fn feature(name: &str) -> bool {
-    FEATURES.contains(&name)
-}
 
 impl<'m> Gen<'m> {
     /// An evaluator with `known` bits of the word fixed to `value`.
@@ -151,6 +193,7 @@ impl<'m> Gen<'m> {
             used_cut: BTreeSet::new(),
             excl_load: false,
             excl_pass: None,
+            no_cut: false,
         }
     }
 
@@ -1729,6 +1772,7 @@ pub fn lit(l: &Lit) -> V {
         Lit::Bit(b) => V::Bits(1, u128::from(*b)),
         Lit::Int(i) => V::Int(*i),
         Lit::Bits { width, value } => V::Bits(*width, *value),
+        Lit::Wide(ps) => V::Wide(Rc::new(ps.iter().map(|p| V::Bits(128, *p)).collect())),
         Lit::Real(r) => V::Str(r.as_str().into()),
         Lit::Str(s) => V::Str(s.as_str().into()),
     }

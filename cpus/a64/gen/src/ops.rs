@@ -125,6 +125,14 @@ impl Gen<'_> {
         if b.width() != Some(w) {
             return fail(format!("{op:?} width mismatch {a:?} {b:?}"));
         }
+        if w > 128 {
+            let (xs, ys) = (self.chunks(&a)?, self.chunks(&b)?);
+            let mut out = Vec::new();
+            for (x, y) in xs.iter().zip(ys.iter()) {
+                out.push(self.bits_op(op, x, y)?);
+            }
+            return Ok(V::Wide(Rc::new(out)));
+        }
         let m = mask(w);
         if let (V::Bits(_, x), V::Bits(_, y)) = (&a, &b) {
             let r = match op {
@@ -162,12 +170,48 @@ impl Gen<'_> {
         Ok(self.dy(K::Bits(w), format!("b.bin(BinOp::{f}, {x}, {y})")))
     }
 
+    /// A value of more than 128 bits as 128-bit pieces, least significant
+    /// first (the last may be narrower).
+    pub fn chunks(&mut self, a: &V) -> R<Vec<V>> {
+        let w = a.width().ok_or_else(|| crate::eval::err("chunks width"))?;
+        let mut out = Vec::new();
+        let mut lo = 0;
+        while lo < w {
+            let n = (w - lo).min(128);
+            out.push(self.extract(a, &V::Int(i128::from(lo)), n)?);
+            lo += n;
+        }
+        Ok(out)
+    }
+
+    /// `n` zero bits, as a wide value above 128 bits.
+    pub fn zeros(n: u32) -> V {
+        if n <= 128 {
+            return V::Bits(n, 0);
+        }
+        let mut parts = Vec::new();
+        let mut left = n;
+        while left > 0 {
+            let k = left.min(128);
+            parts.push(V::Bits(k, 0));
+            left -= k;
+        }
+        V::Wide(Rc::new(parts))
+    }
+
     /// Bitwise complement.
     pub fn bits_not(&mut self, a: &V) -> R<V> {
         let a = self.defd(a);
         let w = a
             .width()
             .ok_or_else(|| crate::eval::err(format!("not of {a:?}")))?;
+        if w > 128 {
+            let mut out = Vec::new();
+            for x in self.chunks(&a)? {
+                out.push(self.bits_not(&x)?);
+            }
+            return Ok(V::Wide(Rc::new(out)));
+        }
         Ok(match &a {
             V::Bits(_, x) => V::Bits(w, !x & mask(w)),
             V::S(_, e, d) => self.st(K::Bits(w), format!("!{e} & {:#x}", mask(w)), *d),
@@ -466,6 +510,9 @@ impl Gen<'_> {
                 {
                     return Err(crate::eval::E::Split(*d));
                 }
+                if lo.is_dyn() && w <= 128 {
+                    return self.wide_extract_dyn(ps, lo, w);
+                }
                 return fail("wide extract at a non-concrete position");
             };
             let (l, hi) = (*l as u32, *l as u32 + w);
@@ -529,6 +576,60 @@ impl Gen<'_> {
             return Ok(V::D(K::Bits(w), s.into()));
         }
         Ok(self.dy(K::Bits(w), format!("b.extract({s}, 0, Width::new({w}))")))
+    }
+
+    /// Bits `lo .. lo + w` of a wide value at a run-time position: each
+    /// part shifted into place by `lo - base` (IR shifts of 128 or more give
+    /// zero, so parts outside the range drop out) and the parts or-ed.
+    fn wide_extract_dyn(&mut self, ps: &[V], lo: &V, w: u32) -> R<V> {
+        if ps.iter().all(V::is_concrete) {
+            return fail("run-time index into a constant table");
+        }
+        if ps.len() > 4 {
+            return fail("run-time index into more than four parts");
+        }
+        let l = self.dx(lo)?;
+        let mut acc: Option<Rc<str>> = None;
+        let mut base = 0u32;
+        for p in ps {
+            let pw = p.width().unwrap_or(0);
+            let pv = self.bitify(p)?;
+            let x = self.dx(&pv)?;
+            let x = if pw == 128 {
+                x
+            } else {
+                match self.dy(K::Bits(128), format!("b.zext({x}, Width::W128)")) {
+                    V::D(_, n) => n,
+                    _ => unreachable!(),
+                }
+            };
+            let k = self.dx(&V::Int(i128::from(base)))?;
+            let d = format!("v{}", self.fresh());
+            self.line(format!("let {d} = b.bin(BinOp::Sub, {l}, {k});"));
+            let z = self.dx(&V::Int(0))?;
+            let nd = format!("v{}", self.fresh());
+            self.line(format!("let {nd} = b.bin(BinOp::Sub, {z}, {d});"));
+            let r = format!("v{}", self.fresh());
+            self.line(format!("let {r} = b.bin(BinOp::LShr, {x}, {d});"));
+            let q = format!("v{}", self.fresh());
+            self.line(format!("let {q} = b.bin(BinOp::Shl, {x}, {nd});"));
+            let c = format!("v{}", self.fresh());
+            self.line(format!("let {c} = b.bin(BinOp::Or, {r}, {q});"));
+            acc = Some(match acc {
+                None => c.into(),
+                Some(a) => {
+                    let o = format!("v{}", self.fresh());
+                    self.line(format!("let {o} = b.bin(BinOp::Or, {a}, {c});"));
+                    o.into()
+                }
+            });
+            base += pw;
+        }
+        let a = acc.ok_or_else(|| crate::eval::err("empty wide value"))?;
+        if w == 128 {
+            return Ok(V::D(K::Bits(128), a));
+        }
+        Ok(self.dy(K::Bits(w), format!("b.extract({a}, 0, Width::new({w}))")))
     }
 
     /// `hi @ lo`.
@@ -620,6 +721,28 @@ impl Gen<'_> {
         let w = a
             .width()
             .ok_or_else(|| crate::eval::err(format!("shift {a:?}")))?;
+        if w > 128 {
+            let V::Int(s) = n else {
+                return fail("wide shift by a non-concrete amount");
+            };
+            let s = (*s).clamp(0, i128::from(w)) as u32;
+            if s == 0 {
+                return Ok(a);
+            }
+            if s == w || kind == "ashr" {
+                if kind == "ashr" {
+                    return fail("wide arithmetic shift");
+                }
+                return Ok(Self::zeros(w));
+            }
+            return if kind == "shl" {
+                let x = self.extract(&a, &V::Int(0), w - s)?;
+                self.concat(&x, &Self::zeros(s))
+            } else {
+                let x = self.extract(&a, &V::Int(i128::from(s)), w - s)?;
+                self.concat(&Self::zeros(s), &x)
+            };
+        }
         if let (V::Bits(_, x), V::Int(s)) = (&a, n) {
             let s = (*s).clamp(0, 255) as u32;
             let r = match kind {

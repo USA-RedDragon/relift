@@ -555,6 +555,20 @@ impl Parser {
             }
             K::Hex => {
                 let h: String = v[2..].chars().filter(|c| *c != '_').collect();
+                if h.len() > 32 {
+                    if !h.len().is_multiple_of(32) {
+                        return Err(format!("wide literal {v} is not whole 128-bit parts"));
+                    }
+                    let mut parts = Vec::new();
+                    for i in (0..h.len() / 32).rev() {
+                        let p = &h[32 * i..32 * i + 32];
+                        parts.push(
+                            u128::from_str_radix(p, 16)
+                                .map_err(|e| format!("bad literal {v}: {e}"))?,
+                        );
+                    }
+                    return Ok(Lit::Wide(parts));
+                }
                 let value =
                     u128::from_str_radix(&h, 16).map_err(|e| format!("bad literal {v}: {e}"))?;
                 Ok(Lit::Bits {

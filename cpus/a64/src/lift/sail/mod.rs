@@ -5,6 +5,8 @@
 
 mod generated;
 #[allow(dead_code)]
+mod half;
+#[allow(dead_code)]
 mod rt;
 
 use relift_ir::{Block, Builder, CmpOp, Width};

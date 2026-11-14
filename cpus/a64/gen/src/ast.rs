@@ -19,6 +19,9 @@ pub enum Lit {
         /// The value.
         value: u128,
     },
+    /// A `0x` literal wider than 128 bits: 128-bit parts, least significant
+    /// first.
+    Wide(Vec<u128>),
     /// A decimal real such as `1.5`, kept as written.
     Real(String),
     /// A string, without its quotes.

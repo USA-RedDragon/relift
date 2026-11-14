@@ -897,6 +897,7 @@ name = "relift-cpu-a64-gen"
 version = "0.1.0"
 dependencies = [
  "relift-cpu-a64",
+ "relift-ir",
 ]
 
 [[package]]
