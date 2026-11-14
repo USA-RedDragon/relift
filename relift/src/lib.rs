@@ -10,6 +10,7 @@ pub mod diff;
 pub mod diff_ir;
 pub mod fpflags;
 pub mod hints;
+pub mod identity;
 pub mod import;
 pub mod paths;
 pub mod runtime_link;
