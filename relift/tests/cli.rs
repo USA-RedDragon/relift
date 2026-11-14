@@ -68,37 +68,18 @@ fn settings_flags_work_before_and_after_a_subcommand() {
 }
 
 #[test]
-fn an_unpinned_cross_image_is_refused() {
-    let out = relift(&[
-        "--cross-image",
-        "example.invalid/image:latest",
-        "check",
-        "x",
-    ]);
-    assert!(!out.status.success());
-    assert!(
-        stderr(&out).contains("not pinned by digest"),
-        "{}",
-        stderr(&out)
-    );
-}
-
-#[test]
 fn relift_toml_in_the_working_dir_is_read() {
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("relift-toml");
     std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
-    relift_cache::write_if_changed(
-        &dir.join("relift.toml"),
-        b"cross-image = \"example.invalid/from-file:latest\"\n",
-    )
-    .expect("the config file is writable");
+    relift_cache::write_if_changed(&dir.join("relift.toml"), b"jobs = \"from-file\"\n")
+        .expect("the config file is writable");
     let out = relift_proc::command(env!("CARGO_BIN_EXE_relift"))
         .args(["check", "x"])
         .current_dir(&dir)
         .output()
         .expect("the relift binary runs");
     assert!(
-        stderr(&out).contains("from-file") && stderr(&out).contains("not pinned by digest"),
+        !out.status.success() && stderr(&out).contains("jobs"),
         "{}",
         stderr(&out)
     );

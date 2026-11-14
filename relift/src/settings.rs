@@ -31,13 +31,6 @@ pub struct Settings {
     )]
     pub jobs: u32,
 
-    #[configulator(
-        name = "cross-image",
-        default = "ghcr.io/usa-reddragon/rust-cross:1.98.1@sha256:a4d9cb8c3d4a4134c36dec1df78f1b0cc760d7fe443240dd5303ee64a01996c2",
-        description = "the cross-build container image, pinned by digest"
-    )]
-    pub cross_image: String,
-
     #[configulator(name = "toolchain", nested)]
     pub toolchain: Toolchain,
 }
@@ -53,24 +46,10 @@ pub struct Toolchain {
 
     #[configulator(name = "ninja", description = "the ninja build tool")]
     pub ninja: PathBuf,
-
-    #[configulator(
-        name = "podman",
-        description = "the container runtime for cross builds"
-    )]
-    pub podman: PathBuf,
 }
 
 impl Validate for Settings {
     fn validate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if self.cross_image.contains("@sha256:") {
-            Ok(())
-        } else {
-            Err(format!(
-                "cross-image {:?} is not pinned by digest (name@sha256:...)",
-                self.cross_image
-            )
-            .into())
-        }
+        Ok(())
     }
 }
