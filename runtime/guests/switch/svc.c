@@ -523,6 +523,7 @@ void rl_hos_shutdown(void)
         return;
     hos_kobj *drop[HOS_HANDLES];
     uint32_t n = 0;
+    hos_audio_shutdown();
     hos_lock();
     for (uint32_t i = 0; i < HOS_HANDLES; i++)
         if (hos.handles[i]) {
