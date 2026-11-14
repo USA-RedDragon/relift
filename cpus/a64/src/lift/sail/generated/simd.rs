@@ -6,7 +6,7 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, Order, UnOp, Width};
+use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, Order, UnOp, Width};
 
 use crate::decode::Encoding;
 use crate::lift::LiftError;
@@ -788,6 +788,395 @@ pub(super) fn ADDHN_asimddiff_N(word: u32, b: &mut Builder, st: &mut St) -> Resu
         }
         0x00c00000 => {
             return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `ADDP_asimdsame_only`.
+///
+/// Split on the word bits `0x40c00000`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn ADDP_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::ADDP_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40c00000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(8));
+            let v11 = b.extract(v9, 8, Width::new(8));
+            let v12 = b.bin(BinOp::Add, v10, v11);
+            let v13 = b.konst(Width::new(56), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 16, Width::new(8));
+            let v16 = b.extract(v9, 24, Width::new(8));
+            let v17 = b.bin(BinOp::Add, v15, v16);
+            let v18 = b.extract(v14, 16, Width::new(48));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v14, 0, Width::new(8));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v9, 32, Width::new(8));
+            let v23 = b.extract(v9, 40, Width::new(8));
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.extract(v21, 24, Width::new(40));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v21, 0, Width::new(16));
+            let v28 = b.concat(v26, v27);
+            let v29 = b.extract(v9, 48, Width::new(8));
+            let v30 = b.extract(v9, 56, Width::new(8));
+            let v31 = b.bin(BinOp::Add, v29, v30);
+            let v32 = b.extract(v28, 32, Width::new(32));
+            let v33 = b.concat(v32, v31);
+            let v34 = b.extract(v28, 0, Width::new(24));
+            let v35 = b.concat(v33, v34);
+            let v36 = b.extract(v9, 64, Width::new(8));
+            let v37 = b.extract(v9, 72, Width::new(8));
+            let v38 = b.bin(BinOp::Add, v36, v37);
+            let v39 = b.extract(v35, 40, Width::new(24));
+            let v40 = b.concat(v39, v38);
+            let v41 = b.extract(v35, 0, Width::new(32));
+            let v42 = b.concat(v40, v41);
+            let v43 = b.extract(v9, 80, Width::new(8));
+            let v44 = b.extract(v9, 88, Width::new(8));
+            let v45 = b.bin(BinOp::Add, v43, v44);
+            let v46 = b.extract(v42, 48, Width::new(16));
+            let v47 = b.concat(v46, v45);
+            let v48 = b.extract(v42, 0, Width::new(40));
+            let v49 = b.concat(v47, v48);
+            let v50 = b.extract(v9, 96, Width::new(8));
+            let v51 = b.extract(v9, 104, Width::new(8));
+            let v52 = b.bin(BinOp::Add, v50, v51);
+            let v53 = b.extract(v49, 56, Width::new(8));
+            let v54 = b.concat(v53, v52);
+            let v55 = b.extract(v49, 0, Width::new(48));
+            let v56 = b.concat(v54, v55);
+            let v57 = b.extract(v9, 112, Width::new(8));
+            let v58 = b.extract(v9, 120, Width::new(8));
+            let v59 = b.bin(BinOp::Add, v57, v58);
+            let v60 = b.extract(v56, 0, Width::new(56));
+            let v61 = b.concat(v59, v60);
+            st.v_set(b, s4 as u32, v61, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(16));
+            let v11 = b.extract(v9, 16, Width::new(16));
+            let v12 = b.bin(BinOp::Add, v10, v11);
+            let v13 = b.konst(Width::new(48), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 32, Width::new(16));
+            let v16 = b.extract(v9, 48, Width::new(16));
+            let v17 = b.bin(BinOp::Add, v15, v16);
+            let v18 = b.extract(v14, 32, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v14, 0, Width::new(16));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v9, 64, Width::new(16));
+            let v23 = b.extract(v9, 80, Width::new(16));
+            let v24 = b.bin(BinOp::Add, v22, v23);
+            let v25 = b.extract(v21, 48, Width::new(16));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v21, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            let v29 = b.extract(v9, 96, Width::new(16));
+            let v30 = b.extract(v9, 112, Width::new(16));
+            let v31 = b.bin(BinOp::Add, v29, v30);
+            let v32 = b.extract(v28, 0, Width::new(48));
+            let v33 = b.concat(v31, v32);
+            st.v_set(b, s4 as u32, v33, None);
+            Ok(())
+        }
+        0x00800000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(32));
+            let v11 = b.extract(v9, 32, Width::new(32));
+            let v12 = b.bin(BinOp::Add, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 64, Width::new(32));
+            let v16 = b.extract(v9, 96, Width::new(32));
+            let v17 = b.bin(BinOp::Add, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00c00000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(8));
+            let v10 = b.extract(v7, 8, Width::new(8));
+            let v11 = b.bin(BinOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(120), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 16, Width::new(8));
+            let v15 = b.extract(v7, 24, Width::new(8));
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.extract(v13, 16, Width::new(112));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(8));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 32, Width::new(8));
+            let v22 = b.extract(v7, 40, Width::new(8));
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v20, 24, Width::new(104));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(16));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 48, Width::new(8));
+            let v29 = b.extract(v7, 56, Width::new(8));
+            let v30 = b.bin(BinOp::Add, v28, v29);
+            let v31 = b.extract(v27, 32, Width::new(96));
+            let v32 = b.concat(v31, v30);
+            let v33 = b.extract(v27, 0, Width::new(24));
+            let v34 = b.concat(v32, v33);
+            let v35 = b.extract(v7, 64, Width::new(8));
+            let v36 = b.extract(v7, 72, Width::new(8));
+            let v37 = b.bin(BinOp::Add, v35, v36);
+            let v38 = b.extract(v34, 40, Width::new(88));
+            let v39 = b.concat(v38, v37);
+            let v40 = b.extract(v34, 0, Width::new(32));
+            let v41 = b.concat(v39, v40);
+            let v42 = b.extract(v7, 80, Width::new(8));
+            let v43 = b.extract(v7, 88, Width::new(8));
+            let v44 = b.bin(BinOp::Add, v42, v43);
+            let v45 = b.extract(v41, 48, Width::new(80));
+            let v46 = b.concat(v45, v44);
+            let v47 = b.extract(v41, 0, Width::new(40));
+            let v48 = b.concat(v46, v47);
+            let v49 = b.extract(v7, 96, Width::new(8));
+            let v50 = b.extract(v7, 104, Width::new(8));
+            let v51 = b.bin(BinOp::Add, v49, v50);
+            let v52 = b.extract(v48, 56, Width::new(72));
+            let v53 = b.concat(v52, v51);
+            let v54 = b.extract(v48, 0, Width::new(48));
+            let v55 = b.concat(v53, v54);
+            let v56 = b.extract(v7, 112, Width::new(8));
+            let v57 = b.extract(v7, 120, Width::new(8));
+            let v58 = b.bin(BinOp::Add, v56, v57);
+            let v59 = b.extract(v55, 64, Width::new(64));
+            let v60 = b.concat(v59, v58);
+            let v61 = b.extract(v55, 0, Width::new(56));
+            let v62 = b.concat(v60, v61);
+            let v63 = b.extract(v8, 0, Width::new(8));
+            let v64 = b.extract(v8, 8, Width::new(8));
+            let v65 = b.bin(BinOp::Add, v63, v64);
+            let v66 = b.extract(v62, 72, Width::new(56));
+            let v67 = b.concat(v66, v65);
+            let v68 = b.extract(v62, 0, Width::new(64));
+            let v69 = b.concat(v67, v68);
+            let v70 = b.extract(v8, 16, Width::new(8));
+            let v71 = b.extract(v8, 24, Width::new(8));
+            let v72 = b.bin(BinOp::Add, v70, v71);
+            let v73 = b.extract(v69, 80, Width::new(48));
+            let v74 = b.concat(v73, v72);
+            let v75 = b.extract(v69, 0, Width::new(72));
+            let v76 = b.concat(v74, v75);
+            let v77 = b.extract(v8, 32, Width::new(8));
+            let v78 = b.extract(v8, 40, Width::new(8));
+            let v79 = b.bin(BinOp::Add, v77, v78);
+            let v80 = b.extract(v76, 88, Width::new(40));
+            let v81 = b.concat(v80, v79);
+            let v82 = b.extract(v76, 0, Width::new(80));
+            let v83 = b.concat(v81, v82);
+            let v84 = b.extract(v8, 48, Width::new(8));
+            let v85 = b.extract(v8, 56, Width::new(8));
+            let v86 = b.bin(BinOp::Add, v84, v85);
+            let v87 = b.extract(v83, 96, Width::new(32));
+            let v88 = b.concat(v87, v86);
+            let v89 = b.extract(v83, 0, Width::new(88));
+            let v90 = b.concat(v88, v89);
+            let v91 = b.extract(v8, 64, Width::new(8));
+            let v92 = b.extract(v8, 72, Width::new(8));
+            let v93 = b.bin(BinOp::Add, v91, v92);
+            let v94 = b.extract(v90, 104, Width::new(24));
+            let v95 = b.concat(v94, v93);
+            let v96 = b.extract(v90, 0, Width::new(96));
+            let v97 = b.concat(v95, v96);
+            let v98 = b.extract(v8, 80, Width::new(8));
+            let v99 = b.extract(v8, 88, Width::new(8));
+            let v100 = b.bin(BinOp::Add, v98, v99);
+            let v101 = b.extract(v97, 112, Width::new(16));
+            let v102 = b.concat(v101, v100);
+            let v103 = b.extract(v97, 0, Width::new(104));
+            let v104 = b.concat(v102, v103);
+            let v105 = b.extract(v8, 96, Width::new(8));
+            let v106 = b.extract(v8, 104, Width::new(8));
+            let v107 = b.bin(BinOp::Add, v105, v106);
+            let v108 = b.extract(v104, 120, Width::new(8));
+            let v109 = b.concat(v108, v107);
+            let v110 = b.extract(v104, 0, Width::new(112));
+            let v111 = b.concat(v109, v110);
+            let v112 = b.extract(v8, 112, Width::new(8));
+            let v113 = b.extract(v8, 120, Width::new(8));
+            let v114 = b.bin(BinOp::Add, v112, v113);
+            let v115 = b.extract(v111, 0, Width::new(120));
+            let v116 = b.concat(v114, v115);
+            st.v_set(b, s4 as u32, v116, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(16));
+            let v10 = b.extract(v7, 16, Width::new(16));
+            let v11 = b.bin(BinOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(112), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(16));
+            let v15 = b.extract(v7, 48, Width::new(16));
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.extract(v13, 32, Width::new(96));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(16));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(16));
+            let v22 = b.extract(v7, 80, Width::new(16));
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v20, 48, Width::new(80));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(32));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(16));
+            let v29 = b.extract(v7, 112, Width::new(16));
+            let v30 = b.bin(BinOp::Add, v28, v29);
+            let v31 = b.extract(v27, 64, Width::new(64));
+            let v32 = b.concat(v31, v30);
+            let v33 = b.extract(v27, 0, Width::new(48));
+            let v34 = b.concat(v32, v33);
+            let v35 = b.extract(v8, 0, Width::new(16));
+            let v36 = b.extract(v8, 16, Width::new(16));
+            let v37 = b.bin(BinOp::Add, v35, v36);
+            let v38 = b.extract(v34, 80, Width::new(48));
+            let v39 = b.concat(v38, v37);
+            let v40 = b.extract(v34, 0, Width::new(64));
+            let v41 = b.concat(v39, v40);
+            let v42 = b.extract(v8, 32, Width::new(16));
+            let v43 = b.extract(v8, 48, Width::new(16));
+            let v44 = b.bin(BinOp::Add, v42, v43);
+            let v45 = b.extract(v41, 96, Width::new(32));
+            let v46 = b.concat(v45, v44);
+            let v47 = b.extract(v41, 0, Width::new(80));
+            let v48 = b.concat(v46, v47);
+            let v49 = b.extract(v8, 64, Width::new(16));
+            let v50 = b.extract(v8, 80, Width::new(16));
+            let v51 = b.bin(BinOp::Add, v49, v50);
+            let v52 = b.extract(v48, 112, Width::new(16));
+            let v53 = b.concat(v52, v51);
+            let v54 = b.extract(v48, 0, Width::new(96));
+            let v55 = b.concat(v53, v54);
+            let v56 = b.extract(v8, 96, Width::new(16));
+            let v57 = b.extract(v8, 112, Width::new(16));
+            let v58 = b.bin(BinOp::Add, v56, v57);
+            let v59 = b.extract(v55, 0, Width::new(112));
+            let v60 = b.concat(v58, v59);
+            st.v_set(b, s4 as u32, v60, None);
+            Ok(())
+        }
+        0x40800000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v7, 32, Width::new(32));
+            let v11 = b.bin(BinOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(32));
+            let v15 = b.extract(v7, 96, Width::new(32));
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v8, 0, Width::new(32));
+            let v22 = b.extract(v8, 32, Width::new(32));
+            let v23 = b.bin(BinOp::Add, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v8, 64, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = b.bin(BinOp::Add, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40c00000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v7, 64, Width::new(64));
+            let v11 = b.bin(BinOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v8, 0, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = b.bin(BinOp::Add, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -14151,6 +14540,580 @@ pub(super) fn EOR_asimdsame_only(word: u32, b: &mut Builder, st: &mut St) -> Res
     }
 }
 
+/// `EXT_asimdext_only`.
+///
+/// Split on the word bits `0x40007800`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn EXT_asimdext_only(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::EXT_asimdext_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40007800 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 0, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 8, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 16, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 24, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 32, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 40, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 48, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 64);
+            let v8 = st.v_read(b, s5 as u32, 64);
+            let v9 = b.concat(v7, v8);
+            let v10 = b.extract(v9, 56, Width::new(64));
+            st.v_set(b, s4 as u32, v10, None);
+            Ok(())
+        }
+        0x00004000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00004800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00005800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00006800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00007800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let v8 = st.v_read(b, s5 as u32, 128);
+            st.v_set(b, s4 as u32, v8, None);
+            Ok(())
+        }
+        0x40000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 8, Width::new(120));
+            let v10 = b.extract(v7, 0, Width::new(8));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40001000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 16, Width::new(112));
+            let v10 = b.extract(v7, 0, Width::new(16));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40001800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 24, Width::new(104));
+            let v10 = b.extract(v7, 0, Width::new(24));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40002000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 32, Width::new(96));
+            let v10 = b.extract(v7, 0, Width::new(32));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40002800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 40, Width::new(88));
+            let v10 = b.extract(v7, 0, Width::new(40));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40003000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 48, Width::new(80));
+            let v10 = b.extract(v7, 0, Width::new(48));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40003800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 56, Width::new(72));
+            let v10 = b.extract(v7, 0, Width::new(56));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40004000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 64, Width::new(64));
+            let v10 = b.extract(v7, 0, Width::new(64));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40004800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 72, Width::new(56));
+            let v10 = b.extract(v7, 0, Width::new(72));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40005000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 80, Width::new(48));
+            let v10 = b.extract(v7, 0, Width::new(80));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40005800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 88, Width::new(40));
+            let v10 = b.extract(v7, 0, Width::new(88));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40006000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 96, Width::new(32));
+            let v10 = b.extract(v7, 0, Width::new(96));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40006800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 104, Width::new(24));
+            let v10 = b.extract(v7, 0, Width::new(104));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40007000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 112, Width::new(16));
+            let v10 = b.extract(v7, 0, Width::new(112));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        0x40007800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s6 as u32, 128);
+            let v8 = st.v_read(b, s5 as u32, 128);
+            let v9 = b.extract(v8, 120, Width::new(8));
+            let v10 = b.extract(v7, 0, Width::new(120));
+            let v11 = b.concat(v10, v9);
+            st.v_set(b, s4 as u32, v11, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FABD_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPSub, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FABD_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FABD_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Sub, v9, v10);
+            let v12 = b.extract(v11, 0, Width::new(31));
+            let v13 = b.konst(Width::new(1), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.konst(Width::new(96), 0x0);
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v7, 32, Width::new(32));
+            let v18 = b.extract(v8, 32, Width::new(32));
+            let v19 = rt::Fp::new(32).bin(b, FpOp::Sub, v17, v18);
+            let v20 = b.extract(v19, 0, Width::new(31));
+            let v21 = b.konst(Width::new(1), 0x0);
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v16, 64, Width::new(64));
+            let v24 = b.concat(v23, v22);
+            let v25 = b.extract(v16, 0, Width::new(32));
+            let v26 = b.concat(v24, v25);
+            st.v_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Sub, v9, v10);
+            let v12 = b.extract(v11, 0, Width::new(31));
+            let v13 = b.konst(Width::new(1), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.konst(Width::new(96), 0x0);
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v7, 32, Width::new(32));
+            let v18 = b.extract(v8, 32, Width::new(32));
+            let v19 = rt::Fp::new(32).bin(b, FpOp::Sub, v17, v18);
+            let v20 = b.extract(v19, 0, Width::new(31));
+            let v21 = b.konst(Width::new(1), 0x0);
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v16, 64, Width::new(64));
+            let v24 = b.concat(v23, v22);
+            let v25 = b.extract(v16, 0, Width::new(32));
+            let v26 = b.concat(v24, v25);
+            let v27 = b.extract(v7, 64, Width::new(32));
+            let v28 = b.extract(v8, 64, Width::new(32));
+            let v29 = rt::Fp::new(32).bin(b, FpOp::Sub, v27, v28);
+            let v30 = b.extract(v29, 0, Width::new(31));
+            let v31 = b.konst(Width::new(1), 0x0);
+            let v32 = b.concat(v31, v30);
+            let v33 = b.extract(v26, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v26, 0, Width::new(64));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v7, 96, Width::new(32));
+            let v38 = b.extract(v8, 96, Width::new(32));
+            let v39 = rt::Fp::new(32).bin(b, FpOp::Sub, v37, v38);
+            let v40 = b.extract(v39, 0, Width::new(31));
+            let v41 = b.konst(Width::new(1), 0x0);
+            let v42 = b.concat(v41, v40);
+            let v43 = b.extract(v36, 0, Width::new(96));
+            let v44 = b.concat(v42, v43);
+            st.v_set(b, s4 as u32, v44, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).bin(b, FpOp::Sub, v9, v10);
+            let v12 = b.extract(v11, 0, Width::new(63));
+            let v13 = b.konst(Width::new(1), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.konst(Width::new(64), 0x0);
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v7, 64, Width::new(64));
+            let v18 = b.extract(v8, 64, Width::new(64));
+            let v19 = rt::Fp::new(64).bin(b, FpOp::Sub, v17, v18);
+            let v20 = b.extract(v19, 0, Width::new(63));
+            let v21 = b.konst(Width::new(1), 0x0);
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v16, 0, Width::new(64));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FABD_asisdsame_only`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FPSub, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FABD_asisdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FABD_asisdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 32);
+            let v8 = st.v_read(b, s6 as u32, 32);
+            let v9 = rt::Fp::new(32).bin(b, FpOp::Sub, v7, v8);
+            let v10 = b.extract(v9, 0, Width::new(31));
+            let v11 = b.konst(Width::new(1), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.konst(Width::new(96), 0x0);
+            let v14 = b.concat(v13, v12);
+            st.v_set(b, s4 as u32, v14, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = rt::Fp::new(64).bin(b, FpOp::Sub, v7, v8);
+            let v10 = b.extract(v9, 0, Width::new(63));
+            let v11 = b.konst(Width::new(1), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            st.v_set(b, s4 as u32, v14, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FABS_asimdmisc_R`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -14242,6 +15205,2283 @@ pub(super) fn FABS_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v16 = b.extract(v11, 0, Width::new(64));
             let v17 = b.concat(v15, v16);
             st.v_set(b, s3 as u32, v17, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FADDP_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPAdd, V_read, V_set.
+pub(super) fn FADDP_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FADDP_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(32));
+            let v11 = b.extract(v9, 32, Width::new(32));
+            let v12 = rt::Fp::new(32).bin(b, FpOp::Add, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 64, Width::new(32));
+            let v16 = b.extract(v9, 96, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Add, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v7, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(32));
+            let v15 = b.extract(v7, 96, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Add, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v8, 0, Width::new(32));
+            let v22 = b.extract(v8, 32, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Add, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v8, 64, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).bin(b, FpOp::Add, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v7, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).bin(b, FpOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v8, 0, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).bin(b, FpOp::Add, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FADDP_asisdpair_only_SD`.
+///
+/// Split on the word bits `0x00400000`.
+///
+/// Cut: ENV, FPAdd, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FADDP_asisdpair_only_SD(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FADDP_asisdpair_only_SD;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 32, Width::new(32));
+            let v7 = b.extract(v5, 0, Width::new(32));
+            let v8 = rt::Fp::new(32).bin(b, FpOp::Add, v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 64, Width::new(64));
+            let v7 = b.extract(v5, 0, Width::new(64));
+            let v8 = rt::Fp::new(64).bin(b, FpOp::Add, v7, v6);
+            st.v_set(b, s3 as u32, v8, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FADD_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPAdd, V_read, V_set.
+pub(super) fn FADD_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FADD_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v10 = b.extract(v7, 0, Width::new(32));
+            let v11 = b.extract(v8, 0, Width::new(32));
+            let v12 = rt::Fp::new(32).bin(b, FpOp::Add, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v7, 32, Width::new(32));
+            let v16 = b.extract(v8, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Add, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Add, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Add, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).bin(b, FpOp::Add, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).bin(b, FpOp::Add, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).bin(b, FpOp::Add, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMEQ_asimdmisc_FZ`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareEQ, V_read, V_set.
+pub(super) fn FCMEQ_asimdmisc_FZ(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMEQ_asimdmisc_FZ;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_eq(b, v6, v7);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_eq(b, v15, v16);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(32));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_eq(b, v6, v7);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(96), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_eq(b, v15, v16);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 64, Width::new(64));
+            let v23 = b.concat(v22, v21);
+            let v24 = b.extract(v14, 0, Width::new(32));
+            let v25 = b.concat(v23, v24);
+            let v26 = b.extract(v5, 64, Width::new(32));
+            let v27 = b.konst(Width::new(32), 0x0);
+            let v28 = rt::Fp::new(32).compare_eq(b, v26, v27);
+            let v30 = b.konst(Width::new(32), 0xffffffff);
+            let v31 = b.konst(Width::new(32), 0x0);
+            let v32 = b.select(v28, v30, v31);
+            let v33 = b.extract(v25, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v25, 0, Width::new(64));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v5, 96, Width::new(32));
+            let v38 = b.konst(Width::new(32), 0x0);
+            let v39 = rt::Fp::new(32).compare_eq(b, v37, v38);
+            let v41 = b.konst(Width::new(32), 0xffffffff);
+            let v42 = b.konst(Width::new(32), 0x0);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.extract(v36, 0, Width::new(96));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s3 as u32, v45, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = rt::Fp::new(64).compare_eq(b, v6, v7);
+            let v10 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 64, Width::new(64));
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = rt::Fp::new(64).compare_eq(b, v15, v16);
+            let v19 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v20 = b.konst(Width::new(64), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(64));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMEQ_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareEQ, V_read, V_set.
+pub(super) fn FCMEQ_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMEQ_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).compare_eq(b, v9, v10);
+            let v13 = b.konst(Width::new(32), 0xffffffff);
+            let v14 = b.konst(Width::new(32), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 32, Width::new(32));
+            let v19 = b.extract(v8, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).compare_eq(b, v18, v19);
+            let v22 = b.konst(Width::new(32), 0xffffffff);
+            let v23 = b.konst(Width::new(32), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 64, Width::new(64));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v17, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            st.v_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).compare_eq(b, v9, v10);
+            let v13 = b.konst(Width::new(32), 0xffffffff);
+            let v14 = b.konst(Width::new(32), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 32, Width::new(32));
+            let v19 = b.extract(v8, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).compare_eq(b, v18, v19);
+            let v22 = b.konst(Width::new(32), 0xffffffff);
+            let v23 = b.konst(Width::new(32), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 64, Width::new(64));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v17, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            let v29 = b.extract(v7, 64, Width::new(32));
+            let v30 = b.extract(v8, 64, Width::new(32));
+            let v31 = rt::Fp::new(32).compare_eq(b, v29, v30);
+            let v33 = b.konst(Width::new(32), 0xffffffff);
+            let v34 = b.konst(Width::new(32), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.extract(v28, 96, Width::new(32));
+            let v37 = b.concat(v36, v35);
+            let v38 = b.extract(v28, 0, Width::new(64));
+            let v39 = b.concat(v37, v38);
+            let v40 = b.extract(v7, 96, Width::new(32));
+            let v41 = b.extract(v8, 96, Width::new(32));
+            let v42 = rt::Fp::new(32).compare_eq(b, v40, v41);
+            let v44 = b.konst(Width::new(32), 0xffffffff);
+            let v45 = b.konst(Width::new(32), 0x0);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.extract(v39, 0, Width::new(96));
+            let v48 = b.concat(v46, v47);
+            st.v_set(b, s4 as u32, v48, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).compare_eq(b, v9, v10);
+            let v13 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v14 = b.konst(Width::new(64), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 64, Width::new(64));
+            let v19 = b.extract(v8, 64, Width::new(64));
+            let v20 = rt::Fp::new(64).compare_eq(b, v18, v19);
+            let v22 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v23 = b.konst(Width::new(64), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 0, Width::new(64));
+            let v26 = b.concat(v24, v25);
+            st.v_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMGE_asimdmisc_FZ`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareGE, V_read, V_set.
+pub(super) fn FCMGE_asimdmisc_FZ(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMGE_asimdmisc_FZ;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_ge(b, v6, v7);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_ge(b, v15, v16);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(32));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_ge(b, v6, v7);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(96), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_ge(b, v15, v16);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 64, Width::new(64));
+            let v23 = b.concat(v22, v21);
+            let v24 = b.extract(v14, 0, Width::new(32));
+            let v25 = b.concat(v23, v24);
+            let v26 = b.extract(v5, 64, Width::new(32));
+            let v27 = b.konst(Width::new(32), 0x0);
+            let v28 = rt::Fp::new(32).compare_ge(b, v26, v27);
+            let v30 = b.konst(Width::new(32), 0xffffffff);
+            let v31 = b.konst(Width::new(32), 0x0);
+            let v32 = b.select(v28, v30, v31);
+            let v33 = b.extract(v25, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v25, 0, Width::new(64));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v5, 96, Width::new(32));
+            let v38 = b.konst(Width::new(32), 0x0);
+            let v39 = rt::Fp::new(32).compare_ge(b, v37, v38);
+            let v41 = b.konst(Width::new(32), 0xffffffff);
+            let v42 = b.konst(Width::new(32), 0x0);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.extract(v36, 0, Width::new(96));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s3 as u32, v45, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = rt::Fp::new(64).compare_ge(b, v6, v7);
+            let v10 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 64, Width::new(64));
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = rt::Fp::new(64).compare_ge(b, v15, v16);
+            let v19 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v20 = b.konst(Width::new(64), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(64));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMGE_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareGE, V_read, V_set.
+pub(super) fn FCMGE_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMGE_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).compare_ge(b, v9, v10);
+            let v13 = b.konst(Width::new(32), 0xffffffff);
+            let v14 = b.konst(Width::new(32), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 32, Width::new(32));
+            let v19 = b.extract(v8, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).compare_ge(b, v18, v19);
+            let v22 = b.konst(Width::new(32), 0xffffffff);
+            let v23 = b.konst(Width::new(32), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 64, Width::new(64));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v17, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            st.v_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).compare_ge(b, v9, v10);
+            let v13 = b.konst(Width::new(32), 0xffffffff);
+            let v14 = b.konst(Width::new(32), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 32, Width::new(32));
+            let v19 = b.extract(v8, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).compare_ge(b, v18, v19);
+            let v22 = b.konst(Width::new(32), 0xffffffff);
+            let v23 = b.konst(Width::new(32), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 64, Width::new(64));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v17, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            let v29 = b.extract(v7, 64, Width::new(32));
+            let v30 = b.extract(v8, 64, Width::new(32));
+            let v31 = rt::Fp::new(32).compare_ge(b, v29, v30);
+            let v33 = b.konst(Width::new(32), 0xffffffff);
+            let v34 = b.konst(Width::new(32), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.extract(v28, 96, Width::new(32));
+            let v37 = b.concat(v36, v35);
+            let v38 = b.extract(v28, 0, Width::new(64));
+            let v39 = b.concat(v37, v38);
+            let v40 = b.extract(v7, 96, Width::new(32));
+            let v41 = b.extract(v8, 96, Width::new(32));
+            let v42 = rt::Fp::new(32).compare_ge(b, v40, v41);
+            let v44 = b.konst(Width::new(32), 0xffffffff);
+            let v45 = b.konst(Width::new(32), 0x0);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.extract(v39, 0, Width::new(96));
+            let v48 = b.concat(v46, v47);
+            st.v_set(b, s4 as u32, v48, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).compare_ge(b, v9, v10);
+            let v13 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v14 = b.konst(Width::new(64), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 64, Width::new(64));
+            let v19 = b.extract(v8, 64, Width::new(64));
+            let v20 = rt::Fp::new(64).compare_ge(b, v18, v19);
+            let v22 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v23 = b.konst(Width::new(64), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 0, Width::new(64));
+            let v26 = b.concat(v24, v25);
+            st.v_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMGT_asimdmisc_FZ`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareGT, V_read, V_set.
+pub(super) fn FCMGT_asimdmisc_FZ(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMGT_asimdmisc_FZ;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_gt(b, v6, v7);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_gt(b, v15, v16);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(32));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_gt(b, v6, v7);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(96), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_gt(b, v15, v16);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 64, Width::new(64));
+            let v23 = b.concat(v22, v21);
+            let v24 = b.extract(v14, 0, Width::new(32));
+            let v25 = b.concat(v23, v24);
+            let v26 = b.extract(v5, 64, Width::new(32));
+            let v27 = b.konst(Width::new(32), 0x0);
+            let v28 = rt::Fp::new(32).compare_gt(b, v26, v27);
+            let v30 = b.konst(Width::new(32), 0xffffffff);
+            let v31 = b.konst(Width::new(32), 0x0);
+            let v32 = b.select(v28, v30, v31);
+            let v33 = b.extract(v25, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v25, 0, Width::new(64));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v5, 96, Width::new(32));
+            let v38 = b.konst(Width::new(32), 0x0);
+            let v39 = rt::Fp::new(32).compare_gt(b, v37, v38);
+            let v41 = b.konst(Width::new(32), 0xffffffff);
+            let v42 = b.konst(Width::new(32), 0x0);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.extract(v36, 0, Width::new(96));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s3 as u32, v45, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = rt::Fp::new(64).compare_gt(b, v6, v7);
+            let v10 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 64, Width::new(64));
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = rt::Fp::new(64).compare_gt(b, v15, v16);
+            let v19 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v20 = b.konst(Width::new(64), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(64));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMGT_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareGT, V_read, V_set.
+pub(super) fn FCMGT_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMGT_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).compare_gt(b, v9, v10);
+            let v13 = b.konst(Width::new(32), 0xffffffff);
+            let v14 = b.konst(Width::new(32), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 32, Width::new(32));
+            let v19 = b.extract(v8, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).compare_gt(b, v18, v19);
+            let v22 = b.konst(Width::new(32), 0xffffffff);
+            let v23 = b.konst(Width::new(32), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 64, Width::new(64));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v17, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            st.v_set(b, s4 as u32, v28, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).compare_gt(b, v9, v10);
+            let v13 = b.konst(Width::new(32), 0xffffffff);
+            let v14 = b.konst(Width::new(32), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 32, Width::new(32));
+            let v19 = b.extract(v8, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).compare_gt(b, v18, v19);
+            let v22 = b.konst(Width::new(32), 0xffffffff);
+            let v23 = b.konst(Width::new(32), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 64, Width::new(64));
+            let v26 = b.concat(v25, v24);
+            let v27 = b.extract(v17, 0, Width::new(32));
+            let v28 = b.concat(v26, v27);
+            let v29 = b.extract(v7, 64, Width::new(32));
+            let v30 = b.extract(v8, 64, Width::new(32));
+            let v31 = rt::Fp::new(32).compare_gt(b, v29, v30);
+            let v33 = b.konst(Width::new(32), 0xffffffff);
+            let v34 = b.konst(Width::new(32), 0x0);
+            let v35 = b.select(v31, v33, v34);
+            let v36 = b.extract(v28, 96, Width::new(32));
+            let v37 = b.concat(v36, v35);
+            let v38 = b.extract(v28, 0, Width::new(64));
+            let v39 = b.concat(v37, v38);
+            let v40 = b.extract(v7, 96, Width::new(32));
+            let v41 = b.extract(v8, 96, Width::new(32));
+            let v42 = rt::Fp::new(32).compare_gt(b, v40, v41);
+            let v44 = b.konst(Width::new(32), 0xffffffff);
+            let v45 = b.konst(Width::new(32), 0x0);
+            let v46 = b.select(v42, v44, v45);
+            let v47 = b.extract(v39, 0, Width::new(96));
+            let v48 = b.concat(v46, v47);
+            st.v_set(b, s4 as u32, v48, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).compare_gt(b, v9, v10);
+            let v13 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v14 = b.konst(Width::new(64), 0x0);
+            let v15 = b.select(v11, v13, v14);
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v7, 64, Width::new(64));
+            let v19 = b.extract(v8, 64, Width::new(64));
+            let v20 = rt::Fp::new(64).compare_gt(b, v18, v19);
+            let v22 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v23 = b.konst(Width::new(64), 0x0);
+            let v24 = b.select(v20, v22, v23);
+            let v25 = b.extract(v17, 0, Width::new(64));
+            let v26 = b.concat(v24, v25);
+            st.v_set(b, s4 as u32, v26, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMLE_asimdmisc_FZ`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareGE, V_read, V_set.
+pub(super) fn FCMLE_asimdmisc_FZ(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMLE_asimdmisc_FZ;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_ge(b, v7, v6);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_ge(b, v16, v15);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(32));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_ge(b, v7, v6);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(96), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_ge(b, v16, v15);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 64, Width::new(64));
+            let v23 = b.concat(v22, v21);
+            let v24 = b.extract(v14, 0, Width::new(32));
+            let v25 = b.concat(v23, v24);
+            let v26 = b.extract(v5, 64, Width::new(32));
+            let v27 = b.konst(Width::new(32), 0x0);
+            let v28 = rt::Fp::new(32).compare_ge(b, v27, v26);
+            let v30 = b.konst(Width::new(32), 0xffffffff);
+            let v31 = b.konst(Width::new(32), 0x0);
+            let v32 = b.select(v28, v30, v31);
+            let v33 = b.extract(v25, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v25, 0, Width::new(64));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v5, 96, Width::new(32));
+            let v38 = b.konst(Width::new(32), 0x0);
+            let v39 = rt::Fp::new(32).compare_ge(b, v38, v37);
+            let v41 = b.konst(Width::new(32), 0xffffffff);
+            let v42 = b.konst(Width::new(32), 0x0);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.extract(v36, 0, Width::new(96));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s3 as u32, v45, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = rt::Fp::new(64).compare_ge(b, v7, v6);
+            let v10 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 64, Width::new(64));
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = rt::Fp::new(64).compare_ge(b, v16, v15);
+            let v19 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v20 = b.konst(Width::new(64), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(64));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FCMLT_asimdmisc_FZ`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPCompareGT, V_read, V_set.
+pub(super) fn FCMLT_asimdmisc_FZ(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FCMLT_asimdmisc_FZ;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 64);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_gt(b, v7, v6);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_gt(b, v16, v15);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(32));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(32));
+            let v7 = b.konst(Width::new(32), 0x0);
+            let v8 = rt::Fp::new(32).compare_gt(b, v7, v6);
+            let v10 = b.konst(Width::new(32), 0xffffffff);
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(96), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 32, Width::new(32));
+            let v16 = b.konst(Width::new(32), 0x0);
+            let v17 = rt::Fp::new(32).compare_gt(b, v16, v15);
+            let v19 = b.konst(Width::new(32), 0xffffffff);
+            let v20 = b.konst(Width::new(32), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 64, Width::new(64));
+            let v23 = b.concat(v22, v21);
+            let v24 = b.extract(v14, 0, Width::new(32));
+            let v25 = b.concat(v23, v24);
+            let v26 = b.extract(v5, 64, Width::new(32));
+            let v27 = b.konst(Width::new(32), 0x0);
+            let v28 = rt::Fp::new(32).compare_gt(b, v27, v26);
+            let v30 = b.konst(Width::new(32), 0xffffffff);
+            let v31 = b.konst(Width::new(32), 0x0);
+            let v32 = b.select(v28, v30, v31);
+            let v33 = b.extract(v25, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v25, 0, Width::new(64));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v5, 96, Width::new(32));
+            let v38 = b.konst(Width::new(32), 0x0);
+            let v39 = rt::Fp::new(32).compare_gt(b, v38, v37);
+            let v41 = b.konst(Width::new(32), 0xffffffff);
+            let v42 = b.konst(Width::new(32), 0x0);
+            let v43 = b.select(v39, v41, v42);
+            let v44 = b.extract(v36, 0, Width::new(96));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s3 as u32, v45, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: i128 = s1 as i128;
+            let s4: i128 = s2 as i128;
+            let v5 = st.v_read(b, s4 as u32, 128);
+            let v6 = b.extract(v5, 0, Width::new(64));
+            let v7 = b.konst(Width::new(64), 0x0);
+            let v8 = rt::Fp::new(64).compare_gt(b, v7, v6);
+            let v10 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v11 = b.konst(Width::new(64), 0x0);
+            let v12 = b.select(v8, v10, v11);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v5, 64, Width::new(64));
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = rt::Fp::new(64).compare_gt(b, v16, v15);
+            let v19 = b.konst(Width::new(64), 0xffffffffffffffff);
+            let v20 = b.konst(Width::new(64), 0x0);
+            let v21 = b.select(v17, v19, v20);
+            let v22 = b.extract(v14, 0, Width::new(64));
+            let v23 = b.concat(v21, v22);
+            st.v_set(b, s3 as u32, v23, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FDIV_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPDiv, V_read, V_set.
+pub(super) fn FDIV_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FDIV_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Div, v9, v10);
+            let v12 = b.konst(Width::new(32), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Div, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Div, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Div, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Div, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).bin(b, FpOp::Div, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).bin(b, FpOp::Div, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).bin(b, FpOp::Div, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMAXNM_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMaxNum, V_read, V_set.
+pub(super) fn FMAXNM_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAXNM_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v10 = b.extract(v7, 0, Width::new(32));
+            let v11 = b.extract(v8, 0, Width::new(32));
+            let v12 = rt::Fp::new(32).max_num(b, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v7, 32, Width::new(32));
+            let v16 = b.extract(v8, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).max_num(b, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).max_num(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).max_num(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).max_num(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).max_num(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).max_num(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).max_num(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMAXP_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMax, V_read, V_set.
+pub(super) fn FMAXP_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAXP_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(32));
+            let v11 = b.extract(v9, 32, Width::new(32));
+            let v12 = rt::Fp::new(32).max(b, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 64, Width::new(32));
+            let v16 = b.extract(v9, 96, Width::new(32));
+            let v17 = rt::Fp::new(32).max(b, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v7, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).max(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(32));
+            let v15 = b.extract(v7, 96, Width::new(32));
+            let v16 = rt::Fp::new(32).max(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v8, 0, Width::new(32));
+            let v22 = b.extract(v8, 32, Width::new(32));
+            let v23 = rt::Fp::new(32).max(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v8, 64, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).max(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v7, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).max(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v8, 0, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).max(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMAX_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMax, V_read, V_set.
+pub(super) fn FMAX_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMAX_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v10 = b.extract(v7, 0, Width::new(32));
+            let v11 = b.extract(v8, 0, Width::new(32));
+            let v12 = rt::Fp::new(32).max(b, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v7, 32, Width::new(32));
+            let v16 = b.extract(v8, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).max(b, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).max(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).max(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).max(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).max(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).max(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).max(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMINNM_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMinNum, V_read, V_set.
+pub(super) fn FMINNM_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMINNM_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v10 = b.extract(v7, 0, Width::new(32));
+            let v11 = b.extract(v8, 0, Width::new(32));
+            let v12 = rt::Fp::new(32).min_num(b, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v7, 32, Width::new(32));
+            let v16 = b.extract(v8, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).min_num(b, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).min_num(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).min_num(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).min_num(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).min_num(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).min_num(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).min_num(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMINP_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMin, V_read, V_set.
+pub(super) fn FMINP_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMINP_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(32));
+            let v11 = b.extract(v9, 32, Width::new(32));
+            let v12 = rt::Fp::new(32).min(b, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 64, Width::new(32));
+            let v16 = b.extract(v9, 96, Width::new(32));
+            let v17 = rt::Fp::new(32).min(b, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v7, 32, Width::new(32));
+            let v11 = rt::Fp::new(32).min(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(32));
+            let v15 = b.extract(v7, 96, Width::new(32));
+            let v16 = rt::Fp::new(32).min(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v8, 0, Width::new(32));
+            let v22 = b.extract(v8, 32, Width::new(32));
+            let v23 = rt::Fp::new(32).min(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v8, 64, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).min(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v7, 64, Width::new(64));
+            let v11 = rt::Fp::new(64).min(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v8, 0, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).min(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMIN_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMin, V_read, V_set.
+pub(super) fn FMIN_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMIN_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v10 = b.extract(v7, 0, Width::new(32));
+            let v11 = b.extract(v8, 0, Width::new(32));
+            let v12 = rt::Fp::new(32).min(b, v10, v11);
+            let v13 = b.konst(Width::new(32), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v7, 32, Width::new(32));
+            let v16 = b.extract(v8, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).min(b, v15, v16);
+            let v18 = b.extract(v14, 0, Width::new(32));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s4 as u32, v19, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).min(b, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).min(b, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).min(b, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).min(b, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).min(b, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).min(b, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMLA_asimdelem_R_SD`.
+///
+/// Split on the word bits `0x40600800`.
+///
+/// Cut: ENV, FPMulAdd, V_read, V_set.
+pub(super) fn FMLA_asimdelem_R_SD(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMLA_asimdelem_R_SD;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40600800 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = st.v_read(b, s5 as u32, 64);
+            let v12 = b.extract(v10, 0, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s5 as u32, v24, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = st.v_read(b, s5 as u32, 64);
+            let v12 = b.extract(v10, 64, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s5 as u32, v24, None);
+            Ok(())
+        }
+        0x00200000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = st.v_read(b, s5 as u32, 64);
+            let v12 = b.extract(v10, 32, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s5 as u32, v24, None);
+            Ok(())
+        }
+        0x00200800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = st.v_read(b, s5 as u32, 64);
+            let v12 = b.extract(v10, 96, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s5 as u32, v24, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00400800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00600000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00600800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = st.v_read(b, s5 as u32, 128);
+            let v12 = b.extract(v10, 0, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v9, 64, Width::new(32));
+            let v26 = b.extract(v11, 64, Width::new(32));
+            let v27 = rt::Fp::new(32).mul_add(b, v26, v25, v12);
+            let v28 = b.extract(v24, 96, Width::new(32));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v24, 0, Width::new(64));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v9, 96, Width::new(32));
+            let v33 = b.extract(v11, 96, Width::new(32));
+            let v34 = rt::Fp::new(32).mul_add(b, v33, v32, v12);
+            let v35 = b.extract(v31, 0, Width::new(96));
+            let v36 = b.concat(v34, v35);
+            st.v_set(b, s5 as u32, v36, None);
+            Ok(())
+        }
+        0x40000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = st.v_read(b, s5 as u32, 128);
+            let v12 = b.extract(v10, 64, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v9, 64, Width::new(32));
+            let v26 = b.extract(v11, 64, Width::new(32));
+            let v27 = rt::Fp::new(32).mul_add(b, v26, v25, v12);
+            let v28 = b.extract(v24, 96, Width::new(32));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v24, 0, Width::new(64));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v9, 96, Width::new(32));
+            let v33 = b.extract(v11, 96, Width::new(32));
+            let v34 = rt::Fp::new(32).mul_add(b, v33, v32, v12);
+            let v35 = b.extract(v31, 0, Width::new(96));
+            let v36 = b.concat(v34, v35);
+            st.v_set(b, s5 as u32, v36, None);
+            Ok(())
+        }
+        0x40200000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = st.v_read(b, s5 as u32, 128);
+            let v12 = b.extract(v10, 32, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v9, 64, Width::new(32));
+            let v26 = b.extract(v11, 64, Width::new(32));
+            let v27 = rt::Fp::new(32).mul_add(b, v26, v25, v12);
+            let v28 = b.extract(v24, 96, Width::new(32));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v24, 0, Width::new(64));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v9, 96, Width::new(32));
+            let v33 = b.extract(v11, 96, Width::new(32));
+            let v34 = rt::Fp::new(32).mul_add(b, v33, v32, v12);
+            let v35 = b.extract(v31, 0, Width::new(96));
+            let v36 = b.concat(v34, v35);
+            st.v_set(b, s5 as u32, v36, None);
+            Ok(())
+        }
+        0x40200800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = st.v_read(b, s5 as u32, 128);
+            let v12 = b.extract(v10, 96, Width::new(32));
+            let v13 = b.extract(v9, 0, Width::new(32));
+            let v14 = b.extract(v11, 0, Width::new(32));
+            let v15 = rt::Fp::new(32).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(96), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 32, Width::new(32));
+            let v19 = b.extract(v11, 32, Width::new(32));
+            let v20 = rt::Fp::new(32).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 64, Width::new(64));
+            let v22 = b.concat(v21, v20);
+            let v23 = b.extract(v17, 0, Width::new(32));
+            let v24 = b.concat(v22, v23);
+            let v25 = b.extract(v9, 64, Width::new(32));
+            let v26 = b.extract(v11, 64, Width::new(32));
+            let v27 = rt::Fp::new(32).mul_add(b, v26, v25, v12);
+            let v28 = b.extract(v24, 96, Width::new(32));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v24, 0, Width::new(64));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v9, 96, Width::new(32));
+            let v33 = b.extract(v11, 96, Width::new(32));
+            let v34 = rt::Fp::new(32).mul_add(b, v33, v32, v12);
+            let v35 = b.extract(v31, 0, Width::new(96));
+            let v36 = b.concat(v34, v35);
+            st.v_set(b, s5 as u32, v36, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = st.v_read(b, s5 as u32, 128);
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = b.extract(v11, 0, Width::new(64));
+            let v14 = rt::Fp::new(64).mul_add(b, v13, v12, v10);
+            let v15 = b.konst(Width::new(64), 0x0);
+            let v16 = b.concat(v15, v14);
+            let v17 = b.extract(v9, 64, Width::new(64));
+            let v18 = b.extract(v11, 64, Width::new(64));
+            let v19 = rt::Fp::new(64).mul_add(b, v18, v17, v10);
+            let v20 = b.extract(v16, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            st.v_set(b, s5 as u32, v21, None);
+            Ok(())
+        }
+        0x40400800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = st.v_read(b, s5 as u32, 128);
+            let v12 = b.extract(v10, 64, Width::new(64));
+            let v13 = b.extract(v9, 0, Width::new(64));
+            let v14 = b.extract(v11, 0, Width::new(64));
+            let v15 = rt::Fp::new(64).mul_add(b, v14, v13, v12);
+            let v16 = b.konst(Width::new(64), 0x0);
+            let v17 = b.concat(v16, v15);
+            let v18 = b.extract(v9, 64, Width::new(64));
+            let v19 = b.extract(v11, 64, Width::new(64));
+            let v20 = rt::Fp::new(64).mul_add(b, v19, v18, v12);
+            let v21 = b.extract(v17, 0, Width::new(64));
+            let v22 = b.concat(v20, v21);
+            st.v_set(b, s5 as u32, v22, None);
+            Ok(())
+        }
+        0x40600000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40600800 => {
+            return Err(LiftError::Undefined(ENC));
             Ok(())
         }
         _ => unreachable!(),
@@ -14381,6 +17621,616 @@ pub(super) fn FMOV_asimdimm_S_s(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `FMUL_asimdelem_R_SD`.
+///
+/// Split on the word bits `0x40600800`.
+///
+/// Cut: ENV, FPMul, V_read, V_set.
+pub(super) fn FMUL_asimdelem_R_SD(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMUL_asimdelem_R_SD;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40600800 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = b.extract(v10, 0, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            st.v_set(b, s5 as u32, v21, None);
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = b.extract(v10, 64, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            st.v_set(b, s5 as u32, v21, None);
+            Ok(())
+        }
+        0x00200000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = b.extract(v10, 32, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            st.v_set(b, s5 as u32, v21, None);
+            Ok(())
+        }
+        0x00200800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 64);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = b.extract(v10, 96, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            st.v_set(b, s5 as u32, v21, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00400800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00600000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x00600800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = b.extract(v10, 0, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v9, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Mul, v22, v11);
+            let v24 = b.extract(v21, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v21, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v9, 96, Width::new(32));
+            let v29 = rt::Fp::new(32).bin(b, FpOp::Mul, v28, v11);
+            let v30 = b.extract(v27, 0, Width::new(96));
+            let v31 = b.concat(v29, v30);
+            st.v_set(b, s5 as u32, v31, None);
+            Ok(())
+        }
+        0x40000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = b.extract(v10, 64, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v9, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Mul, v22, v11);
+            let v24 = b.extract(v21, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v21, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v9, 96, Width::new(32));
+            let v29 = rt::Fp::new(32).bin(b, FpOp::Mul, v28, v11);
+            let v30 = b.extract(v27, 0, Width::new(96));
+            let v31 = b.concat(v29, v30);
+            st.v_set(b, s5 as u32, v31, None);
+            Ok(())
+        }
+        0x40200000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = b.extract(v10, 32, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v9, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Mul, v22, v11);
+            let v24 = b.extract(v21, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v21, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v9, 96, Width::new(32));
+            let v29 = rt::Fp::new(32).bin(b, FpOp::Mul, v28, v11);
+            let v30 = b.extract(v27, 0, Width::new(96));
+            let v31 = b.concat(v29, v30);
+            st.v_set(b, s5 as u32, v31, None);
+            Ok(())
+        }
+        0x40200800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = b.extract(v10, 96, Width::new(32));
+            let v12 = b.extract(v9, 0, Width::new(32));
+            let v13 = rt::Fp::new(32).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(96), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 32, Width::new(32));
+            let v17 = rt::Fp::new(32).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 64, Width::new(64));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v15, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v9, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Mul, v22, v11);
+            let v24 = b.extract(v21, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v21, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v9, 96, Width::new(32));
+            let v29 = rt::Fp::new(32).bin(b, FpOp::Mul, v28, v11);
+            let v30 = b.extract(v27, 0, Width::new(96));
+            let v31 = b.concat(v29, v30);
+            st.v_set(b, s5 as u32, v31, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 64);
+            let v11 = b.extract(v9, 0, Width::new(64));
+            let v12 = rt::Fp::new(64).bin(b, FpOp::Mul, v11, v10);
+            let v13 = b.konst(Width::new(64), 0x0);
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v9, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).bin(b, FpOp::Mul, v15, v10);
+            let v17 = b.extract(v14, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s5 as u32, v18, None);
+            Ok(())
+        }
+        0x40400800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: i128 = s1 as i128;
+            let s6: i128 = s2 as i128;
+            let s7: u128 = (s4 << 4) | s3;
+            let s8: i128 = s7 as i128;
+            let v9 = st.v_read(b, s6 as u32, 128);
+            let v10 = st.v_read(b, s8 as u32, 128);
+            let v11 = b.extract(v10, 64, Width::new(64));
+            let v12 = b.extract(v9, 0, Width::new(64));
+            let v13 = rt::Fp::new(64).bin(b, FpOp::Mul, v12, v11);
+            let v14 = b.konst(Width::new(64), 0x0);
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v9, 64, Width::new(64));
+            let v17 = rt::Fp::new(64).bin(b, FpOp::Mul, v16, v11);
+            let v18 = b.extract(v15, 0, Width::new(64));
+            let v19 = b.concat(v17, v18);
+            st.v_set(b, s5 as u32, v19, None);
+            Ok(())
+        }
+        0x40600000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40600800 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMUL_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPMul, V_read, V_set.
+pub(super) fn FMUL_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMUL_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Mul, v9, v10);
+            let v12 = b.konst(Width::new(32), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Mul, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Mul, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Mul, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Mul, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).bin(b, FpOp::Mul, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).bin(b, FpOp::Mul, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).bin(b, FpOp::Mul, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FMUL_asisdelem_R_SD`.
+///
+/// Split on the word bits `0x00400800`.
+///
+/// Cut: ENV, FPMul, IsFeatureImplemented, V_read, V_set.
+pub(super) fn FMUL_asisdelem_R_SD(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FMUL_asisdelem_R_SD;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x00400800 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: u128 = (w >> 21) & 0x1;
+            let s6: u128 = (0x0u128 << 1) | s5;
+            let s7: u128 = (s6 >> 1) & 0x1;
+            let s8: bool = s7 == 0x0u128;
+            let s9: u128 = (0x0u128 << 1) | s5;
+            let s10: i128 = s9 as i128;
+            let s11: bool = !s8;
+            let s12: bool = s6 == 0x2u128;
+            let s13: bool = s11 && s12;
+            let s14: bool = !s12;
+            let s15: bool = s11 && s14;
+            let s16: bool = s6 == 0x3u128;
+            let s17: bool = s15 && s16;
+            if s17 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s20: i128 = if s8 { s10 } else { (0i128) };
+            let s21: bool = s8 || s13;
+            let s22: i128 = s1 as i128;
+            let s23: i128 = s2 as i128;
+            let s24: u128 = (s4 << 4) | s3;
+            let s25: i128 = s24 as i128;
+            let v26 = st.v_read(b, s23 as u32, 32);
+            let v27 = st.v_read(b, s25 as u32, 64);
+            let s31: i128 = s20.wrapping_mul((32i128));
+            let v37 = b.konst(Width::new(128), (s31) as u128);
+            let v38 = b.bin(BinOp::LShr, v27, v37);
+            let v39 = b.extract(v38, 0, Width::new(32));
+            let v40 = rt::Fp::new(32).bin(b, FpOp::Mul, v26, v39);
+            let v41 = b.konst(Width::new(96), 0x0);
+            let v42 = b.concat(v41, v40);
+            if s21 {
+                st.v_set(b, s22 as u32, v42, None);
+            }
+            Ok(())
+        }
+        0x00000800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: u128 = (w >> 21) & 0x1;
+            let s6: u128 = (0x0u128 << 1) | s5;
+            let s7: u128 = (s6 >> 1) & 0x1;
+            let s8: bool = s7 == 0x0u128;
+            let s9: u128 = (0x1u128 << 1) | s5;
+            let s10: i128 = s9 as i128;
+            let s11: bool = !s8;
+            let s12: bool = s6 == 0x2u128;
+            let s13: bool = s11 && s12;
+            let s14: bool = !s12;
+            let s15: bool = s11 && s14;
+            let s16: bool = s6 == 0x3u128;
+            let s17: bool = s15 && s16;
+            if s17 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s20: i128 = if s8 { s10 } else { (1i128) };
+            let s21: bool = s8 || s13;
+            let s22: i128 = s1 as i128;
+            let s23: i128 = s2 as i128;
+            let s24: u128 = (s4 << 4) | s3;
+            let s25: i128 = s24 as i128;
+            let v26 = st.v_read(b, s23 as u32, 32);
+            let v27 = st.v_read(b, s25 as u32, 128);
+            let s31: i128 = s20.wrapping_mul((32i128));
+            let v37 = b.konst(Width::new(128), (s31) as u128);
+            let v38 = b.bin(BinOp::LShr, v27, v37);
+            let v39 = b.extract(v38, 0, Width::new(32));
+            let v40 = rt::Fp::new(32).bin(b, FpOp::Mul, v26, v39);
+            let v41 = b.konst(Width::new(96), 0x0);
+            let v42 = b.concat(v41, v40);
+            if s21 {
+                st.v_set(b, s22 as u32, v42, None);
+            }
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: u128 = (w >> 21) & 0x1;
+            let s6: u128 = (0x1u128 << 1) | s5;
+            let s7: u128 = (s6 >> 1) & 0x1;
+            let s8: bool = s7 == 0x0u128;
+            let s9: u128 = (0x0u128 << 1) | s5;
+            let s10: i128 = s9 as i128;
+            let s11: bool = !s8;
+            let s12: bool = s6 == 0x2u128;
+            let s13: bool = s11 && s12;
+            let s14: bool = !s12;
+            let s15: bool = s11 && s14;
+            let s16: bool = s6 == 0x3u128;
+            let s17: bool = s15 && s16;
+            if s17 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s20: i128 = if s8 { s10 } else { (0i128) };
+            let s21: bool = s8 || s13;
+            let s22: i128 = s1 as i128;
+            let s23: i128 = s2 as i128;
+            let s24: u128 = (s4 << 4) | s3;
+            let s25: i128 = s24 as i128;
+            let v26 = st.v_read(b, s23 as u32, 64);
+            let v27 = st.v_read(b, s25 as u32, 64);
+            let s31: i128 = s20.wrapping_mul((64i128));
+            let v37 = b.konst(Width::new(128), (s31) as u128);
+            let v38 = b.bin(BinOp::LShr, v27, v37);
+            let v39 = rt::Fp::new(64).bin(b, FpOp::Mul, v26, v38);
+            let v40 = b.konst(Width::new(64), 0x0);
+            let v41 = b.concat(v40, v39);
+            if s21 {
+                st.v_set(b, s22 as u32, v41, None);
+            }
+            Ok(())
+        }
+        0x00400800 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0xf;
+            let s4: u128 = (w >> 20) & 0x1;
+            let s5: u128 = (w >> 21) & 0x1;
+            let s6: u128 = (0x1u128 << 1) | s5;
+            let s7: u128 = (s6 >> 1) & 0x1;
+            let s8: bool = s7 == 0x0u128;
+            let s9: u128 = (0x1u128 << 1) | s5;
+            let s10: i128 = s9 as i128;
+            let s11: bool = !s8;
+            let s12: bool = s6 == 0x2u128;
+            let s13: bool = s11 && s12;
+            let s14: bool = !s12;
+            let s15: bool = s11 && s14;
+            let s16: bool = s6 == 0x3u128;
+            let s17: bool = s15 && s16;
+            if s17 {
+                return Err(LiftError::Undefined(ENC));
+            }
+            let s20: i128 = if s8 { s10 } else { (1i128) };
+            let s21: bool = s8 || s13;
+            let s22: i128 = s1 as i128;
+            let s23: i128 = s2 as i128;
+            let s24: u128 = (s4 << 4) | s3;
+            let s25: i128 = s24 as i128;
+            let v26 = st.v_read(b, s23 as u32, 64);
+            let v27 = st.v_read(b, s25 as u32, 128);
+            let s31: i128 = s20.wrapping_mul((64i128));
+            let v37 = b.konst(Width::new(128), (s31) as u128);
+            let v38 = b.bin(BinOp::LShr, v27, v37);
+            let v39 = b.extract(v38, 0, Width::new(64));
+            let v40 = rt::Fp::new(64).bin(b, FpOp::Mul, v26, v39);
+            let v41 = b.konst(Width::new(64), 0x0);
+            let v42 = b.concat(v41, v40);
+            if s21 {
+                st.v_set(b, s22 as u32, v42, None);
+            }
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `FNEG_asimdmisc_R`.
 ///
 /// Split on the word bits `0x40400000`.
@@ -14480,6 +18330,108 @@ pub(super) fn FNEG_asimdmisc_R(word: u32, b: &mut Builder, st: &mut St) -> Resul
             let v18 = b.extract(v12, 0, Width::new(64));
             let v19 = b.concat(v17, v18);
             st.v_set(b, s3 as u32, v19, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `FSUB_asimdsame_only`.
+///
+/// Split on the word bits `0x40400000`.
+///
+/// Cut: ENV, FPSub, V_read, V_set.
+pub(super) fn FSUB_asimdsame_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::FSUB_asimdsame_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40400000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Sub, v9, v10);
+            let v12 = b.konst(Width::new(32), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Sub, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(32));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
+            Ok(())
+        }
+        0x00400000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.extract(v8, 0, Width::new(32));
+            let v11 = rt::Fp::new(32).bin(b, FpOp::Sub, v9, v10);
+            let v12 = b.konst(Width::new(96), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 32, Width::new(32));
+            let v15 = b.extract(v8, 32, Width::new(32));
+            let v16 = rt::Fp::new(32).bin(b, FpOp::Sub, v14, v15);
+            let v17 = b.extract(v13, 64, Width::new(64));
+            let v18 = b.concat(v17, v16);
+            let v19 = b.extract(v13, 0, Width::new(32));
+            let v20 = b.concat(v18, v19);
+            let v21 = b.extract(v7, 64, Width::new(32));
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = rt::Fp::new(32).bin(b, FpOp::Sub, v21, v22);
+            let v24 = b.extract(v20, 96, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v20, 0, Width::new(64));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v7, 96, Width::new(32));
+            let v29 = b.extract(v8, 96, Width::new(32));
+            let v30 = rt::Fp::new(32).bin(b, FpOp::Sub, v28, v29);
+            let v31 = b.extract(v27, 0, Width::new(96));
+            let v32 = b.concat(v30, v31);
+            st.v_set(b, s4 as u32, v32, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.extract(v8, 0, Width::new(64));
+            let v11 = rt::Fp::new(64).bin(b, FpOp::Sub, v9, v10);
+            let v12 = b.konst(Width::new(64), 0x0);
+            let v13 = b.concat(v12, v11);
+            let v14 = b.extract(v7, 64, Width::new(64));
+            let v15 = b.extract(v8, 64, Width::new(64));
+            let v16 = rt::Fp::new(64).bin(b, FpOp::Sub, v14, v15);
+            let v17 = b.extract(v13, 0, Width::new(64));
+            let v18 = b.concat(v16, v17);
+            st.v_set(b, s4 as u32, v18, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -81533,6 +85485,608 @@ pub(super) fn USUBW_asimddiff_W(word: u32, b: &mut Builder, st: &mut St) -> Resu
     }
 }
 
+/// `UZP1_asimdperm_only`.
+///
+/// Split on the word bits `0x40c00000`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn UZP1_asimdperm_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UZP1_asimdperm_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40c00000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(8));
+            let v11 = b.konst(Width::new(56), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v9, 16, Width::new(8));
+            let v14 = b.extract(v12, 16, Width::new(48));
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v12, 0, Width::new(8));
+            let v17 = b.concat(v15, v16);
+            let v18 = b.extract(v9, 32, Width::new(8));
+            let v19 = b.extract(v17, 24, Width::new(40));
+            let v20 = b.concat(v19, v18);
+            let v21 = b.extract(v17, 0, Width::new(16));
+            let v22 = b.concat(v20, v21);
+            let v23 = b.extract(v9, 48, Width::new(8));
+            let v24 = b.extract(v22, 32, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v22, 0, Width::new(24));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v9, 64, Width::new(8));
+            let v29 = b.extract(v27, 40, Width::new(24));
+            let v30 = b.concat(v29, v28);
+            let v31 = b.extract(v27, 0, Width::new(32));
+            let v32 = b.concat(v30, v31);
+            let v33 = b.extract(v9, 80, Width::new(8));
+            let v34 = b.extract(v32, 48, Width::new(16));
+            let v35 = b.concat(v34, v33);
+            let v36 = b.extract(v32, 0, Width::new(40));
+            let v37 = b.concat(v35, v36);
+            let v38 = b.extract(v9, 96, Width::new(8));
+            let v39 = b.extract(v37, 56, Width::new(8));
+            let v40 = b.concat(v39, v38);
+            let v41 = b.extract(v37, 0, Width::new(48));
+            let v42 = b.concat(v40, v41);
+            let v43 = b.extract(v9, 112, Width::new(8));
+            let v44 = b.extract(v42, 0, Width::new(56));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s4 as u32, v45, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(16));
+            let v11 = b.konst(Width::new(48), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v9, 32, Width::new(16));
+            let v14 = b.extract(v12, 32, Width::new(32));
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v12, 0, Width::new(16));
+            let v17 = b.concat(v15, v16);
+            let v18 = b.extract(v9, 64, Width::new(16));
+            let v19 = b.extract(v17, 48, Width::new(16));
+            let v20 = b.concat(v19, v18);
+            let v21 = b.extract(v17, 0, Width::new(32));
+            let v22 = b.concat(v20, v21);
+            let v23 = b.extract(v9, 96, Width::new(16));
+            let v24 = b.extract(v22, 0, Width::new(48));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s4 as u32, v25, None);
+            Ok(())
+        }
+        0x00800000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 0, Width::new(32));
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v9, 64, Width::new(32));
+            let v14 = b.extract(v12, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s4 as u32, v15, None);
+            Ok(())
+        }
+        0x00c00000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(8));
+            let v10 = b.konst(Width::new(120), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 16, Width::new(8));
+            let v13 = b.extract(v11, 16, Width::new(112));
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v11, 0, Width::new(8));
+            let v16 = b.concat(v14, v15);
+            let v17 = b.extract(v7, 32, Width::new(8));
+            let v18 = b.extract(v16, 24, Width::new(104));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v16, 0, Width::new(16));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v7, 48, Width::new(8));
+            let v23 = b.extract(v21, 32, Width::new(96));
+            let v24 = b.concat(v23, v22);
+            let v25 = b.extract(v21, 0, Width::new(24));
+            let v26 = b.concat(v24, v25);
+            let v27 = b.extract(v7, 64, Width::new(8));
+            let v28 = b.extract(v26, 40, Width::new(88));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v26, 0, Width::new(32));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v7, 80, Width::new(8));
+            let v33 = b.extract(v31, 48, Width::new(80));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v31, 0, Width::new(40));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v7, 96, Width::new(8));
+            let v38 = b.extract(v36, 56, Width::new(72));
+            let v39 = b.concat(v38, v37);
+            let v40 = b.extract(v36, 0, Width::new(48));
+            let v41 = b.concat(v39, v40);
+            let v42 = b.extract(v7, 112, Width::new(8));
+            let v43 = b.extract(v41, 64, Width::new(64));
+            let v44 = b.concat(v43, v42);
+            let v45 = b.extract(v41, 0, Width::new(56));
+            let v46 = b.concat(v44, v45);
+            let v47 = b.extract(v8, 0, Width::new(8));
+            let v48 = b.extract(v46, 72, Width::new(56));
+            let v49 = b.concat(v48, v47);
+            let v50 = b.extract(v46, 0, Width::new(64));
+            let v51 = b.concat(v49, v50);
+            let v52 = b.extract(v8, 16, Width::new(8));
+            let v53 = b.extract(v51, 80, Width::new(48));
+            let v54 = b.concat(v53, v52);
+            let v55 = b.extract(v51, 0, Width::new(72));
+            let v56 = b.concat(v54, v55);
+            let v57 = b.extract(v8, 32, Width::new(8));
+            let v58 = b.extract(v56, 88, Width::new(40));
+            let v59 = b.concat(v58, v57);
+            let v60 = b.extract(v56, 0, Width::new(80));
+            let v61 = b.concat(v59, v60);
+            let v62 = b.extract(v8, 48, Width::new(8));
+            let v63 = b.extract(v61, 96, Width::new(32));
+            let v64 = b.concat(v63, v62);
+            let v65 = b.extract(v61, 0, Width::new(88));
+            let v66 = b.concat(v64, v65);
+            let v67 = b.extract(v8, 64, Width::new(8));
+            let v68 = b.extract(v66, 104, Width::new(24));
+            let v69 = b.concat(v68, v67);
+            let v70 = b.extract(v66, 0, Width::new(96));
+            let v71 = b.concat(v69, v70);
+            let v72 = b.extract(v8, 80, Width::new(8));
+            let v73 = b.extract(v71, 112, Width::new(16));
+            let v74 = b.concat(v73, v72);
+            let v75 = b.extract(v71, 0, Width::new(104));
+            let v76 = b.concat(v74, v75);
+            let v77 = b.extract(v8, 96, Width::new(8));
+            let v78 = b.extract(v76, 120, Width::new(8));
+            let v79 = b.concat(v78, v77);
+            let v80 = b.extract(v76, 0, Width::new(112));
+            let v81 = b.concat(v79, v80);
+            let v82 = b.extract(v8, 112, Width::new(8));
+            let v83 = b.extract(v81, 0, Width::new(120));
+            let v84 = b.concat(v82, v83);
+            st.v_set(b, s4 as u32, v84, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(16));
+            let v10 = b.konst(Width::new(112), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 32, Width::new(16));
+            let v13 = b.extract(v11, 32, Width::new(96));
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v11, 0, Width::new(16));
+            let v16 = b.concat(v14, v15);
+            let v17 = b.extract(v7, 64, Width::new(16));
+            let v18 = b.extract(v16, 48, Width::new(80));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v16, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v7, 96, Width::new(16));
+            let v23 = b.extract(v21, 64, Width::new(64));
+            let v24 = b.concat(v23, v22);
+            let v25 = b.extract(v21, 0, Width::new(48));
+            let v26 = b.concat(v24, v25);
+            let v27 = b.extract(v8, 0, Width::new(16));
+            let v28 = b.extract(v26, 80, Width::new(48));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v26, 0, Width::new(64));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v8, 32, Width::new(16));
+            let v33 = b.extract(v31, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v31, 0, Width::new(80));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v8, 64, Width::new(16));
+            let v38 = b.extract(v36, 112, Width::new(16));
+            let v39 = b.concat(v38, v37);
+            let v40 = b.extract(v36, 0, Width::new(96));
+            let v41 = b.concat(v39, v40);
+            let v42 = b.extract(v8, 96, Width::new(16));
+            let v43 = b.extract(v41, 0, Width::new(112));
+            let v44 = b.concat(v42, v43);
+            st.v_set(b, s4 as u32, v44, None);
+            Ok(())
+        }
+        0x40800000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(32));
+            let v10 = b.konst(Width::new(96), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 64, Width::new(32));
+            let v13 = b.extract(v11, 64, Width::new(64));
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v11, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            let v17 = b.extract(v8, 0, Width::new(32));
+            let v18 = b.extract(v16, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v16, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v8, 64, Width::new(32));
+            let v23 = b.extract(v21, 0, Width::new(96));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        0x40c00000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 0, Width::new(64));
+            let v10 = b.konst(Width::new(64), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v8, 0, Width::new(64));
+            let v13 = b.extract(v11, 0, Width::new(64));
+            let v14 = b.concat(v12, v13);
+            st.v_set(b, s4 as u32, v14, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// `UZP2_asimdperm_only`.
+///
+/// Split on the word bits `0x40c00000`.
+///
+/// Cut: ENV, V_read, V_set.
+pub(super) fn UZP2_asimdperm_only(
+    word: u32,
+    b: &mut Builder,
+    st: &mut St,
+) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::UZP2_asimdperm_only;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    match word & 0x40c00000 {
+        0x00000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 8, Width::new(8));
+            let v11 = b.konst(Width::new(56), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v9, 24, Width::new(8));
+            let v14 = b.extract(v12, 16, Width::new(48));
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v12, 0, Width::new(8));
+            let v17 = b.concat(v15, v16);
+            let v18 = b.extract(v9, 40, Width::new(8));
+            let v19 = b.extract(v17, 24, Width::new(40));
+            let v20 = b.concat(v19, v18);
+            let v21 = b.extract(v17, 0, Width::new(16));
+            let v22 = b.concat(v20, v21);
+            let v23 = b.extract(v9, 56, Width::new(8));
+            let v24 = b.extract(v22, 32, Width::new(32));
+            let v25 = b.concat(v24, v23);
+            let v26 = b.extract(v22, 0, Width::new(24));
+            let v27 = b.concat(v25, v26);
+            let v28 = b.extract(v9, 72, Width::new(8));
+            let v29 = b.extract(v27, 40, Width::new(24));
+            let v30 = b.concat(v29, v28);
+            let v31 = b.extract(v27, 0, Width::new(32));
+            let v32 = b.concat(v30, v31);
+            let v33 = b.extract(v9, 88, Width::new(8));
+            let v34 = b.extract(v32, 48, Width::new(16));
+            let v35 = b.concat(v34, v33);
+            let v36 = b.extract(v32, 0, Width::new(40));
+            let v37 = b.concat(v35, v36);
+            let v38 = b.extract(v9, 104, Width::new(8));
+            let v39 = b.extract(v37, 56, Width::new(8));
+            let v40 = b.concat(v39, v38);
+            let v41 = b.extract(v37, 0, Width::new(48));
+            let v42 = b.concat(v40, v41);
+            let v43 = b.extract(v9, 120, Width::new(8));
+            let v44 = b.extract(v42, 0, Width::new(56));
+            let v45 = b.concat(v43, v44);
+            st.v_set(b, s4 as u32, v45, None);
+            Ok(())
+        }
+        0x00400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 16, Width::new(16));
+            let v11 = b.konst(Width::new(48), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v9, 48, Width::new(16));
+            let v14 = b.extract(v12, 32, Width::new(32));
+            let v15 = b.concat(v14, v13);
+            let v16 = b.extract(v12, 0, Width::new(16));
+            let v17 = b.concat(v15, v16);
+            let v18 = b.extract(v9, 80, Width::new(16));
+            let v19 = b.extract(v17, 48, Width::new(16));
+            let v20 = b.concat(v19, v18);
+            let v21 = b.extract(v17, 0, Width::new(32));
+            let v22 = b.concat(v20, v21);
+            let v23 = b.extract(v9, 112, Width::new(16));
+            let v24 = b.extract(v22, 0, Width::new(48));
+            let v25 = b.concat(v23, v24);
+            st.v_set(b, s4 as u32, v25, None);
+            Ok(())
+        }
+        0x00800000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 64);
+            let v8 = st.v_read(b, s6 as u32, 64);
+            let v9 = b.concat(v8, v7);
+            let v10 = b.extract(v9, 32, Width::new(32));
+            let v11 = b.konst(Width::new(32), 0x0);
+            let v12 = b.concat(v11, v10);
+            let v13 = b.extract(v9, 96, Width::new(32));
+            let v14 = b.extract(v12, 0, Width::new(32));
+            let v15 = b.concat(v13, v14);
+            st.v_set(b, s4 as u32, v15, None);
+            Ok(())
+        }
+        0x00c00000 => {
+            return Err(LiftError::Undefined(ENC));
+            Ok(())
+        }
+        0x40000000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 8, Width::new(8));
+            let v10 = b.konst(Width::new(120), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 24, Width::new(8));
+            let v13 = b.extract(v11, 16, Width::new(112));
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v11, 0, Width::new(8));
+            let v16 = b.concat(v14, v15);
+            let v17 = b.extract(v7, 40, Width::new(8));
+            let v18 = b.extract(v16, 24, Width::new(104));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v16, 0, Width::new(16));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v7, 56, Width::new(8));
+            let v23 = b.extract(v21, 32, Width::new(96));
+            let v24 = b.concat(v23, v22);
+            let v25 = b.extract(v21, 0, Width::new(24));
+            let v26 = b.concat(v24, v25);
+            let v27 = b.extract(v7, 72, Width::new(8));
+            let v28 = b.extract(v26, 40, Width::new(88));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v26, 0, Width::new(32));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v7, 88, Width::new(8));
+            let v33 = b.extract(v31, 48, Width::new(80));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v31, 0, Width::new(40));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v7, 104, Width::new(8));
+            let v38 = b.extract(v36, 56, Width::new(72));
+            let v39 = b.concat(v38, v37);
+            let v40 = b.extract(v36, 0, Width::new(48));
+            let v41 = b.concat(v39, v40);
+            let v42 = b.extract(v7, 120, Width::new(8));
+            let v43 = b.extract(v41, 64, Width::new(64));
+            let v44 = b.concat(v43, v42);
+            let v45 = b.extract(v41, 0, Width::new(56));
+            let v46 = b.concat(v44, v45);
+            let v47 = b.extract(v8, 8, Width::new(8));
+            let v48 = b.extract(v46, 72, Width::new(56));
+            let v49 = b.concat(v48, v47);
+            let v50 = b.extract(v46, 0, Width::new(64));
+            let v51 = b.concat(v49, v50);
+            let v52 = b.extract(v8, 24, Width::new(8));
+            let v53 = b.extract(v51, 80, Width::new(48));
+            let v54 = b.concat(v53, v52);
+            let v55 = b.extract(v51, 0, Width::new(72));
+            let v56 = b.concat(v54, v55);
+            let v57 = b.extract(v8, 40, Width::new(8));
+            let v58 = b.extract(v56, 88, Width::new(40));
+            let v59 = b.concat(v58, v57);
+            let v60 = b.extract(v56, 0, Width::new(80));
+            let v61 = b.concat(v59, v60);
+            let v62 = b.extract(v8, 56, Width::new(8));
+            let v63 = b.extract(v61, 96, Width::new(32));
+            let v64 = b.concat(v63, v62);
+            let v65 = b.extract(v61, 0, Width::new(88));
+            let v66 = b.concat(v64, v65);
+            let v67 = b.extract(v8, 72, Width::new(8));
+            let v68 = b.extract(v66, 104, Width::new(24));
+            let v69 = b.concat(v68, v67);
+            let v70 = b.extract(v66, 0, Width::new(96));
+            let v71 = b.concat(v69, v70);
+            let v72 = b.extract(v8, 88, Width::new(8));
+            let v73 = b.extract(v71, 112, Width::new(16));
+            let v74 = b.concat(v73, v72);
+            let v75 = b.extract(v71, 0, Width::new(104));
+            let v76 = b.concat(v74, v75);
+            let v77 = b.extract(v8, 104, Width::new(8));
+            let v78 = b.extract(v76, 120, Width::new(8));
+            let v79 = b.concat(v78, v77);
+            let v80 = b.extract(v76, 0, Width::new(112));
+            let v81 = b.concat(v79, v80);
+            let v82 = b.extract(v8, 120, Width::new(8));
+            let v83 = b.extract(v81, 0, Width::new(120));
+            let v84 = b.concat(v82, v83);
+            st.v_set(b, s4 as u32, v84, None);
+            Ok(())
+        }
+        0x40400000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 16, Width::new(16));
+            let v10 = b.konst(Width::new(112), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 48, Width::new(16));
+            let v13 = b.extract(v11, 32, Width::new(96));
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v11, 0, Width::new(16));
+            let v16 = b.concat(v14, v15);
+            let v17 = b.extract(v7, 80, Width::new(16));
+            let v18 = b.extract(v16, 48, Width::new(80));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v16, 0, Width::new(32));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v7, 112, Width::new(16));
+            let v23 = b.extract(v21, 64, Width::new(64));
+            let v24 = b.concat(v23, v22);
+            let v25 = b.extract(v21, 0, Width::new(48));
+            let v26 = b.concat(v24, v25);
+            let v27 = b.extract(v8, 16, Width::new(16));
+            let v28 = b.extract(v26, 80, Width::new(48));
+            let v29 = b.concat(v28, v27);
+            let v30 = b.extract(v26, 0, Width::new(64));
+            let v31 = b.concat(v29, v30);
+            let v32 = b.extract(v8, 48, Width::new(16));
+            let v33 = b.extract(v31, 96, Width::new(32));
+            let v34 = b.concat(v33, v32);
+            let v35 = b.extract(v31, 0, Width::new(80));
+            let v36 = b.concat(v34, v35);
+            let v37 = b.extract(v8, 80, Width::new(16));
+            let v38 = b.extract(v36, 112, Width::new(16));
+            let v39 = b.concat(v38, v37);
+            let v40 = b.extract(v36, 0, Width::new(96));
+            let v41 = b.concat(v39, v40);
+            let v42 = b.extract(v8, 112, Width::new(16));
+            let v43 = b.extract(v41, 0, Width::new(112));
+            let v44 = b.concat(v42, v43);
+            st.v_set(b, s4 as u32, v44, None);
+            Ok(())
+        }
+        0x40800000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 32, Width::new(32));
+            let v10 = b.konst(Width::new(96), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v7, 96, Width::new(32));
+            let v13 = b.extract(v11, 64, Width::new(64));
+            let v14 = b.concat(v13, v12);
+            let v15 = b.extract(v11, 0, Width::new(32));
+            let v16 = b.concat(v14, v15);
+            let v17 = b.extract(v8, 32, Width::new(32));
+            let v18 = b.extract(v16, 96, Width::new(32));
+            let v19 = b.concat(v18, v17);
+            let v20 = b.extract(v16, 0, Width::new(64));
+            let v21 = b.concat(v19, v20);
+            let v22 = b.extract(v8, 96, Width::new(32));
+            let v23 = b.extract(v21, 0, Width::new(96));
+            let v24 = b.concat(v22, v23);
+            st.v_set(b, s4 as u32, v24, None);
+            Ok(())
+        }
+        0x40c00000 => {
+            let s1: u128 = (w >> 0) & 0x1f;
+            let s2: u128 = (w >> 5) & 0x1f;
+            let s3: u128 = (w >> 16) & 0x1f;
+            let s4: i128 = s1 as i128;
+            let s5: i128 = s2 as i128;
+            let s6: i128 = s3 as i128;
+            let v7 = st.v_read(b, s5 as u32, 128);
+            let v8 = st.v_read(b, s6 as u32, 128);
+            let v9 = b.extract(v7, 64, Width::new(64));
+            let v10 = b.konst(Width::new(64), 0x0);
+            let v11 = b.concat(v10, v9);
+            let v12 = b.extract(v8, 64, Width::new(64));
+            let v13 = b.extract(v11, 0, Width::new(64));
+            let v14 = b.concat(v12, v13);
+            st.v_set(b, s4 as u32, v14, None);
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// `XTN_asimdmisc_N`.
 ///
 /// Split on the word bits `0x00c00000`.
@@ -82284,6 +86838,7 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
         Encoding::ABS_asimdmisc_R => ABS_asimdmisc_R,
         Encoding::ADDHN_asimddiff_N => ADDHN_asimddiff_N,
+        Encoding::ADDP_asimdsame_only => ADDP_asimdsame_only,
         Encoding::ADDP_asisdpair_only => ADDP_asisdpair_only,
         Encoding::ADDV_asimdall_only => ADDV_asimdall_only,
         Encoding::ADD_asimdsame_only => ADD_asimdsame_only,
@@ -82306,10 +86861,36 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::DUP_asimdins_DV_v => DUP_asimdins_DV_v,
         Encoding::DUP_asisdone_only => DUP_asisdone_only,
         Encoding::EOR_asimdsame_only => EOR_asimdsame_only,
+        Encoding::EXT_asimdext_only => EXT_asimdext_only,
+        Encoding::FABD_asimdsame_only => FABD_asimdsame_only,
+        Encoding::FABD_asisdsame_only => FABD_asisdsame_only,
         Encoding::FABS_asimdmisc_R => FABS_asimdmisc_R,
+        Encoding::FADDP_asimdsame_only => FADDP_asimdsame_only,
+        Encoding::FADDP_asisdpair_only_SD => FADDP_asisdpair_only_SD,
+        Encoding::FADD_asimdsame_only => FADD_asimdsame_only,
+        Encoding::FCMEQ_asimdmisc_FZ => FCMEQ_asimdmisc_FZ,
+        Encoding::FCMEQ_asimdsame_only => FCMEQ_asimdsame_only,
+        Encoding::FCMGE_asimdmisc_FZ => FCMGE_asimdmisc_FZ,
+        Encoding::FCMGE_asimdsame_only => FCMGE_asimdsame_only,
+        Encoding::FCMGT_asimdmisc_FZ => FCMGT_asimdmisc_FZ,
+        Encoding::FCMGT_asimdsame_only => FCMGT_asimdsame_only,
+        Encoding::FCMLE_asimdmisc_FZ => FCMLE_asimdmisc_FZ,
+        Encoding::FCMLT_asimdmisc_FZ => FCMLT_asimdmisc_FZ,
+        Encoding::FDIV_asimdsame_only => FDIV_asimdsame_only,
+        Encoding::FMAXNM_asimdsame_only => FMAXNM_asimdsame_only,
+        Encoding::FMAXP_asimdsame_only => FMAXP_asimdsame_only,
+        Encoding::FMAX_asimdsame_only => FMAX_asimdsame_only,
+        Encoding::FMINNM_asimdsame_only => FMINNM_asimdsame_only,
+        Encoding::FMINP_asimdsame_only => FMINP_asimdsame_only,
+        Encoding::FMIN_asimdsame_only => FMIN_asimdsame_only,
+        Encoding::FMLA_asimdelem_R_SD => FMLA_asimdelem_R_SD,
         Encoding::FMOV_asimdimm_D2_d => FMOV_asimdimm_D2_d,
         Encoding::FMOV_asimdimm_S_s => FMOV_asimdimm_S_s,
+        Encoding::FMUL_asimdelem_R_SD => FMUL_asimdelem_R_SD,
+        Encoding::FMUL_asimdsame_only => FMUL_asimdsame_only,
+        Encoding::FMUL_asisdelem_R_SD => FMUL_asisdelem_R_SD,
         Encoding::FNEG_asimdmisc_R => FNEG_asimdmisc_R,
+        Encoding::FSUB_asimdsame_only => FSUB_asimdsame_only,
         Encoding::INS_asimdins_IR_r => INS_asimdins_IR_r,
         Encoding::INS_asimdins_IV_v => INS_asimdins_IV_v,
         Encoding::LD1R_asisdlso_R1 => LD1R_asisdlso_R1,
@@ -82429,6 +87010,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::USHR_asimdshf_R => USHR_asimdshf_R,
         Encoding::USRA_asimdshf_R => USRA_asimdshf_R,
         Encoding::USUBW_asimddiff_W => USUBW_asimddiff_W,
+        Encoding::UZP1_asimdperm_only => UZP1_asimdperm_only,
+        Encoding::UZP2_asimdperm_only => UZP2_asimdperm_only,
         Encoding::XTN_asimdmisc_N => XTN_asimdmisc_N,
         Encoding::ZIP1_asimdperm_only => ZIP1_asimdperm_only,
         Encoding::ZIP2_asimdperm_only => ZIP2_asimdperm_only,

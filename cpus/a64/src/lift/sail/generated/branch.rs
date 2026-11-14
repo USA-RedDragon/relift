@@ -6,7 +6,7 @@
 
 #![allow(non_snake_case, unused, clippy::all)]
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, Order, UnOp, Width};
+use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, Order, UnOp, Width};
 
 use crate::decode::Encoding;
 use crate::lift::LiftError;
