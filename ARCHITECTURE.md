@@ -98,6 +98,7 @@ All of these run in `cargo test` and in CI's checks job.
 | No guest reaches another guest (each `guests/<name>/` is one guest, `testguest/` another) | `workspace_charter.rs`: `no_guest_reaches_another_guest` |
 | `override/` crates reach no tool crate | `workspace_charter.rs`: `override_reaches_no_tool_crate` |
 | Nothing reaches `check/`; it stays its own workspace and is excluded | `workspace_charter.rs`: `nothing_reaches_check` |
+| No cipher crate (`aes`, `ctr`, `xts-mode`, `cipher`, ...) is anywhere in the resolved graph; control: `sha2` and `digest` are found | `workspace_charter.rs`: `no_crypto_crate_is_in_the_graph` |
 | The charter reads this tree and its walk recurses | `workspace_charter.rs`: `the_reader_reads_this_workspace` |
 | `unsafe_code = "forbid"` for the workspace; every member inherits it or is on the roster with its own `deny` pair | `relift/tests/unsafe_roster.rs`: `the_workspace_lint_table_forbids_unsafe_code`, `every_member_inherits_the_forbid_or_is_rostered` |
 | No `unsafe` outside the roster; each rostered crate reads exactly its ceiling | `unsafe_roster.rs`: `no_unrostered_member_spells_unsafe`, `each_rostered_crate_holds_its_unsafe_ceiling` |
