@@ -597,6 +597,9 @@ Not pattern matching. [verified: probe; see below]
   pair read only makes the CAS fail. 32-bit pairs use the 8-byte form.
 - CLREX (`rl_clrex`) and every `rl_svc` open the monitor, as an exception
   return does on hardware.
+- LSE atomics and compare-and-swap (`rl_atomic`, `rl_cas`), like plain
+  stores, leave the monitor as it is; whether a non-exclusive store by the
+  same PE clears the local monitor is IMPLEMENTATION DEFINED.
 
 Why not pattern matching: pairs that span blocks, calls or functions, STXR
 without a preceding LDXR, and CLREX all work with the emulation without any
@@ -638,6 +641,31 @@ probe; the recompiled test program is phase 4]
 
 Switch code targets Armv8.0 (Cortex-A57), so it has no LSE atomics and
 uses LDAXR/STLXR loops.
+
+## 8.1 LSE atomics
+
+Switch code does not use them, but other A64 guests may, so the helpers are
+in `a64/abi.h` (static inline, no runtime call):
+
+- `rl_atomic(mem, a, size, op, v, ord)`: LDADD, LDCLR, LDEOR, LDSET,
+  LDSMAX, LDSMIN, LDUMAX, LDUMIN and SWP (`op` is `RL_AT_*`) at size 1, 2, 4
+  or 8, as one host atomic read-modify-write. Returns the old value,
+  zero-extended. The ST<op> aliases are the same call with the result
+  dropped.
+- `rl_cas(mem, a, size, expected, v, ord)`: CAS, CASA, CASL, CASAL, and
+  CASP with 32-bit registers as size 8. Returns the old value; a failed
+  compare stores nothing.
+- `rl_cas128` (CASP with 64-bit registers) and `rl_atomic128` (FEAT_LSE128
+  LDCLRP, LDSETP, SWPP) as 16-byte compare-and-swap, a CAS loop for the
+  read-modify-writes. Both need `-mcx16` on x86-64 (`cmpxchg16b`).
+
+`ord` is `RL_ORD_PLAIN` for the plain forms and `RL_ORD_SC` for every
+acquire or release form, the same lowering as LDAR and STLR (section 9).
+The address must be aligned to the access size. Because these are host
+atomics on guest memory, they stay atomic against the exclusive helpers
+above and against other guest threads. [verified: `tests/test_atomic.c`,
+each operation and size against a plain C model, signed min/max cases,
+CAS success and failure, the 16-byte forms, and multi-threaded counters]
 
 ## 9. Memory ordering
 
@@ -847,6 +875,111 @@ are also call boundaries. [inferred]
     before performance work. [open]
 - `__builtin_fmaf`/`__builtin_fma` lower to an FMA instruction where the
   target has one and to libm's correctly rounded `fma` otherwise. [inferred]
+
+## 10.2 Crypto instructions
+
+`a64/crypto.h` has one function per guest instruction of FEAT_AES,
+FEAT_PMULL, FEAT_SHA1, FEAT_SHA256, FEAT_SHA512, FEAT_SM3 and FEAT_SM4:
+`rl_aese`, `rl_aesd`, `rl_aesmc`, `rl_aesimc`, `rl_pmull64` (PMULL and
+PMULL2 1Q), `rl_sha1{c,p,m,h,su0,su1}`,
+`rl_sha256{h,h2,su0,su1}`, `rl_sha512{h,h2,su0,su1}`,
+`rl_sm3{partw1,partw2,ss1,tt1a,tt1b,tt2a,tt2b}`, `rl_sm4e` and `rl_sm4ekey`.
+A vector register is an `rl_u128` holding the register's bits (element `e`
+of size `s` is bits `[e*s, e*s+s)`); `d` is the old destination value, `n`
+and `m` the Vn and Vm operands. The header does not cover the 8-bit PMULL
+or the FEAT_SHA3 instructions (EOR3, RAX1, XAR, BCAX), which are plain
+integer and bit operations.
+
+Each function calls a host path when the host has the instruction
+(`rl_crypto_host_features`, detected on the first call and cached) and
+otherwise a portable C path transcribed from the Arm pseudocode;
+`rl_<name>_portable` is always exported, for tests.
+
+| guest | arm64 host | x86-64 host | other |
+|---|---|---|---|
+| AESE, AESD, AESMC, AESIMC | `vaeseq_u8` ... (the same instructions) | AES-NI, mapping below | portable |
+| PMULL 1Q | `vmull_p64` | PCLMULQDQ imm 0x00 | portable |
+| SHA1C, SHA1P, SHA1M, SHA1SU0, SHA1SU1 | ARMv8 intrinsics | SHA-NI, mapping below | portable |
+| SHA1H | ARMv8 intrinsic | portable (a rotate) | portable |
+| SHA256H, SHA256H2, SHA256SU0, SHA256SU1 | ARMv8 intrinsics | SHA-NI, mapping below | portable |
+| SHA512* | ARMv8 intrinsics (FEAT_SHA512) | portable | portable |
+| SM3*, SM4E, SM4EKEY | ARMv8 intrinsics (FEAT_SM3, FEAT_SM4) | portable | portable |
+
+Detection: `getauxval(AT_HWCAP)` on Linux and Android arm64,
+`sysctlbyname("hw.optional.arm.FEAT_*")` on macOS and iOS, `cpuid` on
+x86-64 (AES, PCLMUL and SHA each also require SSSE3 and SSE4.1). Host
+functions carry target attributes, so `crypto.c` builds without `-march`
+flags.
+
+**AES on AES-NI.** Both ISAs keep byte `i` of the FIPS-197 state (column
+`i / 4`, row `i % 4`) in byte `i` of the register; only the order of the
+steps differs:
+
+- Arm (Arm ARM pseudocode of AESE, AESD, AESMC, AESIMC):
+  AESE = SubBytes(ShiftRows(state XOR key)),
+  AESD = InvSubBytes(InvShiftRows(state XOR key)), AESMC = MixColumns,
+  AESIMC = InvMixColumns.
+- Intel (S. Gueron, "Intel Advanced Encryption Standard (AES) New
+  Instructions Set", Intel white paper, rev. 3.01, 2012):
+  AESENC = MixColumns(SubBytes(ShiftRows(s))) XOR rk, AESENCLAST the same
+  without MixColumns, AESDEC and AESDECLAST the inverse steps in the same
+  shape, AESIMC = InvMixColumns.
+
+The round key is applied before the S-box on Arm and after MixColumns on
+x86-64, so:
+
+- AESE(d, k) = AESENCLAST(d XOR k, 0)
+- AESD(d, k) = AESDECLAST(d XOR k, 0)
+- AESIMC(x) = AESIMC(x)
+- AESMC(x) = AESENC(AESDECLAST(x, 0), 0): the InvShiftRows and
+  InvSubBytes of AESDECLAST are undone by the ShiftRows and SubBytes of
+  AESENC (the two commute: one permutes bytes, the other maps each byte),
+  leaving MixColumns.
+
+**SHA on SHA-NI** (Intel SDM, SHA1RNDS4, SHA1MSG1, SHA1MSG2, SHA256RNDS2,
+SHA256MSG1, SHA256MSG2):
+
+- SHA-1: Intel keeps A and W0 in the top word where Arm keeps them in word
+  0, so every operand is reversed by word (`pshufd 0x1b`). SHA1RNDS4 adds
+  its own round constant and takes E already added to W0, while Arm's Vm
+  holds W + K, so the constant is subtracted from each word (exact modulo
+  2^32) and E is added to word 0. Arm's choose, parity and majority are
+  selectors 0, 1 and 2. SHA1SU0(d, n, m) = rev(SHA1MSG1(rev d, rev n)) XOR
+  m; SHA1SU1(d, n) = rev(SHA1MSG2(rev d, rev n)).
+- SHA-256: Intel packs the state as ABEF and CDGH, Arm as ABCD and EFGH.
+  Four Arm rounds are two SHA256RNDS2 with the state repacked before and
+  after; SHA256H returns the new ABCD, SHA256H2 the new EFGH. The schedule
+  keeps W0 in word 0 on both: SHA256SU0(d, n) = SHA256MSG1(d, n) and
+  SHA256SU1(d, n, m) = SHA256MSG2(d + (n1, n2, n3, m0), m).
+
+[verified: `tests/test_crypto.c` checks the portable paths against
+FIPS-197 round states, the FIPS 180-4 and GB/T 32905 "abc" digests, the
+GB/T 32907 SM4 example and known PMULL products, then every host path
+against its portable path on random inputs; on an AMD Ryzen 9 7950X
+(x86-64 Linux) the AES, PMULL, SHA-1 and SHA-256 host paths match, on an
+Apple M2 (macOS) the AES, PMULL, SHA-1, SHA-256 and SHA-512 ones; SM3 and
+SM4 host paths are unexercised, as neither host has them]
+
+## 10.3 Half precision
+
+`a64/fp16.h` is IEEE binary16 on `uint16_t` bit patterns, for the IR's
+half-precision operations: `rl_fp16_add`, `_sub`, `_mul`, `_div`, `_sqrt`,
+`_muladd` (a * b + c, one rounding), `_round_int` (an `RL_RM_*` mode),
+`_to_f32`, `_to_f64` (exact), `_from_f32`, `_from_f64` (one rounding from
+the wider bits), `_from_int` and `_to_int` (32 or 64 bits, signed or
+unsigned; `_to_int` rounds in an `RL_RM_*` mode, saturates, and gives 0
+for a NaN). Arithmetic rounds to nearest even, sets no flags and does not
+flush subnormals. A NaN result is the first NaN operand quieted (sign and
+payload kept, bit 9 set), else the default NaN 0x7e00; the IR leaves Arm's
+NaN selection, FZ16 and AHP to the frontend (as for binary32 and binary64,
+section 10.1). Every result is computed exactly in integers and rounded
+once, so it does not depend on the host FPU or on `_Float16` support.
+The reference is `core/ir/src/half.rs`. [verified: `tests/test_fp16.c`,
+exhaustive round trips through binary32 and binary64, exhaustive square
+roots and round-to-integral, add, sub, mul and div against binary64 rounded
+once, fused multiply-add against an exact reference including sticky-bit
+cases, integer conversion edges and saturation; on x86-64 Linux and an
+Apple M2]
 
 ## 11. Crash mapping
 

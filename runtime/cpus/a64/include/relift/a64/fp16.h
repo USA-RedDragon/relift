@@ -1,7 +1,7 @@
 /**
  * @file relift/a64/fp16.h
  * @brief IEEE binary16 arithmetic on uint16_t bit patterns for the IR's
- * half-precision operations (docs/abi.md section 10.1).
+ * half-precision operations (docs/abi.md section 10.3).
  *
  * Round to nearest even (rl_fp16_round_int takes a mode), no FPSR flags, no
  * flush to zero. A NaN result is the first NaN operand quieted (sign and
