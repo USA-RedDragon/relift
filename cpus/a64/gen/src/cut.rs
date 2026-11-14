@@ -21,8 +21,9 @@
 //!   `rt::Fp` for FPCR zero; each use marks the template as assuming it.
 //! - CRYPTO: the table-driven AES and SM4 steps, as `relift_ir::CryptoOp`;
 //!   `verify_crypto` checks them against the Sail tables while generating.
-//! - Also `DecodeBitMasks`, `ConstrainUnpredictable` (refused at lift time)
-//!   and the integer quotient of SDIV and UDIV.
+//! - Also `DecodeBitMasks`, `ConstrainUnpredictable` (refused at lift time),
+//!   the integer quotient of SDIV and UDIV, and the unsigned estimates of
+//!   URECPE and URSQRTE (`rt::urecpe`, `rt::ursqrte`, integer formulas).
 //!
 //! The generator refuses to inline a function of `stubs.sail` (placeholders
 //! for implementation choices) other than hints with no effect.
@@ -110,6 +111,8 @@ pub const CUT: &[&str] = &[
     "FPConvert__1",
     "FPRoundInt",
     "FPRoundIntN",
+    "UnsignedRecipEstimate",
+    "UnsignedRSqrtEstimate",
     "AESSubBytes",
     "AESInvSubBytes",
     "AESMixColumns",
@@ -389,6 +392,26 @@ impl Gen<'_> {
         })
     }
 
+    /// Whether `v` is the concrete `FPRounding_ODD`.
+    fn fp_round_odd(&self, v: &V) -> bool {
+        matches!(v, V::Enum(_, i) if self.m.enums["FPRounding"][*i] == "FPRounding_ODD")
+    }
+
+    /// `UnsignedRecipEstimate` or `UnsignedRSqrtEstimate` on 32 bits.
+    fn unsigned_estimate(&mut self, name: &str, a: &[V]) -> R<V> {
+        let x = self.bitify(&a[0])?;
+        if x.width() != Some(32) {
+            return fail(format!("{name} on {:?} bits", x.width()));
+        }
+        let xs = self.dx(&x)?.to_string();
+        let f = if name == "UnsignedRecipEstimate" {
+            "urecpe"
+        } else {
+            "ursqrte"
+        };
+        Ok(self.dy(K::Bits(32), format!("rt::{f}(b, {xs})")))
+    }
+
     fn fp_convert(&mut self, name: &str, a: &[V]) -> R<V> {
         let fpw = |w: u32| -> R<u32> {
             if w == 16 || w == 32 || w == 64 {
@@ -451,8 +474,9 @@ impl Gen<'_> {
             }
             "FPConvert" | "FPConvert__1" => {
                 self.fp_fpcr_ok(name, &a[1])?;
+                let odd = name == "FPConvert" && self.fp_round_odd(&a[2]);
                 let ow_v = if name == "FPConvert" {
-                    if self.fp_round(&a[2])? != "TiesEven" {
+                    if !odd && self.fp_round(&a[2])? != "TiesEven" {
                         return fail("FPConvert rounding");
                     }
                     &a[3]
@@ -460,9 +484,18 @@ impl Gen<'_> {
                     &a[2]
                 };
                 let ow = fpw(self.cint(ow_v)? as u32)?;
+                if odd {
+                    if ow >= iw {
+                        return fail("FPConvert rounding to odd to a wider format");
+                    }
+                    // Rounding to odd overflows and underflows where the
+                    // host's nearest-even conversion does not.
+                    self.line("st.assume_flags_slow();".into());
+                }
+                let m = if odd { "convert_odd" } else { "convert" };
                 (
                     K::Bits(ow),
-                    format!("rt::Fp::new({iw}).convert(b, {xs}, &rt::Fp::new({ow}))"),
+                    format!("rt::Fp::new({iw}).{m}(b, {xs}, &rt::Fp::new({ow}))"),
                 )
             }
             "FPRoundIntN" => {
@@ -845,6 +878,9 @@ impl Gen<'_> {
             "FPToFixed" | "FixedToFP" | "FPConvert" | "FPConvert__1" | "FPRoundInt"
             | "FPRoundIntN" => {
                 return self.fp_convert(name, a).map(Some);
+            }
+            "UnsignedRecipEstimate" | "UnsignedRSqrtEstimate" => {
+                return self.unsigned_estimate(name, a).map(Some);
             }
             n if CRYPTO_CUT.iter().any(|(c, _)| *c == n) => {
                 let op = CRYPTO_CUT.iter().find(|(c, _)| *c == n).expect("listed").1;

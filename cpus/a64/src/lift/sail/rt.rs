@@ -791,6 +791,26 @@ impl Fp {
         b.select(n, nan, r)
     }
 
+    /// `FPConvert` to the narrower format `to` rounding to odd (FCVTXN):
+    /// the value truncated, with its lowest bit set when inexact, so an
+    /// overflow gives the largest normal number and a nonzero value too small
+    /// for `to` its smallest subnormal. Built from the nearest-even
+    /// conversion, which converts back exactly.
+    pub fn convert_odd(&self, b: &mut Builder, x: Value, to: &Fp) -> Value {
+        let r = self.convert(b, x, to);
+        let back = b.fp(FpOp::Convert, &[r], self.w);
+        let (mx, mb) = (self.magnitude(b, x), self.magnitude(b, back));
+        let exact = b.cmp(CmpOp::Eq, mb, mx);
+        let above = b.cmp(CmpOp::Ult, mx, mb);
+        let one = to.k(b, 1);
+        let down = b.sub(r, one);
+        let t = b.select(above, down, r);
+        let odd = b.or(t, one);
+        let n = self.is_nan(b, x);
+        let keep = b.or(exact, n);
+        b.select(keep, r, odd)
+    }
+
     fn k64(b: &mut Builder, v: u64) -> Value {
         b.konst(Width::W64, u128::from(v))
     }
@@ -860,12 +880,7 @@ impl Fp {
         let exp = b.select(e0, esub, exp);
         let hi = Fp::op64(b, BinOp::LShr, frac, 44);
         let scaled = Fp::op64(b, BinOp::Or, hi, 256);
-        let a2 = Fp::op64(b, BinOp::Shl, scaled, 1);
-        let a2 = Fp::op64(b, BinOp::Or, a2, 1);
-        let num = Fp::k64(b, 1 << 19);
-        let q = b.bin(BinOp::UDiv, num, a2);
-        let q = Fp::op64(b, BinOp::Add, q, 1);
-        let est = Fp::op64(b, BinOp::LShr, q, 1);
+        let est = recip_est9(b, scaled);
         let c = self.pick(29, 253, 2045);
         let ck = Fp::k64(b, c);
         let rexp = b.bin(BinOp::Sub, ck, exp);
@@ -913,30 +928,7 @@ impl Fp {
         let s_odd = Fp::op64(b, BinOp::LShr, frac, 45);
         let s_odd = Fp::op64(b, BinOp::Or, s_odd, 128);
         let a = b.select(odd, s_odd, s_even);
-        let k256 = Fp::k64(b, 256);
-        let small = b.cmp(CmpOp::Ult, a, k256);
-        let a_s = Fp::op64(b, BinOp::Shl, a, 1);
-        let a_s = Fp::op64(b, BinOp::Or, a_s, 1);
-        let a_l = Fp::op64(b, BinOp::And, a, !1);
-        let a_l = Fp::op64(b, BinOp::Add, a_l, 1);
-        let a_l = Fp::op64(b, BinOp::Shl, a_l, 1);
-        let a2 = b.select(small, a_s, a_l);
-        let mut lo = Fp::k64(b, 512);
-        let mut hi = Fp::k64(b, 1023);
-        let limit = Fp::k64(b, 1 << 28);
-        for _ in 0..10 {
-            let sum = b.add(lo, hi);
-            let mid = Fp::op64(b, BinOp::LShr, sum, 1);
-            let m1 = Fp::op64(b, BinOp::Add, mid, 1);
-            let sq = b.bin(BinOp::Mul, m1, m1);
-            let prod = b.bin(BinOp::Mul, a2, sq);
-            let below = b.cmp(CmpOp::Ult, prod, limit);
-            let next_lo = Fp::op64(b, BinOp::Add, mid, 1);
-            lo = b.select(below, next_lo, lo);
-            hi = b.select(below, hi, mid);
-        }
-        let r = Fp::op64(b, BinOp::Add, lo, 1);
-        let est = Fp::op64(b, BinOp::LShr, r, 1);
+        let est = rsqrt_est9(b, a);
         let c = self.pick(44, 380, 3068);
         let ck = Fp::k64(b, c);
         let d = b.bin(BinOp::Sub, ck, exp);
@@ -1020,4 +1012,74 @@ impl Fp {
         );
         self.step(b, x, y, three, one5, true)
     }
+}
+
+/// `RecipEstimate` without increased precision: the 9-bit estimate for the
+/// 64-bit index `a` (256 to 511), as a 64-bit value.
+fn recip_est9(b: &mut Builder, a: Value) -> Value {
+    let a2 = Fp::op64(b, BinOp::Shl, a, 1);
+    let a2 = Fp::op64(b, BinOp::Or, a2, 1);
+    let num = Fp::k64(b, 1 << 19);
+    let q = b.bin(BinOp::UDiv, num, a2);
+    let q = Fp::op64(b, BinOp::Add, q, 1);
+    Fp::op64(b, BinOp::LShr, q, 1)
+}
+
+/// `UnsignedRecipEstimate` (URECPE) of the 32-bit `x`: all ones when bit 31
+/// is clear, else the 9-bit estimate of bits 31 to 23 in the top bits.
+pub fn urecpe(b: &mut Builder, x: Value) -> Value {
+    unsigned_estimate(b, x, false)
+}
+
+/// `UnsignedRSqrtEstimate` (URSQRTE) of the 32-bit `x`: all ones when bits
+/// 31 and 30 are clear, else the 9-bit estimate of bits 31 to 23 in the top
+/// bits.
+pub fn ursqrte(b: &mut Builder, x: Value) -> Value {
+    unsigned_estimate(b, x, true)
+}
+
+fn unsigned_estimate(b: &mut Builder, x: Value, rsqrt: bool) -> Value {
+    let x64 = b.zext(x, Width::W64);
+    let a = Fp::op64(b, BinOp::LShr, x64, 23);
+    let est = if rsqrt {
+        rsqrt_est9(b, a)
+    } else {
+        recip_est9(b, a)
+    };
+    let r = Fp::op64(b, BinOp::Shl, est, 23);
+    let r = b.trunc(r, Width::W32);
+    let top = Fp::op64(b, BinOp::LShr, x64, if rsqrt { 30 } else { 31 });
+    let zero = Fp::k64(b, 0);
+    let small = b.cmp(CmpOp::Eq, top, zero);
+    let ones = b.konst(Width::W32, mask(32));
+    b.select(small, ones, r)
+}
+
+/// `RecipSqrtEstimate` without increased precision: the 9-bit estimate for
+/// the 64-bit index `a` (128 to 511), as a 64-bit value.
+fn rsqrt_est9(b: &mut Builder, a: Value) -> Value {
+    let k256 = Fp::k64(b, 256);
+    let small = b.cmp(CmpOp::Ult, a, k256);
+    let a_s = Fp::op64(b, BinOp::Shl, a, 1);
+    let a_s = Fp::op64(b, BinOp::Or, a_s, 1);
+    let a_l = Fp::op64(b, BinOp::And, a, !1);
+    let a_l = Fp::op64(b, BinOp::Add, a_l, 1);
+    let a_l = Fp::op64(b, BinOp::Shl, a_l, 1);
+    let a2 = b.select(small, a_s, a_l);
+    let mut lo = Fp::k64(b, 512);
+    let mut hi = Fp::k64(b, 1023);
+    let limit = Fp::k64(b, 1 << 28);
+    for _ in 0..10 {
+        let sum = b.add(lo, hi);
+        let mid = Fp::op64(b, BinOp::LShr, sum, 1);
+        let m1 = Fp::op64(b, BinOp::Add, mid, 1);
+        let sq = b.bin(BinOp::Mul, m1, m1);
+        let prod = b.bin(BinOp::Mul, a2, sq);
+        let below = b.cmp(CmpOp::Ult, prod, limit);
+        let next_lo = Fp::op64(b, BinOp::Add, mid, 1);
+        lo = b.select(below, next_lo, lo);
+        hi = b.select(below, hi, mid);
+    }
+    let r = Fp::op64(b, BinOp::Add, lo, 1);
+    Fp::op64(b, BinOp::LShr, r, 1)
 }
