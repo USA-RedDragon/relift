@@ -288,11 +288,6 @@ pub fn discover(fe: &dyn Frontend, module: &Module) -> Analysis {
 /// function built.
 pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Progress)) -> Analysis {
     let granule = fe.granule();
-    let mut lifter = Lifter {
-        fe,
-        module,
-        cache: HashMap::new(),
-    };
     let mut kinds: BTreeMap<u64, EntryKind> = BTreeMap::new();
     let mut names: BTreeMap<u64, String> = BTreeMap::new();
     for r in &module.roots {
@@ -305,7 +300,49 @@ pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Prog
             names.entry(r.addr).or_insert_with(|| n.clone());
         }
     }
-    let mut done: BTreeSet<u64> = BTreeSet::new();
+    explore(fe, module, kinds, &BTreeMap::new(), &names, on)
+}
+
+/// The functions that become reachable in `module` from `roots` when
+/// `known` (every entry of an earlier analysis, by kind) is already lifted:
+/// discovery as [`discover`] does it, starting from the roots and stopping
+/// at known entries, which it neither explores nor returns. Each root not
+/// already known is a [`RootKind::Hint`] entry. A root inside the extent of
+/// a known function gets a function of its own; the known one keeps its
+/// copy of the code.
+pub fn discover_more(
+    fe: &dyn Frontend,
+    module: &Module,
+    known: &BTreeMap<u64, EntryKind>,
+    roots: &[u64],
+) -> Analysis {
+    let granule = fe.granule();
+    let mut kinds = known.clone();
+    for &r in roots {
+        if module.is_code(r) && r % granule == 0 {
+            kinds.entry(r).or_insert(EntryKind::Root(RootKind::Hint));
+        }
+    }
+    explore(fe, module, kinds, known, &BTreeMap::new(), &mut |_| {})
+}
+
+/// Explores every entry of `kinds` not in `skip` until no new entry
+/// appears, then builds the functions not in `skip`.
+fn explore(
+    fe: &dyn Frontend,
+    module: &Module,
+    mut kinds: BTreeMap<u64, EntryKind>,
+    skip: &BTreeMap<u64, EntryKind>,
+    names: &BTreeMap<u64, String>,
+    on: &mut dyn FnMut(Progress),
+) -> Analysis {
+    let granule = fe.granule();
+    let mut lifter = Lifter {
+        fe,
+        module,
+        cache: HashMap::new(),
+    };
+    let mut done: BTreeSet<u64> = skip.keys().copied().collect();
     // A function's extent stops at the entries of other functions, except
     // at addresses only known as computed values: those are often labels
     // inside a function (a jump-table base or a loop head taken with adr),
@@ -338,12 +375,17 @@ pub fn discover_with(fe: &dyn Frontend, module: &Module, on: &mut dyn FnMut(Prog
         }
     }
     let entries = stops(&kinds);
-    let total = kinds.len();
-    let mut failed: HashSet<u64> = HashSet::new();
-    let functions = kinds
+    let build: Vec<(u64, EntryKind)> = kinds
         .iter()
+        .filter(|(a, _)| !skip.contains_key(a))
+        .map(|(&a, &k)| (a, k))
+        .collect();
+    let total = build.len();
+    let mut failed: HashSet<u64> = HashSet::new();
+    let functions = build
+        .into_iter()
         .enumerate()
-        .map(|(n, (&e, &kind))| {
+        .map(|(n, (e, kind))| {
             let (insts, tables) = extent(&mut lifter, &entries, e);
             failed.extend(
                 insts

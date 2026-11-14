@@ -446,3 +446,40 @@ fn progress_reports_every_entry_and_function_with_real_counts() {
     assert_eq!(lifted, [(1, 2, 1), (2, 2, 1)]);
     assert_eq!(a.failures(), 1);
 }
+
+#[test]
+fn discover_more_returns_only_what_a_new_root_reaches() {
+    let m = module(
+        &[
+            branch(0x02, 0, 4),
+            word(0x03, 0, 0),
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x04, 1, 7),
+            word(0x03, 0, 0),
+            branch(0x02, 0, 2),
+            word(0x03, 0, 0),
+            word(0x03, 0, 0),
+        ],
+        &[],
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert_eq!(entries(&a), [BASE, BASE + 16]);
+    let known: BTreeMap<u64, EntryKind> = a.functions.values().map(|f| (f.entry, f.kind)).collect();
+    let one = discover_more(&Toy, &m, &known, &[BASE + 8]);
+    assert_eq!(entries(&one), [BASE + 8]);
+    assert_eq!(
+        one.functions[&(BASE + 8)].kind,
+        EntryKind::Root(RootKind::Hint)
+    );
+    assert_eq!(one.functions[&(BASE + 8)].insts.len(), 2);
+    let two = discover_more(&Toy, &m, &known, &[BASE + 24]);
+    assert_eq!(entries(&two), [BASE + 24, BASE + 32]);
+    assert_eq!(two.functions[&(BASE + 32)].kind, EntryKind::Called);
+    assert!(
+        discover_more(&Toy, &m, &known, &[BASE, BASE + 2])
+            .functions
+            .is_empty()
+    );
+}
