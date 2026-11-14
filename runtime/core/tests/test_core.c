@@ -193,11 +193,13 @@ TEST(core_clock_uses_the_guest_rate)
     CHECK_EQ(rl_ns_to_ticks(1000000000ull), 40500000);
     CHECK_EQ(rl_ticks_to_ns(40500000), 1000000000ull);
     CHECK_EQ(rl_ns_to_ticks(1000), 40);
-    uint64_t a = rl_ns_to_ticks(rl_clock_ns());
+    uint64_t t0 = rl_clock_ns();
+    uint64_t a = rl_ns_to_ticks(t0);
     rl_sleep_ns(10000000);
-    uint64_t d = rl_ns_to_ticks(rl_clock_ns()) - a;
+    uint64_t t1 = rl_clock_ns();
+    uint64_t d = rl_ns_to_ticks(t1) - a;
     CHECK(d >= 405000);
-    CHECK(d < 40500000);
+    CHECK(d <= rl_ns_to_ticks(t1 - t0) + 1);
 }
 
 TEST(core_guest_byte_order)
