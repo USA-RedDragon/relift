@@ -103,11 +103,11 @@ fn shapes_wasm_has_no_form_for_are_errors() {
     let v = b.fp(FpOp::Add, &[h, h], Width::W32);
     let z = b.zext(v, Width::W64);
     b.set(Reg(1), z);
-    let mut half = b.jump(4, PC + 4);
+    let mut byte = b.jump(4, PC + 4);
     for x in [h, v] {
-        half.insts[x.index()].width = Some(Width::W16);
+        byte.insts[x.index()].width = Some(Width::W8);
     }
-    cases.push(("16-bit to 16-bit floating-point", half));
+    cases.push(("8-bit to 8-bit floating-point", byte));
     let mut b = Builder::new(file(), Width::W128, PC);
     let q = b.get(Reg(8));
     cases.push((

@@ -462,14 +462,19 @@ impl Em<'_> {
                     return Err("a floating-point operation without operands".into());
                 };
                 let aw = wid(*first).bits();
-                let float = |b: u32| b == 32 || b == 64;
-                if !float(n) || !float(aw) || args.len() != f.arity() {
+                let float = |b: u32| b == 16 || b == 32 || b == 64;
+                let same = f.converts() || aw == n;
+                if !float(n) || !float(aw) || !same || args.len() != f.arity() {
                     return Err(format!(
                         "a {aw}-bit to {n}-bit floating-point operation {f:?}"
                     ));
                 }
                 let a: Vec<V> = args.iter().map(|x| loc(self, *x)).collect();
-                self.fp(*f, &a, aw, n);
+                if n == 16 || aw == 16 {
+                    self.fp16(*f, &a, aw, n);
+                } else {
+                    self.fp(*f, &a, aw, n);
+                }
                 self.set(dst.lo());
             }
             Op::Intrinsic(name, args) => {
@@ -1492,6 +1497,158 @@ impl Em<'_> {
             }
         }
         self.pop_f(w);
+    }
+
+    /// Pushes the `f64` value of the `bits`-bit float `x` (exact).
+    fn push_d(&mut self, x: V, bits: u32) {
+        match bits {
+            16 => {
+                self.push_lo(x);
+                self.i(I::Call(self.cx.helper(Helper::F16ToF64)));
+            }
+            32 => {
+                self.push_f(x, 32);
+                self.i(I::F64PromoteF32);
+            }
+            _ => self.push_f(x, 64),
+        }
+    }
+
+    /// Rounds the `f64` on the stack to a `bits`-bit float and pushes its
+    /// `i64` bits.
+    fn pop_d(&mut self, bits: u32) {
+        match bits {
+            16 => self.i(I::Call(self.cx.helper(Helper::F64ToF16))),
+            32 => {
+                self.i(I::F32DemoteF64);
+                self.pop_f(32);
+            }
+            _ => self.pop_f(64),
+        }
+    }
+
+    /// Converts the integral `f64` on the stack to a `bits`-bit integer,
+    /// saturating, with 0 for a NaN; pushes the `i64` bits.
+    fn sat_int(&mut self, bits: u32, signed: bool) {
+        match (bits, signed) {
+            (64, true) => self.i(I::I64TruncSatF64S),
+            (64, false) => self.i(I::I64TruncSatF64U),
+            (32, _) => {
+                self.i(if signed {
+                    I::I32TruncSatF64S
+                } else {
+                    I::I32TruncSatF64U
+                });
+                self.i(I::I64ExtendI32U);
+            }
+            _ => {
+                let t = Self::t(0);
+                let (lo, hi) = if signed {
+                    (-(1i64 << (bits - 1)), (1i64 << (bits - 1)) - 1)
+                } else {
+                    (0, (1i64 << bits) - 1)
+                };
+                self.i(if signed {
+                    I::I64TruncSatF64S
+                } else {
+                    I::I64TruncSatF64U
+                });
+                self.set(t);
+                self.get(t);
+                self.c64(hi);
+                self.get(t);
+                self.c64(hi);
+                self.i(if signed { I::I64LtS } else { I::I64LtU });
+                self.i(I::Select);
+                if signed {
+                    self.set(t);
+                    self.get(t);
+                    self.c64(lo);
+                    self.get(t);
+                    self.c64(lo);
+                    self.i(I::I64GtS);
+                    self.i(I::Select);
+                }
+                self.and_mask(bits);
+            }
+        }
+    }
+
+    /// Pushes the `i64` result bits of an operation where an operand or
+    /// the result is binary16 (or, for the integer conversions, a 16-bit
+    /// integer). Operands are widened to binary64 exactly and the result is
+    /// rounded once, which is how `relift_ir` defines binary16: binary64
+    /// has more than twice binary16's precision plus two bits, so a sum,
+    /// difference, product, quotient or square root rounded once more is
+    /// correctly rounded; a product of two binary16 values is exact in
+    /// binary64, and adding the third operand is either exact or, when the
+    /// exponents are 33 or more apart, off by less than the distance to the
+    /// nearest binary16 rounding boundary, so the fused multiply-add is too.
+    fn fp16(&mut self, f: FpOp, a: &[V], aw: u32, w: u32) {
+        match f {
+            FpOp::Neg | FpOp::Abs => self.fp(f, a, aw, w),
+            FpOp::Add | FpOp::Sub | FpOp::Mul | FpOp::Div => {
+                self.push_d(a[0], aw);
+                self.push_d(a[1], aw);
+                self.i(match f {
+                    FpOp::Add => I::F64Add,
+                    FpOp::Sub => I::F64Sub,
+                    FpOp::Mul => I::F64Mul,
+                    _ => I::F64Div,
+                });
+                self.pop_d(w);
+            }
+            FpOp::Sqrt => {
+                self.push_d(a[0], aw);
+                self.i(I::F64Sqrt);
+                self.pop_d(w);
+            }
+            FpOp::MulAdd => {
+                self.push_d(a[0], aw);
+                self.push_d(a[1], aw);
+                self.i(I::F64Mul);
+                self.push_d(a[2], aw);
+                self.i(I::F64Add);
+                self.pop_d(w);
+            }
+            FpOp::RoundInt(r) => {
+                self.push_d(a[0], aw);
+                self.round(r, 64);
+                self.pop_d(w);
+            }
+            FpOp::Convert => {
+                self.push_d(a[0], aw);
+                self.pop_d(w);
+            }
+            FpOp::ToSInt(r) | FpOp::ToUInt(r) => {
+                self.push_d(a[0], aw);
+                self.round(r, 64);
+                self.sat_int(w, matches!(f, FpOp::ToSInt(_)));
+            }
+            FpOp::FromSInt | FpOp::FromUInt => {
+                let s = f == FpOp::FromSInt;
+                self.push_lo(a[0]);
+                if s {
+                    self.sx64(aw);
+                }
+                if w == 16 {
+                    self.i(if s {
+                        I::F64ConvertI64S
+                    } else {
+                        I::F64ConvertI64U
+                    });
+                    self.pop_d(16);
+                } else {
+                    self.i(match (s, w == 32) {
+                        (true, true) => I::F32ConvertI64S,
+                        (true, false) => I::F64ConvertI64S,
+                        (false, true) => I::F32ConvertI64U,
+                        (false, false) => I::F64ConvertI64U,
+                    });
+                    self.pop_f(w);
+                }
+            }
+        }
     }
 }
 

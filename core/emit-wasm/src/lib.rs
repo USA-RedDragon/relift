@@ -298,7 +298,9 @@ pub(crate) const T_F64: u32 = T_MULHI + 3;
 pub(crate) const T_PAIR: u32 = T_MULHI + 4;
 pub(crate) const T_UN64: u32 = T_MULHI + 5;
 pub(crate) const T_RUN: u32 = T_MULHI + 6;
-const N_FIXED_TYPES: u32 = T_RUN + 1;
+pub(crate) const T_H2D: u32 = T_MULHI + 7;
+pub(crate) const T_D2H: u32 = T_MULHI + 8;
+const N_FIXED_TYPES: u32 = T_D2H + 1;
 
 /// The runtime import indices, which are also their function indices.
 pub(crate) mod rt {
@@ -326,9 +328,11 @@ pub(crate) enum Helper {
     BitReverse64,
     ByteSwap64,
     Run,
+    F16ToF64,
+    F64ToF16,
 }
 
-pub(crate) const HELPERS: [Helper; 9] = [
+pub(crate) const HELPERS: [Helper; 11] = [
     Helper::MulHi,
     Helper::Shl128,
     Helper::LShr128,
@@ -338,6 +342,8 @@ pub(crate) const HELPERS: [Helper; 9] = [
     Helper::BitReverse64,
     Helper::ByteSwap64,
     Helper::Run,
+    Helper::F16ToF64,
+    Helper::F64ToF16,
 ];
 
 /// What every function of one module shares.
@@ -406,6 +412,8 @@ pub fn emit(fns: &[Function<'_>], opts: &Options) -> Output {
     sigs.push((vec![], vec![I64, I64]));
     sigs.push((vec![I64], vec![I64]));
     sigs.push((vec![I32, I32, I32], vec![I32]));
+    sigs.push((vec![I64], vec![F64]));
+    sigs.push((vec![F64], vec![I64]));
     debug_assert_eq!(sigs.len() as u32, N_FIXED_TYPES);
     let mut imports = ImportSection::new();
     imports.import(

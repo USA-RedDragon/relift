@@ -5,7 +5,8 @@ use wasm_encoder::{BlockType, Function, Instruction as I, ValType};
 
 use crate::func::ma;
 use crate::{
-    Helper, RC_CHAIN, T_F32, T_F64, T_LIFTED, T_MULHI, T_PAIR, T_RUN, T_SH128, T_UN64, ctx, rt,
+    Helper, RC_CHAIN, T_D2H, T_F32, T_F64, T_H2D, T_LIFTED, T_MULHI, T_PAIR, T_RUN, T_SH128,
+    T_UN64, ctx, rt,
 };
 
 /// The type index of helper `h`.
@@ -17,6 +18,8 @@ pub(crate) fn type_of(h: Helper) -> u32 {
         Helper::RoundAway64 => T_F64,
         Helper::BitReverse64 | Helper::ByteSwap64 => T_UN64,
         Helper::Run => T_RUN,
+        Helper::F16ToF64 => T_H2D,
+        Helper::F64ToF16 => T_D2H,
     }
 }
 
@@ -56,6 +59,8 @@ fn byte_steps(f: &mut Function) {
 /// The body of helper `h`.
 pub(crate) fn body(h: Helper) -> Function {
     match h {
+        Helper::F16ToF64 => f16_to_f64(),
+        Helper::F64ToF16 => f64_to_f16(),
         Helper::MulHi => mulhi(),
         Helper::Shl128 => shift128(0),
         Helper::LShr128 => shift128(1),
@@ -297,5 +302,157 @@ fn round_away(f32: bool) -> Function {
         ]
     };
     emit(&mut f, &xs);
+    f
+}
+
+/// The binary64 value of the binary16 pattern in the `i64` local 0, exact:
+/// a subnormal or zero is its significand times 2^-24 with the sign; any
+/// other pattern moves its fields to binary64 (exponent rebiased by 1008,
+/// all ones for infinity and NaN, the fraction on top so a NaN keeps its
+/// payload).
+fn f16_to_f64() -> Function {
+    let mut f = Function::new([(1, ValType::I64)]);
+    let (h, e) = (0, 1);
+    let sign = [
+        I::LocalGet(h),
+        I::I64Const(15),
+        I::I64ShrU,
+        I::I64Const(63),
+        I::I64Shl,
+    ];
+    let frac = [I::LocalGet(h), I::I64Const(0x3ff), I::I64And];
+    emit(
+        &mut f,
+        &[
+            I::LocalGet(h),
+            I::I64Const(10),
+            I::I64ShrU,
+            I::I64Const(0x1f),
+            I::I64And,
+            I::LocalSet(e),
+            I::LocalGet(e),
+            I::I64Eqz,
+            I::If(BlockType::Result(ValType::F64)),
+        ],
+    );
+    emit(&mut f, &frac);
+    emit(
+        &mut f,
+        &[
+            I::F64ConvertI64U,
+            I::F64Const(f64::from_bits(0x3e70_0000_0000_0000).into()),
+            I::F64Mul,
+        ],
+    );
+    emit(&mut f, &sign);
+    emit(&mut f, &[I::F64ReinterpretI64, I::F64Copysign, I::Else]);
+    emit(&mut f, &sign);
+    emit(
+        &mut f,
+        &[
+            I::I64Const(0x7ff),
+            I::LocalGet(e),
+            I::I64Const(1008),
+            I::I64Add,
+            I::LocalGet(e),
+            I::I64Const(31),
+            I::I64Eq,
+            I::Select,
+            I::I64Const(52),
+            I::I64Shl,
+            I::I64Or,
+        ],
+    );
+    emit(&mut f, &frac);
+    emit(
+        &mut f,
+        &[
+            I::I64Const(42),
+            I::I64Shl,
+            I::I64Or,
+            I::F64ReinterpretI64,
+            I::End,
+            I::End,
+        ],
+    );
+    f
+}
+
+/// The `f64` in local 0 rounded to nearest even binary16, as the IR's
+/// `half::from_f64`: a NaN keeps its sign and the top of its payload,
+/// quieted; 65520 and above overflow to infinity; below 2^-14 the result is
+/// the subnormal `nearest(|x| * 2^24)` (exact scaling, one rounding, and
+/// 1024 is the smallest normal's encoding); otherwise the exponent is
+/// rebiased and the fraction rounded by adding half an ulp less one plus
+/// the kept lowest bit, which also carries into the exponent.
+fn f64_to_f16() -> Function {
+    let mut f = Function::new([(3, ValType::I64)]);
+    let (x, b, a, s) = (0, 1, 2, 3);
+    emit(
+        &mut f,
+        &[
+            I::LocalGet(x),
+            I::I64ReinterpretF64,
+            I::LocalTee(b),
+            I::I64Const(48),
+            I::I64ShrU,
+            I::I64Const(0x8000),
+            I::I64And,
+            I::LocalSet(s),
+            I::LocalGet(b),
+            I::I64Const(0x7fff_ffff_ffff_ffff),
+            I::I64And,
+            I::LocalSet(a),
+            I::LocalGet(a),
+            I::I64Const(0x7ff0_0000_0000_0000),
+            I::I64GtU,
+            I::If(BlockType::Result(ValType::I64)),
+            I::LocalGet(b),
+            I::I64Const(42),
+            I::I64ShrU,
+            I::I64Const(0x3ff),
+            I::I64And,
+            I::I64Const(0x7e00),
+            I::I64Or,
+            I::Else,
+            I::LocalGet(a),
+            I::I64Const(0x40ef_fe00_0000_0000),
+            I::I64GeU,
+            I::If(BlockType::Result(ValType::I64)),
+            I::I64Const(0x7c00),
+            I::Else,
+            I::LocalGet(a),
+            I::I64Const(0x3f10_0000_0000_0000),
+            I::I64LtU,
+            I::If(BlockType::Result(ValType::I64)),
+            I::LocalGet(a),
+            I::F64ReinterpretI64,
+            I::F64Const(16_777_216.0.into()),
+            I::F64Mul,
+            I::F64Nearest,
+            I::I64TruncF64U,
+            I::Else,
+            I::LocalGet(a),
+            I::I64Const(1008 << 52),
+            I::I64Sub,
+            I::LocalTee(a),
+            I::I64Const((1 << 41) - 1),
+            I::I64Add,
+            I::LocalGet(a),
+            I::I64Const(42),
+            I::I64ShrU,
+            I::I64Const(1),
+            I::I64And,
+            I::I64Add,
+            I::I64Const(42),
+            I::I64ShrU,
+            I::End,
+            I::End,
+            I::End,
+            I::LocalGet(s),
+            I::I64Or,
+            I::End,
+        ],
+    );
     f
 }
