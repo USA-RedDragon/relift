@@ -563,7 +563,8 @@ pub fn run_build(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
 }
 
 /// `relift run`: build, then run the program in the working directory,
-/// with the SD card in `sdmc/` there. Returns the program's exit code.
+/// with the SD card in `sdmc/` there and the import's `romfs/` and `dlc/`
+/// as its data storage and add-on content. Returns the program's exit code.
 ///
 /// # Errors
 ///
@@ -577,6 +578,15 @@ pub fn run_run(
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
     let built = build_project(settings, &targets, ui)?;
     let mut cmd = relift_proc::command(&built.exe);
+    let import = import_dir()?;
+    let romfs = import.join("romfs");
+    if romfs.is_dir() {
+        cmd.env("RELIFT_ROMFS", &romfs);
+    }
+    let dlc = import.join("dlc");
+    if dlc.is_dir() {
+        cmd.env("RELIFT_DLC", &dlc);
+    }
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }
