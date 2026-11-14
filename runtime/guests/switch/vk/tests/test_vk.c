@@ -4,8 +4,8 @@
  * it: guest structs built in a synthetic guest memory image, arguments in
  * the guest context, thunks reached through vkGetInstanceProcAddr and the
  * dispatch table, run against the host's real Vulkan driver (lavapipe in
- * CI). RELIFT_VK_TEST_DEVICE limits the device tests to physical devices
- * whose name contains it. With no host Vulkan the tests are skipped, unless
+ * CI). The layer shows one physical device; RELIFT_VK_DEVICE picks it by a
+ * part of its name. With no host Vulkan the tests are skipped, unless
  * RELIFT_VK_REQUIRE is set (CI sets it where lavapipe is installed).
  */
 #include "a64.h"
@@ -214,7 +214,7 @@ static bool device_wanted(uint64_t pd, char *name)
     uint64_t gp = galloc(sizeof(VkPhysicalDeviceProperties));
     G("vkGetPhysicalDeviceProperties", pd, gp);
     memcpy(name, g_mem + gp + offsetof(VkPhysicalDeviceProperties, deviceName), 256);
-    const char *want = getenv("RELIFT_VK_TEST_DEVICE");
+    const char *want = getenv(RL_VK_DEVICE_ENV);
     return !want || strstr(name, want);
 }
 
@@ -689,6 +689,7 @@ static rl_vk_surface_provider g_resizable = { .create = resizable_create, .exten
 TEST(vk_vi_surface_presents_headless)
 {
     g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
+    g_resizable.presents = rl_vk_headless_surfaces()->presents;
     g_host_w = g_host_h = 64;
     g_host_gen = 0;
     CHECK_EQ(boot(&g_resizable), 0);
@@ -954,6 +955,41 @@ TEST(vk_queue_families_are_the_switch_layout)
         dci.pQueueCreateInfos = GP(gput(&qci, sizeof qci));
         CHECK_EQ(VKR(G("vkCreateDevice", pds[d], gput(&dci, sizeof dci), 0, out)), VK_ERROR_INITIALIZATION_FAILED);
     }
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+TEST(vk_one_physical_device_that_presents_headless)
+{
+    CHECK_EQ(boot(rl_vk_headless_surfaces()), 0);
+    const char *exts[] = { "VK_KHR_surface", "VK_NN_vi_surface" };
+    CHECK(make_instance(exts, 2, 0) != 0);
+    uint64_t pds[8];
+    CHECK_EQ(physical_devices(pds, 8), 1);
+    uint64_t gn = galloc(4);
+    CHECK_EQ(VKR(G("vkEnumeratePhysicalDeviceGroups", g_inst, gn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 1);
+    VkPhysicalDeviceGroupProperties grp[2] = {
+        { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES },
+        { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES },
+    };
+    uint64_t gg = gput(grp, sizeof grp);
+    rl_st32(g_mem, gn, 2);
+    CHECK_EQ(VKR(G("vkEnumeratePhysicalDeviceGroupsKHR", g_inst, gn, gg)), VK_SUCCESS);
+    CHECK_EQ(g32(gn), 1);
+    CHECK_EQ(g32(gg + offsetof(VkPhysicalDeviceGroupProperties, physicalDeviceCount)), 1);
+    CHECK_EQ(g64(gg + offsetof(VkPhysicalDeviceGroupProperties, physicalDevices)), pds[0]);
+    rl_st32(g_mem, gn, 0);
+    CHECK_EQ(VKR(G("vkEnumeratePhysicalDevices", g_inst, gn, galloc(8))), VK_INCOMPLETE);
+    VkViSurfaceCreateInfoNN sci = { .sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, .window = GP(galloc(64)) };
+    uint64_t gs = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateViSurfaceNN", g_inst, gput(&sci, sizeof sci), 0, gs)), VK_SUCCESS);
+    uint64_t gsup = galloc(4);
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceSupportKHR", pds[0], 0, g64(gs), gsup)), VK_SUCCESS);
+    CHECK_EQ(g32(gsup), VK_TRUE);
+    uint64_t gcaps = galloc(sizeof(VkSurfaceCapabilitiesKHR));
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", pds[0], g64(gs), gcaps)), VK_SUCCESS);
+    G("vkDestroySurfaceKHR", g_inst, g64(gs), 0);
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
 }

@@ -116,6 +116,7 @@ rule must match its own sample, and the denylist must hit files there.
 | `RELIFT_VIDEO=headless\|sdl3` | Window backend. Unset: SDL3 when the runtime was built with `VIDEO=sdl3` and a display exists (`WAYLAND_DISPLAY` or `DISPLAY` on Linux, always on macOS and Windows), headless otherwise. `headless` (or `none`) opens no window. `sdl3` skips the display check; it still falls back to headless when SDL cannot start, or when the runtime has no SDL3. A program without Vulkan symbols opens no backend whatever this says |
 | `RELIFT_VULKAN_LIBRARY=<path>` | Host Vulkan loader to use instead of the system one |
 | `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
+| `RELIFT_VK_DEVICE=<name part>` | Host physical device the guest sees (default: the first that has graphics and compute and can present) |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |

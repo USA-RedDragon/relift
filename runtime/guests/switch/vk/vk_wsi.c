@@ -58,9 +58,31 @@ static int32_t headless_create(void *user, void *host_instance, void *gipa, uint
     return r;
 }
 
+static bool headless_presents(void *user, void *host_instance, void *gipa, void *physical_device, uint32_t family)
+{
+    uint64_t s = 0;
+    if (headless_create(user, host_instance, gipa, 0, &s) < 0 || !s)
+        return false;
+    PFN_vkGetInstanceProcAddr get;
+    memcpy(&get, &gipa, sizeof get);
+    PFN_vkVoidFunction raw = get(host_instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR support;
+    memcpy(&support, &raw, sizeof support);
+    raw = get(host_instance, "vkDestroySurfaceKHR");
+    PFN_vkDestroySurfaceKHR destroy;
+    memcpy(&destroy, &raw, sizeof destroy);
+    VkBool32 ok = VK_FALSE;
+    if (!support || support(physical_device, family, (VkSurfaceKHR)(uintptr_t)s, &ok) < 0)
+        ok = VK_FALSE;
+    if (destroy)
+        destroy(host_instance, (VkSurfaceKHR)(uintptr_t)s, NULL);
+    return ok;
+}
+
 static const rl_vk_surface_provider headless = {
     .instance_extensions = headless_exts,
     .create = headless_create,
+    .presents = headless_presents,
 };
 
 const rl_vk_surface_provider *rl_vk_headless_surfaces(void) { return &headless; }

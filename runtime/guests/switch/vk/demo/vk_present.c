@@ -10,7 +10,7 @@
  * Every step prints a PASS or FAIL line through svcOutputDebugString.
  *
  * With a window backend up (VIDEO=sdl3 and a display) the layer shows in a
- * window; otherwise the frames go to headless surfaces. RELIFT_VK_TEST_DEVICE
+ * window; otherwise the frames go to headless surfaces. RELIFT_VK_DEVICE
  * picks a physical device by name. Exits 0 when every step and frame passed,
  * 70 (svcBreak) on a failure, 77 when the host has no Vulkan (and
  * RELIFT_VK_REQUIRE is unset).
@@ -226,7 +226,7 @@ static int pick_device(gpu *g)
     rl_st32(g_mem, gn, n);
     uint64_t arr = galloc(8ull * n);
     G("vkEnumeratePhysicalDevices", g_inst, gn, arr);
-    const char *want = getenv("RELIFT_VK_TEST_DEVICE");
+    const char *want = getenv(RL_VK_DEVICE_ENV);
     for (uint32_t i = 0; i < g32(gn); i++) {
         uint64_t pd = g64(arr + 8ull * i);
         uint64_t gp = galloc(sizeof(VkPhysicalDeviceProperties));

@@ -1395,6 +1395,8 @@ int vkh_vkGetPhysicalDeviceQueueFamilyProperties(rl_ctx *restrict c, uint8_t *me
 int vkh_vkGetPhysicalDeviceQueueFamilyProperties2(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetDeviceQueue(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetDeviceQueue2(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkEnumeratePhysicalDeviceGroups(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem);

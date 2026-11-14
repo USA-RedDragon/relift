@@ -40,6 +40,9 @@ enum rl_vk_map_mode {
 /** @brief Environment variable that forces a map mode: placed, import or shadow. */
 #define RL_VK_MAP_ENV "RELIFT_VK_MAP"
 
+/** @brief Environment variable that picks the host physical device by a part of its name. */
+#define RL_VK_DEVICE_ENV "RELIFT_VK_DEVICE"
+
 /**
  * @brief Creates host surfaces for the guest's VK_NN_vi_surface.
  *
@@ -62,7 +65,13 @@ typedef struct rl_vk_surface_provider {
      * the guest opened or created last and never change.
      */
     void (*extent)(void *user, uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation);
-    /** @brief Passed to create and extent. */
+    /**
+     * @brief Optional: whether queue family `family` of the host physical
+     * device can present to this provider's surfaces. NULL means every device
+     * can.
+     */
+    bool (*presents)(void *user, void *host_instance, void *gipa, void *physical_device, uint32_t family);
+    /** @brief Passed to create, extent and presents. */
     void *user;
 } rl_vk_surface_provider;
 

@@ -51,6 +51,16 @@ pNext chains are rebuilt from the sType of each guest struct. A struct the
 generator does not know is reported once (`rl_report_unknown`) and dropped from
 the chain.
 
+## Physical device
+
+The Switch has one GPU, so the guest sees one physical device and one device
+group of it (`vk_device.c`), chosen when the instance first enumerates them.
+`RELIFT_VK_DEVICE` picks it by a part of its name. Otherwise it is the first
+host device whose queue family 0 has graphics and compute and, when the guest
+enabled `VK_NN_vi_surface`, that can present through the surface provider
+(`rl_vk_surface_provider.presents`; the headless provider asks the host with a
+probe surface, since not every driver presents to `VK_EXT_headless_surface`).
+
 ## Queue families
 
 The guest sees the Switch's layout on every host (`vk_queue.c`): one family,
@@ -129,7 +139,7 @@ and `VK_KHR_swapchain` forwarding.
 Providers:
 
 - Headless (`rl_vk_headless_surfaces`, `VK_EXT_headless_surface`): tests and
-  offscreen runs. Lavapipe and NVIDIA have it.
+  offscreen runs. Lavapipe presents to it; NVIDIA's Linux driver 615 does not.
 - Window (`rl_vk_window_surfaces`, `vk_window.c`): the player. It needs a
   window backend that is up (`core/include/relift/window.h`; SDL3 in
   `runtime/host/window_sdl3.c`, built with `VIDEO=sdl3`). Each `vi` layer the
@@ -232,8 +242,8 @@ unmapped ranges, a debug messenger calling guest code, `VK_NN_vi_surface` to a
 headless swapchain with a present and a host resize that recreates the host
 swapchain behind the guest's, and bad handles and unknown structs. With no
 host Vulkan the tests are skipped unless `RELIFT_VK_REQUIRE` is set; CI sets it
-on Linux, where it installs Mesa's lavapipe. `RELIFT_VK_TEST_DEVICE` limits the
-device tests to devices whose name contains it.
+on Linux, where it installs Mesa's lavapipe. `RELIFT_VK_DEVICE` picks the
+device they run on.
 
 `demo/vk_present.c` is a synthetic program that goes the whole way: a
 hand-written lifted module whose only import is `vkGetInstanceProcAddr`, loaded

@@ -65,6 +65,8 @@ hand_commands = [
     "vkGetPhysicalDeviceQueueFamilyProperties2",
     "vkGetDeviceQueue",
     "vkGetDeviceQueue2",
+    "vkEnumeratePhysicalDevices",
+    "vkEnumeratePhysicalDeviceGroups",
     "vkCreateDevice",
     "vkDestroyDevice",
     "vkAllocateMemory",

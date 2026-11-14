@@ -2525,55 +2525,6 @@ static int vkt_vkEnumerateInstanceVersion(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkEnumeratePhysicalDeviceGroups(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkInstance a0 = (VkInstance)vkf_first(&k, VKG_KIND_VkInstance, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkEnumeratePhysicalDeviceGroups, c->x[0]);
-    uint32_t * a1 = (uint32_t *)vkf_ptr(&k, c->x[1]);
-    uint64_t n2 = (a1 ? *a1 : 0);
-    VkPhysicalDeviceGroupProperties *a2 = vkg_ain_VkPhysicalDeviceGroupProperties(&k, c->x[2], n2);
-    PFN_vkEnumeratePhysicalDeviceGroups fn = (PFN_vkEnumeratePhysicalDeviceGroups)k.fns->f[VKG_vkEnumeratePhysicalDeviceGroups];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkEnumeratePhysicalDeviceGroups);
-    VkResult r = fn(a0, a1, a2);
-    if (r >= 0) {
-        {
-            uint64_t w2 = (a1 ? *a1 : 0);
-            vkg_aout_VkPhysicalDeviceGroupProperties(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
-        }
-    }
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkInstance a0 = (VkInstance)vkf_first(&k, VKG_KIND_VkInstance, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkEnumeratePhysicalDevices, c->x[0]);
-    uint32_t * a1 = (uint32_t *)vkf_ptr(&k, c->x[1]);
-    uint64_t n2 = (a1 ? *a1 : 0);
-    VkPhysicalDevice *a2 = c->x[2] ? vkf_alloc(&k, (n2 ? n2 : 1) * sizeof *a2) : NULL;
-    PFN_vkEnumeratePhysicalDevices fn = (PFN_vkEnumeratePhysicalDevices)k.fns->f[VKG_vkEnumeratePhysicalDevices];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkEnumeratePhysicalDevices);
-    VkResult r = fn(a0, a1, a2);
-    if (r >= 0) {
-        if (a2) {
-            uint64_t w2 = (a1 ? *a1 : 0);
-            for (uint64_t j = 0; j < w2 && j < n2; j++)
-                vkf_s64(&k, c->x[2] + 8 * j, vkf_wrap(&k, VKG_KIND_VkPhysicalDevice, a2[j]));
-        }
-    }
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
 static int vkt_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -4765,8 +4716,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkh_vkEnumerateInstanceExtensionProperties,
     vkt_vkEnumerateInstanceLayerProperties,
     vkt_vkEnumerateInstanceVersion,
-    vkt_vkEnumeratePhysicalDeviceGroups,
-    vkt_vkEnumeratePhysicalDevices,
+    vkh_vkEnumeratePhysicalDeviceGroups,
+    vkh_vkEnumeratePhysicalDevices,
     vkh_vkFlushMappedMemoryRanges,
     vkh_vkFreeCommandBuffers,
     vkt_vkFreeDescriptorSets,
