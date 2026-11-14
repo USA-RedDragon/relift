@@ -306,6 +306,9 @@ typedef struct upd {
 
 static void put_f(uint8_t *p, float v) { memcpy(p, &v, 4); }
 
+static uint32_t g_fmt = 2, g_end = 480;
+static uint64_t g_wave_size = 960, g_ds;
+
 static void build_update(upd *u, bool first, uint64_t wave, uint64_t sink_buf, uint32_t sink_size, bool sent)
 {
     memset(u, 0, sizeof *u);
@@ -320,18 +323,20 @@ static void build_update(upd *u, bool first, uint64_t wave, uint64_t sink_buf, u
     p[8] = first;
     p[9] = 1;
     p[0xA] = 0;
-    p[0xB] = 2;
+    p[0xB] = (uint8_t)g_fmt;
     put32(p + 0xC, 48000);
     put32(p + 0x18, 1);
     put_f(p + 0x1C, 1.0f);
     put_f(p + 0x20, 1.0f);
     uint8_t *w0 = p + 0x3C;
     put32(w0 + 0x1C, 0);
+    put64(w0 + 0xC, g_ds);
+    put64(w0 + 0x14, g_ds ? 32 : 0);
     uint8_t *wb = w0 + 0x24;
     put64(wb, wave);
-    put64(wb + 8, 960);
+    put64(wb + 8, g_wave_size);
     put32(wb + 0x10, 0);
-    put32(wb + 0x14, 480);
+    put32(wb + 0x14, g_end);
     wb[0x1A] = sent;
     p += sec_voices;
     put32(p + 4, 1);
@@ -484,5 +489,47 @@ TEST(audren_rejects_bad_updates)
     build_update(u, true, heap + 0x10000, heap + 0x20000, 4800, true);
     memcpy(t_mem() + heap + 0x30000, u->in, u->size);
     CHECK_EQ(call(c, rend, &q).result, AUDIO_INVALID_UPDATE_INFO);
+    free(u);
+}
+
+TEST(audren_mixes_adpcm_voices)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x400000);
+    uint32_t h = open_service(c, heap, "audren:u");
+    uint32_t rend = open_renderer(c, heap, h);
+    CHECK(rend);
+    reply r = call(c, rend, &(msg){ .cmd = 7 });
+    CHECK_EQ(r.result, 0);
+    uint8_t *data = t_mem() + heap + 0x10000;
+    memset(data, 0, 8);
+    const uint8_t pairs[7] = { 0x12, 0x3F, 0x7E, 0x00, 0x57, 0x6A, 0x21 };
+    memcpy(data + 1, pairs, 7);
+    memset(t_mem() + heap + 0x11000, 0, 32);
+    g_fmt = 6;
+    g_end = 14;
+    g_wave_size = 8;
+    g_ds = heap + 0x11000;
+    uint64_t sink = heap + 0x20000;
+    upd *u = calloc(1, sizeof *u);
+    build_update(u, true, heap + 0x10000, sink, 480 * 50, true);
+    memcpy(t_mem() + heap + 0x30000, u->in, u->size);
+    msg q = mk(4);
+    q.na = 1;
+    q.a_addr[0] = heap + 0x30000;
+    q.a_size[0] = u->size;
+    q.nb = 1;
+    q.b_addr[0] = heap + 0x40000;
+    q.b_size[0] = 0x1000;
+    CHECK_EQ(call(c, rend, &q).result, 0);
+    CHECK_EQ(call(c, rend, &(msg){ .cmd = 5 }).result, 0);
+    sleep_ms(60);
+    CHECK_EQ(call(c, rend, &(msg){ .cmd = 6 }).result, 0);
+    const int16_t want[14] = { 1, 2, 3, -1, 7, -2, 0, 0, 5, 7, 6, -6, 2, 1 };
+    const int16_t *s = (const int16_t *)(const void *)(t_mem() + sink);
+    for (int i = 0; i < 14; i++)
+        CHECK_EQ(s[i], want[i]);
+    for (int i = 14; i < 240; i++)
+        CHECK_EQ(s[i], 0);
     free(u);
 }
