@@ -30,7 +30,7 @@ typedef struct rl_window {
 
 /** @brief Window events (rl_window_event_fn kind). */
 enum rl_window_event {
-    /** @brief The user asked to close the window. */
+    /** @brief The user asked to close the window (window NULL: to quit the program). */
     RL_WINDOW_CLOSE = 1,
     /** @brief The window got keyboard focus. */
     RL_WINDOW_FOCUS_GAINED = 2,

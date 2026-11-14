@@ -38,6 +38,7 @@ static uint64_t g_keys[4];
 
 static int sdl_init(void)
 {
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         rl_log(RL_LOG_INFO, "window", "SDL video init failed: %s", SDL_GetError());
         return -1;
@@ -239,6 +240,8 @@ static void handle(const SDL_Event *e)
         pad_event(e);
     else if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP)
         key_event(e);
+    else if (e->type == SDL_EVENT_QUIT)
+        rl_window_emit(NULL, RL_WINDOW_CLOSE);
 }
 
 static void sdl_run(bool (*done)(void *user), void *user)
