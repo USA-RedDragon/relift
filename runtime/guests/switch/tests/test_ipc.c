@@ -633,7 +633,7 @@ TEST(ipc_trace)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
-    rl_cfg()->trace_svc = true;
+    rl_cfg()->trace_os = true;
     uint32_t h = open_test_service(c, heap, false);
     CHECK(h);
     uint32_t v;

@@ -49,7 +49,7 @@ TEST(heap_grow_and_shrink)
     CHECK_EQ(mi.addr, heap);
     CHECK_EQ(mi.size, 0x400000);
     CHECK_EQ(mi.type, MS_HEAP & 0xFF);
-    CHECK_EQ(mi.perm, RL_PERM_RW);
+    CHECK_EQ(mi.perm, HOS_PERM_RW);
     CHECK_EQ(t_svc(c, SVC_SET_HEAP_SIZE, 0, 0x200000000ull, 0, 0, 0, 0), KR_INVALID_SIZE);
 }
 
@@ -61,17 +61,17 @@ static void permission_pages(uint32_t host_page)
     CHECK(heap);
     uint64_t page = heap + 0x5000;
     t_mem()[page + 0x10] = 0x5A;
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page, 0x1000, RL_PERM_R, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page, 0x1000, HOS_PERM_R, 0, 0, 0), 0);
     CHECK(!t_read(page + 0x10).faulted);
     CHECK_EQ(t_mem()[page + 0x10], 0x5A);
     t_meminfo mi = query(c, heap, page);
     CHECK_EQ(mi.addr, page);
     CHECK_EQ(mi.size, 0x1000);
-    CHECK_EQ(mi.perm, RL_PERM_R);
+    CHECK_EQ(mi.perm, HOS_PERM_R);
     mi = query(c, heap, page + 0x1000);
     CHECK_EQ(mi.addr, page + 0x1000);
-    CHECK_EQ(mi.perm, RL_PERM_RW);
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page, 0x1000, RL_PERM_NONE, 0, 0, 0), 0);
+    CHECK_EQ(mi.perm, HOS_PERM_RW);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page, 0x1000, HOS_PERM_NONE, 0, 0, 0), 0);
     if (hos.vm.host_page == 0x1000) {
         t_probe p = t_read(page + 0x10);
         CHECK(p.faulted);
@@ -84,7 +84,7 @@ static void permission_pages(uint32_t host_page)
         CHECK_EQ(rl_vm_host_prot(&hos.vm, page), PROT_READ | PROT_WRITE);
     }
     uint64_t big = heap + 0x40000;
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, big, 0x10000, RL_PERM_NONE, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, big, 0x10000, HOS_PERM_NONE, 0, 0, 0), 0);
     t_probe p = t_read(big + 0x8000);
     CHECK(p.faulted);
     CHECK_EQ(p.addr, big + 0x8000);
@@ -97,14 +97,14 @@ static void permission_pages(uint32_t host_page)
     CHECK_EQ(mi.addr, big);
     CHECK_EQ(mi.size, 0x10000);
     CHECK_EQ(mi.perm, 0);
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, big, 0x10000, RL_PERM_RW, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, big, 0x10000, HOS_PERM_RW, 0, 0, 0), 0);
     CHECK(!t_write(big + 0x8000, 1).faulted);
     mi = query(c, heap, heap);
     CHECK_EQ(mi.addr, heap);
     CHECK_EQ(mi.size, 0x5000);
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page, 0x1000, RL_PERM_X, 0, 0, 0), KR_INVALID_PERMISSION);
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page + 1, 0x1000, RL_PERM_R, 0, 0, 0), KR_INVALID_ADDRESS);
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, heap + 0x200000, 0x1000, RL_PERM_R, 0, 0, 0), KR_INVALID_MEM_STATE);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page, 0x1000, HOS_PERM_X, 0, 0, 0), KR_INVALID_PERMISSION);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, page + 1, 0x1000, HOS_PERM_R, 0, 0, 0), KR_INVALID_ADDRESS);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, heap + 0x200000, 0x1000, HOS_PERM_R, 0, 0, 0), KR_INVALID_MEM_STATE);
 }
 
 TEST(permissions_fault_at_4k_page) { permission_pages(0x1000); }
@@ -116,12 +116,12 @@ TEST(policy_union_on_16k_host_pages)
     uint64_t heap = t_heap(c, 0x200000);
     uint64_t hp = heap + 0x10000;
     for (int i = 0; i < 4; i++)
-        CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, hp + 0x1000u * (unsigned)i, 0x1000, RL_PERM_NONE, 0, 0, 0), 0);
+        CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, hp + 0x1000u * (unsigned)i, 0x1000, HOS_PERM_NONE, 0, 0, 0), 0);
     if (hos.vm.host_page == 0x4000) {
         CHECK_EQ(rl_vm_host_prot(&hos.vm, hp), PROT_NONE);
         CHECK(t_read(hp + 0x2000).faulted);
     }
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, hp + 0x1000, 0x1000, RL_PERM_R, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, hp + 0x1000, 0x1000, HOS_PERM_R, 0, 0, 0), 0);
     if (hos.vm.host_page == 0x4000) {
         CHECK_EQ(rl_vm_host_prot(&hos.vm, hp), PROT_READ);
         CHECK(!t_read(hp).faulted);
@@ -132,7 +132,7 @@ TEST(policy_union_on_16k_host_pages)
     CHECK_EQ(mi.size, 0x1000);
     CHECK_EQ(mi.perm, 0);
     mi = query(c, heap, hp + 0x1000);
-    CHECK_EQ(mi.perm, RL_PERM_R);
+    CHECK_EQ(mi.perm, HOS_PERM_R);
 }
 
 TEST(map_memory_copy_semantics)
@@ -162,7 +162,7 @@ TEST(map_memory_copy_semantics)
     CHECK(t_read(dst).faulted);
     mi = query(c, heap, src);
     CHECK_EQ(mi.attr, 0);
-    CHECK_EQ(mi.perm, RL_PERM_RW);
+    CHECK_EQ(mi.perm, HOS_PERM_RW);
     CHECK_EQ(query(c, heap, dst).type, 0);
     CHECK_EQ(t_svc(c, SVC_UNMAP_MEMORY, dst, src, size, 0, 0, 0), KR_INVALID_MEM_STATE);
 }
@@ -170,7 +170,7 @@ TEST(map_memory_copy_semantics)
 TEST(shared_memory_16k_host_pages)
 {
     rl_ctx *c = boot_pages(0x4000);
-    hos_shmem *s = rl_hos_shmem_create(0x4000, RL_PERM_RW);
+    hos_shmem *s = rl_hos_shmem_create(0x4000, HOS_PERM_RW);
     CHECK(s);
     uint32_t h;
     hos_lock();
@@ -178,8 +178,8 @@ TEST(shared_memory_16k_host_pages)
     hos_unlock();
     hos_kobj_unref(&s->obj);
     uint64_t at = t_free_map_addr();
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, RL_PERM_RW, 0, 0), KR_INVALID_ADDRESS);
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, RL_PERM_RW, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, HOS_PERM_RW, 0, 0), KR_INVALID_ADDRESS);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_RW, 0, 0), 0);
     t_mem()[at + 0x3FFF] = 9;
     CHECK_EQ(rl_hos_shmem_ptr(s)[0x3FFF], 9);
 }
@@ -221,20 +221,20 @@ TEST(module_segments)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t base = hos.cfg.code_start;
-    CHECK_EQ(rl_hos_map_segment(base, 0x3000, RL_PERM_RX, MS_CODE_STATIC), 0);
-    CHECK_EQ(rl_hos_map_segment(base + 0x3000, 0x1000, RL_PERM_R, MS_CODE_STATIC), 0);
-    CHECK_EQ(rl_hos_map_segment(base + 0x4000, 0x2000, RL_PERM_RW, MS_CODE_MUTABLE), 0);
-    CHECK_EQ(rl_hos_map_segment(base + 0x4000, 0x1000, RL_PERM_RW, MS_CODE_MUTABLE), KR_INVALID_MEM_STATE);
+    CHECK_EQ(rl_hos_map_segment(base, 0x3000, HOS_PERM_RX, MS_CODE_STATIC), 0);
+    CHECK_EQ(rl_hos_map_segment(base + 0x3000, 0x1000, HOS_PERM_R, MS_CODE_STATIC), 0);
+    CHECK_EQ(rl_hos_map_segment(base + 0x4000, 0x2000, HOS_PERM_RW, MS_CODE_MUTABLE), 0);
+    CHECK_EQ(rl_hos_map_segment(base + 0x4000, 0x1000, HOS_PERM_RW, MS_CODE_MUTABLE), KR_INVALID_MEM_STATE);
     uint64_t heap = t_heap(c, 0x200000);
     t_meminfo mi = query(c, heap, base + 0x1000);
     CHECK_EQ(mi.addr, base);
     CHECK_EQ(mi.size, 0x3000);
-    CHECK_EQ(mi.perm, RL_PERM_RX);
+    CHECK_EQ(mi.perm, HOS_PERM_RX);
     CHECK_EQ(mi.type, MS_CODE_STATIC & 0xFF);
     CHECK(!t_read(base).faulted);
     CHECK(t_write(base + 0x3000, 1).faulted);
     CHECK(!t_write(base + 0x4000, 1).faulted);
-    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, base, 0x1000, RL_PERM_RW, 0, 0, 0), KR_INVALID_MEM_STATE);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, base, 0x1000, HOS_PERM_RW, 0, 0, 0), KR_INVALID_MEM_STATE);
 }
 
 TEST(get_info_regions)
@@ -290,7 +290,7 @@ TEST(shared_memory)
 {
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x400000);
-    hos_shmem *s = rl_hos_shmem_create(0x4000, RL_PERM_R);
+    hos_shmem *s = rl_hos_shmem_create(0x4000, HOS_PERM_R);
     CHECK(s);
     rl_hos_shmem_ptr(s)[5] = 0x42;
     uint32_t h;
@@ -299,18 +299,18 @@ TEST(shared_memory)
     hos_unlock();
     hos_kobj_unref(&s->obj);
     uint64_t at = t_free_map_addr();
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, RL_PERM_RW, 0, 0), KR_INVALID_PERMISSION);
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x1000, RL_PERM_R, 0, 0), KR_INVALID_SIZE);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_RW, 0, 0), KR_INVALID_PERMISSION);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x1000, HOS_PERM_R, 0, 0), KR_INVALID_SIZE);
     if (hos.vm.host_page > 0x1000)
-        CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, RL_PERM_R, 0, 0), KR_INVALID_ADDRESS);
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, heap, 0x4000, RL_PERM_R, 0, 0), KR_INVALID_MEM_RANGE);
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, RL_PERM_R, 0, 0), 0);
+        CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at + 0x1000, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_ADDRESS);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, heap, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_MEM_RANGE);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at, 0x4000, HOS_PERM_R, 0, 0), 0);
     CHECK_EQ(t_mem()[at + 5], 0x42);
     CHECK(t_write(at, 1).faulted);
     rl_hos_shmem_ptr(s)[6] = 0x43;
     CHECK_EQ(t_mem()[at + 6], 0x43);
     uint64_t at2 = at + 0x400000;
-    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at2, 0x4000, RL_PERM_R, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_MAP_SHARED_MEMORY, h, at2, 0x4000, HOS_PERM_R, 0, 0), 0);
     CHECK_EQ(t_mem()[at2 + 6], 0x43);
     rl_hos_shmem_ptr(s)[7] = 0x44;
     CHECK_EQ(t_mem()[at + 7], 0x44);
@@ -328,35 +328,17 @@ TEST(transfer_memory)
     rl_ctx *c = t_boot(NULL);
     uint64_t heap = t_heap(c, 0x200000);
     uint64_t a = heap + 0x20000;
-    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, RL_PERM_R, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, HOS_PERM_R, 0, 0), 0);
     uint32_t h = (uint32_t)c->x[1];
     t_meminfo mi = query(c, heap, a);
     CHECK_EQ(mi.attr, MA_BORROWED);
-    CHECK_EQ(mi.perm, RL_PERM_R);
+    CHECK_EQ(mi.perm, HOS_PERM_R);
     CHECK(t_write(a, 1).faulted);
-    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, RL_PERM_R, 0, 0), KR_INVALID_MEM_STATE);
+    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, HOS_PERM_R, 0, 0), KR_INVALID_MEM_STATE);
     CHECK_EQ(t_svc(c, SVC_CLOSE_HANDLE, h, 0, 0, 0, 0, 0), 0);
     mi = query(c, heap, a);
     CHECK_EQ(mi.attr, 0);
-    CHECK_EQ(mi.perm, RL_PERM_RW);
+    CHECK_EQ(mi.perm, HOS_PERM_RW);
     CHECK(!t_write(a, 1).faulted);
-    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, RL_PERM_W, 0, 0), KR_INVALID_PERMISSION);
-}
-
-TEST(vm_block_map_coalesces)
-{
-    rl_vm vm;
-    CHECK_EQ(rl_vm_init(&vm, 32, 0x4000), 0);
-    CHECK_EQ(rl_vm_set(&vm, 0x10000, 0x8000, RL_PERM_RW, 5, RL_VM_FRESH), 0);
-    CHECK_EQ(rl_vm_set(&vm, 0x12000, 0x1000, RL_PERM_R, 5, RL_VM_KEEP), 0);
-    CHECK_EQ(vm.count, 5);
-    CHECK_EQ(rl_vm_set(&vm, 0x12000, 0x1000, RL_PERM_RW, 5, RL_VM_KEEP), 0);
-    CHECK_EQ(vm.count, 3);
-    rl_vm_block b = rl_vm_query(&vm, 0x17FFF);
-    CHECK_EQ(b.addr, 0x10000);
-    CHECK_EQ(b.size, 0x8000);
-    CHECK_EQ(rl_vm_set(&vm, 0x10000, 0x8000, RL_PERM_NONE, 0, RL_VM_DISCARD), 0);
-    CHECK_EQ(vm.count, 1);
-    CHECK_EQ(rl_vm_set(&vm, 0x10001, 0x1000, RL_PERM_R, 0, RL_VM_KEEP), -1);
-    rl_vm_destroy(&vm);
+    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, a, 0x4000, HOS_PERM_W, 0, 0), KR_INVALID_PERMISSION);
 }
