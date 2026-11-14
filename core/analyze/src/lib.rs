@@ -11,13 +11,16 @@
 //! rather than a copy of its code. Jump tables are resolved by running the
 //! code before the jump ([`tables`]); their targets join the function. A
 //! computed jump that is not a recognized table stays a dynamic exit through
-//! the dispatcher.
+//! the dispatcher. [`unresolved_transfers`] lists those dynamic exits and
+//! the indirect calls, for coverage reports.
 
 mod consts;
 mod slots;
 mod tables;
+mod transfers;
 
 pub use slots::{SlotUses, slot_uses};
+pub use transfers::{Source, Transfer, TransferKind, unresolved_transfers};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;

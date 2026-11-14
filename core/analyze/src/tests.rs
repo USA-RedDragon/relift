@@ -194,6 +194,58 @@ fn jump_tables_are_resolved_into_the_function() {
     );
     assert!(f.insts.contains_key(&(BASE + 0x3c)));
     assert_eq!(a.functions.len(), 1);
+    assert_eq!(unresolved_transfers(f, &Toy.preserved()), []);
+}
+
+#[test]
+fn unresolved_transfers_say_where_their_target_came_from() {
+    let m = module(
+        &[
+            word(0x0a, 1, 0),
+            word(0x0c, 1, 0),
+            word(0x0c, 0, 0),
+            branch(0x07, 1, 3),
+            word(0x05, 2, 2),
+            word(0x06, 2, 0),
+            word(0x06, 2, 0),
+        ],
+        &[],
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    let t = |pc: u64, kind, source| Transfer {
+        pc: BASE + pc,
+        kind,
+        source,
+    };
+    assert_eq!(
+        unresolved_transfers(&a.functions[&BASE], &Toy.preserved()),
+        [
+            t(0x04, TransferKind::Call, Source::Loaded),
+            t(0x08, TransferKind::Call, Source::Returned),
+            t(0x14, TransferKind::Jump, Source::Computed),
+            t(0x18, TransferKind::Jump, Source::Argument),
+        ]
+    );
+}
+
+#[test]
+fn a_target_set_on_two_paths_has_an_unknown_source() {
+    let m = module(
+        &[branch(0x07, 1, 2), word(0x0a, 0, 1), word(0x06, 0, 0)],
+        &[],
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    let got = unresolved_transfers(&a.functions[&BASE], &Toy.preserved());
+    assert_eq!(
+        got,
+        [Transfer {
+            pc: BASE + 8,
+            kind: TransferKind::Jump,
+            source: Source::Unknown,
+        }]
+    );
 }
 
 #[test]
