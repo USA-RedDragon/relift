@@ -15,8 +15,8 @@ fn main() -> ExitCode {
     let loaded = Configulator::<Settings>::new()
         .with_cli_command(Cli::command())
         .with_file(FileOptions {
-            paths: vec!["relift.yaml".into()],
-            ..FileOptions::new(serde_loader(|s| serde_yaml_ng::from_str(s)))
+            paths: vec!["relift.toml".into()],
+            ..FileOptions::new(serde_loader(|s| toml::from_str(s)))
         })
         .with_environment_variables(EnvironmentVariableOptions {
             prefix: "RELIFT_".into(),
