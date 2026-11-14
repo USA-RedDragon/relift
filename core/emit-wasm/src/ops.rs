@@ -5,7 +5,7 @@
 //! the high half masked to `w - 64` bits.
 
 use relift_ir::{
-    BinOp, Block, CmpOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, FpRound, IoKind, Op, UnOp, Value, Width,
 };
 use wasm_encoder::{BlockType, Instruction as I};
 
@@ -14,6 +14,8 @@ use crate::{Helper, Intrinsic, ctx, rt};
 
 const T_ADDR: u32 = 6;
 const T_VAL: u32 = 8;
+/// The new memory value of an atomic read-modify-write.
+const T_NEW: u32 = 10;
 
 /// The pieces `(offset, size)` an access of `n` bytes splits into, in
 /// address order, each of 1, 2, 4 or 8 bytes and none crossing an 8-byte
@@ -589,14 +591,115 @@ impl Em<'_> {
                 self.i(I::End);
             }
             Op::Crypto(..) => return Err("a cipher step".into()),
-            Op::AtomicRmw { .. } | Op::CompareSwap { .. } => {
-                return Err("an atomic read-modify-write".into());
+            Op::AtomicRmw {
+                op: k,
+                addr,
+                value,
+                endian,
+                ..
+            } => {
+                let nb = bytes(w)?;
+                let (a, v) = (loc(self, *addr), loc(self, *value));
+                self.load_le(a, nb, dst);
+                if *endian == Endian::Big {
+                    self.bswap_val(dst, nb, dst);
+                }
+                let new = self.rmw(*k, dst, v, n);
+                let new = self.ordered(new, w, nb, *endian);
+                self.store_le(a, new, nb);
+            }
+            Op::CompareSwap {
+                addr,
+                expected,
+                value,
+                endian,
+                ..
+            } => {
+                let nb = bytes(w)?;
+                let (a, e, v) = (loc(self, *addr), loc(self, *expected), loc(self, *value));
+                self.load_le(a, nb, dst);
+                if *endian == Endian::Big {
+                    self.bswap_val(dst, nb, dst);
+                }
+                self.cmp(CmpOp::Eq, dst, e, n);
+                self.i(I::If(BlockType::Empty));
+                let v = self.ordered(v, w, nb, *endian);
+                self.store_le(a, v, nb);
+                self.i(I::End);
             }
             Op::Set(..) | Op::Guard(..) => {
                 return Err("an operation out of place".into());
             }
         }
         Ok(())
+    }
+
+    /// The new memory value `op(old, v)` of an atomic read-modify-write of
+    /// `n` bits, in the [`T_NEW`] temps (or `v` itself for a swap).
+    fn rmw(&mut self, op: AtomicOp, old: V, v: V, n: u32) -> V {
+        let out = if nat(Width::new(n)) {
+            V::S(Self::t(T_NEW))
+        } else {
+            V::P(Self::t(T_NEW), Self::t(T_NEW + 1))
+        };
+        match op {
+            AtomicOp::Swap => return v,
+            AtomicOp::Add => {
+                if nat(Width::new(n)) {
+                    self.bin_nat(BinOp::Add, old, v, n);
+                    self.set(out.lo());
+                } else {
+                    self.bin_big(BinOp::Add, old, v, n, out);
+                }
+            }
+            AtomicOp::Clear | AtomicOp::Xor | AtomicOp::Or => {
+                let mut halves = vec![(false, out.lo())];
+                if let V::P(_, h) = out {
+                    halves.push((true, h));
+                }
+                for (hi, to) in halves {
+                    for x in [old, v] {
+                        if hi {
+                            self.push_hi(x);
+                        } else {
+                            self.push_lo(x);
+                        }
+                    }
+                    if op == AtomicOp::Clear {
+                        // Both operands are already masked, so `old & !v`
+                        // stays masked.
+                        self.c64(-1);
+                        self.i(I::I64Xor);
+                    }
+                    self.i(match op {
+                        AtomicOp::Clear => I::I64And,
+                        AtomicOp::Xor => I::I64Xor,
+                        _ => I::I64Or,
+                    });
+                    self.set(to);
+                }
+            }
+            AtomicOp::SMax | AtomicOp::SMin | AtomicOp::UMax | AtomicOp::UMin => {
+                let signed = matches!(op, AtomicOp::SMax | AtomicOp::SMin);
+                let max = matches!(op, AtomicOp::SMax | AtomicOp::UMax);
+                self.cmp(if signed { CmpOp::Slt } else { CmpOp::Ult }, old, v, n);
+                self.set(L_RC);
+                let (a, b) = if max { (v, old) } else { (old, v) };
+                self.push_lo(a);
+                self.push_lo(b);
+                self.get(L_RC);
+                self.i(I::Select);
+                self.set(out.lo());
+                if let V::P(_, h) = out {
+                    self.push_hi(a);
+                    self.push_hi(b);
+                    self.get(L_RC);
+                    self.i(I::Select);
+                    self.set(h);
+                }
+            }
+        }
+        out
     }
 
     /// `v` in memory order: itself when little-endian, else byte-swapped
