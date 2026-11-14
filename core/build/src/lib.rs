@@ -110,23 +110,112 @@ pub fn ninja_file(plan: &Plan) -> String {
     t
 }
 
-fn run(cmd: &mut std::process::Command, what: &str) -> Result<(), Error> {
-    let out = cmd.output()?;
-    if out.status.success() {
+/// What a running build reports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event<'a> {
+    /// Time passed (about every 200 ms) with nothing finished.
+    Tick,
+    /// A step finished: `done` of `total` steps of this build so far,
+    /// where `what` is the step's description, such as `cc path/shard0001.c`.
+    Step {
+        /// Steps finished.
+        done: usize,
+        /// Steps in this build.
+        total: usize,
+        /// The step's description.
+        what: &'a str,
+    },
+}
+
+/// How many steps run at once for the `jobs` setting (0: one per CPU).
+pub fn job_count(jobs: u32) -> u32 {
+    if jobs > 0 {
+        return jobs;
+    }
+    std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(u32::MAX))
+}
+
+const POLL: std::time::Duration = std::time::Duration::from_millis(200);
+const TAIL_LINES: usize = 40;
+
+/// The Ninja status line `@done/total/running text`, split.
+fn status(line: &str) -> Option<(usize, usize, &str)> {
+    let rest = line.strip_prefix('@')?;
+    let (head, what) = rest.split_once(' ')?;
+    let mut nums = head.split('/');
+    let done = nums.next()?.parse().ok()?;
+    let total = nums.next()?.parse().ok()?;
+    nums.next()?.parse::<usize>().ok()?;
+    Some((done, total, what))
+}
+
+/// Runs `cmd`, feeding each output line to `line` (which returns whether it
+/// used the line) and telling `on` about time passing. The unused lines are
+/// the failure report.
+fn run(
+    cmd: &mut std::process::Command,
+    what: &str,
+    on: &mut dyn FnMut(Event),
+    mut line: impl FnMut(&str, &mut dyn FnMut(Event)) -> bool,
+) -> Result<(), Error> {
+    use std::io::BufRead as _;
+    use std::process::Stdio;
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let (tx, rx) = channel::<String>();
+    let mut readers = Vec::new();
+    if let Some(out) = child.stdout.take() {
+        let tx = tx.clone();
+        readers.push(std::thread::spawn(move || {
+            for l in io::BufReader::new(out).lines().map_while(Result::ok) {
+                if tx.send(l).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    if let Some(err) = child.stderr.take() {
+        let tx = tx.clone();
+        readers.push(std::thread::spawn(move || {
+            for l in io::BufReader::new(err).lines().map_while(Result::ok) {
+                if tx.send(l).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+    let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    loop {
+        match rx.recv_timeout(POLL) {
+            Ok(l) => {
+                if !line(&l, on) {
+                    if tail.len() == TAIL_LINES {
+                        tail.pop_front();
+                    }
+                    tail.push_back(l);
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => on(Event::Tick),
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    for r in readers {
+        let _ = r.join();
+    }
+    let status = child.wait()?;
+    if status.success() {
         return Ok(());
     }
-    let mut msg = format!("{what} failed ({})", out.status);
-    let tail = |b: &[u8]| {
-        let s = String::from_utf8_lossy(b);
-        let lines: Vec<&str> = s.lines().collect();
-        lines[lines.len().saturating_sub(40)..].join("\n")
-    };
-    for b in [&out.stdout, &out.stderr] {
-        let t = tail(b);
-        if !t.is_empty() {
-            msg.push('\n');
-            msg.push_str(&t);
-        }
+    let mut msg = format!("{what} failed ({status})");
+    for l in tail {
+        msg.push('\n');
+        msg.push_str(&l);
     }
     Err(Error::Failed(msg))
 }
@@ -139,7 +228,7 @@ fn newer(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Builds `plan` in `dir` with `jobs` parallel jobs (0: Ninja's default),
+/// Builds `plan` in `dir` with `jobs` parallel jobs (0: one per CPU),
 /// through Ninja at `ninja` when given, else directly.
 ///
 /// # Errors
@@ -147,6 +236,23 @@ fn newer(a: &Path, b: &Path) -> bool {
 /// A write error, a tool that cannot start, or a failed compile or link
 /// (with the end of its output).
 pub fn build(plan: &Plan, dir: &Path, ninja: Option<&Path>, jobs: u32) -> Result<(), Error> {
+    build_with(plan, dir, ninja, jobs, &mut |_| {})
+}
+
+/// As [`build`], telling `on` about every finished step. With Ninja the
+/// counts are Ninja's own (`NINJA_STATUS`); without it they count the
+/// objects compiled and the link.
+///
+/// # Errors
+///
+/// As [`build`].
+pub fn build_with(
+    plan: &Plan,
+    dir: &Path,
+    ninja: Option<&Path>,
+    jobs: u32,
+    on: &mut dyn FnMut(Event),
+) -> Result<(), Error> {
     std::fs::create_dir_all(dir)?;
     for c in &plan.compiles {
         if let Some(p) = c.obj.parent() {
@@ -156,22 +262,30 @@ pub fn build(plan: &Plan, dir: &Path, ninja: Option<&Path>, jobs: u32) -> Result
     if let Some(n) = ninja {
         relift_cache::write_if_changed(&dir.join("build.ninja"), ninja_file(plan).as_bytes())?;
         let mut cmd = relift_proc::command(n);
-        cmd.current_dir(dir);
-        if jobs > 0 {
-            cmd.arg("-j").arg(jobs.to_string());
-        }
-        return run(&mut cmd, "ninja");
+        cmd.current_dir(dir)
+            .env("NINJA_STATUS", "@%f/%t/%r ")
+            .arg("-j")
+            .arg(job_count(jobs).to_string());
+        return run(&mut cmd, "ninja", on, |l, on| match status(l) {
+            Some((done, total, what)) => {
+                on(Event::Step { done, total, what });
+                true
+            }
+            None => false,
+        });
     }
     let (prog, pre) = plan
         .cc
         .split_first()
         .ok_or_else(|| Error::Failed("no C compiler".into()))?;
-    let mut relink = !plan.output.exists();
-    for c in &plan.compiles {
-        if !newer(&c.src, &c.obj) {
-            continue;
-        }
-        relink = true;
+    let stale: Vec<&Compile> = plan
+        .compiles
+        .iter()
+        .filter(|c| newer(&c.src, &c.obj))
+        .collect();
+    let relink = !stale.is_empty() || !plan.output.exists();
+    let total = stale.len() + usize::from(relink);
+    for (i, c) in stale.iter().enumerate() {
         let mut cmd = relift_proc::command(prog);
         cmd.args(pre)
             .args(&c.flags)
@@ -179,7 +293,14 @@ pub fn build(plan: &Plan, dir: &Path, ninja: Option<&Path>, jobs: u32) -> Result
             .arg(&c.src)
             .arg("-o")
             .arg(&c.obj);
-        run(&mut cmd, &format!("cc {}", c.src.display()))?;
+        run(&mut cmd, &format!("cc {}", c.src.display()), on, |_, _| {
+            false
+        })?;
+        on(Event::Step {
+            done: i + 1,
+            total,
+            what: &format!("cc {}", c.src.display()),
+        });
     }
     if relink {
         let mut cmd = relift_proc::command(prog);
@@ -188,7 +309,12 @@ pub fn build(plan: &Plan, dir: &Path, ninja: Option<&Path>, jobs: u32) -> Result
             .arg("-o")
             .arg(&plan.output)
             .args(&plan.link_flags);
-        run(&mut cmd, "link")?;
+        run(&mut cmd, "link", on, |_, _| false)?;
+        on(Event::Step {
+            done: total,
+            total,
+            what: &format!("link {}", plan.output.display()),
+        });
     }
     Ok(())
 }
@@ -227,6 +353,22 @@ mod tests {
         );
         assert!(t.contains("build game: link obj/a.o\n  libs = -lm"), "{t}");
         assert!(t.contains("deps = gcc"));
+    }
+
+    #[test]
+    fn ninja_status_lines_split_and_other_lines_do_not() {
+        assert_eq!(status("@12/340/8 cc a b.c"), Some((12, 340, "cc a b.c")));
+        assert_eq!(status("@1/2/3 link game"), Some((1, 2, "link game")));
+        assert_eq!(status("FAILED: x.o"), None);
+        assert_eq!(status("@x/2/3 cc"), None);
+        assert_eq!(status("@1/2 cc"), None);
+        assert_eq!(status("ninja: no work to do."), None);
+    }
+
+    #[test]
+    fn explicit_jobs_are_kept_and_zero_means_the_cpus() {
+        assert_eq!(job_count(7), 7);
+        assert!(job_count(0) >= 1);
     }
 
     #[test]
