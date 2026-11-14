@@ -347,17 +347,99 @@ fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
     }
 }
 
-fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<Built, BoxError> {
-    if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-        return Err(format!("target {t}: only the host target builds so far").into());
+/// The environment variable that turns a `relift build` or `relift run`
+/// into the lifting child: it lifts and emits, writes the record of what it
+/// emitted to the named file and exits. Not a setting (no `RELIFT_` prefix).
+const EMIT_RECORD: &str = "_RELIFT_EMIT_RECORD";
+
+/// What the lifting child emitted, as the parent reads it back.
+struct EmitRecord {
+    modules: Vec<String>,
+    lifted: Vec<PathBuf>,
+    prog: Vec<PathBuf>,
+    functions: usize,
+    unlifted: usize,
+    /// Whether every lifted file is built with FPSR flags.
+    fp_program_wide: bool,
+    /// The files built a second time with FPSR flags (`RL_PART=1`).
+    fp_part1: Vec<PathBuf>,
+}
+
+impl EmitRecord {
+    fn to_text(&self) -> String {
+        let mut t = format!("functions {}\nunlifted {}\n", self.functions, self.unlifted);
+        for m in &self.modules {
+            t.push_str(&format!("module {m}\n"));
+        }
+        for p in &self.lifted {
+            t.push_str(&format!("lifted {}\n", p.display()));
+        }
+        for p in &self.prog {
+            t.push_str(&format!("prog {}\n", p.display()));
+        }
+        if self.fp_program_wide {
+            t.push_str("fp_program_wide 1\n");
+        }
+        for p in &self.fp_part1 {
+            t.push_str(&format!("fp_part1 {}\n", p.display()));
+        }
+        t
     }
-    let import = import_dir()?;
-    let (mods, npdm) = load(&import)?;
-    let placed = program::place(mods);
+
+    fn parse(t: &str) -> Result<EmitRecord, BoxError> {
+        let mut r = EmitRecord {
+            modules: Vec::new(),
+            lifted: Vec::new(),
+            prog: Vec::new(),
+            functions: 0,
+            unlifted: 0,
+            fp_program_wide: false,
+            fp_part1: Vec::new(),
+        };
+        for line in t.lines() {
+            let (k, v) = line.split_once(' ').ok_or("a bad emit record line")?;
+            match k {
+                "functions" => r.functions = v.parse()?,
+                "unlifted" => r.unlifted = v.parse()?,
+                "module" => r.modules.push(v.into()),
+                "lifted" => r.lifted.push(v.into()),
+                "prog" => r.prog.push(v.into()),
+                "fp_program_wide" => r.fp_program_wide = v == "1",
+                "fp_part1" => r.fp_part1.push(v.into()),
+                _ => return Err(format!("unknown emit record key {k}").into()),
+            }
+        }
+        Ok(r)
+    }
+}
+
+/// The project's name and its host build directory.
+fn project_out(settings: &Settings) -> Result<(String, PathBuf), BoxError> {
     let name = std::fs::canonicalize(".")?
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "project".into());
+    let root = cache_root(settings)?;
+    std::fs::create_dir_all(&root)?;
+    let out = std::fs::canonicalize(root)?
+        .join("projects")
+        .join(&name)
+        .join("build")
+        .join("host");
+    Ok((name, out))
+}
+
+/// Lifts and emits the project (the lifting child's whole job): the C of
+/// every module, the unlifted list and the program files.
+fn lift_and_emit(
+    settings: &Settings,
+    name: &str,
+    out: &Path,
+    ui: &mut Ui,
+) -> Result<EmitRecord, BoxError> {
+    let import = import_dir()?;
+    let (mods, npdm) = load(&import)?;
+    let placed = program::place(mods);
     ui.title(&format!(
         "relift build: {name} ({} module{}, {}-{})",
         placed.len(),
@@ -366,17 +448,8 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         std::env::consts::ARCH
     ));
     let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
-    let compile_row = ui.row("");
-    let root = cache_root(settings)?;
-    std::fs::create_dir_all(&root)?;
-    let out = std::fs::canonicalize(&root)?
-        .join("projects")
-        .join(name)
-        .join("build")
-        .join("host");
     let cdir = out.join("c");
     let emitted = emit_modules(settings, &placed, &cdir, ui, &rows)?;
-    let (lifted, units) = (emitted.files, emitted.units);
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
     let fpsr = emitted.fpsr;
@@ -385,13 +458,61 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         ui.note(&Line::new().text(l));
     }
     let mut prog = Vec::new();
-    for f in program::program_files(&placed, npdm.as_ref(), &units, fp_flags) {
+    for f in program::program_files(&placed, npdm.as_ref(), &emitted.units, fp_flags) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;
         if f.is_c() {
             prog.push(path);
         }
     }
+    Ok(EmitRecord {
+        modules: placed.iter().map(|p| p.name.clone()).collect(),
+        lifted: emitted.files,
+        prog,
+        functions: emitted.functions,
+        unlifted: emitted.unlifted,
+        fp_program_wide: fpsr.program_wide,
+        fp_part1: fpsr.part1,
+    })
+}
+
+/// Runs the lift and emit in a child relift (this executable, the same
+/// arguments, [`EMIT_RECORD`] set), so the memory they use is gone before
+/// the compilers start, and reads back what it emitted.
+fn lift_in_child(out: &Path) -> Result<EmitRecord, BoxError> {
+    std::fs::create_dir_all(out)?;
+    let rec = out.join("emit.txt");
+    let _ = std::fs::remove_file(&rec);
+    let status = relift_proc::command(&std::env::current_exe()?)
+        .args(std::env::args_os().skip(1))
+        .env(EMIT_RECORD, &rec)
+        .status()?;
+    if !status.success() {
+        return Err(format!("lifting failed ({status})").into());
+    }
+    EmitRecord::parse(&std::fs::read_to_string(&rec)?)
+}
+
+fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<Built, BoxError> {
+    if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
+        return Err(format!("target {t}: only the host target builds so far").into());
+    }
+    let (name, out) = project_out(settings)?;
+    if let Some(rec) = std::env::var_os(EMIT_RECORD) {
+        let r = lift_and_emit(settings, &name, &out, ui)?;
+        relift_cache::write_if_changed(Path::new(&rec), r.to_text().as_bytes())?;
+        std::process::exit(0);
+    }
+    let emitted = lift_in_child(&out)?;
+    // The child printed the module rows; registering them again keeps the
+    // compile row's columns in line with them.
+    for m in &emitted.modules {
+        ui.row(m);
+    }
+    let compile_row = ui.row("");
+    let cdir = out.join("c");
+    let unlifted_file = out.join("unlifted.txt");
+    let (lifted, prog) = (emitted.lifted, emitted.prog);
     let rt = if settings.runtime_dir.as_os_str().is_empty() {
         PathBuf::from(RUNTIME_DIR)
     } else {
@@ -428,12 +549,12 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
     // which the compiler must then neither fold nor reorder.
     let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
     let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
-    let lifted_flags = if fpsr.program_wide {
+    let lifted_flags = if emitted.fp_program_wide {
         flag_flags.clone()
     } else {
         lifted_flags
     };
-    let extras = crate::runtime_link::extras(&rt, &root)?;
+    let extras = crate::runtime_link::extras(&rt, &cache_root(settings)?)?;
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
         .iter()
@@ -473,7 +594,7 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             pool: None,
         })
         .collect();
-    for s in &fpsr.part1 {
+    for s in &emitted.fp_part1 {
         compiles.push(Compile {
             src: s.clone(),
             obj: obj(s, "lifted").with_extension("p1.o"),
