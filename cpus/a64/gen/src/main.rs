@@ -21,6 +21,7 @@ mod eval;
 mod model;
 mod ops;
 mod parse;
+mod stage;
 mod template;
 mod value;
 

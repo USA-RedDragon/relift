@@ -1,10 +1,10 @@
 //! The Sail library primitives, over staged values.
 
-use crate::eval::{Gen, R, fail};
+use crate::eval::{Cpu, Gen, R, fail};
 use crate::ops::{BOp, Cmp, IOp};
 use crate::value::{K, Kind, V, mask};
 
-impl Gen<'_> {
+impl<C: Cpu> Gen<'_, C> {
     fn cw(&self, v: &V) -> R<u32> {
         let i = self.cint(v)?;
         if !(0..=4096).contains(&i) {

@@ -28,8 +28,158 @@
 //! The generator refuses to inline a function of `stubs.sail` (placeholders
 //! for implementation choices) other than hints with no effect.
 
-use crate::eval::{Gen, R, fail, feature};
+use std::rc::Rc;
+
+use crate::ast::Expr;
+use crate::eval::{Cpu, Gen, R, fail};
+use crate::stage::Stage;
 use crate::value::{K, V};
+
+/// The A64 layer of the evaluator, and its per-run state: the exclusive
+/// monitor bookkeeping.
+#[derive(Default)]
+pub struct A64 {
+    /// The next load arms the exclusive monitor for this many bytes.
+    pub excl_load: Option<u32>,
+    /// The bytes of an exclusive load not yet read: the IR value, its
+    /// width in bits and the next bit to read.
+    pub excl_rest: Option<(Rc<str>, u32, u32)>,
+    /// The pending exclusive-store result, named before the store defines it.
+    pub excl_pass: Option<Rc<str>>,
+    /// Run the cipher functions from Sail instead of cutting them (to
+    /// check the cut).
+    pub no_cut: bool,
+}
+
+/// Features every configuration has: Armv8.0-A with floating point and
+/// Advanced SIMD, AArch64 at every exception level.
+const BASE_FEATURES: &[&str] = &[
+    "FEAT_AdvSIMD",
+    "FEAT_FP",
+    "FEAT_AA64EL0",
+    "FEAT_AA64EL1",
+    "FEAT_AA64EL2",
+    "FEAT_AA64EL3",
+    "FEAT_EL0",
+    "FEAT_EL1",
+    "FEAT_EL2",
+    "FEAT_EL3",
+    "FEAT_AA32EL0",
+];
+
+/// Optional features a template may test at lift time (`St::has`): the
+/// user-visible instruction-set extensions relift lifts. Every other
+/// feature is absent in every configuration.
+const LIFT_TIME_FEATURES: &[&str] = &[
+    "FEAT_AES",
+    "FEAT_PMULL",
+    "FEAT_SHA1",
+    "FEAT_SHA256",
+    "FEAT_SHA512",
+    "FEAT_SHA3",
+    "FEAT_SM3",
+    "FEAT_SM4",
+    "FEAT_CRC32",
+    "FEAT_LSE",
+    "FEAT_LSE128",
+    "FEAT_RDM",
+    "FEAT_FP16",
+    "FEAT_FHM",
+    "FEAT_DotProd",
+    "FEAT_I8MM",
+    "FEAT_BF16",
+    "FEAT_FCMA",
+    "FEAT_JSCVT",
+    "FEAT_FRINTTS",
+    "FEAT_FlagM",
+    "FEAT_FlagM2",
+    "FEAT_LRCPC",
+    "FEAT_LRCPC2",
+    "FEAT_LRCPC3",
+    "FEAT_CSSC",
+    "FEAT_HBC",
+    "FEAT_SB",
+];
+
+/// How a template sees a feature: `Some(true)` for a base feature,
+/// `Some(false)` for one no configuration has, `None` for one tested at
+/// lift time.
+pub fn feature(name: &str) -> Option<bool> {
+    if BASE_FEATURES.contains(&name) {
+        return Some(true);
+    }
+    if LIFT_TIME_FEATURES.contains(&name) {
+        return None;
+    }
+    Some(false)
+}
+
+/// Stubs of `stubs.sail` whose empty body is right for a user-mode guest:
+/// hints with no architectural effect.
+const STUBS_OK: &[&str] = &[
+    "Hint_Yield",
+    "Hint_PreloadData",
+    "Hint_PreloadDataForWrite",
+    "Hint_PreloadInstr",
+];
+
+impl Cpu for A64 {
+    fn cut(g: &mut Gen<'_, A64>, name: &str, a: &[V], hint: Option<u32>) -> R<Option<V>> {
+        cut(g, name, a, hint)
+    }
+
+    fn init_reg(g: &mut Gen<'_, A64>, name: &str) -> Option<R<V>> {
+        if name == "__ThisInstrEnc" {
+            return Some(match g.m.enum_of.get("__A64") {
+                Some((t, i)) => Ok(V::Enum(t.as_str().into(), *i)),
+                None => fail("no __A64"),
+            });
+        }
+        None
+    }
+
+    fn reg_config(name: &str) -> u128 {
+        match name {
+            "SCR_EL3" => 1 | (1 << 10),
+            "HCR_EL2" => 1 << 31,
+            _ => 0,
+        }
+    }
+
+    fn stub_ok(name: &str) -> bool {
+        STUBS_OK.contains(&name)
+    }
+
+    fn assign_index(g: &mut Gen<'_, A64>, b: &Expr, i: &Expr, v: &V) -> Option<R<()>> {
+        if !(matches!(b, Expr::Id(r) if r == "FPSR") && matches!(i, Expr::Id(f) if f == "QC")) {
+            return None;
+        }
+        // The saturation flag is the one FPSR write outside the FP
+        // cut: it is sticky, so a write ORs it in.
+        if !matches!(g.defd(v), V::Bits(1, 1)) {
+            return Some(fail("FPSR.QC written with a value other than 1"));
+        }
+        g.used_cut.insert("FPSR.QC");
+        let gd = g.gd();
+        g.effect(format!("st.set_qc(b, {gd});"));
+        Some(Ok(()))
+    }
+}
+
+impl Stage for A64 {
+    const PURE_READS: &'static [&'static str] = &["st.x_read(", "st.v_read(", "st.sp_read("];
+
+    fn finish_run(g: &Gen<'_, A64>) -> Result<(), String> {
+        if g.cpu.excl_pass.is_some() {
+            return Err("exclusive monitor check without a store".into());
+        }
+        Ok(())
+    }
+}
+
+fn cut(g: &mut Gen<'_, A64>, name: &str, a: &[V], hint: Option<u32>) -> R<Option<V>> {
+    g.a64_cut(name, a, hint)
+}
 
 /// The ENV functions: no effect and no value in the fixed configuration.
 pub const ENV_NOOPS: &[&str] = &[
@@ -156,8 +306,8 @@ pub fn verify_crypto(m: &crate::model::Model) -> Result<(), String> {
             }
         }
         for x in inputs {
-            let mut g = Gen::new(m, 0, 0);
-            g.no_cut = true;
+            let mut g: Gen<'_, A64> = Gen::new(m, 0, 0);
+            g.cpu.no_cut = true;
             let got = g
                 .call(name, vec![V::Bits(w, x)], None)
                 .map_err(|e| format!("{name}({x:#x}) does not evaluate: {e:?}"))?;
@@ -227,7 +377,21 @@ fn real_of(n: V, d: V) -> V {
     V::Union("$real".into(), Box::new(V::tuple(vec![n, d])))
 }
 
-impl Gen<'_> {
+trait A64Cut {
+    fn real(&mut self, name: &str, a: &[V]) -> R<Option<V>>;
+    fn fp_cut(&mut self, name: &str, a: &[V]) -> R<V>;
+    fn fp_estimate(&mut self, name: &str, a: &[V]) -> R<V>;
+    fn fp_fpcr_ok(&self, name: &str, fpcr: &V) -> R<()>;
+    fn fp_round(&self, v: &V) -> R<&'static str>;
+    fn fp_round_odd(&self, v: &V) -> bool;
+    fn unsigned_estimate(&mut self, name: &str, a: &[V]) -> R<V>;
+    fn fp_convert(&mut self, name: &str, a: &[V]) -> R<V>;
+    fn reg_no(&self, v: &V) -> R<String>;
+    fn order(&self, acc: &V) -> &'static str;
+    fn a64_cut(&mut self, name: &str, a: &[V], _hint: Option<u32>) -> R<Option<V>>;
+}
+
+impl A64Cut for Gen<'_, A64> {
     /// REAL: the one use of reals in the integer instructions, an integer
     /// quotient rounded toward zero (`SDIV`, `UDIV`), kept as a fraction.
     fn real(&mut self, name: &str, a: &[V]) -> R<Option<V>> {
@@ -562,8 +726,8 @@ impl Gen<'_> {
     }
 
     /// Runs the cut function `name`, or gives `None` when `name` is not cut.
-    pub fn cut(&mut self, name: &str, a: &[V], _hint: Option<u32>) -> R<Option<V>> {
-        if self.no_cut && CRYPTO_CUT.iter().any(|(n, _)| *n == name) {
+    fn a64_cut(&mut self, name: &str, a: &[V], _hint: Option<u32>) -> R<Option<V>> {
+        if self.cpu.no_cut && CRYPTO_CUT.iter().any(|(n, _)| *n == name) {
             return Ok(None);
         }
         if name == "HaveFP16Ext" {
@@ -673,13 +837,13 @@ impl Gen<'_> {
                 if self.guard.d.is_some() {
                     return fail("load under a dynamic condition");
                 }
-                if let Some((v, w, lo)) = self.excl_rest.take() {
+                if let Some((v, w, lo)) = self.cpu.excl_rest.take() {
                     // The next part of a pair the exclusive load read whole.
                     if lo + size * 8 > w {
                         return fail("read past the exclusive load");
                     }
                     if lo + size * 8 < w {
-                        self.excl_rest = Some((v.clone(), w, lo + size * 8));
+                        self.cpu.excl_rest = Some((v.clone(), w, lo + size * 8));
                     }
                     return Ok(Some(self.dy(
                         K::Bits(size * 8),
@@ -687,7 +851,7 @@ impl Gen<'_> {
                     )));
                 }
                 let order = self.order(&a[2]);
-                let mon = self.excl_load.take();
+                let mon = self.cpu.excl_load.take();
                 let excl = mon.is_some();
                 // An exclusive load reads the monitor's whole span at once
                 // (a pair of 64-bit registers reads as one 16-byte access).
@@ -711,7 +875,7 @@ impl Gen<'_> {
                     };
                     let whole = self.dy(K::Bits(size * 8), expr);
                     let v = self.dx(&whole)?;
-                    self.excl_rest = Some((v.clone(), size * 8, part * 8));
+                    self.cpu.excl_rest = Some((v.clone(), size * 8, part * 8));
                     return Ok(Some(self.dy(
                         K::Bits(part * 8),
                         format!("b.extract({v}, 0, Width::new({}))", part * 8),
@@ -735,7 +899,7 @@ impl Gen<'_> {
                 let y = self.dx(&data)?;
                 let order = self.order(&a[2]);
                 let size = data.width().unwrap_or(8) / 8;
-                if let Some(p) = self.excl_pass.clone()
+                if let Some(p) = self.cpu.excl_pass.clone()
                     && self.guard.d.as_deref() == Some(p.as_ref())
                 {
                     if self.guard.s.is_none() {
@@ -756,7 +920,7 @@ impl Gen<'_> {
                         }
                     };
                     self.line(l);
-                    self.excl_pass = None;
+                    self.cpu.excl_pass = None;
                     return Ok(Some(V::Unit));
                 }
                 if self.guard.d.is_some() {
@@ -825,7 +989,7 @@ impl Gen<'_> {
                 }
             }
             "AArch64_SetExclusiveMonitors" => {
-                self.excl_load = Some(self.cint(&a[1])? as u32);
+                self.cpu.excl_load = Some(self.cint(&a[1])? as u32);
                 V::Unit
             }
             "AlignmentFault" => V::Enum("relift_fault".into(), 0),
@@ -843,7 +1007,7 @@ impl Gen<'_> {
             }
             "AArch64_ExclusiveMonitorsPass" => {
                 let p = format!("xp{}", self.fresh());
-                self.excl_pass = Some(p.as_str().into());
+                self.cpu.excl_pass = Some(p.as_str().into());
                 V::D(K::Bool, p.into())
             }
             "ConstrainUnpredictable" => {

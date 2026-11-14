@@ -76,8 +76,39 @@ impl Guard {
     }
 }
 
+/// The per-CPU layer of the evaluator: the cut line (Sail functions replaced
+/// by hand-written code), register configuration and the few model writes
+/// that are not plain guest state. `Self` is also the per-run state the
+/// cut keeps (for A64, the exclusive monitor bookkeeping).
+pub trait Cpu: Default + Sized {
+    /// Runs the cut function `name`, or gives `None` when it is not cut.
+    fn cut(g: &mut Gen<'_, Self>, name: &str, a: &[V], hint: Option<u32>) -> R<Option<V>>;
+
+    /// The initial value of a register or top-level `let`, before the
+    /// generic rules; `None` to use them.
+    fn init_reg(_g: &mut Gen<'_, Self>, _name: &str) -> Option<R<V>> {
+        None
+    }
+
+    /// The fixed configuration value of a register with no initial value.
+    fn reg_config(_name: &str) -> u128 {
+        0
+    }
+
+    /// A stub of `stubs.sail` whose empty body is right for this guest.
+    fn stub_ok(_name: &str) -> bool {
+        false
+    }
+
+    /// Handles an assignment to `base[index]` itself; `None` for the
+    /// generic rule.
+    fn assign_index(_g: &mut Gen<'_, Self>, _base: &Expr, _index: &Expr, _v: &V) -> Option<R<()>> {
+        None
+    }
+}
+
 /// The evaluator for one encoding and one assignment of its split bits.
-pub struct Gen<'m> {
+pub struct Gen<'m, C: Cpu> {
     /// The model.
     pub m: &'m Model,
     out: Vec<String>,
@@ -96,93 +127,13 @@ pub struct Gen<'m> {
     pub value: u32,
     /// The cut functions this run used.
     pub used_cut: BTreeSet<&'static str>,
-    /// The next load arms the exclusive monitor for this many bytes.
-    pub excl_load: Option<u32>,
-    /// The bytes of an exclusive load not yet read: the IR value, its
-    /// width in bits and the next bit to read.
-    pub excl_rest: Option<(Rc<str>, u32, u32)>,
-    /// The pending exclusive-store result, named before the store defines it.
-    pub excl_pass: Option<Rc<str>>,
-    /// Run the cipher functions from Sail instead of cutting them (to
-    /// check the cut).
-    pub no_cut: bool,
+    /// The per-CPU run state.
+    pub cpu: C,
 }
 
-/// Features every configuration has: Armv8.0-A with floating point and
-/// Advanced SIMD, AArch64 at every exception level.
-const BASE_FEATURES: &[&str] = &[
-    "FEAT_AdvSIMD",
-    "FEAT_FP",
-    "FEAT_AA64EL0",
-    "FEAT_AA64EL1",
-    "FEAT_AA64EL2",
-    "FEAT_AA64EL3",
-    "FEAT_EL0",
-    "FEAT_EL1",
-    "FEAT_EL2",
-    "FEAT_EL3",
-    "FEAT_AA32EL0",
-];
-
-/// Optional features a template may test at lift time (`St::has`): the
-/// user-visible instruction-set extensions relift lifts. Every other
-/// feature is absent in every configuration.
-const LIFT_TIME_FEATURES: &[&str] = &[
-    "FEAT_AES",
-    "FEAT_PMULL",
-    "FEAT_SHA1",
-    "FEAT_SHA256",
-    "FEAT_SHA512",
-    "FEAT_SHA3",
-    "FEAT_SM3",
-    "FEAT_SM4",
-    "FEAT_CRC32",
-    "FEAT_LSE",
-    "FEAT_LSE128",
-    "FEAT_RDM",
-    "FEAT_FP16",
-    "FEAT_FHM",
-    "FEAT_DotProd",
-    "FEAT_I8MM",
-    "FEAT_BF16",
-    "FEAT_FCMA",
-    "FEAT_JSCVT",
-    "FEAT_FRINTTS",
-    "FEAT_FlagM",
-    "FEAT_FlagM2",
-    "FEAT_LRCPC",
-    "FEAT_LRCPC2",
-    "FEAT_LRCPC3",
-    "FEAT_CSSC",
-    "FEAT_HBC",
-    "FEAT_SB",
-];
-
-/// How a template sees a feature: `Some(true)` for a base feature,
-/// `Some(false)` for one no configuration has, `None` for one tested at
-/// lift time.
-pub fn feature(name: &str) -> Option<bool> {
-    if BASE_FEATURES.contains(&name) {
-        return Some(true);
-    }
-    if LIFT_TIME_FEATURES.contains(&name) {
-        return None;
-    }
-    Some(false)
-}
-
-/// Stubs of `stubs.sail` whose empty body is right for a user-mode guest:
-/// hints with no architectural effect.
-const STUBS_OK: &[&str] = &[
-    "Hint_Yield",
-    "Hint_PreloadData",
-    "Hint_PreloadDataForWrite",
-    "Hint_PreloadInstr",
-];
-
-impl<'m> Gen<'m> {
+impl<'m, C: Cpu> Gen<'m, C> {
     /// An evaluator with `known` bits of the word fixed to `value`.
-    pub fn new(m: &'m Model, known: u32, value: u32) -> Gen<'m> {
+    pub fn new(m: &'m Model, known: u32, value: u32) -> Gen<'m, C> {
         Gen {
             m,
             out: Vec::new(),
@@ -197,10 +148,7 @@ impl<'m> Gen<'m> {
             known,
             value,
             used_cut: BTreeSet::new(),
-            excl_load: None,
-            excl_rest: None,
-            excl_pass: None,
-            no_cut: false,
+            cpu: C::default(),
         }
     }
 
@@ -440,32 +388,35 @@ impl<'m> Gen<'m> {
         Ok(v)
     }
 
-    fn init_reg(&mut self, name: &str) -> R<V> {
+    /// The PSTATE every template starts from: every field zero.
+    pub fn default_pstate(&self) -> R<V> {
+        let fields = self
+            .m
+            .structs
+            .get("ProcState")
+            .ok_or_else(|| err("no ProcState"))?;
+        let mut f = Vec::new();
+        for (n, _) in fields {
+            let w = match n.as_str() {
+                "EL" | "BTYPE" => 2,
+                "GE" => 4,
+                "IT" => 8,
+                "M" => 5,
+                _ => 1,
+            };
+            f.push((n.clone(), V::Bits(w, 0)));
+        }
+        Ok(V::Struct("ProcState".into(), Rc::new(f)))
+    }
+
+    /// The initial value of register `name`.
+    pub fn init_reg(&mut self, name: &str) -> R<V> {
+        if let Some(r) = C::init_reg(self, name) {
+            return r;
+        }
         match name {
-            "PSTATE" => {
-                let fields = self
-                    .m
-                    .structs
-                    .get("ProcState")
-                    .ok_or_else(|| err("no ProcState"))?;
-                let mut f = Vec::new();
-                for (n, _) in fields {
-                    let w = match n.as_str() {
-                        "EL" | "BTYPE" => 2,
-                        "GE" => 4,
-                        "IT" => 8,
-                        "M" => 5,
-                        _ => 1,
-                    };
-                    f.push((n.clone(), V::Bits(w, 0)));
-                }
-                return Ok(V::Struct("ProcState".into(), Rc::new(f)));
-            }
+            "PSTATE" => return self.default_pstate(),
             "SEE" => return Ok(V::Int(-1)),
-            "__ThisInstrEnc" => {
-                let (t, i) = self.m.enum_of.get("__A64").ok_or_else(|| err("no __A64"))?;
-                return Ok(V::Enum(t.as_str().into(), *i));
-            }
             "__BranchTaken" | "SPESampleInFlight" | "InGuardedPage" => return Ok(V::Bool(false)),
             "BTypeNext" => return Ok(V::Bits(2, 0)),
             _ => {}
@@ -480,11 +431,7 @@ impl<'m> Gen<'m> {
         }
         if let Some((ty, _)) = self.m.registers.get(name) {
             let ty = ty.trim().to_string();
-            let cfg: u128 = match name {
-                "SCR_EL3" => 1 | (1 << 10),
-                "HCR_EL2" => 1 << 31,
-                _ => 0,
-            };
+            let cfg: u128 = C::reg_config(name);
             if let Some((w, _)) = self.m.bitfields.get(&ty) {
                 return Ok(V::Bf(ty.as_str().into(), Box::new(V::Bits(*w, cfg))));
             }
@@ -1189,21 +1136,10 @@ impl<'m> Gen<'m> {
                 };
                 self.assign(b, nb)
             }
-            Expr::Index(b, i)
-                if matches!(b.as_ref(), Expr::Id(r) if r == "FPSR")
-                    && matches!(i.as_ref(), Expr::Id(f) if f == "QC") =>
-            {
-                // The saturation flag is the one FPSR write outside the FP
-                // cut: it is sticky, so a write ORs it in.
-                if !matches!(self.defd(&v), V::Bits(1, 1)) {
-                    return fail("FPSR.QC written with a value other than 1");
-                }
-                self.used_cut.insert("FPSR.QC");
-                let g = self.gd();
-                self.effect(format!("st.set_qc(b, {g});"));
-                Ok(())
-            }
             Expr::Index(b, i) => {
+                if let Some(r) = C::assign_index(self, b, i, &v) {
+                    return r;
+                }
                 let base = self.eval(b, None)?;
                 if let V::Bf(t, bits) = &base
                     && let Expr::Id(f) = i.as_ref()
@@ -1489,7 +1425,7 @@ impl<'m> Gen<'m> {
         if self.guard.dead {
             return Ok(V::Undef(None));
         }
-        if let Some(r) = self.cut(name, &args, hint)? {
+        if let Some(r) = C::cut(self, name, &args, hint)? {
             return Ok(r);
         }
         if let Some(t) = name.strip_prefix("Mk_")
@@ -1687,7 +1623,7 @@ impl<'m> Gen<'m> {
     }
 
     fn invoke(&mut self, name: &str, args: Vec<V>, _tyvars: HashMap<String, V>) -> R<V> {
-        if self.m.stubs.contains(name) && !STUBS_OK.contains(&name) {
+        if self.m.stubs.contains(name) && !C::stub_ok(name) {
             return fail(format!("calls the stub {name}"));
         }
         let clauses = match self.m.func(name) {
@@ -1779,13 +1715,18 @@ impl<'m> Gen<'m> {
     }
 }
 
-impl Gen<'_> {
-    /// Runs one `__DecodeA64_*` clause on the template's word.
-    pub fn run_decode(&mut self, c: &crate::ast::Clause) -> R<()> {
+impl<C: Cpu> Gen<'_, C> {
+    /// Runs one decode clause (`__DecodeA64_*`, `__DecodeA32_*`,
+    /// `__DecodeT16`) on the template's word of `word_bits` bits.
+    pub fn run_decode(&mut self, c: &crate::ast::Clause, word_bits: u32) -> R<()> {
         self.frames.push(Vec::new());
         let argv = V::tuple(vec![
             V::S(K::Bits(64), "pc".into(), 0),
-            V::S(K::Bits(32), "w".into(), !self.known),
+            V::S(
+                K::Bits(word_bits),
+                "w".into(),
+                !self.known & mask(word_bits) as u32,
+            ),
         ]);
         let cond = self.pat_cond(&c.params, &argv)?;
         if cond != V::Bool(true) {
@@ -1844,7 +1785,7 @@ pub fn extern_names(ext: &str) -> Vec<String> {
     out
 }
 
-impl Gen<'_> {
+impl<C: Cpu> Gen<'_, C> {
     /// Applies the integer operation `op` (used by builtins).
     pub fn iop(&mut self, op: IOp, a: &V, b: &V) -> R<V> {
         self.int_op(op, a, b)

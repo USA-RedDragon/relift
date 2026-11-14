@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use crate::eval::{Gen, R, fail};
+use crate::eval::{Cpu, Gen, R, fail};
 use crate::value::{K, V, mask};
 
 /// A two-operand bit vector operation.
@@ -50,7 +50,7 @@ fn ty_of(k: K) -> &'static str {
     }
 }
 
-impl Gen<'_> {
+impl<C: Cpu> Gen<'_, C> {
     /// Emits `let sN: T = expr;` and gives the static value.
     pub fn st(&mut self, k: K, expr: String, deps: u32) -> V {
         let name = format!("s{}", self.fresh());
