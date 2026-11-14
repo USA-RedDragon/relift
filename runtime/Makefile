@@ -10,6 +10,7 @@
 #   make AUDIO=real BUILD=build/audio   also build runtime/host (SDL3 output and libopus decoding;
 #                              needs pkg-config packages sdl3 and opus). The default is the null
 #                              output and the stub decoder, with no extra dependency.
+#   make gdb-test              check the gdb frame filter (skips without gdb)
 #   make CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 #
 # TARGET is passed as -target; leave it empty for the compiler's default.
@@ -99,7 +100,7 @@ SWITCH_TESTS := $(BUILD)/switch_tests
 VK_TESTS := $(BUILD)/switch_vk_tests
 TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
 
-.PHONY: all test charter clean
+.PHONY: all test charter gdb-test clean
 all: $(CORE_LIB) $(A64_LIB) $(SWITCH_LIB) $(VK_LIB) $(STATIC) $(SHARED) $(TESTS)
 
 $(CORE_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -162,6 +163,9 @@ test: $(TESTS)
 
 charter:
 	$(PYTHON) charter/check.py
+
+gdb-test:
+	CC="$(CC)" sh tools/gdb/test.sh $(BUILD)
 
 clean:
 	rm -rf $(BUILD)
