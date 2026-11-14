@@ -15,7 +15,10 @@
 //! the body runs with the same value over the module's own bytes and its
 //! jump target is one table entry. Of the candidates for which every
 //! in-bound index gives a code address, the one with the most distinct
-//! targets wins.
+//! targets wins. A check that reads a copy of the candidate instead (another
+//! register that the straight-line code before the check, at most
+//! [`COPY_BACK`] instructions, fills from the same value) runs with that copy
+//! set to the index.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -32,6 +35,9 @@ const CMP_BACK: usize = 4;
 /// what it reads (the stores a compiler schedules between a compare and its
 /// branch).
 const SKIP_BACK: usize = 24;
+/// The most instructions before the check searched for the copies that give
+/// the check's register and the candidate the same value.
+const COPY_BACK: usize = 48;
 /// The largest table.
 const MAX_ENTRIES: u64 = 4096;
 
@@ -132,6 +138,58 @@ fn reads(blocks: &[Arc<Block>]) -> BTreeSet<Reg> {
         }
     }
     read
+}
+
+/// Whether registers `a` and `b` hold the same value after `window` runs in
+/// order: the blocks that write them, and what those read, are run twice from
+/// unrelated register values and must give equal results both times. A
+/// window block that loads or touches memory on the way makes it false.
+fn same_value(window: &[Arc<Block>], a: Reg, b: Reg, mem: &mut Image<'_>) -> bool {
+    let mut needed: BTreeSet<Reg> = [a, b].into_iter().collect();
+    let mut kept = Vec::new();
+    for blk in window.iter().rev() {
+        let sets: BTreeSet<Reg> = blk
+            .insts
+            .iter()
+            .filter_map(|i| match i.op {
+                Op::Set(x, _) => Some(x),
+                _ => None,
+            })
+            .collect();
+        if sets.is_disjoint(&needed) {
+            continue;
+        }
+        if has_memory(blk) || blk.insts.iter().any(|i| matches!(i.op, Op::Load { .. })) {
+            return false;
+        }
+        needed.retain(|r| !sets.contains(r));
+        needed.extend(reads(std::slice::from_ref(blk)));
+        kept.insert(0, blk.clone());
+    }
+    if kept.is_empty() {
+        return false;
+    }
+    let regs = &kept[0].regs;
+    for seed in [0x9e37_79b9_7f4a_7c15u64, 0xc2b2_ae3d_27d4_eb4f] {
+        let mut st = State::new(regs.len());
+        let mut x = seed;
+        for (i, v) in st.regs.iter_mut().enumerate() {
+            x = x
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let bits = regs.width(Reg(u16::try_from(i).unwrap_or(u16::MAX))).bits();
+            let full = (u128::from(x) << 64) | u128::from(x.rotate_left(29));
+            *v = if bits >= 128 {
+                full
+            } else {
+                full & ((1u128 << bits) - 1)
+            };
+        }
+        if run_seq(&kept, &mut st, mem).is_none() || st.regs[a.index()] != st.regs[b.index()] {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether every store in `b` writes at an address made only of the stack
@@ -298,16 +356,39 @@ pub(crate) fn resolve(
         // every index: it leaves at index 0 (no targets) or never (more
         // entries than the largest table). Either way the candidate fails,
         // so skip the 4097 runs.
+        let mut bound = r;
         if !check
             .iter()
             .any(|b| b.insts.iter().any(|i| matches!(i.op, Op::Get(x) if x == r)))
         {
-            continue;
+            let mut window = Vec::new();
+            let mut back = check[0].pc;
+            while window.len() < COPY_BACK {
+                let Some(prev) = back.checked_sub(granule) else {
+                    break;
+                };
+                let Some(b) = block_at(prev) else {
+                    break;
+                };
+                if !falls_into(&b, back) {
+                    break;
+                }
+                window.insert(0, b);
+                back = prev;
+            }
+            let Some(q) = reads(&check)
+                .into_iter()
+                .filter(|&q| q != r && !seeds.contains_key(&q) && check[0].regs.width(q).bits() > 1)
+                .find(|&q| same_value(&window, q, r, &mut mem))
+            else {
+                continue;
+            };
+            bound = q;
         }
         let check_seeds = known(check[0].pc);
         let mut targets = Vec::new();
         for idx in 0..=MAX_ENTRIES {
-            let mut st = fresh(&check_seeds, r, idx);
+            let mut st = fresh(&check_seeds, bound, idx);
             let Some(after) = run_seq(&check, &mut st, &mut mem) else {
                 continue 'cand;
             };
