@@ -6,7 +6,7 @@ if [ $# -ne 2 ]; then
 fi
 out=cpus/a64/src/lift/sail/generated
 target=${CARGO_TARGET_DIR:-target}
-classes="int ldst excl branch system simd_ldst_multi simd_ldst_multi_post simd_ldst_single simd_same simd_same_ext simd_shift simd_misc simd_elem simd_other fp"
+classes="int ldst excl branch system simd_ldst_multi simd_ldst_multi_post simd_ldst_single simd_same simd_same_ext simd_shift simd_shift_narrow simd_shift_scalar simd_misc simd_elem simd_elem_sat simd_other fp"
 for class in $classes; do
     cp cpus/a64/gen/placeholder.rs "$out/$class.rs"
 done

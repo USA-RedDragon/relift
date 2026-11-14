@@ -48,7 +48,7 @@ const SAIL_ARM: &str = "5416ef6b43e9527c38dc71fb752259c1d01a47e1";
 const SAIL_LIB: &str = "c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456";
 
 /// The output files, one per instruction class.
-const CLASSES: [&str; 15] = [
+const CLASSES: [&str; 18] = [
     "int",
     "ldst",
     "excl",
@@ -60,8 +60,11 @@ const CLASSES: [&str; 15] = [
     "simd_same",
     "simd_same_ext",
     "simd_shift",
+    "simd_shift_narrow",
+    "simd_shift_scalar",
     "simd_misc",
     "simd_elem",
+    "simd_elem_sat",
     "simd_other",
     "fp",
 ];
@@ -106,7 +109,9 @@ fn simd_class(name: &str) -> &'static str {
             "simd_same_ext"
         }
         g if g.starts_with("asimdsame") || g.starts_with("asisdsame") => "simd_same",
-        "asimdshf" | "asisdshf" => "simd_shift",
+        "asimdshf" if name.ends_with("_N") || name.ends_with("_C") => "simd_shift_narrow",
+        "asimdshf" => "simd_shift",
+        "asisdshf" => "simd_shift_scalar",
         g if g.starts_with("asimdmisc")
             || g.starts_with("asisdmisc")
             || g == "asimdall"
@@ -115,6 +120,7 @@ fn simd_class(name: &str) -> &'static str {
         {
             "simd_misc"
         }
+        "asimdelem" | "asisdelem" if name.starts_with("SQ") => "simd_elem_sat",
         "asimdelem" | "asisdelem" => "simd_elem",
         _ => "simd_other",
     }
