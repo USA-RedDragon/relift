@@ -137,9 +137,9 @@ $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
 test: $(TESTS)
-	./$(CORE_TESTS)
-	./$(A64_TESTS)
-	./$(SWITCH_TESTS)
+	$(abspath $(CORE_TESTS))
+	$(abspath $(A64_TESTS))
+	$(abspath $(SWITCH_TESTS))
 
 charter:
 	$(PYTHON) charter/check.py
