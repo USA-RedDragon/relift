@@ -20,6 +20,7 @@ mod tables;
 pub use slots::{SlotUses, slot_uses};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use relift_guest::{Frontend, LiftFailure, Module, RootKind};
 use relift_ir::{Block, Flow, Next};
@@ -38,8 +39,9 @@ pub enum EntryKind {
 /// One lifted instruction, or why it could not be lifted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Insn {
-    /// The lifted block.
-    Lifted(Block),
+    /// The lifted block, one allocation shared by every function that
+    /// holds the instruction.
+    Lifted(Arc<Block>),
     /// The frontend refused it; the emitter reports it at run time.
     Failed(LiftFailure),
 }
@@ -115,7 +117,10 @@ impl Lifter<'_> {
         }
         let bytes = self.module.bytes_at(pc).unwrap_or(&[]);
         let i = match self.fe.lift(bytes, pc) {
-            Ok(b) => Insn::Lifted(b),
+            Ok(mut b) => {
+                b.insts.shrink_to_fit();
+                Insn::Lifted(Arc::new(b))
+            }
             Err(e) => Insn::Failed(e),
         };
         self.cache.insert(pc, i.clone());
@@ -174,7 +179,7 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
             work.extend(successors(lifter.module, entries, entry, &i));
             insts.insert(pc, i);
         }
-        let jumps: Vec<(u64, Block)> = insts
+        let jumps: Vec<(u64, Arc<Block>)> = insts
             .iter()
             .filter(|(pc, _)| !tables.contains_key(pc))
             .filter_map(|(pc, i)| match i {
@@ -195,13 +200,13 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         let mut found = false;
         for (pc, b) in jumps {
             let mut at = |a: u64| match lifter.get(a) {
-                Insn::Lifted(b) => Some(b),
+                Insn::Lifted(b) => Some(Block::clone(&b)),
                 Insn::Failed(_) => None,
             };
             let entering = |a: u64| {
                 insts.values().find_map(|i| match i {
                     Insn::Lifted(b) => match b.exit.next {
-                        Next::Select { taken, .. } if taken == a => Some(b.clone()),
+                        Next::Select { taken, .. } if taken == a => Some(Block::clone(b)),
                         _ => None,
                     },
                     Insn::Failed(_) => None,

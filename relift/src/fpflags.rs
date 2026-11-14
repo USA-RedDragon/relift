@@ -164,7 +164,7 @@ impl Fpsr {
                     .iter()
                     .map(|(&pc, i)| {
                         let b = match i {
-                            Insn::Lifted(b) => Some(b),
+                            Insn::Lifted(b) => Some(&**b),
                             Insn::Failed(_) => None,
                         };
                         (pc, b)

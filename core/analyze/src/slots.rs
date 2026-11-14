@@ -406,7 +406,7 @@ mod tests {
             kind: EntryKind::Called,
             insts: blocks
                 .into_iter()
-                .map(|b| (b.pc, Insn::Lifted(b)))
+                .map(|b| (b.pc, Insn::Lifted(b.into())))
                 .collect(),
             tables: BTreeMap::new(),
         }
