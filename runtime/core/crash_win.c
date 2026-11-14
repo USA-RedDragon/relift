@@ -1,12 +1,15 @@
 /**
  * @file crash_win.c
  * @brief The crash handler on Windows: a vectored exception handler for
- * access violations, illegal instructions and in-page errors, the host
- * backtrace from the unwind tables (RtlVirtualUnwind), and module names.
+ * access violations, illegal instructions, in-page errors and stack
+ * overflows, the host backtrace from the unwind tables (RtlVirtualUnwind),
+ * and module names. A stack overflow is reported from a fiber of its own,
+ * as the overflowed stack has only the guarantee left.
  */
 #if defined(_WIN32)
 
 #include "crash.h"
+#include "fiber.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +17,12 @@
 
 static int g_installed;
 static volatile LONG g_reporting;
+static rl_fiber g_report_fiber;
+static rl_fiber g_overflowed;
+static EXCEPTION_POINTERS *g_overflow_ep;
+
+/** @brief Host stack of the stack overflow report. */
+#define REPORT_STACK (256u << 10)
 
 #if defined(_M_X64) || defined(__x86_64__)
 #define CTX_PC(c) ((c)->Rip)
@@ -56,22 +65,20 @@ static const char *kind_of(DWORD code)
     case EXCEPTION_IN_PAGE_ERROR: return "EXCEPTION_IN_PAGE_ERROR";
     case EXCEPTION_ILLEGAL_INSTRUCTION: return "EXCEPTION_ILLEGAL_INSTRUCTION";
     case EXCEPTION_PRIV_INSTRUCTION: return "EXCEPTION_PRIV_INSTRUCTION";
+    case EXCEPTION_STACK_OVERFLOW: return "EXCEPTION_STACK_OVERFLOW";
     default: return NULL;
     }
 }
 
-static LONG CALLBACK handler(EXCEPTION_POINTERS *ep)
+static void report(EXCEPTION_POINTERS *ep)
 {
     DWORD code = ep->ExceptionRecord->ExceptionCode;
-    const char *kind = kind_of(code);
-    if (!kind)
-        return EXCEPTION_CONTINUE_SEARCH;
-    if (InterlockedExchange(&g_reporting, 1))
-        return EXCEPTION_CONTINUE_SEARCH;
     rl_crash_info ci;
     memset(&ci, 0, sizeof ci);
-    ci.kind = kind;
+    ci.kind = kind_of(code);
     ci.pc = (uintptr_t)ep->ExceptionRecord->ExceptionAddress;
+    ci.sp = (uintptr_t)CTX_SP(ep->ContextRecord);
+    ci.stack_overflow = code == EXCEPTION_STACK_OVERFLOW;
     if ((code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR) &&
         ep->ExceptionRecord->NumberParameters >= 2) {
         ci.has_addr = true;
@@ -80,6 +87,28 @@ static LONG CALLBACK handler(EXCEPTION_POINTERS *ep)
     ci.nframes = walk(ep->ContextRecord, ci.frames, RL_CRASH_MAX_FRAMES);
     rl_crash_report(&ci);
     TerminateProcess(GetCurrentProcess(), code);
+}
+
+static void report_main(void *arg)
+{
+    (void)arg;
+    report(g_overflow_ep);
+    for (;;)
+        TerminateProcess(GetCurrentProcess(), EXCEPTION_STACK_OVERFLOW);
+}
+
+static LONG CALLBACK handler(EXCEPTION_POINTERS *ep)
+{
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (!kind_of(code))
+        return EXCEPTION_CONTINUE_SEARCH;
+    if (InterlockedExchange(&g_reporting, 1))
+        return EXCEPTION_CONTINUE_SEARCH;
+    if (code == EXCEPTION_STACK_OVERFLOW && g_report_fiber.sp) {
+        g_overflow_ep = ep;
+        rl_fiber_switch(&g_overflowed, &g_report_fiber);
+    }
+    report(ep);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -89,6 +118,9 @@ void rl_crash_install(void)
         return;
     g_installed = 1;
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    if (rl_fiber_init(&g_report_fiber, REPORT_STACK, report_main, NULL) == 0)
+        snprintf(g_report_fiber.label, sizeof g_report_fiber.label, "the crash report");
+    rl_fiber_thread_init();
     AddVectoredExceptionHandler(1, handler);
 }
 

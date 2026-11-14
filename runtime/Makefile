@@ -70,6 +70,9 @@ SWITCH_HDRS := $(A64_HDRS) $(wildcard guests/switch/*.h)
 VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c)
 VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h)
 
+FIBER_SRCS := core/fiber.c
+FIBER_ASM := $(CORE_ASM)
+
 RUNNER_SRCS := core/tests/runner.c
 RUNNER_HDRS := core/tests/runner.h
 CORE_TEST_SRCS := $(filter-out $(RUNNER_SRCS),$(wildcard core/tests/*.c))
@@ -81,6 +84,7 @@ VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
 obj = $(patsubst %.S,$(BUILD)/obj/%.o,$(patsubst %.c,$(BUILD)/obj/%.o,$(1)))
 CORE_ASM_OBJS := $(call obj,$(CORE_ASM))
 CORE_OBJS := $(call obj,$(CORE_SRCS)) $(CORE_ASM_OBJS)
+FIBER_OBJS := $(call obj,$(FIBER_SRCS) $(FIBER_ASM))
 A64_OBJS := $(call obj,$(A64_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
 VK_OBJS := $(call obj,$(VK_SRCS))
@@ -102,7 +106,7 @@ A64_TESTS := $(BUILD)/a64_tests
 SWITCH_TESTS := $(BUILD)/switch_tests
 VK_TESTS := $(BUILD)/switch_vk_tests
 TESTS := $(CORE_TESTS) $(A64_TESTS) $(SWITCH_TESTS) $(VK_TESTS)
-CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c)
+CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
 CRASH_TEST := $(BUILD)/crash_test
 SCHED_BENCH_OBJS := $(call obj,core/tests/bench/sched_bench.c)
@@ -167,7 +171,8 @@ $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(TESTS):
 	$(CC) $(TARGET_FLAGS) $^ -o $@ $(LDLIBS)
 
-# The crash test links only the crash handler, so it also builds on Windows.
+# The crash test links only the crash handler and the fibers, so it also
+# builds on Windows.
 $(CRASH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) -mno-omit-leaf-frame-pointer $(CORE_INC) $(CFLAGS) -c $< -o $@

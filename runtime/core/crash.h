@@ -2,10 +2,12 @@
  * @file crash.h
  * @brief Crash reports: the function maps of the lifted code, the host
  * signal or exception handler, and a report with the faulting guest
- * address, a guest backtrace and the host backtrace (docs/abi.md section 11).
+ * address, the fiber (guest CPU) that faulted, a guest backtrace and the
+ * host backtrace (docs/abi.md section 11).
  *
- * Depends on the C library and the host OS only, so a program can link the
- * crash handler without the rest of the core (the crash test does).
+ * Depends on the C library, the host OS and the fibers only, so a program
+ * can link the crash handler without the rest of the core (the crash test
+ * does).
  */
 #ifndef RELIFT_CRASH_H
 #define RELIFT_CRASH_H
@@ -66,6 +68,10 @@ typedef struct rl_crash_info {
     bool has_addr;
     /** @brief Host pc of the faulting instruction. */
     uintptr_t pc;
+    /** @brief Host sp at the fault, which tells the fiber (guest CPU) that faulted; 0 when unknown. */
+    uintptr_t sp;
+    /** @brief True when the host reported a stack overflow (Windows); a fault in a fiber's guard also counts. */
+    bool stack_overflow;
     /** @brief Host frames, innermost first: frames[0] is pc. */
     uintptr_t frames[RL_CRASH_MAX_FRAMES];
     /** @brief Number of frames. */

@@ -96,6 +96,7 @@ void rl_crash_signal(int sig, void *siginfo, void *ucontext)
     ci.has_addr = si && sig != SIGILL;
     ci.addr = si ? (uintptr_t)si->si_addr : 0;
     ci.pc = r.pc ? r.pc : ci.addr;
+    ci.sp = r.sp;
     r.pc = ci.pc;
     ci.nframes = walk(r, ci.frames, RL_CRASH_MAX_FRAMES);
     rl_crash_report(&ci);

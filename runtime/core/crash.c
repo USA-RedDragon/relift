@@ -6,6 +6,7 @@
  * uses only stack buffers, so it runs inside a signal or exception handler.
  */
 #include "crash.h"
+#include "fiber.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -203,6 +204,19 @@ size_t rl_crash_format(const rl_crash_info *ci, char *buf, size_t n)
             put(&o, " (outside guest memory)");
     }
     put(&o, ", host pc %p\n", (void *)ci->pc);
+    bool guard = false;
+    const rl_fiber *f = ci->sp ? rl_fiber_find(ci->sp, &guard) : NULL;
+    bool addr_guard = false;
+    const rl_fiber *af = ci->has_addr ? rl_fiber_find(ci->addr, &addr_guard) : NULL;
+    if (af && addr_guard)
+        f = af;
+    if (f && (ci->stack_overflow || addr_guard))
+        put(&o, "%sstack overflow on %s (fiber stack %p-%p, guard below)\n", t, f->label[0] ? f->label : "a fiber",
+            (void *)f->limit, (void *)f->top);
+    else if (f)
+        put(&o, "%son %s (fiber stack %p-%p)\n", t, f->label[0] ? f->label : "a fiber", (void *)f->limit, (void *)f->top);
+    else if (ci->stack_overflow)
+        put(&o, "%sstack overflow on the host thread's own stack\n", t);
     rl_fn_hit h;
     if (rl_fn_find_host(ci->pc, &h)) {
         put(&o, "%sin guest function ", t);
