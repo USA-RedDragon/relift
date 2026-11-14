@@ -64,6 +64,7 @@
 //! | `intrinsic "name" args` | [`Op::Intrinsic`], args may be empty |
 //! | `guard c, HEX` | [`Op::Guard`]: leave to slow path `HEX` when `c` is 1 |
 //! | `tick DEC` / `tick.if c, DEC` | [`Op::Tick`] / [`Op::TickIf`]: guest cycles, decimal |
+//! | `io.load.E.K addr` / `io.store.E.K addr, value` | [`Op::IoLoad`] / [`Op::IoStore`]; `K` is `any` or `dev` ([`IoKind`]) |
 //!
 //! The ordering `O` is `plain`, `acquire`, `release`, `acqrel` or `seqcst`.
 //! Intrinsic names are quoted with `\"` and `\\` escapes. A parsed
@@ -79,7 +80,7 @@ use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst, Next, Op, Order,
+    BinOp, Block, CmpOp, Endian, Exit, ExtKind, Flow, FpOp, FpRound, Inst, IoKind, Next, Op, Order,
     RegFile, UnOp, Value, Width,
 };
 
@@ -172,6 +173,13 @@ fn endian_name(e: Endian) -> &'static str {
     match e {
         Endian::Little => "le",
         Endian::Big => "be",
+    }
+}
+
+fn io_kind_name(k: IoKind) -> &'static str {
+    match k {
+        IoKind::Any => "any",
+        IoKind::Device => "dev",
     }
 }
 
@@ -288,6 +296,26 @@ impl fmt::Display for Block {
                 }
                 Op::Tick(n) => write!(f, "tick {n}")?,
                 Op::TickIf(v, n) => write!(f, "tick.if v{}, {n}", v.0)?,
+                Op::IoLoad { addr, endian, kind } => write!(
+                    f,
+                    "io.load.{}.{} v{}",
+                    endian_name(*endian),
+                    io_kind_name(*kind),
+                    addr.0
+                )?,
+                Op::IoStore {
+                    addr,
+                    value,
+                    endian,
+                    kind,
+                } => write!(
+                    f,
+                    "io.store.{}.{} v{}, v{}",
+                    endian_name(*endian),
+                    io_kind_name(*kind),
+                    addr.0,
+                    value.0
+                )?,
             }
             writeln!(f)?;
         }
@@ -630,6 +658,27 @@ fn parse_order_endian(
     Ok((endian, order))
 }
 
+fn parse_io(c: &Cursor, t: &Tok, rest: &str, base: usize) -> Result<(Endian, IoKind), ParseError> {
+    let parts: Vec<&str> = rest.split('.').collect();
+    let col_of =
+        |i: usize| -> usize { base + parts[..i].iter().map(|p| p.len() + 1).sum::<usize>() };
+    let endian = match parts[0] {
+        "le" => Endian::Little,
+        "be" => Endian::Big,
+        other => return c.err(col_of(0), format!("unknown byte order `{other}`")),
+    };
+    let kind = match parts.get(1).copied() {
+        Some("any") => IoKind::Any,
+        Some("dev") => IoKind::Device,
+        Some(other) => return c.err(col_of(1), format!("unknown I/O kind `{other}`")),
+        None => return c.err(t.col, "missing I/O kind"),
+    };
+    if parts.len() > 2 {
+        return c.err(col_of(2), format!("unexpected `{}`", parts[2]));
+    }
+    Ok((endian, kind))
+}
+
 fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize), ParseError> {
     let m = c.word("a mnemonic")?;
     let text = m.text.as_str();
@@ -712,7 +761,23 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
                 Op::Intrinsic(intern(&n.text), args)
             }
             _ => {
-                if let Some(rest) = text.strip_prefix("fence.") {
+                if let Some(rest) = text.strip_prefix("io.load.") {
+                    let (endian, kind) = parse_io(c, &m, rest, at + 8)?;
+                    Op::IoLoad {
+                        addr: c.value(defined)?,
+                        endian,
+                        kind,
+                    }
+                } else if let Some(rest) = text.strip_prefix("io.store.") {
+                    let (endian, kind) = parse_io(c, &m, rest, at + 9)?;
+                    let v = c.values(2, defined)?;
+                    Op::IoStore {
+                        addr: v[0],
+                        value: v[1],
+                        endian,
+                        kind,
+                    }
+                } else if let Some(rest) = text.strip_prefix("fence.") {
                     Op::Fence(c.order(rest, at + 6)?)
                 } else if let Some(rest) = text.strip_prefix("load.excl.") {
                     let parts: Vec<&str> = rest.split('.').collect();

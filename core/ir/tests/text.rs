@@ -2,8 +2,8 @@
 
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{
-    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, Next, Order, Reg, RegDecl,
-    RegFile, UnOp, Value, Width, dce, parse,
+    BinOp, Block, Builder, CmpOp, Endian, Exit, Flow, FpOp, FpRound, IoKind, Next, Order, Reg,
+    RegDecl, RegFile, UnOp, Value, Width, dce, parse,
 };
 
 static DECLS: [RegDecl; 4] = [
@@ -141,6 +141,10 @@ fn everything(exit: Exit, addr: Width) -> Block {
     b.tick(4);
     b.tick_if(cond, 12);
     b.tick(u32::MAX);
+    for (e, k) in [(Endian::Little, IoKind::Any), (Endian::Big, IoKind::Device)] {
+        let l = b.io_load(ad, Width::W16, e, k);
+        b.io_store(ad, l, e, k);
+    }
     b.set(Reg(0), x1);
     b.set(Reg(2), cond);
     b.finish(4, exit)
@@ -271,6 +275,12 @@ fn parse_errors_carry_positions() {
     let (l, c, m) = err(&format!("{head}  tick 0x4\n{tail}"));
     assert_eq!((l, c), (2, 8));
     assert!(m.contains("cycle count"), "{m}");
+
+    let (l, c, m) = err(&format!(
+        "{head}  v0:i64 = get x1\n  v1:i8 = io.load.le.maybe v0\n{tail}"
+    ));
+    assert_eq!((l, c), (3, 22));
+    assert!(m.contains("I/O kind"), "{m}");
 
     let (l, c, m) = err(&format!("{head}  v0:i64 = get x0\n  tick.if v0, 4\n{tail}"));
     assert_eq!((l, c), (3, 3));

@@ -1,7 +1,12 @@
-//! Hardware-register guest support: the guest clock.
+//! Hardware-register guest support: the guest clock and I/O accesses.
 
-use relift_ir::interp::{self, Devices, Error, FlatMemory, NoIntrinsics, Outcome, State};
-use relift_ir::{Block, Builder, CmpOp, Reg, RegDecl, RegFile, Width, dce, parse};
+use relift_ir::interp::{
+    self, Devices, Error, Fault, FlatMemory, GuestMemory, NoIntrinsics, Outcome, State,
+};
+use relift_ir::{
+    AddrClass, Block, Builder, CmpOp, Endian, IoKind, IoMap, IoRange, Reg, RegDecl, RegFile, Width,
+    dce, parse,
+};
 
 static DECLS: [RegDecl; 3] = [
     RegDecl {
@@ -25,16 +30,81 @@ fn file() -> RegFile {
 #[derive(Debug, PartialEq, Eq)]
 enum Event {
     Tick(u64),
+    Read(u64, usize),
+    Write(u64, Vec<u8>),
 }
 
-#[derive(Debug, Default)]
+fn gb_map() -> IoMap {
+    IoMap {
+        ranges: vec![
+            IoRange {
+                first: 0x0000,
+                last: 0x7fff,
+                read: AddrClass::Memory,
+                write: AddrClass::Device,
+            },
+            IoRange {
+                first: 0xff00,
+                last: 0xff7f,
+                read: AddrClass::Device,
+                write: AddrClass::Device,
+            },
+            IoRange {
+                first: 0xffff,
+                last: 0xffff,
+                read: AddrClass::Device,
+                write: AddrClass::Device,
+            },
+        ],
+        default: AddrClass::Memory,
+    }
+}
+
+#[derive(Debug)]
 struct Log {
+    map: IoMap,
     events: Vec<Event>,
+}
+
+impl Default for Log {
+    fn default() -> Log {
+        Log {
+            map: gb_map(),
+            events: Vec::new(),
+        }
+    }
 }
 
 impl Devices for Log {
     fn tick(&mut self, cycles: u64) {
         self.events.push(Event::Tick(cycles));
+    }
+
+    fn map(&self) -> &IoMap {
+        &self.map
+    }
+
+    fn io_read(
+        &mut self,
+        _mem: &mut dyn GuestMemory,
+        addr: u64,
+        buf: &mut [u8],
+    ) -> Result<(), Fault> {
+        self.events.push(Event::Read(addr, buf.len()));
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = 0xa0 + i as u8;
+        }
+        Ok(())
+    }
+
+    fn io_write(
+        &mut self,
+        _mem: &mut dyn GuestMemory,
+        addr: u64,
+        data: &[u8],
+    ) -> Result<(), Fault> {
+        self.events.push(Event::Write(addr, data.to_vec()));
+        Ok(())
     }
 }
 
@@ -117,6 +187,88 @@ fn dce_keeps_ticks() {
         let (_, _, _, lb) = run(&d, &regs);
         assert_eq!(la.events, lb.events);
     }
+}
+
+#[test]
+fn the_map_classifies_by_direction_and_straddling_goes_to_the_device() {
+    let m = gb_map();
+    let w = Width::W16;
+    assert_eq!(m.classify(0x4000, 1, false, w), AddrClass::Memory);
+    assert_eq!(m.classify(0x2000, 1, true, w), AddrClass::Device);
+    assert_eq!(m.classify(0xc000, 1, true, w), AddrClass::Memory);
+    assert_eq!(m.classify(0xff44, 1, false, w), AddrClass::Device);
+    assert_eq!(m.classify(0xfeff, 2, false, w), AddrClass::Device);
+    assert_eq!(m.classify(0xfffe, 1, false, w), AddrClass::Memory);
+    assert_eq!(m.classify(0x1_ff44, 1, false, w), AddrClass::Device);
+    assert_eq!(
+        IoMap::default().classify(0xff44, 1, false, w),
+        AddrClass::Memory
+    );
+}
+
+fn io_block(addr: u128, kind: IoKind) -> Block {
+    let mut b = Builder::new(file(), Width::W16, 0x200);
+    let a = b.konst(Width::W16, addr);
+    b.tick(4);
+    let v = b.io_load(a, Width::W8, Endian::Little, kind);
+    b.tick(4);
+    b.io_store(a, v, Endian::Little, kind);
+    let wide = b.io_load(a, Width::W16, Endian::Big, kind);
+    let lo = b.trunc(wide, Width::W8);
+    b.set(Reg(0), lo);
+    b.jump(2, 0x202)
+}
+
+#[test]
+fn io_accesses_route_by_the_map_and_interleave_with_ticks() {
+    let b = io_block(0xff44, IoKind::Any);
+    roundtrip(&b);
+    let (r, s, m, d) = run(&b, &[0, 0, 0]);
+    r.unwrap();
+    assert_eq!(
+        d.events,
+        [
+            Event::Tick(4),
+            Event::Read(0xff44, 1),
+            Event::Tick(4),
+            Event::Write(0xff44, vec![0xa0]),
+            Event::Read(0xff44, 2),
+        ]
+    );
+    assert_eq!(s.regs[0], 0xa1);
+    assert_eq!(m.bytes[0xff44], 0);
+
+    let (r, s, m, d) = run(&io_block(0xc000, IoKind::Any), &[0, 0, 0]);
+    r.unwrap();
+    assert_eq!(d.events, [Event::Tick(4), Event::Tick(4)]);
+    assert_eq!(s.regs[0], 0);
+    assert_eq!(m.bytes[0xc000], 0);
+
+    let (r, _, _, d) = run(&io_block(0xc000, IoKind::Device), &[0, 0, 0]);
+    r.unwrap();
+    assert_eq!(d.events.len(), 5);
+}
+
+#[test]
+fn without_devices_io_is_plain_memory() {
+    for kind in [IoKind::Any, IoKind::Device] {
+        let b = io_block(0xff44, kind);
+        let mut s = State::new(DECLS.len());
+        let mut m = mem();
+        m.bytes[0xff44] = 0x12;
+        m.bytes[0xff45] = 0x34;
+        interp::run(&b, &mut s, &mut m, &mut NoIntrinsics).unwrap();
+        assert_eq!(s.regs[0], 0x34);
+    }
+}
+
+#[test]
+fn dce_keeps_unused_io_loads() {
+    let mut b = Builder::new(file(), Width::W16, 0x100);
+    let hl = b.get(Reg(1));
+    let _unused = b.io_load(hl, Width::W8, Endian::Little, IoKind::Any);
+    let block = b.jump(1, 0x101);
+    assert_eq!(dce(&block), block);
 }
 
 #[test]

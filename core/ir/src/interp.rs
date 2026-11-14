@@ -2,7 +2,10 @@
 
 use std::fmt;
 
-use crate::{BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, FpRound, Next, Op, UnOp, Width};
+use crate::{
+    AddrClass, BinOp, Block, CmpOp, Endian, ExtKind, Flow, FpOp, FpRound, IoKind, IoMap, Next, Op,
+    UnOp, Width,
+};
 
 /// A failed guest memory access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,14 +42,54 @@ pub trait Devices {
     /// Advances the guest clock by `cycles`, for [`Op::Tick`] and a taken
     /// [`Op::TickIf`].
     fn tick(&mut self, cycles: u64);
+
+    /// The guest's address-range classifier. An [`Op::IoLoad`] or
+    /// [`Op::IoStore`] of kind [`IoKind::Any`] whose bytes are all memory
+    /// in it reads or writes `mem` directly; any other goes to
+    /// [`Devices::io_read`] or [`Devices::io_write`].
+    fn map(&self) -> &IoMap;
+
+    /// A device read of `buf.len()` bytes at `addr`, in memory order (byte
+    /// 0 at `addr`). `mem` is the guest memory, for devices that are partly
+    /// memory.
+    fn io_read(
+        &mut self,
+        mem: &mut dyn GuestMemory,
+        addr: u64,
+        buf: &mut [u8],
+    ) -> Result<(), Fault>;
+
+    /// A device write of `data` at `addr`, in memory order.
+    fn io_write(&mut self, mem: &mut dyn GuestMemory, addr: u64, data: &[u8]) -> Result<(), Fault>;
 }
 
-/// [`Devices`] of a guest without any: the clock is ignored.
+static MEMORY_ONLY: IoMap = IoMap::memory();
+
+/// [`Devices`] of a guest without any: the clock is ignored, the map is all
+/// memory, and a device access (only an [`IoKind::Device`] one reaches it)
+/// reads or writes guest memory.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoDevices;
 
 impl Devices for NoDevices {
     fn tick(&mut self, _cycles: u64) {}
+
+    fn map(&self) -> &IoMap {
+        &MEMORY_ONLY
+    }
+
+    fn io_read(
+        &mut self,
+        mem: &mut dyn GuestMemory,
+        addr: u64,
+        buf: &mut [u8],
+    ) -> Result<(), Fault> {
+        mem.read(addr, buf)
+    }
+
+    fn io_write(&mut self, mem: &mut dyn GuestMemory, addr: u64, data: &[u8]) -> Result<(), Fault> {
+        mem.write(addr, data)
+    }
 }
 
 /// An [`Intrinsics`] that knows no intrinsic.
@@ -355,6 +398,17 @@ fn from_bytes(buf: &[u8], endian: Endian) -> u128 {
     u128::from_le_bytes(le)
 }
 
+fn routes_to_device(
+    map: &IoMap,
+    kind: IoKind,
+    addr: u64,
+    size: u32,
+    write: bool,
+    addr_width: Width,
+) -> bool {
+    kind == IoKind::Device || map.classify(addr, size, write, addr_width) == AddrClass::Device
+}
+
 /// Runs `block` on `state` and `mem`, with no devices ([`NoDevices`]).
 ///
 /// `Get` reads the state at entry; `Set`s are committed together when the
@@ -369,10 +423,10 @@ pub fn run(
     run_with(block, state, mem, intrinsics, &mut NoDevices)
 }
 
-/// Runs `block` like [`run`], with `devices` for the clock.
+/// Runs `block` like [`run`], with `devices` for the clock and I/O.
 ///
-/// Clock ticks take effect in order with memory operations, so a fault
-/// leaves the ticks before it applied.
+/// Clock ticks and I/O accesses take effect in order with memory
+/// operations, so a fault leaves the ticks and accesses before it applied.
 pub fn run_with(
     block: &Block,
     state: &mut State,
@@ -503,6 +557,35 @@ pub fn run_with(
                 if v(*c) != 0 {
                     devices.tick(u64::from(*n));
                 }
+                0
+            }
+            Op::IoLoad { addr, endian, kind } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = width.bits() / 8;
+                let mut buf = vec![0u8; n as usize];
+                if routes_to_device(devices.map(), *kind, a, n, false, block.addr_width) {
+                    devices.io_read(mem, a, &mut buf)
+                } else {
+                    mem.read(a, &mut buf)
+                }
+                .map_err(Error::Fault)?;
+                from_bytes(&buf, *endian)
+            }
+            Op::IoStore {
+                addr,
+                value,
+                endian,
+                kind,
+            } => {
+                let a = (v(*addr) & addr_mask) as u64;
+                let n = block.width_of(*value).unwrap_or(Width::W8).bits() / 8;
+                let data = to_bytes(v(*value), n as usize, *endian);
+                if routes_to_device(devices.map(), *kind, a, n, true, block.addr_width) {
+                    devices.io_write(mem, a, &data)
+                } else {
+                    mem.write(a, &data)
+                }
+                .map_err(Error::Fault)?;
                 0
             }
         };
