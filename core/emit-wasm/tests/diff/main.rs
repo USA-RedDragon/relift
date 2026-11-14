@@ -2,7 +2,10 @@
 //! against `relift_ir::interp`, the definition of every operation.
 //!
 //! - `ops`: random blocks over every IR operation and width, one block per
-//!   step ([`relift_emit_wasm::Exits::Step`]), plus the mutation control.
+//!   step ([`relift_emit_wasm::Exits::Step`]), plus the mutation control;
+//!   and blocks of only the atomic, cipher and binary16 operations, with a
+//!   mutation control that breaks those operations and a check that every
+//!   atomic update, width, cipher step and binary16 shape was generated.
 //! - `hw`: the hardware-register operations (ticks, I/O, sync points) over a
 //!   Game Boy-like map, in step mode, plus the mutation control.
 //! - `chain`: random programs of several functions in the real chained
