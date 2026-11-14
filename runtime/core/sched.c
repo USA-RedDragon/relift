@@ -500,14 +500,32 @@ static const sched_range *find_range(rl_sched *s, uint64_t addr)
     return &s->ranges[lo];
 }
 
-static const sched_range *prepare(rl_sched_cpu *c, uint64_t addr, uint64_t at)
+#define SPLIT ((const sched_range *)1)
+
+static bool span_has_range_start(const rl_sched *s, uint64_t addr, uint64_t end)
+{
+    uint32_t lo = 0, hi = s->nr;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (s->ranges[mid].hi < addr)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo < s->nr && s->ranges[lo].lo <= end;
+}
+
+static const sched_range *prepare(rl_sched_cpu *c, uint64_t addr, uint32_t size, uint64_t at)
 {
     rl_sched *s = c->sched;
+    uint64_t end = addr + (size - 1);
+    const sched_range *r = find_range(s, addr);
+    if (size > 1 && end >= addr && (r ? end > r->hi : span_has_range_start(s, addr, end)))
+        return SPLIT;
     s->started = true;
     s->stats.accesses++;
     if (s->qn && s->heap[0]->when <= at)
         fire_due(s, frontier(s, c, at));
-    const sched_range *r = find_range(s, addr);
     if (!r) {
         s->stats.unmapped++;
         return NULL;
@@ -519,7 +537,13 @@ static const sched_range *prepare(rl_sched_cpu *c, uint64_t addr, uint64_t at)
 uint64_t rl_sched_read(rl_sched_cpu *c, uint64_t addr, uint32_t size)
 {
     uint64_t at = rl_sched_now(c);
-    const sched_range *r = prepare(c, addr, at);
+    const sched_range *r = prepare(c, addr, size, at);
+    if (r == SPLIT) {
+        uint64_t v = 0;
+        for (uint32_t i = 0; i < size; i++)
+            v |= (rl_sched_read(c, addr + i, 1) & 0xff) << (8 * i);
+        return v;
+    }
     if (!r || !r->owner->read)
         return size >= 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
     return r->owner->read(r->owner, addr, size, at);
@@ -528,7 +552,12 @@ uint64_t rl_sched_read(rl_sched_cpu *c, uint64_t addr, uint32_t size)
 void rl_sched_write(rl_sched_cpu *c, uint64_t addr, uint32_t size, uint64_t value)
 {
     uint64_t at = rl_sched_now(c);
-    const sched_range *r = prepare(c, addr, at);
+    const sched_range *r = prepare(c, addr, size, at);
+    if (r == SPLIT) {
+        for (uint32_t i = 0; i < size; i++)
+            rl_sched_write(c, addr + i, 1, (value >> (8 * i)) & 0xff);
+        return;
+    }
     if (r && r->owner->write)
         r->owner->write(r->owner, addr, size, value, at);
 }

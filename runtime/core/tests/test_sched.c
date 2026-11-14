@@ -413,6 +413,87 @@ TEST(sched_masked_lines_wait_for_the_mask)
     rl_sched_destroy(s);
 }
 
+/** @brief Accesses a logging device saw. */
+static struct {
+    uint64_t addr[16];
+    uint32_t size[16];
+    uint64_t value[16];
+    uint64_t at[16];
+    int n;
+} gl;
+
+static uint64_t log_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)
+{
+    (void)d;
+    gl.addr[gl.n] = addr;
+    gl.size[gl.n] = size;
+    gl.at[gl.n] = now;
+    return gl.value[gl.n++] = 0x10 + (addr & 0xf);
+}
+
+static void log_store(rl_device *d, uint64_t addr, uint32_t size, uint64_t value, uint64_t now)
+{
+    (void)d;
+    gl.addr[gl.n] = addr;
+    gl.size[gl.n] = size;
+    gl.value[gl.n] = value;
+    gl.at[gl.n++] = now;
+}
+
+TEST(sched_an_access_that_straddles_ranges_goes_byte_by_byte)
+{
+    rl_sched *s = rl_sched_create(NULL);
+    rl_sched_cpu *k = rl_sched_add_cpu(s, 1);
+    rl_device a = {.name = "a", .read = log_read, .write = log_store, .line = RL_LINE_NONE};
+    rl_device b = {.name = "b", .read = log_read, .write = log_store, .line = RL_LINE_NONE};
+    rl_sched_add_device(s, &a);
+    rl_sched_add_device(s, &b);
+    CHECK_EQ(rl_sched_map(s, 0x100, 4, &a, 0), 0);
+    CHECK_EQ(rl_sched_map(s, 0x104, 4, &b, 0), 0);
+    CHECK_EQ(rl_sched_map(s, 0x109, 1, &b, 0), 0);
+    rl_sched_run(k);
+    memset(&gl, 0, sizeof gl);
+    CHECK_EQ(rl_sched_read(k, 0x100, 4), 0x10);
+    CHECK_EQ(gl.n, 1);
+    CHECK_EQ(gl.size[0], 4);
+    memset(&gl, 0, sizeof gl);
+    CHECK_EQ(rl_sched_read(k, 0x102, 4), 0x15141312ull);
+    CHECK_EQ(gl.n, 4);
+    for (int i = 0; i < 4; i++) {
+        CHECK_EQ(gl.addr[i], 0x102 + i);
+        CHECK_EQ(gl.size[i], 1);
+        CHECK_EQ(gl.at[i], 0);
+    }
+    memset(&gl, 0, sizeof gl);
+    rl_sched_write(k, 0x106, 4, 0x44332211);
+    CHECK_EQ(gl.n, 3);
+    CHECK_EQ(gl.addr[0], 0x106);
+    CHECK_EQ(gl.value[0], 0x11);
+    CHECK_EQ(gl.addr[1], 0x107);
+    CHECK_EQ(gl.value[1], 0x22);
+    CHECK_EQ(gl.addr[2], 0x109);
+    CHECK_EQ(gl.value[2], 0x44);
+    memset(&gl, 0, sizeof gl);
+    CHECK_EQ(rl_sched_read(k, 0x107, 4), 0xff19ff17ull);
+    rl_sched_destroy(s);
+}
+
+TEST(sched_an_access_that_leaves_the_mapped_ranges_mixes_in_ones)
+{
+    rl_sched *s = rl_sched_create(NULL);
+    rl_sched_cpu *k = rl_sched_add_cpu(s, 1);
+    rl_device a = {.name = "a", .read = log_read, .write = log_store, .line = RL_LINE_NONE};
+    rl_sched_add_device(s, &a);
+    CHECK_EQ(rl_sched_map(s, 0x100, 2, &a, 0), 0);
+    rl_sched_run(k);
+    memset(&gl, 0, sizeof gl);
+    CHECK_EQ(rl_sched_read(k, 0x100, 4), 0xffff1110ull);
+    CHECK_EQ(gl.n, 2);
+    CHECK_EQ(rl_sched_read(k, 0xfe, 4), 0x1110ffffull);
+    CHECK_EQ(rl_sched_read(k, 0xf0, 8), UINT64_MAX);
+    rl_sched_destroy(s);
+}
+
 TEST(sched_halt_skips_to_the_next_interrupt)
 {
     rl_sched *s = rl_sched_create(NULL);

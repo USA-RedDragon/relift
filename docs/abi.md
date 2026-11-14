@@ -1257,7 +1257,17 @@ checked by `core/emit-wasm/tests/diff/` (section 15)]
 - `IoKind::Any` accesses get an inline range check compiled from the
   guest's `IoMap` (`core/ir/src/io.rs`): bytes that are memory for that
   direction take a plain access through `mem`, anything else the hook. An
-  access that straddles a boundary counts as a device access as a whole.
+  access that straddles a boundary counts as a device access as a whole,
+  so it calls the hook once.
+- **Straddling accesses in the scheduler.** `rl_sched_read` and
+  `rl_sched_write` send an access to one owner when all its bytes are in
+  one mapped range, or all unmapped. An access whose bytes touch more than
+  one range, or a range and unmapped bytes, is done as `size` one-byte
+  accesses in address order, each through the same path (events due,
+  catch-up, handler), each at the clock's tick when it runs. A read
+  assembles the bytes little-endian; an unmapped byte reads 0xff and an
+  unmapped byte write is dropped. A device therefore never sees an access
+  wider than the part of the range it owns, whatever the emitter passed.
   `IoKind::Device` accesses call the hook directly, and plain `Load` and
   `Store` never reach it.
 - `classify_io` (`core/ir/src/opt.rs`) runs before emission: an `any`
@@ -1680,8 +1690,6 @@ committed.
     nested call of `rl_sync` then returns to the wrong place or grows the
     host stack. A check after the handler's return against `next`, with a
     dispatch to the real target, is the likely fix (13).
-12. How `rl_sched_read` and `rl_sched_write` treat an access that straddles
-    two ranges; the IR sends it to the hook as a whole (13).
 13. The dispatch table shape for banked code regions (13).
 14. The JavaScript runtime for WebAssembly modules, and an exact `fma64`
     for it (15).
