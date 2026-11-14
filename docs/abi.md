@@ -31,7 +31,7 @@ Prototype names used in the tags:
 - **hot-load prototype (not yet in the repo)**: a runtime as a shared library,
   a stand-in for relift's dev server, and a hand-written host, run end to end
   (miss, socket round trip, compile, load, register, resume) on x86-64 Linux
-  and an Apple M2 Mac; the Windows build links but was not run.
+  an Apple M2 Mac and a Windows 11 24H2 x86-64 VM.
 - **probe**: the ABI probe programs described under "Checks run for this
   contract".
 
@@ -57,7 +57,7 @@ Prototype names used in the tags:
   (0.17.1) or use outline helpers that zig's compiler-rt provides (0.13.0).
   [verified: a contended exclusives test gives correct totals on x86-64 Linux,
   arm64 Linux under qemu, and arm64 and x86-64 (Rosetta) macOS on an Apple M2
-  Mac; Windows builds link but were not run]
+  Mac, and x86-64 Windows 11; arm64 Windows builds link but were not run]
 - On arm64 without `-march=...+lse`, clang emits outline atomics
   (`__aarch64_cas16_acq_rel`); these come from compiler-rt, which zig cc
   ships. [verified: disassembly; zig link not tried, open]
@@ -296,7 +296,8 @@ and reads the target from `c->pc`.
 1. Take the process miss lock. If another thread already loaded the target,
    release the lock and continue at step 6.
 2. Connect once per process to the socket named by `RELIFT_DEV_SOCKET`
-   (Unix domain socket; Windows 10 1803+ has AF_UNIX, built but not run) and send
+   (Unix domain socket; AF_UNIX on Windows 10 1803+ and 11, verified on
+   Windows 11 24H2) and send
    `RL_DEV_HELLO` (ABI version, host page size, image id, pid). relift
    refuses a different image id or ABI version.
 3. Send `RL_DEV_LIFT` with the target, the call site, the guest thread id,
@@ -338,8 +339,8 @@ never by symbol, so it does not need the main program's lifted symbols. It
 calls runtime entry points by name: in dev builds the runtime is a shared
 library (`librelift_rt`) that both the program and hot-loaded units link
 against. Shipped builds link it statically (`RL_STATIC_RUNTIME` on
-Windows). [verified: hot-load prototype on x86-64 Linux and an Apple M2 Mac;
-the Windows build links with zig cc 0.17.1, not run]
+Windows). [verified: hot-load prototype on x86-64 Linux, an Apple M2 Mac and
+Windows 11 24H2 x86-64 built with zig cc 0.17.1]
 
 **Linking a unit:** a unit links against the runtime library: `-lrelift_rt`,
 or the import library (`librelift_rt.dll.a`) on Windows. macOS rejects
@@ -365,9 +366,11 @@ and fails as above. [verified: length check in the hot-load prototype]
 
 **Latency, miss to resume** (one function, one library, the stand-in
 compiling with clang -O2): x86-64 Linux 42 to 63 ms (zig cc as the
-compiler: 61 to 63 ms), macOS on an Apple M2 196 to 278 ms. The load itself
-is 0.05 to 0.2 ms on Linux; on macOS it is 129 to 216 ms and dominates.
-Check and register take about 1 us. [verified: hot-load prototype]
+compiler: 61 to 63 ms), macOS on an Apple M2 196 to 278 ms, Windows 11 x86-64
+in a 4-vCPU VM 340 to 405 ms with zig cc 0.17.1. The load itself is 0.05 to
+0.2 ms on Linux; on macOS it is 129 to 216 ms and on Windows about 140 to
+165 ms, and dominates. Check and register take about 1 us (about 7 us on
+Windows). [verified: hot-load prototype]
 
 **Registration ABI** (`rl_unit`): ABI version, `sizeof(rl_ctx)`, 32-byte
 image id, sorted `rl_fn_entry` array (guest address, guest size, flags,
@@ -691,18 +694,13 @@ committed.
 4. Interprocedural analyses: "may unwind" to drop plain checks; exit-store
    pruning of caller-dead registers (4, 7).
 5. Cost of the hash-table dispatch on Android and iOS (5).
-6. Dev hot-load on Windows: AF_UNIX and the runtime DLL build and link with
-   zig cc 0.17.1 (x86_64-windows-gnu) but have not been run. Linux and macOS
-   are verified end to end (42 to 63 ms and 196 to 278 ms from miss to
-   resume; macOS is dominated by the first load of a new library) (6).
-7. `spin_flag` and `llsc_stress` recompiled from the libnx test programs, on
+6. `spin_flag` and `llsc_stress` recompiled from the libnx test programs, on
    x86-64 Linux and arm64 macOS (8, 9).
-8. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
+7. CTR_EL0 and DCZID_EL0 values on hardware; Horizon svc register
    preservation (which registers `rl_svc` may change besides outputs) (10).
-9. Whether any guest program keeps an alias that is not 16 KiB aligned live
+8. Whether any guest program keeps an alias that is not 16 KiB aligned live
    while both views are in use; aligned live aliases are not yet prototyped
    (2).
-10. Guard sizes against real wild-pointer patterns (2).
-11. Whether passing guest arguments in host registers is worth a second
+9. Guard sizes against real wild-pointer patterns (2).
+10. Whether passing guest arguments in host registers is worth a second
     signature after phase 4 measurements (4).
-12. Running the zig cc Windows builds (they link; not yet run) (1).
