@@ -42,16 +42,23 @@ pub fn group_of(word: u32) -> Option<&'static str> {
 pub fn clauses(m: &Model, group: &str) -> Vec<DecodeClause> {
     let mut out = Vec::new();
     for (index, raw) in m.funcs.get(group).into_iter().flatten().enumerate() {
-        let Some(start) = raw.find("((pc, ([") else {
-            continue;
-        };
+        if let Some((mask, value)) = clause_bits(raw) {
+            out.push(DecodeClause { index, mask, value });
+        }
+    }
+    out
+}
+
+/// The fixed bits and their values of a decode clause's opcode pattern,
+/// written either as a list of `bitzero`, `bitone` and `_` or as one 32-bit
+/// binary literal; `None` for the catch-all clause.
+fn clause_bits(raw: &str) -> Option<(u32, u32)> {
+    if let Some(start) = raw.find("((pc, ([") {
         let rest = &raw[start + 8..];
-        let Some(end) = rest.find("] as __opcode") else {
-            continue;
-        };
+        let end = rest.find("] as __opcode")?;
         let bits: Vec<&str> = rest[..end].split(',').map(str::trim).collect();
         if bits.len() != 32 {
-            continue;
+            return None;
         }
         let (mut mask, mut value) = (0u32, 0u32);
         for (i, b) in bits.iter().enumerate() {
@@ -65,16 +72,28 @@ pub fn clauses(m: &Model, group: &str) -> Vec<DecodeClause> {
                 _ => {}
             }
         }
-        out.push(DecodeClause { index, mask, value });
+        return Some((mask, value));
     }
-    out
+    let start = raw.find("((pc, (0b")?;
+    let rest = &raw[start + 9..];
+    let end = rest.find(" as __opcode")?;
+    let lit = &rest[..end];
+    if lit.len() != 32 {
+        return None;
+    }
+    Some((u32::MAX, u32::from_str_radix(lit, 2).ok()?))
 }
 
-/// The first decode clause that takes the words whose `known` bits are
-/// `value`: `Ok(None)` when none does, `Err(bits)` when the choice depends on
-/// these further bits.
-fn clause_for(cls: &[DecodeClause], known: u32, value: u32) -> Result<Option<DecodeClause>, u32> {
-    for c in cls {
+/// The position in `cls` of the first decode clause from `from` on that
+/// takes the words whose `known` bits are `value`: `Ok(None)` when none
+/// does, `Err(bits)` when the choice depends on these further bits.
+fn clause_for(
+    cls: &[DecodeClause],
+    from: usize,
+    known: u32,
+    value: u32,
+) -> Result<Option<usize>, u32> {
+    for (i, c) in cls.iter().enumerate().skip(from) {
         let both = c.mask & known;
         if (c.value ^ value) & both != 0 {
             continue;
@@ -82,7 +101,7 @@ fn clause_for(cls: &[DecodeClause], known: u32, value: u32) -> Result<Option<Dec
         if c.mask & !known != 0 {
             return Err(c.mask & !known);
         }
-        return Ok(Some(c.clone()));
+        return Ok(Some(i));
     }
     Ok(None)
 }
@@ -140,16 +159,29 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
                 ));
                 continue;
             }
-            let dc = match clause_for(&pats, known, value) {
-                Ok(Some(c)) => c,
-                Ok(None) => return Err(format!("no clause of {group} matches")),
-                Err(more) => {
-                    split |= more;
-                    continue 'outer;
+            // Sail's decoder retries a word once after an `Error_See`, with
+            // only the clauses after the one that threw it.
+            let mut from = 0;
+            let (g, r) = loop {
+                let at = match clause_for(&pats, from, known, value) {
+                    Ok(Some(at)) => at,
+                    Ok(None) if from == 0 => return Err(format!("no clause of {group} matches")),
+                    Ok(None) => return Err("Error_See and no later clause takes the word".into()),
+                    Err(more) => {
+                        split |= more;
+                        continue 'outer;
+                    }
+                };
+                let mut g = Gen::new(m, known, value);
+                let r = g.run_decode(&cls[pats[at].index]);
+                if !matches!(r, Err(E::See)) {
+                    break (g, r);
                 }
+                if from != 0 {
+                    return Err("Error_See on the retry".into());
+                }
+                from = at + 1;
             };
-            let mut g = Gen::new(m, known, value);
-            let r = g.run_decode(&cls[dc.index]);
             let excl = g.excl_pass.clone();
             cut.extend(g.used_cut.iter().copied());
             let mut lines = g.take();
@@ -175,6 +207,7 @@ pub fn template(m: &Model, enc: Encoding) -> Result<Template, String> {
                     lines = vec!["return Err(LiftError::Unsupported(ENC));".to_string()];
                 }
                 Err(E::NoMatch) => return Err("unmatched call".into()),
+                Err(E::See) => unreachable!("the decode loop retries Error_See"),
             }
             let lines = hoist_align(lines)?;
             arms.push((val, dead_lines(lines)));

@@ -27,6 +27,9 @@ pub enum E {
     Fail(String),
     /// An unconditional exception; the payload is the `LiftError` variant.
     Throw(&'static str),
+    /// An unconditional `Error_See`: the word belongs to a later decode
+    /// clause, which the Sail decoder retries.
+    See,
     /// A call's arguments do not fit this overload.
     NoMatch,
 }
@@ -247,6 +250,22 @@ impl<'m> Gen<'m> {
                 self.line(l);
             }
             None => self.line(stmt),
+        }
+    }
+
+    /// An `Error_See` on this path: the template goes on with the next
+    /// decode clause that takes the word, so a static condition splits the
+    /// template on the bits it reads.
+    fn see(&mut self) -> R<()> {
+        if self.guard.dead {
+            return Ok(());
+        }
+        if self.guard.d.is_some() {
+            return fail("Error_See under a dynamic condition");
+        }
+        match &self.guard.s {
+            None => Err(E::See),
+            Some((_, deps)) => Err(E::Split(*deps)),
         }
     }
 
@@ -743,9 +762,10 @@ impl<'m> Gen<'m> {
                     V::Union(c, _) => match c.as_ref() {
                         "Error_Undefined" | "Error_ReservedEncoding" => "Undefined",
                         "Error_Unpredictable" | "Error_ConstrainedUnpredictable" => "Unpredictable",
-                        // The word belongs to another encoding; the decoder
-                        // never gives it this one, so the arm is unreachable.
-                        "Error_See" => "Undefined",
+                        "Error_See" => {
+                            self.see()?;
+                            return Ok(V::Undef(None));
+                        }
                         c => return fail(format!("throw {c}")),
                     },
                     _ => return fail(format!("throw {v:?}")),
@@ -1294,6 +1314,32 @@ impl<'m> Gen<'m> {
                 }
                 if let V::Undef(_) = v {
                     return Ok(V::Bool(false));
+                }
+                if let (V::Bits(w, x), V::S(_, _, deps)) = (&l, v)
+                    && *w > 1
+                    && deps.count_ones() < *w
+                    && v.width() == Some(*w)
+                {
+                    // A value with fewer unknown word bits than its width
+                    // (a decode clause written as one binary literal):
+                    // bit by bit, so the bits known while generating fold.
+                    // Kept only when the compare folds to a constant; the
+                    // lines of a partial fold are dropped again.
+                    let (mark, n) = (self.out.len(), self.n);
+                    let mut c = V::Bool(true);
+                    for i in 0..*w {
+                        let bit = self.extract(v, &V::Int(i128::from(i)), 1)?;
+                        let d = self.cmp(Cmp::Eq, &bit, &V::Bits(1, x >> i & 1))?;
+                        c = self.and(&c, &d)?;
+                        if c == V::Bool(false) {
+                            break;
+                        }
+                    }
+                    self.out.truncate(mark);
+                    self.n = n;
+                    if let V::Bool(_) = c {
+                        return Ok(c);
+                    }
                 }
                 let (a, b) = match (&l, v.kind()) {
                     (V::Bits(1, x), Kind::Bool) => (V::Bool(*x == 1), v.clone()),

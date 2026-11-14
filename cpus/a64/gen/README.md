@@ -52,6 +52,13 @@ committed files differ. `regen.sh` first replaces each class file with
 `placeholder.rs`, so the generator builds even when the old output no longer
 compiles against `rt.rs`.
 
+An `Error_See` thrown by a decode clause means the word belongs to another
+encoding. As Sail's decoder does, the generator then runs the word again
+with the first later clause of the group that takes it (one retry only);
+an `Error_See` under a static condition splits the template on the bits
+the condition reads, and one under a dynamic condition is refused. Clause
+patterns written as one 32-bit binary literal count as fully fixed.
+
 `forms.txt` lists the encodings to generate; the generator fails when any of
 them does not generate. `try` prints the template of named encodings or why
 it fails, and `parse-all` parses every model function. A form joins
