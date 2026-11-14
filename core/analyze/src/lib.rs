@@ -12,13 +12,16 @@
 //! code before the jump ([`tables`]); their targets join the function. A
 //! computed jump that is not a recognized table stays a dynamic exit through
 //! the dispatcher. [`unresolved_transfers`] lists those dynamic exits and
-//! the indirect calls, for coverage reports.
+//! the indirect calls, for coverage reports. [`rediscover`] lifts again only
+//! the functions a change to the module's bytes touches.
 
 mod consts;
+mod incremental;
 mod slots;
 mod tables;
 mod transfers;
 
+pub use incremental::{Reuse, from_text, rediscover, stale, to_text};
 pub use slots::{SlotUses, slot_uses};
 pub use transfers::{Source, Transfer, TransferKind, unresolved_transfers};
 
@@ -388,8 +391,26 @@ pub struct Outline {
 
 impl Outline {
     fn new(entry: u64, kind: EntryKind, granule: u64, ext: &Extent) -> Outline {
+        Outline::of_parts(entry, kind, granule, &ext.0, &ext.1, &ext.2)
+    }
+
+    /// The outline of `f`, whose instructions lie `granule` bytes apart.
+    pub fn of(f: &Function, granule: u64) -> Outline {
+        let mut o = Outline::of_parts(f.entry, f.kind, granule, &f.insts, &f.tables, &f.pads);
+        o.name.clone_from(&f.name);
+        o
+    }
+
+    fn of_parts(
+        entry: u64,
+        kind: EntryKind,
+        granule: u64,
+        insts: &BTreeMap<u64, Insn>,
+        tables: &BTreeMap<u64, Vec<u64>>,
+        pads: &BTreeSet<u64>,
+    ) -> Outline {
         let mut runs: Vec<(u64, u32)> = Vec::new();
-        for &pc in ext.0.keys() {
+        for &pc in insts.keys() {
             match runs.last_mut() {
                 Some((first, n)) if *first + u64::from(*n) * granule == pc && *n < u32::MAX => {
                     *n += 1;
@@ -397,16 +418,14 @@ impl Outline {
                 _ => runs.push((pc, 1)),
             }
         }
-        let failed = ext
-            .0
+        let failed = insts
             .iter()
             .filter_map(|(&pc, i)| match i {
                 Insn::Failed(e) => Some((pc, e.clone())),
                 Insn::Lifted(_) => None,
             })
             .collect();
-        let calls = ext
-            .0
+        let calls = insts
             .values()
             .filter_map(|i| match i {
                 Insn::Lifted(b) => match (b.exit.flow, b.exit.next) {
@@ -416,8 +435,7 @@ impl Outline {
                 Insn::Failed(_) => None,
             })
             .collect();
-        let end = ext
-            .0
+        let end = insts
             .iter()
             .next_back()
             .map(|(pc, i)| match i {
@@ -430,8 +448,8 @@ impl Outline {
             name: None,
             kind,
             runs,
-            tables: ext.1.clone(),
-            pads: ext.2.clone(),
+            tables: tables.clone(),
+            pads: pads.clone(),
             failed,
             calls,
             end,
@@ -534,6 +552,29 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// The outlines of the functions of `a`, whose instructions lie
+    /// `granule` bytes apart.
+    pub fn of(a: &Analysis, granule: u64) -> Layout {
+        Layout {
+            functions: a
+                .functions
+                .values()
+                .map(|f| (f.entry, Outline::of(f, granule)))
+                .collect(),
+        }
+    }
+
+    /// The functions of the layout lifted again with `fe` from `module`.
+    pub fn lift(&self, fe: &(dyn Frontend + Sync), module: &Module) -> Analysis {
+        let all: Vec<&Outline> = self.functions.values().collect();
+        Analysis {
+            functions: each_lifted(fe, module, &all, |_, f| f.clone())
+                .into_iter()
+                .map(|f| (f.entry, f))
+                .collect(),
+        }
+    }
+
     /// Whether `addr` is a function entry.
     pub fn is_entry(&self, addr: u64) -> bool {
         self.functions.contains_key(&addr)
@@ -817,3 +858,6 @@ pub fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Ve
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod incremental_tests;
