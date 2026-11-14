@@ -4,6 +4,7 @@
 
 use relift_ir::{BinOp, Builder, CmpOp, Exit, Flow, FpOp, FpRound, Next, Reg, UnOp, Value, Width};
 
+use crate::decode::{Feature, Features};
 use crate::regs;
 
 /// Where a branch goes.
@@ -31,19 +32,33 @@ pub enum Kind {
 /// IR reads see the block's entry state and IR writes land at its end, but
 /// Sail semantics read their own writes; `St` keeps the current value of
 /// each slot the template wrote and emits the writes in [`St::finish`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct St {
     cur: Vec<Option<Value>>,
     exit: Option<(Next, Kind)>,
     fp: bool,
     flags_slow: bool,
     qc: Option<Value>,
+    features: Features,
 }
 
 impl St {
-    /// A state that has written nothing.
-    pub fn new() -> St {
-        St::default()
+    /// A state that has written nothing, on a CPU with `features`.
+    pub fn new(features: Features) -> St {
+        St {
+            cur: Vec::new(),
+            exit: None,
+            fp: false,
+            flags_slow: false,
+            qc: None,
+            features,
+        }
+    }
+
+    /// Whether the CPU implements `f`; templates whose Arm semantics branch
+    /// on a feature test it at lift time.
+    pub fn has(&self, f: Feature) -> bool {
+        self.features.has(f)
     }
 
     /// Records that the instruction's semantics assume FPCR zero.
@@ -351,8 +366,8 @@ pub fn decode_bit_masks(
     (w & mask(m), t & mask(m), true)
 }
 
-/// The floating-point cut: arithmetic, comparisons and min/max on 32- and
-/// 64-bit values with FPCR zero (round to nearest, no flush, NaNs
+/// The floating-point cut: arithmetic, comparisons and min/max on 16-, 32-
+/// and 64-bit values with FPCR zero (round to nearest, no flush, NaNs
 /// propagated), as Arm's `FPProcessNaNs` and `FPDefaultNaN` describe.
 /// FPSR flags: the IEEE operations raise them on the host; compares and
 /// min/max raise IOC through `system::FP_RAISE`, under the condition the
@@ -367,9 +382,13 @@ pub struct Fp {
 }
 
 impl Fp {
-    /// The format of `w` bits (32 or 64).
+    /// The format of `w` bits (16, 32 or 64).
     pub fn new(w: u32) -> Fp {
-        let (e, f) = if w == 32 { (8, 23) } else { (11, 52) };
+        let (e, f) = match w {
+            16 => (5, 10),
+            32 => (8, 23),
+            _ => (11, 52),
+        };
         Fp {
             w: Width::new(w),
             sign: 1u128 << (w - 1),
@@ -384,6 +403,15 @@ impl Fp {
     pub fn guarded(mut self, g: Option<Value>) -> Fp {
         self.guard = g;
         self
+    }
+
+    /// `h`, `s` or `d` by the format's width.
+    fn pick<T>(&self, h: T, s: T, d: T) -> T {
+        match self.w.bits() {
+            16 => h,
+            32 => s,
+            _ => d,
+        }
     }
 
     fn k(&self, b: &mut Builder, v: u128) -> Value {
@@ -660,11 +688,7 @@ impl Fp {
     }
 
     fn pow2(&self, b: &mut Builder, k: u32) -> Value {
-        let (bias, f) = if self.w == Width::W32 {
-            (127, 23)
-        } else {
-            (1023, 52)
-        };
+        let (bias, f) = self.pick((15, 10), (127, 23), (1023, 52));
         self.k(b, u128::from(bias + k) << f)
     }
 
@@ -826,7 +850,7 @@ impl Fp {
         let q = b.bin(BinOp::UDiv, num, a2);
         let q = Fp::op64(b, BinOp::Add, q, 1);
         let est = Fp::op64(b, BinOp::LShr, q, 1);
-        let c = if self.w == Width::W32 { 253 } else { 2045 };
+        let c = self.pick(29, 253, 2045);
         let ck = Fp::k64(b, c);
         let rexp = b.bin(BinOp::Sub, ck, exp);
         let fr = Fp::op64(b, BinOp::And, est, 0xff);
@@ -841,11 +865,7 @@ impl Fp {
         let fr = b.select(rm1, f2, fr);
         let rexp = b.select(rm1, zero64, rexp);
         let normal = self.pack(b, sign, rexp, fr);
-        let tiny_k = if self.w == Width::W32 {
-            1u128 << 21
-        } else {
-            1u128 << 50
-        };
+        let tiny_k = self.pick(1u128 << 8, 1u128 << 21, 1u128 << 50);
         let m = self.magnitude(b, x);
         let tk = self.k(b, tiny_k);
         let tiny = b.cmp(CmpOp::Ult, m, tk);
@@ -901,7 +921,7 @@ impl Fp {
         }
         let r = Fp::op64(b, BinOp::Add, lo, 1);
         let est = Fp::op64(b, BinOp::LShr, r, 1);
-        let c = if self.w == Width::W32 { 380 } else { 3068 };
+        let c = self.pick(44, 380, 3068);
         let ck = Fp::k64(b, c);
         let d = b.bin(BinOp::Sub, ck, exp);
         let rexp = Fp::op64(b, BinOp::LShr, d, 1);
@@ -945,22 +965,8 @@ impl Fp {
         let kb = self.k(b, base);
         let r = b.fp(FpOp::MulAdd, &[nx, y, kb], self.w);
         let r = if halve {
-            let half = self.k(
-                b,
-                if self.w == Width::W32 {
-                    0x3f00_0000
-                } else {
-                    0x3fe0_0000_0000_0000
-                },
-            );
-            let two = self.k(
-                b,
-                if self.w == Width::W32 {
-                    0x4000_0000
-                } else {
-                    0x4000_0000_0000_0000
-                },
-            );
+            let half = self.k(b, self.pick(0x3800, 0x3f00_0000, 0x3fe0_0000_0000_0000));
+            let two = self.k(b, self.pick(0x4000, 0x4000_0000, 0x4000_0000_0000_0000));
             let slow = b.fp(FpOp::Div, &[r, two], self.w);
             let kh = self.k(b, special);
             let f = self.frac_bits();
@@ -985,21 +991,17 @@ impl Fp {
 
     /// `FPRecipStepFused` (FRECPS): `2 - x * y` with one rounding.
     pub fn recip_step(&self, b: &mut Builder, x: Value, y: Value) -> Value {
-        let two = if self.w == Width::W32 {
-            0x4000_0000
-        } else {
-            0x4000_0000_0000_0000
-        };
+        let two = self.pick(0x4000, 0x4000_0000, 0x4000_0000_0000_0000);
         self.step(b, x, y, two, two, false)
     }
 
     /// `FPRSqrtStepFused` (FRSQRTS): `(3 - x * y) / 2`.
     pub fn rsqrt_step(&self, b: &mut Builder, x: Value, y: Value) -> Value {
-        let (three, one5) = if self.w == Width::W32 {
-            (0x4040_0000, 0x3fc0_0000)
-        } else {
-            (0x4008_0000_0000_0000, 0x3ff8_0000_0000_0000)
-        };
+        let (three, one5) = self.pick(
+            (0x4200, 0x3e00),
+            (0x4040_0000, 0x3fc0_0000),
+            (0x4008_0000_0000_0000, 0x3ff8_0000_0000_0000),
+        );
         self.step(b, x, y, three, one5, true)
     }
 }

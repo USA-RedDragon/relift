@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::decode::{Encoding, decode};
+use relift_cpu_a64::decode::{Encoding, Features, decode};
 use relift_cpu_a64::frontend::A64;
 use relift_emit::{Function, Insn, Options, emit};
 use relift_guest::{Frontend, Home};
@@ -77,7 +77,9 @@ const NZCV: usize = 96;
 const EXCL: usize = 101;
 
 fn slots() -> Vec<Slot> {
-    let fe = A64;
+    let fe = A64 {
+        features: Features::ALL,
+    };
     let regs = fe.regs();
     (0..regs.len())
         .map(|i| {
@@ -391,7 +393,9 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
     let forms = std::fs::read_to_string(root.join("cpus/a64/gen/forms.txt"))
         .expect("forms.txt is readable");
     let by_name: BTreeMap<&str, Encoding> = Encoding::all().map(|e| (e.name(), e)).collect();
-    let fe = A64;
+    let fe = A64 {
+        features: Features::ALL,
+    };
     let mut r = Rng(0x5eed_0e0e);
     // Cases spaced 1 GiB apart so no branch reaches another case.
     let mut cases: Vec<(u64, u32, Block)> = Vec::new();

@@ -250,7 +250,7 @@ pub fn lift(w: u32, pc: u64) -> Result<Block, LiftError> {
     let b = if HAND.load(Ordering::Relaxed) {
         lift::lift_hand(w, pc)?
     } else {
-        lift::lift(w, pc)?
+        lift::lift(w, pc, &relift_cpu_a64::decode::Features::ALL)?
     };
     if DCE.load(Ordering::Relaxed) {
         return Ok(relift_ir::dce(&b));

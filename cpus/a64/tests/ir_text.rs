@@ -1,7 +1,7 @@
 //! Every lifted encoding prints, parses back, and survives dead-value
 //! elimination with the same interpreter result.
 
-use relift_cpu_a64::decode::decode;
+use relift_cpu_a64::decode::{Features, decode};
 use relift_cpu_a64::lift::{lift, supported};
 use relift_cpu_a64::regs;
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
@@ -67,7 +67,9 @@ fn print_parse_and_dce_agree_for_every_supported_encoding() {
             if decode(w).map(|i| i.encoding) != Some(enc) {
                 continue;
             }
-            let Ok(b) = lift(w, PC) else { continue };
+            let Ok(b) = lift(w, PC, &Features::ALL) else {
+                continue;
+            };
             got += 1;
             checked += 1;
             let text = b.to_string();

@@ -577,6 +577,7 @@ pub fn summarize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode::Features;
     use crate::lift::lift;
 
     fn func<'a>(
@@ -595,7 +596,7 @@ mod tests {
         words
             .iter()
             .enumerate()
-            .map(|(i, w)| lift(*w, base + 4 * i as u64).expect("lifts"))
+            .map(|(i, w)| lift(*w, base + 4 * i as u64, &Features::ALL).expect("lifts"))
             .collect()
     }
 

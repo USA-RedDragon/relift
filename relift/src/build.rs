@@ -119,12 +119,15 @@ fn emit_modules(
         fpsr: crate::fpflags::Plan::default(),
     };
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
+    let cpu = A64 {
+        features: relift_switch::CPU_FEATURES,
+    };
     for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
         let module = program::module(p);
         ui.begin(row, "discover");
         let mut lifting = false;
         let mut found = 0;
-        let analysis = discover_with(&A64, &module, &mut |event| match event {
+        let analysis = discover_with(&cpu, &module, &mut |event| match event {
             Progress::Found { entries, .. } => {
                 found = entries;
                 ui.update(
@@ -229,7 +232,7 @@ fn emit_modules(
         let unit = format!("rl_unit_{i}_{}", c_ident(&p.name));
         ui.begin(row, "emit");
         let out = relift_emit::emit_with(
-            &A64,
+            &cpu,
             &fns,
             &overrides,
             &relift_emit::Options {

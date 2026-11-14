@@ -1,6 +1,7 @@
 //! Tests of the hand-written system lifters, run in the `relift-ir`
 //! interpreter where they have no intrinsic.
 
+use relift_cpu_a64::decode::Features;
 use relift_cpu_a64::lift::{lift, system};
 use relift_cpu_a64::regs::{self, C, N, TPIDR_EL0, TPIDRRO_EL0, V, Z};
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
@@ -9,7 +10,7 @@ use relift_ir::{Flow, Next, Op};
 const PC: u64 = 0x4000;
 
 fn run(word: u32, s: &mut State) -> u64 {
-    let b = lift(word, PC).expect("lifts");
+    let b = lift(word, PC, &Features::ALL).expect("lifts");
     let mut m = FlatMemory {
         base: PC,
         bytes: (0..=255u8).cycle().take(0x1000).collect(),
@@ -38,7 +39,7 @@ const NZCV_ENC: u32 = sysreg(3, 3, 4, 2, 0);
 
 #[test]
 fn svc_is_a_trap_that_resumes_after_it() {
-    let b = lift(0xd400_0001 | (0x27 << 5), PC).expect("lifts");
+    let b = lift(0xd400_0001 | (0x27 << 5), PC, &Features::ALL).expect("lifts");
     assert_eq!(b.exit.flow, Flow::Trap(0x27));
     assert_eq!(b.exit.next, Next::Const(PC + 4));
 }
@@ -56,7 +57,7 @@ fn mrs_reads_the_thread_pointers() {
 
 #[test]
 fn msr_tpidrro_is_undefined() {
-    assert!(lift(msr(TPIDRRO_ENC, 0), PC).is_err());
+    assert!(lift(msr(TPIDRRO_ENC, 0), PC, &Features::ALL).is_err());
 }
 
 #[test]
@@ -72,7 +73,7 @@ fn nzcv_round_trips_through_x() {
 #[test]
 fn hints_without_the_feature_are_nops() {
     for w in [0xd503_245f, 0xd503_251f, 0xd503_20ff] {
-        let b = lift(w, PC).expect("lifts");
+        let b = lift(w, PC, &Features::ALL).expect("lifts");
         assert!(b.insts.is_empty(), "{w:#x}");
         assert_eq!(b.exit.next, Next::Const(PC + 4));
     }
@@ -80,7 +81,7 @@ fn hints_without_the_feature_are_nops() {
 
 #[test]
 fn counter_reads_are_intrinsics() {
-    let b = lift(mrs(sysreg(3, 3, 14, 0, 1), 0), PC).expect("lifts");
+    let b = lift(mrs(sysreg(3, 3, 14, 0, 1), 0), PC, &Features::ALL).expect("lifts");
     assert!(
         b.insts
             .iter()

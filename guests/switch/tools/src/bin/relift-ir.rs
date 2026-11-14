@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use relift_cpu_a64::decode::decode;
+use relift_cpu_a64::decode::{Features, decode_for};
 use relift_cpu_a64::lift::lift;
 use relift_ir::dce;
 use relift_switch_formats::nso::Nso;
@@ -35,6 +35,10 @@ struct Cli {
     /// With `--addr`, or a symbol of unknown size: how many instructions.
     #[arg(long, default_value_t = 16)]
     count: u64,
+    /// The CPU's architecture features: a base (`cortex-a57`, `armv8.0`,
+    /// `all`) and features such as `FEAT_LSE`, comma-separated.
+    #[arg(long, default_value = "cortex-a57", value_parser = Features::parse)]
+    features: Features,
     /// Remove dead values before printing.
     #[arg(long)]
     dce: bool,
@@ -55,8 +59,8 @@ fn body(cli: Cli) -> Result<(), BoxError> {
     let words = words(&cli)?;
     let mut out = Vec::new();
     for (pc, word) in words {
-        let encoding = decode(word).map(|i| i.encoding.name());
-        let (ir, error) = match lift(word, pc) {
+        let encoding = decode_for(word, &cli.features).map(|i| i.encoding.name());
+        let (ir, error) = match lift(word, pc, &cli.features) {
             Ok(b) => {
                 let b = if cli.dce { dce(&b) } else { b };
                 (Some(b.to_string()), None)

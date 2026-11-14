@@ -4,6 +4,7 @@
 use relift_guest::{Frontend, Home, LiftFailure, WasmIntrinsic};
 use relift_ir::{Block, FpOp, FpRound, Reg, RegFile, Width};
 
+use crate::decode::Features;
 use crate::lift::{self, sail, system};
 use crate::regs;
 
@@ -16,9 +17,14 @@ const DCZID_EL0: u128 = 0x4;
 /// The `DC ZVA` block size, `RL_DC_ZVA_BYTES` in `abi.h`.
 const DC_ZVA_BYTES: u32 = 64;
 
-/// The A64 frontend.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct A64;
+/// The A64 frontend for a CPU with the architecture features `features`
+/// (the guest's CPU, from its descriptor).
+#[derive(Clone, Copy, Debug)]
+pub struct A64 {
+    /// The CPU's features: the decoder refuses words of encodings the CPU
+    /// lacks and templates take the CPU's branch of feature tests.
+    pub features: Features,
+}
 
 impl Frontend for A64 {
     fn granule(&self) -> u64 {
@@ -45,7 +51,7 @@ impl Frontend for A64 {
             });
         };
         let word = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
-        lift::lift(word, pc).map_err(|e| LiftFailure {
+        lift::lift(word, pc, &self.features).map_err(|e| LiftFailure {
             insn: u64::from(word),
             message: e.to_string(),
         })
@@ -196,6 +202,10 @@ fn rmode(r: FpRound) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const A64: A64 = A64 {
+        features: Features::ALL,
+    };
 
     #[test]
     fn homes_follow_the_context_layout() {

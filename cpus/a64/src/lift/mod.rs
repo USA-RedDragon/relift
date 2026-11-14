@@ -16,7 +16,7 @@ use std::fmt;
 
 use relift_ir::{Block, Builder, CmpOp, Exit, Flow, Next, Value, Width};
 
-use crate::decode::{Encoding, Insn, decode};
+use crate::decode::{Encoding, Features, Insn, decode, decode_for};
 use crate::regs::{self, C, N, SP, V, Z};
 
 /// Why a word could not be lifted.
@@ -60,20 +60,23 @@ pub enum End {
 /// A lifting function: emits the instruction's operations into the builder.
 pub type LiftFn = fn(Insn, &mut Builder) -> Result<End, LiftError>;
 
-/// Lifts the word `word` at guest address `pc` to a one-instruction block.
-pub fn lift(word: u32, pc: u64) -> Result<Block, LiftError> {
-    let insn = decode(word).ok_or(LiftError::Unallocated(word))?;
-    lift_insn(insn, pc)
+/// Lifts the word `word` at guest address `pc` to a one-instruction block,
+/// for a CPU with the features `f`. A word whose encoding needs a feature
+/// `f` lacks is unallocated there ([`decode_for`]), as on that hardware.
+pub fn lift(word: u32, pc: u64, f: &Features) -> Result<Block, LiftError> {
+    let insn = decode_for(word, f).ok_or(LiftError::Unallocated(word))?;
+    lift_insn(insn, pc, f)
 }
 
-/// Lifts an already decoded instruction at `pc`: with its generated template
-/// when it has one, else with its hand-written lifter.
-pub fn lift_insn(insn: Insn, pc: u64) -> Result<Block, LiftError> {
-    if let Some(f) = system::lifter(insn.encoding) {
-        return run_lifter(f, insn, pc);
+/// Lifts an already decoded instruction at `pc` for a CPU with the features
+/// `f`: with its generated template when it has one, else with its
+/// hand-written lifter. The caller decoded `insn` for the same features.
+pub fn lift_insn(insn: Insn, pc: u64, f: &Features) -> Result<Block, LiftError> {
+    if let Some(l) = system::lifter(insn.encoding) {
+        return run_lifter(l, insn, pc);
     }
     if sail::has_template(insn.encoding) {
-        return sail::lift_insn(insn, pc);
+        return sail::lift_insn(insn, pc, f);
     }
     hand_insn(insn, pc)
 }

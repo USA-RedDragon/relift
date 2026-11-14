@@ -1,7 +1,7 @@
 //! Lifter tests on words built from field values, run in the `relift-ir`
 //! interpreter. The differential check against Unicorn lives in `check/`.
 
-use relift_cpu_a64::decode::decode;
+use relift_cpu_a64::decode::{Features, decode};
 use relift_cpu_a64::lift::{LiftError, lift, lift_hand, lifter, sail, supported};
 use relift_cpu_a64::regs::{self, C, N, SP, V, Z};
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
@@ -21,7 +21,7 @@ fn mem() -> FlatMemory {
 }
 
 fn step(word: u32, s: &mut State, m: &mut FlatMemory) -> u64 {
-    let b = lift(word, PC).expect("lifts");
+    let b = lift(word, PC, &Features::ALL).expect("lifts");
     interp::run(&b, s, m, &mut NoIntrinsics).expect("runs").next
 }
 
@@ -93,7 +93,7 @@ fn adrp_and_branches_compute_targets() {
     step(adrp, &mut s, &mut mem());
     assert_eq!(x(&s, 7), (PC & !0xfff) + (9 << 12));
 
-    let bl = lift(0x9400_0000 | 0x3ff_ffff, PC).expect("lifts");
+    let bl = lift(0x9400_0000 | 0x3ff_ffff, PC, &Features::ALL).expect("lifts");
     assert_eq!(bl.exit.next, Next::Const(PC - 4));
     assert_eq!(bl.exit.flow, Flow::Call { ret: PC + 4 });
 
@@ -107,7 +107,7 @@ fn adrp_and_branches_compute_targets() {
     setx(&mut s, 9, 1 << 33);
     assert_eq!(step(tbnz, &mut s, &mut mem()), PC + 8);
 
-    let ret = lift(0xd65f_03c0, PC).expect("lifts");
+    let ret = lift(0xd65f_03c0, PC, &Features::ALL).expect("lifts");
     assert_eq!(ret.exit.flow, Flow::Return);
 }
 
@@ -146,13 +146,13 @@ fn exclusive_pairs_report_status() {
 fn unpredictable_and_unallocated_words_are_refused() {
     let ldr_post_same = 0xf840_0400 | (1 << 5) | 1;
     assert!(matches!(
-        lift(ldr_post_same, PC),
+        lift(ldr_post_same, PC, &Features::ALL),
         Err(LiftError::Unpredictable(_))
     ));
     let unallocated = 0x0200_0000;
     assert!(relift_cpu_a64::decode::decode(unallocated).is_none());
     assert!(matches!(
-        lift(unallocated, PC),
+        lift(unallocated, PC, &Features::ALL),
         Err(LiftError::Unallocated(_))
     ));
     assert!(supported().count() > 150);
@@ -192,7 +192,7 @@ fn generated_templates_agree_with_the_hand_lifter() {
             if decode(w).map(|i| i.encoding) != Some(enc) {
                 continue;
             }
-            let (Ok(h), Ok(g)) = (lift_hand(w, PC), lift(w, PC)) else {
+            let (Ok(h), Ok(g)) = (lift_hand(w, PC), lift(w, PC, &Features::ALL)) else {
                 continue;
             };
             let mut s = state();

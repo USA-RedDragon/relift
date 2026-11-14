@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use relift_cpu_a64::decode::{Encoding, decode};
+use relift_cpu_a64::decode::{Encoding, Features, decode};
 use relift_cpu_a64::lift::lift;
 use relift_ir::interp::{FlatMemory, Monitor, NoIntrinsics, State, run};
 use relift_ir::{Block, dce, simplify};
@@ -82,7 +82,7 @@ fn simplify_and_dce_keep_every_form_s_meaning() {
             if decode(w).map(|i| i.encoding) != Some(enc) {
                 continue;
             }
-            let Ok(b) = lift(w, 0x7100_0000) else {
+            let Ok(b) = lift(w, 0x7100_0000, &Features::ALL) else {
                 continue;
             };
             got += 1;
