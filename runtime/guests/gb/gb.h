@@ -196,6 +196,10 @@ unsigned rl_gb_ram_bank(const rl_gb *g);
 bool rl_gb_ram_enabled(const rl_gb *g);
 /** @brief The external RAM, ram_len bytes (512 for MBC2), or NULL when the cartridge has none. */
 uint8_t *rl_gb_ram(rl_gb *g, size_t *len);
+/** @brief A source of host time in whole seconds for the MBC3 clock. */
+typedef uint64_t rl_gb_time_fn(void *ctx);
+/** @brief Sets where the MBC3 clock reads host time from; fn NULL restores the system clock. The clock keeps its value. */
+void rl_gb_set_time_source(rl_gb *g, rl_gb_time_fn *fn, void *ctx);
 /** @brief True while an MBC5 rumble cartridge's motor bit is set. */
 bool rl_gb_rumble(const rl_gb *g);
 

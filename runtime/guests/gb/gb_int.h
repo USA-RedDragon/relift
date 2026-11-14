@@ -18,7 +18,7 @@
 typedef struct gb_rtc {
     /** @brief Clock seconds elapsed since the clock was zero, as of `stamp`. */
     uint64_t seconds;
-    /** @brief Host time (rl_gb_rtc_time) when `seconds` was last brought up to date. */
+    /** @brief Host time (the time source) when `seconds` was last brought up to date. */
     uint64_t stamp;
     /** @brief The clock is halted (DH bit 6). */
     bool halt;
@@ -72,6 +72,10 @@ struct rl_gb {
     bool rumble;
     /** @brief The MBC3 clock. */
     gb_rtc rtc;
+    /** @brief Host time for the clock. */
+    rl_gb_time_fn *time_fn;
+    /** @brief Argument of time_fn. */
+    void *time_ctx;
 
     /** @brief ROM bank at $0000. */
     uint32_t bank0;
@@ -95,6 +99,14 @@ static inline unsigned gb_wram_bank(const rl_gb *g)
 void gb_reset_mapper(rl_gb *g);
 /** @brief Recomputes bank0, bank1, rambank and the read pages from the controller registers. */
 void gb_remap(rl_gb *g);
+/** @brief Writes the clock register that RAM bank number reg (8 to 12) selects. */
+void gb_rtc_write(rl_gb *g, unsigned reg, uint8_t value);
+/** @brief The live clock register reg (0 seconds, 1 minutes, 2 hours, 3 day low, 4 day high and flags), without updating. */
+uint8_t gb_rtc_peek(const rl_gb *g, unsigned reg);
+/** @brief Host time in seconds from the time source. */
+uint64_t gb_host_time(const rl_gb *g);
+/** @brief Brings the clock up to the host time. */
+void gb_rtc_update(rl_gb *g);
 /** @brief A write to $0000-$7FFF. */
 void gb_mbc_write(rl_gb *g, uint16_t addr, uint8_t value);
 /** @brief A read of external RAM or the clock at $A000-$BFFF, for the pages without a direct pointer. */
