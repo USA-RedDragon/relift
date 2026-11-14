@@ -220,8 +220,8 @@ fn only_the_function_whose_fp_reaches_a_read_produces_flags() {
     assert_eq!(defs.len(), 1, "{parts}");
     assert!(defs[0].contains("fn_00000038"), "{parts}");
     assert!(parts.contains("#define RL_PART1_shard0000 1"), "{parts}");
-    assert!(root.join("obj/lifted/0_main/shard0000.p1.o").exists());
-    assert!(root.join("obj/lifted/0_main/shard0000.o").exists());
+    assert!(root.join("dev/obj/lifted/0_main/shard0000.p1.o").exists());
+    assert!(root.join("dev/obj/lifted/0_main/shard0000.o").exists());
 }
 
 #[test]
@@ -279,7 +279,8 @@ fn a_flagged_function_split_into_pieces_is_all_in_part_1() {
                 "{stem}: {parts}"
             );
             assert!(
-                root.join(format!("obj/lifted/0_main/{stem}.p1.o")).exists(),
+                root.join(format!("dev/obj/lifted/0_main/{stem}.p1.o"))
+                    .exists(),
                 "{stem}"
             );
         }

@@ -1,17 +1,19 @@
 //! `relift build` and `relift run`: lift, emit and compile the project's
 //! modules for this host, then run the result.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use relift_analyze::{Insn, Progress, discover_with};
+use relift_analyze::{EntryKind, Insn, Progress, discover_with};
 use relift_build::{Compile, Event, Plan};
 use relift_cpu_a64::frontend::A64;
+use relift_guest::{Root, RootKind};
 use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration, noun};
 use relift_switch::program::{self, Placed};
 use relift_switch_formats::npdm::Npdm;
 use relift_switch_formats::nso::Nso;
 
+use crate::hints::Hint;
 use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 use crate::ui::Ui;
@@ -75,11 +77,6 @@ fn load(import: &Path) -> Result<Loaded, BoxError> {
     Ok((mods.into_iter().map(|(_, n, m)| (n, m)).collect(), npdm))
 }
 
-/// What one build produced.
-struct Built {
-    exe: PathBuf,
-}
-
 fn c_ident(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -95,6 +92,72 @@ struct Emitted {
     unlifted_list: String,
     /// Which functions produce FPSR flags.
     fpsr: crate::fpflags::Plan,
+    /// The entries of every module, one `<module> <address> <kind>` line
+    /// each ([`entries_line`]), for the dev server's later discovery.
+    entries: String,
+}
+
+/// One line of the entry list: the module index, the address, and `S` for
+/// an entry other functions stop at or `A` for an address-taken one.
+fn entries_line(module: usize, addr: u64, kind: EntryKind) -> String {
+    let k = if kind == EntryKind::AddressTaken {
+        'A'
+    } else {
+        'S'
+    };
+    format!("{module} {addr:#x} {k}\n")
+}
+
+/// The entries of an entry list, per module index.
+pub(crate) fn parse_entries(text: &str) -> Result<Vec<BTreeMap<u64, EntryKind>>, BoxError> {
+    let mut out: Vec<BTreeMap<u64, EntryKind>> = Vec::new();
+    for line in text.lines() {
+        let mut f = line.split(' ');
+        let (Some(m), Some(a), Some(k)) = (f.next(), f.next(), f.next()) else {
+            return Err(format!("a bad entry list line: {line}").into());
+        };
+        let m: usize = m.parse()?;
+        let a = u64::from_str_radix(a.trim_start_matches("0x"), 16)?;
+        let k = if k == "A" {
+            EntryKind::AddressTaken
+        } else {
+            EntryKind::Called
+        };
+        if out.len() <= m {
+            out.resize(m + 1, BTreeMap::new());
+        }
+        out[m].insert(a, k);
+    }
+    Ok(out)
+}
+
+/// The identity of the guest image set: the modules in load order, by
+/// name and bytes, and `game.lock` when there is one.
+pub(crate) fn image_id(placed: &[Placed]) -> [u8; 32] {
+    let mut all = Vec::new();
+    for p in placed {
+        all.extend_from_slice(p.name.as_bytes());
+        all.push(0);
+        all.extend_from_slice(&p.base.to_le_bytes());
+        all.extend_from_slice(&relift_switch_formats::sha256(&p.nso.image));
+    }
+    if let Ok(lock) = std::fs::read("game.lock") {
+        all.extend_from_slice(&relift_switch_formats::sha256(&lock));
+    }
+    relift_switch_formats::sha256(&all)
+}
+
+/// The module `p` as analysis sees it, with the hints that name it as roots.
+pub(crate) fn module_with_hints(p: &Placed, hints: &BTreeSet<Hint>) -> relift_guest::Module {
+    let mut module = program::module(p);
+    for h in hints.iter().filter(|h| h.module == p.name) {
+        module.roots.push(Root {
+            addr: p.base.wrapping_add(h.offset),
+            kind: RootKind::Hint,
+            name: None,
+        });
+    }
+    module
 }
 
 fn unlifted_line(module: &str, pc: u64, word: u64, message: &str) -> String {
@@ -109,6 +172,8 @@ fn emit_modules(
     cdir: &Path,
     ui: &mut Ui,
     rows: &[usize],
+    image_id: [u8; 32],
+    hints: &BTreeSet<Hint>,
 ) -> Result<Emitted, BoxError> {
     let mut done = Emitted {
         files: Vec::new(),
@@ -117,13 +182,14 @@ fn emit_modules(
         unlifted: 0,
         unlifted_list: String::new(),
         fpsr: crate::fpflags::Plan::default(),
+        entries: String::new(),
     };
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
     let cpu = A64 {
         features: relift_switch::CPU_FEATURES,
     };
     for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
-        let module = program::module(p);
+        let module = module_with_hints(p, hints);
         ui.begin(row, "discover");
         let mut lifting = false;
         let mut found = 0;
@@ -181,6 +247,9 @@ fn emit_modules(
                     .text(format!("  {}  {pc:#x}  {:08x}  ", p.name, e.insn))
                     .paint(Paint::Yellow, e.message.clone()),
             );
+        }
+        for f in analysis.functions.values() {
+            done.entries.push_str(&entries_line(i, f.entry, f.kind));
         }
         done.unlifted += failed.len();
         done.functions += analysis.functions.len();
@@ -242,6 +311,7 @@ fn emit_modules(
                 unit_symbol: unit.clone(),
                 module_base: p.base,
                 parts: fpsr.parts(),
+                image_id,
                 ..relift_emit::Options::default()
             },
             &mut |d, total| {
@@ -357,6 +427,10 @@ fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
 /// emitted to the named file and exits. Not a setting (no `RELIFT_` prefix).
 const EMIT_RECORD: &str = "_RELIFT_EMIT_RECORD";
 
+/// The entry list the lifting child writes into the build directory
+/// ([`entries_line`]).
+pub(crate) const ENTRIES: &str = "entries.txt";
+
 /// What the lifting child emitted, as the parent reads it back.
 struct EmitRecord {
     modules: Vec<String>,
@@ -368,6 +442,8 @@ struct EmitRecord {
     fp_program_wide: bool,
     /// The files built a second time with FPSR flags (`RL_PART=1`).
     fp_part1: Vec<PathBuf>,
+    /// Whether any function produces FPSR flags.
+    fp_flags: bool,
 }
 
 impl EmitRecord {
@@ -385,6 +461,9 @@ impl EmitRecord {
         if self.fp_program_wide {
             t.push_str("fp_program_wide 1\n");
         }
+        if self.fp_flags {
+            t.push_str("fp_flags 1\n");
+        }
         for p in &self.fp_part1 {
             t.push_str(&format!("fp_part1 {}\n", p.display()));
         }
@@ -400,6 +479,7 @@ impl EmitRecord {
             unlifted: 0,
             fp_program_wide: false,
             fp_part1: Vec::new(),
+            fp_flags: false,
         };
         for line in t.lines() {
             let (k, v) = line.split_once(' ').ok_or("a bad emit record line")?;
@@ -411,6 +491,7 @@ impl EmitRecord {
                 "prog" => r.prog.push(v.into()),
                 "fp_program_wide" => r.fp_program_wide = v == "1",
                 "fp_part1" => r.fp_part1.push(v.into()),
+                "fp_flags" => r.fp_flags = v == "1",
                 _ => return Err(format!("unknown emit record key {k}").into()),
             }
         }
@@ -454,7 +535,17 @@ fn lift_and_emit(
     ));
     let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
     let cdir = out.join("c");
-    let emitted = emit_modules(settings, &placed, &cdir, ui, &rows)?;
+    let hints = crate::hints::read(Path::new("game.toml"))?;
+    let emitted = emit_modules(
+        settings,
+        &placed,
+        &cdir,
+        ui,
+        &rows,
+        image_id(&placed),
+        &hints,
+    )?;
+    relift_cache::write_if_changed(&out.join(ENTRIES), emitted.entries.as_bytes())?;
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
     let fpsr = emitted.fpsr;
@@ -478,6 +569,7 @@ fn lift_and_emit(
         unlifted: emitted.unlifted,
         fp_program_wide: fpsr.program_wide,
         fp_part1: fpsr.part1,
+        fp_flags: fp_flags || fpsr.program_wide,
     })
 }
 
@@ -498,7 +590,114 @@ fn lift_in_child(out: &Path) -> Result<EmitRecord, BoxError> {
     EmitRecord::parse(&std::fs::read_to_string(&rec)?)
 }
 
-fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<Built, BoxError> {
+/// How the program is built: shipped, with the runtime linked in and no
+/// code loaded at run time, or dev (`relift run`), with the runtime as a
+/// shared library and the miss path that hot-loads code
+/// (`-DRL_HOTLOAD`, docs/abi.md section 6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Shipped,
+    Dev,
+}
+
+/// The link flags that make a shared library on this host.
+fn shlib_flags(name: &str) -> Vec<String> {
+    if cfg!(target_os = "macos") {
+        vec![
+            "-dynamiclib".into(),
+            format!("-Wl,-install_name,@rpath/{name}"),
+        ]
+    } else {
+        vec![
+            "-shared".into(),
+            "-Wl,--no-undefined".into(),
+            format!("-Wl,-soname,{name}"),
+        ]
+    }
+}
+
+/// The file name of the runtime library on this host.
+pub(crate) fn runtime_lib_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "librelift_rt.dylib"
+    } else {
+        "librelift_rt.so"
+    }
+}
+
+/// How to compile and link code for this build, kept for the dev server.
+#[derive(Clone, Debug)]
+pub struct Toolchain {
+    /// The C compiler.
+    pub cc: PathBuf,
+    /// Ninja, when found.
+    pub ninja: Option<PathBuf>,
+    /// Compile jobs.
+    pub jobs: u32,
+    /// The flags of hot-loaded code: those of lifted code with FPSR flags
+    /// when any function produces them, as position-independent code with
+    /// hidden symbols.
+    pub hot_flags: Vec<String>,
+    /// The link flags of a hot-loaded library.
+    pub hot_link: Vec<String>,
+}
+
+/// What one build produced.
+pub(crate) struct Built {
+    pub(crate) exe: PathBuf,
+    pub(crate) out: PathBuf,
+    pub(crate) toolchain: Toolchain,
+}
+
+/// Builds `plans` in order, each in its own directory, showing progress
+/// on `row`; returns how many steps ran.
+fn build_plans(
+    ui: &mut Ui,
+    row: usize,
+    plans: &[(Plan, PathBuf)],
+    ninja: Option<&Path>,
+    jobs: u32,
+    note: &str,
+) -> Result<usize, BoxError> {
+    let compile = Metrics {
+        unit: "files",
+        note: Some(note.to_string()),
+        elapsed: true,
+        ..Metrics::default()
+    };
+    ui.update(row, compile.clone());
+    let verbose = ui.verbosity() == Verbosity::Verbose;
+    let mut finished = 0;
+    for (plan, dir) in plans {
+        std::fs::create_dir_all(dir)?;
+        let base = finished;
+        relift_build::build_with(plan, dir, ninja, jobs, &mut |e| match e {
+            Event::Tick => ui.tick(),
+            Event::Step { done, total, what } => {
+                finished = base + done;
+                ui.update(
+                    row,
+                    Metrics {
+                        done: done as u64,
+                        total: Some(total as u64),
+                        ..compile.clone()
+                    },
+                );
+                if verbose {
+                    ui.detail(&Line::new().text(format!("  {what}")));
+                }
+            }
+        })?;
+    }
+    Ok(finished)
+}
+
+pub(crate) fn build_project(
+    settings: &Settings,
+    targets: &[String],
+    mode: Mode,
+    ui: &mut Ui,
+) -> Result<Built, BoxError> {
     if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
         return Err(format!("target {t}: only the host target builds so far").into());
     }
@@ -522,6 +721,12 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         PathBuf::from(RUNTIME_DIR)
     } else {
         settings.runtime_dir.clone()
+    };
+    let dev = mode == Mode::Dev;
+    let hotload: Vec<String> = if dev {
+        vec!["-DRL_HOTLOAD".into()]
+    } else {
+        Vec::new()
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
     let arch: Vec<String> = if cfg!(target_arch = "x86_64") {
@@ -549,11 +754,21 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         })
         .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))
         .chain([inc("core/include"), inc("cpus/a64/include")])
+        .chain(hotload.iter().cloned())
         .collect();
     // Code that produces FPSR flags gets them from host FP operations,
     // which the compiler must then neither fold nor reorder.
     let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
     let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
+    let pic = ["-fPIC", "-fvisibility=hidden"].map(String::from);
+    let hot_flags: Vec<String> = if emitted.fp_flags {
+        flag_flags.clone()
+    } else {
+        lifted_flags.clone()
+    }
+    .into_iter()
+    .chain(pic.iter().cloned())
+    .collect();
     let lifted_flags = if emitted.fp_program_wide {
         flag_flags.clone()
     } else {
@@ -582,13 +797,24 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             inc("guests/switch"),
         ])
         .chain(extras.defines())
+        .chain(hotload.iter().cloned())
         .collect();
+    let lib_flags: Vec<String> = if dev {
+        rt_flags
+            .iter()
+            .cloned()
+            .chain(pic.iter().cloned())
+            .collect()
+    } else {
+        rt_flags.clone()
+    };
+    let bdir = if dev { out.join("dev") } else { out.clone() };
     let obj = |src: &Path, tag: &str| {
         let stem = src
             .strip_prefix(&cdir)
             .or_else(|_| src.strip_prefix(&rt))
             .unwrap_or(src);
-        out.join("obj").join(tag).join(stem).with_extension("o")
+        bdir.join("obj").join(tag).join(stem).with_extension("o")
     };
     let mut compiles: Vec<Compile> = lifted
         .iter()
@@ -622,36 +848,75 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             stage: 0,
         });
     }
-    for s in runtime_sources(&rt)? {
-        compiles.push(Compile {
+    let mut rt_compiles: Vec<Compile> = runtime_sources(&rt)?
+        .into_iter()
+        .map(|s| Compile {
             obj: obj(&s, "rt"),
             src: s,
-            flags: rt_flags.clone(),
+            flags: lib_flags.clone(),
             pool: None,
             stage: 0,
-        });
-    }
-    compiles.extend(extras.compiles(&rt, &rt_flags, &|s| obj(s, "rt")));
+        })
+        .collect();
+    rt_compiles.extend(extras.compiles(&rt, &lib_flags, &|s| obj(s, "rt")));
     let clang = tool(&settings.toolchain.clang, "clang").ok_or("no clang on PATH")?;
-    let exe = out.join("game");
+    let exe = bdir.join("game");
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = if ninja.is_some() {
         relift_build::job_count(settings.jobs)
     } else {
         1
     };
-    let pools = memory_pools(&mut compiles, jobs);
-    let plan = Plan {
-        cc: vec![clang.display().to_string()],
-        compiles,
-        output: exe.clone(),
-        link_flags: ["-lpthread", "-lm"]
-            .map(String::from)
-            .into_iter()
-            .chain(extras.libs())
-            .collect(),
-        pools,
-    };
+    let libs: Vec<String> = ["-lpthread", "-lm"].map(String::from).into();
+    let rt_lib = bdir.join("rt").join(runtime_lib_name());
+    let mut plans = Vec::new();
+    if dev {
+        let pools = memory_pools(&mut rt_compiles, jobs);
+        plans.push((
+            Plan {
+                cc: vec![clang.display().to_string()],
+                compiles: rt_compiles,
+                output: rt_lib.clone(),
+                link_flags: shlib_flags(runtime_lib_name())
+                    .into_iter()
+                    .chain(libs.iter().cloned())
+                    .chain(extras.libs())
+                    .collect(),
+                pools,
+            },
+            bdir.join("rt"),
+        ));
+        let pools = memory_pools(&mut compiles, jobs);
+        plans.push((
+            Plan {
+                cc: vec![clang.display().to_string()],
+                compiles,
+                output: exe.clone(),
+                link_flags: [
+                    rt_lib.display().to_string(),
+                    format!("-Wl,-rpath,{}", bdir.join("rt").display()),
+                ]
+                .into_iter()
+                .chain(libs.iter().cloned())
+                .collect(),
+                pools,
+            },
+            bdir.clone(),
+        ));
+    } else {
+        compiles.extend(rt_compiles);
+        let pools = memory_pools(&mut compiles, jobs);
+        plans.push((
+            Plan {
+                cc: vec![clang.display().to_string()],
+                compiles,
+                output: exe.clone(),
+                link_flags: libs.iter().cloned().chain(extras.libs()).collect(),
+                pools,
+            },
+            bdir.clone(),
+        ));
+    }
     let note = format!(
         "{} {}, -j{jobs}",
         clang
@@ -662,33 +927,8 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
             .find(|f| f.starts_with("-O"))
             .map_or("", String::as_str)
     );
-    let compile = Metrics {
-        unit: "files",
-        note: Some(note.clone()),
-        elapsed: true,
-        ..Metrics::default()
-    };
     ui.begin(compile_row, "compile");
-    ui.update(compile_row, compile.clone());
-    let mut finished = 0;
-    let verbose = ui.verbosity() == Verbosity::Verbose;
-    relift_build::build_with(&plan, &out, ninja.as_deref(), jobs, &mut |e| match e {
-        Event::Tick => ui.tick(),
-        Event::Step { done, total, what } => {
-            finished = done;
-            ui.update(
-                compile_row,
-                Metrics {
-                    done: done as u64,
-                    total: Some(total as u64),
-                    ..compile.clone()
-                },
-            );
-            if verbose {
-                ui.detail(&Line::new().text(format!("  {what}")));
-            }
-        }
-    })?;
+    let finished = build_plans(ui, compile_row, &plans, ninja.as_deref(), jobs, &note)?;
     ui.done(
         compile_row,
         if finished == 0 {
@@ -704,7 +944,21 @@ fn build_project(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result
         &unlifted_file,
         &exe,
     );
-    Ok(Built { exe })
+    Ok(Built {
+        exe,
+        out,
+        toolchain: Toolchain {
+            cc: clang,
+            ninja,
+            jobs,
+            hot_flags,
+            hot_link: shlib_flags("unit")
+                .into_iter()
+                .filter(|f| !f.contains("soname") && !f.contains("install_name"))
+                .chain([rt_lib.display().to_string()])
+                .collect(),
+        },
+    })
 }
 
 fn summarize(ui: &mut Ui, functions: usize, unlifted: usize, list: &Path, exe: &Path) {
@@ -738,12 +992,14 @@ fn summarize(ui: &mut Ui, functions: usize, unlifted: usize, list: &Path, exe: &
 /// No game.toml or import, a module that does not parse, or a failed
 /// compile or link.
 pub fn run_build(settings: &Settings, targets: &[String], ui: &mut Ui) -> Result<(), BoxError> {
-    build_project(settings, targets, ui).map(|_| ())
+    build_project(settings, targets, Mode::Shipped, ui).map(|_| ())
 }
 
-/// `relift run`: build, then run the program in the working directory,
+/// `relift run`: a dev build, then the program in the working directory,
 /// with the SD card in `sdmc/` there and the import's `romfs/` and `dlc/`
-/// as its data storage and add-on content. Returns the program's exit code.
+/// as its data storage and add-on content, and the dev server
+/// ([`crate::dev`]) on `RELIFT_DEV_SOCKET`, which hot-loads the code the
+/// program misses. Returns the program's exit code.
 ///
 /// # Errors
 ///
@@ -755,9 +1011,33 @@ pub fn run_run(
     ui: &mut Ui,
 ) -> Result<i32, BoxError> {
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
-    let built = build_project(settings, &targets, ui)?;
-    let mut cmd = relift_proc::command(&built.exe);
+    let built = build_project(settings, &targets, Mode::Dev, ui)?;
     let import = import_dir()?;
+    let (mods, _) = load(&import)?;
+    let placed = program::place(mods);
+    let known = parse_entries(&std::fs::read_to_string(built.out.join(ENTRIES))?)?;
+    let rt = if settings.runtime_dir.as_os_str().is_empty() {
+        PathBuf::from(RUNTIME_DIR)
+    } else {
+        settings.runtime_dir.clone()
+    };
+    let abi = crate::dev::abi_version(&rt.join("core/include/relift/abi_core.h"))?;
+    let hot = built.out.join("dev").join("hot");
+    let _ = std::fs::remove_dir_all(&hot);
+    let mut server = crate::dev::Server::new(
+        placed,
+        known,
+        abi,
+        built.toolchain.clone(),
+        hot,
+        std::fs::canonicalize("game.toml")?,
+    );
+    let sock = crate::dev::socket_path(&built.out);
+    let _ = std::fs::remove_file(&sock);
+    let listener =
+        crate::devsock::bind(&sock).map_err(|e| format!("dev socket {}: {e}", sock.display()))?;
+    let mut cmd = relift_proc::command(&built.exe);
+    cmd.env(crate::dev::SOCKET_ENV, &sock);
     let romfs = import.join("romfs");
     if romfs.is_dir() {
         cmd.env("RELIFT_ROMFS", &romfs);
@@ -769,6 +1049,47 @@ pub fn run_run(
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }
-    let status = cmd.status()?;
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let quiet = ui.verbosity() == Verbosity::Quiet;
+    let (status, loads) = std::thread::scope(|sc| {
+        let server = &mut server;
+        let stop = &stop;
+        let listener = &listener;
+        let worker = sc.spawn(move || {
+            crate::dev::accept_loop(
+                listener,
+                server,
+                stop,
+                &mut |l| {
+                    if !quiet {
+                        eprintln!(
+                            "relift run: hot-loaded {:#x} ({}): {}, {} unlifted, lift {:.0} ms, compile {:.0} ms",
+                            l.target,
+                            l.hint.text(),
+                            noun(l.functions as u64, "function"),
+                            l.unlifted,
+                            l.lift_ms,
+                            l.compile_ms
+                        );
+                    }
+                },
+                &mut |e| eprintln!("relift run: dev server: {e}"),
+            );
+            server.loads.clone()
+        });
+        let status = cmd.status();
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        let _ = crate::devsock::connect(&sock);
+        let loads = worker.join().unwrap_or_default();
+        (status, loads)
+    });
+    let _ = std::fs::remove_file(&sock);
+    let status = status?;
+    if !loads.is_empty() {
+        ui.summary(&Line::new().text(format!(
+            "hot-loaded {}; added to the hints in game.toml, so the next relift build lifts them",
+            noun(loads.len() as u64, "target")
+        )));
+    }
     Ok(status.code().unwrap_or(128))
 }
