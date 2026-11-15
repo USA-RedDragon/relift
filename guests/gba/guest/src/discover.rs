@@ -32,7 +32,7 @@ pub const IRQ_VECTOR: u32 = 0x0300_7FFC;
 /// The stack pointer every function starts with: an address of no memory,
 /// so pushes and pops of the function's frame are followed without taking
 /// it for a real one.
-const FRAME: u128 = 0x0F00_0000;
+const FRAME: u128 = 0x0F80_0000;
 
 /// The return address every function starts with in LR: a jump there is a
 /// return.
@@ -153,6 +153,12 @@ type Regs = Vec<Kv>;
 
 /// Bytes of RAM the path stored known values to.
 type Mem = BTreeMap<u32, u8>;
+
+/// Whether a load at `a` reads back what was stored there: work RAM and
+/// the function's own frame, not I/O or the cartridge's backup.
+fn remembers(a: u32) -> bool {
+    matches!(a >> 24, 0x02 | 0x03) || a >> 24 == (FRAME >> 24) as u32
+}
 
 fn meet_mem(a: &mut Mem, b: &Mem) -> bool {
     let n = a.len();
@@ -341,7 +347,9 @@ fn eval(b: &Block, rom: &Rom<'_>, inp: &Regs, mem_in: &Mem) -> Step {
                             stores.push((a, x as u32));
                         }
                         for i in 0..n {
-                            mem.insert(a.wrapping_add(i), (x >> (8 * i)) as u8);
+                            if remembers(a) {
+                                mem.insert(a.wrapping_add(i), (x >> (8 * i)) as u8);
+                            }
                         }
                     }
                     (Some(a), None) => {
