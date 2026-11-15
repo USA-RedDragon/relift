@@ -24,6 +24,9 @@
  */
 #include "vkf.h"
 #include "vi.h"
+#include "vk_overlay.h"
+
+#include <relift/touchpad.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -82,6 +85,8 @@ typedef struct vkf_swap {
     void *cap_ptr;
     VkCommandBuffer cap_cmd;
     VkFence cap_fence;
+    vkf_overlay *ov;
+    VkSemaphore again;
     pthread_mutex_t lock;
 } vkf_swap;
 
@@ -472,6 +477,11 @@ static VkResult host_create(vkf_swap *s)
         return r;
     }
     wait_all(s);
+    if (s->ov) {
+        DFN(s, vkDeviceWaitIdle)(s->dev);
+        vkf_overlay_free(s->ov);
+        s->ov = NULL;
+    }
     if (s->host)
         DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
     retire_semaphores(s);
@@ -487,6 +497,13 @@ static VkResult host_create(vkf_swap *s)
     s->host_n = n;
     s->host_extent = e;
     s->host_hint = caps.currentTransform;
+    if (rl_touchpad_wanted() && (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
+        uint32_t vw = 0, vh = 0;
+        rl_touchpad_view_size(&vw, &vh);
+        if (!vw || !vh)
+            rl_touchpad_view(e.width, e.height, 0, NULL);
+        s->ov = vkf_overlay_new(s->dev, s->fns, s->dobj->dev, fmt.format, e, s->host_img, n);
+    }
     s->gen = gen;
     s->stale = false;
     s->creations++;
@@ -527,6 +544,9 @@ static void swap_free(vkf_swap *s)
         DFN(s, vkFreeMemory)(s->dev, s->cap_mem, NULL);
     if (s->pool)
         DFN(s, vkDestroyCommandPool)(s->dev, s->pool, NULL);
+    vkf_overlay_free(s->ov);
+    if (s->again)
+        DFN(s, vkDestroySemaphore)(s->dev, s->again, NULL);
     if (s->host)
         DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
     if (s->offscreen)
@@ -985,8 +1005,19 @@ static void record(vkf_swap *s, uint32_t i, uint32_t hi)
     if (!dh)
         dh = 1;
     int32_t x = (int32_t)((hw - dw) / 2), y = (int32_t)((hh - dh) / 2);
+    uint32_t vw = 0, vh = 0;
+    int32_t pic[4];
+    if (s->ov && (rl_touchpad_view_size(&vw, &vh), vw && vh)) {
+        rl_touchpad_picture(pic);
+        if (pic[2] > 0 && pic[3] > 0) {
+            x = (int32_t)((int64_t)pic[0] * hw / vw);
+            y = (int32_t)((int64_t)pic[1] * hh / vh);
+            dw = (uint32_t)((uint64_t)pic[2] * hw / vw);
+            dh = (uint32_t)((uint64_t)pic[3] * hh / vh);
+        }
+    }
     VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    if (dw != hw || dh != hh) {
+    if (dw != hw || dh != hh || x || y) {
         VkClearColorValue black = { .float32 = { 0, 0, 0, 1 } };
         DFN(s, vkCmdClearColorImage)(cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
         barrier(s, cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1001,8 +1032,9 @@ static void record(vkf_swap *s, uint32_t i, uint32_t hi)
     };
     DFN(s, vkCmdBlitImage)(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                            &blit, s->filter);
-    barrier(s, cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT,
-            0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    if (!vkf_overlay_record(s->ov, cb, hi, i, dst))
+        barrier(s, cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
     barrier(s, cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_READ_BIT,
             0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
     DFN(s, vkEndCommandBuffer)(cb);
@@ -1157,6 +1189,63 @@ out:
     return r;
 }
 
+/**
+ * @brief Shows guest image i again with the overlay as it is now, while the on-screen controller pauses the game
+ * (the guest thread waits inside its present). Lock not held.
+ */
+static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
+{
+    pthread_mutex_lock(&s->lock);
+    if (!s->host || s->stale || !s->pool || i >= s->n) {
+        pthread_mutex_unlock(&s->lock);
+        return;
+    }
+    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    if (!s->again && DFN(s, vkCreateSemaphore)(s->dev, &sci, NULL, &s->again) < 0)
+        s->again = NULL;
+    if (!s->again) {
+        pthread_mutex_unlock(&s->lock);
+        return;
+    }
+    DFN(s, vkQueueWaitIdle)(q);
+    if (s->busy[i]) {
+        DFN(s, vkWaitForFences)(s->dev, 1, &s->done[i], VK_TRUE, UINT64_MAX);
+        DFN(s, vkResetFences)(s->dev, 1, &s->done[i]);
+        s->busy[i] = false;
+    }
+    uint32_t hi = 0;
+    VkResult r = DFN(s, vkAcquireNextImageKHR)(s->dev, s->host, UINT64_MAX, s->again, NULL, &hi);
+    if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
+        record(s, i, hi);
+        VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        VkSubmitInfo si = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &s->again,
+            .pWaitDstStageMask = &stage,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &s->cmd[i],
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &s->ready[hi],
+        };
+        if (DFN(s, vkQueueSubmit)(q, 1, &si, s->done[i]) >= 0) {
+            s->busy[i] = true;
+            VkPresentInfoKHR pi = {
+                .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &s->ready[hi],
+                .swapchainCount = 1,
+                .pSwapchains = &s->host,
+                .pImageIndices = &hi,
+            };
+            r = DFN(s, vkQueuePresentKHR)(q, &pi);
+        }
+    }
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+        s->stale = true;
+    pthread_mutex_unlock(&s->lock);
+}
+
 int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -1188,6 +1277,9 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
             rl_st32(mem, gres + 4u * j, (uint32_t)r);
         if (r < 0 && all >= 0)
             all = r;
+        if (s && r >= 0 && j == 0)
+            while (rl_touchpad_hold(16))
+                repaint(s, q, vkf_g32(&k, gidx));
     }
     vkf_queue_unlock(&k);
     vkf_wait_return(&k);
