@@ -17,6 +17,7 @@ fn run(dir: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
         .env_remove("CI")
         .env_remove("TERM")
         .env_remove("COLUMNS")
+        .env("RELIFT_PACKAGE_APPIMAGE", "never")
         .current_dir(dir);
     for (k, v) in env {
         cmd.env(k, v);
