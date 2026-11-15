@@ -1355,9 +1355,9 @@ only on the C library and the host OS.
 
 ## 13. Hardware-register guests
 
-Guests such as the Game Boy (later GBA, NDS and N64) drive devices through
-memory-mapped registers and depend on CPU timing relative to them. Their
-lifted code carries a guest cycle clock, routes device accesses to the
+Guests such as the Game Boy and the Game Boy Advance (later NDS and N64)
+drive devices through memory-mapped registers and depend on CPU timing
+relative to them. Their lifted code carries a guest cycle clock, routes device accesses to the
 runtime and gives the runtime points where it may run devices and deliver
 interrupts. A64 code uses none of this: the Switch CPU layer has no clock
 (`rl_cpu_desc.time_offset` is 0) and the A64 frontend emits none of the
