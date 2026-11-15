@@ -46,9 +46,19 @@ enum { IO_TM0 = 20, IO_TM1 = 24, IO_CPSR = 28, IO_OB = 48, IO_TOTAL = 64, IO_FIR
        IO_SPSR = 80, IO_BB = 84, IO_HUNG = 88, IO_HMODE = 92, IO_DELAY = 96, IO_KIND = 100, IO_DMACNT = 104 };
 
 /** Driver time the mirror adds in part_halt: the TM1 watchdog's prescaler
- * phase at the first Halt IME=1 call, and the extra loop cycles when ret16()
- * takes its IWRAM path (fitted to halt_ime1). */
-enum { HALT_PHASE = 21, HALT_PUT_BIOS = 1, HALT_PUT_IWRAM = 33 };
+ * phase at the first Halt IME=1 call, and the loop cycles after a call when
+ * ret16() takes its BIOS or its IWRAM path, modulo 64 (fitted to halt_ime1). */
+enum { HALT_PHASE = 1, HALT_PUT_BIOS = 45, HALT_PUT_IWRAM = 13 };
+
+/** Driver time of call() between the IF acknowledge and the IME write; it
+ * sets how early an HBlank may come and still skip the stub's Halt (fitted to
+ * A_hblankdma_CpuSet16_copy_ws4317). */
+enum { DRIVER_ACK = 24 };
+
+/** sweep_hb's driver time: the line it starts on after a frame start and the
+ * cycles of one loop besides fill() and call() (fitted to the skipped Halts
+ * and VCOUNT waits of A_hblankdma_CpuSet16_copy_ws4317). */
+enum { HB_START_LINES = 19, HB_LOOP = 8552 };
 
 typedef struct probe {
     mach m;
@@ -172,7 +182,7 @@ static void call(uint32_t op, uint32_t kind, uint32_t r0, uint32_t r1, uint32_t 
     rl_gba_store(P.m.g, 0x04000200u, 2, ie, false);
     spend(4);
     rl_gba_store(P.m.g, 0x04000202u, 2, 0xFFFF, false);
-    spend(4);
+    spend(DRIVER_ACK);
     rl_gba_store(P.m.g, 0x04000208u, 2, ime, false);
     spend(4);
     P.c.r[14] = DONE_PC;
@@ -325,6 +335,11 @@ static void sweep_hb(unsigned ci, uint32_t ws)
     uint32_t dst = c->vram ? VDST : DST;
     wr(0x04000204u, 2, ws);
     wr(0x04000000u, 2, 0x0080);
+    while (rl_gba_read(P.m.g, 0x04000006u, 2) != 227u)
+        spend(1);
+    while (rl_gba_read(P.m.g, 0x04000006u, 2) == 227u)
+        spend(1);
+    spend(HB_START_LINES * 1232u);
     for (uint32_t d = 0; d <= 1232u; d += 4) {
         fill(dst - 16u, ALEN + 48u, FILL);
         for (unsigned k = 0; k < 16; k++)
@@ -332,6 +347,7 @@ static void sweep_hb(unsigned ci, uint32_t ws)
         wr(0x040000B0u, 4, 0x04000108u);
         wr(0x040000B4u, 4, STAMP);
         wr(0x040000B8u, 2, 1);
+        spend(HB_LOOP);
         wait_vcount();
         wr(0x04000004u, 2, 0x0010);
         set_io(IO_DMACNT, 0xA300u);
