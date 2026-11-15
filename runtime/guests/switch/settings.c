@@ -3,9 +3,11 @@
  * @brief The settings of the Switch layer: where saves go, which host
  * Vulkan device the guest sees and whether attachments keep their contents.
  */
+#include "hid_priv.h"
 #include "services.h"
 
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 
 static const char *const g_keep[] = { "auto", "on", "off" };
 
@@ -53,4 +55,5 @@ void rl_switch_declare_settings(void)
 {
     rl_settings_declare_runtime();
     rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
+    rl_touchpad_declare(rl_switch_touchpad());
 }

@@ -742,6 +742,7 @@ pub fn program_files(
 
 const ANDROID_ENTRY: &str = r#"#ifdef __ANDROID__
 #include <relift/android.h>
+#include <relift/settings.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -757,6 +758,7 @@ static void set_dir(const char *env, const char *base, const char *name)
 static void set_android_dirs(void)
 {
     rl_android_init();
+    rl_settings_set_app("relift");
     set_dir("RELIFT_SAVE", rl_android_files_dir(), "save");
     set_dir("RELIFT_SDMC", rl_android_files_dir(), "sdmc");
     set_dir("RELIFT_ROMFS", rl_android_external_dir(), "romfs");

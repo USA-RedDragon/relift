@@ -147,11 +147,68 @@ pub fn gb_settings() -> Vec<Setting> {
     }]
 }
 
+/// The settings of the on-screen controller (`runtime/core/touchpad.c`).
+/// The editor's saved places (`input.touch_pad.layout.*`) are not listed.
+#[must_use]
+pub fn touch_pad_settings() -> Vec<Setting> {
+    let s = |key: &str, label: &str, description: &str, default: Value, kind| Setting {
+        key: key.into(),
+        label: label.into(),
+        description: description.into(),
+        apply: Apply::Live,
+        default,
+        kind,
+    };
+    vec![
+        s(
+            "input.touch_pad.show",
+            "Show",
+            "Automatic shows the on-screen controller only while no controller is connected",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: ["auto", "always", "never"].map(String::from).into(),
+            },
+        ),
+        s(
+            "input.touch_pad.opacity",
+            "Opacity",
+            "How see-through the buttons are",
+            Value::from(60),
+            SettingKind::Int {
+                min: 20,
+                max: 100,
+                step: 1,
+            },
+        ),
+        s(
+            "input.touch_pad.size",
+            "Button size",
+            "Bigger buttons are easier to hit",
+            Value::from(100),
+            SettingKind::Int {
+                min: 70,
+                max: 150,
+                step: 1,
+            },
+        ),
+        s(
+            "input.touch_pad.haptics",
+            "Vibrate on press",
+            "A short tick when a button goes down",
+            Value::Bool(true),
+            SettingKind::Bool,
+        ),
+    ]
+}
+
 /// The `settings` section of the self-description for a game's settings.
 #[must_use]
 pub fn section(game: Vec<Setting>) -> relift_info::Settings {
     relift_info::Settings {
-        runtime: runtime_settings(),
+        runtime: runtime_settings()
+            .into_iter()
+            .chain(touch_pad_settings())
+            .collect(),
         game,
     }
 }
@@ -743,7 +800,32 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 6);
+        assert_eq!(section(Vec::new()).runtime.len(), 10);
+    }
+
+    #[test]
+    fn touch_pad_settings_match_the_runtime_declarations() {
+        let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
+        let c = std::fs::read_to_string(rt.join("core/touchpad.c")).unwrap();
+        let declared: Vec<String> = c
+            .split(".key = \"")
+            .skip(1)
+            .map(|r| r.split('"').next().unwrap().to_string())
+            .collect();
+        let listed: Vec<String> = touch_pad_settings().into_iter().map(|s| s.key).collect();
+        assert_eq!(declared, listed);
+        for (s, label) in
+            touch_pad_settings()
+                .iter()
+                .zip(["Show", "Opacity", "Button size", "Vibrate on press"])
+        {
+            assert!(c.contains(&format!(".label = \"{label}\"")), "{}", s.key);
+            assert!(
+                c.contains(&format!(".description = \"{}\"", s.description)),
+                "{}",
+                s.key
+            );
+        }
     }
 
     #[test]

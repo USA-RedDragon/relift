@@ -525,6 +525,7 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     rl_switch_declare_settings();
     rl_switch_declare_ports();
     rl_settings_args(argc, argv);
+    rl_switch_declare_touchpad_port();
     main_args a = { p };
     uint32_t base = g_nhooks;
     for (uint32_t i = 0; i < g_nauto; i++) {

@@ -51,6 +51,8 @@ void rl_srv_install_fs(void);
 void rl_switch_declare_settings(void);
 /** @brief Declares the Switch ports and their bind.* settings; idempotent. Call before reading arguments so --relift-set and settings files can rebind keys. */
 void rl_switch_declare_ports(void);
+/** @brief Declares the on-screen controller port once it is wanted; call again after reading arguments, which can ask for it. */
+void rl_switch_declare_touchpad_port(void);
 /** @brief Registers acc:u0 with one local user, the applet manager's preselected user. */
 void rl_srv_install_acc(void);
 /** @brief Registers mm:u, the multimedia clock request service. */

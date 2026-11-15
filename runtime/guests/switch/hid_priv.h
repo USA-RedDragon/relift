@@ -81,5 +81,12 @@ void hid_core_get_vibration(uint32_t slot, uint32_t position, float v[4]);
 /** @brief The native ports of the Switch (generated: ports_gen.c). */
 extern const rl_port_decl rl_switch_ports[];
 extern const uint32_t rl_switch_ports_count;
+/** @brief The on-screen controller's port (touchpad.h), declared when the run uses it. */
+extern const rl_port_decl rl_switch_ports_touchpad[];
+/** @brief Number of entries of rl_switch_ports_touchpad. */
+extern const uint32_t rl_switch_ports_touchpad_count;
+struct rl_touchpad_guest;
+/** @brief The Switch on-screen controller layouts. */
+const struct rl_touchpad_guest *rl_switch_touchpad(void);
 
 #endif

@@ -12,6 +12,7 @@
 #include <relift/audio.h>
 #include <relift/ports.h>
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 #include <relift/window.h>
 
 #include <stdio.h>
@@ -23,6 +24,11 @@ extern const rl_port_decl rl_gb_ports[];
 extern const uint32_t rl_gb_ports_count;
 extern const rl_port_decl rl_gbc_ports[];
 extern const uint32_t rl_gbc_ports_count;
+extern const rl_port_decl rl_gb_ports_touchpad[];
+extern const uint32_t rl_gb_ports_touchpad_count;
+extern const rl_port_decl rl_gbc_ports_touchpad[];
+extern const uint32_t rl_gbc_ports_touchpad_count;
+extern const rl_touchpad_guest *rl_gb_touchpad(void);
 
 #define FRAME_NS 16742706ull
 #define SAVE_EVERY 600u
@@ -598,6 +604,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     const char *model = p->model, *case_file = NULL, *input = NULL;
     bool headless = false, check = false, no_audio = false;
     rl_gb_declare_settings();
+    rl_touchpad_declare(rl_gb_touchpad());
     bool color = p->rom_len > 0x143 && (p->rom[0x143] & 0x80);
     rl_ports_declare(color ? rl_gbc_ports : rl_gb_ports, color ? rl_gbc_ports_count : rl_gb_ports_count);
     rl_settings_args(argc, argv);
@@ -735,6 +742,9 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
         }
     if (!H.in_case)
         load_save(&H);
+    if (rl_touchpad_wanted())
+        rl_ports_declare(color ? rl_gbc_ports_touchpad : rl_gb_ports_touchpad,
+                         color ? rl_gbc_ports_touchpad_count : rl_gb_ports_touchpad_count);
     for (int i = 0; i < 8; i++)
         H.pad[i] = rl_ports_find("p1", g_buttons[i]);
     if (headless)

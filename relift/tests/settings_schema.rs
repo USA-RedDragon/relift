@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use relift::game_settings::{gb_settings, runtime_settings};
+use relift::game_settings::{gb_settings, runtime_settings, touch_pad_settings};
 
 const HARNESS: &str = r#"#include <stdio.h>
 #include "core.h"
@@ -56,13 +56,16 @@ fn declared(
         "core/ports.c",
         "core/input.c",
         "core/input_script.c",
+        "core/touchpad.c",
+        "core/touchpad_draw.c",
+        "core/touchpad_font.c",
     ]
     .iter()
     .chain(sources)
     {
         cmd.arg(rt.join(f));
     }
-    cmd.arg("-o").arg(&exe).arg("-lpthread");
+    cmd.arg("-o").arg(&exe).arg("-lpthread").arg("-lm");
     let out = cmd.output().expect("clang runs");
     assert!(
         out.status.success(),
@@ -89,15 +92,25 @@ fn as_json(settings: &[relift_info::Setting]) -> Vec<serde_json::Value> {
 
 #[test]
 fn the_runtime_schema_in_c_equals_the_list_in_rust() {
-    let Some(c) = declared(
+    let Some(mut c) = declared(
         "settings-schema",
         "rl_switch_declare_settings",
         &["cpus/a64/include", "cpus/a64", "guests/switch"],
-        &["guests/switch/settings.c"],
+        &["guests/switch/settings.c", "guests/switch/touchpad.c"],
     ) else {
         return;
     };
-    assert_eq!(c, as_json(&runtime_settings()));
+    let layout = c.len();
+    c.retain(|s| {
+        !s["key"]
+            .as_str()
+            .unwrap()
+            .starts_with("input.touch_pad.layout.switch.")
+    });
+    assert!(c.len() < layout);
+    let mut rust = runtime_settings();
+    rust.extend(touch_pad_settings());
+    assert_eq!(c, as_json(&rust));
 }
 
 #[test]

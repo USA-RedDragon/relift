@@ -8,6 +8,8 @@
  */
 #include "hid_priv.h"
 
+#include <relift/touchpad.h>
+
 #include <pthread.h>
 #include <string.h>
 
@@ -293,13 +295,22 @@ static const struct {
 };
 
 static rl_control_ref g_port_ref[RL_INPUT_PADS][PORT_CONTROLS];
-static bool g_ports_ready;
+static bool g_ports_ready, g_touchpad_ready;
+
+static void touchpad_port(void)
+{
+    if (g_touchpad_ready || !rl_touchpad_wanted())
+        return;
+    rl_ports_declare(rl_switch_ports_touchpad, rl_switch_ports_touchpad_count);
+    g_touchpad_ready = true;
+}
 
 static void ports_init(void)
 {
     if (g_ports_ready)
         return;
     rl_ports_declare(rl_switch_ports, rl_switch_ports_count);
+    touchpad_port();
     for (uint32_t p = 0; p < RL_INPUT_PADS; p++) {
         char id[3] = { 'p', (char)('1' + p), 0 };
         for (uint32_t c = 0; c < PORT_CONTROLS; c++)
@@ -312,6 +323,8 @@ void rl_switch_declare_ports(void)
 {
     ports_init();
 }
+
+void rl_switch_declare_touchpad_port(void) { touchpad_port(); }
 
 static int16_t axis_value(float v)
 {

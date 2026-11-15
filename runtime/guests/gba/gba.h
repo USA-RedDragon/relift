@@ -343,6 +343,13 @@ uint16_t rl_gba_keypad_pressed(const rl_gba *g);
 extern const rl_port_decl rl_gba_ports[];
 /** @brief Number of entries of rl_gba_ports. */
 extern const uint32_t rl_gba_ports_count;
+/** @brief The on-screen controller's port (touchpad.h), declared when the run uses it. */
+extern const rl_port_decl rl_gba_ports_touchpad[];
+/** @brief Number of entries of rl_gba_ports_touchpad. */
+extern const uint32_t rl_gba_ports_touchpad_count;
+struct rl_touchpad_guest;
+/** @brief The GBA on-screen controller layouts. */
+const struct rl_touchpad_guest *rl_gba_touchpad(void);
 
 /** @brief True while the CPU is halted (by HALTCNT; only seen from callbacks that run during the halt). */
 bool rl_gba_halted(const rl_gba *g);

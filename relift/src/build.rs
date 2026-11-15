@@ -1099,6 +1099,7 @@ fn lift_and_emit(
     name: &str,
     out: &Path,
     mods: &[PathBuf],
+    touchpad: bool,
     ui: &mut Ui,
 ) -> Result<EmitRecord, BoxError> {
     let import = import_dir(settings)?;
@@ -1175,13 +1176,17 @@ fn lift_and_emit(
     }
     let mut prog = Vec::new();
     let game = read_toml(Path::new("game.toml"))?;
+    let mut ports = game_ports(Path::new("game.toml"))?;
+    if touchpad && let Some(t) = relift_input::touchpad_port("switch") {
+        ports.add_port(t)?;
+    }
     let doc = crate::info::switch_document(
         &import,
         &game,
         &placed,
         name,
         game_settings.clone(),
-        &game_ports(Path::new("game.toml"))?,
+        &ports,
         stage.info(),
     )?;
     let info_c = cdir.join(crate::info::C_FILE);
@@ -1425,7 +1430,7 @@ pub(crate) fn build_project(
         [t, ..] => return Err(format!("target {t}: only one target builds at a time").into()),
     };
     if let Some(rec) = std::env::var_os(EMIT_RECORD) {
-        let r = lift_and_emit(settings, &name, &out, mods, ui)?;
+        let r = lift_and_emit(settings, &name, &out, mods, android.is_some(), ui)?;
         relift_cache::write_if_changed(Path::new(&rec), r.to_text().as_bytes())?;
         std::process::exit(0);
     }

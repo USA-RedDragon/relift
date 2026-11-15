@@ -315,4 +315,8 @@ int rl_gb_load(rl_gb *g, const char *path);
 /** @brief True while an MBC5 rumble cartridge's motor bit is set. */
 bool rl_gb_rumble(const rl_gb *g);
 
+struct rl_touchpad_guest;
+/** @brief The GB and GBC on-screen controller layouts (touchpad.h). */
+const struct rl_touchpad_guest *rl_gb_touchpad(void);
+
 #endif

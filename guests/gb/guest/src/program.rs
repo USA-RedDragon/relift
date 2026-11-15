@@ -686,7 +686,7 @@ pub fn program_c(
     t.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
     if p.android {
         t.push_str(
-            "#include <stdio.h>\n#include <relift/android.h>\n__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)\n{\n    rl_android_init();\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = rl_android_files_dir();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", ",
+            "#include <stdio.h>\n#include <relift/android.h>\n#include <relift/settings.h>\n__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)\n{\n    rl_android_init();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = rl_android_files_dir();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", ",
         );
         t.push_str(&c_string(p.save));
         t.push_str(");\n");

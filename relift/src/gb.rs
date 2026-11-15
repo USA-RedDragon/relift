@@ -486,7 +486,12 @@ pub fn build(
         prog.push(path);
     }
     let platform = if is_color(&rom) { "gbc" } else { "gb" };
-    let ports = relift_input::native_ports(platform)?;
+    let mut ports = relift_input::native_ports(platform)?;
+    if android.is_some()
+        && let Some(t) = relift_input::touchpad_port(platform)
+    {
+        ports.add_port(t)?;
+    }
     let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
     let mods_section = relift_info::Mods {
         code: hack
@@ -677,6 +682,7 @@ fn compile(
         rt_compiles.extend(c_files(&rt.join(layer))?);
     }
     rt_compiles.push(rt.join("guests/gb/ports_gen.c"));
+    rt_compiles.push(rt.join("guests/gb/touchpad.c"));
     let (prog, resources) = crate::winres::split(prog);
     for s in &prog {
         compiles.push(Compile {
