@@ -1,0 +1,77 @@
+diff --git a/src/nba/src/arm/arm7tdmi.hh b/src/nba/src/arm/arm7tdmi.hh
+index 0329c33..7f1d888 100644
+--- a/src/nba/src/arm/arm7tdmi.hh
++++ b/src/nba/src/arm/arm7tdmi.hh
+@@ -32,6 +32,7 @@ struct ARM7TDMI {
+   }
+ 
+   auto IRQLine() -> bool& { return irq_line; }
++  u64 irq_rise = 0;
+ 
+   void Reset() {
+     state.Reset();
+@@ -51,7 +52,7 @@ struct ARM7TDMI {
+   }
+ 
+   void Run() {
+-    if(IRQLine()) SignalIRQ();
++    if(IRQLine() && irq_rise <= bus.access_start + 1) SignalIRQ();
+ 
+     auto instruction = pipe.opcode[0];
+ 
+diff --git a/src/nba/src/bus/bus.cc b/src/nba/src/bus/bus.cc
+index 3631ef8..c2b75de 100644
+--- a/src/nba/src/bus/bus.cc
++++ b/src/nba/src/bus/bus.cc
+@@ -91,6 +91,7 @@ auto Bus::Read(u32 address, int access) -> T {
+   if(!(access & (Dma | Lock)) && hw.dma.IsRunning()) hw.dma.Run();
+ 
+   parallel_internal_cpu_cycle_limit = 0;
++  if(!(access & Dma)) access_start = scheduler.GetTimestampNow();
+ 
+   switch(page) {
+     // BIOS
+@@ -188,6 +189,7 @@ void Bus::Write(u32 address, int access, T value) {
+   if(!(access & (Dma | Lock)) && hw.dma.IsRunning()) hw.dma.Run();
+ 
+   parallel_internal_cpu_cycle_limit = 0;
++  if(!(access & Dma)) access_start = scheduler.GetTimestampNow();
+ 
+   switch(page) {
+     // EWRAM (external work RAM)
+diff --git a/src/nba/src/bus/bus.hh b/src/nba/src/bus/bus.hh
+index 5703bea..999db8d 100644
+--- a/src/nba/src/bus/bus.hh
++++ b/src/nba/src/bus/bus.hh
+@@ -118,6 +118,7 @@ struct Bus {
+   } prefetch;
+ 
+   int last_access;
++  u64 access_start = 0;
+   int parallel_internal_cpu_cycle_limit;
+ 
+   template<typename T>
+diff --git a/src/nba/src/bus/timing.cc b/src/nba/src/bus/timing.cc
+index 7d5e0a5..837dfb2 100644
+--- a/src/nba/src/bus/timing.cc
++++ b/src/nba/src/bus/timing.cc
+@@ -23,6 +23,7 @@ void Bus::Idle() {
+     parallel_internal_cpu_cycle_limit = hw.dma.Run();
+   }
+ 
++  access_start = scheduler.GetTimestampNow();
+   if(parallel_internal_cpu_cycle_limit == 0) {
+     Step(1);
+   } else {
+diff --git a/src/nba/src/hw/irq/irq.cc b/src/nba/src/hw/irq/irq.cc
+index 76454a4..b6632eb 100644
+--- a/src/nba/src/hw/irq/irq.cc
++++ b/src/nba/src/hw/irq/irq.cc
+@@ -155,6 +155,7 @@ void IRQ::UpdateIEAndIF(u64 irq_available) {
+ }
+ 
+ void IRQ::UpdateIRQLine(u64 irq_line) {
++  if(irq_line && !cpu.IRQLine()) cpu.irq_rise = scheduler.GetTimestampNow();
+   cpu.IRQLine() = (bool)irq_line;
+ }
+ 

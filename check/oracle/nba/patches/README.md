@@ -56,6 +56,28 @@ the console 0x90000074 / 0x000000ff / 0x00000051. Patched: batch 1 1000 of 1000 
 console (stock 990). The single-boot runs mask these bits (the model calls them unknown), so they
 do not see this.
 
+## 0006-irq-sampled-before-the-last-access-waits.patch
+
+Hardware: the CPU decides at the end of each instruction whether it takes a pending IRQ, but it
+sees the IRQ input as it was at the start of the instruction's last bus cycle sequence: an IRQ
+line that rises later than one cycle after the start of the instruction's last access (a code
+fetch, data access or internal cycle) is taken only after the next instruction. Wait states of
+that access count after the sample, so a store to EWRAM (3 cycles) hides a request raised during
+its wait states for one instruction, a store to VRAM or IWRAM (1 cycle) does not.
+
+Stock NBA: takes the IRQ at the first instruction boundary after the line rose.
+
+Evidence: console single-run BIOS probe (`relift-swiprobe2`, part A): a timer IRQ swept cycle by
+cycle across CpuSet, CpuFastSet, LZ77UnComp and RLUnComp, recording the latency to the handler and
+the return address the IRQ stub stacked. Stock NBA differs from the console in 21 of 29 series:
+every series that writes to EWRAM, at WAITCNT 0x4317 and 0x0000 (between 7 and 120 entries each),
+the DMA3-from-handler series and Halt with IME=1 (81 of 100). The differences come in runs where
+the console enters the handler one instruction later than stock NBA: e.g. CpuSet32 copy at offsets
+78-82, console latency 37-33 with return address 0xB72, stock NBA 34-30 with 0xB7A; Halt with
+IME=1 at offset 41, console latency 74 with return address 0x174, stock NBA 71 with 0x1B8. The
+LZ77UnComp and RLUnComp series that write to VRAM (no wait states) match stock NBA. Patched: all
+21 series equal the console; the 8 that matched still match; `test.sh` still passes.
+
 ## 0007-serial-registers-and-memcnt-read-back.patch
 
 Hardware (no link cable attached): SIOMULTI0-3 (0x04000120-27) read 0 whatever the BIOS stored
@@ -94,5 +116,5 @@ runs the three probe ROMs through the real BIOS (about 80 s): p2 and sb1 compare
 timing record, batch 1 per record (full end state) and per timing record, with the console
 decodes; PASS when nothing disagrees except `known.txt`. Stock NBA fails it (p2: five classes; sb1:
 T hi-reg op and 19 timing records; batch 1: 10 MSR records and 16 timing records). Patched with
-0001-0003: PASS (p2 4096/4096, sb1 all 52 classes and 358/365 timing, batch 1 1000/1000 and
+0001-0007: PASS (p2 4096/4096, sb1 all 52 classes and 358/365 timing, batch 1 1000/1000 and
 313/320 timing; the misses are the open cfg 6 Thumb records).
