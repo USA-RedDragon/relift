@@ -117,7 +117,9 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
     let mut lifted: Vec<Lifting> = Vec::new();
     let mut instructions = BTreeSet::new();
     for (entry, f) in &report.functions {
-        if !seen_entry.insert(entry.addr) || !matches!(entry.addr >> 24, 0x02 | 0x03 | 0x08..=0x0D)
+        if f.instructions.is_empty()
+            || !seen_entry.insert(entry.addr)
+            || !matches!(entry.addr >> 24, 0x02 | 0x03 | 0x08..=0x0D)
         {
             continue;
         }

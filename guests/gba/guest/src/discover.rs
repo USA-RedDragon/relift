@@ -38,15 +38,23 @@ const FRAME: u128 = 0x0F80_0000;
 /// return.
 const RET: u32 = 0x0E00_0000;
 
-/// The most bytes of RAM a path remembers.
-const MEM_BYTES: usize = 1 << 16;
+/// The most bytes of RAM the reset path remembers while its start runs on
+/// known values (the copies of code and data to work RAM).
+const BOOT_BYTES: usize = 1 << 18;
+
+/// The most bytes of RAM any other path remembers.
+const PATH_BYTES: usize = 256;
+
+/// The most instructions the start of any function but the reset entry runs
+/// on known values.
+const START: usize = 512;
 
 /// The most instructions of a leaf run in place at its calls.
 const INLINE: usize = 24;
 
 /// The most instructions a function's start runs on known values before
 /// the paths are met (a copy loop runs to its end).
-const CONCRETE: usize = 1 << 15;
+const CONCRETE: usize = 1 << 18;
 
 /// The most instruction visits per function, against runaway joins.
 const VISITS: usize = 1 << 16;
@@ -232,7 +240,7 @@ struct Step {
     mem: Mem,
 }
 
-fn eval(b: &Block, rom: &Rom<'_>, inp: &Regs, mem_in: &Mem) -> Step {
+fn eval(b: &Block, rom: &Rom<'_>, inp: &Regs, mem_in: &Mem, cap: usize) -> Step {
     use relift_ir::BinOp;
     let mut vals: Vec<Kv> = Vec::with_capacity(b.insts.len());
     let mut writes: Vec<(usize, Kv)> = Vec::new();
@@ -362,7 +370,7 @@ fn eval(b: &Block, rom: &Rom<'_>, inp: &Regs, mem_in: &Mem) -> Step {
                             stores.push((a, x as u32));
                         }
                         for i in 0..n {
-                            if remembers(a) && mem.len() < MEM_BYTES {
+                            if remembers(a) && mem.len() < cap {
                                 mem.insert(a.wrapping_add(i), (x >> (8 * i)) as u8);
                             }
                         }
@@ -430,12 +438,12 @@ const MODES: [u128; 7] = [0x10, 0x11, 0x12, 0x13, 0x17, 0x1B, 0x1F];
 /// `b` run once per mode for a state whose mode is unknown, when every run
 /// knows the exit: the targets of all runs, and the state where the runs
 /// agree.
-fn by_mode(b: &Block, rom: &Rom<'_>, inp: &Regs, mem: &Mem) -> Option<Step> {
+fn by_mode(b: &Block, rom: &Rom<'_>, inp: &Regs, mem: &Mem, cap: usize) -> Option<Step> {
     let mut all: Option<Step> = None;
     for m in MODES {
         let mut r = inp.clone();
         r[regs::M.index()] = Kv::known(m);
-        let mut s = eval(b, rom, &r, mem);
+        let mut s = eval(b, rom, &r, mem, cap);
         if s.targets.contains(&None) || s.may_skip {
             return None;
         }
@@ -456,20 +464,23 @@ fn by_mode(b: &Block, rom: &Rom<'_>, inp: &Regs, mem: &Mem) -> Option<Step> {
     all
 }
 
+/// Bytes a copy writes: address and value, `None` when not known.
+type Written = Vec<(u32, Option<u8>)>;
+
 /// The copy or fill of `CpuSet` (0x0B) and `CpuFastSet` (0x0C) with known
-/// operands, into the path's RAM.
-fn bios_copy(rom: &Rom<'_>, number: u32, r: &Regs, mem: &mut Mem) {
-    if number != 0x0B && number != 0x0C {
-        return;
-    }
+/// operands: the bytes it writes, `None` for a byte whose value is not
+/// known; `Err` with the destination (or `None`) when the operands are not
+/// known.
+fn bios_copy(
+    rom: &Rom<'_>,
+    number: u32,
+    r: &Regs,
+    mem: &Mem,
+    ram: &BTreeMap<u32, u8>,
+) -> Result<Written, Option<u32>> {
     let get = |n: u32| reg(r, regs::r(n), Width::W32).map(|v| v as u32);
     let (Some(src), Some(dst), Some(ctl)) = (get(0), get(1), get(2)) else {
-        if let Some(d) = get(1) {
-            mem.retain(|a, _| *a < d);
-        } else {
-            mem.clear();
-        }
-        return;
+        return Err(get(1));
     };
     let fill = ctl & (1 << 24) != 0;
     let (unit, count) = if number == 0x0C {
@@ -478,23 +489,18 @@ fn bios_copy(rom: &Rom<'_>, number: u32, r: &Regs, mem: &mut Mem) {
         (if ctl & (1 << 26) != 0 { 4 } else { 2 }, ctl & 0x1F_FFFF)
     };
     let (src, dst) = (src & !(unit - 1), dst & !(unit - 1));
-    let byte = |a: u32, mem: &Mem| {
+    let byte = |a: u32| {
         mem.get(&a)
+            .or_else(|| ram.get(&a))
             .copied()
             .or_else(|| rom.read(a, 1).map(|v| v as u8))
     };
-    for i in 0..count.min(0x10000) * unit {
-        let from = if fill { src + i % unit } else { src + i };
-        let to = dst + i;
-        match byte(from, mem) {
-            Some(b) if remembers(to) && mem.len() < MEM_BYTES => {
-                mem.insert(to, b);
-            }
-            _ => {
-                mem.remove(&to);
-            }
-        }
-    }
+    Ok((0..count.min(0x10000) * unit)
+        .map(|i| {
+            let from = if fill { src + i % unit } else { src + i };
+            (dst + i, byte(from))
+        })
+        .collect())
 }
 
 /// The registers a call leaves unknown (the AAPCS scratch registers, the
@@ -522,6 +528,8 @@ struct Walk<'a> {
     entries: VecDeque<(Loc, Psr)>,
     busy: BTreeSet<Loc>,
     report: Report,
+    /// The most bytes of RAM the current path remembers.
+    cap: usize,
 }
 
 impl Walk<'_> {
@@ -561,6 +569,19 @@ impl Walk<'_> {
                 mem.get(&a).or_else(|| self.report.ram.get(&a)).copied()
             })
             .try_fold(0u32, |acc, b| b.map(|b| (acc << 8) | u32::from(b)))
+    }
+
+    /// The register `n` when the code at `at` is a call veneer, `BX Rn`
+    /// (the compiler's `_call_via_rn`, never `BX LR`, which returns): a
+    /// call of it calls `Rn`.
+    fn veneer(&self, at: Loc, mem: &Mem) -> Option<u32> {
+        let w = self.code(at, mem)?;
+        if at.thumb {
+            (w & 0xFF87 == 0x4700).then_some((w >> 3) & 0xF)
+        } else {
+            (w & 0x0FFF_FFF0 == 0x012F_FF10 && w >> 28 == 0xE).then_some(w & 0xF)
+        }
+        .filter(|&n| n < 14)
     }
 
     /// Keeps the work RAM `mem` holds as code that runs from RAM, for an
@@ -687,6 +708,7 @@ impl Walk<'_> {
     ) -> Vec<(Loc, Regs, Mem)> {
         let mut next: Vec<(Loc, Regs, Mem)> = Vec::new();
         let Some(word) = self.code(at, min) else {
+            f.returns = true;
             if !quiet {
                 self.report.unresolved.push(Unresolved {
                     at,
@@ -705,9 +727,9 @@ impl Walk<'_> {
                 return next;
             }
         };
-        let mut s = eval(&l.block, &self.rom, inp, min);
+        let mut s = eval(&l.block, &self.rom, inp, min, self.cap);
         if s.may_run && s.targets.contains(&None) && reg(inp, regs::M, Width::new(5)).is_none() {
-            s = by_mode(&l.block, &self.rom, inp, min).unwrap_or(s);
+            s = by_mode(&l.block, &self.rom, inp, min, self.cap).unwrap_or(s);
         }
         for &(a, v) in &s.stores {
             if a == IRQ_VECTOR && !quiet {
@@ -738,7 +760,29 @@ impl Walk<'_> {
                 };
                 let mut o = inp.clone();
                 let mut m = min.clone();
-                bios_copy(&self.rom, number, inp, &mut m);
+                if number == 0x0B || number == 0x0C {
+                    match bios_copy(&self.rom, number, inp, min, &self.report.ram) {
+                        Ok(bytes) => {
+                            let big = bytes.len() > self.cap;
+                            for (a, b) in bytes {
+                                match b {
+                                    Some(b) if remembers(a) && !big && m.len() < self.cap => {
+                                        m.insert(a, b);
+                                    }
+                                    Some(b) if big && !quiet && matches!(a >> 24, 0x02 | 0x03) => {
+                                        m.remove(&a);
+                                        self.report.ram.insert(a, b);
+                                    }
+                                    _ => {
+                                        m.remove(&a);
+                                    }
+                                }
+                            }
+                        }
+                        Err(Some(d)) => m.retain(|a, _| *a < d),
+                        Err(None) => m.clear(),
+                    }
+                }
                 for n in 0..4 {
                     o[regs::r(n).index()] = Kv::UNKNOWN;
                 }
@@ -753,7 +797,30 @@ impl Walk<'_> {
             }
             Flow::Call { ret } => {
                 f.calls_out = true;
-                let t = self.bl_pair(at, word).or(s.targets[0]);
+                let mut t = self.bl_pair(at, word).or(s.targets[0]);
+                let mut thumb = thumb;
+                if let (Some(v), Some(th)) = (t, thumb)
+                    && let Some(n) = self.veneer(
+                        Loc {
+                            addr: v & !1,
+                            thumb: th,
+                        },
+                        &s.mem,
+                    )
+                {
+                    if !quiet {
+                        self.call(
+                            Loc {
+                                addr: v & !1,
+                                thumb: th,
+                            },
+                            psr(&s.out),
+                        );
+                    }
+                    let r = reg(&s.out, regs::r(n), Width::W32).map(|x| x as u32);
+                    t = r.map(|x| x & !1);
+                    thumb = r.map(|x| x & 1 != 0);
+                }
                 let back = quiet || self.callee(at, t, thumb, &s.out, &s.mem);
                 let callee = t.zip(thumb).map(|(t, th)| Loc {
                     addr: t & !1,
@@ -858,8 +925,11 @@ impl Walk<'_> {
             init[r.index()] = v;
         }
         let (mut at, mut regs_now, mut mem_now) = (entry, init, Mem::new());
+        let boot = entry.addr == RESET && !entry.thumb;
+        let saved = self.cap;
+        self.cap = if boot { BOOT_BYTES } else { PATH_BYTES };
         let mut seen: BTreeSet<(Loc, u64)> = BTreeSet::new();
-        for _ in 0..CONCRETE {
+        for _ in 0..if boot { CONCRETE } else { START } {
             let mut h = std::hash::DefaultHasher::new();
             std::hash::Hash::hash(&regs_now, &mut h);
             if !seen.insert((at, std::hash::Hasher::finish(&h))) {
@@ -872,6 +942,15 @@ impl Walk<'_> {
             let (to, r, m) = n.remove(0);
             (at, regs_now, mem_now) = (to, r, m);
         }
+        if mem_now.len() > PATH_BYTES {
+            for (&a, &v) in &mem_now {
+                if matches!(a >> 24, 0x02 | 0x03) {
+                    self.report.ram.entry(a).or_insert(v);
+                }
+            }
+            mem_now.retain(|a, _| !matches!(a >> 24, 0x02 | 0x03));
+        }
+        self.cap = PATH_BYTES;
         let mut state: BTreeMap<Loc, (Regs, Mem)> = BTreeMap::from([(at, (regs_now, mem_now))]);
         let mut work = VecDeque::from([at]);
         let mut visits = 0;
@@ -903,6 +982,7 @@ impl Walk<'_> {
                 }
             }
         }
+        self.cap = saved;
         f
     }
 
@@ -932,6 +1012,7 @@ pub fn discover(rom: &[u8]) -> Report {
         )]),
         busy: BTreeSet::new(),
         report: Report::default(),
+        cap: PATH_BYTES,
     };
     while let Some((e, p)) = w.entries.pop_front() {
         w.call(e, p);
