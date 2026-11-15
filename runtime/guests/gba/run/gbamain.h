@@ -27,7 +27,9 @@ typedef struct rl_gba_program {
  * @brief Runs the ROM in a window (the SDL3 backend when built and a display
  * exists) or headless. Options: --headless, --frames N (stop at the end of
  * the Nth frame and print the frame count, the frame hash as
- * rl_gba_frame_hash gives it, the registers and memory hashes), --png FILE
+ * rl_gba_frame_hash gives it, the registers and memory hashes), --dump
+ * PREFIX (with --frames: also write work RAM, palette, VRAM and OAM to
+ * PREFIX.ewram and so on), --png FILE
  * (the last frame at exit), --png-dir DIR with --png-every N (every Nth
  * frame), --save FILE (the backup file instead of the one rl_gba_save_path
  * names), --no-save, --stats (counters on stderr), and the runtime's

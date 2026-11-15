@@ -37,6 +37,7 @@ typedef struct host {
     const char *png;
     const char *png_dir;
     uint32_t png_every;
+    const char *dump;
     uint64_t next_ns;
     char save[4096];
 } host;
@@ -159,6 +160,10 @@ static void report(host *H, rl_ctx *c)
     rl_arm32_cpu()->describe(c, buf, sizeof buf);
     printf("frames %u hash %016llx\n", H->frames, (unsigned long long)rl_gba_frame_hash(H->run.g));
     printf("regs %s\n", buf);
+    rl_gba *g = H->run.g;
+    printf("io dispcnt=%04x dispstat=%04x ie=%04x if=%04x ime=%u waitcnt=%04x\n", rl_gba_read(g, 0x04000000u, 2),
+           rl_gba_read(g, 0x04000004u, 2), rl_gba_read(g, 0x04000200u, 2), rl_gba_read(g, 0x04000202u, 2),
+           rl_gba_read(g, 0x04000208u, 2), rl_gba_read(g, 0x04000204u, 2));
     static const struct {
         const char *name;
         rl_gba_region r;
@@ -171,6 +176,17 @@ static void report(host *H, rl_ctx *c)
     }
     printf("\n");
     fflush(stdout);
+    for (size_t i = 0; H->dump && i < sizeof rs / sizeof rs[0]; i++) {
+        size_t n = 0;
+        const uint8_t *m = rl_gba_mem(H->run.g, rs[i].r, &n);
+        char path[4096];
+        snprintf(path, sizeof path, "%s.%s", H->dump, rs[i].name);
+        FILE *f = fopen(path, "wb");
+        if (!f || fwrite(m, 1, n, f) != n)
+            fprintf(stderr, "relift-gba: could not write %s\n", path);
+        if (f)
+            fclose(f);
+    }
 }
 
 static void on_frame(void *user, const uint16_t *pixels, uint64_t when)
@@ -276,6 +292,8 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
             H.png_dir = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png-every"))
             H.png_every = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
+        else if (!strcmp(a, "--dump"))
+            H.dump = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--save"))
             save = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--no-save"))
