@@ -206,6 +206,31 @@ impl Stage {
         })
     }
 
+    /// The superset functions of module `i` over its outlines `hot`
+    /// ([`crate::total::superset`]), from the cache when the module is
+    /// unchanged since a build that kept them; gives whether they came from
+    /// the cache.
+    ///
+    /// # Errors
+    ///
+    /// The cache cannot be written.
+    pub(crate) fn superset(
+        &self,
+        fe: &(dyn Frontend + Sync),
+        i: usize,
+        module: &Module,
+        hot: &Layout,
+    ) -> Result<(crate::total::Superset, bool), BoxError> {
+        let path = self.cache_dir.join(format!("{i}.cold.zst"));
+        let key = format!("cold {}", cache::key(&self.tool, module));
+        if let Some(layout) = cache::read(&path, &key) {
+            return Ok((crate::total::Superset { layout, roots: 0 }, true));
+        }
+        let s = crate::total::superset(fe, module, hot);
+        cache::write(&path, &key, &s.layout)?;
+        Ok((s, false))
+    }
+
     /// Checks module `i`'s user mods against its overrides and its bundled
     /// mods, and plans its bundled mods: their swapped functions and data
     /// writes. Returns the plan and the notes to show.

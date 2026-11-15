@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/a64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 4.
+Contract version: `RL_ABI_VERSION` 5.
 
 ## 0. Runtime layers
 
@@ -400,6 +400,47 @@ build time. [decided]
   targets the guest loader writes into GOT slots are lifted entries. A slot
   that resolves to a function no module exports goes to the miss path
   (section 6).
+
+## 5.2 Total coverage
+
+A Switch build is total: every aligned word of a module's executable pages
+has a dispatch slot that is not empty, so no guest jump can miss.
+
+- **Closed world.** The build first checks the NPDM: the supervisor calls
+  both the ACI0 and the ACID allow must include none of `CreateCodeMemory`,
+  `ControlCodeMemory`, `SetProcessMemoryPermission`, `MapProcessCodeMemory`
+  and `UnmapProcessCodeMemory`, the ACI0 must not grant `jit:u`, and when it
+  grants `ldr:ro` or `ro:1` the romfs and add-on content must hold no NRO or
+  NRR image (by magic). Otherwise the build stops: the program could run
+  code no build can lift. A missing NPDM stops it too.
+- **Superset roots.** After discovery, every word of the executable pages
+  that no function covers, that is not padding (zero, `nop`, `udf`, `brk`)
+  and that lifts, and that no such word before it falls into, is a root
+  of more discovery, stopping at the known entries, until none is left.
+  These functions exist only in the cold copy.
+- **Cold copy.** Each module gets a second unit, `rl_cold_<i>_<module>`:
+  every function of the hot layout and every superset function, emitted
+  with `enter_anywhere` in pieces of about 1 KiB of C, in shards of their
+  own under `c/<i>_<module>/cold/`, built at `-O1`. Its direct calls and
+  tail calls go to the hot functions by name (`Options::calls`); hot code
+  never calls cold code, and reaches it only through dispatch at an
+  address that is not a hot entry. A landing pad keeps its `rl_pad_resume`
+  entry. Hot shards, their flags and their code do not change. The setting
+  `emit.cold` turns the copy off.
+- **Code map.** `rl_code_map` (`RL_CODE_MAP_VERSION` 1) gives each slot of
+  the executable pages its class: `RL_CODE_HOT` (an entry of the hot unit:
+  function entries, landing pads, overrides), `RL_CODE_COLD` (an
+  instruction only the cold unit enters) or `RL_CODE_TRAP` (padding or a
+  word that does not lift). Pages of `RL_CODE_PAGE_SLOTS` slots point at
+  shared two-bit patterns. The build refuses a map that leaves a word that
+  lifts as a trap. The program lists the maps (`rl_switch_program.code_maps`),
+  and the loader, after registering every unit hot first, calls
+  `rl_code_maps_register`, which checks each slot against the units and the
+  table, refuses any disagreement, and stores `rl_dispatch_trap` in every
+  trap slot (it reports the target and stops). In a dev build each cold slot
+  first holds `rl_dispatch_cold`, which logs the first dispatch there
+  (`first entry to cold code at <address> (<module>+<offset>)`) and puts
+  the cold function back.
 
 ## 6. Missed code
 
@@ -1375,6 +1416,9 @@ only on the C library and the host OS.
   designated initializers and no maps still compiles unchanged. The map
   has its own `RL_FN_MAP_VERSION`; the entry for each piece of a split
   function added `fn_addr` and made it 2.
+- Version 5 added the code maps (`rl_code_map`, `enum rl_code_class`,
+  `RL_CODE_PAGE_SLOTS`, `RL_CODE_MAP_VERSION`, section 5.2) and
+  `rl_dispatch_trap` and `rl_dispatch_cold`.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a

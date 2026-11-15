@@ -708,6 +708,7 @@ pub fn program_files(
     placed: &[Placed],
     npdm: Option<&Npdm>,
     units: &[String],
+    code_maps: &[String],
     fp_flags: bool,
     mods: Option<&str>,
     with_image_id: bool,
@@ -725,7 +726,16 @@ pub fn program_files(
     }
     out.push(ProgramFile {
         name: "program.c".into(),
-        bytes: program_c(placed, npdm, units, fp_flags, mods, with_image_id).into_bytes(),
+        bytes: program_c(
+            placed,
+            npdm,
+            units,
+            code_maps,
+            fp_flags,
+            mods,
+            with_image_id,
+        )
+        .into_bytes(),
     });
     out
 }
@@ -762,6 +772,7 @@ fn program_c(
     placed: &[Placed],
     npdm: Option<&Npdm>,
     units: &[String],
+    code_maps: &[String],
     fp_flags: bool,
     mods: Option<&str>,
     with_image_id: bool,
@@ -784,6 +795,16 @@ fn program_c(
         t.push_str(" 0");
     }
     let _ = writeln!(t, " }};");
+    for m in code_maps {
+        let _ = writeln!(t, "extern const rl_code_map {m};");
+    }
+    if !code_maps.is_empty() {
+        t.push_str("static const rl_code_map *const code_maps[] = {");
+        for m in code_maps {
+            let _ = write!(t, " &{m},");
+        }
+        t.push_str(" };\n");
+    }
     for i in 0..placed.len() {
         let _ = writeln!(t, "extern const uint8_t rl_image{i}[];");
     }
@@ -827,11 +848,17 @@ fn program_c(
         .unwrap_or(CODE_START);
     let _ = write!(
         t,
-        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {} }};\n",
+        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u }};\n",
         placed.len(),
         units.len(),
         mods.map_or_else(|| "0".to_string(), |m| format!("&{m}")),
-        if with_image_id { "rl_image_id" } else { "0" }
+        if with_image_id { "rl_image_id" } else { "0" },
+        if code_maps.is_empty() {
+            "0"
+        } else {
+            "code_maps"
+        },
+        code_maps.len()
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp_flags {
@@ -1065,7 +1092,7 @@ mod tests {
     #[test]
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
-        let files = program_files(&p, None, &["rl_unit_main".into()], false, None, true);
+        let files = program_files(&p, None, &["rl_unit_main".into()], &[], false, None, true);
         let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["image0.bin", "image0.c", "program.c"]);
         assert_eq!(files[0].bytes, p[0].nso.image);
@@ -1081,13 +1108,36 @@ mod tests {
             "const rl_switch_program rl_program = { modules, 1u, UINT64_C(0x8000000), 3u, 44, 0,"
         ));
         assert!(c.contains("rl_switch_main(&rl_program, argc, argv)"));
-        assert!(c.contains("static_units, 1u, 0, rl_image_id };"), "{c}");
+        assert!(
+            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u };"),
+            "{c}"
+        );
         assert!(c.contains("extern const uint8_t rl_image_id[];"));
-        let files = program_files(&p, None, &[], false, Some("rl_mods_bundled"), false);
+        let files = program_files(
+            &p,
+            None,
+            &["rl_unit_main".into(), "rl_cold_main".into()],
+            &["rl_code_main".into()],
+            false,
+            None,
+            true,
+        );
+        let c = String::from_utf8_lossy(&files[2].bytes);
+        assert!(c.contains("{ &rl_unit_main, &rl_cold_main, };"), "{c}");
+        assert!(c.contains("extern const rl_code_map rl_code_main;"), "{c}");
+        assert!(
+            c.contains("static const rl_code_map *const code_maps[] = { &rl_code_main, };"),
+            "{c}"
+        );
+        assert!(
+            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u };"),
+            "{c}"
+        );
+        let files = program_files(&p, None, &[], &[], false, Some("rl_mods_bundled"), false);
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("extern const rl_mods rl_mods_bundled;"), "{c}");
         assert!(
-            c.contains("static_units, 0u, &rl_mods_bundled, 0 };"),
+            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u };"),
             "{c}"
         );
     }

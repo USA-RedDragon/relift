@@ -190,48 +190,6 @@ that SDL3, and the AppImage asks glibc 2.28 or newer. Without it the program
 is built with the host compiler and asks the host's glibc (the build summary
 prints it).
 
-### Android: APK
-
-`relift build --target android-arm64` (or `android-x64`) writes a signed
-`<project>.apk` beside the program. The program is a shared library that
-SDL3's activity loads; the APK holds it with SDL3, the manifest and a
-signature. relift drives the Android SDK's own tools (`aapt2`, `d8`,
-`zipalign`, `apksigner`) and the NDK's clang, with no Gradle. Run
-`runtime/tools/cross/android_deps.py` once to build SDL3 and libopus for the
-target into the cache.
-
-The SDK and NDK come from `toolchain.android-sdk` and `toolchain.android-ndk`,
-else `ANDROID_HOME` and `ANDROID_NDK_HOME`. The application id is
-`package.android-id` (default `dev.relift.game.<project folder>`). The APK is
-signed with `package.android-keystore` and `package.android-keystore-pass`, or
-a debug key kept in the cache. The left stick drives the d-pad controls of
-the native ports.
-
-### macOS: signed app
-
-`relift build` on macOS also writes `<game>.app` beside the program (not with
-`package.appimage = never`): the
-program behind a small launcher, SDL3 and MoltenVK (and what they link,
-outside `/usr/lib` and `/System`) copied into `Contents/Frameworks` with
-`@rpath` install names, and a Switch game's romfs and DLC in
-`Contents/Resources`. Saves go to `~/Library/Application Support/<game>`.
-
-The bundle is signed inside out. With no `toolchain.codesign-identity` it
-gets an ad-hoc signature, which runs on this Mac. With a Developer ID
-Application identity (its name or SHA-1) every library and the bundle are
-signed with the hardened runtime and a secure timestamp, and
-`toolchain.codesign-keychain` names the keychain that holds it. No
-entitlements are set: relift never generates code at run time (so no
-`allow-jit`), and the libraries inside the bundle are signed with the same
-identity as the program (so no `disable-library-validation`).
-
-`package.notarize = true` submits the bundle to Apple with an App Store
-Connect API key (`package.notarize-key` for the `.p8` file,
-`package.notarize-key-id`, `package.notarize-issuer`), waits, prints the
-submission ID, and staples the ticket to the app so it opens offline. It
-needs a Developer ID identity and is off by default. A rejection fails the
-build with Apple's log.
-
 ## Tools
 
 | Binary | Guest | Does |
@@ -313,6 +271,7 @@ Per-game data lives in each game project's `game.toml`, not here.
 | `toolchain.codesign-keychain`   | string  |         | `RELIFT_TOOLCHAIN_CODESIGN_KEYCHAIN`   | `--toolchain.codesign-keychain`   | the keychain that holds the signing identity (empty: the default keychain search list)                                                                                                                                                    |
 | `emit.shard-kib`                | integer | `4096`  | `RELIFT_EMIT_SHARD_KIB`                | `--emit.shard-kib`                | the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C                                                                                                                                                   |
 | `emit.piece-kib`                | integer | `1024`  | `RELIFT_EMIT_PIECE_KIB`                | `--emit.piece-kib`                | the most KiB of C per C function; a larger guest function is split into several                                                                                                                                                           |
+| `emit.cold`                     | boolean | `true`  | `RELIFT_EMIT_COLD`                     | `--emit.cold`                     | also emit a cold copy of every function that dispatch enters at any instruction, so no guest code is missed                                                                                                                               |
 | `package.appimage`              | string  | `auto`  | `RELIFT_PACKAGE_APPIMAGE`              | `--package.appimage`              | the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built) |
 | `package.android-id`            | string  |         | `RELIFT_PACKAGE_ANDROID_ID`            | `--package.android-id`            | the application id of the Android APK (empty: dev.relift.game.<project folder>)                                                                                                                                                           |
 | `package.android-keystore`      | string  |         | `RELIFT_PACKAGE_ANDROID_KEYSTORE`      | `--package.android-keystore`      | the keystore that signs the APK, with the key alias relift (empty: a debug key in the cache)                                                                                                                                              |

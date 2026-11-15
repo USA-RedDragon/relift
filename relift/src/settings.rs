@@ -118,6 +118,13 @@ pub struct Emit {
         description = "the most KiB of C per C function; a larger guest function is split into several"
     )]
     pub piece_kib: u32,
+
+    #[configulator(
+        name = "cold",
+        default = "true",
+        description = "also emit a cold copy of every function that dispatch enters at any instruction, so no guest code is missed"
+    )]
+    pub cold: bool,
 }
 
 /// Host tools relift drives. An empty path means look it up on `PATH`.

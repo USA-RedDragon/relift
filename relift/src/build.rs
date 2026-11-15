@@ -112,6 +112,14 @@ struct Emitted {
     /// The entries of every module, one `<module> <address> <kind>` line
     /// each ([`entries_line`]), for the dev server's later discovery.
     entries: String,
+    /// The C files of the cold copies and code maps.
+    cold_files: Vec<PathBuf>,
+    /// The symbols of the cold units.
+    cold_units: Vec<String>,
+    /// The symbols of the code maps.
+    code_maps: Vec<String>,
+    /// One line per module: the class of each word of its executable pages.
+    total: String,
 }
 
 /// One line of the entry list: the module index, the address, and `S` for
@@ -208,7 +216,12 @@ fn emit_modules(
         unlifted_list: String::new(),
         fpsr: crate::fpflags::Plan::default(),
         entries: String::new(),
+        cold_files: Vec::new(),
+        cold_units: Vec::new(),
+        code_maps: Vec::new(),
+        total: String::new(),
     };
+    let mut census = crate::total::Census::default();
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
     let cpu = A64 {
         features: relift_switch::CPU_FEATURES,
@@ -396,28 +409,7 @@ fn emit_modules(
             relift_analyze::lift_each(&cpu, &module, &group, &mut |_, f| {
                 let k = ks[n];
                 n += 1;
-                let e = relift_emit::Function {
-                    entry: f.entry,
-                    name: heads[k].name.clone(),
-                    guest_name: f.name.clone(),
-                    span: heads[k].span,
-                    insts: f
-                        .insts
-                        .iter()
-                        .map(|(&pc, i)| {
-                            let e = match i {
-                                Insn::Lifted(b) => relift_emit::Insn::Lifted {
-                                    block: b,
-                                    raw: raw(pc),
-                                },
-                                Insn::Failed(e) => relift_emit::Insn::Failed(e),
-                            };
-                            (pc, e)
-                        })
-                        .collect::<BTreeMap<_, _>>(),
-                    tables: f.tables.clone(),
-                    pads: f.pads.clone(),
-                };
+                let e = emit_function(f, &heads[k], &raw);
                 if let Some(s) = fpsr_now.function(&flags, &module, all[keep[k]], f) {
                     summaries
                         .lock()
@@ -530,10 +522,253 @@ fn emit_modules(
                 count(counts.total as u64)
             )),
         );
+        if settings.emit.cold {
+            let heads_by: BTreeMap<u64, &relift_emit::Head> =
+                heads.iter().map(|h| (h.entry, h)).collect();
+            let cold = ColdModule {
+                cpu: &cpu,
+                index: i,
+                p,
+                module: &module,
+                layout: &layout,
+                heads: &heads_by,
+                overrides: &overrides,
+                hot_unit: &unit,
+                dir: &dir,
+                window,
+                shard_bytes: kib(settings.emit.shard_kib),
+            };
+            let made = emit_cold(&cold, stage, ui, row)?;
+            census.add(&made.census);
+            done.total
+                .push_str(&format!("{} {}\n", p.name, made.census.line()));
+            done.cold_files.extend(made.files);
+            done.cold_units.push(made.unit);
+            done.code_maps.push(made.map);
+        }
         done.units.push(unit);
+    }
+    if settings.emit.cold {
+        done.total.push_str(&format!("all {}\n", census.line()));
     }
     done.fpsr = fpsr.finish()?;
     Ok(done)
+}
+
+/// The C function of the lifted function `f`, under the name and span of
+/// `head`; `raw` gives the raw instruction at an address.
+fn emit_function<'a>(
+    f: &'a relift_analyze::Function,
+    head: &relift_emit::Head,
+    raw: &dyn Fn(u64) -> u64,
+) -> relift_emit::Function<'a> {
+    relift_emit::Function {
+        entry: f.entry,
+        name: head.name.clone(),
+        guest_name: f.name.clone(),
+        span: head.span,
+        insts: f
+            .insts
+            .iter()
+            .map(|(&pc, i)| {
+                let e = match i {
+                    Insn::Lifted(b) => relift_emit::Insn::Lifted {
+                        block: b,
+                        raw: raw(pc),
+                    },
+                    Insn::Failed(e) => relift_emit::Insn::Failed(e),
+                };
+                (pc, e)
+            })
+            .collect::<BTreeMap<_, _>>(),
+        tables: f.tables.clone(),
+        pads: f.pads.clone(),
+    }
+}
+
+/// The C bytes of one piece of a cold function.
+const COLD_PIECE_BYTES: usize = 1 << 10;
+
+/// What [`emit_cold`] takes of one module.
+struct ColdModule<'a> {
+    cpu: &'a A64,
+    index: usize,
+    p: &'a Placed,
+    module: &'a relift_guest::Module,
+    /// The module's hot functions.
+    layout: &'a relift_analyze::Layout,
+    /// The hot functions emitted, by entry.
+    heads: &'a BTreeMap<u64, &'a relift_emit::Head>,
+    /// The hot unit's overrides.
+    overrides: &'a [relift_emit::Override],
+    hot_unit: &'a str,
+    /// The module's C directory; the cold copy goes in its `cold`.
+    dir: &'a Path,
+    window: u64,
+    shard_bytes: usize,
+}
+
+/// What [`emit_cold`] made of one module.
+struct ColdMade {
+    files: Vec<PathBuf>,
+    unit: String,
+    map: String,
+    census: crate::total::Census,
+}
+
+/// Emits the cold copy of a module: every function of its hot layout and
+/// its superset functions as small pieces dispatch enters at any
+/// instruction, calling the hot functions by name, in shards of their own,
+/// with the module's code map, checked to be total.
+fn emit_cold(
+    m: &ColdModule<'_>,
+    stage: &Stage,
+    ui: &mut Ui,
+    row: usize,
+) -> Result<ColdMade, BoxError> {
+    let ColdModule { cpu, p, module, .. } = *m;
+    let i = m.index;
+    ui.begin(row, "cold");
+    let (sup, cached) = stage.superset(cpu, i, module, m.layout)?;
+    let mut all: Vec<&Outline> = m
+        .layout
+        .functions
+        .values()
+        .chain(sup.layout.functions.values())
+        .collect();
+    all.sort_by_key(|o| o.entry);
+    let heads: Vec<relift_emit::Head> = all
+        .iter()
+        .map(|o| relift_emit::Head {
+            entry: o.entry,
+            name: format!("{}_cold", program::host_name(p, o.name.as_deref(), o.entry)),
+            guest_name: o.name.clone(),
+            span: o.span(),
+            pads: o.pads.clone(),
+        })
+        .collect();
+    let mut calls: Vec<relift_emit::Override> = m.overrides.to_vec();
+    calls.extend(m.heads.values().map(|h| relift_emit::Override {
+        entry: h.entry,
+        host_fn: h.name.clone(),
+        may_unwind: true,
+        resume_point: false,
+        declare: true,
+    }));
+    let raw = |pc: u64| {
+        module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
+            u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        })
+    };
+    let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &relift_emit::Function<'_>)| {
+        let group: Vec<&Outline> = ks.iter().map(|&k| all[k]).collect();
+        let mut n = 0;
+        relift_analyze::lift_each(cpu, module, &group, &mut |_, f| {
+            let k = ks[n];
+            n += 1;
+            sink(k, &emit_function(f, &heads[k], &raw));
+        });
+    };
+    let unit = format!("rl_cold_{i}_{}", c_ident(&p.name));
+    let dir = m.dir.join("cold");
+    std::fs::create_dir_all(&dir)?;
+    let store = crate::emitstore::EmitStore::open(
+        &m.dir
+            .parent()
+            .unwrap_or(m.dir)
+            .with_file_name("emit")
+            .join(format!("{i}c")),
+        stage.tool,
+        p.base,
+        m.window,
+    )?;
+    let from = relift_emit::Stream {
+        heads: &heads,
+        lend: &lend,
+        store: Some(&store),
+    };
+    let mut files: Vec<relift_emit::File> = Vec::new();
+    let (_, written) = with_writers(&mut |write| {
+        relift_emit::emit_reusing(
+            cpu,
+            &from,
+            &[],
+            &relift_emit::Options {
+                shard_bytes: m.shard_bytes,
+                piece_bytes: COLD_PIECE_BYTES,
+                unit_name: format!("{} (cold)", p.name),
+                unit_symbol: unit.clone(),
+                module_base: p.base,
+                window: m.window,
+                enter_anywhere: Some(u64::MAX),
+                calls: calls.clone(),
+                ..relift_emit::Options::default()
+            },
+            &mut |d, total| {
+                ui.update(
+                    row,
+                    Metrics {
+                        done: d as u64,
+                        total: Some(total as u64),
+                        unit: "functions",
+                        ..Metrics::default()
+                    },
+                );
+            },
+            &mut |f| {
+                let relift_emit::File { name, text, fns } = f;
+                write(dir.join(&name), text);
+                files.push(relift_emit::File {
+                    name,
+                    text: String::new(),
+                    fns,
+                });
+            },
+        )
+    });
+    written?;
+    store.finish()?;
+    remove_stale_shards(&dir, &files)?;
+    let mut hot: BTreeSet<u64> = m.overrides.iter().map(|o| o.entry).collect();
+    for h in m.heads.values() {
+        hot.insert(h.entry);
+        hot.extend(h.pads.iter().copied());
+    }
+    let map = crate::total::code_map(cpu, module, &hot, &all)?;
+    let sym = format!("rl_code_{i}_{}", c_ident(&p.name));
+    let map_c = dir.join("codemap.c");
+    relift_cache::write_if_changed(
+        &map_c,
+        crate::total::code_map_c(cpu.abi_headers(), &map, &sym, m.hot_unit, &unit, &p.name)
+            .as_bytes(),
+    )?;
+    let mut out: Vec<PathBuf> = files
+        .iter()
+        .filter(|f| f.name.ends_with(".c"))
+        .map(|f| dir.join(&f.name))
+        .collect();
+    out.push(map_c);
+    let shards = files.iter().filter(|f| f.name.starts_with("shard")).count();
+    ui.done(
+        row,
+        Line::new().text(format!(
+            "{}, {} superset functions{}",
+            noun(shards as u64, "cold shard"),
+            count(sup.layout.functions.len() as u64),
+            if cached {
+                String::new()
+            } else {
+                format!(" from {}", noun(sup.roots as u64, "root"))
+            }
+        )),
+    );
+    ui.note(&Line::new().text(format!("{}: {}", p.name, map.census.line())));
+    Ok(ColdMade {
+        files: out,
+        unit,
+        map: sym,
+        census: map.census,
+    })
 }
 
 /// The guest bytes of a shard window per byte of the shard budget: lifted
@@ -753,6 +988,8 @@ struct EmitRecord {
     fp_part1: Vec<PathBuf>,
     /// Whether any function produces FPSR flags.
     fp_flags: bool,
+    /// The C files of the cold copies, built for size rather than speed.
+    cold: Vec<PathBuf>,
 }
 
 impl EmitRecord {
@@ -776,6 +1013,9 @@ impl EmitRecord {
         for p in &self.fp_part1 {
             t.push_str(&format!("fp_part1 {}\n", p.display()));
         }
+        for p in &self.cold {
+            t.push_str(&format!("cold {}\n", p.display()));
+        }
         t
     }
 
@@ -789,6 +1029,7 @@ impl EmitRecord {
             fp_program_wide: false,
             fp_part1: Vec::new(),
             fp_flags: false,
+            cold: Vec::new(),
         };
         for line in t.lines() {
             let (k, v) = line.split_once(' ').ok_or("a bad emit record line")?;
@@ -801,6 +1042,7 @@ impl EmitRecord {
                 "fp_program_wide" => r.fp_program_wide = v == "1",
                 "fp_part1" => r.fp_part1.push(v.into()),
                 "fp_flags" => r.fp_flags = v == "1",
+                "cold" => r.cold.push(v.into()),
                 _ => return Err(format!("unknown emit record key {k}").into()),
             }
         }
@@ -882,6 +1124,13 @@ fn lift_and_emit(
         emitted.files.extend(stage.files.iter().cloned());
     }
     relift_cache::write_if_changed(&out.join(ENTRIES), emitted.entries.as_bytes())?;
+    relift_cache::write_if_changed(&out.join("total.txt"), emitted.total.as_bytes())?;
+    let units: Vec<String> = emitted
+        .units
+        .iter()
+        .chain(&emitted.cold_units)
+        .cloned()
+        .collect();
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
     let fpsr = emitted.fpsr;
@@ -918,7 +1167,8 @@ fn lift_and_emit(
     for f in program::program_files(
         &placed,
         npdm.as_ref(),
-        &emitted.units,
+        &units,
+        &emitted.code_maps,
         fp_flags,
         mods_c.as_ref().map(|_| crate::mods::bundled::SYMBOL),
         true,
@@ -938,6 +1188,7 @@ fn lift_and_emit(
         fp_program_wide: fpsr.program_wide,
         fp_part1: fpsr.part1,
         fp_flags: fp_flags || fpsr.program_wide,
+        cold: emitted.cold_files,
     })
 }
 
@@ -1217,6 +1468,14 @@ pub(crate) fn build_project(
     .into_iter()
     .chain(pic.iter().cloned())
     .collect();
+    let cold_flags: Vec<String> = if emitted.fp_flags {
+        &flag_flags
+    } else {
+        &lifted_flags
+    }
+    .iter()
+    .map(|f| if f == "-O2" { "-O1".into() } else { f.clone() })
+    .collect();
     let lifted_flags = if emitted.fp_program_wide {
         flag_flags.clone()
     } else {
@@ -1281,6 +1540,15 @@ pub(crate) fn build_project(
             stage: 0,
         })
         .collect();
+    for s in &emitted.cold {
+        compiles.push(Compile {
+            src: s.clone(),
+            obj: obj(s, "lifted"),
+            flags: cold_flags.clone(),
+            pool: None,
+            stage: 0,
+        });
+    }
     for s in &emitted.fp_part1 {
         compiles.push(Compile {
             src: s.clone(),
