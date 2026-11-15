@@ -153,6 +153,12 @@ struct Driver<'a> {
     summaries: HashMap<Loc, Summary>,
     ptrs: HashMap<u32, BTreeSet<u32>>,
     callers: HashMap<Loc, BTreeSet<Loc>>,
+    /// The mode, masks, SPSRs and banked registers at each call site of a
+    /// function, by function and site.
+    site_psr: HashMap<Loc, BTreeMap<Loc, crate::val::Psr>>,
+    /// Their join: what a function reached only through discovered edges
+    /// starts with.
+    entry_psr: HashMap<Loc, crate::val::Psr>,
     readers: HashMap<u32, BTreeSet<Loc>>,
     irq: BTreeSet<u32>,
     queue: BTreeSet<Loc>,
@@ -183,6 +189,8 @@ impl<'a> Driver<'a> {
             summaries: HashMap::new(),
             ptrs: HashMap::new(),
             callers: HashMap::new(),
+            site_psr: HashMap::new(),
+            entry_psr: HashMap::new(),
             readers: HashMap::new(),
             irq: BTreeSet::new(),
             queue: BTreeSet::new(),
@@ -373,6 +381,14 @@ impl<'a> Driver<'a> {
                     stops: &self.stops,
                 };
                 let mut st = State::entry(f.thumb);
+                let edges_only =
+                    matches!(self.origins.get(&f), Some(Origin::Called | Origin::Jumped));
+                if let Some(p) = self.entry_psr.get(&f)
+                    && edges_only
+                    && !self.roots.contains_key(&f)
+                {
+                    st.set_psr(p);
+                }
                 match self.roots.get(&f) {
                     Some(Origin::Irq) => {
                         st.regs[regs::M.index()] = Abs::K(u128::from(Mode::Irq.bits()))
@@ -399,6 +415,21 @@ impl<'a> Driver<'a> {
             self.summaries.insert(f, sum);
             if let Some(cs) = self.callers.get(&f) {
                 self.queue.extend(cs.iter().copied());
+            }
+        }
+        for (e, p) in run.edges.iter().zip(&run.edge_psr) {
+            let site_psr = self.site_psr.entry(e.target).or_default();
+            if site_psr.insert(e.site, p.clone()) != Some(p.clone()) {
+                let joined = site_psr
+                    .values()
+                    .cloned()
+                    .reduce(|a, b| a.iter().zip(&b).map(|(x, y)| x.join(*y)).collect());
+                if let Some(j) = joined
+                    && self.entry_psr.get(&e.target) != Some(&j)
+                {
+                    self.entry_psr.insert(e.target, j);
+                    self.queue.insert(e.target);
+                }
             }
         }
         for e in &run.edges {

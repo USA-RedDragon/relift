@@ -14,7 +14,7 @@ use crate::eval::{self, DmaStart, Out};
 use crate::image::Image;
 use crate::loc::{Loc, Region};
 use crate::report::{CopyKind, Edge, EdgeKind, RamCopy, Swi, Table, Unresolved, UnresolvedKind};
-use crate::val::{Abs, Base, LR, SP, State, Sym};
+use crate::val::{Abs, Base, LR, Psr, SP, State, Sym};
 
 /// Registers a call to code the analysis cannot see is taken to keep:
 /// `r4`-`r11` and the stack pointer (the procedure call standard).
@@ -46,6 +46,10 @@ pub(crate) struct Summary {
     /// offset from the entry stack pointer: it ends the caller's frame (a
     /// `BL` to a shared epilogue).
     pub frame_exit: Option<i32>,
+    /// No instruction it runs, nor any function it calls, writes the mode,
+    /// the interrupt masks, an SPSR or a banked register: the caller keeps
+    /// them (a SWI restores them before it returns).
+    pub psr: bool,
 }
 
 impl Summary {
@@ -62,6 +66,16 @@ impl Summary {
             via: None,
             effects: Rc::from(Vec::new()),
             frame_exit: None,
+            psr: true,
+        }
+    }
+
+    /// The assumption for code the analysis cannot see: it returns and
+    /// keeps what the procedure call standard keeps.
+    pub(crate) fn opaque() -> Summary {
+        Summary {
+            psr: false,
+            ..Summary::new(true, AAPCS_KEEP)
         }
     }
 }
@@ -145,6 +159,9 @@ impl Env<'_> {
 pub(crate) struct FnRun {
     pub body: BTreeMap<Loc, u8>,
     pub edges: Vec<Edge>,
+    /// The mode, masks, SPSRs and banked registers at each edge, in the
+    /// order of `edges`.
+    pub edge_psr: Vec<Psr>,
     pub unresolved: Vec<Unresolved>,
     pub data: Vec<(u32, u8)>,
     /// Constant words stored to constant RAM addresses.
@@ -168,6 +185,9 @@ pub(crate) struct FnRun {
     /// The ROM tables read: base and the address after the last entry
     /// read.
     pub tab_reads: Vec<(u32, u32)>,
+    /// Some instruction run writes the mode, a mask, an SPSR or a banked
+    /// register.
+    pub writes_psr: bool,
 }
 
 struct Run<'a> {
@@ -392,6 +412,16 @@ impl Run<'_> {
     fn execute(&mut self, loc: Loc, word: u32, enc: Encoding, block: &Block, st: &State) {
         let fall = Self::fall_loc(loc);
         let literal = eval::pc_relative(enc, word, loc.thumb);
+        let swi = matches!(block.exit.flow, Flow::Call { .. })
+            && block.exit.next == relift_ir::Next::Const(0x08);
+        if !swi
+            && block
+                .insts
+                .iter()
+                .any(|i| matches!(i.op, relift_ir::Op::Set(r, _) if r.index() >= regs::M.index()))
+        {
+            self.out.writes_psr = true;
+        }
         let out = eval::eval(block, loc, st, self.env.image, literal, None);
         if out.may_skip {
             self.succ(loc, fall, st.clone());
@@ -600,7 +630,7 @@ impl Run<'_> {
             return;
         }
         let mut after = st.clone();
-        after.clobber(s.keep);
+        after.clobber(s.keep, s.psr);
         let mut t = after.regs.clone();
         t[relift_cpu_arm32::regs::T.index()] = Abs::K(u128::from(site.thumb));
         after.regs = t;
@@ -628,6 +658,7 @@ impl Run<'_> {
                 target: callee,
                 kind,
             });
+            self.out.edge_psr.push(st.psr());
             self.constant_call(site, callee, st);
             let cs = self.env.summary(callee);
             let effects = cs.effects.clone();
@@ -641,6 +672,7 @@ impl Run<'_> {
             };
             s.returns |= cs.returns;
             s.keep &= cs.keep;
+            s.psr &= cs.psr;
         }
         self.resume(site, st, s);
     }
@@ -745,7 +777,7 @@ impl Run<'_> {
                 UnresolvedKind::IndirectJump,
                 format!("table {base:#010x} has no code address"),
             );
-            return Summary::new(true, AAPCS_KEEP);
+            return Summary::opaque();
         }
         let mut s = Summary::new(false, 0x7FFF);
         for (addr, th) in es {
@@ -755,9 +787,11 @@ impl Run<'_> {
                     target: t,
                     kind: EdgeKind::Pointer,
                 });
+                self.out.edge_psr.push(st.psr());
                 let ts = self.env.summary(t);
                 s.returns |= ts.returns;
                 s.keep &= ts.keep;
+                s.psr &= ts.psr;
             }
         }
         if linked {
@@ -784,7 +818,7 @@ impl Run<'_> {
             None => Abs::Top,
         };
         let mut after = st.clone();
-        after.clobber(0);
+        after.clobber(0, false);
         match v {
             Abs::S(Sym {
                 base: Base::Entry(LR),
@@ -816,6 +850,7 @@ impl Run<'_> {
             target: to,
             kind: EdgeKind::Tail,
         });
+        self.out.edge_psr.push(st.psr());
         let cs = self.env.summary(to);
         let effects = cs.effects.clone();
         self.apply(site, &effects, st);
@@ -828,7 +863,7 @@ impl Run<'_> {
         };
         if cs.returns {
             let mut after = st.clone();
-            after.clobber(cs.keep);
+            after.clobber(cs.keep, cs.psr);
             self.rets.push(after);
         }
     }
@@ -877,15 +912,18 @@ impl Run<'_> {
                 let thumb = if bx { x & 1 == 1 } else { site.thumb };
                 let addr = if thumb { x & !1 } else { x & !3 };
                 let mut s = Summary::new(cs.returns, cs.keep);
+                s.psr = cs.psr;
                 for t in self.targets(site, addr, thumb) {
                     self.out.edges.push(Edge {
                         site,
                         target: t,
                         kind: EdgeKind::Via,
                     });
+                    self.out.edge_psr.push(st.psr());
                     let ts = self.env.summary(t);
                     s.returns |= ts.returns;
                     s.keep &= ts.keep;
+                    s.psr &= ts.psr;
                 }
                 s
             }
@@ -916,7 +954,7 @@ impl Run<'_> {
                     UnresolvedKind::IndirectCall,
                     format!("r{r} passed to {callee} not constant"),
                 );
-                Summary::new(true, AAPCS_KEEP)
+                Summary::opaque()
             }
         }
     }
@@ -937,7 +975,7 @@ impl Run<'_> {
             UnresolvedKind::IndirectCall,
             "target not constant".to_owned(),
         );
-        self.resume(site, st, Summary::new(true, AAPCS_KEEP));
+        self.resume(site, st, Summary::opaque());
     }
 
     /// A transfer through the RAM word at `a`: every constant discovered
@@ -961,9 +999,9 @@ impl Run<'_> {
         if vals.is_empty() {
             self.unresolved(site, UnresolvedKind::PointerNoStore, format!("[{a:#010x}]"));
             if linked {
-                self.resume(site, st, Summary::new(true, AAPCS_KEEP));
+                self.resume(site, st, Summary::opaque());
             }
-            return Summary::new(true, AAPCS_KEEP);
+            return Summary::opaque();
         }
         let mut s = Summary::new(false, 0x7FFF);
         for v in vals {
@@ -975,9 +1013,11 @@ impl Run<'_> {
                     target: t,
                     kind: EdgeKind::Pointer,
                 });
+                self.out.edge_psr.push(st.psr());
                 let ts = self.env.summary(t);
                 s.returns |= ts.returns;
                 s.keep &= ts.keep;
+                s.psr &= ts.psr;
             }
         }
         if linked {
@@ -1086,7 +1126,7 @@ impl Run<'_> {
                 let detail = format!("{} target not constant", enc.name());
                 if link {
                     self.unresolved(site, UnresolvedKind::IndirectCall, detail);
-                    self.resume(site, st, Summary::new(true, AAPCS_KEEP));
+                    self.resume(site, st, Summary::opaque());
                 } else {
                     self.unresolved(site, UnresolvedKind::IndirectJump, detail);
                 }
@@ -1272,6 +1312,10 @@ impl Run<'_> {
         }
         if unresolved_exit {
             s.keep &= AAPCS_KEEP;
+            s.psr = false;
+        }
+        if self.out.writes_psr {
+            s.psr = false;
         }
         for st in &self.rets {
             for r in 0..15u8 {

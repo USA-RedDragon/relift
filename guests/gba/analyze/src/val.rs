@@ -156,9 +156,27 @@ pub(crate) struct State {
     /// Caller frame slots this run may have written.
     pub frame_dirty: std::collections::BTreeSet<i32>,
     pub dma: [Abs; DMA_HALVES],
+    /// Words this run stored at addresses relative to an entry register
+    /// other than the stack pointer, while no store could have overwritten
+    /// them: address and value.
+    pub held: Vec<(Sym, Abs)>,
 }
 
+/// The mode, the masks, the reserved CPSR bits, the SPSRs and the banked
+/// registers: the slots from `regs::M` on.
+pub(crate) type Psr = Vec<Abs>;
+
 impl State {
+    /// The slots from `regs::M` on.
+    pub(crate) fn psr(&self) -> Psr {
+        self.regs[regs::M.index()..].to_vec()
+    }
+
+    /// Sets the slots from `regs::M` on.
+    pub(crate) fn set_psr(&mut self, p: &[Abs]) {
+        self.regs[regs::M.index()..].copy_from_slice(p);
+    }
+
     /// The state at a function entry in `thumb` state.
     pub(crate) fn entry(thumb: bool) -> State {
         let n = regs::regs().len();
@@ -172,6 +190,7 @@ impl State {
             stack: BTreeMap::new(),
             frame_dirty: std::collections::BTreeSet::new(),
             dma: [Abs::Top; DMA_HALVES],
+            held: Vec::new(),
         }
     }
 
@@ -208,20 +227,30 @@ impl State {
             }
         }
         self.frame_dirty.extend(o.frame_dirty.iter().copied());
+        let held = self.held.len();
+        self.held.retain(|h| o.held.contains(h));
         self.stack.retain(|k, v| o.stack.get(k) == Some(v));
-        changed || self.stack.len() != before || self.frame_dirty.len() != dirty_before
+        changed
+            || self.held.len() != held
+            || self.stack.len() != before
+            || self.frame_dirty.len() != dirty_before
     }
 
     /// Forgets every register but those in `keep` (bits 0-14), the flags
-    /// and the DMA registers, as after a call.
-    pub(crate) fn clobber(&mut self, keep: u16) {
+    /// and the DMA registers, as after a call; with `psr` the mode, the
+    /// masks, the SPSRs and the banked registers stay.
+    pub(crate) fn clobber(&mut self, keep: u16, psr: bool) {
         for (i, v) in self.regs.iter_mut().enumerate() {
-            if i == regs::T.index() || (i < 15 && keep >> i & 1 == 1) {
+            if i == regs::T.index()
+                || (i < 15 && keep >> i & 1 == 1)
+                || (psr && i >= regs::M.index())
+            {
                 continue;
             }
             *v = Abs::Top;
         }
         self.dma = [Abs::Top; DMA_HALVES];
+        self.held.clear();
     }
 }
 

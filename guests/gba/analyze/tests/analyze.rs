@@ -795,3 +795,56 @@ fn copy_loop_bounded_by_a_register_past_r3_is_run_with_it() {
     };
     assert_eq!(r.functions[&ram].instructions.len(), 2);
 }
+
+#[test]
+fn a_call_that_writes_no_psr_keeps_the_mode() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let leaf = 0x0800_0200;
+    a.arm(
+        e,
+        &[
+            0xEB00_003E,
+            0xE329_F011,
+            0xE369_F01F,
+            0xE25F_F004,
+            0xE3A0_0000,
+            0xEAFF_FFFE,
+        ],
+    );
+    a.arm(leaf, &[A_MOV_R0_1, A_BX_LR]);
+    let r = a.run(e);
+    assert!(insts(&r).contains(&(e + 0x10, false)), "{:?}", r.unresolved);
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+#[test]
+fn a_callee_starts_in_the_mode_of_its_callers() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let f = 0x0800_0200;
+    a.arm(e, &[0xEB00_003E, 0xEAFF_FFFE]);
+    a.arm(
+        f,
+        &[0xE329_F011, 0xE369_F01F, 0xE25F_F004, 0xE3A0_0000, A_BX_LR],
+    );
+    let r = a.run(e);
+    assert!(insts(&r).contains(&(f + 0xC, false)), "{:?}", r.unresolved);
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+#[test]
+fn a_word_stored_through_an_argument_reads_back() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let f = 0x0800_0200;
+    a.arm(e, &[0xE3A0_1403, 0xEB00_003D, 0xEAFF_FFFE]);
+    a.arm(
+        f,
+        &[0xE28F_0008, 0xE581_0000, 0xE891_8000, 0xE7FF_DEFE, A_BX_LR],
+    );
+    let r = a.run(e);
+    assert!(insts(&r).contains(&(f + 0x10, false)), "{:?}", r.unresolved);
+    assert!(!insts(&r).contains(&(f + 0xC, false)));
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}

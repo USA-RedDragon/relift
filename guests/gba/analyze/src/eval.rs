@@ -600,6 +600,12 @@ fn load(
             }
             Abs::Top
         }
+        Abs::S(sym) if n == 4 && addr.stack_off().is_none() => out
+            .st
+            .held
+            .iter()
+            .find(|h| h.0 == sym)
+            .map_or(Abs::Top, |h| h.1),
         _ => match addr.stack_off() {
             Some(o) if n == 4 && o % 4 == 0 => match out.st.stack.get(&o) {
                 Some(v) => *v,
@@ -614,6 +620,21 @@ fn load(
 fn store(out: &mut Out, addr: Abs, n: u8, v: Abs, scratch: Option<&mut Scratch>) {
     if addr.stack_off().is_none() {
         out.stores.push((addr, n, v));
+        match addr {
+            Abs::S(sym) => {
+                let end = sym.off.wrapping_add(u32::from(n));
+                out.st.held.retain(|h| {
+                    h.0.base != sym.base
+                        || (h.0.align == 0
+                            && sym.align == 0
+                            && (h.0.off.wrapping_add(4) <= sym.off || h.0.off >= end))
+                });
+                if n == 4 {
+                    out.st.held.push((sym, v));
+                }
+            }
+            _ => out.st.held.clear(),
+        }
     }
     if let Abs::K(a) = addr {
         let a = a as u32;
