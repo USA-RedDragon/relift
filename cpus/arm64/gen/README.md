@@ -74,3 +74,13 @@ them does not generate. `try` prints the template of named encodings or why
 it fails, and `parse-all` parses every model function. A form joins
 `forms.txt` only after `relift-check forms` (see `check/`) passes it and
 catches its mutation.
+
+`oracle SAIL_LIB MODEL_SRC` makes the model an oracle for `relift-check`
+(`--oracle cmd:...`, the protocol of `check/src/oracle.rs`), for the pointer
+authentication forms only: each word runs once in the evaluator with every
+word bit known, so every value is concrete, and nothing of the instruction
+is cut (`ComputePACQARMA`, `Auth`, `AddPAC` and `CalculateBottomPACBit` run
+from the Sail sources). Registers come from the request, the keys are
+`CHECK_PAC_KEYS`, features are the Cortex-A78C's, and loads read the data
+window (an abort outside it). `oracle-word SAIL_LIB MODEL_SRC HEX` runs one
+word on a fixed state and prints the state after.

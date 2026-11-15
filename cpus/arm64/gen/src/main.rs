@@ -7,14 +7,20 @@
 //! relift-cpu-arm64-gen parse-all SAIL_LIB MODEL_SRC
 //! relift-cpu-arm64-gen try SAIL_LIB MODEL_SRC ENCODING...
 //! relift-cpu-arm64-gen gen SAIL_LIB MODEL_SRC ENCODING_LIST CLASS > OUT
+//! relift-cpu-arm64-gen oracle SAIL_LIB MODEL_SRC
+//! relift-cpu-arm64-gen oracle-word SAIL_LIB MODEL_SRC HEX
 //! ```
 //!
 //! `SAIL_LIB` is the `lib` directory of the Sail compiler sources and
 //! `MODEL_SRC` the `arm-v9.4-a/src` directory of sail-arm. `gen` prints the
 //! templates of the listed encodings in one class ([`CLASSES`]), the file
-//! `cpus/arm64/src/lift/sail/generated/CLASS.rs`.
+//! `cpus/arm64/src/lift/sail/generated/CLASS.rs`. `oracle` serves
+//! `relift-check --oracle cmd:...` requests for the pointer authentication
+//! forms from the model evaluated concretely (see `oracle.rs`);
+//! `oracle-word` runs one word on a fixed state and prints the outcome.
 
 mod cut;
+mod oracle;
 mod template;
 
 use relift_sail::model;
@@ -172,6 +178,40 @@ fn real_main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     match args[0].as_str() {
+        "oracle" => match oracle::serve(&m) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("oracle: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        "oracle-word" if args.len() == 4 => {
+            let Ok(word) = u32::from_str_radix(args[3].trim_start_matches("0x"), 16) else {
+                eprintln!("oracle-word: not a hex word");
+                return ExitCode::from(2);
+            };
+            let mut st = oracle::State {
+                pc: 0x100_1000_0000,
+                sp: 0x100_2000_2000,
+                mem: vec![0; 0x4000],
+                ..oracle::State::default()
+            };
+            for (i, x) in st.x.iter_mut().enumerate() {
+                *x = 0x0000_0010_0200_0000 + 8 * i as u64;
+            }
+            let t = std::time::Instant::now();
+            match oracle::run(&m, word, &st) {
+                Ok(oracle::Outcome::Done(s)) => {
+                    for (i, x) in s.x.iter().enumerate() {
+                        println!("x{i} {x:#018x}");
+                    }
+                    println!("sp {:#018x}\npc {:#018x}\nnzcv {:?}", s.sp, s.pc, s.nzcv);
+                }
+                r => println!("{r:?}"),
+            }
+            eprintln!("{:?}", t.elapsed());
+            ExitCode::SUCCESS
+        }
         "parse-all" => {
             let (ok, bad) = m.parse_all();
             println!("{ok} functions parsed, {} failed", bad.len());
