@@ -6,10 +6,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use relift_guest::Frontend;
-use relift_ir::{BinError, IoMap, Reader, put_str, put_uvar, write_block};
+use relift_ir::{BinError, Reader, put_str, put_uvar, write_block};
 
 use crate::func::{Emitted1, Piece};
-use crate::{Function, Insn, Target};
+use crate::{Function, Insn, Options, Target};
 
 /// The key of one function's input, as the store hashes it.
 pub type Key = [u8; 32];
@@ -58,17 +58,13 @@ impl<'a> Targets<'a> {
 
 /// The bytes that decide what the emitter makes of the functions of one
 /// emit apart from their own code.
-pub(crate) fn salt(
-    fe: &dyn Frontend,
-    piece_bytes: usize,
-    io: &IoMap,
-    anywhere: Option<u64>,
-) -> Vec<u8> {
+pub(crate) fn salt(fe: &dyn Frontend, opts: &Options) -> Vec<u8> {
     let mut out = Vec::new();
     put_str(&mut out, fe.regs().name());
-    put_uvar(&mut out, piece_bytes as u64);
-    put_str(&mut out, &format!("{io:?}"));
-    match anywhere {
+    put_uvar(&mut out, opts.piece_bytes.max(1) as u64);
+    put_str(&mut out, &format!("{:?}", opts.io_map));
+    out.push(u8::from(opts.regs_in_context));
+    match opts.enter_anywhere {
         None => out.push(0),
         Some(m) => {
             out.push(1);

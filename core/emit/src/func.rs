@@ -18,7 +18,7 @@ use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 
 use crate::time;
 use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
-use crate::{Function, Insn, Targets};
+use crate::{Function, Insn, Options, Targets};
 
 /// One C function of an emitted guest function.
 pub(crate) struct Piece {
@@ -77,6 +77,8 @@ struct Ctx<'a> {
     io: &'a IoMap,
     /// The C lvalue of the clock, when the piece keeps a budget local.
     clock: Option<&'static str>,
+    /// Whether the registers stay in their homes ([`Options::regs_in_context`]).
+    in_context: bool,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -338,12 +340,13 @@ pub(crate) fn emit_function(
     fe: &dyn Frontend,
     f: &Function<'_>,
     targets: &Targets<'_>,
-    piece_bytes: usize,
-    io: &IoMap,
-    test_fault: bool,
-    anywhere: Option<u64>,
+    opts: &Options,
 ) -> Emitted1 {
-    let mask = anywhere.filter(|_| f.insts.contains_key(&f.entry));
+    let piece_bytes = opts.piece_bytes.max(1);
+    let io = &opts.io_map;
+    let mask = opts
+        .enter_anywhere
+        .filter(|_| f.insts.contains_key(&f.entry));
     let anywhere = mask.is_some();
     let resumes = resume_points(f, targets);
     let mut blocks: BTreeMap<u64, Block> = f
@@ -354,7 +357,7 @@ pub(crate) fn emit_function(
             Insn::Failed(_) => None,
         })
         .collect();
-    if test_fault {
+    if opts.test_fault == Some(f.entry) {
         miscompile_first_add(&mut blocks);
     }
     let blocks = drop_dead_sets(fe, f, targets, blocks);
@@ -367,6 +370,7 @@ pub(crate) fn emit_function(
         resumes: &resumes,
         io,
         anywhere,
+        in_context: opts.regs_in_context,
     };
     let whole = emit_piece(&env, &all, None);
     if !anywhere && (whole.text.len() <= piece_bytes || all.len() < 2) {
@@ -460,6 +464,7 @@ struct Env<'a> {
     resumes: &'a BTreeSet<u64>,
     io: &'a IoMap,
     anywhere: bool,
+    in_context: bool,
 }
 
 /// One emitted C function over the instructions `pcs` of `f`.
@@ -481,6 +486,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         resumes,
         io,
         anywhere,
+        in_context,
     } = *env;
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let mut used: BTreeSet<Reg> = BTreeSet::new();
@@ -523,10 +529,14 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({name})\n{{");
     for &r in &used {
         let ty = cty(regs.width(r));
-        let _ = match fe.home(r) {
-            Home::Field(lv) => writeln!(t, "    {ty} {} = {lv};", reg(r)),
-            Home::Flag { word, bit } => {
+        let _ = match (fe.home(r), in_context) {
+            (Home::Field(lv), false) => writeln!(t, "    {ty} {} = {lv};", reg(r)),
+            (Home::Field(lv), true) => writeln!(t, "#define {} ({lv})", reg(r)),
+            (Home::Flag { word, bit }, false) => {
                 writeln!(t, "    {ty} {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
+            }
+            (Home::Flag { word, bit }, true) => {
+                writeln!(t, "#define {} (({ty})(({word} >> {bit}) & 1u))", reg(r))
             }
         };
     }
@@ -541,7 +551,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if let Some(clk) = clock {
         let _ = write!(t, " {clk}.budget = {};", time::BUDGET);
     }
-    for &r in &written {
+    for &r in written.iter().filter(|_| !in_context) {
         let _ = match fe.home(r) {
             Home::Field(lv) => write!(t, " {lv} = {};", reg(r)),
             Home::Flag { word, bit } => write!(
@@ -555,7 +565,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if let Some(clk) = clock {
         let _ = write!(t, " {} = {clk}.budget;", time::BUDGET);
     }
-    for &r in &used {
+    for &r in used.iter().filter(|_| !in_context) {
         let ty = cty(regs.width(r));
         let _ = match fe.home(r) {
             Home::Field(lv) => write!(t, " {} = {lv};", reg(r)),
@@ -617,6 +627,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         split,
         io,
         clock,
+        in_context,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -660,7 +671,11 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             f.entry
         );
     }
-    t.push_str("#undef RL_STORE\n#undef RL_RELOAD\n}\n");
+    t.push_str("#undef RL_STORE\n#undef RL_RELOAD\n");
+    for &r in used.iter().filter(|_| in_context) {
+        let _ = writeln!(t, "#undef {}", reg(r));
+    }
+    t.push_str("}\n");
     Written {
         text: t,
         callees: cx.callees,
@@ -854,7 +869,13 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         }
     }
     for (r, e) in sets {
-        let _ = writeln!(s, "    {} = {e};", reg(r));
+        let _ = match cx.fe.home(r) {
+            Home::Flag { word, bit } if cx.in_context => writeln!(
+                s,
+                "    {word} = ({word} & ~(1u << {bit})) | ((uint32_t)({e}) << {bit});"
+            ),
+            _ => writeln!(s, "    {} = {e};", reg(r)),
+        };
         if cx.hoisted.contains(&r) {
             let _ = writeln!(s, "    {} = {} != 0;", flag(r), reg(r));
         }

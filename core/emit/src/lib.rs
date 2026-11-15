@@ -148,6 +148,12 @@ pub struct Options {
     /// it names a continuation block of the instruction at the masked
     /// address, kept in that instruction's piece.
     pub enter_anywhere: Option<u64>,
+    /// Whether the C reads and writes the guest registers in their homes
+    /// in the context rather than in locals stored and reloaded around
+    /// every runtime call. For code built without optimization, where a
+    /// local is a stack slot anyway: it halves the machine code of an
+    /// instruction that ends in a runtime call.
+    pub regs_in_context: bool,
 }
 
 impl Default for Options {
@@ -164,6 +170,7 @@ impl Default for Options {
             test_fault: None,
             window: 0,
             enter_anywhere: None,
+            regs_in_context: false,
         }
     }
 }
@@ -264,17 +271,7 @@ pub fn emit_with(
         on,
         &mut |ks, targets| {
             ks.iter()
-                .map(|&k| {
-                    func::emit_function(
-                        fe,
-                        &fns[k],
-                        &Targets::new(targets),
-                        opts.piece_bytes.max(1),
-                        &opts.io_map,
-                        opts.test_fault == Some(fns[k].entry),
-                        opts.enter_anywhere,
-                    )
-                })
+                .map(|&k| func::emit_function(fe, &fns[k], &Targets::new(targets), opts))
                 .collect()
         },
         &mut |f| out.files.push(f),
@@ -367,12 +364,7 @@ pub fn emit_reusing(
     sink: &mut dyn FnMut(File),
 ) -> usize {
     let Stream { heads, lend, store } = *from;
-    let salt = reuse::salt(
-        fe,
-        opts.piece_bytes.max(1),
-        &opts.io_map,
-        opts.enter_anywhere,
-    );
+    let salt = reuse::salt(fe, opts);
     emit_core(
         fe,
         heads,
@@ -385,17 +377,7 @@ pub fn emit_reusing(
                 let mut out = Vec::with_capacity(g.len());
                 lend(g, &mut |_, f| {
                     let fault = opts.test_fault == Some(f.entry);
-                    let emit = |seen: &Targets<'_>| {
-                        func::emit_function(
-                            fe,
-                            f,
-                            seen,
-                            opts.piece_bytes.max(1),
-                            &opts.io_map,
-                            fault,
-                            opts.enter_anywhere,
-                        )
-                    };
+                    let emit = |seen: &Targets<'_>| func::emit_function(fe, f, seen, opts);
                     let Some(store) = store else {
                         out.push((emit(&Targets::new(targets)), None));
                         return;

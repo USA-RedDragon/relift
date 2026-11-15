@@ -426,6 +426,7 @@ pub fn lift_superset(
             },
             unit_symbol: symbol.clone(),
             io_map: device_map(),
+            regs_in_context: true,
             image_id,
             enter_anywhere: Some(0xFFFF),
             ..Options::default()
@@ -452,6 +453,7 @@ pub fn lift_nothing(image_id: [u8; 32]) -> Lifted {
         unit_name: "fixed".into(),
         unit_symbol: "rl_unit_gb_fixed".into(),
         io_map: device_map(),
+        regs_in_context: true,
         image_id,
         ..Options::default()
     };
@@ -607,6 +609,7 @@ fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
             unit_name: format!("ram{i}"),
             unit_symbol: symbol.clone(),
             io_map: device_map(),
+            regs_in_context: true,
             image_id,
             ..Options::default()
         };
@@ -752,6 +755,7 @@ mod tests {
             .map(|f| f.text.as_str())
             .collect();
         assert!(fixed.contains("rl_gb_io_write(c, mem,"), "{fixed}");
+        assert!(!fixed.contains("a_ <= UINT64_C("), "{fixed}");
         assert!(
             fixed.contains("rl_indirect(c, UINT64_C(0x4000))"),
             "{fixed}"
@@ -772,8 +776,8 @@ mod tests {
             .collect();
         let first = c.split("L_150: {").nth(1).expect("the first INC E");
         let first = first.split("L_151: {").next().expect("ends");
-        assert!(first.contains("r10 = "), "{first}");
-        assert!(first.contains("r9 = "), "{first}");
+        assert!(first.contains("c->f = (c->f & ~(1u << 5))"), "{first}");
+        assert!(first.contains("c->f = (c->f & ~(1u << 6))"), "{first}");
     }
 
     #[test]

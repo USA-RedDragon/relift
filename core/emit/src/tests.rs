@@ -60,6 +60,27 @@ fn locals_labels_and_exits() {
 }
 
 #[test]
+fn registers_in_the_context_are_macros_with_nothing_to_store() {
+    let code = [
+        word(0x04, 0, 5),
+        branch(0x07, 1, 2),
+        word(0x05, 0, 1),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let opts = Options {
+        regs_in_context: true,
+        ..Options::default()
+    };
+    let out = emit(&Toy, &[function(0x100, &blocks)], &[], &opts);
+    let s = shard(&out);
+    assert!(s.contains("#define r0 (c->x[0])"), "{s}");
+    assert!(!s.contains("uint64_t r0 ="), "{s}");
+    assert!(s.contains("#define RL_STORE() do { } while (0)"), "{s}");
+    assert!(s.contains("#undef r0\n#undef r1\n#undef r3\n}"), "{s}");
+}
+
+#[test]
 fn calls_check_pending_and_tail_calls_use_musttail() {
     let code = [
         branch(0x02, 0, 2),
@@ -346,6 +367,7 @@ fn shards_declare_their_foreign_callees() {
             test_fault: None,
             window: 0,
             enter_anywhere: None,
+            regs_in_context: false,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -533,6 +555,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         test_fault: None,
         window: 0,
         enter_anywhere: None,
+        regs_in_context: false,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
