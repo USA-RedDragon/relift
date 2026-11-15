@@ -233,8 +233,9 @@ fn summarize(o: &Outcome) -> Summary {
     let regs = regs
         .unwrap_or([Val::Top; 7])
         .map(|v| if v == Val::Dep { Val::Top } else { v });
-    let lo = lo.unwrap_or(Bv::Unknown);
-    let hi = hi.unwrap_or(Bv::Unknown);
+    let kept = if o.touches { Bv::Unknown } else { Bv::Entry };
+    let lo = lo.unwrap_or(kept);
+    let hi = hi.unwrap_or(kept);
     let exit_dep = regs
         .iter()
         .any(|v| v.depends_on_entry() && !matches!(v, Val::Entry(_)))

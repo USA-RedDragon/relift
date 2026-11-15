@@ -728,6 +728,22 @@ fn code_after_a_call_that_waits_for_an_interrupt_is_found() {
 }
 
 #[test]
+fn a_callee_that_writes_no_bank_register_keeps_the_bank() {
+    let r = Cart::new(0x19, 0x04)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x02, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x02, 0xCD, 0x00, 0x40, 0x18, 0xFE,
+            ],
+        )
+        .put(0, 0x200, &[0xC3, 0x80, 0xFF])
+        .put(2, 0x4000, &[0xC9])
+        .analyze();
+    assert!(has(&r, 2, 0x4000), "{:?}", r.unresolved);
+}
+
+#[test]
 fn code_walked_only_inside_a_caller_is_part_of_the_callee() {
     let r = Cart::new(0x19, 0x04)
         .put(
