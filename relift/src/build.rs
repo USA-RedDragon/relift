@@ -871,7 +871,7 @@ pub(crate) fn runtime_lib_name() -> &'static str {
 
 /// How to compile and link code for this build, kept for the dev server.
 #[derive(Clone, Debug)]
-pub struct Toolchain {
+pub struct BuildTools {
     /// The C compiler command: clang, or `zig cc`.
     pub cc: Vec<String>,
     /// Ninja, when found.
@@ -890,7 +890,7 @@ pub struct Toolchain {
 pub(crate) struct Built {
     pub(crate) exe: PathBuf,
     pub(crate) out: PathBuf,
-    pub(crate) toolchain: Toolchain,
+    pub(crate) toolchain: BuildTools,
 }
 
 /// Builds `plans` in order, each in its own directory, showing progress
@@ -1218,7 +1218,7 @@ pub(crate) fn build_project(
     Ok(Built {
         exe,
         out,
-        toolchain: Toolchain {
+        toolchain: BuildTools {
             cc,
             ninja,
             jobs,

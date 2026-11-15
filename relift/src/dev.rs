@@ -17,7 +17,7 @@ use relift_cpu_a64::frontend::A64;
 use relift_guest::Module;
 use relift_switch::program::{self, Placed};
 
-use crate::build::Toolchain;
+use crate::build::BuildTools;
 use crate::hints::Hint;
 use crate::import::BoxError;
 
@@ -171,7 +171,7 @@ pub struct Server {
     known: Vec<BTreeMap<u64, EntryKind>>,
     image_id: [u8; 32],
     abi: u32,
-    tools: Toolchain,
+    tools: BuildTools,
     dir: PathBuf,
     game_toml: PathBuf,
     seq: u32,
@@ -186,7 +186,7 @@ impl Server {
         placed: Vec<Placed>,
         known: Vec<BTreeMap<u64, EntryKind>>,
         abi: u32,
-        tools: Toolchain,
+        tools: BuildTools,
         dir: PathBuf,
         game_toml: PathBuf,
     ) -> Server {
