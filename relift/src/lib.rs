@@ -6,6 +6,7 @@ pub mod appimage;
 pub mod appimage_runtime;
 pub mod build;
 pub mod cli;
+pub mod closed;
 pub mod coverage;
 pub mod dev;
 pub mod devsock;

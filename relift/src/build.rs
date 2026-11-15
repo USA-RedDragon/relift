@@ -835,6 +835,10 @@ fn lift_and_emit(
 ) -> Result<EmitRecord, BoxError> {
     let import = import_dir(settings)?;
     let (mut loaded, npdm) = load_slots(&import)?;
+    let closed = crate::closed::check(npdm.as_ref(), &[import.join("romfs"), import.join("dlc")])?;
+    if let Some(n) = closed {
+        ui.note(&Line::new().text(n));
+    }
     let game = read_toml(Path::new("game.toml"))?;
     let title_id = npdm
         .as_ref()
