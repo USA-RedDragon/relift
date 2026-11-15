@@ -2193,3 +2193,425 @@ TEST(vk_secondary_begun_without_inheritance_info_gets_it)
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
+
+static void bits_put(uint8_t *b, unsigned *at, uint32_t v, unsigned n)
+{
+    for (unsigned i = 0; i < n; i++, (*at)++)
+        if (v >> i & 1)
+            b[*at / 8] |= (uint8_t)(1u << (*at % 8));
+}
+
+/** @brief A BC7 mode 6 block: endpoint 0 red, endpoint 1 green, both opaque; texel 0 takes endpoint 0, the rest endpoint 1. */
+static void bc7_red_green(uint8_t *b)
+{
+    memset(b, 0, 16);
+    unsigned at = 0;
+    bits_put(b, &at, 1u << 6, 7);
+    const uint32_t ep[8] = { 127, 0, 0, 127, 0, 0, 127, 127 };
+    for (int i = 0; i < 8; i++)
+        bits_put(b, &at, ep[i], 7);
+    bits_put(b, &at, 1, 1);
+    bits_put(b, &at, 1, 1);
+    bits_put(b, &at, 0, 3);
+    for (int i = 1; i < 16; i++)
+        bits_put(b, &at, 15, 4);
+}
+
+static uint32_t texel(const uint8_t *out, int i) { return rl_ld32(out, 4u * (unsigned)i); }
+
+TEST(vk_bc_decoder_vectors)
+{
+    uint8_t out[4 * 4 * 8];
+    const vkf_decode_format *bc1 = vkf_decode_format_of(VK_FORMAT_BC1_RGBA_UNORM_BLOCK);
+    const vkf_decode_format *bc1rgb = vkf_decode_format_of(VK_FORMAT_BC1_RGB_SRGB_BLOCK);
+    CHECK(bc1 && bc1rgb && !vkf_decode_format_of(VK_FORMAT_R8G8B8A8_UNORM));
+    CHECK_EQ(bc1->host, VK_FORMAT_R8G8B8A8_UNORM);
+    CHECK_EQ(bc1rgb->host, VK_FORMAT_R8G8B8A8_SRGB);
+    const uint8_t red_blue[8] = { 0x00, 0xF8, 0x1F, 0x00, 0x00, 0x55, 0xAA, 0xFF };
+    vkf_decode_block(bc1, red_blue, out);
+    CHECK_EQ(texel(out, 0), 0xFF0000FFu);
+    CHECK_EQ(texel(out, 4), 0xFFFF0000u);
+    CHECK_EQ(texel(out, 8), 0xFF5500AAu);
+    CHECK_EQ(texel(out, 12), 0xFFAA0055u);
+    const uint8_t three[8] = { 0x1F, 0x00, 0x00, 0xF8, 0xFF, 0xFF, 0xFF, 0xFF };
+    vkf_decode_block(bc1, three, out);
+    CHECK_EQ(texel(out, 5), 0);
+    vkf_decode_block(bc1rgb, three, out);
+    CHECK_EQ(texel(out, 5), 0xFF000000u);
+
+    uint8_t bc3[16] = { 255, 0 };
+    unsigned at = 16;
+    for (int i = 0; i < 16; i++)
+        bits_put(bc3, &at, i & 1, 3);
+    memcpy(bc3 + 8, red_blue, 8);
+    vkf_decode_block(vkf_decode_format_of(VK_FORMAT_BC3_UNORM_BLOCK), bc3, out);
+    CHECK_EQ(texel(out, 0), 0xFF0000FFu);
+    CHECK_EQ(texel(out, 1), 0x000000FFu);
+    CHECK_EQ(texel(out, 5), 0x00FF0000u);
+
+    uint8_t bc4[8] = { 200, 100 };
+    at = 16;
+    for (int i = 0; i < 16; i++)
+        bits_put(bc4, &at, (uint32_t)i % 3, 3);
+    vkf_decode_block(vkf_decode_format_of(VK_FORMAT_BC4_UNORM_BLOCK), bc4, out);
+    CHECK_EQ(out[0], 200);
+    CHECK_EQ(out[1], 100);
+    CHECK_EQ(out[2], 186);
+    const uint8_t bc4s[8] = { 0x80, 0x7F, 0, 0, 0, 0, 0, 0 };
+    vkf_decode_block(vkf_decode_format_of(VK_FORMAT_BC4_SNORM_BLOCK), bc4s, out);
+    CHECK_EQ(out[0], 0x81);
+    CHECK_EQ(out[15], 0x81);
+
+    uint8_t bc5[16];
+    memcpy(bc5, bc4, 8);
+    memcpy(bc5 + 8, bc4s, 8);
+    vkf_decode_block(vkf_decode_format_of(VK_FORMAT_BC5_UNORM_BLOCK), bc5, out);
+    CHECK_EQ(out[0], 200);
+    CHECK_EQ(out[1], 0x80);
+    CHECK_EQ(out[2], 100);
+    CHECK_EQ(out[3], 0x80);
+
+    uint8_t bc7[16];
+    bc7_red_green(bc7);
+    vkf_decode_block(vkf_decode_format_of(VK_FORMAT_BC7_UNORM_BLOCK), bc7, out);
+    CHECK_EQ(texel(out, 0), 0xFF0101FFu);
+    for (int i = 1; i < 16; i++)
+        CHECK_EQ(texel(out, i), 0xFF01FF01u);
+
+    const uint8_t r4g4 = 0xA5;
+    vkf_decode_block(vkf_decode_format_of(VK_FORMAT_R4G4_UNORM_PACK8), &r4g4, out);
+    CHECK_EQ(out[0], 0xAA);
+    CHECK_EQ(out[1], 0x55);
+}
+
+/** @brief Allocates guest memory of the type the guest would pick and binds the image to it; returns the memory. */
+static uint64_t bind_image(uint64_t pd, uint64_t dev, uint64_t image, VkMemoryRequirements *req)
+{
+    uint64_t greq = galloc(sizeof *req);
+    G("vkGetImageMemoryRequirements", dev, image, greq);
+    memcpy(req, g_mem + greq, sizeof *req);
+    uint32_t t = memory_type(pd, req->memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req->size, .memoryTypeIndex = t };
+    uint64_t gm = galloc(8);
+    if (t == UINT32_MAX || VKR(G("vkAllocateMemory", dev, gput(&mai, sizeof mai), 0, gm)) != VK_SUCCESS)
+        return 0;
+    if (VKR(G("vkBindImageMemory", dev, image, g64(gm), 0)) != VK_SUCCESS)
+        return 0;
+    return g64(gm);
+}
+
+static uint64_t make_bc_image(uint64_t dev, VkFormat format, uint32_t w, uint32_t h)
+{
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = { w, h, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    uint64_t gi = galloc(8);
+    if (VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)) != VK_SUCCESS)
+        return 0;
+    return g64(gi);
+}
+
+/** @brief Records a copy of the host image behind a guest image to a buffer, on the host side (the guest's would be dropped). */
+static void host_read_back(uint64_t cb, uint64_t image, uint64_t buf, uint64_t offset, uint32_t w, uint32_t h)
+{
+    vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
+    VkBufferImageCopy r = { .bufferOffset = offset, .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { w, h, 1 } };
+    ((PFN_vkCmdCopyImageToBuffer)o->fns->f[VKG_vkCmdCopyImageToBuffer])(o->host, (VkImage)GP(image), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                                        (VkBuffer)GP(buf), 1, &r);
+}
+
+#define BW 8
+#define BH 8
+
+/** @brief The texels of a w x h image of format f whose blocks are blocks, rows of blocks packed. */
+static void decode_image(VkFormat format, const uint8_t *blocks, uint32_t w, uint32_t h, uint8_t *out)
+{
+    const vkf_decode_format *f = vkf_decode_format_of(format);
+    vkf_decode_region(f, blocks, (w / 4) * f->block_bytes, (w / 4) * (h / 4) * f->block_bytes, w, h, 1, out);
+}
+
+/**
+ * @brief Uploads a BC1 and a BC7 image through vkCmdCopyBufferToImage (the
+ * BC7 one by the copy2 command), copies the BC7 one to another BC7 image,
+ * reads the host images back and counts the texels that differ from the
+ * decoded blocks. The blocks are written after the commands are recorded.
+ */
+static uint32_t bc_upload_scene(uint64_t pd, uint64_t dev, uint32_t qf)
+{
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, qf, 0, gq);
+    uint64_t queue = g64(gq);
+    mapped_buf up, rb;
+    const uint32_t bc1_bytes = (BW / 4) * (BH / 4) * 8, bc7_bytes = (BW / 4) * (BH / 4) * 16;
+    if (make_mapped(pd, dev, 4096, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &up) ||
+        make_mapped(pd, dev, 3 * BW * BH * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rb))
+        return UINT32_MAX;
+    memset(g_mem + rb.ptr, 0xEE, 3 * BW * BH * 4);
+    uint64_t img1 = make_bc_image(dev, VK_FORMAT_BC1_RGBA_UNORM_BLOCK, BW, BH);
+    uint64_t img7 = make_bc_image(dev, VK_FORMAT_BC7_UNORM_BLOCK, BW, BH);
+    uint64_t img7b = make_bc_image(dev, VK_FORMAT_BC7_UNORM_BLOCK, BW, BH);
+    if (!img1 || !img7 || !img7b)
+        return UINT32_MAX;
+    VkMemoryRequirements req;
+    uint64_t m1 = bind_image(pd, dev, img1, &req);
+    if (req.size != (bc1_bytes + req.alignment - 1) / req.alignment * req.alignment)
+        return UINT32_MAX - 1;
+    uint64_t m7 = bind_image(pd, dev, img7, &req), m7b = bind_image(pd, dev, img7b, &req);
+    if (!m1 || !m7 || !m7b)
+        return UINT32_MAX - 2;
+    VkImageViewCreateInfo vci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = (VkImage)GP(img7),
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_BC7_UNORM_BLOCK,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    uint64_t gv = galloc(8);
+    if (VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gv)) != VK_SUCCESS)
+        return UINT32_MAX - 3;
+
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+    uint64_t gpool = galloc(8);
+    G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi));
+    const uint64_t imgs[3] = { img1, img7, img7b };
+    for (int i = 0; i < 3; i++)
+        barrier(cb, imgs[i], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy r1 = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { BW, BH, 1 } };
+    G("vkCmdCopyBufferToImage", cb, up.buf, img1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, gput(&r1, sizeof r1));
+    VkBufferImageCopy2 r7 = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+        .bufferOffset = 64,
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent = { BW, BH, 1 },
+    };
+    VkCopyBufferToImageInfo2 ci2 = {
+        .sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+        .srcBuffer = (VkBuffer)GP(up.buf),
+        .dstImage = (VkImage)GP(img7),
+        .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .regionCount = 1,
+        .pRegions = GP(gput(&r7, sizeof r7)),
+    };
+    G("vkCmdCopyBufferToImage2", cb, gput(&ci2, sizeof ci2));
+    barrier(cb, img7, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT);
+    VkImageCopy ic = {
+        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .extent = { BW, BH, 1 },
+    };
+    G("vkCmdCopyImage", cb, img7, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, img7b, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+      gput(&ic, sizeof ic));
+    barrier(cb, img1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT);
+    barrier(cb, img7b, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT);
+    host_read_back(cb, img1, rb.buf, 0, BW, BH);
+    host_read_back(cb, img7, rb.buf, BW * BH * 4, BW, BH);
+    host_read_back(cb, img7b, rb.buf, 2 * BW * BH * 4, BW, BH);
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    G("vkEndCommandBuffer", cb);
+
+    const uint8_t bc1[4][8] = {
+        { 0x00, 0xF8, 0x1F, 0x00, 0x00, 0x55, 0xAA, 0xFF },
+        { 0x1F, 0x00, 0x00, 0xF8, 0xE4, 0xE4, 0xE4, 0xE4 },
+        { 0xE0, 0x07, 0x00, 0xF8, 0x1B, 0x1B, 0x1B, 0x1B },
+        { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+    };
+    uint8_t *src = g_mem + up.ptr;
+    memcpy(src, bc1, bc1_bytes);
+    for (uint32_t b = 0; b < bc7_bytes / 16; b++) {
+        bc7_red_green(src + 64 + 16 * b);
+        src[64 + 16 * b + 15] ^= (uint8_t)(b << 4);
+    }
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
+    if (VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)) != VK_SUCCESS || VKR(G("vkQueueWaitIdle", queue)) != VK_SUCCESS)
+        return UINT32_MAX - 4;
+
+    uint8_t want[3][BW * BH * 4];
+    decode_image(VK_FORMAT_BC1_RGBA_UNORM_BLOCK, src, BW, BH, want[0]);
+    decode_image(VK_FORMAT_BC7_UNORM_BLOCK, src + 64, BW, BH, want[1]);
+    memcpy(want[2], want[1], sizeof want[1]);
+    uint32_t bad = 0;
+    for (int i = 0; i < 3; i++)
+        for (uint32_t p = 0; p < BW * BH; p++)
+            bad += rl_ld32(g_mem, rb.ptr + (uint64_t)i * BW * BH * 4 + 4 * p) != rl_ld32(want[i], 4 * p);
+    fprintf(stderr, "  BC1 texel 0 0x%08x, BC7 texel 1 0x%08x, copied BC7 texel 1 0x%08x, %u bad\n", rl_ld32(g_mem, rb.ptr),
+            rl_ld32(g_mem, rb.ptr + BW * BH * 4 + 4), rl_ld32(g_mem, rb.ptr + 2 * BW * BH * 4 + 4), bad);
+
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyImageView", dev, g64(gv), 0);
+    for (int i = 0; i < 3; i++)
+        G("vkDestroyImage", dev, imgs[i], 0);
+    G("vkFreeMemory", dev, m1, 0);
+    G("vkFreeMemory", dev, m7, 0);
+    G("vkFreeMemory", dev, m7b, 0);
+    G("vkDestroyBuffer", dev, up.buf, 0);
+    G("vkFreeMemory", dev, up.mem, 0);
+    G("vkDestroyBuffer", dev, rb.buf, 0);
+    G("vkFreeMemory", dev, rb.mem, 0);
+    return bad;
+}
+
+TEST(vk_bc_uploads_decode_at_submit)
+{
+    CHECK_EQ(boot(NULL), 0);
+    rl_switch_declare_settings();
+    CHECK_EQ(rl_settings_set("vk.decode_bc", "on"), RL_SETTING_OK);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint32_t qf = queue_family(pds[0], VK_QUEUE_GRAPHICS_BIT);
+    uint64_t dev = make_device(pds[0], qf, NULL, 0);
+    CHECK(dev != 0);
+    CHECK(vkf_obj_of(dev, VKG_KIND_VkDevice)->dev->decoding);
+    CHECK_EQ(bc_upload_scene(pds[0], dev, qf), 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+    rl_settings_reset();
+}
+
+/** @brief The features the Switch has for BC formats that every host format standing in for them has too (not min/max filtering). */
+#define BC_BASE_FEATURES                                                                                               \
+    (VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |               \
+     VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)
+
+typedef struct bc_answers {
+    VkFormatProperties props[VKF_DECODE_FORMATS];
+    VkImageFormatProperties image[VKF_DECODE_FORMATS];
+    int32_t image_rc[VKF_DECODE_FORMATS];
+    VkBool32 bc;
+} bc_answers;
+
+static void bc_queries(uint64_t pd, bc_answers *a)
+{
+    uint64_t gfp = galloc(sizeof(VkFormatProperties)), gip = galloc(sizeof(VkImageFormatProperties));
+    for (uint32_t i = 0; i < VKF_DECODE_FORMATS; i++) {
+        VkFormat f = i ? (VkFormat)(VK_FORMAT_BC1_RGB_UNORM_BLOCK + i - 1) : VK_FORMAT_R4G4_UNORM_PACK8;
+        G("vkGetPhysicalDeviceFormatProperties", pd, f, gfp);
+        memcpy(&a->props[i], g_mem + gfp, sizeof a->props[i]);
+        memset(g_mem + gip, 0, sizeof(VkImageFormatProperties));
+        a->image_rc[i] = VKR(G("vkGetPhysicalDeviceImageFormatProperties", pd, f, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+                               VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, gip));
+        memcpy(&a->image[i], g_mem + gip, sizeof a->image[i]);
+    }
+    uint64_t gf = galloc(sizeof(VkPhysicalDeviceFeatures));
+    G("vkGetPhysicalDeviceFeatures", pd, gf);
+    a->bc = ((const VkPhysicalDeviceFeatures *)(g_mem + gf))->textureCompressionBC;
+}
+
+TEST(vk_bc_queries_do_not_change_with_decoding)
+{
+    CHECK_EQ(boot(NULL), 0);
+    rl_switch_declare_settings();
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK(physical_devices(&pd, 1) == 1);
+    static bc_answers off, on;
+    CHECK_EQ(rl_settings_set("vk.decode_bc", "off"), RL_SETTING_OK);
+    bc_queries(pd, &off);
+    CHECK_EQ(rl_settings_set("vk.decode_bc", "on"), RL_SETTING_OK);
+    bc_queries(pd, &on);
+    unsigned compared = 0;
+    for (uint32_t i = 0; i < VKF_DECODE_FORMATS; i++) {
+        if (!(off.props[i].optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+            continue;
+        const VkImageFormatProperties *a = &off.image[i], *b = &on.image[i];
+        if (a->maxResourceSize != b->maxResourceSize)
+            fprintf(stderr, "  format index %u: maxResourceSize 0x%llx, decoded 0x%llx\n", i, (unsigned long long)a->maxResourceSize,
+                    (unsigned long long)b->maxResourceSize);
+        if (on.props[i].optimalTilingFeatures != off.props[i].optimalTilingFeatures)
+            fprintf(stderr, "  format index %u: optimal features 0x%x, decoded 0x%x\n", i, off.props[i].optimalTilingFeatures,
+                    on.props[i].optimalTilingFeatures);
+        CHECK_EQ(on.props[i].optimalTilingFeatures & BC_BASE_FEATURES, off.props[i].optimalTilingFeatures & BC_BASE_FEATURES);
+        CHECK_EQ(on.props[i].linearTilingFeatures, off.props[i].linearTilingFeatures);
+        CHECK_EQ(on.image_rc[i], off.image_rc[i]);
+        CHECK(!memcmp(&a->maxExtent, &b->maxExtent, sizeof a->maxExtent));
+        CHECK_EQ(a->maxMipLevels, b->maxMipLevels);
+        CHECK_EQ(a->maxArrayLayers, b->maxArrayLayers);
+        CHECK_EQ(a->sampleCounts, b->sampleCounts);
+        compared++;
+    }
+    fprintf(stderr, "  %u of %u formats the host samples answer the same with vk.decode_bc on\n", compared, VKF_DECODE_FORMATS);
+    CHECK_EQ(on.bc, off.bc);
+    G("vkDestroyInstance", g_inst, 0);
+    rl_settings_reset();
+}
+
+static PFN_vkGetPhysicalDeviceFormatProperties g_real_format_props;
+
+/** @brief The host's format features, none for BC1 to BC7 (a GPU without them). */
+static void no_bc_format_props(VkPhysicalDevice pd, VkFormat f, VkFormatProperties *p)
+{
+    g_real_format_props(pd, f, p);
+    if (f >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && f <= VK_FORMAT_BC7_SRGB_BLOCK)
+        memset(p, 0, sizeof *p);
+}
+
+static void *no_bc_gipa(void *inst, const char *name)
+{
+    void *r = fake_gipa(inst, name);
+    if (r && inst && !strcmp(name, "vkGetPhysicalDeviceFormatProperties")) {
+        memcpy(&g_real_format_props, &r, sizeof r);
+        void (*f)(void) = (void (*)(void))no_bc_format_props;
+        memcpy(&r, &f, sizeof r);
+    }
+    return r;
+}
+
+TEST(vk_bc_a_host_without_bc_shows_the_switch_features)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    g_drop_feature = (int)(offsetof(VkPhysicalDeviceFeatures, textureCompressionBC) / sizeof(VkBool32));
+    void *(*fg)(void *, const char *) = no_bc_gipa;
+    void *gipa;
+    memcpy(&gipa, &fg, sizeof gipa);
+    CHECK_EQ(boot_with(NULL, gipa), 0);
+    rl_switch_declare_settings();
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK(physical_devices(&pd, 1) == 1);
+    static bc_answers a;
+    bc_queries(pd, &a);
+    CHECK(a.bc);
+    for (uint32_t i = 1; i < VKF_DECODE_FORMATS; i++) {
+        VkFormatProperties s = vkf_switch_format_props((VkFormat)(VK_FORMAT_BC1_RGB_UNORM_BLOCK + i - 1));
+        CHECK_EQ(a.props[i].optimalTilingFeatures & BC_BASE_FEATURES, s.optimalTilingFeatures & BC_BASE_FEATURES);
+        CHECK_EQ(a.props[i].optimalTilingFeatures & ~s.optimalTilingFeatures, 0);
+        CHECK_EQ(a.props[i].linearTilingFeatures, 0);
+        CHECK_EQ(a.image_rc[i], VK_SUCCESS);
+        CHECK(a.image[i].maxExtent.width >= 4096);
+    }
+    VkPhysicalDeviceFeatures want = { .textureCompressionBC = VK_TRUE };
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, gput(&want, sizeof want), &dev), VK_SUCCESS);
+    vkf_dev *d = vkf_obj_of(dev, VKG_KIND_VkDevice)->dev;
+    CHECK(d->decoding);
+    CHECK_EQ(d->decode_host[vkf_decode_index(VK_FORMAT_BC7_SRGB_BLOCK)], VK_FORMAT_R8G8B8A8_SRGB);
+    CHECK_EQ(bc_upload_scene(pd, dev, 0), 0);
+    finish(dev);
+    rl_settings_reset();
+}
