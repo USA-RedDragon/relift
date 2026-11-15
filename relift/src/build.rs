@@ -694,18 +694,17 @@ pub(crate) fn release_compiler(settings: &Settings) -> Result<Vec<String>, BoxEr
     if cfg!(target_os = "linux")
         && settings.toolchain.clang.as_os_str().is_empty()
         && settings.package.appimage != "never"
-    {
-        if let (Some(v), Some(zig)) = (
+        && let (Some(v), Some(zig)) = (
             pinned_glibc(&cache_root(settings)?),
             tool(&settings.toolchain.zig, "zig"),
-        ) {
-            return Ok(vec![
-                zig.display().to_string(),
-                "cc".into(),
-                "-target".into(),
-                format!("{}-linux-gnu.{v}", std::env::consts::ARCH),
-            ]);
-        }
+        )
+    {
+        return Ok(vec![
+            zig.display().to_string(),
+            "cc".into(),
+            "-target".into(),
+            format!("{}-linux-gnu.{v}", std::env::consts::ARCH),
+        ]);
     }
     c_compiler(&settings.toolchain)
 }

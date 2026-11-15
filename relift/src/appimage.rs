@@ -253,7 +253,7 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         if e.path().is_dir() {
             copy_tree(&e.path(), &dest)?;
         } else {
-            std::fs::copy(e.path(), dest)?;
+            relift_cache::write_if_changed(&dest, &std::fs::read(e.path())?)?;
         }
     }
     Ok(())
@@ -351,8 +351,11 @@ fn write_licenses(
 ) -> Result<(), BoxError> {
     let dir = root.join("usr/share/licenses").join(slug);
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join("BUNDLED.txt"), licenses_file(name, bundled))?;
-    std::fs::write(dir.join("relift-LICENSE"), LICENSE_RELIFT)?;
+    relift_cache::write_if_changed(
+        &dir.join("BUNDLED.txt"),
+        licenses_file(name, bundled).as_bytes(),
+    )?;
+    relift_cache::write_if_changed(&dir.join("relift-LICENSE"), LICENSE_RELIFT.as_bytes())?;
     for b in bundled {
         let Some(k) = KNOWN.iter().find(|k| b.soname.starts_with(k.prefix)) else {
             continue;
@@ -367,7 +370,10 @@ fn write_licenses(
                     .iter()
                     .any(|w| n.contains(w))
             {
-                std::fs::copy(e.path(), dir.join(format!("{}-{}", k.component, n)))?;
+                relift_cache::write_if_changed(
+                    &dir.join(format!("{}-{}", k.component, n)),
+                    &std::fs::read(e.path())?,
+                )?;
             }
         }
     }
@@ -401,14 +407,14 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
     std::fs::create_dir_all(&bin)?;
     std::fs::create_dir_all(&lib)?;
     let exe_dest = bin.join(&slug);
-    std::fs::copy(req.exe, &exe_dest)?;
+    relift_cache::write_if_changed(&exe_dest, &std::fs::read(req.exe)?)?;
     let ld: Vec<PathBuf> = std::env::var_os("LD_LIBRARY_PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
     let bundled = resolve(req.exe, &ld)?;
     let mut glibc = elfdeps::read(&std::fs::read(req.exe)?)?.glibc;
     for b in &bundled {
-        std::fs::copy(&b.path, lib.join(&b.soname))?;
+        relift_cache::write_if_changed(&lib.join(&b.soname), &std::fs::read(&b.path)?)?;
         glibc = glibc.max(elfdeps::read(&std::fs::read(&b.path)?)?.glibc);
     }
     let romfs = req.import.map(|i| i.join("romfs")).filter(|p| p.is_dir());
@@ -421,22 +427,22 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
     if let Some(d) = &dlc {
         copy_tree(d, &share.join("dlc"))?;
     }
-    std::fs::write(dir.join(INFO_PATH), info.to_bytes())?;
+    relift_cache::write_if_changed(&dir.join(INFO_PATH), &info.to_bytes())?;
     write_licenses(dir, &slug, &name, &bundled)?;
     let run = dir.join("AppRun");
-    std::fs::write(
+    relift_cache::write_if_changed(
         &run,
-        app_run(&slug, platform, romfs.is_some(), dlc.is_some()),
+        app_run(&slug, platform, romfs.is_some(), dlc.is_some()).as_bytes(),
     )?;
     set_mode(&run, 0o755)?;
     set_mode(&exe_dest, 0o755)?;
-    std::fs::write(
-        dir.join(format!("{slug}.desktop")),
-        desktop_file(&slug, &name, platform),
+    relift_cache::write_if_changed(
+        &dir.join(format!("{slug}.desktop")),
+        desktop_file(&slug, &name, platform).as_bytes(),
     )?;
     let png = crate::icon::png(info.identity.icon.as_ref(), &name);
-    std::fs::write(dir.join(format!("{slug}.png")), &png)?;
-    std::fs::write(dir.join(".DirIcon"), &png)?;
+    relift_cache::write_if_changed(&dir.join(format!("{slug}.png")), &png)?;
+    relift_cache::write_if_changed(&dir.join(".DirIcon"), &png)?;
     Ok(Packaged {
         path: PathBuf::new(),
         bundled,
@@ -636,7 +642,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let data = root.join("import");
         std::fs::create_dir_all(data.join("romfs")).unwrap();
-        std::fs::write(data.join("romfs/a.bin"), b"x").unwrap();
+        relift_cache::write_if_changed(&data.join("romfs/a.bin"), b"x").unwrap();
         let mut info = Info::new("0");
         info.identity.platform = "switch".into();
         info.identity
