@@ -222,6 +222,18 @@ TEST(a_fetch_of_the_halfword_the_prefetch_loads_next_is_sequential)
     mach_free(&m);
 }
 
+TEST(a_fetch_with_the_prefetch_off_leaves_it_stopped)
+{
+    mach m = mach_new();
+    rl_gba_write(m.g, 0x04000204u, 2, 0x0014u);
+    rl_gba_fetch(m.g, 0x08000010u, 2, false);
+    rl_gba_write(m.g, 0x04000204u, 2, 0x4314u);
+    uint64_t t = mach_now(&m);
+    rl_gba_fetch(m.g, 0x08000012u, 2, false);
+    CHECK_EQ(mach_now(&m) - t, 4u);
+    mach_free(&m);
+}
+
 TEST(the_cpu_fetch_after_a_dma_is_nonsequential)
 {
     mach m = mach_new();

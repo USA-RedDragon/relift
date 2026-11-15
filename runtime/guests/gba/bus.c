@@ -132,7 +132,7 @@ static void pf_sync(rl_gba *g, unsigned size, uint32_t addr)
 {
     if (g->pf.wait == 1)
         gba_charge(g, 1);
-    g->pf.stopped = false;
+    g->pf.stopped = !pf_on(g);
     g->pf.ahead = false;
     g->pf.addr = addr + size;
     g->pf.load = addr + size;
