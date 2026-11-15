@@ -55,31 +55,40 @@ pub struct Notary {
 ///
 /// Notarization is on without an identity or without the API key.
 pub fn plan(settings: &Settings) -> Result<(Signing, Option<Notary>), String> {
-    let identity = Some(settings.toolchain.codesign_identity.trim().to_string())
-        .filter(|s| !s.is_empty() && s != "-");
-    let keychain =
-        Some(settings.toolchain.codesign_keychain.clone()).filter(|p| !p.as_os_str().is_empty());
+    let p = &settings.package;
+    let t = &settings.toolchain;
+    plan_of(
+        &t.codesign_identity,
+        &t.codesign_keychain,
+        p.notarize
+            .then_some((&p.notarize_key, &p.notarize_key_id, &p.notarize_issuer)),
+    )
+}
+
+fn plan_of(
+    identity: &str,
+    keychain: &Path,
+    notarize: Option<(&PathBuf, &String, &String)>,
+) -> Result<(Signing, Option<Notary>), String> {
+    let identity = Some(identity.trim().to_string()).filter(|s| !s.is_empty() && s != "-");
+    let keychain = Some(keychain.to_path_buf()).filter(|p| !p.as_os_str().is_empty());
     let signing = Signing { identity, keychain };
-    if !settings.package.notarize {
+    let Some((key, key_id, issuer)) = notarize else {
         return Ok((signing, None));
-    }
+    };
     if signing.identity.is_none() {
         return Err("package.notarize needs toolchain.codesign-identity (a Developer ID)".into());
     }
-    let p = &settings.package;
-    if p.notarize_key.as_os_str().is_empty()
-        || p.notarize_key_id.is_empty()
-        || p.notarize_issuer.is_empty()
-    {
+    if key.as_os_str().is_empty() || key_id.is_empty() || issuer.is_empty() {
         return Err(
             "package.notarize needs package.notarize-key, package.notarize-key-id and package.notarize-issuer"
                 .into(),
         );
     }
     let notary = Notary {
-        key: p.notarize_key.clone(),
-        key_id: p.notarize_key_id.clone(),
-        issuer: p.notarize_issuer.clone(),
+        key: key.clone(),
+        key_id: key_id.clone(),
+        issuer: issuer.clone(),
     };
     Ok((signing, Some(notary)))
 }
@@ -413,6 +422,7 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
     }
     let real = macos.join(format!("{slug}.bin"));
     relift_cache::write_if_changed(&real, &std::fs::read(req.exe)?)?;
+    crate::appimage::set_mode(&real, 0o755)?;
     let mut done = Vec::new();
     bundle_libs(req.exe, &frameworks, &real, &mut done, &macos)?;
     let rpaths = parse_rpaths(&run(
@@ -515,6 +525,23 @@ mod tests {
     use super::*;
 
     const OTOOL: &str = "/x/prog:\n\t/opt/homebrew/opt/sdl3/lib/libSDL3.0.dylib (compatibility version 401.0.0, current version 401.20.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 372.16.0)\n\t@rpath/libMoltenVK.dylib (compatibility version 1.0.0, current version 1.0.0)\n";
+
+    fn plan_for(id: &str, notarize: bool, key: &str) -> Result<(Signing, Option<Notary>), String> {
+        let (key, kid, iss) = (PathBuf::from(key), "K".to_string(), "I".to_string());
+        plan_of(id, Path::new(""), notarize.then_some((&key, &kid, &iss)))
+    }
+
+    #[test]
+    fn notarization_needs_an_identity_and_the_key() {
+        assert!(plan_for("", true, "k.p8").is_err());
+        assert!(plan_for("-", true, "k.p8").is_err());
+        assert!(plan_for("ID", true, "").is_err());
+        let (sign, notary) = plan_for("ID", true, "k.p8").unwrap();
+        assert_eq!(sign.identity.as_deref(), Some("ID"));
+        assert_eq!(notary.unwrap().key_id, "K");
+        let (sign, notary) = plan_for("", false, "").unwrap();
+        assert!(sign.identity.is_none() && notary.is_none());
+    }
 
     #[test]
     fn only_non_system_libraries_are_bundled() {

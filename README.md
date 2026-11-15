@@ -200,6 +200,30 @@ signed with `package.android-keystore` and `package.android-keystore-pass`, or
 a debug key kept in the cache. The left stick drives the d-pad controls of
 the native ports.
 
+### macOS: signed app
+
+`relift build` on macOS also writes `<game>.app` beside the program: the
+program behind a small launcher, SDL3 and MoltenVK (and what they link,
+outside `/usr/lib` and `/System`) copied into `Contents/Frameworks` with
+`@rpath` install names, and a Switch game's romfs and DLC in
+`Contents/Resources`. Saves go to `~/Library/Application Support/<game>`.
+
+The bundle is signed inside out. With no `toolchain.codesign-identity` it
+gets an ad-hoc signature, which runs on this Mac. With a Developer ID
+Application identity (its name or SHA-1) every library and the bundle are
+signed with the hardened runtime and a secure timestamp, and
+`toolchain.codesign-keychain` names the keychain that holds it. No
+entitlements are set: relift never generates code at run time (so no
+`allow-jit`), and the libraries inside the bundle are signed with the same
+identity as the program (so no `disable-library-validation`).
+
+`package.notarize = true` submits the bundle to Apple with an App Store
+Connect API key (`package.notarize-key` for the `.p8` file,
+`package.notarize-key-id`, `package.notarize-issuer`), waits, prints the
+submission ID, and staples the ticket to the app so it opens offline. It
+needs a Developer ID identity and is off by default. A rejection fails the
+build with Apple's log.
+
 ## Tools
 
 | Binary | Guest | Does |
