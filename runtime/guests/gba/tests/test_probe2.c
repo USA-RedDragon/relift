@@ -45,6 +45,11 @@ enum {
 enum { IO_TM0 = 20, IO_TM1 = 24, IO_CPSR = 28, IO_OB = 48, IO_TOTAL = 64, IO_FIRED = 68, IO_ENTRY = 72, IO_RET = 76,
        IO_SPSR = 80, IO_BB = 84, IO_HUNG = 88, IO_HMODE = 92, IO_DELAY = 96, IO_KIND = 100, IO_DMACNT = 104 };
 
+/** Driver time the mirror adds in part_halt: the TM1 watchdog's prescaler
+ * phase at the first Halt IME=1 call, and the extra loop cycles when ret16()
+ * takes its IWRAM path (fitted to halt_ime1). */
+enum { HALT_PHASE = 21, HALT_PUT_BIOS = 1, HALT_PUT_IWRAM = 33 };
+
 typedef struct probe {
     mach m;
     p2cpu c;
@@ -440,9 +445,12 @@ static void part_ob(void)
 static void part_halt(uint32_t kind)
 {
     wr(0x04000204u, 2, 0x4317);
+    if (kind == 7)
+        spend(64u - (unsigned)(mach_now(&P.m) & 63u) + HALT_PHASE);
     uint32_t lim = kind == 6 ? 1024u : kind == 8 ? 160u : 200u;
     for (uint32_t o = 1; o < lim; o += kind == 7 ? 2u : (o < 200u ? 1u : 16u)) {
         uint32_t op = kind == 8 ? 0xE5CBA000u : arm_swi(2);
+        trace_on = getenv("RL_TRACE_O") && (uint32_t)atoi(getenv("RL_TRACE_O")) == o;
         if (kind == 7)
             call(op, 0, 0, 0, 0, 0, (0x10000u - o) | 0xC00000u, 0xC1F000u, 0x1F, 0x18, 1, 0, 2);
         else
@@ -450,6 +458,7 @@ static void part_halt(uint32_t kind)
         uint16_t ifv = (uint16_t)rl_gba_read(P.m.g, 0x04000202u, 2);
         wr(0x04000202u, 2, 0xFFFF);
         uint32_t t = io(IO_TOTAL);
+        spend(io(IO_RET) >= 0x4000u ? HALT_PUT_IWRAM : HALT_PUT_BIOS);
         put((uint16_t)o, (uint16_t)t, (uint16_t)(t >> 16), ifv, (uint16_t)(io(IO_FIRED) | io(IO_HUNG) << 1),
             (uint16_t)io(IO_ENTRY), ret16(io(IO_RET)), (uint16_t)io(IO_BB));
     }
