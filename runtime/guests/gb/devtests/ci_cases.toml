@@ -1,0 +1,390 @@
+# Corpus cases the CI runs through relift (runtime/guests/gb/devtests/ci_corpus.py): one or two
+# per suite and pass protocol of the relift GB corpus, from the ROMs of the c-sp
+# game-boy-test-roms v7.0 release. Paths are relative to that release. rustyboi-test-runner passes
+# every one at rustyboi 14acecf.
+
+[[case]]
+id = "acid2:dmg-acid2/dmg-acid2:dmg:dmg-acid2-dmg"
+rom = "dmg-acid2/dmg-acid2.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["dmg-acid2/dmg-acid2-dmg.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "age:age-test-roms/halt/ei-halt-dmgC-cgbBCE:dmg"
+rom = "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "age:age-test-roms/m3-bg-bgp/m3-bg-bgp:dmg:m3-bg-bgp-dmgC"
+rom = "age-test-roms/m3-bg-bgp/m3-bg-bgp.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["age-test-roms/m3-bg-bgp/m3-bg-bgp-dmgC.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "blargg:blargg/mem_timing-2/mem_timing:dmg"
+rom = "blargg/mem_timing-2/mem_timing.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "blargg_mem"
+timeout_frames = 0xfa0
+timeout_cycles = 0x10be2200
+
+[[case]]
+id = "blargg:blargg/halt_bug:dmg:halt_bug-dmg-cgb"
+rom = "blargg/halt_bug.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["blargg/halt_bug-dmg-cgb.png"]
+timeout_frames = 0xfa0
+timeout_cycles = 0x10be2200
+
+[[case]]
+id = "blargg:blargg/oam_bug/oam_bug:dmg:oam_bug-dmg"
+rom = "blargg/oam_bug/oam_bug.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png_fixed"
+refs = ["blargg/oam_bug/oam_bug-dmg.png"]
+timeout_frames = 0xfa0
+timeout_cycles = 0x10be2200
+
+[[case]]
+id = "blargg:blargg/cpu_instrs/cpu_instrs:dmg"
+rom = "blargg/cpu_instrs/cpu_instrs.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "serial"
+capture = "sc_edge"
+pass_text = "Passed"
+fail_text = ["Failed", "Error"]
+timeout_frames = 0xfa0
+timeout_cycles = 0x10be2200
+
+[[case]]
+id = "blargg_singles:blargg/mem_timing-2/rom_singles/01-read_timing:dmg"
+rom = "blargg/mem_timing-2/rom_singles/01-read_timing.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "blargg_mem"
+timeout_frames = 0x7d0
+timeout_cycles = 0x85f1100
+
+[[case]]
+id = "blargg_singles:blargg/cpu_instrs/individual/01-special:dmg"
+rom = "blargg/cpu_instrs/individual/01-special.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "serial"
+capture = "sc_edge"
+pass_text = "Passed"
+fail_text = ["Failed", "Error"]
+timeout_frames = 0x7d0
+timeout_cycles = 0x85f1100
+
+[[case]]
+id = "bully:bully/bully:dmg:bully"
+rom = "bully/bully.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["bully/bully.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "cgb_acid_hell:cgb-acid-hell/cgb-acid-hell:cgb:cgb-acid-hell"
+rom = "cgb-acid-hell/cgb-acid-hell.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png"
+refs = ["cgb-acid-hell/cgb-acid-hell.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gambatte:gambatte/cgbpal_m3/cgbpal_m3end_1_cgb04c_out7:cgb"
+rom = "gambatte/cgbpal_m3/cgbpal_m3end_1_cgb04c_out7.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "gambatte_hex"
+expect_hex = "7"
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gambatte:gambatte/oamdma/oamdma_src0000_srambankchange_1_dmg08_cgb04c_out4:dmg"
+rom = "gambatte/oamdma/oamdma_src0000_srambankchange_1_dmg08_cgb04c_out4.gbc"
+mode = "dmg"
+hardware = "dmg"
+protocol = "gambatte_hex"
+expect_hex = "4"
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gambatte:gambatte/bgen/bgoff_bgon_sprite_above_window:cgb:bgoff_bgon_sprite_above_window_cgb04c"
+rom = "gambatte/bgen/bgoff_bgon_sprite_above_window.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "gambatte_png"
+refs = ["gambatte/bgen/bgoff_bgon_sprite_above_window_cgb04c.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gambatte:gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4:cgb:scx_during_m3_4_cgb04c"
+rom = "gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "gambatte_png"
+refs = ["gambatte/scx_during_m3/scx_0363c0/scx_during_m3_4_cgb04c.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gbmicrotest:gbmicrotest/000-oam_lock:dmg"
+rom = "gbmicrotest/000-oam_lock.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "mem"
+addr = 0x8000
+expect = 0xff
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gbmicrotest:gbmicrotest/oam_read_l1_d:dmg"
+rom = "gbmicrotest/oam_read_l1_d.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "mem"
+addr = 0xff82
+expect = 1
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "little_things_gb:little-things-gb/tellinglys:cgb:tellinglys-cgb"
+rom = "little-things-gb/tellinglys.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png"
+refs = ["little-things-gb/tellinglys-cgb.png"]
+input = "30@5:A,45:-,60@21:B,75:-,90@42:Up,105:-,120@84:Down,135:-,150@105:Left,165:-,180@120:Right,195:-,210@135:Start,225:-,240@10:Select,255:-"
+timeout_frames = 0x2bc
+timeout_cycles = 0x2ee12c0
+
+[[case]]
+id = "little_things_gb:little-things-gb/firstwhite:dmg:firstwhite-dmg-cgb"
+rom = "little-things-gb/firstwhite.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png_fixed"
+refs = ["little-things-gb/firstwhite-dmg-cgb.png"]
+timeout_frames = 0x3c
+timeout_cycles = 0x404ac0
+
+[[case]]
+id = "mbc3_tester:mbc3-tester/mbc3-tester:dmg:mbc3-tester-dmg"
+rom = "mbc3-tester/mbc3-tester.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["mbc3-tester/mbc3-tester-dmg.png"]
+timeout_frames = 0x64
+timeout_cycles = 0x6b2740
+
+[[case]]
+id = "mbc3_tester:mbc3-tester/mbc3-tester:cgb:mbc3-tester-cgb"
+rom = "mbc3-tester/mbc3-tester.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png_layout"
+refs = ["mbc3-tester/mbc3-tester-cgb.png"]
+timeout_frames = 0x64
+timeout_cycles = 0x6b2740
+
+[[case]]
+id = "mealybug:mealybug-tearoom-tests/ppu/m2_win_en_toggle:dmg:m2_win_en_toggle_dmg_blob"
+rom = "mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["mealybug-tearoom-tests/ppu/m2_win_en_toggle_dmg_blob.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "mooneye:mooneye-test-suite/acceptance/add_sp_e_timing:dmg"
+rom = "mooneye-test-suite/acceptance/add_sp_e_timing.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "mooneye:mooneye-test-suite/acceptance/reti_intr_timing:cgb"
+rom = "mooneye-test-suite/acceptance/reti_intr_timing.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "mooneye:mooneye-test-suite/madness/mgb_oam_dma_halt_sprites:dmg:mgb:mgb_oam_dma_halt_sprites_expected"
+rom = "mooneye-test-suite/madness/mgb_oam_dma_halt_sprites.gb"
+mode = "dmg"
+hardware = "mgb"
+protocol = "png_layout"
+refs = ["mooneye-test-suite/madness/mgb_oam_dma_halt_sprites_expected.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "mooneye_wilbertpol:mooneye-test-suite-wilbertpol/acceptance/add_sp_e_timing:dmg"
+rom = "mooneye-test-suite-wilbertpol/acceptance/add_sp_e_timing.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "mooneye_ed"
+marker = 0xed
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "mooneye_wilbertpol:mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS:dmg"
+rom = "mooneye-test-suite-wilbertpol/acceptance/gpu/ly_lyc_0_write-GS.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "mooneye_ed"
+marker = 0xed
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "mooneye_wilbertpol:mooneye-test-suite-wilbertpol/manual-only/sprite_priority:dmg:sprite_priority-dmg"
+rom = "mooneye-test-suite-wilbertpol/manual-only/sprite_priority.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["mooneye-test-suite-wilbertpol/manual-only/sprite_priority-dmg.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "mooneye_wilbertpol:mooneye-test-suite-wilbertpol/madness/mgb_oam_dma_halt_sprites:dmg:mgb:mgb_oam_dma_halt_sprites_expected"
+rom = "mooneye-test-suite-wilbertpol/madness/mgb_oam_dma_halt_sprites.gb"
+mode = "dmg"
+hardware = "mgb"
+protocol = "png_layout"
+refs = ["mooneye-test-suite-wilbertpol/madness/mgb_oam_dma_halt_sprites_expected.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "rtc3test:rtc3test/rtc3test:cgb:rtc3test-basic-tests-cgb"
+rom = "rtc3test/rtc3test.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png"
+refs = ["rtc3test/rtc3test-basic-tests-cgb.png"]
+input = "20:A,30:-"
+timeout_frames = 0x352
+timeout_cycles = 0x38ecda0
+
+[[case]]
+id = "samesuite_apu:same-suite/apu/channel_1/channel_1_align_cpu:cgb:cgbe"
+rom = "same-suite/apu/channel_1/channel_1_align_cpu.gb"
+mode = "cgb"
+hardware = "cgbe"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "samesuite_nonapu:same-suite/dma/gbc_dma_cont:cgb"
+rom = "same-suite/dma/gbc_dma_cont.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "samesuite_sgb:same-suite/sgb/command_mlt_req:dmg:sgb"
+rom = "same-suite/sgb/command_mlt_req.gb"
+mode = "dmg"
+hardware = "sgb"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xde8
+timeout_cycles = 0xee6b280
+
+[[case]]
+id = "scribbltests:scribbltests/lycscx/lycscx:dmg:lycscx-cgb-dmg"
+rom = "scribbltests/lycscx/lycscx.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["scribbltests/lycscx/lycscx-cgb-dmg.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "scribbltests:scribbltests/statcount/statcount-auto:dmg:statcount_auto-cgb-dmg"
+rom = "scribbltests/statcount/statcount-auto.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png_fixed"
+refs = ["scribbltests/statcount/statcount_auto-cgb-dmg.png"]
+timeout_frames = 0x10e
+timeout_cycles = 0x1215060
+
+[[case]]
+id = "scribbltests:scribbltests/scxly/scxly:cgb:scxly-cgb"
+rom = "scribbltests/scxly/scxly.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png_layout"
+refs = ["scribbltests/scxly/scxly-cgb.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "strikethrough:strikethrough/strikethrough:cgb:strikethrough-cgb"
+rom = "strikethrough/strikethrough.gb"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png"
+refs = ["strikethrough/strikethrough-cgb.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "turtle_tests:turtle-tests/window_y_trigger/window_y_trigger:dmg:window_y_trigger"
+rom = "turtle-tests/window_y_trigger/window_y_trigger.gb"
+mode = "dmg"
+hardware = "dmg"
+protocol = "png"
+refs = ["turtle-tests/window_y_trigger/window_y_trigger.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
