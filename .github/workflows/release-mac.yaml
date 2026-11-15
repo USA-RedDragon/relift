@@ -134,11 +134,12 @@ jobs:
           # A bare command-line binary and its zip cannot hold a stapled
           # ticket, so Gatekeeper looks the notarization up online by the
           # binary's hash. spctl judges apps and installers only; the
-          # "notarized" requirement asks the same question of a binary.
+          # "notarized" requirement asks the same question of a binary,
+          # and --check-notarization makes codesign do that online lookup.
           unzip -q "$zip" -d "$RUNNER_TEMP/verify"
           v="$RUNNER_TEMP/verify/relift-macos-${{ matrix.arch }}/relift"
           codesign --verify --strict --verbose=2 "$v"
-          codesign --verify --strict --verbose=2 -R="notarized" "$v"
+          codesign --verify --strict --verbose=2 --check-notarization -R="notarized" "$v"
           echo "artifact=$zip" >> "$GITHUB_ENV"
 
       - name: Delete the keychain and the key files
