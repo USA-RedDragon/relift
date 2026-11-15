@@ -240,9 +240,7 @@ pub(crate) fn sync(fe: &dyn Frontend, b: &Block, next: &str) -> String {
     let call = fe
         .sync_call(b, next)
         .unwrap_or_else(|| format!("rl_sync(c, mem, {next})"));
-    format!(
-        "    if (RL_UNLIKELY({BUDGET} <= 0)) {{\n        RL_STORE();\n        rc = {call};\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n        RL_RELOAD();\n    }}\n"
-    )
+    format!("    RL_E_SYNC({call});\n")
 }
 
 #[cfg(test)]

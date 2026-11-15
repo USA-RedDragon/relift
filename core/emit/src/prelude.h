@@ -6,6 +6,17 @@
 
 typedef __int128 rl_e_s128;
 
+#define RL_E_SYNC(call)                                                                                                \
+    do {                                                                                                               \
+        if (RL_UNLIKELY(budget <= 0)) {                                                                                \
+            RL_STORE();                                                                                                \
+            rc = (call);                                                                                               \
+            if (RL_UNLIKELY(rc))                                                                                       \
+                return RL_PENDING;                                                                                     \
+            RL_RELOAD();                                                                                               \
+        }                                                                                                              \
+    } while (0)
+
 static inline int64_t rl_e_sx64(uint64_t v, unsigned w)
 {
     return w >= 64 ? (int64_t)v : (int64_t)(v << (64 - w)) >> (64 - w);
