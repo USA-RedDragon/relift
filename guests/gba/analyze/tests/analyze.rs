@@ -405,8 +405,8 @@ fn shared_epilogue_reached_by_bl_ends_the_callers_frame() {
 }
 
 #[test]
-fn multiboot_and_oversized_images_are_refused() {
-    assert!(analyze(&synth::multiboot(0x400)).is_err());
+fn image_with_a_multiboot_entry_analyzes_as_a_cartridge() {
+    assert!(analyze(&synth::multiboot(0x400)).is_ok());
 }
 
 #[test]

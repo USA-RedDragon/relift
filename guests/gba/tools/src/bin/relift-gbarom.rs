@@ -16,8 +16,8 @@ use relift_gba_tools::{BoxError, input, print_json, run};
 use serde_json::{Value, json};
 
 /// Show a ROM's cartridge header, check its logo hash, complement and size,
-/// and list the save library strings it carries. Multiboot images are
-/// refused.
+/// and list the save library strings it carries and the multiboot entry
+/// of an image that fits work RAM.
 #[derive(Parser, Debug)]
 #[command(
     name = "relift-gbarom",
@@ -122,6 +122,7 @@ impl Report<'_> {
             "fixed": h.fixed,
             "entry": word_hex(h.entry),
             "entry_target": h.entry_target(),
+            "multiboot_target": h.multiboot_target(),
             "image_bytes": h.len,
             "power_of_two": h.len.is_power_of_two(),
             "eeprom_spans_region": self.eeprom_spans,
@@ -155,6 +156,9 @@ impl Report<'_> {
         match h.entry_target() {
             Some(t) => writeln!(out, "entry: {} (b ${t:08X})", word_hex(h.entry))?,
             None => writeln!(out, "entry: {}", word_hex(h.entry))?,
+        }
+        if let (Some(w), Some(t)) = (h.multiboot_entry, h.multiboot_target()) {
+            writeln!(out, "multiboot entry: {} (b ${t:08X})", word_hex(w))?;
         }
         writeln!(out, "logo: sha256 {} {}", hex(&h.logo_sha256), ok(k.logo))?;
         writeln!(out, "fixed byte: ${:02X} {}", h.fixed, ok(k.fixed))?;

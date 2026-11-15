@@ -1,7 +1,8 @@
 //! The Game Boy Advance cartridge format: the header at `0x00-0xBF`, its
 //! complement checksum, the logo hash, the size rules, the three ROM
 //! mirrors with the open-bus rule past the image, the save library strings
-//! a ROM carries and the multiboot images that are refused.
+//! a ROM carries and the multiboot entry an image that fits work RAM may
+//! carry.
 //!
 //! Sources: GBATEK's cartridge header and memory map chapters and the
 //! save-type notes of the community emulators. A `.gba` file is a plain

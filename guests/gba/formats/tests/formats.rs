@@ -108,17 +108,19 @@ fn size_limits_and_short_images() {
 }
 
 #[test]
-fn multiboot_is_refused() {
+fn multiboot_entry_is_read_with_its_target_in_work_ram() {
     let mb = synth::multiboot(0x2000);
     assert!(is_multiboot(&mb));
-    assert_eq!(Header::parse(&mb), Err(Error::Multiboot));
-    let msg = Error::Multiboot.to_string();
-    assert!(msg.contains("multiboot"), "{msg}");
+    let h = Header::parse(&mb).expect("a multiboot image parses");
+    assert_eq!(h.multiboot_entry, Some(0xEA00_000E));
+    assert_eq!(h.multiboot_target(), Some(0x0200_0100));
     let cart = synth::rom(&Spec::default());
     assert!(!is_multiboot(&cart));
+    assert_eq!(Header::parse(&cart).unwrap().multiboot_target(), None);
     let mut large = synth::multiboot(0x2000);
     large.resize(0x80000, 0);
     assert!(!is_multiboot(&large), "larger than work RAM is a cartridge");
+    assert_eq!(Header::parse(&large).unwrap().multiboot_entry, None);
 }
 
 #[test]

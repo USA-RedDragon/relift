@@ -112,9 +112,10 @@ lifted code. CI builds and runs 38 corpus cases through this path
 ### Game Boy Advance
 
 Import is not available yet. `relift-gbarom` reads and checks a ROM header and
-lists the save library strings. `relift-gbarom functions` lists the functions
-of a ROM across ARM and Thumb code, the code it copies to work RAM and the
-transfers it cannot resolve; `--multiboot` reads a multiboot image.
+lists the save library strings and the multiboot entry of an image that fits
+work RAM. `relift-gbarom functions` lists the functions of a ROM across ARM
+and Thumb code, the code it copies to work RAM and the transfers it cannot
+resolve; `--multiboot` reads a multiboot image.
 
 ## Building and running
 

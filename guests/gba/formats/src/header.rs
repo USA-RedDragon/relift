@@ -17,6 +17,8 @@ pub const FIXED: usize = 0xB2;
 pub const COMPLEMENT: usize = 0xBD;
 /// Offset of the multiboot entry word.
 pub const MULTIBOOT_ENTRY: usize = 0xC0;
+/// Where the BIOS loads a multiboot image: the start of external work RAM.
+pub const MULTIBOOT_BASE: u32 = 0x0200_0000;
 /// One past the last byte the BIOS reads from the header.
 pub const HEADER_END: usize = 0xC0;
 /// The value of the fixed byte.
@@ -75,6 +77,9 @@ pub struct Header {
     pub complement_computed: u8,
     /// Length of the image in bytes.
     pub len: usize,
+    /// The word at `0xC0`, when the image is a [`is_multiboot`] program:
+    /// the branch the BIOS runs after loading it to [`MULTIBOOT_BASE`].
+    pub multiboot_entry: Option<u32>,
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -103,9 +108,10 @@ pub fn is_branch(w: u32) -> bool {
     w >> 24 == 0xEA
 }
 
-/// Whether `rom` is a multiboot program: it fits work RAM and carries a
-/// branch in the multiboot entry word at `0xC0`, which a cartridge leaves
-/// as padding.
+/// Whether `rom` can be a multiboot program: it fits work RAM and carries
+/// a branch in the multiboot entry word at `0xC0`. The same file can run
+/// as a cartridge too (the toolchains put that branch in every image), so
+/// this says how it may be loaded, not how it is.
 #[must_use]
 pub fn is_multiboot(rom: &[u8]) -> bool {
     rom.len() >= MULTIBOOT_ENTRY + 4
@@ -113,23 +119,26 @@ pub fn is_multiboot(rom: &[u8]) -> bool {
         && is_branch(word(rom, MULTIBOOT_ENTRY))
 }
 
+/// Where the ARM `B` `w` at `at` jumps: `at` plus 8 plus the offset.
+fn branch_target(at: u32, w: u32) -> u32 {
+    let imm = (w & 0x00FF_FFFF) << 8;
+    let off = (imm.cast_signed() >> 6).cast_unsigned();
+    at.wrapping_add(8).wrapping_add(off)
+}
+
 impl Header {
     /// Decode the header of `rom`.
     ///
     /// # Errors
     ///
-    /// The image ends before `0xC0`, is larger than 32 MiB or is a
-    /// multiboot program. Failing checks are not errors; see
-    /// [`Header::checks`].
+    /// The image ends before `0xC0` or is larger than 32 MiB. Failing
+    /// checks are not errors; see [`Header::checks`].
     pub fn parse(rom: &[u8]) -> Result<Header> {
         if rom.len() < HEADER_END {
             return Err(Error::TooShort(rom.len()));
         }
         if rom.len() > MAX_ROM {
             return Err(Error::TooLong(rom.len()));
-        }
-        if is_multiboot(rom) {
-            return Err(Error::Multiboot);
         }
         Ok(Header {
             entry: word(rom, ENTRY_START),
@@ -144,6 +153,7 @@ impl Header {
             complement: rom[COMPLEMENT],
             complement_computed: checksum::complement(rom),
             len: rom.len(),
+            multiboot_entry: is_multiboot(rom).then(|| word(rom, MULTIBOOT_ENTRY)),
         })
     }
 
@@ -151,11 +161,15 @@ impl Header {
     /// always-condition `B`: the branch address plus 8 plus the offset.
     #[must_use]
     pub fn entry_target(&self) -> Option<u32> {
-        is_branch(self.entry).then(|| {
-            let imm = (self.entry & 0x00FF_FFFF) << 8;
-            let off = (imm.cast_signed() >> 6).cast_unsigned();
-            0x0800_0008u32.wrapping_add(off)
-        })
+        is_branch(self.entry).then(|| branch_target(0x0800_0000, self.entry))
+    }
+
+    /// The address the multiboot entry branch jumps to once the image is
+    /// at [`MULTIBOOT_BASE`].
+    #[must_use]
+    pub fn multiboot_target(&self) -> Option<u32> {
+        let at = MULTIBOOT_BASE + MULTIBOOT_ENTRY as u32;
+        self.multiboot_entry.map(|w| branch_target(at, w))
     }
 
     /// Run every check against the expected logo hash.

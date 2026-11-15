@@ -119,14 +119,18 @@ fn a_rom_without_a_save_string_says_so() {
 }
 
 #[test]
-fn multiboot_is_refused_with_one_line() {
+fn multiboot_entry_is_shown() {
     let d = dir("gbarom-multiboot");
     let p = put(&d, "mb.gba", &synth::multiboot(0x4000));
     let out = gbarom(&d, &[path(&p)]);
-    assert_eq!(out.status.code(), Some(1));
-    let err = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert_eq!(err.trim_end().lines().count(), 1, "{err}");
-    assert!(err.contains("multiboot"), "{err}");
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        text.contains("multiboot entry: EA00000E (b $02000100)"),
+        "{text}"
+    );
+    let v = json(&gbarom(&d, &[path(&p), "--json"]));
+    assert_eq!(v["multiboot_target"], 0x0200_0100);
 }
 
 #[test]

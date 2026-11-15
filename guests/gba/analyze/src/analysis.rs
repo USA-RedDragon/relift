@@ -18,7 +18,7 @@ use crate::val::{Abs, State};
 /// Why an image cannot be analyzed.
 #[derive(Debug)]
 pub enum AnalyzeError {
-    /// The header does not parse, or the image is a multiboot image.
+    /// The header does not parse.
     Format(FormatError),
     /// The image is larger than the cartridge space.
     TooLarge(usize),
@@ -46,8 +46,7 @@ const MAX_RUNS_PER_FUNCTION: usize = 1024;
 ///
 /// # Errors
 ///
-/// The header does not parse, the image is a multiboot image, or it is
-/// larger than 32 MiB.
+/// The header does not parse, or the image is larger than 32 MiB.
 pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
     if rom.len() > MAX_ROM {
         return Err(AnalyzeError::TooLarge(rom.len()));
