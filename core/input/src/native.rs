@@ -111,10 +111,14 @@ fn handheld_pad(
     rows.extend_from_slice(&[
         ("start", "Start", "gamepad:start,key:enter"),
         ("select", "Select", "gamepad:back,key:backspace"),
-        ("up", "Up", "gamepad:dpad_up,key:up"),
-        ("down", "Down", "gamepad:dpad_down,key:down"),
-        ("left", "Left", "gamepad:dpad_left,key:left"),
-        ("right", "Right", "gamepad:dpad_right,key:right"),
+        ("up", "Up", "gamepad:dpad_up,gamepad:left_y+,key:up"),
+        ("down", "Down", "gamepad:dpad_down,gamepad:left_y-,key:down"),
+        ("left", "Left", "gamepad:dpad_left,gamepad:left_x-,key:left"),
+        (
+            "right",
+            "Right",
+            "gamepad:dpad_right,gamepad:left_x+,key:right",
+        ),
     ]);
     Port::new(
         "p1",

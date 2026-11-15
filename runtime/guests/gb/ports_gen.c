@@ -11,10 +11,10 @@ static const rl_control_decl rl_gb_ports_0[] = {
     { "b", 0, "gamepad:south,key:z" },
     { "start", 0, "gamepad:start,key:enter" },
     { "select", 0, "gamepad:back,key:backspace" },
-    { "up", 0, "gamepad:dpad_up,key:up" },
-    { "down", 0, "gamepad:dpad_down,key:down" },
-    { "left", 0, "gamepad:dpad_left,key:left" },
-    { "right", 0, "gamepad:dpad_right,key:right" },
+    { "up", 0, "gamepad:dpad_up,gamepad:left_y+,key:up" },
+    { "down", 0, "gamepad:dpad_down,gamepad:left_y-,key:down" },
+    { "left", 0, "gamepad:dpad_left,gamepad:left_x-,key:left" },
+    { "right", 0, "gamepad:dpad_right,gamepad:left_x+,key:right" },
 };
 
 const rl_port_decl rl_gb_ports[] = {
@@ -27,10 +27,10 @@ static const rl_control_decl rl_gbc_ports_0[] = {
     { "b", 0, "gamepad:south,key:z" },
     { "start", 0, "gamepad:start,key:enter" },
     { "select", 0, "gamepad:back,key:backspace" },
-    { "up", 0, "gamepad:dpad_up,key:up" },
-    { "down", 0, "gamepad:dpad_down,key:down" },
-    { "left", 0, "gamepad:dpad_left,key:left" },
-    { "right", 0, "gamepad:dpad_right,key:right" },
+    { "up", 0, "gamepad:dpad_up,gamepad:left_y+,key:up" },
+    { "down", 0, "gamepad:dpad_down,gamepad:left_y-,key:down" },
+    { "left", 0, "gamepad:dpad_left,gamepad:left_x-,key:left" },
+    { "right", 0, "gamepad:dpad_right,gamepad:left_x+,key:right" },
 };
 
 const rl_port_decl rl_gbc_ports[] = {
