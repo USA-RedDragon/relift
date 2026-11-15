@@ -68,6 +68,12 @@ pub fn run(
     update: Option<&str>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
+    if crate::gb::is_rom(dump) {
+        if update.is_some() {
+            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
+        }
+        return crate::gb::import(settings, dump, ui);
+    }
     let opts = Options {
         update: match update {
             Some(u) => UpdateSelect::parse(u)?,

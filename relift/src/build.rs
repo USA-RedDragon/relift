@@ -546,7 +546,7 @@ fn lift_summary(functions: usize, unlifted: usize) -> Line {
 /// similar size, each in a pool sized so its members fit together
 /// ([`relift_build::schedule`]). Sorts `compiles` largest source first
 /// within a stage, so the long compiles start early. Returns the pools.
-fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, u32)> {
+pub(crate) fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, u32)> {
     let size = |c: &Compile| std::fs::metadata(&c.src).map_or(0, |m| m.len());
     compiles.sort_by_cached_key(|c| std::cmp::Reverse(size(c)));
     let Some(avail) = relift_build::available_memory() else {
@@ -586,7 +586,7 @@ fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
 
 /// The C compiler command: the configured or `PATH` clang, else `zig cc`
 /// from the configured or `PATH` zig.
-fn c_compiler(t: &crate::settings::Toolchain) -> Result<Vec<String>, BoxError> {
+pub(crate) fn c_compiler(t: &crate::settings::Toolchain) -> Result<Vec<String>, BoxError> {
     if let Some(clang) = tool(&t.clang, "clang") {
         return Ok(vec![clang.display().to_string()]);
     }
@@ -603,7 +603,7 @@ fn cc_name(cc: &[String]) -> String {
     cc.iter().map(stem).collect::<Vec<_>>().join(" ")
 }
 
-fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
+pub(crate) fn tool(setting: &Path, name: &str) -> Option<PathBuf> {
     if setting.as_os_str().is_empty() {
         relift_build::find_tool(name)
     } else {
@@ -689,7 +689,7 @@ impl EmitRecord {
 }
 
 /// The project's name and its host build directory.
-fn project_out(settings: &Settings) -> Result<(String, PathBuf), BoxError> {
+pub(crate) fn project_out(settings: &Settings) -> Result<(String, PathBuf), BoxError> {
     let name = crate::paths::canonical(".")?
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -895,7 +895,7 @@ pub(crate) struct Built {
 
 /// Builds `plans` in order, each in its own directory, showing progress
 /// on `row`; returns how many steps ran.
-fn build_plans(
+pub(crate) fn build_plans(
     ui: &mut Ui,
     row: usize,
     plans: &[(Plan, PathBuf)],
@@ -934,6 +934,16 @@ fn build_plans(
         })?;
     }
     Ok(finished)
+}
+
+/// The runtime sources: the `runtime-dir` setting, or the ones this
+/// binary was built beside.
+pub(crate) fn runtime_dir(settings: &Settings) -> PathBuf {
+    if settings.runtime_dir.as_os_str().is_empty() {
+        PathBuf::from(RUNTIME_DIR)
+    } else {
+        settings.runtime_dir.clone()
+    }
 }
 
 pub(crate) fn build_project(
@@ -1271,6 +1281,12 @@ pub fn run_build(
     mods: &[PathBuf],
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
+    if crate::gb::is_project() {
+        if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
+            return Err(format!("target {t}: only the host target builds so far").into());
+        }
+        return crate::gb::build(settings, mods, ui).map(|_| ());
+    }
     build_project(settings, targets, mods, Mode::Shipped, ui).map(|_| ())
 }
 
@@ -1289,6 +1305,12 @@ pub fn run_run(
     trace_os: bool,
     ui: &mut Ui,
 ) -> Result<i32, BoxError> {
+    if crate::gb::is_project() {
+        if target.is_some_and(|t| t != "host") {
+            return Err("only the host target runs so far".into());
+        }
+        return crate::gb::run(settings, ui);
+    }
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
     let built = build_project(settings, &targets, &[], Mode::Dev, ui)?;
     let import = import_dir()?;

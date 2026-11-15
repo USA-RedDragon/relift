@@ -19,6 +19,8 @@ relift-cpu-a64 = { workspace = true }
 relift-cpu-sm83 = { workspace = true }
 relift-diff = { workspace = true }
 relift-emit = { workspace = true }
+relift-gb = { workspace = true }
+relift-gb-analyze = { workspace = true }
 relift-gb-formats = { workspace = true }
 relift-guest = { workspace = true }
 relift-host = { workspace = true }

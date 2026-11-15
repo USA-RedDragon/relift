@@ -32,9 +32,11 @@ pub enum Command {
     /// The dump is a .nup file, or a directory holding base/{exefs,romfs},
     /// updates/<version>/{exefs,romfs} and dlc/<title id>/<index>/romfs (or
     /// exefs/ and romfs/ directly). Encrypted dumps are refused: convert
-    /// them with a separate tool first.
+    /// them with a separate tool first. A Game Boy or Game Boy Color
+    /// cartridge ROM (.gb, .gbc) is imported as it is; its battery save
+    /// stays next to it as a .sav file.
     Import {
-        /// The .nup file or dump directory.
+        /// The .nup file, dump directory or cartridge ROM.
         dump: PathBuf,
         /// The update version to apply, or `base` for the base alone
         /// (default: the newest update).
@@ -49,7 +51,8 @@ pub enum Command {
         /// Code mods to build in, in order: mod directories (Atmosphere or
         /// Ryujinx layout) or .ips and .pchtxt files, comma-separated or
         /// repeated. Later mods apply over earlier ones; two mods that
-        /// write different bytes at one address are refused.
+        /// write different bytes at one address are refused. For a Game
+        /// Boy ROM, IPS, UPS or BPS ROM-hack patches, applied in order.
         #[arg(long, value_delimiter = ',', value_name = "MOD")]
         mods: Vec<PathBuf>,
     },
