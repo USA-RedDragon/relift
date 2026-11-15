@@ -1,6 +1,8 @@
 //! Function discovery over synthetic cartridges.
 
-use relift_gb_analyze::{CallKind, Loc, Report, TableBound, UnresolvedKind, analyze};
+use relift_gb_analyze::{
+    CallKind, Loc, Origin, Report, TableBound, UnresolvedKind, analyze, analyze_with,
+};
 use relift_gb_formats::banks::ROM_BANK_SIZE;
 use relift_gb_formats::synth::{self, Spec};
 
@@ -855,4 +857,37 @@ fn a_computed_entry_into_an_unrolled_loop_is_followed_for_every_count() {
         assert!(f.body.contains_key(&Loc::fixed(a)), "${a:04X}");
     }
     assert!(!f.body.contains_key(&Loc::fixed(0x400)));
+}
+
+#[test]
+fn a_location_seen_at_run_time_is_a_root() {
+    let mut rom = Cart::new(0x19, 0x04)
+        .put(0, 0x150, &[0x21, 0x00, 0x60, 0xE9])
+        .put(2, 0x6000, &[0x3E, 0x01, 0xC9])
+        .put(0, 0x200, &[0xAF, 0xC9])
+        .rom;
+    synth::fix_checksums(&mut rom);
+    let seen = [
+        Loc {
+            bank: 2,
+            addr: 0x6000,
+        },
+        Loc::fixed(0x200),
+        Loc {
+            bank: 200,
+            addr: 0x6000,
+        },
+        Loc::fixed(0x9000),
+    ];
+    let plain = analyze(&rom).expect("analyzes");
+    assert!(!has(&plain, 2, 0x6000));
+    let r = analyze_with(&rom, &seen).expect("analyzes");
+    assert!(has(&r, 2, 0x6000));
+    assert!(has(&r, 0, 0x200));
+    assert!(!has(&r, 200, 0x6000));
+    assert!(!has(&r, 0, 0x9000));
+    assert!(matches!(
+        r.functions[&Loc::fixed(0x200)].origin,
+        Origin::Seen
+    ));
 }

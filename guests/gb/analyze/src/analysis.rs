@@ -56,6 +56,17 @@ fn reg_name(i: usize) -> char {
 ///
 /// The header does not parse, or the mapper's ROM banking is not modelled.
 pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
+    analyze_with(rom, &[])
+}
+
+/// As [`analyze`], with more roots: ROM locations the program is known to
+/// have run (`Origin::Seen`). Locations outside the ROM or its windows are
+/// left out.
+///
+/// # Errors
+///
+/// As [`analyze`].
+pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
     let cart = Cartridge::parse(rom).map_err(AnalyzeError::Format)?;
     crate::state::reset_pools();
     let kind = cart.mapper();
@@ -68,7 +79,7 @@ pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
             Image::new(rom),
             &limits,
         );
-        d.seed(rom);
+        d.seed(rom, seen);
         d.solve();
         let fences = d.fences();
         if fences.is_empty() {
@@ -80,7 +91,7 @@ pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
         }
     }
     let mut d = Driver::new(model, Image::new(rom), &limits);
-    d.seed(rom);
+    d.seed(rom, seen);
     d.solve();
     Ok(d.report(kind, banks))
 }
@@ -297,7 +308,7 @@ impl Driver<'_> {
         }
     }
 
-    fn seed(&mut self, rom: &[u8]) {
+    fn seed(&mut self, rom: &[u8], seen: &[Loc]) {
         let mut start = State::symbolic();
         let reset = State::reset(&self.model);
         start.regs = [Val::Top; 7];
@@ -317,6 +328,23 @@ impl Driver<'_> {
                 self.roots.insert(Loc::fixed(v), s);
                 self.add_entry(Loc::fixed(v), Origin::Root);
             }
+        }
+        let banks = rom.len().div_ceil(ROM_BANK_SIZE);
+        for &l in seen {
+            let inside = if l.is_window() {
+                usize::from(l.bank) < banks
+            } else {
+                l.bank == 0 && l.addr < 0x4000
+            };
+            if !inside || self.roots.contains_key(&l) {
+                continue;
+            }
+            let mut s = State::symbolic();
+            s.regs = [Val::Top; 7];
+            s.lo = Bv::Unknown;
+            s.hi = Bv::Unknown;
+            self.roots.insert(l, s);
+            self.add_entry(l, Origin::Seen);
         }
     }
 

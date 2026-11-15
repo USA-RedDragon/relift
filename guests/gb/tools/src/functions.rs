@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Args;
-use relift_gb_analyze::{CallKind, Function, Loc, Origin, Report, TableBound, analyze};
+use relift_gb_analyze::{CallKind, Function, Loc, Origin, Report, TableBound, analyze_with};
 use serde_json::{Value, json};
 
 use crate::{BoxError, input, print_json};
@@ -28,6 +28,23 @@ pub struct FunctionsArgs {
     /// Exit with code 1 when a transfer is unresolved.
     #[arg(long)]
     pub strict: bool,
+    /// A learned file of a built program (`BBB:AAAA` lines, bank and
+    /// address in hex): its ROM locations are roots too.
+    #[arg(long)]
+    pub seen: Option<PathBuf>,
+}
+
+/// The `BBB:AAAA` lines of a learned file.
+fn seen_locations(text: &str) -> Vec<Loc> {
+    text.lines()
+        .filter_map(|l| {
+            let (b, a) = l.trim().split_once(':')?;
+            Some(Loc {
+                bank: u16::from_str_radix(b, 16).ok()?,
+                addr: u16::from_str_radix(a, 16).ok()?,
+            })
+        })
+        .collect()
 }
 
 /// Run the subcommand.
@@ -38,7 +55,11 @@ pub struct FunctionsArgs {
 /// transfer.
 pub fn run(args: &FunctionsArgs) -> Result<(), BoxError> {
     let rom = input(&args.rom)?;
-    let report = analyze(&rom).map_err(|e| format!("{}: {e}", args.rom.display()))?;
+    let seen = match &args.seen {
+        Some(p) => seen_locations(&std::fs::read_to_string(p)?),
+        None => Vec::new(),
+    };
+    let report = analyze_with(&rom, &seen).map_err(|e| format!("{}: {e}", args.rom.display()))?;
     if args.json {
         print_json(&to_json(&report, args.summary, args.instructions))?;
     } else {
@@ -60,6 +81,7 @@ fn bound_name(b: TableBound) -> &'static str {
 fn origin_name(o: Origin) -> &'static str {
     match o {
         Origin::Root => "root",
+        Origin::Seen => "seen",
         Origin::Call(CallKind::Call) => "call",
         Origin::Call(CallKind::Rst) => "rst",
         Origin::Call(CallKind::Trampoline) => "trampoline",

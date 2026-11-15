@@ -87,6 +87,9 @@ pub enum Origin {
     Root,
     /// The target of a call, restart, trampoline or `jp hl` helper.
     Call(CallKind),
+    /// An address the program ran in an earlier run without lifted code
+    /// there, recorded by the runtime: code, because it ran.
+    Seen,
 }
 
 /// One function.

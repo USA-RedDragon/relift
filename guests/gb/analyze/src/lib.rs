@@ -42,7 +42,7 @@ mod probe;
 mod report;
 mod state;
 
-pub use analysis::{AnalyzeError, analyze};
+pub use analysis::{AnalyzeError, analyze, analyze_with};
 pub use bankmodel::{BankModel, BankReg, OutOfRange};
 pub use func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 pub use loc::Loc;
