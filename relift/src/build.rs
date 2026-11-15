@@ -1126,7 +1126,7 @@ pub(crate) fn build_project(
                 );
             }
         },
-        _ => return Err("one target at a time".into()),
+        [t, ..] => return Err(format!("target {t}: only one target builds at a time").into()),
     };
     if let Some(rec) = std::env::var_os(EMIT_RECORD) {
         let r = lift_and_emit(settings, &name, &out, mods, ui)?;

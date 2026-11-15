@@ -63,7 +63,7 @@ fn build_and_run_without_a_project_say_what_is_missing() {
     }
     let err = stderr(&relift(&["build", "--target", "a", "--target", "b"]));
     assert!(
-        err.contains("target a: only the host target builds so far"),
+        err.contains("target a: only one target builds at a time"),
         "{err}"
     );
 }

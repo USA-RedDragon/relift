@@ -162,7 +162,6 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
 
 /// The extras of an Android program: the window, sound and Android glue
 /// backends against the SDL3 and libopus builds in `deps`.
-#[must_use]
 pub fn android_extras(
     rt: &Path,
     deps: &crate::android::Deps,
