@@ -356,3 +356,29 @@ fn dump_nso(root: &Path, spec: &NsoSpec) -> PathBuf {
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
     project
 }
+
+const RET_BIN: &[u8] = include_bytes!("ret.bin");
+
+/// As [`dump`], with the program of `ret.s`: with `wild`, a return whose
+/// address lost its canonical form; else a return to a rewritten address.
+pub fn dump_ret(root: &Path, wild: bool) -> PathBuf {
+    let mut data = vec![0u8; 0x1000];
+    data[0x10] = u8::from(wild);
+    dump_nso(
+        root,
+        &NsoSpec {
+            text: RET_BIN[..0x1000].to_vec(),
+            rodata: RET_BIN[0x1000..].to_vec(),
+            data,
+            bss: 0x1000,
+            compress: true,
+            ..NsoSpec::default()
+        },
+    )
+}
+
+/// Whether `ret.bin` is what `ret.s` assembles to; `None` without llvm-mc
+/// or llvm-objcopy.
+pub fn ret_matches_source() -> Option<bool> {
+    matches_source("ret", RET_BIN)
+}
