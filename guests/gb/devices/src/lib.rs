@@ -158,6 +158,35 @@ impl Rlgbd {
         self.begin()
     }
 
+    /// [`Rlgbd::begin`] after loading `pc` and `sp` into the CPU, keeping
+    /// the interrupt enable the library tracks.
+    pub fn at(&mut self, pc: u16, sp: u16) -> Option<u8> {
+        let r = self.gb.cpu_registers_mut();
+        r.pc = pc;
+        r.sp = sp;
+        self.begin()
+    }
+
+    /// The CPU's program counter.
+    pub fn pc(&self) -> u16 {
+        self.gb.get_cpu_registers().pc
+    }
+
+    /// The CPU's stack pointer.
+    pub fn sp(&self) -> u16 {
+        self.gb.get_cpu_registers().sp
+    }
+
+    /// The number of frames taken so far, by [`Rlgbd::frame_poll`] or a case.
+    pub fn frames(&self) -> u32 {
+        self.frames
+    }
+
+    /// Sets the interrupt master enable, as `RETI` does.
+    pub fn set_ime(&mut self, on: bool) {
+        self.gb.cpu_registers_mut().ime = on;
+    }
+
     /// The instruction boundary; see [`rlgbd_begin`].
     pub fn begin(&mut self) -> Option<u8> {
         let op = self.gb.ext_begin(&mut self.st);
@@ -676,6 +705,54 @@ pub unsafe extern "C" fn rlgbd_present_hash(h: *mut Rlgbd) -> u64 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rlgbd_enter(h: *mut Rlgbd, pc: u16, sp: u16, ime: u8) -> i32 {
     me(h).enter(pc, sp, ime).map_or(-1, i32::from)
+}
+
+/// `rlgbd_begin` after loading `pc` and `sp` into the CPU, keeping the
+/// interrupt enable the library tracks (`EI`, `DI` and `RETI` run through
+/// the library): the boundary of code that keeps its other registers.
+///
+/// # Safety
+/// `h` is a live handle between instructions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_at(h: *mut Rlgbd, pc: u16, sp: u16) -> i32 {
+    me(h).at(pc, sp).map_or(-1, i32::from)
+}
+
+/// The CPU's program counter.
+///
+/// # Safety
+/// `h` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_pc(h: *mut Rlgbd) -> u16 {
+    me(h).pc()
+}
+
+/// The CPU's stack pointer.
+///
+/// # Safety
+/// `h` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_sp(h: *mut Rlgbd) -> u16 {
+    me(h).sp()
+}
+
+/// The number of frames taken so far by `rlgbd_frame_poll` or a case, without
+/// taking one.
+///
+/// # Safety
+/// `h` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_frames(h: *mut Rlgbd) -> u32 {
+    me(h).frames()
+}
+
+/// Sets the interrupt master enable (0 or 1), as `RETI` does.
+///
+/// # Safety
+/// `h` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_set_ime(h: *mut Rlgbd, on: u8) {
+    me(h).set_ime(on != 0);
 }
 
 /// Call between instructions: when the picture unit completed an LCD frame

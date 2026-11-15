@@ -384,7 +384,11 @@ impl Case {
         }
         let uses_input = matches!(
             kind,
-            Kind::Csp { .. } | Kind::Shootout { .. } | Kind::Sram { .. } | Kind::Region { .. }
+            Kind::Run
+                | Kind::Csp { .. }
+                | Kind::Shootout { .. }
+                | Kind::Sram { .. }
+                | Kind::Region { .. }
         );
         let frames_given = frames.is_some();
         let frames = frames.unwrap_or(DEFAULT_FRAMES);
@@ -616,6 +620,7 @@ impl Case {
     }
 
     fn poll_run(&mut self, m: &mut Rlgbd) -> Verdict {
+        self.poll_input(m);
         m.frame_poll();
         if let Some(b) = self.capture_serial(m, true) {
             self.out.push(b);

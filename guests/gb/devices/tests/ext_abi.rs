@@ -294,3 +294,69 @@ fn the_c_functions_drive_a_case_end_to_end() {
         rlgbd_free(std::ptr::null_mut());
     }
 }
+
+#[test]
+fn at_keeps_the_interrupt_enable_the_library_tracks() {
+    let rom = image(
+        0,
+        0,
+        0,
+        0,
+        &[0x3E, 0x91, 0xE0, 0x40, 0x3C, 0xFB, 0x18, 0xFB],
+    );
+    let mut a = Rlgbd::new(1, &rom).unwrap();
+    let mut b = Rlgbd::new(1, &rom).unwrap();
+    for _ in 0..30_000 {
+        if let Some(op) = a.begin() {
+            a.exec_native(op);
+        }
+        let (pc, sp) = (b.pc(), b.sp());
+        if let Some(op) = b.at(pc, sp) {
+            b.exec_native(op);
+        }
+        assert_eq!(a.regs(), b.regs());
+        assert_eq!(a.now(), b.now());
+    }
+    assert_eq!(a.regs().ime, 1);
+    b.set_ime(false);
+    assert_eq!(b.regs().ime, 0);
+}
+
+#[test]
+fn frames_counts_taken_frames_without_taking_one() {
+    let rom = image(0, 0, 0, 0, &[0x3E, 0x91, 0xE0, 0x40, 0x18, 0xFE]);
+    let mut m = Rlgbd::new(0, &rom).unwrap();
+    run(&mut m, 40_000);
+    assert_eq!(m.frames(), 0);
+    let taken = m.frame_poll();
+    assert_eq!(m.frames(), taken);
+    run(&mut m, 40_000);
+    assert_eq!(m.frames(), taken);
+}
+
+#[test]
+fn a_run_case_applies_its_input_script() {
+    let rom = image(
+        0,
+        0,
+        0,
+        0,
+        &[0x3E, 0x20, 0xE0, 0x00, 0xF0, 0x00, 0xE0, 0x80, 0x18, 0xF8],
+    );
+    let mut m = Rlgbd::new(0, &rom).unwrap();
+    m.case_open("protocol=run\nframes=4\ninput=1:down\n")
+        .unwrap();
+    let mut low = 0xFF;
+    loop {
+        let pc = m.pc();
+        let v = m.case_poll(pc);
+        low = low.min(m.peek(0xFF80) & 0x0F);
+        if v != Verdict::Continue {
+            break;
+        }
+        if let Some(op) = m.begin() {
+            m.exec_native(op);
+        }
+    }
+    assert_eq!(low, 0x07);
+}

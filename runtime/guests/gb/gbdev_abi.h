@@ -137,4 +137,15 @@ void rlgbd_case_regs(rlgbd *h, const rlgbd_regs *regs);
 /** @brief The NUL-terminated detail of the verdict (or of a failed open); valid until the next case call. */
 const char *rlgbd_case_detail(rlgbd *h);
 
+/** @brief rlgbd_begin after loading pc and sp into the CPU, keeping the interrupt enable the library tracks. */
+int32_t rlgbd_at(rlgbd *h, uint16_t pc, uint16_t sp);
+/** @brief The CPU's program counter. */
+uint16_t rlgbd_pc(rlgbd *h);
+/** @brief The CPU's stack pointer. */
+uint16_t rlgbd_sp(rlgbd *h);
+/** @brief The number of frames taken so far by rlgbd_frame_poll or a case, without taking one. */
+uint32_t rlgbd_frames(rlgbd *h);
+/** @brief Sets the interrupt master enable (0 or 1), as RETI does. */
+void rlgbd_set_ime(rlgbd *h, uint8_t on);
+
 #endif
