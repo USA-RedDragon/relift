@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use relift_cpu_sm83::HALF;
+use relift_cpu_sm83::{HALF, decode};
 use relift_emit::{Function, Insn, Options, Output};
 use relift_gb_analyze::{Loc, Report};
 use relift_guest::{Frontend, LiftFailure};
@@ -259,6 +259,76 @@ fn homes(
 /// runtime.
 #[must_use]
 pub fn lift(rom: &[u8], report: &Report, ram: &[(u16, u16)], image_id: [u8; 32]) -> Lifted {
+    lift_superset(rom, report, ram, image_id, &[])
+}
+
+/// Functions over every address of the units `keys` (a bank, or [`FIXED`])
+/// that starts an instruction the bytes decode to and no function of the
+/// unit lifts: a superset of the code there, entered at any instruction.
+fn superset(
+    rom: &[u8],
+    groups: &BTreeMap<u32, Vec<(Loc, Lifts)>>,
+    keys: &[u32],
+) -> Vec<(Loc, relift_gb_analyze::Function)> {
+    let mut out = Vec::new();
+    for &key in keys {
+        let (bank, lo, hi) = if key == FIXED {
+            (0u16, 0u16, 0x4000u16)
+        } else {
+            let Ok(b) = u16::try_from(key) else { continue };
+            (b, 0x4000, 0x8000)
+        };
+        let held: BTreeSet<u64> = groups
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .flat_map(|(_, f)| f.blocks.iter().map(|(pc, ..)| *pc))
+            .collect();
+        let mut body = BTreeMap::new();
+        for addr in lo..hi {
+            let l = Loc { bank, addr };
+            if held.contains(&u64::from(addr)) {
+                continue;
+            }
+            let Some(bytes) = bytes_at(rom, l) else {
+                continue;
+            };
+            let Ok(ins) = decode(bytes) else { continue };
+            let len = ins.length();
+            if usize::from(addr) + usize::from(len) > usize::from(hi) {
+                continue;
+            }
+            body.insert(l, len);
+        }
+        let Some(&entry) = body.keys().next() else {
+            continue;
+        };
+        let bytes = body.values().map(|&n| usize::from(n)).sum();
+        out.push((
+            entry,
+            relift_gb_analyze::Function {
+                entry,
+                origin: relift_gb_analyze::Origin::Root,
+                body,
+                bytes,
+                switches_bank: false,
+                trampoline: None,
+            },
+        ));
+    }
+    out
+}
+
+/// As [`lift`], with every decodable address of the units `keys` lifted too
+/// ([`superset`]).
+#[must_use]
+pub fn lift_superset(
+    rom: &[u8],
+    report: &Report,
+    ram: &[(u16, u16)],
+    image_id: [u8; 32],
+    keys: &[u32],
+) -> Lifted {
     let fe = Gb::new();
     let mut lifted = Lifted::default();
     let mut groups: BTreeMap<u32, Vec<(Loc, Lifts)>> = BTreeMap::new();
@@ -281,6 +351,12 @@ pub fn lift(rom: &[u8], report: &Report, ram: &[(u16, u16)], image_id: [u8; 32])
         let l = lift_function(&fe, rom, &f, &mut lifted, &mut BTreeMap::new(), &mut sleds);
         groups.entry(unit_key(entry)).or_default().push((entry, l));
     }
+    for (entry, f) in superset(rom, &groups, keys) {
+        let l = lift_function(&fe, rom, &f, &mut lifted, &mut BTreeMap::new(), &mut sleds);
+        if !l.blocks.is_empty() {
+            groups.entry(unit_key(entry)).or_default().push((entry, l));
+        }
+    }
     for (key, addr) in sleds {
         match lifted.sleds.last_mut() {
             Some((k, _, end)) if *k == key && *end == addr => *end = addr + 1,
@@ -288,6 +364,9 @@ pub fn lift(rom: &[u8], report: &Report, ram: &[(u16, u16)], image_id: [u8; 32])
         }
     }
     groups.entry(FIXED).or_default();
+    for list in groups.values_mut() {
+        list.sort_by_key(|(entry, _)| *entry);
+    }
     let window: BTreeSet<(u64, u64)> = groups
         .iter()
         .filter(|(k, _)| **k != FIXED)
@@ -768,6 +847,27 @@ mod tests {
             .map(|f| f.text.as_str())
             .collect();
         assert!(!c.contains("goto L_300;") || c.contains("L_300: {"), "{c}");
+    }
+
+    #[test]
+    fn the_superset_lifts_bytes_discovery_did_not_reach() {
+        let mut r = rom();
+        r[0x300..0x303].copy_from_slice(&[0x3E, 0x07, 0xC9]);
+        let report = relift_gb_analyze::analyze(&r).expect("analyzes");
+        let fixed = |l: &Lifted| -> String {
+            l.units[0]
+                .output
+                .files
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect()
+        };
+        let plain = lift(&r, &report, &[], [0; 32]);
+        assert!(!fixed(&plain).contains("L_300: {"));
+        let all = lift_superset(&r, &report, &[], [0; 32], &[FIXED]);
+        let c = fixed(&all);
+        assert!(c.contains("L_300: {"), "{c}");
+        assert!(c.contains("L_301: {"), "{c}");
     }
 
     #[test]

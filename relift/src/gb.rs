@@ -396,7 +396,25 @@ pub fn build(
     ui.begin(row, "lift");
     let image_id = relift_switch_formats::sha256(&rom);
     let lifted = match &report {
-        Some(r) => relift_gb::program::lift(&rom, r, &learned.ram, image_id),
+        Some(r) => {
+            let keys: Vec<u32> = match std::env::var("RELIFT_GB_SUPERSET").as_deref() {
+                Ok("all") => std::iter::once(u32::MAX)
+                    .chain(1..u32::try_from(rom.len() / 0x4000).unwrap_or(0))
+                    .collect(),
+                Ok("code") => std::iter::once(u32::MAX)
+                    .chain(
+                        r.functions
+                            .keys()
+                            .filter(|l| l.is_window())
+                            .map(|l| u32::from(l.bank)),
+                    )
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+                _ => Vec::new(),
+            };
+            relift_gb::program::lift_superset(&rom, r, &learned.ram, image_id, &keys)
+        }
         None => relift_gb::program::lift_nothing(image_id),
     };
     let mut files = Vec::new();
