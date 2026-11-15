@@ -630,11 +630,21 @@ fn emit_cold(
     let i = m.index;
     ui.begin(row, "cold");
     let (sup, cached) = stage.superset(cpu, i, module, m.layout)?;
+    let mut hot: BTreeSet<u64> = m.overrides.iter().map(|o| o.entry).collect();
+    for h in m.heads.values() {
+        hot.insert(h.entry);
+        hot.extend(h.pads.iter().copied());
+    }
     let mut all: Vec<&Outline> = m
         .layout
         .functions
         .values()
         .chain(sup.layout.functions.values())
+        .filter(|o| {
+            o.runs
+                .iter()
+                .any(|&(first, n)| (0..u64::from(n)).any(|k| !hot.contains(&(first + 4 * k))))
+        })
         .collect();
     all.sort_by_key(|o| o.entry);
     let heads: Vec<relift_emit::Head> = all
@@ -702,6 +712,7 @@ fn emit_cold(
                 window: m.window,
                 enter_anywhere: Some(u64::MAX),
                 calls: calls.clone(),
+                entry_ranges: true,
                 ..relift_emit::Options::default()
             },
             &mut |d, total| {
@@ -729,11 +740,6 @@ fn emit_cold(
     written?;
     store.finish()?;
     remove_stale_shards(&dir, &files)?;
-    let mut hot: BTreeSet<u64> = m.overrides.iter().map(|o| o.entry).collect();
-    for h in m.heads.values() {
-        hot.insert(h.entry);
-        hot.extend(h.pads.iter().copied());
-    }
     let map = crate::total::code_map(cpu, module, &hot, &all)?;
     let sym = format!("rl_code_{i}_{}", c_ident(&p.name));
     let map_c = dir.join("codemap.c");
@@ -755,7 +761,7 @@ fn emit_cold(
             "{}, {} superset functions{}",
             noun(shards as u64, "cold shard"),
             count(sup.layout.functions.len() as u64),
-            if cached {
+            if cached || sup.roots == 0 {
                 String::new()
             } else {
                 format!(" from {}", noun(sup.roots as u64, "root"))
@@ -1474,7 +1480,16 @@ pub(crate) fn build_project(
         &lifted_flags
     }
     .iter()
-    .map(|f| if f == "-O2" { "-O1".into() } else { f.clone() })
+    .filter_map(|f| match f.as_str() {
+        "-O2" => Some("-Os".into()),
+        "-gline-tables-only" => None,
+        _ => Some(f.clone()),
+    })
+    .chain([
+        "-g0".into(),
+        "-fno-asynchronous-unwind-tables".into(),
+        "-fno-unwind-tables".into(),
+    ])
     .collect();
     let lifted_flags = if emitted.fp_program_wide {
         flag_flags.clone()

@@ -421,7 +421,11 @@ has a dispatch slot that is not empty, so no guest jump can miss.
 - **Cold copy.** Each module gets a second unit, `rl_cold_<i>_<module>`:
   every function of the hot layout and every superset function, emitted
   with `enter_anywhere` in pieces of about 1 KiB of C, in shards of their
-  own under `c/<i>_<module>/cold/`, built at `-O1`. Its direct calls and
+  own under `c/<i>_<module>/cold/`, built at `-Os` without debug info or
+  unwind tables (crash reports walk frame pointers). Its unit lists each run
+  of consecutive instructions of one piece as one `RL_FN_RANGE` entry
+  (`Options::entry_ranges`), which fills every empty slot of its range. A
+  function every instruction of which is a hot entry gets no cold copy. Its direct calls and
   tail calls go to the hot functions by name (`Options::calls`); hot code
   never calls cold code, and reaches it only through dispatch at an
   address that is not a hot entry. A landing pad keeps its `rl_pad_resume`
@@ -1416,7 +1420,7 @@ only on the C library and the host OS.
   designated initializers and no maps still compiles unchanged. The map
   has its own `RL_FN_MAP_VERSION`; the entry for each piece of a split
   function added `fn_addr` and made it 2.
-- Version 5 added the code maps (`rl_code_map`, `enum rl_code_class`,
+- Version 5 added `RL_FN_RANGE`, the code maps (`rl_code_map`, `enum rl_code_class`,
   `RL_CODE_PAGE_SLOTS`, `RL_CODE_MAP_VERSION`, section 5.2) and
   `rl_dispatch_trap` and `rl_dispatch_cold`.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
