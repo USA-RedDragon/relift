@@ -91,6 +91,8 @@ pub enum Origin {
     /// An address the program ran in an earlier run without lifted code
     /// recorded by the runtime: code, because it ran.
     Seen,
+    /// A bank select in a lifted bank that no path reached.
+    BankSwitch,
 }
 
 /// One function.

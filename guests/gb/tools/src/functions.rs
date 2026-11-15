@@ -84,6 +84,7 @@ fn origin_name(o: Origin) -> &'static str {
     match o {
         Origin::Root => "root",
         Origin::Seen => "seen",
+        Origin::BankSwitch => "bank-switch",
         Origin::Call(CallKind::Call) => "call",
         Origin::Call(CallKind::Rst) => "rst",
         Origin::Call(CallKind::Trampoline) => "trampoline",

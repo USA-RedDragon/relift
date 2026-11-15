@@ -81,6 +81,7 @@ pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
         );
         d.seed(rom, seen);
         d.solve();
+        d.switch_roots();
         let fences = d.fences();
         if fences.is_empty() {
             return Ok(d.report(rom, kind, banks));
@@ -93,6 +94,7 @@ pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
     let mut d = Driver::new(model, Image::new(rom), &limits);
     d.seed(rom, seen);
     d.solve();
+    d.switch_roots();
     Ok(d.report(rom, kind, banks))
 }
 
@@ -464,6 +466,74 @@ impl Driver<'_> {
         out
     }
 
+    /// Bank selects that no path reached, in the banks whose every
+    /// decodable address is lifted: a constant loaded into A and stored
+    /// to a bank register, or a call to a routine that switches banks for
+    /// its caller. Each becomes a root, so the code it maps and calls is
+    /// found and its bank lifted, until no new bank appears.
+    fn switch_roots(&mut self) {
+        let mut todo: Vec<(u16, u16)> = vec![(0, 0)];
+        let mut done: BTreeSet<u16> = BTreeSet::new();
+        while !todo.is_empty() {
+            let reached: FxSet<Loc> = self
+                .inline_bodies
+                .values()
+                .flat_map(|m| m.values())
+                .flat_map(|b| b.keys().copied())
+                .collect();
+            let mut found = Vec::new();
+            for (bank, start) in todo.drain(..) {
+                for addr in start..start + 0x4000 {
+                    let loc = Loc { bank, addr };
+                    if self.known.contains(&loc)
+                        || reached.contains(&loc)
+                        || self.roots.contains_key(&loc)
+                    {
+                        continue;
+                    }
+                    if self.selects_bank(loc) {
+                        found.push(loc);
+                    }
+                }
+            }
+            for l in found {
+                let mut s = State::symbolic();
+                s.regs = [Val::Top; 7];
+                s.lo = Bv::Unknown;
+                s.hi = Bv::Unknown;
+                self.roots.insert(l, s);
+                self.add_entry(l, Origin::BankSwitch);
+            }
+            self.solve();
+            for b in self.lift_banks() {
+                if done.insert(b) {
+                    todo.push((b, 0x4000));
+                }
+            }
+        }
+    }
+
+    fn selects_bank(&self, loc: Loc) -> bool {
+        let Some(b) = self.image.fetch(loc) else {
+            return false;
+        };
+        match b {
+            [0x3E, _, 0xEA, lo, hi, ..] => self
+                .model
+                .classify(u16::from_le_bytes([*lo, *hi]))
+                .is_some(),
+            [0xCD, lo, hi, ..] => {
+                let addr = u16::from_le_bytes([*lo, *hi]);
+                addr < 0x4000
+                    && self
+                        .summaries
+                        .get(&Loc::fixed(addr))
+                        .is_some_and(|s| s.touches && s.ctx)
+            }
+            _ => false,
+        }
+    }
+
     fn solve(&mut self) {
         let mut rounds = 0;
         while let Some(e) = self.dirty.pop() {
@@ -503,7 +573,12 @@ impl Driver<'_> {
                 called.extend(o.calls.iter().map(|c| c.target));
             }
         }
-        let mut reach: FxSet<Loc> = self.roots.keys().copied().collect();
+        let mut reach: FxSet<Loc> = self
+            .roots
+            .keys()
+            .filter(|l| self.entries.get(l) != Some(&Origin::BankSwitch))
+            .copied()
+            .collect();
         let mut stack: Vec<Loc> = reach.iter().copied().collect();
         while let Some(l) = stack.pop() {
             let Some((alone, root)) = self.results.get(&l) else {

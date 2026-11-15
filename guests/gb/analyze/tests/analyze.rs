@@ -886,6 +886,24 @@ fn a_computed_entry_into_an_unrolled_loop_is_followed_for_every_count() {
 }
 
 #[test]
+fn a_bank_select_no_path_reaches_lifts_the_bank_it_calls_into() {
+    let r = Cart::new(0x19, 0x05)
+        .put(0, 0x150, &[0x18, 0xFE])
+        .put(
+            0,
+            0x200,
+            &[0x3E, 0x07, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x40, 0xC9],
+        )
+        .put(7, 0x4000, &[0xC9])
+        .put(0, 0x300, &[0x3E, 0x09, 0xEA, 0x00, 0x20, 0xC9])
+        .analyze();
+    assert!(r.lift_banks.contains(&7), "{:?}", r.lift_banks);
+    assert!(!r.lift_banks.contains(&9));
+    assert!(!has(&r, 7, 0x4000));
+    assert!(!has(&r, 0, 0x200));
+}
+
+#[test]
 fn a_location_seen_at_run_time_is_a_root() {
     let mut rom = Cart::new(0x19, 0x04)
         .put(0, 0x150, &[0x21, 0x00, 0x60, 0xE9])
