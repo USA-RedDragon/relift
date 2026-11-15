@@ -15,7 +15,7 @@ enum { RD_BYTE = 1, RD_HALF = 2 };
 static inline uint32_t ppu_h16(const uint8_t *m, uint32_t i) { return (uint32_t)(m[i * 2] | m[i * 2 + 1] << 8); }
 static inline int32_t ppu_s28(int32_t v) { return (int32_t)((uint32_t)v << 4) >> 4; }
 
-uint32_t gba_ppu_vram_bg(const gba_ppu *p, unsigned size, uint32_t addr);
+uint32_t gba_ppu_vram_bg(gba_ppu *p, unsigned size, uint32_t addr);
 uint32_t gba_ppu_pram(const gba_ppu *p, unsigned index);
 bool gba_ppu_blank(const gba_ppu *p);
 

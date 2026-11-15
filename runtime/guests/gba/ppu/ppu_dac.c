@@ -1,6 +1,9 @@
 /**
  * @file ppu_dac.c
  * @brief The windows, the layer priorities and the blend, brighten and darken effects.
+ * The effects follow the console as NanoBoyAdvance measured it, not ares:
+ * green has six bits (bit 15 of a palette or bitmap color is its low bit),
+ * and a blend or brighten result is rounded to the nearest step.
  *
  * Ported from ares (gba/ppu/window.cpp and dac.cpp), which carries this notice:
  *
@@ -48,14 +51,28 @@ static uint16_t lookup(const gba_ppu *p, const gba_pixel *l)
     return (uint16_t)gba_ppu_pram(p, l->color);
 }
 
+static unsigned green6(uint16_t c) { return ((c >> 4) & 62u) | ((c >> 15) & 1u); }
+
+static uint16_t pack(unsigned r, unsigned g6, unsigned b) { return (uint16_t)(r | (g6 >> 1) << 5 | b << 10); }
+
 static uint16_t blend(uint16_t above, unsigned eva, uint16_t below, unsigned evb)
 {
-    unsigned ar = above & 31, ag = (above >> 5) & 31, ab = (above >> 10) & 31;
-    unsigned br = below & 31, bg = (below >> 5) & 31, bb = (below >> 10) & 31;
-    unsigned r = (ar * eva + br * evb) >> 4;
-    unsigned g = (ag * eva + bg * evb) >> 4;
-    unsigned b = (ab * eva + bb * evb) >> 4;
-    return (uint16_t)(min_u(31, r) | min_u(31, g) << 5 | min_u(31, b) << 10);
+    unsigned r = min_u(31, ((above & 31u) * eva + (below & 31u) * evb + 8) >> 4);
+    unsigned g = min_u(63, (green6(above) * eva + green6(below) * evb + 8) >> 4);
+    unsigned b = min_u(31, (((above >> 10) & 31u) * eva + ((below >> 10) & 31u) * evb + 8) >> 4);
+    return pack(r, g, b);
+}
+
+static uint16_t brighten(uint16_t c, unsigned evy)
+{
+    unsigned r = c & 31u, g = green6(c), b = (c >> 10) & 31u;
+    return pack(r + (((31 - r) * evy + 8) >> 4), g + (((63 - g) * evy + 8) >> 4), b + (((31 - b) * evy + 8) >> 4));
+}
+
+static uint16_t darken(uint16_t c, unsigned evy)
+{
+    unsigned r = c & 31u, g = green6(c), b = (c >> 10) & 31u;
+    return pack(r - ((r * evy + 7) >> 4), g - ((g * evy + 7) >> 4), b - ((b * evy + 7) >> 4));
 }
 
 void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
@@ -106,9 +123,9 @@ void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
             p->dac.blending = true;
             return;
         } else if (p->dac.blend_mode == 2 && p->dac.blend_above[above_layer]) {
-            p->dac.color = blend(p->dac.color, 16 - evy, 0x7FFF, evy);
+            p->dac.color = brighten(p->dac.color, evy);
         } else if (p->dac.blend_mode == 3 && p->dac.blend_above[above_layer]) {
-            p->dac.color = blend(p->dac.color, 16 - evy, 0x0000, evy);
+            p->dac.color = darken(p->dac.color, evy);
         }
     }
     p->dac.blending = false;
@@ -120,5 +137,5 @@ void gba_ppu_dac_lower(gba_ppu *p, unsigned x)
         const gba_pixel *below = &p->dac.layers[p->dac.below_layer];
         p->dac.color = blend(p->dac.color, min_u(16, p->dac.eva), lookup(p, below), min_u(16, p->dac.evb));
     }
-    p->line[x] = p->dac.color;
+    p->line[x] = p->dac.color & 0x7FFFu;
 }

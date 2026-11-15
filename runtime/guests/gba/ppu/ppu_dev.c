@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-enum { DEFAULT_RENDER_DOT = 42 };
+enum { DEFAULT_RENDER_DOT = 24 };
 
 static void schedule(rl_gba *g)
 {

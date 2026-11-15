@@ -53,6 +53,7 @@ void gba_ppu_render(gba_ppu *p, unsigned y)
         gba_ppu_win_run(&p->win[W_IN0], x);
         gba_ppu_win_run(&p->win[W_IN1], x);
     }
+    p->obj.hmosaic_offset = p->obj.mosaic_w;
     for (unsigned x = 0; x < GBA_PPU_W; x++) {
         for (unsigned i = 0; i < 4; i++)
             gba_ppu_bg_output(p, &p->bg[i], x);

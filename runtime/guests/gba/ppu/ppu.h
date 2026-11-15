@@ -80,6 +80,7 @@ typedef struct gba_ppu {
     uint8_t mode, frame, bg_mosaic_w, bg_mosaic_h;
     uint8_t gbc_mode, force_blank[4], green_swap;
     bool stopped;
+    uint16_t vram_bg_latch;
 
     gba_ppu_bg bg[4];
 

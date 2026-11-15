@@ -1,6 +1,12 @@
 /**
  * @file ppu_obj.c
  * @brief The sprites: the OAM walk and the cycle budget of a line, regular and affine sprites, the OBJ window and the sprite mosaic.
+ * Where NanoBoyAdvance measured the console differently from ares, it wins: a
+ * transparent pixel of an OBJ window sprite updates the priority of the
+ * pixel under it like any sprite, an OBJ window sprite has no mosaic, and
+ * mode 3 sprites are not drawn, and a 256-color sprite ignores the low bit of
+ * its tile number in two-dimensional mapping; a mosaic sprite that wraps past
+ * the bottom of the screen keeps its row (ares drew its first row).
  *
  * Ported from ares (gba/ppu/object.cpp), which carries this notice:
  *
@@ -63,6 +69,9 @@ static void read_a01(gba_ppu *p, unsigned y)
     o->vflip = (a1 >> 13) & 1;
     unsigned size = (a1 >> 14) & 3;
 
+    if (o->mode == 2)
+        o->mosaic = 0;
+
     o->width = widths[shape * 4 + size];
     o->height = heights[shape * 4 + size];
 
@@ -73,13 +82,13 @@ static void read_a01(gba_ppu *p, unsigned y)
         o->px &= (uint16_t)~1u;
 
     o->py = (uint8_t)(y - ypos);
-    if ((o->affine == 0 && o->affine_size == 1) || o->py >= (o->height << o->affine_size) || o->px >= (o->width << o->affine_size)) {
+    if ((o->affine == 0 && o->affine_size == 1) || o->mode == 3 || o->py >= (o->height << o->affine_size) || o->px >= (o->width << o->affine_size)) {
         go_next(p);
         p->obj.state = ST_A01;
     } else {
         if (o->mosaic) {
-            int32_t d = p->obj.mosaic_y - (int32_t)ypos;
-            o->py = (uint8_t)(ypos >= 160 || d >= 0 ? (uint32_t)d : 0u);
+            int32_t row = (int32_t)o->py - ((int32_t)y - p->obj.mosaic_y);
+            o->py = (uint8_t)(row > 0 ? row : 0);
         }
         p->obj.state = ST_A2;
     }
@@ -137,7 +146,7 @@ static void draw_object(gba_ppu *p, unsigned y)
         tile = (o->character + (offset << o->colors)) & 0x3FFu;
     } else {
         uint32_t row = ((uint32_t)(o->character >> 5) + (sy >> 3)) & 31u;
-        uint32_t entry = ((uint32_t)o->character + ((sx >> 3) << o->colors)) & 31u;
+        uint32_t entry = (((uint32_t)o->character & ~(uint32_t)o->colors) + ((sx >> 3) << o->colors)) & 31u;
         tile = ((row << 5) + entry) & 0x3FFu;
     }
 
@@ -147,9 +156,8 @@ static void draw_object(gba_ppu *p, unsigned y)
     unsigned bx = (o->x + o->px) & 0x1FFu;
     if (bx < 240 && sx < o->width && sy < o->height) {
         gba_pixel *b = &buffer[bx];
-        if (o->mode & 2) {
-            if (color)
-                b->flags |= PX_WIN;
+        if (o->mode == 2 && color) {
+            b->flags |= PX_WIN;
         } else if (!(b->flags & PX_ON) || o->priority < b->priority) {
             b->priority = o->priority;
             b->flags = (uint8_t)((b->flags & ~PX_MOSAIC) | (o->mosaic ? PX_MOSAIC : 0));
@@ -231,7 +239,6 @@ static void obj_scanline(gba_ppu *p, unsigned y)
 {
     if (y >= 160)
         return;
-    p->obj.hmosaic_offset = p->obj.mosaic_w;
     if (y == 0 || p->obj.vmosaic_offset == p->obj.mosaic_h) {
         p->obj.vmosaic_offset = 0;
         p->obj.mosaic_y = (int32_t)y;

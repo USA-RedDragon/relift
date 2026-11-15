@@ -1,6 +1,11 @@
 /**
  * @file ppu_bg.c
  * @brief The background layers: text, affine and bitmap, with the mosaic and the VRAM reads they make.
+ * The affine reference points advance as NanoBoyAdvance measured the console,
+ * not as ares: only while the layer is enabled (and in a mode that uses it),
+ * and by the whole mosaic height once per mosaic block. A read of video RAM
+ * above the background limit returns the last halfword the layer fetched
+ * (the bus latch), not zero; the map address of an affine layer is 16 bits wide.
  *
  * Ported from ares (gba/ppu/background.cpp and memory.cpp), which carries this notice:
  *
@@ -24,21 +29,23 @@
 
 bool gba_ppu_blank(const gba_ppu *p) { return p->force_blank[0] || p->stopped; }
 
-uint32_t gba_ppu_vram_bg(const gba_ppu *p, unsigned size, uint32_t addr)
+uint32_t gba_ppu_vram_bg(gba_ppu *p, unsigned size, uint32_t addr)
 {
-    if (p->mode < 3 && addr >= 0x10000)
-        return 0;
-    if (addr >= 0x14000)
-        return 0;
-    uint32_t a = addr & 0x1FFFFu;
-    a &= (a & 0x10000) ? 0x17FFEu : 0x0FFFEu;
-    uint32_t half = (uint32_t)(p->vram[a] | p->vram[a + 1] << 8);
+    uint32_t half;
+    if (addr >= (p->mode < 3 ? 0x10000u : 0x14000u)) {
+        half = p->vram_bg_latch;
+    } else {
+        uint32_t a = addr & 0x1FFFFu;
+        a &= (a & 0x10000) ? 0x17FFEu : 0x0FFFEu;
+        half = (uint32_t)(p->vram[a] | p->vram[a + 1] << 8);
+        p->vram_bg_latch = (uint16_t)half;
+    }
     if (size == RD_BYTE)
         return (addr & 1) ? half >> 8 : half & 0xFF;
     return half;
 }
 
-uint32_t gba_ppu_pram(const gba_ppu *p, unsigned index) { return ppu_h16(p->pram, index & 511) & 0x7FFF; }
+uint32_t gba_ppu_pram(const gba_ppu *p, unsigned index) { return ppu_h16(p->pram, index & 511); }
 
 void gba_ppu_bg_reset(gba_ppu_bg *b, unsigned id)
 {
@@ -58,12 +65,16 @@ void gba_ppu_bg_scanline(gba_ppu *p, gba_ppu_bg *b, unsigned y)
     b->mosaic_offset = 0;
     memset(b->output, 0, sizeof b->output);
     b->latch.active = 0;
-    if (!b->mosaic || (y % (1u + p->bg_mosaic_h)) == 0) {
+    unsigned rows = b->mosaic ? 1u + p->bg_mosaic_h : 1u;
+    if (rows == 1 || (y % rows) == 0) {
         b->vmosaic = y;
         b->affine.hmosaic = (uint32_t)b->lx;
         b->affine.vmosaic = (uint32_t)b->ly;
-        b->lx = ppu_s28(b->lx + b->pb);
-        b->ly = ppu_s28(b->ly + b->pd);
+        bool advances = b->enable[0] && (b->id == 2 ? p->mode >= 1 && p->mode <= 5 : b->id == 3 && p->mode == 2);
+        if (advances) {
+            b->lx = ppu_s28(b->lx + (int32_t)rows * b->pb);
+            b->ly = ppu_s28(b->ly + (int32_t)rows * b->pd);
+        }
     }
 }
 
@@ -157,7 +168,7 @@ static void affine_run(gba_ppu *p, gba_ppu_bg *b)
         uint32_t cx = (uint32_t)(b->fx >> 8) & wrap;
         uint32_t cy = (uint32_t)(b->fy >> 8) & wrap;
         uint32_t tx = cx >> 3, ty = cy >> 3;
-        uint32_t character = gba_ppu_vram_bg(p, RD_BYTE, ((uint32_t)b->screen_base << 11) + ty * size + tx) & 0xFF;
+        uint32_t character = gba_ppu_vram_bg(p, RD_BYTE, (((uint32_t)b->screen_base << 11) + ty * size + tx) & 0xFFFFu) & 0xFF;
         uint32_t color = gba_ppu_vram_bg(p, RD_BYTE, ((uint32_t)b->char_base << 14) + (character << 6) + ((cy & 7) << 3) + (cx & 7)) & 0xFF;
         if (tx < size && ty < size && color) {
             gba_pixel *o = &b->output[x];
@@ -182,7 +193,7 @@ static void bitmap_run(gba_ppu *p, gba_ppu_bg *b)
         uint32_t px = (uint32_t)(b->fx >> 8);
         uint32_t py = (uint32_t)(b->fy >> 8);
         uint32_t offset = py * width + px;
-        uint32_t color = gba_ppu_vram_bg(p, depth ? RD_HALF : RD_BYTE, base + (offset << depth)) & 0x7FFF;
+        uint32_t color = gba_ppu_vram_bg(p, depth ? RD_HALF : RD_BYTE, base + (offset << depth));
         if (px < width && py < height && (depth || color)) {
             gba_pixel *o = &b->output[x];
             if (depth)

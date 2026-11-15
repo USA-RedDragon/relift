@@ -1,0 +1,13 @@
+diff --git a/src/nba/src/hw/ppu/ppu.hh b/src/nba/src/hw/ppu/ppu.hh
+index 5002581..978eb98 100644
+--- a/src/nba/src/hw/ppu/ppu.hh
++++ b/src/nba/src/hw/ppu/ppu.hh
+@@ -427,7 +427,7 @@ private:
+     // @todo: OBJ circuitry seems to ignore 'forced blank'. But is that really true?
+     if(address >= GetSpriteVRAMBoundary()) [[likely]] {
+       sprite.timestamp_vram_access = sprite.timestamp_init + cycle;
+-      return read<T>(vram, address);
++      return read<T>(vram, address & 0x17FFFU);
+     }
+     return 0u;
+   }

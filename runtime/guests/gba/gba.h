@@ -370,8 +370,10 @@ uint64_t rl_gba_frame_hash(rl_gba *g);
 const uint16_t *rl_gba_frame(rl_gba *g);
 /**
  * @brief Sets the cycle of a line at which the picture unit draws it (default
- * 42, where ares' scanline renderer draws; register writes before it show in
- * the line, writes after it in the next). Takes effect from the next line.
+ * 24: NanoBoyAdvance, which follows the console, takes the first tile of a
+ * line from the registers at that cycle, so a write at cycle 23 or before
+ * shows in the whole line and a write from cycle 24 on shows from the second
+ * tile at the earliest, in the next line in practice). Takes effect from the next line.
  */
 void rl_gba_set_render_dot(rl_gba *g, unsigned dot);
 /** @brief Sets whether the CPU is in STOP (the picture unit shows white). */

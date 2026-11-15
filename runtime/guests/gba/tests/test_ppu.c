@@ -274,7 +274,7 @@ TEST(blend_modes_alpha_brighten_darken)
     CHECK_EQ(px(s, 3, 3), 8u);
     io16(s, 0x50, 0x0081);
     frames(s, 1);
-    CHECK_EQ(px(s, 3, 3), 23u | 15u << 5 | 15u << 10);
+    CHECK_EQ(px(s, 3, 3), 24u | 16u << 5 | 16u << 10);
     free(s);
 }
 

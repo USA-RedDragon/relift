@@ -55,6 +55,8 @@ those cycles).
 | `MEM ADDR LEN` | `MEM <hex bytes>` read from the backing memory, without bus timing or side effects |
 | `POKE ADDR HEXBYTES` | writes EWRAM, IWRAM, palette, VRAM, OAM or SRAM, `OK` |
 | `IO` | `IO <hex bytes>`: 0x04000000..0x040003FF as the CPU reads them, by halfword |
+| `IOPOKE ADDR HEXBYTES` | writes I/O registers (offsets 0..3FF from 0x04000000) one byte at a time through the bus, `OK` |
+| `PPUREGS` | `PPUREGS <hex>`: the 0x58 bytes of picture unit registers as last written, including the ones the CPU cannot read back (scroll, affine, windows, mosaic, BLDY) |
 | `FRAME` | `FRAME count=<decimal> hash=<16 hex>` |
 | `PIXELS` | `PIXELS <hex>`: the last frame, 240x160 BGR555 halfwords, little-endian |
 | `AUDIO` | `AUDIO samples=<decimal> hash=<16 hex>` since reset |

@@ -527,6 +527,58 @@ struct Server {
         o << Hex(v & 0xFF, 2) << Hex(v >> 8, 2);
       }
       o << "\n";
+    } else if(c == "IOPOKE") {
+      need(2);
+      u32 a = u32(ParseHex(w[1]));
+      auto const& h = w[2];
+      if(h.size() % 2 || a >= 0x400 || a + h.size() / 2 > 0x400) {
+        throw std::runtime_error("IOPOKE needs whole bytes inside 0..3FF");
+      }
+      for(std::size_t i = 0; i < h.size() / 2; i++) {
+        m.bus.hw.ppu.Sync();
+        m.bus.hw.WriteByte(0x04000000 + u32(a + i), u8(ParseHex(h.substr(2 * i, 2))));
+      }
+      o << "OK\n";
+    } else if(c == "PPUREGS") {
+      auto& r = m.bus.hw.ppu.mmio;
+      u8 img[0x58] = {};
+      auto put16 = [&](int at, u16 v) {
+        img[at] = u8(v);
+        img[at + 1] = u8(v >> 8);
+      };
+      auto put32 = [&](int at, u32 v) {
+        put16(at, u16(v));
+        put16(at + 2, u16(v >> 16));
+      };
+      put16(0x00, r.dispcnt.ReadHalf());
+      put16(0x02, r.greenswap);
+      for(int i = 0; i < 4; i++) {
+        put16(0x08 + 2 * i, r.bgcnt[i].ReadHalf());
+        put16(0x10 + 4 * i, r.bghofs[i]);
+        put16(0x12 + 4 * i, r.bgvofs[i]);
+      }
+      for(int i = 0; i < 2; i++) {
+        int b = 0x20 + 0x10 * i;
+        put16(b + 0, u16(r.bgpa[i]));
+        put16(b + 2, u16(r.bgpb[i]));
+        put16(b + 4, u16(r.bgpc[i]));
+        put16(b + 6, u16(r.bgpd[i]));
+        put32(b + 8, u32(r.bgx[i].initial) & 0x0FFFFFFF);
+        put32(b + 12, u32(r.bgy[i].initial) & 0x0FFFFFFF);
+        put16(0x40 + 2 * i, r.winh[i].ReadHalf());
+        put16(0x44 + 2 * i, r.winv[i].ReadHalf());
+      }
+      put16(0x48, r.winin.ReadHalf());
+      put16(0x4A, r.winout.ReadHalf());
+      put16(0x4C, u16((r.mosaic.bg.size_x - 1) | (r.mosaic.bg.size_y - 1) << 4 | (r.mosaic.obj.size_x - 1) << 8 | (r.mosaic.obj.size_y - 1) << 12));
+      put16(0x50, r.bldcnt.ReadHalf());
+      put16(0x52, u16((r.eva & 31) | (r.evb & 31) << 8));
+      put16(0x54, u16(r.evy & 31));
+      o << "PPUREGS ";
+      for(u8 b : img) {
+        o << Hex(b, 2);
+      }
+      o << "\n";
     } else if(c == "FRAME") {
       o << "FRAME count=" << m.video->frames << " hash=" << Hex(m.video->Hash(), 16) << "\n";
     } else if(c == "PIXELS") {
