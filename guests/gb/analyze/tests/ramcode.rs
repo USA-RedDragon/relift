@@ -234,3 +234,20 @@ fn a_driver_loop_copies_each_test_from_its_bank() {
         ]
     );
 }
+
+#[test]
+fn a_halt_runs_the_enabled_handler_with_the_state_before_it() {
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x3E, 0xC9, 0xEA, 0x00, 0xC8, 0x3E, 0x04, 0xE0, 0xFF, 0xFB, 0x76, 0x18, 0xFE,
+            ],
+        ),
+        (
+            0x50,
+            &[0xFA, 0x00, 0xC8, 0xEA, 0x00, 0xC0, 0xCD, 0x00, 0xC0, 0xD9],
+        ),
+    ]);
+    assert_eq!(ops(&r), [(0xC000, 0xC9, RamClass::Generated)]);
+}

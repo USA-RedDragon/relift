@@ -20,7 +20,9 @@
 //! control to a test it copied there, gets a budget of its own for that
 //! code; when the path ends there it goes on, with its memory but unknown
 //! registers, at the ROM targets of the jumps that code holds, so the
-//! driver's next round copies its next test.
+//! driver's next round copies its next test. A `halt` or `ei` with the
+//! interrupt master enable set and known enabled interrupts calls the
+//! handler of the first and forks into the others.
 //!
 //! Every instruction a path runs in RAM is predicted, and so is the code
 //! decoded from the bytes a path holds where it jumps into RAM from ROM.
@@ -215,6 +217,8 @@ struct Path {
     steps: u32,
     limit: u32,
     frames: Vec<Frame>,
+    ie: Option<u8>,
+    ime: Option<bool>,
     main: bool,
     free: bool,
     launch: Option<Launch>,
@@ -435,6 +439,10 @@ impl Machine<'_> {
             p.svbk = b.v.map(|v| (v & 7).max(1));
             return;
         }
+        if a == 0xFFFF {
+            p.ie = b.v;
+            return;
+        }
         if !is_ram(a) {
             return;
         }
@@ -624,6 +632,8 @@ fn cb_op(p: &mut Path, op: u8, v: Option<u8>) -> Option<Option<u8>> {
 
 enum Flow {
     Next,
+    Halt,
+    Ei,
     Jump(Option<u16>),
     Branch(Option<bool>, Option<u16>),
     Call(Option<bool>, Option<u16>),
@@ -698,7 +708,16 @@ impl Machine<'_> {
             }
         };
         let flow = match op {
-            0x00 | 0x10 | 0x76 | 0xF3 | 0xFB => Flow::Next,
+            0x00 | 0x10 => Flow::Next,
+            0x76 => Flow::Halt,
+            0xF3 => {
+                p.ime = Some(false);
+                Flow::Next
+            }
+            0xFB => {
+                p.ime = Some(true);
+                Flow::Ei
+            }
             0x40..=0x7F => {
                 let v = rd(self, p, z);
                 if x == 6 {
@@ -887,7 +906,11 @@ impl Machine<'_> {
             0xCD => Flow::Call(Some(true), imm16),
             0xC4 | 0xCC | 0xD4 | 0xDC => Flow::Call(cond(p, x), imm16),
             _ if op & 0xC7 == 0xC7 => Flow::Call(Some(true), Some(u16::from(op & 0x38))),
-            0xC9 | 0xD9 => Flow::Ret(Some(true)),
+            0xC9 => Flow::Ret(Some(true)),
+            0xD9 => {
+                p.ime = Some(true);
+                Flow::Ret(Some(true))
+            }
             0xC0 | 0xC8 | 0xD0 | 0xD8 => Flow::Ret(cond(p, x)),
             0xE9 => Flow::Jump(hl),
             _ if op & 0xCF == 0xC5 => {
@@ -985,6 +1008,26 @@ impl Machine<'_> {
         Some(flow)
     }
 
+    /// Calls `t` from `p.pc`, which the callee returns to.
+    fn call(&self, p: &mut Path, f: &mut Found, t: u16, resumable: bool) {
+        if p.frames.len() >= MAX_FRAMES {
+            return;
+        }
+        p.frames.push(Frame {
+            r: p.r,
+            ret: p.pc,
+            sp: p.sp,
+            lo: p.lo,
+            hi: p.hi,
+            svbk: p.svbk,
+            at: p.steps,
+            resumable,
+        });
+        let [h, l] = p.pc.to_be_bytes();
+        self.push(p, f, calc(Some(h)), calc(Some(l)));
+        p.pc = t;
+    }
+
     fn enter(&self, p: &Path, f: &mut Found, from: u16, to: u16) {
         if from < 0x8000 && to >= 0x8000 && is_ram(to) && self.read(p, Some(from)).v != Some(0xE9) {
             f.entries.insert((norm(to), self.bucket(p, norm(to))));
@@ -1044,6 +1087,7 @@ impl Machine<'_> {
                 p.steps += 1;
                 let pc = p.pc;
                 let op = self.read(&p, Some(pc)).v;
+                let ime = p.ime == Some(true);
                 let Some(flow) = self.step(&mut p, f) else {
                     if p.resume() {
                         continue;
@@ -1069,6 +1113,28 @@ impl Machine<'_> {
                 };
                 let dead = match flow {
                     Flow::Next | Flow::Branch(Some(false), _) => false,
+                    Flow::Halt | Flow::Ei => {
+                        let ie = p.ie.unwrap_or(0) & 0x1F;
+                        let sure = p.ime == Some(true);
+                        if p.ime != Some(false) && ie != 0 && !(ime && matches!(flow, Flow::Ei)) {
+                            if sure && matches!(flow, Flow::Ei) {
+                                queue(&mut work, fork(&p));
+                            }
+                            let vectors = (0..5u16).filter(|i| ie & (1 << i) != 0);
+                            for (k, v) in vectors.map(|i| 0x40 + 8 * i).enumerate() {
+                                if sure && k == 0 {
+                                    p.ime = Some(false);
+                                    self.call(&mut p, f, v, true);
+                                } else {
+                                    let mut q = fork(&p);
+                                    q.ime = Some(false);
+                                    self.call(&mut q, f, v, true);
+                                    queue(&mut work, q);
+                                }
+                            }
+                        }
+                        false
+                    }
                     Flow::Stop | Flow::Jump(None) | Flow::Branch(Some(true), None) => true,
                     Flow::Jump(Some(t)) | Flow::Branch(Some(true), Some(t)) => {
                         goto(&mut p, t, f);
@@ -1101,19 +1167,8 @@ impl Machine<'_> {
                         }
                         match t {
                             Some(t) if p.frames.len() < MAX_FRAMES => {
-                                p.frames.push(Frame {
-                                    r: p.r,
-                                    ret: p.pc,
-                                    sp: p.sp,
-                                    lo: p.lo,
-                                    hi: p.hi,
-                                    svbk: p.svbk,
-                                    at: p.steps,
-                                    resumable: op.is_some_and(|o| o & 0xC7 != 0xC7),
-                                });
-                                let [h, l] = p.pc.to_be_bytes();
-                                self.push(&mut p, f, calc(Some(h)), calc(Some(l)));
-                                goto(&mut p, t, f);
+                                self.enter(&p, f, pc, t);
+                                self.call(&mut p, f, t, op.is_some_and(|o| o & 0xC7 != 0xC7));
                                 false
                             }
                             _ => {
@@ -1276,6 +1331,8 @@ impl Machine<'_> {
             steps: 0,
             limit: ROOT_STEPS,
             frames: Vec::new(),
+            ie: None,
+            ime: None,
             main: true,
             free: false,
             launch: None,
