@@ -65,6 +65,11 @@ struct rl_window_backend {
     void *(*vulkan_gipa)(void);
     /** @brief Creates a VkSurfaceKHR for w on host instance; returns a VkResult. */
     int32_t (*vulkan_surface)(rl_window *w, void *instance, uint64_t *surface);
+    /**
+     * @brief Optional. Shows a frame of width by height RGB888 pixels (rows packed) in w, scaled to fit with square
+     * pixels; any thread, the pixels are copied before it returns. NULL for a backend that only makes Vulkan surfaces.
+     */
+    void (*present_rgb)(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height);
 };
 
 /**
@@ -92,6 +97,9 @@ RL_RUNTIME_API void rl_window_emit(rl_window *w, int event);
  * body runs on the calling thread and rl_window_backend_current is NULL.
  */
 RL_RUNTIME_API int rl_window_main(int (*body)(void *arg), void *arg);
+
+/** @brief Shows an RGB888 frame in w through the backend's present_rgb; returns false when the backend has none. */
+RL_RUNTIME_API bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height);
 
 /** @brief The host backend built with VIDEO=sdl3. */
 RL_RUNTIME_API const rl_window_backend *rl_host_window_backend(void);

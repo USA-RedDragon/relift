@@ -24,6 +24,10 @@ typedef struct sdl_win {
     SDL_Window *w;
     SDL_WindowID id;
     uint32_t width, height;
+    SDL_Renderer *r;
+    SDL_Texture *t;
+    uint32_t tw, th;
+    bool no_renderer;
     struct sdl_win *next;
 } sdl_win;
 
@@ -318,6 +322,10 @@ static void do_close(void *p)
             break;
         }
     SDL_UnlockMutex(g_lock);
+    if (w->t)
+        SDL_DestroyTexture(w->t);
+    if (w->r)
+        SDL_DestroyRenderer(w->r);
     SDL_DestroyWindow(w->w);
     free(w);
 }
@@ -370,6 +378,53 @@ static int32_t sdl_vulkan_surface(rl_window *h, void *instance, uint64_t *surfac
     return r.ok ? 0 : -3;
 }
 
+typedef struct present_req {
+    sdl_win *w;
+    const uint8_t *rgb;
+    uint32_t width, height;
+} present_req;
+
+static void do_present(void *p)
+{
+    present_req *q = p;
+    sdl_win *w = q->w;
+    if (w->no_renderer)
+        return;
+    if (!w->r) {
+        w->r = SDL_CreateRenderer(w->w, NULL);
+        if (!w->r) {
+            rl_log(RL_LOG_ERROR, "window", "SDL could not make a renderer: %s", SDL_GetError());
+            w->no_renderer = true;
+            return;
+        }
+    }
+    if (!w->t || w->tw != q->width || w->th != q->height) {
+        if (w->t)
+            SDL_DestroyTexture(w->t);
+        w->t = SDL_CreateTexture(w->r, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, (int)q->width, (int)q->height);
+        if (!w->t) {
+            rl_log(RL_LOG_ERROR, "window", "SDL could not make a texture: %s", SDL_GetError());
+            w->no_renderer = true;
+            return;
+        }
+        SDL_SetTextureScaleMode(w->t, SDL_SCALEMODE_NEAREST);
+        SDL_SetRenderLogicalPresentation(w->r, (int)q->width, (int)q->height, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+        w->tw = q->width;
+        w->th = q->height;
+    }
+    SDL_UpdateTexture(w->t, NULL, q->rgb, (int)(q->width * 3));
+    SDL_SetRenderDrawColor(w->r, 0, 0, 0, 255);
+    SDL_RenderClear(w->r);
+    SDL_RenderTexture(w->r, w->t, NULL, NULL);
+    SDL_RenderPresent(w->r);
+}
+
+static void sdl_present_rgb(rl_window *h, const uint8_t *rgb, uint32_t width, uint32_t height)
+{
+    present_req q = { .w = (sdl_win *)h, .rgb = rgb, .width = width, .height = height };
+    on_loop(do_present, &q);
+}
+
 static const rl_window_backend g_sdl = {
     .name = "SDL3",
     .init = sdl_init,
@@ -381,6 +436,7 @@ static const rl_window_backend g_sdl = {
     .vulkan_extensions = sdl_vulkan_extensions,
     .vulkan_gipa = sdl_vulkan_gipa,
     .vulkan_surface = sdl_vulkan_surface,
+    .present_rgb = sdl_present_rgb,
 };
 
 const rl_window_backend *rl_host_window_backend(void) { return &g_sdl; }

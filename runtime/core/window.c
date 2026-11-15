@@ -31,6 +31,14 @@ void rl_window_set_events(rl_window_event_fn *fn, void *user)
     pthread_mutex_unlock(&g_lock);
 }
 
+bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height)
+{
+    if (!w || !w->b || !w->b->present_rgb)
+        return false;
+    w->b->present_rgb(w, rgb, width, height);
+    return true;
+}
+
 void rl_window_emit(rl_window *w, int event)
 {
     pthread_mutex_lock(&g_lock);
