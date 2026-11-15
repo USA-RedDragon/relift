@@ -44,6 +44,8 @@ NDK=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
 make -C runtime -j2 CC=$NDK/aarch64-linux-android30-clang AR=$NDK/llvm-ar BUILD=build/android all
 ```
 
+`runtime/tools/cross/gbcross.py --target <windows-x64|windows-arm64|android-arm64|android-x64|macos-x64|macos-arm64|ios-arm64|ios-sim-arm64> --relift BIN --work DIR [--run]` cross-builds the runtime and a generated Game Boy test program for one target (zig 0.17.1 or llvm-mingw for Windows, the NDK found through `ANDROID_NDK_HOME`, `ANDROID_NDK_ROOT` or the SDK's `ndk-bundle` and newest `ndk/<version>` for Android, Xcode for Apple targets), runs `release_guard.py` on the result (no hot-load, no `dlopen` or `LoadLibrary` outside `hostlib.c`, no executable memory, no writable and executable segment) and with `--run` runs the program (wine, adb or locally). A missing tool stops the run and names what to install. The `Cross` workflow runs it for Windows x86-64, Android arm64, macOS x86-64 and iOS.
+
 `portable` builds only `crash_test`, `fiber_tests` and `sched_bench`,
 which link the host-portable part of the core (crash handler, fibers,
 scheduler), so they build for Windows (x86-64 and arm64), where the rest
