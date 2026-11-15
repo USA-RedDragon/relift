@@ -11,10 +11,12 @@
 #include "a64.h"
 #include "hostlib.h"
 #include "runner.h"
+#include "vi.h"
 #include "vkf.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define THUNKS 0x08000000ull
@@ -826,6 +828,13 @@ static void resizable_extent(void *user, uint64_t surface, uint32_t guest[2], ui
 
 static rl_vk_surface_provider g_resizable = { .create = resizable_create, .extent = resizable_extent };
 
+static int64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
+}
+
 TEST(vk_vi_surface_presents_headless)
 {
     g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
@@ -979,7 +988,14 @@ TEST(vk_vi_surface_presents_headless)
         CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
         CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
         pi.pImageIndices = GP(gput(&idx, 4));
+        int64_t before = mono_ns();
         CHECK_EQ(VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi))), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkResetFences", dev, 1, gput(&fence, 8))), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, 0, 0, fence, gidx)), VK_NOT_READY);
+        CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, UINT64_MAX, 0, fence, gidx)), VK_SUCCESS);
+        CHECK(mono_ns() >= vi_vsync_after(before));
+        CHECK(g32(gidx) != idx);
+        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
         CHECK_EQ(VKR(G("vkDeviceWaitIdle", dev)), VK_SUCCESS);
         G("vkDestroyCommandPool", dev, g64(gpool), 0);
         G("vkDestroyFence", dev, fence, 0);

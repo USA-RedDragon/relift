@@ -10,6 +10,12 @@
  * the present letterboxes the guest image into it. The guest never gets
  * VK_ERROR_OUT_OF_DATE_KHR or VK_SUBOPTIMAL_KHR from a resize.
  *
+ * Presents are paced like the console's FIFO queue: each frame is shown at
+ * the first vsync of vi_vsync_after that follows its present and the frame
+ * before it, and an image comes back to vkAcquireNextImageKHR only when the
+ * frame after it is shown. A game that renders faster than 60 frames a
+ * second waits in acquire, as it waits in DequeueBuffer on the console.
+ *
  * Guest swapchain handles are ids from this file (0x57 in the top byte).
  */
 #include "vkf.h"
@@ -45,6 +51,10 @@ typedef struct vkf_swap {
     bool busy[SWAP_MAX];
     bool held[SWAP_MAX];
     uint32_t host_idx[SWAP_MAX];
+    int64_t free_at[SWAP_MAX];
+    int64_t last_shown;
+    uint32_t shown;
+    bool any_shown;
     uint32_t next;
     VkSwapchainKHR host;
     uint32_t host_n;
@@ -451,6 +461,7 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     vkf_swap *old = swap_of((uint64_t)(uintptr_t)ci->oldSwapchain, k.obj);
     if (old) {
         pthread_mutex_lock(&old->lock);
+        s->last_shown = old->last_shown;
         if (old->surface == s->surface && old->host) {
             wait_all(old);
             s->host = old->host;
@@ -598,12 +609,33 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             if (r < 0)
                 break;
         }
-        uint32_t i = s->next, tries = 0;
-        while (s->held[i] && tries++ < s->n)
-            i = (i + 1) % s->n;
-        if (s->held[i]) {
+        uint32_t i = s->n;
+        for (uint32_t t = 0; t < s->n; t++) {
+            uint32_t j = (s->next + t) % s->n;
+            if (!s->held[j] && (i == s->n || s->free_at[j] < s->free_at[i]))
+                i = j;
+        }
+        if (i == s->n) {
             r = VK_NOT_READY;
             break;
+        }
+        int64_t now = now_ns();
+        if (s->free_at[i] > now) {
+            if (!timeout) {
+                r = VK_NOT_READY;
+                break;
+            }
+            int64_t left = timeout == UINT64_MAX ? INT64_MAX : (int64_t)timeout - (now - start);
+            if (left <= 0) {
+                r = VK_TIMEOUT;
+                break;
+            }
+            int64_t d = s->free_at[i] - now < left ? s->free_at[i] - now : left;
+            pthread_mutex_unlock(&s->lock);
+            struct timespec ts = { (time_t)(d / 1000000000ll), (long)(d % 1000000000ll) };
+            nanosleep(&ts, NULL);
+            pthread_mutex_lock(&s->lock);
+            continue;
         }
         if (s->busy[i]) {
             r = DFN(s, vkWaitForFences)(s->dev, 1, &s->done[i], VK_TRUE, timeout);
@@ -787,6 +819,19 @@ static void record(vkf_swap *s, uint32_t i, uint32_t hi)
     DFN(s, vkEndCommandBuffer)(cb);
 }
 
+static void show(vkf_swap *s, uint32_t i)
+{
+    int64_t at = vi_vsync_after(now_ns());
+    if (at < s->last_shown + VI_VSYNC_NS)
+        at = s->last_shown + VI_VSYNC_NS;
+    s->last_shown = at;
+    if (s->any_shown && s->shown != i)
+        s->free_at[s->shown] = at;
+    s->free_at[i] = INT64_MAX;
+    s->shown = i;
+    s->any_shown = true;
+}
+
 static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkSemaphore *waits, uint32_t nwaits,
                              uint32_t i)
 {
@@ -830,6 +875,7 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .pImageIndices = &hi,
     };
     r = DFN(s, vkQueuePresentKHR)(q, &pi);
+    show(s, i);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
         s->stale = true;
         r = VK_SUCCESS;

@@ -185,9 +185,14 @@ counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.
 
 The console's own swapchain layer (`NvSwapchain` in the `vulkan` module)
 offers only `VK_PRESENT_MODE_FIFO_KHR` and sets swap interval 1 on the
-window. `vkGetPhysicalDeviceSurfacePresentModesKHR` reports FIFO alone too, so
-a game that picks its mode from the list (The Forge prefers immediate when
-vsync is off) gets FIFO, as on the console.
+window, so a game shows at most one frame per 60 Hz vsync and waits in
+dequeue when it renders faster. The layer does the same:
+`vkGetPhysicalDeviceSurfacePresentModesKHR` reports FIFO alone, each present
+is shown at the next vsync of the vi timeline (`vi_vsync_after`, the one the
+display's vsync event fires on) after the frame before it, and acquire hands
+an image back only once the frame presented after it is shown. A game that
+picks its mode from the list (The Forge prefers immediate when vsync is off)
+gets FIFO, as on the console.
 
 ## Loading
 
