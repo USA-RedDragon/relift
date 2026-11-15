@@ -351,4 +351,14 @@ rl_result vi_native_window(int32_t binder_id, rl_ipc_buf out, uint64_t *len);
 /** @brief The vsync event (created on demand) and a start of its timer thread. */
 hos_revent *vi_vsync_event(bool start);
 
+/** @brief Time between two vsyncs of the console's display, in nanoseconds (60 Hz). */
+#define VI_VSYNC_NS 16666667ll
+/**
+ * @brief The first vsync strictly after t (CLOCK_MONOTONIC nanoseconds).
+ *
+ * The vsync event and the swapchain present pacing share this one timeline,
+ * so a frame shown at a vsync and the event the guest waits on line up.
+ */
+int64_t vi_vsync_after(int64_t t);
+
 #endif

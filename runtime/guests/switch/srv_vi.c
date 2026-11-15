@@ -18,7 +18,6 @@ enum { VI_TYPE_APPLICATION = 0, VI_TYPE_MANAGER = 1, VI_TYPE_SYSTEM = 2 };
 #define VI_DISPLAYS 5
 #define VI_NAME_SIZE 0x40u
 #define VI_DISPLAY_INFO 0x60u
-#define VSYNC_NS 16666667ll
 
 static const char *const display_names[VI_DISPLAYS] = { "Default", "External", "Edid", "Internal", "Null" };
 
@@ -27,6 +26,7 @@ static uint32_t res_w = 1280, res_h = 720;
 static pthread_mutex_t vsync_lock = PTHREAD_MUTEX_INITIALIZER;
 static hos_revent *vsync_ev;
 static pthread_t vsync_thread;
+static int64_t vsync_epoch;
 static bool vsync_running;
 static bool vsync_quit;
 
@@ -52,15 +52,31 @@ void vi_get_resolution(uint32_t *w, uint32_t *h)
     *h = __atomic_load_n(&res_h, __ATOMIC_RELAXED);
 }
 
+static int64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
+}
+
+int64_t vi_vsync_after(int64_t t)
+{
+    int64_t e = __atomic_load_n(&vsync_epoch, __ATOMIC_ACQUIRE);
+    if (!e) {
+        int64_t mine = mono_ns();
+        e = __atomic_compare_exchange_n(&vsync_epoch, &e, mine, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) ? mine : e;
+    }
+    if (t < e)
+        return e;
+    return e + ((t - e) / VI_VSYNC_NS + 1) * VI_VSYNC_NS;
+}
+
 static void *vsync_main(void *arg)
 {
     (void)arg;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    int64_t next = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec + VSYNC_NS;
+    int64_t next = vi_vsync_after(mono_ns());
     for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        int64_t now = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
+        int64_t now = mono_ns();
         if (next > now) {
             struct timespec d = { (time_t)((next - now) / 1000000000ll), (long)((next - now) % 1000000000ll) };
             nanosleep(&d, NULL);
@@ -77,7 +93,8 @@ static void *vsync_main(void *arg)
             rl_hos_event_signal(e);
             hos_kobj_unref(&e->obj);
         }
-        next += VSYNC_NS;
+        int64_t done = mono_ns();
+        next = vi_vsync_after(done > next ? done : next);
     }
 }
 

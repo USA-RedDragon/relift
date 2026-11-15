@@ -846,6 +846,19 @@ TEST(vi_droppable_and_history)
     CHECK_EQ(state, 3);
 }
 
+TEST(vi_vsync_timeline)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    int64_t now = (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
+    int64_t a = vi_vsync_after(now);
+    CHECK(a > now);
+    CHECK(a - now <= VI_VSYNC_NS);
+    CHECK_EQ(vi_vsync_after(a - 1), a);
+    CHECK_EQ(vi_vsync_after(a), a + VI_VSYNC_NS);
+    CHECK_EQ(vi_vsync_after(a + 10 * VI_VSYNC_NS + 5), a + 11 * VI_VSYNC_NS);
+}
+
 TEST(vi_vsync_signal)
 {
     fx f;
