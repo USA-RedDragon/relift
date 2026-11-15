@@ -39,6 +39,26 @@ fn switch_has_eight_players_and_touch() {
 }
 
 #[test]
+fn only_switch_player_one_binds_the_keyboard() {
+    let s = native_ports("switch").unwrap();
+    let b = Bindings::defaults(&s);
+    let list = |port: &str, control: &str| -> Vec<String> {
+        b.get(port, control)
+            .unwrap()
+            .iter()
+            .map(|i| i.to_string())
+            .collect()
+    };
+    assert_eq!(list("p1", "a"), ["gamepad:east", "key:l", "key:space"]);
+    assert_eq!(
+        list("p1", "lstick_x"),
+        ["gamepad:left_x", "key:d+", "key:a-"]
+    );
+    assert_eq!(list("p2", "a"), ["gamepad:east"]);
+    assert_eq!(list("p8", "lstick_y"), ["gamepad:left_y"]);
+}
+
+#[test]
 fn joy_con_layouts_are_subsets() {
     let pair = switch_player(1, SwitchLayout::JoyConPair);
     let left = switch_player(1, SwitchLayout::JoyConLeft);

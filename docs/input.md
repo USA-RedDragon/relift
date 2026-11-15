@@ -20,6 +20,26 @@ are generated from them (`runtime/guests/switch/ports_gen.c`,
 (pair, left and right sideways) are subsets of the Pro Controller controls.
 Motion is not declared yet.
 
+## Switch keyboard defaults
+
+Player 1 binds the keyboard next to the pad, so a player with no pad
+connected can play. The other players have no keys. With no gamepad attached, the window host connects
+pad 1 with no buttons, and the keys drive it through these bindings:
+
+| Control | Keys | Control | Keys |
+| --- | --- | --- | --- |
+| Left stick | `w` `a` `s` `d` | D-pad | arrow keys |
+| A | `l`, `space` | B | `k`, `escape` |
+| X | `i` | Y | `j` |
+| L | `q` | R | `e` |
+| ZL | `z` | ZR | `c` |
+| Plus | `enter` | Minus | `backspace` |
+| Left stick press | `left_shift` | Right stick press | `right_shift` |
+
+The right stick has no key. Rebind keys with `bind.p1.<control>`, such as
+`bind.p1.a=gamepad:east,key:f`, or give `p2` and up their own keys. A pad and the keyboard work together: a control follows whichever
+input is held hardest.
+
 ## Extra ports and controls
 
 `game.toml` or a mod adds ports or controls:

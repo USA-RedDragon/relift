@@ -85,11 +85,18 @@ const SWITCH_RIGHT: &[Row] = &[
     ("rstick_y", X, "Right stick vertical", "gamepad:right_y"),
 ];
 
-fn controls(groups: &[&[Row]]) -> Vec<Control> {
+fn controls(groups: &[&[Row]], keyboard: bool) -> Vec<Control> {
     groups
         .iter()
         .flat_map(|g| g.iter())
-        .map(|(id, kind, label, default)| Control::new(id, *kind).labeled(label).bound(default))
+        .map(|(id, kind, label, default)| {
+            let default = default
+                .split(',')
+                .filter(|b| keyboard || !b.starts_with("key:"))
+                .collect::<Vec<_>>()
+                .join(",");
+            Control::new(id, *kind).labeled(label).bound(&default)
+        })
         .collect()
 }
 
@@ -102,8 +109,12 @@ pub fn switch_player(number: u8, layout: SwitchLayout) -> Port {
         SwitchLayout::JoyConLeft => vec![SWITCH_DPAD, SWITCH_LEFT],
         SwitchLayout::JoyConRight => vec![SWITCH_FACE, SWITCH_RIGHT],
     };
-    Port::new(&format!("p{number}"), layout.kind(), controls(&groups))
-        .labeled(&format!("Player {number}"))
+    Port::new(
+        &format!("p{number}"),
+        layout.kind(),
+        controls(&groups, number == 1),
+    )
+    .labeled(&format!("Player {number}"))
 }
 
 fn touch() -> Port {
