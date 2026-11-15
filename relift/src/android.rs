@@ -560,6 +560,69 @@ fn link_resources(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> Result<(), BoxErr
     Ok(())
 }
 
+/// The page size Android 15 and later may run with; native libraries must
+/// be built and stored for it.
+const PAGE: usize = 16384;
+
+/// The `p_align` of every loadable segment of the ELF image `elf`, or what
+/// is wrong with it.
+fn load_alignments(elf: &[u8]) -> Result<Vec<u64>, String> {
+    let rd = |at: usize, n: usize| elf.get(at..at + n).ok_or("a truncated ELF header");
+    if rd(0, 4)? != b"\x7fELF" || rd(4, 1)?[0] != 2 {
+        return Err("not a 64-bit ELF".into());
+    }
+    let u16_at = |at: usize| rd(at, 2).map(|b| usize::from(u16::from_le_bytes([b[0], b[1]])));
+    let u64_at = |at: usize| {
+        rd(at, 8).map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    };
+    let phoff = usize::try_from(u64_at(0x20)?).map_err(|_| "a bad program header offset")?;
+    let entsize = u16_at(0x36)?;
+    let count = u16_at(0x38)?;
+    let mut out = Vec::new();
+    for i in 0..count {
+        let at = phoff + i * entsize;
+        if rd(at, 4)? == [1, 0, 0, 0] {
+            out.push(u64_at(at + 0x30)?);
+        }
+    }
+    Ok(out)
+}
+
+/// Fails when a native library in the APK `apk` cannot be mapped on a
+/// device with 16 KiB pages: an entry that is compressed or does not start
+/// on a 16 KiB boundary, or a loadable segment aligned to less.
+///
+/// # Errors
+///
+/// The first offending library, named with the reason.
+pub fn check_page_alignment(apk: &[u8]) -> Result<(), BoxError> {
+    for e in zip::entries(apk)? {
+        if !(e.name.starts_with("lib/") && e.name.ends_with(".so")) {
+            continue;
+        }
+        if e.method != 0 {
+            return Err(format!("{}: stored compressed; it must be stored", e.name).into());
+        }
+        if e.offset % PAGE != 0 {
+            return Err(format!(
+                "{}: starts at byte {}, not on a 16 KiB boundary",
+                e.name, e.offset
+            )
+            .into());
+        }
+        for align in load_alignments(e.data).map_err(|m| format!("{}: {m}", e.name))? {
+            if align < PAGE as u64 {
+                return Err(format!(
+                    "{}: a loadable segment is aligned to {align:#x}; link with -Wl,-z,max-page-size=16384",
+                    e.name
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Makes the signed APK of `a`.
 ///
 /// # Errors
@@ -667,6 +730,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
             .arg(a.output),
         "apksigner verify",
     )?;
+    check_page_alignment(&std::fs::read(a.output)?)?;
     Ok(())
 }
 
@@ -703,6 +767,40 @@ mod tests {
         v.sort_by_key(|p| std::cmp::Reverse(version_key(p)));
         assert_eq!(v[0], PathBuf::from("36.0.0"));
         assert_eq!(v[2], PathBuf::from("5.1"));
+    }
+
+    fn elf(align: u64) -> Vec<u8> {
+        let mut b = vec![0u8; 0x40 + 56];
+        b[..4].copy_from_slice(b"\x7fELF");
+        b[4] = 2;
+        b[0x20..0x28].copy_from_slice(&0x40u64.to_le_bytes());
+        b[0x36..0x38].copy_from_slice(&56u16.to_le_bytes());
+        b[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes());
+        b[0x40..0x44].copy_from_slice(&1u32.to_le_bytes());
+        b[0x40 + 0x30..0x40 + 0x38].copy_from_slice(&align.to_le_bytes());
+        b
+    }
+
+    fn apk_with(lib: &[u8], pad: usize) -> Vec<u8> {
+        let mut z = zip::Zip::default();
+        z.add("pad", vec![0; pad]);
+        z.add("lib/arm64-v8a/libx.so", lib.to_vec());
+        z.finish().unwrap()
+    }
+
+    #[test]
+    fn a_library_stored_off_the_page_or_aligned_low_fails_the_check() {
+        assert!(check_page_alignment(&apk_with(&elf(0x4000), PAGE - 84)).is_ok());
+        let m = check_page_alignment(&apk_with(&elf(0x4000), PAGE - 83))
+            .unwrap_err()
+            .to_string();
+        assert!(m.contains("not on a 16 KiB boundary"), "{m}");
+        let m = check_page_alignment(&apk_with(&elf(0x1000), PAGE - 84))
+            .unwrap_err()
+            .to_string();
+        assert!(m.contains("max-page-size"), "{m}");
+        assert_eq!(load_alignments(&elf(0x4000)).unwrap(), [0x4000]);
+        assert!(load_alignments(b"nope").is_err());
     }
 
     #[test]

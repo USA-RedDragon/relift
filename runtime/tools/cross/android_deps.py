@@ -70,7 +70,7 @@ def unpack(tar, into):
 def cmake(src, build, prefix, abi, extra):
     tool = os.path.join(ndk_root(), "build", "cmake", "android.toolchain.cmake")
     for cmd in (
-        ["cmake", "-S", src, "-B", build, "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={tool}", f"-DANDROID_ABI={abi}", f"-DANDROID_PLATFORM=android-{API}", "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={prefix}"] + extra,
+        ["cmake", "-S", src, "-B", build, "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={tool}", f"-DANDROID_ABI={abi}", f"-DANDROID_PLATFORM=android-{API}", "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={prefix}", "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384", "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384"] + extra,
         ["ninja", "-C", build, "install"],
     ):
         r = subprocess.run(cmd, capture_output=True, text=True)

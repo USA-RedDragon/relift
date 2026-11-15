@@ -91,6 +91,68 @@ impl Zip {
     }
 }
 
+/// One entry of an existing archive.
+pub struct Entry<'a> {
+    pub name: String,
+    /// Zip compression method; 0 is stored.
+    pub method: u16,
+    /// Where the entry's data starts in the archive.
+    pub offset: usize,
+    pub data: &'a [u8],
+}
+
+fn le16(b: &[u8], at: usize) -> Option<usize> {
+    Some(usize::from(u16::from_le_bytes(
+        b.get(at..at + 2)?.try_into().ok()?,
+    )))
+}
+
+fn le32(b: &[u8], at: usize) -> Option<usize> {
+    usize::try_from(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?)).ok()
+}
+
+/// The entries of the archive `bytes`, read through its central directory.
+///
+/// # Errors
+///
+/// The bytes are not a zip archive this reader understands.
+pub fn entries(bytes: &[u8]) -> Result<Vec<Entry<'_>>, String> {
+    let bad = || "not a readable zip archive".to_string();
+    let end = bytes
+        .windows(4)
+        .rposition(|w| w == END.to_le_bytes())
+        .ok_or_else(bad)?;
+    let count = le16(bytes, end + 10).ok_or_else(bad)?;
+    let mut at = le32(bytes, end + 16).ok_or_else(bad)?;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        if le32(bytes, at).ok_or_else(bad)? != usize::try_from(CENTRAL).unwrap_or(0) {
+            return Err(bad());
+        }
+        let method = u16::try_from(le16(bytes, at + 10).ok_or_else(bad)?).map_err(|_| bad())?;
+        let size = le32(bytes, at + 20).ok_or_else(bad)?;
+        let name_len = le16(bytes, at + 28).ok_or_else(bad)?;
+        let extra_len = le16(bytes, at + 30).ok_or_else(bad)?;
+        let comment_len = le16(bytes, at + 32).ok_or_else(bad)?;
+        let local = le32(bytes, at + 42).ok_or_else(bad)?;
+        let name = String::from_utf8_lossy(bytes.get(at + 46..at + 46 + name_len).ok_or_else(bad)?)
+            .into_owned();
+        let data_at = local
+            + 30
+            + le16(bytes, local + 26).ok_or_else(bad)?
+            + le16(bytes, local + 28).ok_or_else(bad)?;
+        let data = bytes.get(data_at..data_at + size).ok_or_else(bad)?;
+        out.push(Entry {
+            name,
+            method,
+            offset: data_at,
+            data,
+        });
+        at += 46 + name_len + extra_len + comment_len;
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +160,20 @@ mod tests {
     #[test]
     fn the_crc_matches_the_standard_check_value() {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn entries_come_back_with_their_data_offsets() {
+        let mut z = Zip::default();
+        z.add("a", b"xyz".to_vec());
+        z.add("b/c", b"hello".to_vec());
+        let bytes = z.finish().unwrap();
+        let e = entries(&bytes).unwrap();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[1].name, "b/c");
+        assert_eq!(e[1].method, 0);
+        assert_eq!(e[1].data, b"hello");
+        assert_eq!(&bytes[e[1].offset..e[1].offset + 5], b"hello");
     }
 
     #[test]
