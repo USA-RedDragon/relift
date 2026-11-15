@@ -167,6 +167,9 @@ pub(crate) struct Outcome {
     pub store_dep: bool,
     pub impure: bool,
     pub popped_ret: bool,
+    /// It halts or enables interrupts, so an interrupt handler may leave
+    /// a loop that has no exit of its own.
+    pub waits: bool,
     pub touches: bool,
     pub bank_reg: Option<usize>,
     pub target_regs: Option<(usize, usize)>,
@@ -454,6 +457,12 @@ impl<'a> Run<'a> {
                 }
                 if mn == Mnemonic::Stop {
                     st.kill_all();
+                }
+                if mn == Mnemonic::Halt {
+                    st.kill_memory();
+                }
+                if matches!(mn, Mnemonic::Halt | Mnemonic::Ei) {
+                    self.out.waits = true;
                 }
                 self.fall(loc, next, st);
             }
@@ -751,6 +760,15 @@ impl<'a> Run<'a> {
             let mut s = st;
             s.kill_all();
             self.fall(site, Some(exit), s);
+            return;
+        }
+        if o.exits.is_empty() && o.waits {
+            let mut known = (*o).clone();
+            known.escapes.clear();
+            self.absorb(site, target, &sum, &known, ret);
+            let mut s = st;
+            s.kill_all();
+            self.fall(site, Some(ret), s);
             return;
         }
         self.absorb(site, target, &sum, &o, ret);

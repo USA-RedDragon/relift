@@ -718,6 +718,16 @@ fn a_byte_stored_to_an_io_register_is_not_assumed_to_read_back() {
 }
 
 #[test]
+fn code_after_a_call_that_waits_for_an_interrupt_is_found() {
+    let r = Cart::new(0x19, 0x04)
+        .put(0, 0x150, &[0xCD, 0x00, 0x02, 0x3E, 0x01, 0x18, 0xFE])
+        .put(0, 0x200, &[0xFB, 0x76, 0x18, 0xFC])
+        .analyze();
+    let entry = &r.functions[&Loc::fixed(0x100)];
+    assert!(entry.body.contains_key(&Loc::fixed(0x153)));
+}
+
+#[test]
 fn code_walked_only_inside_a_caller_is_part_of_the_callee() {
     let r = Cart::new(0x19, 0x04)
         .put(

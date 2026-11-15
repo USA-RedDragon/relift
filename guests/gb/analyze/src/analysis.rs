@@ -224,8 +224,8 @@ fn summarize(o: &Outcome) -> Summary {
         lo = Some(lo.map_or(s.lo, |l| merge_bv(l, s.lo)));
         hi = Some(hi.map_or(s.hi, |h| merge_bv(h, s.hi)));
     }
-    let assumed =
-        exits.is_empty() && !o.popped_ret && !(o.unresolved.is_empty() && o.ram.is_empty());
+    let assumed = exits.is_empty()
+        && (o.waits || (!o.popped_ret && !(o.unresolved.is_empty() && o.ram.is_empty())));
     if assumed {
         exits.insert(0);
     }
