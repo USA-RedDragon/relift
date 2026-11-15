@@ -22,7 +22,8 @@
 //! registers, at the ROM targets of the jumps that code holds, so the
 //! driver's next round copies its next test. A `halt` or `ei` with the
 //! interrupt master enable set and known enabled interrupts calls the
-//! handler of the first and forks into the others.
+//! handler of the first and forks into the others, and a write to `$FF46`
+//! copies the OAM DMA source.
 //!
 //! Every instruction a path runs in RAM is predicted, and so is the code
 //! decoded from the bytes a path holds where it jumps into RAM from ROM.
@@ -441,6 +442,16 @@ impl Machine<'_> {
         }
         if a == 0xFFFF {
             p.ie = b.v;
+            return;
+        }
+        if a == 0xFF46 {
+            if let Some(v) = b.v {
+                let src = u16::from(v) << 8;
+                for i in 0..0xA0 {
+                    let b = self.read(p, Some(src | i));
+                    self.write(p, f, Some(0xFE00 | i), b);
+                }
+            }
             return;
         }
         if !is_ram(a) {

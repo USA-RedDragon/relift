@@ -251,3 +251,21 @@ fn a_halt_runs_the_enabled_handler_with_the_state_before_it() {
     ]);
     assert_eq!(ops(&r), [(0xC000, 0xC9, RamClass::Generated)]);
 }
+
+#[test]
+fn oam_dma_copies_code_into_oam() {
+    let r = predict(&[(
+        0x150,
+        &[
+            0x3E, 0x3E, 0xEA, 0x00, 0xC1, 0x3E, 0x05, 0xEA, 0x01, 0xC1, 0x3E, 0xC9, 0xEA, 0x02,
+            0xC1, 0x3E, 0xC1, 0xE0, 0x46, 0xCD, 0x00, 0xFE, 0x18, 0xFE,
+        ],
+    )]);
+    assert_eq!(
+        ops(&r),
+        [
+            (0xFE00, 0x3E, RamClass::Generated),
+            (0xFE02, 0xC9, RamClass::Generated),
+        ]
+    );
+}
