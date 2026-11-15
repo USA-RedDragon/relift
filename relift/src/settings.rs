@@ -21,7 +21,7 @@ pub struct Settings {
         name = "jobs",
         short = 'j',
         default = "0",
-        description = "parallel compile jobs (0: one per CPU)"
+        description = "worker threads for every parallel stage of a build: analysis, emit and compile (0: one per CPU)"
     )]
     pub jobs: u32,
 
