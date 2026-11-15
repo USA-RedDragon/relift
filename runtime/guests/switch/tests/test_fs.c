@@ -831,6 +831,30 @@ TEST(fs_save_crash_in_commit_step_5_recovers_to_one_state)
     crash_case(5);
 }
 
+TEST(fs_save_in_a_read_only_host_directory_fails_and_keeps_the_save)
+{
+    fsx x;
+    uint32_t h;
+    save_setup(&x, "fs-save-ro", &h);
+    guest_put(&x, "/slot", "one");
+    CHECK_EQ(fs_result(&x, 10, NULL, NULL, NULL, 0), 0);
+    unmount_save(&x, h);
+    char parent[PATH_MAX];
+    snprintf(parent, sizeof parent, "%s", host("/save/0100000000010000"));
+    CHECK_EQ(chmod(host(SAVE_DIR), 0555), 0);
+    CHECK_EQ(chmod(parent, 0555), 0);
+    if (geteuid() != 0)
+        CHECK_EQ(mount_save(&x, 51, &h), RL_MAKE_RESULT(2, 5000));
+    CHECK_EQ(chmod(parent, 0755), 0);
+    CHECK_EQ(chmod(host(SAVE_DIR), 0755), 0);
+    CHECK_EQ(mount_save(&x, 51, &h), 0);
+    x.fs = h;
+    CHECK(guest_has(&x, "/slot", "one"));
+    unmount_save(&x, h);
+    rl_hos_fs_set_save(NULL);
+    tmp_clean();
+}
+
 TEST(fs_save_second_mount_is_locked_and_read_only_refuses_writes)
 {
     fsx x;

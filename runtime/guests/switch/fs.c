@@ -821,8 +821,10 @@ static rl_result open_save_data_file_system(rl_ipc_req *r)
     parent_dirs(dir);
     mode = r->cmd == 53 ? RL_SAVE_READONLY : in.attr.type == 4 ? RL_SAVE_DIRECT : RL_SAVE_JOURNALED;
     e = rl_save_open(dir, mode, &mount);
-    if (e)
+    if (e) {
+        rl_log(RL_LOG_ERROR, "fs", "cannot mount save data at %s: %s", dir, strerror(e));
         return errno_result(e);
+    }
     o = rl_ipc_object_new(&fs_class, mount);
     if (!o) {
         rl_save_close(mount);
