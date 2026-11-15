@@ -746,3 +746,34 @@ fn a_pad_whose_site_is_in_no_function_is_ignored() {
     assert!(a.functions[&BASE].pads.is_empty());
     assert_eq!(a.functions[&BASE].insts.len(), 1);
 }
+
+#[test]
+fn stack_slots_follow_the_stack_pointer_across_calls() {
+    let code = [
+        word(0x09, 2, 0xFFC0),
+        word(0x04, 0, 8),
+        word(0x05, 0, 2),
+        word(0x04, 1, 0x1234),
+        word(0x0b, 1, 0),
+        word(0x04, 1, 0x20),
+        word(0x0c, 1, 0),
+        word(0x09, 2, 8),
+        word(0x03, 0, 0),
+    ];
+    let m = module(&code, &[], &[BASE]);
+    let insts: BTreeMap<u64, Insn> = (0..code.len() as u64)
+        .map(|k| {
+            let pc = BASE + 4 * k;
+            let b = Toy.lift(m.bytes_at(pc).expect("code"), pc).expect("lifts");
+            (pc, Insn::Lifted(Arc::new(b)))
+        })
+        .collect();
+    let s = consts::stack_slots(&insts, BASE, &Toy.preserved(), Reg(2));
+    assert!(!s.contains_key(&(BASE + 0x10)));
+    let v = 0x1234u64.to_le_bytes().to_vec();
+    assert_eq!(
+        s.get(&(BASE + 0x1c)),
+        Some(&BTreeMap::from([(8, v.clone())]))
+    );
+    assert_eq!(s.get(&(BASE + 0x20)), Some(&BTreeMap::from([(0, v)])));
+}

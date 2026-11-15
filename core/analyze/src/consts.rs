@@ -245,6 +245,165 @@ pub(crate) fn in_states(
     ins
 }
 
+/// Where [`stack_slots`] puts the stack pointer at the function's entry:
+/// far from any module, with room below for any frame.
+const STACK: u128 = 1 << 61;
+
+/// Constant registers and stack slots when one instruction starts.
+#[derive(Clone, Default)]
+struct Frame {
+    regs: HashMap<Reg, u128>,
+    /// By address relative to [`STACK`]-based `sp`, the bytes stored there.
+    slots: BTreeMap<u128, Vec<u8>>,
+}
+
+fn meet_frame(into: &mut Frame, from: &Frame) -> bool {
+    let changed = meet(&mut into.regs, &from.regs);
+    let before = into.slots.len();
+    into.slots.retain(|a, v| from.slots.get(a) == Some(v));
+    changed || into.slots.len() != before
+}
+
+/// The constant stack slots of the function at `entry` when each
+/// instruction starts: by forward propagation, as [`in_states`], with the
+/// stack pointer `sp` known relative to its value at the entry, every store
+/// to a known stack address recorded (a constant value) or forgetting what
+/// it overlaps, and loads from a recorded slot giving its value. By
+/// address, a slot's offset from `sp` at that instruction and its bytes.
+/// Calls keep the slots, and stores through a register not known to point
+/// at the stack are not seen, so callers use the values only where a wrong
+/// one is caught (jump table targets must be code). Unlike
+/// [`frame_slots`], a slot reused for other values counts where the paths
+/// that reach the instruction all stored the same one.
+pub(crate) fn stack_slots(
+    insts: &BTreeMap<u64, Insn>,
+    entry: u64,
+    preserved: &[Reg],
+    sp: Reg,
+) -> HashMap<u64, BTreeMap<u64, Vec<u8>>> {
+    let near = |a: u128| a.abs_diff(STACK) < 1 << 32;
+    let mut ins: HashMap<u64, Frame> = HashMap::new();
+    let mut start = Frame::default();
+    start.regs.insert(sp, STACK);
+    ins.insert(entry, start);
+    let mut work = BTreeSet::from([entry]);
+    let mut steps = 0usize;
+    let mut vals: Vec<Option<u128>> = Vec::new();
+    while let Some(pc) = work.pop_first() {
+        steps += 1;
+        if steps > 200_000 {
+            break;
+        }
+        let Some(Insn::Lifted(b)) = insts.get(&pc) else {
+            continue;
+        };
+        let mut out = ins.get(&pc).cloned().unwrap_or_default();
+        let known = out.regs.clone();
+        vals.clear();
+        for n in 0..b.insts.len() {
+            let mut v = eval(b, &vals, &known, n);
+            match &b.insts[n].op {
+                Op::Load { addr, .. } => {
+                    let size = b.insts[n].width.map_or(0, |w| w.bits() / 8) as usize;
+                    v = vals[addr.index()]
+                        .filter(|a| near(*a))
+                        .and_then(|a| out.slots.get(&a))
+                        .filter(|s| s.len() == size && size <= 16)
+                        .map(|s| {
+                            let mut le = [0u8; 16];
+                            le[..size].copy_from_slice(s);
+                            u128::from_le_bytes(le)
+                        });
+                }
+                Op::Store {
+                    addr,
+                    value,
+                    endian,
+                    ..
+                } => {
+                    if let Some(a) = vals[addr.index()].filter(|a| near(*a)) {
+                        let size = b.width_of(*value).map_or(0, |w| w.bits() / 8) as u128;
+                        let end = a.wrapping_add(size);
+                        let lo = a.saturating_sub(16);
+                        let hit: Vec<u128> = out
+                            .slots
+                            .range(lo..end)
+                            .filter(|(o, v)| o.wrapping_add(v.len() as u128) > a)
+                            .map(|(o, _)| *o)
+                            .collect();
+                        for o in hit {
+                            out.slots.remove(&o);
+                        }
+                        if let Some(c) = vals[value.index()].filter(|_| size > 0 && size <= 16) {
+                            let mut bytes = c.to_le_bytes()[..size as usize].to_vec();
+                            if *endian == Endian::Big {
+                                bytes.reverse();
+                            }
+                            out.slots.insert(a, bytes);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            vals.push(v);
+        }
+        for inst in &b.insts {
+            if let Op::Set(r, x) = &inst.op {
+                match vals[x.index()] {
+                    Some(c) => {
+                        out.regs.insert(*r, c);
+                    }
+                    None => {
+                        out.regs.remove(r);
+                    }
+                }
+            }
+        }
+        if matches!(b.exit.flow, Flow::Call { .. } | Flow::Trap(_)) {
+            out.regs.retain(|r, _| preserved.contains(r));
+        }
+        let succ: Vec<u64> = match (b.exit.flow, b.exit.next) {
+            (Flow::Return, _) => Vec::new(),
+            (Flow::Call { ret }, _) => vec![ret],
+            (_, Next::Dynamic(_)) => Vec::new(),
+            (_, Next::Const(t)) => vec![t],
+            (
+                _,
+                Next::Select {
+                    taken, not_taken, ..
+                },
+            ) => vec![taken, not_taken],
+        };
+        for s in succ {
+            if !insts.contains_key(&s) {
+                continue;
+            }
+            match ins.get_mut(&s) {
+                None => {
+                    ins.insert(s, out.clone());
+                    work.insert(s);
+                }
+                Some(e) => {
+                    if meet_frame(e, &out) {
+                        work.insert(s);
+                    }
+                }
+            }
+        }
+    }
+    ins.into_iter()
+        .filter_map(|(pc, f)| {
+            let at = *f.regs.get(&sp)?;
+            let slots: BTreeMap<u64, Vec<u8>> = f
+                .slots
+                .into_iter()
+                .filter_map(|(a, v)| Some((u64::try_from(a.checked_sub(at)?).ok()?, v)))
+                .collect();
+            (!slots.is_empty()).then_some((pc, slots))
+        })
+        .collect()
+}
+
 /// The register and constant offset that make up address `v`: a register
 /// read, plus or minus a constant.
 pub(crate) fn base_offset(b: &Block, v: Value) -> Option<(Reg, u64)> {

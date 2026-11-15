@@ -259,8 +259,10 @@ fn slice(body: &[Arc<Block>]) -> Vec<Arc<Block>> {
 pub(crate) struct Known<'a> {
     /// The registers known to be constant at an address.
     pub(crate) regs: &'a dyn Fn(u64) -> HashMap<Reg, u128>,
-    /// The constant frame slots of a register ([`consts::frame_slots`]).
-    pub(crate) frame: &'a dyn Fn(Reg) -> BTreeMap<u64, Vec<u8>>,
+    /// The constant frame slots of a register when an address starts
+    /// ([`consts::frame_slots`], and [`consts::stack_slots`] for the stack
+    /// pointer).
+    pub(crate) frame: &'a dyn Fn(Reg, u64) -> BTreeMap<u64, Vec<u8>>,
 }
 
 /// The register the kept body loads a constant frame slot through (a table
@@ -270,8 +272,9 @@ pub(crate) struct Known<'a> {
 fn frame_base(
     body: &[Arc<Block>],
     seeds: &HashMap<Reg, u128>,
-    frame: &dyn Fn(Reg) -> BTreeMap<u64, Vec<u8>>,
+    frame: &dyn Fn(Reg, u64) -> BTreeMap<u64, Vec<u8>>,
 ) -> Option<(Reg, BTreeMap<u64, Vec<u8>>)> {
+    let at = body.first()?.pc;
     let mut written = BTreeSet::new();
     for b in body {
         for i in &b.insts {
@@ -280,7 +283,7 @@ fn frame_base(
                 && !written.contains(&r)
                 && !seeds.contains_key(&r)
             {
-                let slots = frame(r);
+                let slots = frame(r, at);
                 if slots.contains_key(&off) {
                     return Some((r, slots));
                 }

@@ -278,7 +278,20 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         }
         let states = consts::in_states(&insts, entry, &preserved);
         let known = |a: u64| states.get(&a).cloned().unwrap_or_default();
-        let frame = |r: Reg| consts::frame_slots(&insts, &states, r);
+        let sp = lifter.fe.stack_pointer();
+        let stack = std::cell::OnceCell::new();
+        let frame = |r: Reg, at: u64| {
+            if Some(r) == sp {
+                let s = stack.get_or_init(|| consts::stack_slots(&insts, entry, &preserved, r));
+                let mut slots: BTreeMap<u64, Vec<u8>> = s.get(&at).cloned().unwrap_or_default();
+                if slots.is_empty() {
+                    slots = consts::frame_slots(&insts, &states, r);
+                }
+                slots
+            } else {
+                consts::frame_slots(&insts, &states, r)
+            }
+        };
         let facts = tables::Known {
             regs: &known,
             frame: &frame,
