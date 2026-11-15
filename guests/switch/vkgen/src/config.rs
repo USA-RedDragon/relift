@@ -30,7 +30,8 @@ pub struct Config {
     pub drop_types: Vec<String>,
     /// Command name to a runtime function called before the host call.
     pub before: BTreeMap<String, String>,
-    /// Command name to a runtime function called after the host call.
+    /// Command name to a runtime function called after the host call and
+    /// the copy of its results back to the guest.
     pub after: BTreeMap<String, String>,
     /// Command name to a runtime function returning a `VkResult`, called
     /// before the host call: an error result ends the call with it.

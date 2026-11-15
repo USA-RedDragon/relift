@@ -468,9 +468,6 @@ fn emit_thunk(m: &mut Model, def: &str, primary: &str, o: &mut String) -> Result
     } else {
         writeln!(o, "    {call};").ok();
     }
-    if let Some(h) = m.cfg.after.get(primary) {
-        writeln!(o, "    {h}(&k);").ok();
-    }
     if !gated.is_empty() {
         if ret == "VkResult" {
             writeln!(o, "    if (r >= 0) {{").ok();
@@ -487,6 +484,9 @@ fn emit_thunk(m: &mut Model, def: &str, primary: &str, o: &mut String) -> Result
         }
     }
     after.clear();
+    if let Some(h) = m.cfg.after.get(primary) {
+        writeln!(o, "    {h}(&k);").ok();
+    }
     if has_ret {
         let l = m.type_layout(&ret)?;
         if l.size == 8 {
