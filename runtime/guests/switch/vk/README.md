@@ -139,6 +139,16 @@ hold the allocation, and allocates from it. Freeing a set goes to the host
 pool it came from; resetting or destroying the guest pool applies to all of
 them.
 
+## Formats
+
+The console has `VK_FORMAT_D24_UNORM_S8_UINT` and
+`VK_FORMAT_X8_D24_UNORM_PACK32`, and a game may view an image as D24S8 even
+after the queries told it to use another depth format. MoltenVK on Apple GPUs
+without 24-bit depth reports both unsupported, yet creates images of them as
+`D32_SFLOAT_S8_UINT` and `D32_SFLOAT`. On that driver the format queries
+(`vk_format.c`) answer for the format it will use, so the game creates its
+depth images in a format its D24S8 views can share.
+
 ## Handles
 
 Dispatchable handles (instance, physical device, device, queue, command

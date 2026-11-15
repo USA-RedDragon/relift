@@ -289,6 +289,8 @@ extern const vkf_switch_profile vkf_switch;
 
 /** @brief The Switch's properties of a format; all zero for one it does not list. */
 VkFormatProperties vkf_switch_format_props(VkFormat format);
+/** @brief The format the host driver uses for format f: on MoltenVK without 24-bit depth, the D32 format it makes D24 images as (vk_format.c). */
+VkFormat vkf_host_format(const vkf_fns *fns, VkPhysicalDevice pd, VkFormat f);
 /** @brief The Switch's extension entry of that name, NULL when it has none. */
 const VkExtensionProperties *vkf_switch_ext(const VkExtensionProperties *list, uint32_t n, const char *name);
 

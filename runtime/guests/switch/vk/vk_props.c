@@ -700,7 +700,7 @@ static VkFormatProperties guest_format(vkf_call *k, VkPhysicalDevice pd, VkForma
     VkFormatProperties s = vkf_switch_format_props(format);
     VkFormatProperties h = { 0 };
     if (s.linearTilingFeatures || s.optimalTilingFeatures || s.bufferFeatures)
-        VKF_FN(k->fns, vkGetPhysicalDeviceFormatProperties)(pd, format, &h);
+        VKF_FN(k->fns, vkGetPhysicalDeviceFormatProperties)(pd, vkf_host_format(k->fns, pd, format), &h);
     VkFormatProperties g = {
         .linearTilingFeatures = s.linearTilingFeatures & h.linearTilingFeatures,
         .optimalTilingFeatures = s.optimalTilingFeatures & h.optimalTilingFeatures,
@@ -775,8 +775,8 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *me
     VkImageFormatProperties p = { 0 };
     VkResult r = VK_ERROR_FORMAT_NOT_SUPPORTED;
     if (switch_has(format, tiling))
-        r = VKF_FN(k.fns, vkGetPhysicalDeviceImageFormatProperties)(pd, format, type, tiling, (VkImageUsageFlags)c->x[4],
-                                                                     (VkImageCreateFlags)c->x[5], &p);
+        r = VKF_FN(k.fns, vkGetPhysicalDeviceImageFormatProperties)(pd, vkf_host_format(k.fns, pd, format), type, tiling,
+                                                                     (VkImageUsageFlags)c->x[4], (VkImageCreateFlags)c->x[5], &p);
     if (r >= 0)
         clamp_image_format(&p, type);
     if (c->x[6])
@@ -795,11 +795,13 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *m
     PFN_vkGetPhysicalDeviceImageFormatProperties2 f = VKF_FN(k.fns, vkGetPhysicalDeviceImageFormatProperties2);
     if (!f)
         return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceImageFormatProperties2);
-    const VkPhysicalDeviceImageFormatInfo2 *info = vkg_ain_VkPhysicalDeviceImageFormatInfo2(&k, c->x[1], 1);
+    VkPhysicalDeviceImageFormatInfo2 *info = vkg_ain_VkPhysicalDeviceImageFormatInfo2(&k, c->x[1], 1);
     VkImageFormatProperties2 *out = vkg_ain_VkImageFormatProperties2(&k, c->x[2], 1);
     VkResult r = VK_ERROR_FORMAT_NOT_SUPPORTED;
-    if (info && out && switch_has(info->format, info->tiling))
+    if (info && out && switch_has(info->format, info->tiling)) {
+        info->format = vkf_host_format(k.fns, pd, info->format);
         r = f(pd, info, out);
+    }
     if (out) {
         if (r >= 0)
             clamp_image_format(&out->imageFormatProperties, info->type);
