@@ -70,11 +70,7 @@ fn generated_c_files_are_current() {
         native_c_file("switch", "rl_switch_ports").unwrap(),
     );
     let mut gb = String::new();
-    for (platform, symbol) in [
-        ("gb", "rl_gb_ports"),
-        ("gbc", "rl_gbc_ports"),
-        ("gba", "rl_gba_ports"),
-    ] {
+    for (platform, symbol) in [("gb", "rl_gb_ports"), ("gbc", "rl_gbc_ports")] {
         let f = native_c_file(platform, symbol).unwrap();
         if gb.is_empty() {
             gb.push_str(&f);
@@ -84,4 +80,8 @@ fn generated_c_files_are_current() {
         }
     }
     check_file("gb/ports_gen.c", gb);
+    check_file(
+        "gba/ports_gen.c",
+        native_c_file("gba", "rl_gba_ports").unwrap(),
+    );
 }
