@@ -59,6 +59,17 @@
  * cumulative flags exactly (docs/abi.md section 10.1).
  */
 #define RL_FPCR_EXACT (1u << 31)
+/**
+ * @brief The test of lifted code's hoisted FPCR guard: a nonzero FPCR leaves
+ * for the slow path. A build whose analysis proves that no FPCR write
+ * changes the mode from the thread-start default compiles lifted code with
+ * RL_FPCR_CONST, and the guards fold away (docs/abi.md section 10.1).
+ */
+#ifdef RL_FPCR_CONST
+#define RL_FPCR_GUARD(v) ((void)(v), 0)
+#else
+#define RL_FPCR_GUARD(v) ((v) != 0)
+#endif
 /** @brief FPCR bits the guest sees: AHP, DN, FZ, RMode, FZ16 (the Cortex-A57 implements no trap enables). */
 #define RL_FPCR_GUEST 0x07C80000u
 /** @brief FPSR cumulative exception and saturation bits (IOC DZC OFC UFC IXC IDC QC). */

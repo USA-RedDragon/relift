@@ -133,6 +133,9 @@ impl Frontend for Plain {
     fn guard_state(&self, code: u32) -> Option<Reg> {
         self.0.guard_state(code)
     }
+    fn guard_flag(&self, r: Reg, value: &str) -> String {
+        self.0.guard_flag(r, value)
+    }
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
         self.0.guard_slow(code, pc, insn)
     }

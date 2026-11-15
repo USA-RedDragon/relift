@@ -228,6 +228,14 @@ impl Frontend for Arm64 {
         }
     }
 
+    fn guard_flag(&self, r: Reg, value: &str) -> String {
+        if r == regs::FPCR {
+            format!("RL_FPCR_GUARD({value})")
+        } else {
+            format!("{value} != 0")
+        }
+    }
+
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
         matches!(code, sail::SLOW_FPCR | sail::SLOW_FLAGS)
             .then(|| format!("rl_fp_slow(c, mem, UINT64_C({pc:#x}), {insn:#x}u)"))
@@ -363,6 +371,8 @@ mod tests {
             Some("rl_fp_slow(c, mem, UINT64_C(0x40), 0x1e602820u)")
         );
         assert_eq!(f.guard_slow(1, 0x40, 0), None);
+        assert_eq!(f.guard_flag(regs::FPCR, "r68"), "RL_FPCR_GUARD(r68)");
+        assert_eq!(f.guard_flag(regs::FP_FLAGS, "r72"), "r72 != 0");
     }
 
     #[test]

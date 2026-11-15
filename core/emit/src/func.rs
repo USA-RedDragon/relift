@@ -667,7 +667,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     }
     for &r in &hoisted {
         if in_context || load.contains(r) {
-            let _ = writeln!(t, "    int {} = {} != 0;", flag(r), reg(r));
+            let _ = writeln!(t, "    int {} = {};", flag(r), fe.guard_flag(r, &reg(r)));
         } else {
             let _ = writeln!(t, "    int {};", flag(r));
         }
@@ -1047,7 +1047,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             _ => writeln!(s, "    {} = {e};", reg(r)),
         };
         if cx.hoisted.contains(&r) {
-            let _ = writeln!(s, "    {} = {} != 0;", flag(r), reg(r));
+            let _ = writeln!(s, "    {} = {};", flag(r), cx.fe.guard_flag(r, &reg(r)));
         }
     }
     let check = match &cx.lp_sp {
@@ -1185,7 +1185,7 @@ fn reload(
         };
     }
     for &r in hoisted.iter().filter(|r| set.contains(**r)) {
-        let _ = write!(t, "{} = {} != 0; ", flag(r), reg(r));
+        let _ = write!(t, "{} = {}; ", flag(r), fe.guard_flag(r, &reg(r)));
     }
     t.trim_end().to_string()
 }

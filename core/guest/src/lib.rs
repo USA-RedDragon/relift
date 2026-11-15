@@ -213,6 +213,15 @@ pub trait Frontend {
     /// the guard's own condition.
     fn guard_state(&self, code: u32) -> Option<Reg>;
 
+    /// The `int` C expression that is the hoisted guard condition of
+    /// [`Frontend::guard_state`] register `r`, whose value is the C
+    /// expression `value`: nonzero by default. A frontend may let the build
+    /// decide the test with a macro.
+    fn guard_flag(&self, r: Reg, value: &str) -> String {
+        let _ = r;
+        format!("{value} != 0")
+    }
+
     /// An `int` C expression that runs the instruction `insn` at `pc` on the
     /// runtime's slow path `code`, with the context fully stored, and
     /// returns `RL_PENDING` when it could not; `None` when the frontend has
