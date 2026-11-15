@@ -1,0 +1,46 @@
+Provenance of the GBA machine layer (runtime/guests/gba, without bios/)
+
+The timing behavior of the bus, the devices and the display is ported from
+ares, https://github.com/ares-emulator/ares, commit
+0b928930af4cc59ed99e942996f0d3c815379388, ISC license (text below). The
+code here is new C11 in relift's scheduler shape (closed forms of the tick
+and scheduler events instead of per-cycle threads); each ported file keeps
+the ISC notice in its header.
+
+bus.c     wait states, Game Pak bursts and the 128 KiB page rule, the
+          prefetch buffer          gba/cpu/bus.cpp, prefetch.cpp, memory.cpp,
+                                   gba/cartridge/mrom.cpp
+irq.c     IE, IF, IME and their pipeline, the halt loop
+                                   gba/cpu/cpu.cpp, io.cpp
+timer.c   prescalers, cascade, overflow, the control and reload latches
+                                   gba/cpu/timer.cpp, io.cpp, cpu.cpp
+dma.c     channels, start delay, priorities, latches, special starts
+                                   gba/cpu/dma.cpp, io.cpp, timer.cpp
+lcd.c     VCOUNT, DISPSTAT and the line edges
+                                   gba/display/display.cpp, io.cpp
+io.c      system register values, byte-wise register access
+                                   gba/cpu/io.cpp, gba/memory/memory.cpp
+mem.c     VRAM mirror and bitmap-mode rules, byte writes to palette, VRAM
+          and OAM, the memory control register
+                                   gba/ppu/memory.cpp, gba/cpu/memory.cpp
+
+Changes found by the differential tests against NanoBoyAdvance and the
+console probe records: the prefetch buffer ends the Game Pak burst when it
+stops full (the next fetch is nonsequential), a DMA requests its interrupt
+at the end of the transfer, and the prefetch unit starts idle at power on.
+
+ares license:
+
+Copyright (c) 2004-2025 ares team, Near et al
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
