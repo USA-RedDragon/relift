@@ -463,6 +463,24 @@ fn an_unused_opcode_ends_the_path_and_is_listed() {
 }
 
 #[test]
+fn code_that_runs_on_past_the_window_runs_from_ram() {
+    let r = Cart::new(0x00, 0x00)
+        .put(0, 0x150, &[0xC3, 0xFD, 0x7F])
+        .put(1, 0x7FFD, &[0x00, 0x00, 0x00])
+        .analyze();
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+    assert_eq!(r.ram_code.len(), 1, "{:?}", r.ram_code);
+    assert_eq!(r.ram_code[0].transfer.target, 0x8000);
+    assert_eq!(
+        r.ram_code[0].transfer.site,
+        Loc {
+            bank: 1,
+            addr: 0x7FFF
+        }
+    );
+}
+
+#[test]
 fn coverage_counts_distinct_bytes_per_bank() {
     let r = Cart::new(0x19, 0x04)
         .put(

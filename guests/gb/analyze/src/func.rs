@@ -619,7 +619,10 @@ impl<'a> Run<'a> {
             return;
         };
         if is_ram(n) {
-            self.unresolved(loc, UnresolvedKind::RunsOffWindow, String::new(), false);
+            self.out.ram.push(RamTransfer {
+                site: loc,
+                target: n,
+            });
             return;
         }
         if !loc.is_window() && n >= 0x4000 {
