@@ -188,7 +188,11 @@ static void plain_cost(rl_gba *g, uint32_t addr, unsigned size)
         return;
     case 0x5:
     case 0x6:
-        gba_pf_step(g, 1u << (size == 4));
+    case 0x7:
+        for (unsigned i = (addr >> 24) == 0x7 || size != 4 ? 1u : 2u; i; i--)
+            do
+                gba_pf_step(g, 1);
+            while (gba_contend_busy(g, addr, gba_now(g)));
         return;
     default:
         gba_pf_step(g, 1);

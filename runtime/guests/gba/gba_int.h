@@ -118,6 +118,54 @@ typedef struct gba_ppu_sched {
     rl_event ev;
 } gba_ppu_sched;
 
+/** @brief A text background's fetch unit in the memory contention model. */
+typedef struct gba_ct_text {
+    int fetches, left;
+    uint32_t addr;
+    bool flip;
+} gba_ct_text;
+
+/** @brief The sprite drawer's view of one object in the memory contention model. */
+typedef struct gba_ct_obj {
+    bool affine, c256, hflip;
+    int w, h, left, tx, ty;
+    int16_t m[4];
+    unsigned tile;
+} gba_ct_obj;
+
+/** @brief The sprite unit's OAM walk in the memory contention model. */
+typedef struct gba_ct_walk {
+    unsigned index, matrix;
+    int step, wait, pending, x0, y0;
+    bool delay;
+} gba_ct_walk;
+
+/**
+ * @brief When the picture unit itself reads video RAM, palette RAM and OAM
+ * (contend.c): a CPU or DMA access that meets such a read waits a cycle.
+ */
+typedef struct gba_contend {
+    uint8_t io[0x56];
+    uint16_t latch[3];
+    uint64_t latch_next;
+    uint64_t bg_t0;
+    unsigned bg_k, mg_k, bg_y;
+    bool bg_on, mg_blank;
+    gba_ct_text text[4];
+    int32_t ref_init[2][2], ref_cur[2][2], aff[2][2];
+    uint32_t aff_tile[2];
+    bool ref_written[2][2];
+    uint8_t mos_bg, mos_obj;
+    uint16_t bg_latch;
+    uint64_t ob_t0;
+    unsigned ob_k, ob_end, ob_y, ob_rd;
+    int ob_mosaic;
+    bool ob_on, drawing;
+    gba_ct_walk walk;
+    gba_ct_obj st[2];
+    uint64_t bg_slot, obj_slot, oam_slot, pram_slot;
+} gba_contend;
+
 /** @brief The Game Pak prefetch buffer. */
 typedef struct gba_prefetch {
     uint16_t slot[8];
@@ -186,6 +234,7 @@ struct rl_gba {
     gba_save save;
     gba_ppu ppu;
     gba_ppu_sched ps;
+    gba_contend ct;
 
     bool halt_req, stop_req, halted, in_bios;
     uint64_t dma_overlap;
@@ -286,6 +335,14 @@ bool gba_dma_quiet(const rl_gba *g, unsigned cycles);
 uint64_t gba_lcd_pos(const rl_gba *g, uint64_t t);
 
 void gba_ppu_dev_reset(rl_gba *g);
+/** @brief Power-on state of the memory contention model. */
+void gba_contend_reset(rl_gba *g);
+/** @brief Forgets the model's line state after the display position moved. */
+void gba_contend_resync(rl_gba *g);
+/** @brief Runs the model up to now, then stores a written byte of the picture unit's registers (0x04000000 to 0x04000055). */
+void gba_contend_reg(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now);
+/** @brief Whether the picture unit read the memory of addr (palette RAM, video RAM or OAM) in the cycle that ends at now. */
+bool gba_contend_busy(rl_gba *g, uint32_t addr, uint64_t now);
 void gba_ppu_dev_attach(rl_gba *g);
 void gba_ppu_dev_resync(rl_gba *g);
 void gba_ppu_dev_catch_up(rl_gba *g, uint64_t to);

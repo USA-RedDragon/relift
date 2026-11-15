@@ -74,6 +74,8 @@ void gba_io_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
     if (!g->cpu || off >= 0x804u || !mapped(off))
         return;
     for (unsigned i = 0; i < size; i++)
+        gba_contend_reg(g, a + i, (uint8_t)(value >> (8 * i)), gba_now(g));
+    for (unsigned i = 0; i < size; i++)
         if (off + i < 2)
             g->dispcnt = (uint16_t)((g->dispcnt & ~(0xFFu << (8 * (off + i)))) | ((value >> (8 * i)) & 0xFFu) << (8 * (off + i)));
     rl_sched_write(g->cpu, a, size, value);
@@ -397,6 +399,7 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
     gba_timer_attach(g);
     gba_dma_attach(g);
     gba_lcd_attach(g);
+    gba_contend_resync(g);
     gba_keypad_attach(g);
     if (g->slot[RL_GBA_SLOT_PPU] == &g->d_ppu.dev)
         gba_ppu_dev_attach(g);

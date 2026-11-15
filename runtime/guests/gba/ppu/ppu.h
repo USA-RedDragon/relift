@@ -111,6 +111,9 @@ typedef struct gba_ppu {
     } dac;
 
     uint16_t *line;
+    /** @brief Per pixel of the line last drawn: bit 0 the top color reads palette RAM, bit 1 a blend reads it again. */
+    uint8_t pram_use[GBA_PPU_W];
+    unsigned pram_y;
     uint16_t pixels[GBA_PPU_W * GBA_PPU_H];
     uint64_t frames;
 } gba_ppu;

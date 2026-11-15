@@ -152,6 +152,7 @@ void rl_gba_lcd_set(rl_gba *g, unsigned line, unsigned dot)
     g->lcd.origin = (now + RL_GBA_FRAME_CYCLES - p % RL_GBA_FRAME_CYCLES) % RL_GBA_FRAME_CYCLES;
     gba_lcd_repost(g);
     gba_ppu_dev_resync(g);
+    gba_contend_resync(g);
 }
 
 unsigned rl_gba_vcount(const rl_gba *g) { return (unsigned)(gba_lcd_pos(g, gba_now(g)) / RL_GBA_LINE_CYCLES); }

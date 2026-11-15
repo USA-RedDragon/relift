@@ -47,6 +47,7 @@ void gba_ppu_render(gba_ppu *p, unsigned y)
     gba_ppu_obj_render_scanline(p, (y + 1) % GBA_PPU_LINES);
     if (y >= GBA_PPU_H)
         return;
+    p->pram_y = y;
     for (unsigned i = 0; i < 4; i++)
         gba_ppu_bg_run_line(p, &p->bg[i]);
     for (unsigned x = 0; x < 256; x++) {

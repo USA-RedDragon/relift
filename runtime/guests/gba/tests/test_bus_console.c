@@ -188,6 +188,7 @@ static uint32_t replay(const ct_cfg *cf, unsigned kid)
 {
     const kern *k = &kerns[kid];
     mach m = mach_new();
+    rl_gba_write(m.g, 0x04000000u, 2, 0x0080);
     rl_gba_write(m.g, WAITCNT, 2, 3);
     unsigned nn = cf->n == 4 ? 0 : cf->n == 3 ? 1 : cf->n == 2 ? 2 : 3;
     uint32_t wc = 3u | nn << 2 | (uint32_t)(cf->s == 1) << 4 | (uint32_t)cf->pf << 14;

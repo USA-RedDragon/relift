@@ -274,6 +274,7 @@ void gba_ppu_reset(gba_ppu *p, const uint8_t *pram, const uint8_t *vram, const u
         gba_ppu_bg_reset(&p->bg[i], i);
     gba_ppu_obj_reset(p);
     p->line = p->pixels;
+    p->pram_y = ~0u;
 }
 
 uint64_t gba_ppu_hash(const gba_ppu *p)

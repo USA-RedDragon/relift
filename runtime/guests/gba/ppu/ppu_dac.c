@@ -80,6 +80,7 @@ void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
     if (gba_ppu_blank(p)) {
         p->dac.color = 0x7FFF;
         p->dac.blending = false;
+        p->pram_use[x] = 1;
         return;
     }
 
@@ -121,6 +122,7 @@ void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
 
     gba_pixel above = layers[above_layer];
     p->dac.color = lookup(p, &above);
+    p->pram_use[x] = (above.flags & PX_DIRECT) ? 0 : 1;
 
     if ((above.flags & PX_TRANS) && p->dac.blend_below[below_layer]) {
         p->dac.blending = true;
@@ -144,6 +146,8 @@ void gba_ppu_dac_lower(gba_ppu *p, unsigned x)
 {
     if (p->dac.blending) {
         const gba_pixel *below = &p->dac.layers[p->dac.below_layer];
+        if (!(below->flags & PX_DIRECT))
+            p->pram_use[x] |= 2;
         p->dac.color = blend(p->dac.color, min_u(16, p->dac.eva), lookup(p, below), min_u(16, p->dac.evb));
     }
     p->line[x] = p->dac.color & 0x7FFFu;

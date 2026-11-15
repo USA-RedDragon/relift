@@ -28,6 +28,11 @@ mem.c     VRAM mirror and bitmap-mode rules, byte writes to palette, VRAM
           and OAM, the memory control register
                                    gba/ppu/memory.cpp, gba/cpu/memory.cpp
 
+contend.c is relift's own: the cycles in which the picture unit reads video
+RAM, palette RAM and OAM, so that a CPU or DMA access waits for them, were
+measured against NanoBoyAdvance (the oracle of check/oracle/nba) with
+experiment ROMs; no NanoBoyAdvance code is in it.
+
 Changes found by the differential tests against NanoBoyAdvance and the
 console probe records: the prefetch buffer ends the Game Pak burst when it
 stops full (the next fetch is nonsequential), a DMA requests its interrupt

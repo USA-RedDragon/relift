@@ -293,6 +293,7 @@ rl_gba *rl_gba_create(const rl_gba_cart *cart)
     gba_dma_reset(g);
     gba_lcd_reset(g);
     gba_ppu_dev_reset(g);
+    gba_contend_reset(g);
     return g;
 }
 
