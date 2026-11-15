@@ -417,6 +417,45 @@ static void close_routed(machine *m)
 
 static int regs_eq(const rlgbd_regs *x, const rlgbd_regs *y) { return memcmp(x, y, sizeof *x) == 0; }
 
+typedef struct pending {
+    float *v;
+    size_t n, cap;
+} pending;
+
+static int audio_pull(pending *p, rlgbd *h)
+{
+    static float x[2 * 1024];
+    size_t n;
+    while ((n = rlgbd_audio_take(h, x, 1024)) > 0) {
+        if (p->n + 2 * n > p->cap) {
+            p->cap = (p->n + 2 * n) * 2;
+            p->v = realloc(p->v, p->cap * sizeof *p->v);
+            if (!p->v)
+                abort();
+        }
+        memcpy(p->v + p->n, x, 2 * n * sizeof *x);
+        p->n += 2 * n;
+    }
+    return 1;
+}
+
+/** The two machines stand at the same dot, but a sample due at the very end may reach one side a call later: the streams must agree over their common prefix and differ in length by one frame at most. */
+static int audio_eq(pending *a, rlgbd *ra, pending *b, rlgbd *rb)
+{
+    audio_pull(a, ra);
+    audio_pull(b, rb);
+    size_t k = a->n < b->n ? a->n : b->n;
+    if (memcmp(a->v, b->v, k * sizeof *a->v) != 0)
+        return 0;
+    if ((a->n > b->n ? a->n - b->n : b->n - a->n) > 2)
+        return 0;
+    memmove(a->v, a->v + k, (a->n - k) * sizeof *a->v);
+    memmove(b->v, b->v + k, (b->n - k) * sizeof *b->v);
+    a->n -= k;
+    b->n -= k;
+    return 1;
+}
+
 static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
 {
     size_t n = 0;
@@ -434,6 +473,9 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
         free(rom);
         return 0;
     }
+    pending heard_ref = {0}, heard_m = {0};
+    rlgbd_audio_enable(ref, 1);
+    rlgbd_audio_enable(m.h, 1);
     uint64_t end = frames * RLGBD_FRAME_DOTS, next_frame = RLGBD_FRAME_DOTS, steps = 0, checked = 0;
     int bad = 0, frozen = 0;
     unsigned idle = 0;
@@ -454,7 +496,10 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
         } else if (rlgbd_now(ref) >= next_frame) {
             next_frame += RLGBD_FRAME_DOTS;
             checked++;
-            if (rlgbd_present_hash(ref) != rlgbd_present_hash(m.h) || rlgbd_state_hash(ref) != rlgbd_state_hash(m.h)) {
+            if (!audio_eq(&heard_ref, ref, &heard_m, m.h)) {
+                printf("%s: SAMPLES DIFFER at frame %llu\n", path, (unsigned long long)checked);
+                bad = 1;
+            } else if (rlgbd_present_hash(ref) != rlgbd_present_hash(m.h) || rlgbd_state_hash(ref) != rlgbd_state_hash(m.h)) {
                 printf("%s: DEVICE STATE DIFFERS at frame %llu\n", path, (unsigned long long)checked);
                 bad = 1;
             }
@@ -471,6 +516,8 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
     if (bad) {
         close_routed(&m);
         rlgbd_free(ref);
+        free(heard_ref.v);
+        free(heard_m.v);
         free(rom);
         return 1;
     }
@@ -479,6 +526,8 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
                (unsigned long long)steps, (unsigned long long)checked);
         close_routed(&m);
         rlgbd_free(ref);
+        free(heard_ref.v);
+        free(heard_m.v);
         free(rom);
         return 0;
     }
@@ -495,6 +544,8 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
            (unsigned long long)m.boundaries, t_native / (double)frames * 1e6, t_routed / (double)frames * 1e6, t_routed / t_native);
     close_routed(&m);
     rlgbd_free(ref);
+    free(heard_ref.v);
+    free(heard_m.v);
     free(rom);
     return 0;
 }
