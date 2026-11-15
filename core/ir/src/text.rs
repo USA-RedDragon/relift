@@ -62,6 +62,7 @@
 //! | `atomic.U.E.O addr, value` | [`Op::AtomicRmw`], `U` is `add clr eor set smax smin umax umin swp` |
 //! | `cas.E.O addr, expected, value` | [`Op::CompareSwap`] |
 //! | `crypto.C v` | [`Op::Crypto`], `C` is `aes.subbytes aes.invsubbytes aes.mixcolumns aes.invmixcolumns sm4.sbox` |
+//! | `pac data, modifier, key0, key1` | [`Op::Pac`] |
 //! | `lane.K.W args` | [`Op::Lane`]: `K` is a [`LaneKind`] mnemonic (`add qadds mulhs shli widenlos narrow mulwloss bcast extract insert splat` and so on, see `LANE` in this file), `W` the lane width 8, 16, 32 or 64 (omitted for the bitwise kinds `and or xor andn not select`); shift, broadcast, extract and insert end in `, N`, a decimal immediate |\n//! | `lane.perm v, PAT` / `lane.perm2 a, b, PAT` | [`Op::Permute`]; `PAT` is the 16 byte indices as a 128-bit hex value, byte `i` of the value giving result byte `i` |\n//! | `fence.O` / `clear.excl` | fence, clear the monitor |
 //! | `fp.add fp.sub fp.mul fp.div fp.sqrt fp.muladd fp.neg fp.abs args` | [`FpOp`] |
 //! | `fp.rint.R fp.tosint.R fp.touint.R fp.fromsint fp.fromuint fp.convert v` | [`FpOp`] conversions; `R` is `n`, `a`, `m`, `p` or `z` ([`FpRound`]) |
@@ -419,6 +420,16 @@ impl fmt::Display for Block {
                     }
                     write!(f, ", {:#x}", p.pattern_value())?;
                 }
+                Op::Pac {
+                    data,
+                    modifier,
+                    key0,
+                    key1,
+                } => write!(
+                    f,
+                    "pac v{}, v{}, v{}, v{}",
+                    data.0, modifier.0, key0.0, key1.0
+                )?,
                 Op::AtomicRmw {
                     op,
                     addr,
@@ -894,6 +905,15 @@ fn parse_op(c: &mut Cursor, regs: &RegFile, defined: usize) -> Result<(Op, usize
                     a: v[0],
                     b: v.get(1).copied(),
                 }))
+            }
+            "pac" => {
+                let v = c.values(4, defined)?;
+                Op::Pac {
+                    data: v[0],
+                    modifier: v[1],
+                    key0: v[2],
+                    key1: v[3],
+                }
             }
             "const" => Op::konst(c.hex("a constant")?),
             "get" => Op::Get(reg(c)?),

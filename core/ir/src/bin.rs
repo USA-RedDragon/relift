@@ -407,6 +407,17 @@ fn put_op(out: &mut Vec<u8>, op: &Op) {
                 put_val(out, b);
             }
         }
+        Op::Pac {
+            data,
+            modifier,
+            key0,
+            key1,
+        } => {
+            out.push(30);
+            for v in [data, modifier, key0, key1] {
+                put_val(out, *v);
+            }
+        }
     }
 }
 
@@ -585,6 +596,12 @@ fn get_op(r: &mut Reader<'_>) -> Res<Op> {
             let b = if c == 29 { Some(val(r)?) } else { None };
             Op::Permute(Box::new(Permute { pattern, a, b }))
         }
+        30 => Op::Pac {
+            data: val(r)?,
+            modifier: val(r)?,
+            key0: val(r)?,
+            key1: val(r)?,
+        },
         _ => return bad("bad operation code"),
     })
 }

@@ -301,6 +301,12 @@ pub fn eval_crypto(op: CryptoOp, x: u128) -> u128 {
     crate::crypto::eval(op, x)
 }
 
+/// The meaning of [`crate::Op::Pac`]: QARMA5 of `data` under the tweak
+/// `modifier` and the key `key0:key1`.
+pub fn eval_pac(data: u64, modifier: u64, key0: u64, key1: u64) -> u64 {
+    crate::pac::qarma5(data, modifier, key0, key1)
+}
+
 fn fp_round(x: f64, r: FpRound) -> f64 {
     match r {
         FpRound::TiesEven => x.round_ties_even(),
@@ -731,6 +737,17 @@ pub fn run_verified(
                 crate::lane::eval(*op, &vals)
             }
             Op::Permute(p) => crate::lane::eval_permute(&p.pattern, v(p.a), p.b.map(v)),
+            Op::Pac {
+                data,
+                modifier,
+                key0,
+                key1,
+            } => u128::from(eval_pac(
+                v(*data) as u64,
+                v(*modifier) as u64,
+                v(*key0) as u64,
+                v(*key1) as u64,
+            )),
             Op::AtomicRmw {
                 op,
                 addr,

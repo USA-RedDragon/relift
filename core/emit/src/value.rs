@@ -590,6 +590,16 @@ pub(crate) fn emit_op(
         Op::Crypto(op, x) => fe
             .crypto(*op, &val(*x))
             .ok_or_else(|| format!("cipher step {op:?}"))?,
+        Op::Pac {
+            data,
+            modifier,
+            key0,
+            key1,
+        } => {
+            let (d, m, k0, k1) = (val(*data), val(*modifier), val(*key0), val(*key1));
+            fe.pac([&d, &m, &k0, &k1])
+                .ok_or_else(|| "pointer authentication".to_string())?
+        }
         Op::AtomicRmw {
             op,
             addr,

@@ -168,6 +168,14 @@ pub trait Frontend {
         None
     }
 
+    /// The C expression for [`relift_ir::Op::Pac`] on the C expressions of
+    /// its data, modifier and key halves, or `None` when the runtime has
+    /// none (the emitter then refuses the block).
+    fn pac(&self, args: [&str; 4]) -> Option<String> {
+        let _ = args;
+        None
+    }
+
     /// The C lvalue of the guest cycle clock, an `rl_time` (docs/abi.md
     /// section 13), such as `c->time`; `None` for a CPU without one, whose
     /// blocks hold no tick, I/O access or sync point (the emitter reports

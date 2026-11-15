@@ -35,6 +35,7 @@ mod io;
 pub mod lane;
 mod ops;
 pub mod opt;
+mod pac;
 mod regs;
 pub mod text;
 

@@ -645,6 +645,19 @@ pub enum Op {
     Sync,
     /// A cipher step of the width [`CryptoOp::width`].
     Crypto(CryptoOp, Value),
+    /// The 64-bit pointer authentication code of `data` under the 64-bit
+    /// `modifier` and the key `key0:key1` (Arm `ComputePAC` with QARMA5,
+    /// see [`crate::interp::eval_pac`]). Pure; all operands are 64 bits.
+    Pac {
+        /// The pointer or value signed.
+        data: Value,
+        /// The tweak.
+        modifier: Value,
+        /// The key's high half.
+        key0: Value,
+        /// The key's low half.
+        key1: Value,
+    },
     /// One single-copy-atomic read-modify-write of the instruction's width
     /// (whole bytes) at `addr`: memory becomes `op(old, value)`; gives `old`.
     AtomicRmw {
@@ -777,6 +790,17 @@ impl Op {
                 a: r(&p.a),
                 b: p.b.as_ref().map(r),
             })),
+            Op::Pac {
+                data,
+                modifier,
+                key0,
+                key1,
+            } => Op::Pac {
+                data: r(data),
+                modifier: r(modifier),
+                key0: r(key0),
+                key1: r(key1),
+            },
             Op::AtomicRmw {
                 op,
                 addr,
@@ -844,6 +868,12 @@ impl Op {
             Op::Fp(_, args) | Op::Lane(_, args) => args.to_vec(),
             Op::Permute(p) => std::iter::once(p.a).chain(p.b).collect(),
             Op::Intrinsic(call) => call.args.clone(),
+            Op::Pac {
+                data,
+                modifier,
+                key0,
+                key1,
+            } => vec![*data, *modifier, *key0, *key1],
         }
     }
 

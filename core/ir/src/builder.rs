@@ -418,6 +418,19 @@ impl Builder {
         self.val(Op::Permute(Box::new(p)), Width::W128)
     }
 
+    /// The pointer authentication code of `data` (see [`Op::Pac`]).
+    pub fn pac(&mut self, data: Value, modifier: Value, key0: Value, key1: Value) -> Value {
+        self.val(
+            Op::Pac {
+                data,
+                modifier,
+                key0,
+                key1,
+            },
+            Width::W64,
+        )
+    }
+
     /// Calls a named intrinsic.
     pub fn intrinsic(&mut self, name: &'static str, args: &[Value], width: Option<Width>) -> Value {
         self.push(Op::intrinsic(name, args.to_vec()), width)

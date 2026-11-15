@@ -641,6 +641,7 @@ impl Em<'_> {
             Op::Set(..) | Op::Guard(..) => {
                 return Err("an operation out of place".into());
             }
+            Op::Pac { .. } => return Err("pointer authentication".into()),
         }
         Ok(())
     }

@@ -296,6 +296,18 @@ pub(crate) fn check_op(
             same(need()?, c.width())?;
             same(w(*x)?, c.width())
         }
+        Op::Pac {
+            data,
+            modifier,
+            key0,
+            key1,
+        } => {
+            same(need()?, Width::W64)?;
+            for v in [data, modifier, key0, key1] {
+                same(w(*v)?, Width::W64)?;
+            }
+            Ok(())
+        }
     }
 }
 
