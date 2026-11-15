@@ -484,9 +484,47 @@ fn xml(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// What the home screen shows for a game.
+pub struct Home {
+    /// The name under the icon.
+    pub label: String,
+    /// A file name in the bundle and the PNG bytes for each size.
+    pub icons: Vec<(&'static str, Vec<u8>)>,
+}
+
+/// The home screen entry of the program `exe`, from the identity it embeds:
+/// its title (else `label`) and its icon (else the generated one for `seed`).
+///
+/// # Errors
+///
+/// The program cannot be read or carries no self-description.
+pub fn home(exe: &Path, seed: &str, label: &str) -> Result<Home, BoxError> {
+    let image = std::fs::read(exe)?;
+    let doc = relift_info::section::read(&image).map_err(|e| format!("{}: {e}", exe.display()))?;
+    let info = relift_info::Info::from_bytes(doc)?;
+    Ok(Home {
+        label: crate::appimage::display_name(&info, label),
+        icons: crate::icon::ios_pngs(info.identity.icon.as_ref(), seed),
+    })
+}
+
+/// `CFBundleName`, which iOS keeps to 15 characters.
+fn short_name(label: &str) -> String {
+    if label.chars().count() <= 15 {
+        return label.to_string();
+    }
+    let cut: String = label.chars().take(14).collect();
+    format!("{}\u{2026}", cut.trim_end())
+}
+
 /// The bundle's Info.plist.
 #[must_use]
 pub fn info_plist(b: &IosBuild, exe: &str, label: &str) -> String {
+    plist(&b.bundle_id, b.target, exe, label)
+}
+
+fn plist(bundle_id: &str, target: Target, exe: &str, label: &str) -> String {
+    let short = xml(&short_name(label));
     let label = xml(label);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -498,12 +536,13 @@ pub fn info_plist(b: &IosBuild, exe: &str, label: &str) -> String {
   <key>CFBundleExecutable</key><string>{exe}</string>
   <key>CFBundleIdentifier</key><string>{id}</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>{label}</string>
+  <key>CFBundleName</key><string>{short}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleSupportedPlatforms</key><array><string>{platform}</string></array>
   <key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string></array></dict></dict>
+  <key>CFBundleIcons~ipad</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>AppIcon60x60</string><string>AppIcon76x76</string><string>AppIcon83.5x83.5</string></array></dict></dict>
   <key>DTPlatformName</key><string>{sdk}</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
@@ -519,9 +558,9 @@ pub fn info_plist(b: &IosBuild, exe: &str, label: &str) -> String {
 </dict>
 </plist>
 "#,
-        id = b.bundle_id,
-        platform = b.target.platform,
-        sdk = b.target.sdk,
+        id = bundle_id,
+        platform = target.platform,
+        sdk = target.sdk,
     )
 }
 
@@ -535,8 +574,7 @@ pub fn package(
     b: &IosBuild,
     exe: &Path,
     name: &str,
-    label: &str,
-    icon: &[u8],
+    home: &Home,
     ui: &mut Ui,
 ) -> Result<PathBuf, BoxError> {
     let dir = exe.parent().ok_or("the program has no folder")?;
@@ -553,11 +591,11 @@ pub fn package(
     executable(&dest)?;
     relift_cache::write_if_changed(
         &app.join("Info.plist"),
-        info_plist(b, exe_name, label).as_bytes(),
+        info_plist(b, exe_name, &home.label).as_bytes(),
     )?;
     relift_cache::write_if_changed(&app.join("PkgInfo"), b"APPL????")?;
-    for n in ["AppIcon60x60@2x.png", "AppIcon60x60@3x.png"] {
-        relift_cache::write_if_changed(&app.join(n), icon)?;
+    for (n, png) in &home.icons {
+        relift_cache::write_if_changed(&app.join(n), png)?;
     }
     let how = sign(b, &app, &dir.join("sign"))?;
     ui.done(row, Line::new().text(format!("{} ({how})", b.bundle_id)));
@@ -647,6 +685,22 @@ mod tests {
         assert!(app_id_covers("T.*", "T", "x.y"));
         assert!(app_id_covers("T.a.b", "T", "a.b"));
         assert!(!app_id_covers("T.a.b", "T", "a.bc"));
+    }
+
+    #[test]
+    fn the_bundle_is_named_with_the_title_and_lists_its_icons() {
+        assert_eq!(short_name("Short"), "Short");
+        assert_eq!(
+            short_name("A Very Long Game Title"),
+            "A Very Long Ga\u{2026}"
+        );
+        let t = target("ios-arm64").unwrap();
+        let p = plist("dev.relift.x", t, "game", "A & B Long Title Here");
+        assert!(
+            p.contains("<key>CFBundleDisplayName</key><string>A &amp; B Long Title Here</string>")
+        );
+        assert!(p.contains("<key>CFBundleName</key><string>A &amp; B Long Tit\u{2026}</string>"));
+        assert!(p.contains("<string>AppIcon83.5x83.5</string>"));
     }
 
     #[test]

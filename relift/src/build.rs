@@ -1899,8 +1899,8 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         req.label
     };
     if let Some(i) = req.ios {
-        let icon = crate::icon::png(None, req.name);
-        let app = crate::ios::package(i, req.exe, req.name, label, &icon, ui)?;
+        let home = crate::ios::home(req.exe, req.name, label)?;
+        let app = crate::ios::package(i, req.exe, req.name, &home, ui)?;
         ui.summary(&Line::new().text(format!("  app: {}", app.display())));
         if let crate::ios::Signing::Unsigned(why) = &i.signing {
             ui.summary(&Line::new().paint(
