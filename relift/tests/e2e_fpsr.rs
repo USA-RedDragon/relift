@@ -114,6 +114,32 @@ fn two_functions() -> Vec<u8> {
     code.iter().flat_map(|w| w.to_le_bytes()).collect()
 }
 
+/// Clears FPSR, calls B through a register, reads FPSR and prints when
+/// DZC is set, and exits. B divides by zero and returns.
+fn through_a_pointer() -> Vec<u8> {
+    let code = [
+        // 0x00: the entry.
+        0xd51b_443f, // msr fpsr, xzr
+        adr(9, 0x30 - 0x04),
+        0xd63f_0120, // blr x9
+        MRS_X2_FPSR,
+        tbz(2, 1, 0x20 - 0x10),
+        adr(0, 0x1000 - 0x14),
+        movz(1, MSG.len() as u32),
+        svc(0x27),
+        svc(0x07),
+        0x1400_0000,
+        NOP,
+        NOP,
+        // 0x30: B.
+        FMOV_S1_ONE,
+        FMOV_S2_WZR,
+        FDIV_S0_S1_S2,
+        RET,
+    ];
+    code.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
 /// Builds and runs the program; gives stdout, stderr and program.c.
 fn build_and_run(name: &str, read: bool) -> (String, String, String) {
     let text = program(read);
@@ -286,4 +312,20 @@ fn a_flagged_function_split_into_pieces_is_all_in_part_1() {
         }
     }
     assert!(holding >= 2, "{holding} shards hold pieces of A");
+}
+
+#[test]
+fn flags_raised_through_a_function_pointer_reach_the_read() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let (stdout, stderr, prog) =
+        build_and_run_text("e2e-fpsr-pointer", through_a_pointer(), MSG.to_vec());
+    assert!(prog.contains("rl_a64_set_fp_flags(1)"));
+    assert!(
+        stderr.contains("a region is unbounded: every function produces flags"),
+        "{stderr}"
+    );
+    assert_eq!(stdout, "divide by zero seen\n", "{stderr}");
 }
