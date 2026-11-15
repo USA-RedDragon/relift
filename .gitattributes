@@ -6,3 +6,4 @@ cpus/arm32/src/decode/generated.rs linguist-generated=true
 cpus/arm32/src/lift/generated/*.rs linguist-generated=true
 cpus/arm32/src/lift/generated/mod.rs -linguist-generated
 runtime/guests/gba/tests/vectors_console.h linguist-generated=true
+runtime/guests/gba/tests/vectors_io.h linguist-generated=true
