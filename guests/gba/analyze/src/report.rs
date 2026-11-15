@@ -16,6 +16,8 @@ pub enum CopyKind {
     Dma(u8),
     /// A call with constant arguments, run to its return.
     Run,
+    /// A multiboot image where the BIOS loads it.
+    Load,
 }
 
 impl fmt::Display for CopyKind {
@@ -25,6 +27,7 @@ impl fmt::Display for CopyKind {
             CopyKind::CpuFastSet => f.write_str("CpuFastSet"),
             CopyKind::Dma(n) => write!(f, "DMA{n}"),
             CopyKind::Run => f.write_str("run"),
+            CopyKind::Load => f.write_str("load"),
         }
     }
 }

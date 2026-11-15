@@ -5,7 +5,9 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Args;
-use relift_gba_analyze::{CopyKind, EdgeKind, Function, Loc, Origin, Region, Report, analyze};
+use relift_gba_analyze::{
+    CopyKind, EdgeKind, Function, Loc, Origin, Region, Report, analyze, analyze_multiboot,
+};
 use serde_json::{Value, json};
 
 use crate::{BoxError, input, print_json};
@@ -27,6 +29,10 @@ pub struct FunctionsArgs {
     /// Exit with code 1 when a transfer is unresolved.
     #[arg(long)]
     pub strict: bool,
+    /// Run the image as a multiboot program: loaded to work RAM at
+    /// 0x02000000 and entered at its entry word at 0xC0, with no cartridge.
+    #[arg(long)]
+    pub multiboot: bool,
 }
 
 /// Run the subcommand.
@@ -37,7 +43,12 @@ pub struct FunctionsArgs {
 /// transfer.
 pub fn run(args: &FunctionsArgs) -> Result<(), BoxError> {
     let rom = input(&args.rom)?;
-    let report = analyze(&rom).map_err(|e| format!("{}: {e}", args.rom.display()))?;
+    let report = if args.multiboot {
+        analyze_multiboot(&rom)
+    } else {
+        analyze(&rom)
+    }
+    .map_err(|e| format!("{}: {e}", args.rom.display()))?;
     if args.json {
         print_json(&to_json(&report, args.summary, args.instructions))?;
     } else {
@@ -75,6 +86,7 @@ fn copy_name(k: CopyKind) -> String {
         CopyKind::CpuFastSet => "cpufastset".to_owned(),
         CopyKind::Dma(n) => format!("dma{n}"),
         CopyKind::Run => "run".to_owned(),
+        CopyKind::Load => "load".to_owned(),
     }
 }
 

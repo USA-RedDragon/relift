@@ -507,14 +507,10 @@ impl Run<'_> {
     }
 
     fn copy(&mut self, site: Loc, kind: CopyKind, src: u32, dst: u32, len: u32) {
-        if len == 0
-            || Region::of(src) != Region::Rom
-            || !self.env.image.in_image(src)
-            || !Region::of(dst).is_ram()
-        {
+        if len == 0 || !Region::of(dst).is_ram() {
             return;
         }
-        let Some(bytes) = self.env.image.rom_bytes(src, len) else {
+        let Some(bytes) = self.env.image.source(src, len) else {
             return;
         };
         self.out.copies.push(RamCopy {
@@ -793,7 +789,7 @@ impl Run<'_> {
         let args = [st.reg(0), st.reg(1), st.reg(2), st.reg(3)];
         let ks: Vec<u32> = args.iter().filter_map(|a| a.k32()).collect();
         if !ks.iter().any(|a| Region::of(*a).is_ram())
-            || !ks.iter().any(|a| self.env.image.in_image(*a))
+            || !ks.iter().any(|a| self.env.image.is_source(*a))
         {
             return;
         }

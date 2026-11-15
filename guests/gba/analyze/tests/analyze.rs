@@ -4,7 +4,9 @@
 
 use std::collections::BTreeSet;
 
-use relift_gba_analyze::{CopyKind, EdgeKind, Loc, Origin, Report, UnresolvedKind, analyze};
+use relift_gba_analyze::{
+    CopyKind, EdgeKind, Loc, Origin, Report, UnresolvedKind, analyze, analyze_multiboot,
+};
 use relift_gba_formats::synth::{self, Spec};
 
 const BASE: u32 = 0x0800_0000;
@@ -405,8 +407,46 @@ fn shared_epilogue_reached_by_bl_ends_the_callers_frame() {
 }
 
 #[test]
-fn image_with_a_multiboot_entry_analyzes_as_a_cartridge() {
-    assert!(analyze(&synth::multiboot(0x400)).is_ok());
+fn multiboot_image_runs_from_work_ram_at_its_entry() {
+    let mut mb = synth::multiboot(0x400);
+    let at = |a: u32| (a - 0x0200_0000) as usize;
+    let e = 0x0200_0100;
+    for (i, w) in [
+        a_ldr_lit(0, e, e + 0x10),
+        A_MOV_LR_PC,
+        a_bx(0),
+        a_b(e + 0xC, e + 0xC),
+        0x0200_0201,
+    ]
+    .iter()
+    .enumerate()
+    {
+        mb[at(e) + 4 * i..at(e) + 4 * i + 4].copy_from_slice(&w.to_le_bytes());
+    }
+    mb[at(0x0200_0200)..at(0x0200_0204)]
+        .copy_from_slice(&[T_MOVS_R0_1.to_le_bytes(), T_BX_LR.to_le_bytes()].concat());
+    let r = analyze_multiboot(&mb).expect("multiboot image analyzes");
+    assert_eq!(r.copies[0].kind, CopyKind::Load);
+    assert_eq!((r.copies[0].dst, r.copies[0].len()), (0x0200_0000, 0x400));
+    let ram = |addr, thumb| Loc {
+        addr,
+        thumb,
+        copy: Some(0),
+    };
+    let found: BTreeSet<Loc> = r.instructions().keys().copied().collect();
+    for l in [
+        ram(0x0200_00C0, false),
+        ram(e, false),
+        ram(e + 0xC, false),
+        ram(0x0200_0200, true),
+        ram(0x0200_0202, true),
+    ] {
+        assert!(found.contains(&l), "{l} missed");
+    }
+    assert_eq!(found.len(), 7);
+    assert!(r.data.contains(&(e + 0x10, 4)));
+    assert!(analyze(&mb).is_ok());
+    assert!(analyze_multiboot(&synth::rom(&Spec::default())).is_err());
 }
 
 #[test]

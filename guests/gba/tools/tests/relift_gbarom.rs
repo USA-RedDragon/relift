@@ -216,3 +216,32 @@ fn functions_text_and_strict() {
     assert_eq!(v["unresolved_by_kind"]["indirect-jump"], 1);
     assert_eq!(v["functions"].as_array().map(Vec::len), Some(0));
 }
+
+#[test]
+fn functions_runs_a_multiboot_image_from_work_ram() {
+    let d = dir("gbarom-functions-multiboot");
+    let mut mb = synth::multiboot(0x400);
+    mb[0x100..0x104].copy_from_slice(&0xE12F_FF1Eu32.to_le_bytes());
+    let p = put(&d, "mb.gba", &mb);
+    let v = json(&gbarom(
+        &d,
+        &[
+            "functions",
+            path(&p),
+            "--multiboot",
+            "--json",
+            "--instructions",
+        ],
+    ));
+    assert_eq!(v["copies"][0]["kind"], "load");
+    let f = &v["functions"][0];
+    assert_eq!(f["entry"]["text"], "A:020000C0@0");
+    assert_eq!(
+        f["instructions"],
+        serde_json::json!([[0x0200_00C0u32, "A", 0, 4], [0x0200_0100u32, "A", 0, 4]])
+    );
+    let cart = put(&d, "cart.gba", &synth::rom(&Spec::default()));
+    let out = gbarom(&d, &["functions", path(&cart), "--multiboot"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no multiboot entry"));
+}

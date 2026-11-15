@@ -2,12 +2,13 @@
 //!
 //! A code location ([`Loc`]) is an address, the CPU state (ARM or Thumb)
 //! and, for code in work RAM, the copy whose bytes are there. The analysis
-//! starts at the reset entry and at every handler stored to the IRQ vector
-//! (`0x03007FFC`), lifts each instruction with `relift-cpu-arm32` and runs
-//! the lifted IR over abstract values: constants, partly known bits, an
-//! entry register plus an offset, a word loaded from a constant RAM
-//! address, a word of the caller's frame, a table index (`base + stride *
-//! i`) and a word read from a table. Every rule below follows from the
+//! starts at the reset entry ([`analyze_multiboot`]: at the entry of a
+//! multiboot image loaded to work RAM) and at every handler stored to the
+//! IRQ vector (`0x03007FFC`), lifts each instruction with
+//! `relift-cpu-arm32` and runs the lifted IR over abstract values:
+//! constants, partly known bits, an entry register plus an offset, a word
+//! loaded from a constant RAM address, a word of the caller's frame, a
+//! table index (`base + stride * i`) and a word read from a table. Every rule below follows from the
 //! instruction semantics in the IR; nothing is taken from a byte pattern.
 //!
 //! - State: the state of an instruction is the Thumb bit the IR leaves.
@@ -62,7 +63,7 @@ mod loc;
 mod report;
 mod val;
 
-pub use analysis::{AnalyzeError, RESET, analyze};
+pub use analysis::{AnalyzeError, RESET, analyze, analyze_multiboot};
 pub use loc::{Loc, Region};
 pub use report::{
     CopyKind, Edge, EdgeKind, Function, Origin, RamCopy, RegionCoverage, Report, Swi, Table,

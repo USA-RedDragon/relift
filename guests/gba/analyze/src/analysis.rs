@@ -3,14 +3,15 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
 
-use relift_gba_formats::header::MAX_ROM;
+use relift_gba_formats::header::{MAX_ROM, MULTIBOOT_BASE, MULTIBOOT_ENTRY};
 use relift_gba_formats::{Error as FormatError, Header};
 
 use crate::func::{self, Env, FnRun, Lifted, Summary};
 use crate::image::Image;
 use crate::loc::Loc;
-use crate::report::{Function, Origin, Report, UnresolvedKind};
+use crate::report::{CopyKind, Function, Origin, RamCopy, Report, UnresolvedKind};
 use relift_cpu_arm32::regs::{self, Mode};
 
 use crate::val::{Abs, State};
@@ -22,6 +23,8 @@ pub enum AnalyzeError {
     Format(FormatError),
     /// The image is larger than the cartridge space.
     TooLarge(usize),
+    /// The image has no multiboot entry, or is larger than work RAM.
+    NotMultiboot,
 }
 
 impl fmt::Display for AnalyzeError {
@@ -30,6 +33,9 @@ impl fmt::Display for AnalyzeError {
             AnalyzeError::Format(e) => write!(f, "{e}"),
             AnalyzeError::TooLarge(n) => {
                 write!(f, "image of {n} bytes exceeds the cartridge space")
+            }
+            AnalyzeError::NotMultiboot => {
+                f.write_str("no multiboot entry branch at 0xC0, or larger than work RAM")
             }
         }
     }
@@ -42,7 +48,8 @@ pub const RESET: u32 = 0x0800_0000;
 /// Function runs per function before the fixed point gives up.
 const MAX_RUNS_PER_FUNCTION: usize = 1024;
 
-/// Find the functions of the image `rom`.
+/// Find the functions of the image `rom` run as a cartridge, from the
+/// reset entry at `0x08000000`.
 ///
 /// # Errors
 ///
@@ -52,8 +59,42 @@ pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
         return Err(AnalyzeError::TooLarge(rom.len()));
     }
     Header::parse(rom).map_err(AnalyzeError::Format)?;
+    Ok(discover(Image::new(rom), Loc::rom(RESET, false)))
+}
+
+/// Find the functions of the multiboot image `rom` as the BIOS runs it:
+/// loaded to `0x02000000` in external work RAM and entered at its
+/// entry word at `0xC0`, with no cartridge. The image is copy 0 of the
+/// report, of kind [`crate::CopyKind::Load`].
+///
+/// # Errors
+///
+/// The header does not parse, or the image has no multiboot entry branch
+/// or does not fit work RAM.
+pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
+    let h = Header::parse(rom).map_err(AnalyzeError::Format)?;
+    if h.multiboot_entry.is_none() {
+        return Err(AnalyzeError::NotMultiboot);
+    }
+    let mut image = Image::new(&[]);
+    let site = Loc {
+        addr: MULTIBOOT_BASE + MULTIBOOT_ENTRY as u32,
+        thumb: false,
+        copy: Some(0),
+    };
+    image.copies.push(RamCopy {
+        site,
+        kind: CopyKind::Load,
+        src: None,
+        dst: MULTIBOOT_BASE,
+        bytes: Rc::from(rom),
+    });
+    Ok(discover(image, site))
+}
+
+fn discover(image: Image<'_>, entry: Loc) -> Report {
     let mut d = Driver {
-        image: Image::new(rom),
+        image,
         roots: BTreeMap::new(),
         origins: HashMap::new(),
         entries: HashSet::new(),
@@ -70,14 +111,14 @@ pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
         no_tables: BTreeSet::new(),
         rejected: BTreeSet::new(),
     };
-    d.add_root(Loc::rom(RESET, false), Origin::Entry);
+    d.add_root(entry, Origin::Entry);
     loop {
         d.solve();
         if !d.address_taken() {
             break;
         }
     }
-    Ok(d.report())
+    d.report()
 }
 
 struct Driver<'a> {

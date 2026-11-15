@@ -4,7 +4,7 @@
 use relift_gba_formats::rom::OFFSET_MASK;
 
 use crate::loc::{Loc, Region};
-use crate::report::RamCopy;
+use crate::report::{CopyKind, RamCopy};
 
 pub(crate) struct Image<'a> {
     rom: &'a [u8],
@@ -72,6 +72,22 @@ impl<'a> Image<'a> {
             .filter(|(_, c)| addr.wrapping_sub(c.dst) < c.len())
             .filter_map(|(i, _)| u16::try_from(i).ok())
             .collect()
+    }
+
+    /// The bytes a copy can read at `src`: the ROM image, or the multiboot
+    /// image where the BIOS loaded it.
+    pub(crate) fn source(&self, src: u32, n: u32) -> Option<&[u8]> {
+        if let Some(b) = self.rom_bytes(src, n) {
+            return Some(b);
+        }
+        let c = self.copies.iter().find(|c| c.kind == CopyKind::Load)?;
+        let off = src.checked_sub(c.dst)? as usize;
+        c.bytes.get(off..off + n as usize)
+    }
+
+    /// Whether `addr` is in the ROM image or in a loaded multiboot image.
+    pub(crate) fn is_source(&self, addr: u32) -> bool {
+        self.source(addr, 1).is_some()
     }
 
     /// Whether `addr` is a ROM address inside the image.
