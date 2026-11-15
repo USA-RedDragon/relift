@@ -69,6 +69,7 @@ typedef struct host {
     const char *interp_log;
     const char *learn;
     bool live;
+    bool save_soon;
     bool audio;
     rl_audio_out *out;
     const char *wav;
@@ -233,9 +234,16 @@ static bool wav_write(const host *H)
     return ok;
 }
 
+static void save_if_asked(host *H)
+{
+    if (__atomic_exchange_n(&H->save_soon, false, __ATOMIC_ACQ_REL))
+        save_now(H);
+}
+
 static void audio_pace(host *H)
 {
     while (!__atomic_load_n(&H->quit, __ATOMIC_ACQUIRE) && rl_audio_queued(H->out) > AUDIO_AHEAD) {
+        save_if_asked(H);
         struct timespec d = {0, 1000000L};
         nanosleep(&d, NULL);
     }
@@ -261,6 +269,7 @@ static void on_frame(host *H)
     }
     if (H->frames % SAVE_EVERY == 0)
         save_now(H);
+    save_if_asked(H);
     if (H->stop_frames && !H->in_case && H->frames >= H->stop_frames)
         H->quit = true;
     if (H->win && H->out) {
@@ -337,6 +346,8 @@ static void on_window(void *user, rl_window *w, int event)
     host *H = user;
     if (event == RL_WINDOW_CLOSE)
         __atomic_store_n(&H->quit, true, __ATOMIC_RELEASE);
+    else if (event == RL_WINDOW_BACKGROUND)
+        __atomic_store_n(&H->save_soon, true, __ATOMIC_RELEASE);
 }
 
 static void print_stats(void)

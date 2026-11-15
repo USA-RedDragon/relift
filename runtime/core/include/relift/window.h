@@ -37,7 +37,9 @@ enum rl_window_event {
     /** @brief The window lost keyboard focus. */
     RL_WINDOW_FOCUS_LOST = 3,
     /** @brief The drawable size changed (generation was bumped). */
-    RL_WINDOW_RESIZED = 4
+    RL_WINDOW_RESIZED = 4,
+    /** @brief The system is about to suspend or end the app (mobile hosts; window NULL): save now. */
+    RL_WINDOW_BACKGROUND = 5
 };
 
 /** @brief Receives window events, on the backend's loop thread. */

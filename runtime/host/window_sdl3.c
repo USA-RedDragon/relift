@@ -332,6 +332,8 @@ static void handle(const SDL_Event *e)
         finger_event(e);
     else if (e->type == SDL_EVENT_QUIT)
         rl_window_emit(NULL, RL_WINDOW_CLOSE);
+    else if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND || e->type == SDL_EVENT_TERMINATING)
+        rl_window_emit(NULL, RL_WINDOW_BACKGROUND);
 }
 
 static void sdl_run(bool (*done)(void *user), void *user)
