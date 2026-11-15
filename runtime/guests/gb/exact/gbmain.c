@@ -597,7 +597,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     H.learn = p->learn && *p->learn ? p->learn : NULL;
     const char *model = p->model, *case_file = NULL, *input = NULL;
     bool headless = false, check = false, no_audio = false;
-    rl_settings_declare_runtime();
+    rl_gb_declare_settings();
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -698,6 +698,10 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
         rlgbd_audio_enable(H.h, 1);
     if (check)
         H.ref = rlgbd_new_with((uint32_t)hw, p->rom, p->rom_len, flags);
+    bool correction = rl_setting_bool("video.gb_color_correction");
+    rlgbd_set_color_correction(H.h, correction);
+    if (H.ref)
+        rlgbd_set_color_correction(H.ref, correction);
     if (spec) {
         if (rlgbd_case_open(H.h, spec) != 0) {
             fprintf(stderr, "relift-gb: case: %s\n", rlgbd_case_detail(H.h));

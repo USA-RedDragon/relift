@@ -369,7 +369,11 @@ pub fn handheld_document(
     info.identity = hack.map_or(id, |h| h.identity.clone());
     info.save = save;
     info.mods = mods;
-    info.settings = game_settings::section(settings);
+    info.settings = if gba {
+        game_settings::section(settings)
+    } else {
+        game_settings::gb_section(settings)
+    };
     info.input = relift_input::input_section(ports);
     Ok(info)
 }

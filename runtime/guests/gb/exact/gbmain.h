@@ -71,4 +71,7 @@ typedef struct rl_gb_program {
  */
 RL_RUNTIME_API int rl_gb_main(const rl_gb_program *p, int argc, char **argv);
 
+/** @brief Declares the runtime's settings and the ones of the Game Boy layer (video.gb_color_correction). */
+RL_RUNTIME_API void rl_gb_declare_settings(void);
+
 #endif

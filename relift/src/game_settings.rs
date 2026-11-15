@@ -106,6 +106,20 @@ pub fn runtime_settings() -> Vec<Setting> {
     ]
 }
 
+/// The setting of the Game Boy layer (`runtime/guests/gb/exact/settings.c`), which
+/// a test keeps equal to its declaration.
+#[must_use]
+pub fn gb_settings() -> Vec<Setting> {
+    vec![Setting {
+        key: "video.gb_color_correction".into(),
+        label: "Colour correction".into(),
+        description: "Shows the colours as the LCD of the console does. Off: the plain expansion of the 5-bit channels the game writes".into(),
+        apply: Apply::Start,
+        default: Value::Bool(true),
+        kind: SettingKind::Bool,
+    }]
+}
+
 /// The `settings` section of the self-description for a game's settings.
 #[must_use]
 pub fn section(game: Vec<Setting>) -> relift_info::Settings {
@@ -113,6 +127,15 @@ pub fn section(game: Vec<Setting>) -> relift_info::Settings {
         runtime: runtime_settings(),
         game,
     }
+}
+
+/// [`section`] for a Game Boy or Game Boy Color game, whose runtime also
+/// declares [`gb_settings`].
+#[must_use]
+pub fn gb_section(game: Vec<Setting>) -> relift_info::Settings {
+    let mut s = section(game);
+    s.runtime.extend(gb_settings());
+    s
 }
 
 fn text(t: &toml::Table, key: &str, what: &str) -> Result<String, BoxError> {
@@ -605,6 +628,17 @@ pub fn check_dir(dir: &Path, settings: &[Setting]) -> Result<(), BoxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_game_boy_section_adds_the_colour_correction_after_the_runtime_ones() {
+        let gb = gb_section(Vec::new());
+        let plain = section(Vec::new());
+        assert_eq!(gb.runtime.len(), plain.runtime.len() + 1);
+        assert_eq!(gb.runtime[..plain.runtime.len()], plain.runtime[..]);
+        let last = gb.runtime.last().unwrap();
+        assert_eq!(last.key, "video.gb_color_correction");
+        assert_eq!(last.default, Value::Bool(true));
+    }
 
     const GOOD: &str = r#"
 [game]
