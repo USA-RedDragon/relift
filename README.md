@@ -183,6 +183,23 @@ that SDL3, and the AppImage asks glibc 2.28 or newer. Without it the program
 is built with the host compiler and asks the host's glibc (the build summary
 prints it).
 
+### Android: APK
+
+`relift build --target android-arm64` (or `android-x64`) writes a signed
+`<project>.apk` beside the program. The program is a shared library that
+SDL3's activity loads; the APK holds it with SDL3, the manifest and a
+signature. relift drives the Android SDK's own tools (`aapt2`, `d8`,
+`zipalign`, `apksigner`) and the NDK's clang, with no Gradle. Run
+`runtime/tools/cross/android_deps.py` once to build SDL3 and libopus for the
+target into the cache.
+
+The SDK and NDK come from `toolchain.android-sdk` and `toolchain.android-ndk`,
+else `ANDROID_HOME` and `ANDROID_NDK_HOME`. The application id is
+`package.android-id` (default `dev.relift.game.<project folder>`). The APK is
+signed with `package.android-keystore` and `package.android-keystore-pass`, or
+a debug key kept in the cache. The left stick drives the d-pad controls of
+the native ports.
+
 ## Tools
 
 | Binary | Guest | Does |
@@ -248,19 +265,24 @@ Per-game data lives in each game project's `game.toml`, not here.
 
 <!-- configulator:begin -->
 
-| Key                      | Type    | Default | Environment                     | Flag                       | Description                                                                                                                   |
-|--------------------------|---------|---------|---------------------------------|----------------------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `cache-dir`              | string  |         | `RELIFT_CACHE_DIR`              | `--cache-dir`              | where lifted, emitted and built artifacts are cached (empty: the user cache dir)                                              |
-| `jobs`                   | integer | `0`     | `RELIFT_JOBS`                   | `-j`, `--jobs`             | parallel compile jobs (0: one per CPU)                                                                                        |
-| `runtime-dir`            | string  |         | `RELIFT_RUNTIME_DIR`            | `--runtime-dir`            | the C runtime sources to build against (empty: the ones beside this relift's source)                                          |
-| `color`                  | string  | `auto`  | `RELIFT_COLOR`                  | `--color`                  | color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never                                         |
-| `toolchain.clang`        | string  |         | `RELIFT_TOOLCHAIN_CLANG`        | `--toolchain.clang`        | the clang driver                                                                                                              |
-| `toolchain.zig`          | string  |         | `RELIFT_TOOLCHAIN_ZIG`          | `--toolchain.zig`          | zig, for `zig cc` player builds                                                                                               |
-| `toolchain.ninja`        | string  |         | `RELIFT_TOOLCHAIN_NINJA`        | `--toolchain.ninja`        | the ninja build tool                                                                                                          |
-| `toolchain.appimagetool` | string  |         | `RELIFT_TOOLCHAIN_APPIMAGETOOL` | `--toolchain.appimagetool` | appimagetool, which packs the Linux release output                                                                            |
-| `emit.shard-kib`         | integer | `4096`  | `RELIFT_EMIT_SHARD_KIB`         | `--emit.shard-kib`         | the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C                                       |
-| `emit.piece-kib`         | integer | `1024`  | `RELIFT_EMIT_PIECE_KIB`         | `--emit.piece-kib`         | the most KiB of C per C function; a larger guest function is split into several                                               |
-| `package.appimage`       | string  | `auto`  | `RELIFT_PACKAGE_APPIMAGE`       | `--package.appimage`       | the Linux release output: auto (an AppImage when appimagetool is found), always (a build without appimagetool fails) or never |
+| Key                             | Type    | Default | Environment                            | Flag                              | Description                                                                                                                   |
+|---------------------------------|---------|---------|----------------------------------------|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `cache-dir`                     | string  |         | `RELIFT_CACHE_DIR`                     | `--cache-dir`                     | where lifted, emitted and built artifacts are cached (empty: the user cache dir)                                              |
+| `jobs`                          | integer | `0`     | `RELIFT_JOBS`                          | `-j`, `--jobs`                    | parallel compile jobs (0: one per CPU)                                                                                        |
+| `runtime-dir`                   | string  |         | `RELIFT_RUNTIME_DIR`                   | `--runtime-dir`                   | the C runtime sources to build against (empty: the ones beside this relift's source)                                          |
+| `color`                         | string  | `auto`  | `RELIFT_COLOR`                         | `--color`                         | color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never                                         |
+| `toolchain.clang`               | string  |         | `RELIFT_TOOLCHAIN_CLANG`               | `--toolchain.clang`               | the clang driver                                                                                                              |
+| `toolchain.zig`                 | string  |         | `RELIFT_TOOLCHAIN_ZIG`                 | `--toolchain.zig`                 | zig, for `zig cc` player builds                                                                                               |
+| `toolchain.ninja`               | string  |         | `RELIFT_TOOLCHAIN_NINJA`               | `--toolchain.ninja`               | the ninja build tool                                                                                                          |
+| `toolchain.appimagetool`        | string  |         | `RELIFT_TOOLCHAIN_APPIMAGETOOL`        | `--toolchain.appimagetool`        | appimagetool, which packs the Linux release output                                                                            |
+| `toolchain.android-sdk`         | string  |         | `RELIFT_TOOLCHAIN_ANDROID_SDK`         | `--toolchain.android-sdk`         | the Android SDK with build-tools and platforms (empty: ANDROID_HOME, then common places)                                      |
+| `toolchain.android-ndk`         | string  |         | `RELIFT_TOOLCHAIN_ANDROID_NDK`         | `--toolchain.android-ndk`         | the Android NDK (empty: ANDROID_NDK_HOME, then the SDK's newest)                                                              |
+| `emit.shard-kib`                | integer | `4096`  | `RELIFT_EMIT_SHARD_KIB`                | `--emit.shard-kib`                | the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C                                       |
+| `emit.piece-kib`                | integer | `1024`  | `RELIFT_EMIT_PIECE_KIB`                | `--emit.piece-kib`                | the most KiB of C per C function; a larger guest function is split into several                                               |
+| `package.appimage`              | string  | `auto`  | `RELIFT_PACKAGE_APPIMAGE`              | `--package.appimage`              | the Linux release output: auto (an AppImage when appimagetool is found), always (a build without appimagetool fails) or never |
+| `package.android-id`            | string  |         | `RELIFT_PACKAGE_ANDROID_ID`            | `--package.android-id`            | the application id of the Android APK (empty: dev.relift.game.<project folder>)                                               |
+| `package.android-keystore`      | string  |         | `RELIFT_PACKAGE_ANDROID_KEYSTORE`      | `--package.android-keystore`      | the keystore that signs the APK, with the key alias relift (empty: a debug key in the cache)                                  |
+| `package.android-keystore-pass` | string  |         | `RELIFT_PACKAGE_ANDROID_KEYSTORE_PASS` | `--package.android-keystore-pass` | the password of the keystore and its key                                                                                      |
 
 <!-- configulator:end -->
 

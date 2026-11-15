@@ -311,6 +311,10 @@ pub struct Built {
     pub exe: PathBuf,
     /// The ROM the save belongs next to.
     pub source: PathBuf,
+    /// The title the game goes by, empty when it has none.
+    pub title: String,
+    /// The Android build, when the target is one.
+    pub android: Option<android::AndroidBuild>,
 }
 
 /// `relift build` of the Game Boy project in the working directory, with
@@ -489,9 +493,18 @@ pub fn build(
         crate::game_settings::generate_c(&game_settings).as_bytes(),
     )?;
     prog.push(settings_c);
-    compile(settings, &out, &cdir, &files, &prog, release, android.as_ref(), ui)?;
+    compile(
+        settings,
+        &out,
+        &cdir,
+        &files,
+        &prog,
+        release,
+        android.as_ref(),
+        ui,
+    )?;
     let exe = match &android {
-        Some(a) => package_apk(a, &out, &name, &p.title, ui)?,
+        Some(_) => out.join("libmain.so"),
         None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
     };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
@@ -507,43 +520,9 @@ pub fn build(
     Ok(Built {
         exe,
         source: p.source,
+        title: p.title,
+        android,
     })
-}
-
-fn package_apk(
-    a: &android::AndroidBuild,
-    out: &Path,
-    name: &str,
-    title: &str,
-    ui: &mut Ui,
-) -> Result<PathBuf, BoxError> {
-    let row = ui.row("");
-    ui.begin(row, "package");
-    let apk = out.join(format!("{name}.apk"));
-    android::build_apk(
-        &android::Apk {
-            package: &a.package,
-            label: if title.is_empty() { name } else { title },
-            target: a.target,
-            program: &out.join("libmain.so"),
-            deps: &a.deps,
-            work: &out.join("apk"),
-            output: &apk,
-        },
-        &a.sdk,
-        &a.ndk,
-        &a.signing,
-    )?;
-    ui.done(
-        row,
-        Line::new().text(format!(
-            "{} ({}, signed with the {} key)",
-            a.package,
-            a.target.abi,
-            if a.signing.debug { "debug" } else { "given" }
-        )),
-    );
-    Ok(apk)
 }
 
 fn compile(

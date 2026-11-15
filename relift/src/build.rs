@@ -1027,6 +1027,7 @@ pub(crate) struct Built {
     pub(crate) exe: PathBuf,
     pub(crate) out: PathBuf,
     pub(crate) toolchain: BuildTools,
+    pub(crate) android: Option<crate::android::AndroidBuild>,
 }
 
 /// Builds `plans` in order, each in its own directory, showing progress
@@ -1411,30 +1412,6 @@ pub(crate) fn build_project(
             Line::new().text(format!("{}, {note}", noun(finished as u64, "file")))
         },
     );
-    let exe = match &android {
-        Some(a) => {
-            let row = ui.row("");
-            ui.begin(row, "package");
-            let apk = bdir.join(format!("{name}.apk"));
-            crate::android::build_apk(
-                &crate::android::Apk {
-                    package: &a.package,
-                    label: &name,
-                    target: a.target,
-                    program: &exe,
-                    deps: &a.deps,
-                    work: &bdir.join("apk"),
-                    output: &apk,
-                },
-                &a.sdk,
-                &a.ndk,
-                &a.signing,
-            )?;
-            ui.done(row, Line::new().text(a.package.clone()));
-            apk
-        }
-        None => exe,
-    };
     summarize(
         ui,
         emitted.functions,
@@ -1445,6 +1422,7 @@ pub(crate) fn build_project(
     Ok(Built {
         exe,
         out,
+        android,
         toolchain: BuildTools {
             cc,
             ninja,
@@ -1519,27 +1497,60 @@ pub fn run_build(
             })?),
         };
         let built = crate::gb::build(settings, mods, true, android, ui)?;
-        if android.is_some() {
-            return Ok(());
-        }
         let (name, _) = project_out(settings)?;
-        return package(settings, &name, &built.exe, None, ui);
+        let request = Package {
+            name: &name,
+            label: &built.title,
+            exe: &built.exe,
+            import: None,
+            android: built.android.as_ref(),
+        };
+        return package(settings, &request, ui);
     }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
     let (name, _) = project_out(settings)?;
     let import = import_dir(settings)?;
-    package(settings, &name, &built.exe, Some(&import), ui)
+    let request = Package {
+        name: &name,
+        label: "",
+        exe: &built.exe,
+        import: Some(&import),
+        android: built.android.as_ref(),
+    };
+    package(settings, &request, ui)
 }
 
-/// The release output of the host: on Linux an AppImage of the program.
-fn package(
-    settings: &Settings,
-    name: &str,
-    exe: &Path,
-    import: Option<&Path>,
-    ui: &mut Ui,
-) -> Result<(), BoxError> {
-    let request = crate::appimage::Request { name, exe, import };
+/// What the packaging step of a release build works from.
+struct Package<'a> {
+    name: &'a str,
+    /// The title the game goes by; empty to use `name`.
+    label: &'a str,
+    exe: &'a Path,
+    /// The import directory of a Switch game, whose `romfs/` and `dlc/` go
+    /// with the program.
+    import: Option<&'a Path>,
+    /// The Android build, when the target is one.
+    android: Option<&'a crate::android::AndroidBuild>,
+}
+
+/// The release output of the target: an APK for Android, on Linux an
+/// AppImage of the program, nothing else yet.
+fn package(settings: &Settings, req: &Package<'_>, ui: &mut Ui) -> Result<(), BoxError> {
+    if let Some(a) = req.android {
+        let label = if req.label.is_empty() {
+            req.name
+        } else {
+            req.label
+        };
+        let apk = crate::android::package(a, req.exe, req.name, label, ui)?;
+        ui.summary(&Line::new().text(format!("  apk: {}", apk.display())));
+        return Ok(());
+    }
+    let request = crate::appimage::Request {
+        name: req.name,
+        exe: req.exe,
+        import: req.import,
+    };
     if let Some(p) = crate::appimage::package(settings, &request, ui)? {
         let libs: Vec<&str> = p.bundled.iter().map(|b| b.soname.as_str()).collect();
         ui.summary(&Line::new().text(format!("  appimage: {}", p.path.display())));

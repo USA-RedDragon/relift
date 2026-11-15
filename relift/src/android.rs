@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
+use crate::ui::Ui;
+use relift_progress::Line;
 
 /// The Android API level the runtime builds for (`memfd_create` in bionic).
 pub const MIN_API: u32 = 30;
@@ -368,7 +370,9 @@ impl Signing {
     pub fn find(settings: &Settings, sdk: &Sdk, cache_root: &Path) -> Result<Self, BoxError> {
         if !settings.package.android_keystore.as_os_str().is_empty() {
             if settings.package.android_keystore_pass.is_empty() {
-                return Err("package.android-keystore is set without package.android-keystore-pass".into());
+                return Err(
+                    "package.android-keystore is set without package.android-keystore-pass".into(),
+                );
             }
             return Ok(Self {
                 keystore: settings.package.android_keystore.clone(),
@@ -458,6 +462,69 @@ pub fn default_package(name: &str) -> String {
     }
 }
 
+/// The packaging step of an Android build: the signed APK of the program
+/// `exe`, written beside it, with `label` as the launcher name.
+///
+/// # Errors
+///
+/// A tool fails; its output is in the message.
+pub fn package(
+    a: &AndroidBuild,
+    exe: &Path,
+    name: &str,
+    label: &str,
+    ui: &mut Ui,
+) -> Result<PathBuf, BoxError> {
+    let dir = exe.parent().ok_or("the program has no folder")?;
+    let row = ui.row("");
+    ui.begin(row, "package");
+    let apk = dir.join(format!("{name}.apk"));
+    build_apk(
+        &Apk {
+            package: &a.package,
+            label,
+            target: a.target,
+            program: exe,
+            deps: &a.deps,
+            work: &dir.join("apk"),
+            output: &apk,
+        },
+        &a.sdk,
+        &a.ndk,
+        &a.signing,
+    )?;
+    ui.done(
+        row,
+        Line::new().text(format!(
+            "{} ({}, signed with the {} key)",
+            a.package,
+            a.target.abi,
+            if a.signing.debug { "debug" } else { "given" }
+        )),
+    );
+    Ok(apk)
+}
+
+/// Links the manifest and the resources of the APK into `res/` of its work
+/// folder. The launcher icon and the application label's resources join the
+/// link here.
+fn link_resources(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> Result<(), BoxError> {
+    let manifest_path = a.work.join("AndroidManifest.xml");
+    relift_cache::write_if_changed(&manifest_path, manifest(a, sdk, debuggable).as_bytes())?;
+    run(
+        relift_proc::command(&sdk.aapt2)
+            .arg("link")
+            .arg("--manifest")
+            .arg(&manifest_path)
+            .arg("-I")
+            .arg(&sdk.android_jar)
+            .args(["--output-to-dir", "-o"])
+            .arg(a.work.join("res")),
+        "aapt2",
+    )?;
+    Ok(())
+}
+
 /// Makes the signed APK of `a`.
 ///
 /// # Errors
@@ -494,19 +561,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
             .arg(&a.deps.sdl3_jar),
         "d8",
     )?;
-    let manifest_path = w.join("AndroidManifest.xml");
-    relift_cache::write_if_changed(&manifest_path, manifest(a, sdk, signing.debug).as_bytes())?;
-    run(
-        relift_proc::command(&sdk.aapt2)
-            .arg("link")
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .arg("-I")
-            .arg(&sdk.android_jar)
-            .args(["--output-to-dir", "-o"])
-            .arg(w.join("res")),
-        "aapt2",
-    )?;
+    link_resources(a, sdk, signing.debug)?;
     let stripped = w.join("libmain.so");
     run(
         relift_proc::command(&ndk.strip)
