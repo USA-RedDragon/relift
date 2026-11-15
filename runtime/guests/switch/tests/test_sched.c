@@ -14,6 +14,7 @@
 
 #define HAS_LISTENERS 0x40000000u
 #define LIMIT_NS 5000000000ull
+#define SLEEP_FLAG_NS 10000000ull
 
 static struct {
     uint32_t handles[8];
@@ -155,7 +156,7 @@ static int w_sleep_then_flag(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
     int i = idx_of(c);
-    svc_c(c, SVC_SLEEP_THREAD, 10000000, 0, 0, 0);
+    svc_c(c, SVC_SLEEP_THREAD, SLEEP_FLAG_NS, 0, 0, 0);
     S.cpu[i] = cpu_now(c);
     set(&S.flag[i], 1);
     return RL_OK;
@@ -292,9 +293,22 @@ TEST(a_thread_that_wakes_preempts_a_lower_one_at_its_next_preemption_point)
 {
     uint64_t heap;
     rl_ctx *c = setup(&heap);
-    uint32_t h = spawn(c, heap, F_SLEEP_FLAG, 0, 30, 0);
-    CHECK_EQ(start(c, h), 0);
-    CHECK_EQ(get(&S.flag[0]), 0);
+    uint32_t h = 0;
+    bool timely = false;
+    for (int attempt = 0; attempt < 100 && !timely; attempt++) {
+        set(&S.flag[0], 0);
+        h = spawn(c, heap, F_SLEEP_FLAG, 0, 30, 0);
+        uint64_t t_start = rl_clock_ns();
+        CHECK_EQ(start(c, h), 0);
+        int woke = get(&S.flag[0]);
+        timely = rl_clock_ns() - t_start < SLEEP_FLAG_NS;
+        if (!timely) {
+            CHECK_EQ(join(c, heap, h), 0);
+            continue;
+        }
+        CHECK_EQ(woke, 0);
+    }
+    CHECK(timely);
     uint64_t t0 = rl_clock_ns();
     int points = 0;
     while (!get(&S.flag[0]) && rl_clock_ns() - t0 < LIMIT_NS) {
