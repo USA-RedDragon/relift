@@ -6,8 +6,6 @@
 
 #include "bios/bios.h"
 
-#include <stdio.h>
-#include <stdlib.h>
 
 #define T_BIT 0x20u
 #define I_BIT 0x80u
@@ -163,8 +161,6 @@ bool p2cpu_poll(p2cpu *c)
     c->msr_masked = false;
     if (masked || !rl_gba_irq_sample(c->g))
         return false;
-    if (getenv("RL_TRACE_O"))
-        fprintf(stderr, "    cpu irq at %08x cpsr %08x t %llu\n", c->r[15], c->cpsr, (unsigned long long)rl_sched_now(c->sc));
     p2cpu_irq(c, c->r[15] + 4, c->cpsr);
     return true;
 }

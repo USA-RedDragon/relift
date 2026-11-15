@@ -38,6 +38,11 @@ enum {
     STAMP = 0x02002000,
     STAGE7 = 0x02007000,
     DONE_PC = 0x08007F00,
+    HB_LOOP_PC = 0x080039E8,
+    HB_DONE_PC = 0x08003D68,
+    ACALLS = 0x030016D0,
+    NPOOL = 0x03001628,
+    POOL = 0x02012000,
     FILL = 0xEE,
     ALEN = 96
 };
@@ -50,15 +55,9 @@ enum { IO_TM0 = 20, IO_TM1 = 24, IO_CPSR = 28, IO_OB = 48, IO_TOTAL = 64, IO_FIR
  * ret16() takes its BIOS or its IWRAM path, modulo 64 (fitted to halt_ime1). */
 enum { HALT_PHASE = 1, HALT_PUT_BIOS = 45, HALT_PUT_IWRAM = 13 };
 
-/** Driver time of call() between the IF acknowledge and the IME write; it
- * sets how early an HBlank may come and still skip the stub's Halt (fitted to
- * A_hblankdma_CpuSet16_copy_ws4317). */
+/** Driver time of call() between the IF acknowledge and the IME write (fitted with
+ * the Halt constants above to halt_ime1). */
 enum { DRIVER_ACK = 24 };
-
-/** sweep_hb's driver time: the line it starts on after a frame start and the
- * cycles of one loop besides fill() and call() (fitted to the skipped Halts
- * and VCOUNT waits of A_hblankdma_CpuSet16_copy_ws4317). */
-enum { HB_START_LINES = 19, HB_LOOP = 8552 };
 
 typedef struct probe {
     mach m;
@@ -83,10 +82,7 @@ static void swi_hook(p2cpu *c, unsigned n)
     rl_gba *g = c->g;
     rl_gba_swi_cpu s = {.ret = c->r[14], .cpsr = c->spsr[2], .sp_svc = c->r[13], .sp_sys = c->bank_sp[0], .lr_sys = c->bank_lr[0]};
     memcpy(s.r, c->r, sizeof s.r);
-    uint64_t t0 = rl_sched_now(c->sc);
     rl_gba_swi_status st = rl_gba_swi(rl_gba_bios_of(g), rl_gba_bios_bus(g), n, &s);
-    if (getenv("RL_DBG"))
-        fprintf(stderr, "hook swi %x spent %llu total %llu\n", n, (unsigned long long)(rl_sched_now(c->sc) - t0), (unsigned long long)rl_gba_bios_of(g)->total);
     if (st == RL_GBA_SWI_LEFT)
         return;
     for (unsigned i = 0; i < 4; i++)
@@ -98,8 +94,6 @@ static void swi_hook(p2cpu *c, unsigned n)
     p2cpu_resume(c, s.ret);
 }
 
-static int trace_on;
-
 static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bios_regs)
 {
     (void)user;
@@ -107,8 +101,6 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
     p2cpu *c = &P.c;
     uint32_t saved = c->cpsr, regs[16];
     memcpy(regs, c->r, sizeof regs);
-    if (trace_on)
-        fprintf(stderr, "    irq at %04x spsr %08x tm2 %u\n", lr - 4, spsr, (unsigned)rl_gba_read(c->g, 0x04000108u, 2));
     p2cpu_irq(c, lr, spsr);
     if (!p2cpu_run_irq(c, 10000000u))
         fprintf(stderr, "probe2: a handler did not return\n");
@@ -282,10 +274,7 @@ static void sweep_a(unsigned ci, uint32_t ws, uint32_t hmode, unsigned sh)
             wr(STAMP + 2 * k, 2, 0xFFFF);
         wr(SCAN_CNT, 4, 0);
         wr(SCAN_HASH, 4, 0);
-        trace_on = getenv("RL_TRACE_O") && (uint32_t)atoi(getenv("RL_TRACE_O")) == o;
         call(arm_swi(c->swi), 0, c->r0, dst, c->r2, 0, (0x10000u - o) | 0xC00000u, 0xC10000u, 0x1F, 0x18, 1, 0, hmode);
-        if (trace_on)
-            fprintf(stderr, "  o %u fired %u entry %u ret %x spsr %x total %u\n", o, io(IO_FIRED), io(IO_ENTRY), io(IO_RET), io(IO_SPSR), io(IO_TOTAL));
         uint32_t fin = whash(lo, len) == ref, fired = io(IO_FIRED), spsr = io(IO_SPSR);
         uint16_t f[7];
         f[0] = fired ? (uint16_t)(io(IO_ENTRY) - o) : 0xFFFFu;
@@ -319,45 +308,31 @@ static void sweep_a(unsigned ci, uint32_t ws, uint32_t hmode, unsigned sh)
     put(0xFFFF, 0, 0, 0, 0, 0, (uint16_t)ref, (uint16_t)(ref >> 16));
 }
 
-static void wait_vcount(void)
-{
-    for (;;) {
-        uint32_t v = rl_gba_read(P.m.g, 0x04000006u, 2);
-        if (v >= 20u && v <= 120u)
-            return;
-        spend(8);
-    }
-}
-
 static void sweep_hb(unsigned ci, uint32_t ws)
 {
     const acall *c = &acalls[ci];
-    uint32_t dst = c->vram ? VDST : DST;
+    uint32_t sp = P.c.r[13];
     wr(0x04000204u, 2, ws);
-    wr(0x04000000u, 2, 0x0080);
+    wr(ACALLS, 1, c->swi);
+    wr(ACALLS + 1, 1, c->vram);
+    wr(ACALLS + 4, 4, c->r0);
+    wr(ACALLS + 8, 4, c->r2);
+    wr(NPOOL, 4, 0);
     while (rl_gba_read(P.m.g, 0x04000006u, 2) != 227u)
         spend(1);
     while (rl_gba_read(P.m.g, 0x04000006u, 2) == 227u)
         spend(1);
-    spend(HB_START_LINES * 1232u);
-    for (uint32_t d = 0; d <= 1232u; d += 4) {
-        fill(dst - 16u, ALEN + 48u, FILL);
-        for (unsigned k = 0; k < 16; k++)
-            wr(STAMP + 2 * k, 2, 0xFFFF);
-        wr(0x040000B0u, 4, 0x04000108u);
-        wr(0x040000B4u, 4, STAMP);
-        wr(0x040000B8u, 2, 1);
-        spend(HB_LOOP);
-        wait_vcount();
-        wr(0x04000004u, 2, 0x0010);
-        set_io(IO_DMACNT, 0xA300u);
-        call(arm_swi(c->swi), 1, c->r0, dst, c->r2, 0, 0, 0, 0x9F, 0x0002, 0, d, 2);
-        wr(0x04000004u, 2, 0);
-        uint16_t n = 0;
-        while (n < 16 && rd(STAMP + 2 * n, 2) != 0xFFFFu)
-            n++;
-        put((uint16_t)d, (uint16_t)io(IO_TOTAL), (uint16_t)rd(STAMP, 2), (uint16_t)rd(STAMP + 2, 2), n,
-            (uint16_t)rd(STAMP + 4, 2), (uint16_t)whash(dst - 16u, ALEN + 48u), 0);
+    P.c.r[13] = sp - 20u;
+    wr(P.c.r[13] + 8u, 4, ACALLS);
+    P.c.r[4] = c->vram;
+    p2cpu_jump(&P.c, HB_LOOP_PC);
+    if (!p2cpu_run(&P.c, HB_DONE_PC, 2000000000u))
+        fprintf(stderr, "probe2: sweep_hb did not finish\n");
+    P.c.r[13] = sp;
+    for (uint32_t k = 0; k < rd(NPOOL, 4); k++) {
+        uint32_t e = POOL + 16u * k;
+        put((uint16_t)rd(e, 2), (uint16_t)rd(e + 2, 2), (uint16_t)rd(e + 4, 2), (uint16_t)rd(e + 6, 2), (uint16_t)rd(e + 8, 2),
+            (uint16_t)rd(e + 10, 2), (uint16_t)rd(e + 12, 2), (uint16_t)rd(e + 14, 2));
     }
 }
 
@@ -466,7 +441,6 @@ static void part_halt(uint32_t kind)
     uint32_t lim = kind == 6 ? 1024u : kind == 8 ? 160u : 200u;
     for (uint32_t o = 1; o < lim; o += kind == 7 ? 2u : (o < 200u ? 1u : 16u)) {
         uint32_t op = kind == 8 ? 0xE5CBA000u : arm_swi(2);
-        trace_on = getenv("RL_TRACE_O") && (uint32_t)atoi(getenv("RL_TRACE_O")) == o;
         if (kind == 7)
             call(op, 0, 0, 0, 0, 0, (0x10000u - o) | 0xC00000u, 0xC1F000u, 0x1F, 0x18, 1, 0, 2);
         else
