@@ -82,8 +82,15 @@ fn device_cond(
     if kind == IoKind::Device {
         return Some("1".into());
     }
-    let parts: Vec<String> = io
-        .device_intervals(bits, write)
+    let intervals = io.device_intervals(bits, write);
+    let top = u64::MAX >> (64 - bits.clamp(1, 64));
+    if intervals
+        .iter()
+        .any(|&(first, last)| first == 0 && last >= top)
+    {
+        return Some("1".into());
+    }
+    let parts: Vec<String> = intervals
         .iter()
         .map(|(first, last)| {
             let lo = first.saturating_sub(u64::from(n) - 1);
@@ -131,6 +138,15 @@ pub(crate) fn emit(
             let mut s = format!("({{ uint64_t a_ = (uint64_t){}; {t} r_;", val(*addr));
             match device_cond(io, bits, n, *kind, false, "a_") {
                 None => s.push_str(&format!(" {plain}")),
+                Some(cond) if cond == "1" => {
+                    s.push_str(&format!(" {clk}.{BUDGET} = {BUDGET}; r_ = 0;"));
+                    for (off, size) in pieces(n) {
+                        let call =
+                            format!("{read_call}(c, mem, a_ + {off}, {size}) & {}", mask(size));
+                        s.push_str(&format!(" r_ |= (({t})({call})) << {};", 8 * off));
+                    }
+                    s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                }
                 Some(cond) => {
                     s.push_str(&format!(
                         " if ({cond}) {{ {clk}.{BUDGET} = {BUDGET}; r_ = 0;"
@@ -177,6 +193,17 @@ pub(crate) fn emit(
             );
             match device_cond(io, bits, n, *kind, true, "a_") {
                 None => s.push_str(&format!(" {plain}")),
+                Some(cond) if cond == "1" => {
+                    s.push_str(&format!(" {clk}.{BUDGET} = {BUDGET};"));
+                    for (off, size) in pieces(n) {
+                        s.push_str(&format!(
+                            " {write_call}(c, mem, a_ + {off}, {size}, (uint64_t)((d_ >> {}) & {}));",
+                            8 * off,
+                            mask(size)
+                        ));
+                    }
+                    s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                }
                 Some(cond) => {
                     s.push_str(&format!(" if ({cond}) {{ {clk}.{BUDGET} = {BUDGET};"));
                     for (off, size) in pieces(n) {
@@ -216,4 +243,26 @@ pub(crate) fn sync(fe: &dyn Frontend, b: &Block, next: &str) -> String {
     format!(
         "    if (RL_UNLIKELY({BUDGET} <= 0)) {{\n        RL_STORE();\n        rc = {call};\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n        RL_RELOAD();\n    }}\n"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use relift_ir::AddrClass;
+
+    #[test]
+    fn an_address_space_of_devices_needs_no_range_check() {
+        let all = IoMap {
+            ranges: Vec::new(),
+            default: AddrClass::Device,
+        };
+        assert_eq!(
+            device_cond(&all, 16, 1, IoKind::Any, true, "a_").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            device_cond(&IoMap::memory(), 16, 1, IoKind::Any, true, "a_"),
+            None
+        );
+    }
 }
