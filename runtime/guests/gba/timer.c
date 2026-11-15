@@ -165,6 +165,7 @@ void gba_timer_reset(rl_gba *g)
         t->reload = 0;
         t->ctl = 0;
     }
+    g->tm[0].val = 0xFF8B;
 }
 
 void gba_timer_attach(rl_gba *g)

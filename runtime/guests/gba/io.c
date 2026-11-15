@@ -132,7 +132,62 @@ static void stub_set(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
         split_write(gba_of(d), wr, addr, size, value, now);                                                            \
     }
 
+static bool stub_open(uint32_t off)
+{
+    return (off >= 0x12C && off <= 0x12F) || (off >= 0x138 && off <= 0x13F) || (off >= 0x144 && off <= 0x14F);
+}
+
+static uint8_t serial_byte(rl_gba *g, uint32_t addr, uint64_t now)
+{
+    uint32_t off = addr & 0x3FFu;
+    if (stub_open(off))
+        return gba_open_byte(g, addr);
+    uint8_t v = stub_byte(g, addr, now);
+    switch (off) {
+    case 0x128:
+        return v | 0x04;
+    case 0x134: {
+        if (!(g->regs[0x135] & 0x80))
+            return 0x05;
+        uint8_t dir = v >> 4 & 0xFu;
+        return (uint8_t)((v & 0xF0u) | (v & dir) | (0xFu & ~dir));
+    }
+    case 0x158:
+        return v | 0x08;
+    default:
+        return v;
+    }
+}
+
+static void serial_set(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
+{
+    switch (addr & 0x3FFu) {
+    case 0x134:
+        v &= 0xF0u | (g->regs[0x135] & 0x80 ? 0x0Fu : 0u);
+        break;
+    case 0x135:
+        v &= 0xC0u;
+        break;
+    case 0x140:
+        v &= 0x40u;
+        break;
+    case 0x141:
+        v = 0;
+        break;
+    case 0x158:
+        v &= 0x30u;
+        break;
+    case 0x159:
+        v = 0;
+        break;
+    default:
+        break;
+    }
+    stub_set(g, addr, v, now);
+}
+
 DEVICE_RW(stub, stub_byte, stub_set)
+DEVICE_RW(serial, serial_byte, serial_set)
 DEVICE_RW(lcd, gba_lcd_read, gba_lcd_write)
 
 static uint8_t ppu_byte(rl_gba *g, uint32_t addr, uint64_t now)
@@ -297,8 +352,8 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
             d->name = slot_names[i];
             d->opaque = st;
             d->line = RL_LINE_NONE;
-            d->read = stub_read;
-            d->write = stub_write;
+            d->read = i == RL_GBA_SLOT_SERIAL ? serial_read : stub_read;
+            d->write = i == RL_GBA_SLOT_SERIAL ? serial_write : stub_write;
         }
         if (rl_sched_add_device(s, d) != 0)
             return -1;

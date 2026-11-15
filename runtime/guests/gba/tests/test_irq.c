@@ -126,7 +126,7 @@ TEST(register_ram_reset_clears_the_selected_areas)
     CHECK_EQ(gbat_r16(g, 0x04000000u), 0x0080);
     CHECK_EQ(gbat_r16(g, 0x04000020u), 0x0100);
     CHECK_EQ(gbat_r16(g, 0x04000132u), 0);
-    CHECK_EQ(gbat_r16(g, 0x04000204u), 0x4317);
+    CHECK_EQ(gbat_r16(g, 0x04000204u), 0);
     gbat_w16(g, 0x04000134u, 0);
     c = gbat_cpu(0x20, 0, 0, 0);
     gbat_swi(g, 0x01, &c);

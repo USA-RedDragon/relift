@@ -40,12 +40,13 @@ void bios_register_ram_reset(bios_call *c)
                 bios_st16(c, a, a == 0x04000020u || a == 0x04000026u || a == 0x04000030u || a == 0x04000036u ? 0x100u : 0u,
                           a != 0x04000004u);
             reset_region(c, 0x040000B0u, 0x14);
+            reset_region(c, 0x04000100u, 4);
             bios_st16(c, 0x04000130u, 0, false);
             bios_st16(c, 0x04000132u, 0, false);
             bios_st16(c, 0x04000200u, 0, false);
             bios_st16(c, 0x04000202u, 0, false);
-            for (uint32_t a = 0x04000206u; a < 0x04000220u; a += 2)
-                bios_st16(c, a, 0, a != 0x04000206u);
+            for (uint32_t a = 0x04000204u; a < 0x04000220u; a += 2)
+                bios_st16(c, a, 0, a != 0x04000204u);
             break;
         case 6: {
             reset_region(c, 0x04000060u, 0x8);
