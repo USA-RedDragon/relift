@@ -165,6 +165,7 @@ fn to_json(report: &Report, summary: bool, instructions: bool) -> Value {
             "site": loc_json(p.site), "cell": p.cell, "targets": p.targets, "partial": p.partial,
         })).collect::<Vec<_>>(),
         "dynamic_bank_writes": report.dynamic_writes.iter().map(|l| loc_json(*l)).collect::<Vec<_>>(),
+        "lift_banks": report.lift_banks,
         "unresolved": report.unresolved.iter().map(|u| json!({
             "at": loc_json(u.at), "kind": u.kind.name(), "detail": u.detail,
         })).collect::<Vec<_>>(),
@@ -233,6 +234,16 @@ fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
     for u in &report.unresolved {
         *kinds.entry(u.kind.name()).or_default() += 1;
     }
+    writeln!(
+        out,
+        "banks to lift: {}",
+        report
+            .lift_banks
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )?;
     writeln!(out, "unresolved transfers: {}", report.unresolved.len())?;
     for (k, n) in &kinds {
         writeln!(out, "  {k}: {n}")?;

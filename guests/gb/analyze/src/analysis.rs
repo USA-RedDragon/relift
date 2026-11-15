@@ -448,6 +448,22 @@ impl Driver<'_> {
         self.inline_bodies.insert(e, inline_body);
     }
 
+    /// The banks whose window code may run, before the report.
+    fn lift_banks(&self) -> BTreeSet<u16> {
+        let mut out: BTreeSet<u16> = self
+            .known
+            .iter()
+            .filter(|l| l.is_window())
+            .map(|l| l.bank)
+            .collect();
+        for (alone, root) in self.results.values() {
+            for o in std::iter::once(alone).chain(root.iter()) {
+                out.extend(o.blind.iter().copied());
+            }
+        }
+        out
+    }
+
     fn solve(&mut self) {
         let mut rounds = 0;
         while let Some(e) = self.dirty.pop() {
@@ -473,6 +489,7 @@ impl Driver<'_> {
         let mut edges = Vec::new();
         let mut unresolved = BTreeSet::new();
         let mut dynamic_writes = BTreeSet::new();
+        let lift_banks = self.lift_banks();
         let mut copies: Vec<(Loc, CopyLoop)> = Vec::new();
         let mut ram_sites = Vec::new();
         let mut taken = BTreeSet::new();
@@ -676,6 +693,7 @@ impl Driver<'_> {
             tables: tables.into_iter().collect(),
             ram_pointers: ram_pointers.into_iter().collect(),
             ram_ops,
+            lift_banks,
         }
     }
 }

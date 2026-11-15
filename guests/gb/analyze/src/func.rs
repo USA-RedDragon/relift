@@ -164,6 +164,8 @@ pub(crate) struct Outcome {
     pub taken: Vec<AddressTaken>,
     pub stores: Vec<Store>,
     pub dyn_writes: Vec<Loc>,
+    /// Banks mapped in the window at a transfer whose target is not known.
+    pub blind: BTreeSet<u16>,
     pub tables: Vec<TableUse>,
     pub cells: Vec<CellUse>,
     pub deps: BTreeSet<Loc>,
@@ -1012,6 +1014,7 @@ impl<'a> Run<'a> {
         self.out.stores.extend(o.stores.iter().cloned());
         self.out.ram.extend(o.ram.iter().copied());
         self.out.dyn_writes.extend(o.dyn_writes.iter().copied());
+        self.out.blind.extend(o.blind.iter().copied());
         self.out.tables.extend(o.tables.iter().copied());
         self.out.cells.extend(o.cells.iter().copied());
         if o.touches {
@@ -1130,7 +1133,10 @@ impl<'a> Run<'a> {
         let from_ram = matches!(w, Word::Load(_));
         let targets = match self.targets(at, w, h, l, &st) {
             Some(t) => t,
-            None => return,
+            None => {
+                self.blind(&st);
+                return;
+            }
         };
         for (addr, bank) in targets {
             if is_ram(addr) {
@@ -1365,6 +1371,9 @@ impl<'a> Run<'a> {
                 dep,
             );
         }
+        if info.elems.is_empty() || loose {
+            self.blind(st);
+        }
         if info.elems.is_empty() {
             self.unresolved(
                 at,
@@ -1409,6 +1418,12 @@ impl<'a> Run<'a> {
             );
         }
         Some(out)
+    }
+
+    fn blind(&mut self, st: &State) {
+        if let WindowBank::Known(b) = st.window_bank(self.env.model) {
+            self.out.blind.insert(b);
+        }
     }
 
     fn bank_of_byte(&self, v: u8) -> Option<u16> {

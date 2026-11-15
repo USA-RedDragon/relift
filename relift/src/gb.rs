@@ -403,14 +403,7 @@ pub fn build(
                     .collect(),
                 Ok("none") => Vec::new(),
                 _ => std::iter::once(u32::MAX)
-                    .chain(
-                        r.functions
-                            .keys()
-                            .filter(|l| l.is_window())
-                            .map(|l| u32::from(l.bank)),
-                    )
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
+                    .chain(r.lift_banks.iter().map(|b| u32::from(*b)))
                     .collect(),
             };
             let ram: Vec<(u16, u16)> = learned

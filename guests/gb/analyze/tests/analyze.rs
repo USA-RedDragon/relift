@@ -404,6 +404,32 @@ fn a_jump_through_an_unknown_hl_is_listed() {
 }
 
 #[test]
+fn a_jump_to_an_unknown_address_lifts_the_bank_it_maps() {
+    let r = Cart::new(0x19, 0x05)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x07, 0xEA, 0x00, 0x20, 0xFA, 0x00, 0xC0, 0x6F, 0x26, 0x40, 0xE9,
+            ],
+        )
+        .analyze();
+    assert_eq!(kinds(&r), vec![UnresolvedKind::IndirectJump]);
+    assert_eq!(r.coverage[&7].bytes, 0);
+    assert!(r.lift_banks.contains(&7), "{:?}", r.lift_banks);
+}
+
+#[test]
+fn window_code_without_an_entry_of_its_own_lifts_its_bank() {
+    let r = Cart::new(0x00, 0x00)
+        .put(0, 0x150, &[0xC3, 0x00, 0x40])
+        .put(1, 0x4000, &[0x18, 0xFE])
+        .analyze();
+    assert_eq!(r.coverage[&1].functions, 0);
+    assert!(r.lift_banks.contains(&1));
+}
+
+#[test]
 fn a_constant_jump_through_hl_is_followed() {
     let r = Cart::new(0x19, 0x02)
         .put(0, 0x150, &[0x21, 0x00, 0x03, 0xE9])

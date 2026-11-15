@@ -1,6 +1,6 @@
 //! What the analysis found.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 use crate::loc::Loc;
@@ -89,7 +89,7 @@ pub enum Origin {
     /// The target of a call, restart, trampoline or `jp hl` helper.
     Call(CallKind),
     /// An address the program ran in an earlier run without lifted code
-    /// there, recorded by the runtime: code, because it ran.
+    /// recorded by the runtime: code, because it ran.
     Seen,
 }
 
@@ -223,4 +223,7 @@ pub struct Report {
     pub ram_pointers: Vec<RamPointerJump>,
     /// The instructions predicted to run from RAM.
     pub ram_ops: RamOps,
+    /// The banks whose window code may run: banks with code found, and
+    /// banks mapped at a transfer to an address that is not known.
+    pub lift_banks: BTreeSet<u16>,
 }
