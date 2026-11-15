@@ -32,6 +32,9 @@ pub struct Config {
     pub before: BTreeMap<String, String>,
     /// Command name to a runtime function called after the host call.
     pub after: BTreeMap<String, String>,
+    /// Command name to a runtime function returning a `VkResult`, called
+    /// before the host call: an error result ends the call with it.
+    pub check: BTreeMap<String, String>,
 }
 
 fn strings(t: &toml::Table, key: &str, out: &mut Vec<String>) -> Result<(), Error> {
@@ -111,6 +114,9 @@ impl Config {
             if let Some(b) = table(h, "after")? {
                 map(b, &mut self.after)?;
             }
+            if let Some(b) = table(h, "check")? {
+                map(b, &mut self.check)?;
+            }
         }
         for l in [
             &mut self.features,
@@ -135,13 +141,14 @@ mod tests {
     fn files_merge() {
         let mut c = Config::default();
         c.merge(
-            "[registry]\ntag = \"v1\"\nsha256 = \"AB\"\n[api]\nfeatures = [\"VK_VERSION_1_0\"]\nextensions = [\"A\"]\n[hooks.before]\nvkQueueSubmit = \"f\"\n",
+            "[registry]\ntag = \"v1\"\nsha256 = \"AB\"\n[api]\nfeatures = [\"VK_VERSION_1_0\"]\nextensions = [\"A\"]\n[hooks.before]\nvkQueueSubmit = \"f\"\n[hooks.check]\nvkCreateImage = \"g\"\n",
         )
         .unwrap();
         c.merge("[api]\nextensions = [\"B\", \"A\"]\n").unwrap();
         assert_eq!(c.registry_sha256, "ab");
         assert_eq!(c.extensions, ["A", "B"]);
         assert_eq!(c.before["vkQueueSubmit"], "f");
+        assert_eq!(c.check["vkCreateImage"], "g");
         assert!(c.merge("[nope]\n").is_err());
     }
 }

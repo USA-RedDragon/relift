@@ -195,4 +195,20 @@ fn refusals() {
     let mut missing = config();
     missing.extensions.push("VK_KHR_nope".into());
     assert!(generate(&xml(), &missing).is_err());
+    let mut void_check = config();
+    void_check.check.insert("vkCmdFoo".into(), "f".into());
+    let e = generate(&xml(), &void_check).unwrap_err();
+    assert!(e.0.contains("check hook"), "{e}");
+}
+
+#[test]
+fn a_check_hook_can_end_the_call() {
+    let mut cfg = config();
+    cfg.check.insert("vkCreateFoo".into(), "foo_check".into());
+    let files = generate(&xml(), &cfg).unwrap();
+    assert!(file(&files, "vkg.h").contains("VkResult foo_check(vkf_call *k);"));
+    let th = file(&files, "vkg_thunks.c");
+    let check = th.find("VkResult checked = foo_check(&k);").unwrap();
+    assert!(th[check..].contains("if (checked < 0) {\n        c->x[0] = (uint32_t)checked;\n        return vkf_end(&k);\n    }"));
+    assert!(check < th.find("VkResult r = fn(").unwrap());
 }

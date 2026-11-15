@@ -443,6 +443,19 @@ fn emit_thunk(m: &mut Model, def: &str, primary: &str, o: &mut String) -> Result
     let args: Vec<String> = (0..c.params.len()).map(|i| format!("a{i}")).collect();
     let call = format!("fn({})", args.join(", "));
     let ret = m.canon(&c.ret.ty).to_string();
+    if let Some(h) = m.cfg.check.get(primary) {
+        if ret != "VkResult" || c.ret.ptr > 0 {
+            return Err(Error(format!(
+                "{}: a check hook needs a command that returns VkResult",
+                c.name
+            )));
+        }
+        writeln!(
+            o,
+            "    VkResult checked = {h}(&k);\n    if (checked < 0) {{\n        c->x[0] = (uint32_t)checked;\n        return vkf_end(&k);\n    }}"
+        )
+        .ok();
+    }
     let has_ret = !(ret == "void" && c.ret.ptr == 0);
     if c.ret.ptr > 0 || matches!(m.kind(&ret), Some(Kind::FuncPtr { .. })) {
         return Err(Error(format!(
@@ -569,6 +582,12 @@ pub fn emit(m: &mut Model) -> Result<CFiles, Error> {
     hooks.dedup();
     for f in hooks {
         writeln!(h, "void {f}(vkf_call *k);").ok();
+    }
+    let mut checks: Vec<&String> = m.cfg.check.values().collect();
+    checks.sort();
+    checks.dedup();
+    for f in checks {
+        writeln!(h, "VkResult {f}(vkf_call *k);").ok();
     }
     writeln!(h, "\n#endif").ok();
 
