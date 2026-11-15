@@ -190,6 +190,7 @@ pub fn android_extras(
             ],
             origin: "Android prebuilt".into(),
         }),
+        vulkan: None,
         host: ["audio_sdl3.c", "opus_libopus.c", "android_sdl3.c"]
             .iter()
             .map(|n| host.join(n))
