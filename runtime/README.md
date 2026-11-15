@@ -163,6 +163,7 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_VULKAN_LIBRARY=<path>` | Host Vulkan loader to use instead of the system one |
 | `RELIFT_VK_MAP=placed\|import\|shadow` | Force how guest-mapped device memory reaches guest memory (see `guests/switch/vk/README.md`) |
 | `RELIFT_VK_DEVICE=<name part>` | The `vk.device` setting. Host physical device the guest sees (default: the first that has graphics and compute and can present) |
+| `RELIFT_INPUT_SCRIPT=<steps>` | Debugging only: hold port controls at guest frames so a run needs nobody at the controls. Comma separated `<frame>[+<frames>]:<port>.<control>[=<value>]`, for example `600:p1.plus,900+10:p1.a,1200+30:p1.lstick_y=-1`; a step holds the control at the value (default 1) for the frames (default 6) and replaces what its bindings read. Switch counts frames as the guest queues them to vi. See docs/input.md |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |
 | `RELIFT_SCHED=free\|stats` | Debugging only. `free`: Switch guest threads run freely on host threads, ignoring priorities and cores (the old behavior, for comparisons). `stats`: log scheduler hand-overs, preemptions and the longest preemption delay once a second |
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |

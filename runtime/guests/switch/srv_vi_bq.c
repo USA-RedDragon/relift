@@ -10,6 +10,8 @@
 #include "hos_mods.h"
 #include "vi.h"
 
+#include <relift/ports.h>
+
 #include <stdlib.h>
 #include <time.h>
 
@@ -23,6 +25,7 @@ static uint64_t render_layer;
 static pthread_mutex_t cb_lock = PTHREAD_MUTEX_INITIALIZER;
 static void (*frame_cb)(uint64_t, void *);
 static void *frame_cb_user;
+static uint64_t frames_queued;
 
 static int64_t now_ns(void)
 {
@@ -376,7 +379,9 @@ void vi_frame_queued(vi_core *c)
     pthread_mutex_lock(&cb_lock);
     void (*fn)(uint64_t, void *) = frame_cb;
     void *user = frame_cb_user;
+    uint64_t frame = ++frames_queued;
     pthread_mutex_unlock(&cb_lock);
+    rl_ports_script_frame(frame);
     rl_hos_mods_frame();
     if (fn)
         fn(c->layer_id, user);

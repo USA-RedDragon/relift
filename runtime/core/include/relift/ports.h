@@ -88,4 +88,20 @@ RL_RUNTIME_API float rl_ports_eval(rl_control_ref ref, const rl_input_snapshot *
 /** @brief The value of a control now, from rl_input_sample. */
 RL_RUNTIME_API float rl_ports_read(rl_control_ref ref);
 
+/**
+ * @brief Sets the input script, a debug tool: comma separated steps
+ * `<frame>[+<frames>]:<port>.<control>[=<value>]`, each holding a control at
+ * the value (default 1) for the frames (default 6) from a guest frame on.
+ * Without a call, the first rl_ports_script_frame reads RELIFT_INPUT_SCRIPT. Returns false and keeps the old script when the text is invalid.
+ */
+RL_RUNTIME_API bool rl_ports_set_script(const char *text);
+/** @brief True when text is a valid input script (empty is valid). */
+RL_RUNTIME_API bool rl_ports_valid_script(const char *text);
+/** @brief The guest layer tells the input script the number of the frame the guest just finished. */
+RL_RUNTIME_API void rl_ports_script_frame(uint64_t frame);
+/** @brief True with the value when the input script holds port.control at the current frame. */
+RL_RUNTIME_API bool rl_ports_script_value(const char *port, const char *control, float *value);
+/** @brief Drops the input script and the frame count (tests). */
+RL_RUNTIME_API void rl_ports_script_reset(void);
+
 #endif

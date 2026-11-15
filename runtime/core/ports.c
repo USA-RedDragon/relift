@@ -479,6 +479,11 @@ float rl_ports_eval(rl_control_ref ref, const rl_input_snapshot *s)
         const port *p = &g_ports[pi];
         const control *c = &p->c[ci];
         best = strongest(c->b, c->nb, p->pad, c->kind, s);
+        float held;
+        if (rl_ports_script_value(p->id, c->id, &held))
+            best = c->kind == RL_CONTROL_BUTTON ? (held > 0.5f || held < -0.5f ? 1.0f : 0.0f)
+                   : c->kind == RL_CONTROL_TRIGGER && held < 0.0f ? 0.0f
+                                                                  : held;
     }
     pthread_mutex_unlock(&g_lock);
     return best;

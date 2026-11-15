@@ -8,6 +8,8 @@
 #include <relift/override.h>
 #include <relift/settings.h>
 
+#include <stdlib.h>
+
 static const rl_control_decl pad_controls[] = {
     { "a", RL_CONTROL_BUTTON, "gamepad:east,key:x" },
     { "b", RL_CONTROL_BUTTON, NULL },
@@ -193,4 +195,70 @@ TEST(ports_extras_may_be_declared_before_the_native_ports)
     CHECK_EQ(rl_ports_control_count("p1"), 5);
     CHECK(rl_ports_find("p1", "turbo") != RL_PORT_NONE);
     CHECK(rl_ports_find("p1", "a") != RL_PORT_NONE);
+}
+
+TEST(ports_input_script_holds_controls_at_guest_frames)
+{
+    rl_ports_reset();
+    rl_ports_script_reset();
+    CHECK(rl_ports_declare(native, 2));
+    CHECK(rl_ports_set_script("10:p1.a, 12+3:p2.b,20+2:p1.stick_x=-0.5,30:p1.zr=-1"));
+    rl_input_snapshot s = blank();
+    rl_control_ref a = rl_ports_find("p1", "a");
+    rl_control_ref b = rl_ports_find("p2", "b");
+    rl_control_ref x = rl_ports_find("p1", "stick_x");
+    rl_control_ref zr = rl_ports_find("p1", "zr");
+    rl_ports_script_frame(9);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    rl_ports_script_frame(10);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    CHECK(rl_ports_eval(b, &s) == 0.0f);
+    rl_ports_script_frame(14);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    CHECK(rl_ports_eval(b, &s) == 1.0f);
+    rl_ports_script_frame(15);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    CHECK(rl_ports_eval(b, &s) == 0.0f);
+    rl_ports_script_frame(16);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    rl_ports_script_frame(21);
+    CHECK(rl_ports_eval(x, &s) == -0.5f);
+    rl_ports_script_frame(22);
+    CHECK(rl_ports_eval(x, &s) == 0.0f);
+    rl_ports_script_frame(30);
+    CHECK(rl_ports_eval(zr, &s) == 0.0f);
+    rl_ports_script_reset();
+}
+
+TEST(ports_input_script_refuses_bad_steps)
+{
+    rl_ports_script_reset();
+    CHECK(rl_ports_valid_script(""));
+    CHECK(rl_ports_valid_script("0:p1.a"));
+    CHECK(rl_ports_valid_script("5+1:p1.a=0.25, 7:p2.lstick_x=-1,"));
+    CHECK(!rl_ports_valid_script("p1.a"));
+    CHECK(!rl_ports_valid_script("5:p1"));
+    CHECK(!rl_ports_valid_script("5+0:p1.a"));
+    CHECK(!rl_ports_valid_script("5:p1.a=2"));
+    CHECK(!rl_ports_valid_script("5:P1.a"));
+    CHECK(!rl_ports_valid_script("-1:p1.a"));
+    CHECK(rl_ports_set_script("1:p1.a"));
+    CHECK(!rl_ports_set_script("x"));
+    rl_ports_script_frame(1);
+    float v = 0.0f;
+    CHECK(rl_ports_script_value("p1", "a", &v));
+    CHECK(v == 1.0f);
+    rl_ports_script_reset();
+}
+
+TEST(ports_input_script_reads_the_environment_at_the_first_frame)
+{
+    rl_ports_script_reset();
+    setenv("RELIFT_INPUT_SCRIPT", "3:p1.b", 1);
+    float v = 0.0f;
+    rl_ports_script_frame(3);
+    unsetenv("RELIFT_INPUT_SCRIPT");
+    CHECK(rl_ports_script_value("p1", "b", &v));
+    CHECK(!rl_ports_script_value("p1", "a", &v));
+    rl_ports_script_reset();
 }

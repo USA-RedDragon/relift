@@ -55,6 +55,7 @@ fn the_runtime_schema_in_c_equals_the_list_in_rust() {
         "core/log.c",
         "core/ports.c",
         "core/input.c",
+        "core/input_script.c",
         "guests/switch/settings.c",
     ] {
         cmd.arg(rt.join(f));

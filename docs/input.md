@@ -61,3 +61,25 @@ which returns a float (button 0 or 1, trigger 0 to 1, axis -1 to 1). For a
 control read every frame, keep the result of `rl_ports_find` and call
 `rl_ports_read`. The Switch hid service reads the native ports, so a
 rebinding changes what the guest sees.
+
+## Input script
+
+For runs with nobody at the controls (headless checks, reproducing a bug),
+`RELIFT_INPUT_SCRIPT` holds port controls at given guest frames. It is a
+debugging tool, not a setting. Steps are comma separated:
+
+```
+<frame>[+<frames>]:<port>.<control>[=<value>]
+```
+
+A step holds the control at the value (default 1; -1 to 1 for an axis) from
+guest frame `frame` for `frames` frames (default 6). While a step holds a
+control, its value replaces what the control's bindings read; other controls
+keep reading the host. The guest layer counts frames: on Switch, each buffer
+the guest queues to vi is one frame. The runtime logs each step as it starts.
+
+```sh
+RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./game
+```
+
+`rl_ports_set_script` sets a script from code (tests).
