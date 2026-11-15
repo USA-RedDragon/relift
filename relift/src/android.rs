@@ -10,7 +10,7 @@ mod zip;
 
 use std::path::{Path, PathBuf};
 
-use crate::import::BoxError;
+use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 
 /// The Android API level the runtime builds for (`memfd_create` in bionic).
@@ -277,6 +277,45 @@ impl Deps {
             }
         }
         Ok(d)
+    }
+}
+
+/// What building for Android needs beyond the lift: the tools, the SDL3 and
+/// libopus builds, the signing key and the application id.
+pub struct AndroidBuild {
+    pub target: Target,
+    pub ndk: Ndk,
+    pub sdk: Sdk,
+    pub deps: Deps,
+    pub signing: Signing,
+    pub package: String,
+}
+
+impl AndroidBuild {
+    /// Finds every tool and dependency, or says what is missing.
+    ///
+    /// # Errors
+    ///
+    /// A missing tool or dependency, or a bad package name.
+    pub fn prepare(settings: &Settings, target: Target, name: &str) -> Result<Self, BoxError> {
+        let cache = cache_root(settings)?;
+        let sdk = Sdk::find(settings)?;
+        let package = if settings.package.android_id.is_empty() {
+            default_package(name)
+        } else {
+            settings.package.android_id.clone()
+        };
+        if !valid_package(&package) {
+            return Err(format!("package.android-id {package}: not a Java package name").into());
+        }
+        Ok(Self {
+            target,
+            ndk: Ndk::find(settings, target)?,
+            deps: Deps::find(&cache, target)?,
+            signing: Signing::find(settings, &sdk, &cache)?,
+            sdk,
+            package,
+        })
     }
 }
 

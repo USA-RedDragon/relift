@@ -305,40 +305,6 @@ fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
     Ok(v)
 }
 
-/// What building for Android needs beyond the lift: the tools, the SDL3 and
-/// libopus builds, the signing key and the application id.
-struct AndroidBuild {
-    target: android::Target,
-    ndk: android::Ndk,
-    sdk: android::Sdk,
-    deps: android::Deps,
-    signing: android::Signing,
-    package: String,
-}
-
-impl AndroidBuild {
-    fn prepare(settings: &Settings, target: android::Target, name: &str) -> Result<Self, BoxError> {
-        let cache = cache_root(settings)?;
-        let sdk = android::Sdk::find(settings)?;
-        let package = if settings.package.android_id.is_empty() {
-            android::default_package(name)
-        } else {
-            settings.package.android_id.clone()
-        };
-        if !android::valid_package(&package) {
-            return Err(format!("package.android-id {package}: not a Java package name").into());
-        }
-        Ok(Self {
-            target,
-            ndk: android::Ndk::find(settings, target)?,
-            deps: android::Deps::find(&cache, target)?,
-            signing: android::Signing::find(settings, &sdk, &cache)?,
-            sdk,
-            package,
-        })
-    }
-}
-
 /// What a build produced.
 pub struct Built {
     /// The program.
@@ -364,7 +330,7 @@ pub fn build(
     let p = project(settings)?;
     let (name, host_out) = crate::build::project_out(settings)?;
     let android = target
-        .map(|t| AndroidBuild::prepare(settings, t, &name))
+        .map(|t| android::AndroidBuild::prepare(settings, t, &name))
         .transpose()?;
     let (rom, hack) = patched(p.rom, mods, ui)?;
     let out = match &android {
@@ -545,7 +511,7 @@ pub fn build(
 }
 
 fn package_apk(
-    a: &AndroidBuild,
+    a: &android::AndroidBuild,
     out: &Path,
     name: &str,
     title: &str,
@@ -587,7 +553,7 @@ fn compile(
     lifted: &[PathBuf],
     prog: &[PathBuf],
     release: bool,
-    android: Option<&AndroidBuild>,
+    android: Option<&android::AndroidBuild>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt_real = crate::build::runtime_dir(settings);
@@ -637,7 +603,7 @@ fn compile(
         .chain(static_rt.clone())
         .collect();
     let mut extras = match android {
-        Some(a) => crate::runtime_link::android_extras(&rt, &a.deps),
+        Some(a) => crate::runtime_link::android_extras(&rt, &a.deps, false)?,
         None => crate::runtime_link::extras(&rt, &croot)?,
     };
     extras.vk.clear();

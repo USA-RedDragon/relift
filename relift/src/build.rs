@@ -1111,15 +1111,23 @@ pub(crate) fn build_project(
     mode: Mode,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
-    if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-        let why = if crate::android::target(t).is_some() {
-            "Android builds of Switch games are not supported yet (Game Boy projects build)"
-        } else {
-            "only the host target builds so far"
-        };
-        return Err(format!("target {t}: {why}").into());
-    }
     let (name, out) = project_out(settings)?;
+    let android = match targets {
+        [] => None,
+        [t] if t == "host" => None,
+        [t] => match crate::android::target(t) {
+            Some(a) if mode == Mode::Shipped => {
+                Some(crate::android::AndroidBuild::prepare(settings, a, &name)?)
+            }
+            Some(_) => return Err("relift run does not run on Android yet".into()),
+            None => {
+                return Err(
+                    format!("target {t}: unknown; try host, android-arm64 or android-x64").into(),
+                );
+            }
+        },
+        _ => return Err("one target at a time".into()),
+    };
     if let Some(rec) = std::env::var_os(EMIT_RECORD) {
         let r = lift_and_emit(settings, &name, &out, mods, ui)?;
         relift_cache::write_if_changed(Path::new(&rec), r.to_text().as_bytes())?;
@@ -1150,12 +1158,14 @@ pub(crate) fn build_project(
         Vec::new()
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = if dev {
-        c_compiler(&settings.toolchain)?
-    } else {
-        release_compiler(settings)?
+    let cc = match &android {
+        Some(a) => vec![a.ndk.clang.display().to_string()],
+        None if dev => c_compiler(&settings.toolchain)?,
+        None => release_compiler(settings)?,
     };
-    let arch: Vec<String> = if cfg!(target_arch = "x86_64") {
+    let arch: Vec<String> = if android.is_some() {
+        Vec::new()
+    } else if cfg!(target_arch = "x86_64") {
         vec!["-mcx16".into()]
     } else {
         Vec::new()
@@ -1188,7 +1198,7 @@ pub(crate) fn build_project(
     // which the compiler must then neither fold nor reorder.
     let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
     let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
-    let pic: Vec<String> = if cfg!(windows) {
+    let pic: Vec<String> = if cfg!(windows) && android.is_none() {
         Vec::new()
     } else {
         ["-fPIC", "-fvisibility=hidden"].map(String::from).into()
@@ -1206,7 +1216,10 @@ pub(crate) fn build_project(
     } else {
         lifted_flags
     };
-    let extras = crate::runtime_link::extras(&rt, &croot)?;
+    let extras = match &android {
+        Some(a) => crate::runtime_link::android_extras(&rt, &a.deps, true)?,
+        None => crate::runtime_link::extras(&rt, &croot)?,
+    };
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
         .iter()
@@ -1231,7 +1244,7 @@ pub(crate) fn build_project(
         .chain(extras.defines())
         .chain(hotload.iter().cloned())
         .collect();
-    let lib_flags: Vec<String> = if dev {
+    let lib_flags: Vec<String> = if dev || android.is_some() {
         rt_flags
             .iter()
             .cloned()
@@ -1240,7 +1253,11 @@ pub(crate) fn build_project(
     } else {
         rt_flags.clone()
     };
-    let bdir = if dev { out.join("dev") } else { out.clone() };
+    let bdir = match &android {
+        Some(a) => out.join(a.target.name),
+        None if dev => out.join("dev"),
+        None => out.clone(),
+    };
     let obj = |src: &Path, tag: &str| {
         let stem = src
             .strip_prefix(&cdir)
@@ -1300,10 +1317,24 @@ pub(crate) fn build_project(
         })
         .collect();
     rt_compiles.extend(extras.compiles(&rt, &lib_flags, &|s| obj(s, "rt")));
-    let exe = bdir.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    let exe = match &android {
+        Some(_) => bdir.join("libmain.so"),
+        None => bdir.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+    };
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = relift_build::job_count(settings.jobs);
-    let libs: Vec<String> = if cfg!(windows) {
+    let libs: Vec<String> = if android.is_some() {
+        [
+            "-lm",
+            "-ldl",
+            "-shared",
+            "-Wl,-soname,libmain.so",
+            "-Wl,-z,max-page-size=16384",
+            "-Wl,--no-undefined",
+        ]
+        .map(String::from)
+        .into()
+    } else if cfg!(windows) {
         ["-lpthread", "-lm", "-lws2_32"].map(String::from).into()
     } else {
         ["-lpthread", "-lm"].map(String::from).into()
@@ -1380,6 +1411,30 @@ pub(crate) fn build_project(
             Line::new().text(format!("{}, {note}", noun(finished as u64, "file")))
         },
     );
+    let exe = match &android {
+        Some(a) => {
+            let row = ui.row("");
+            ui.begin(row, "package");
+            let apk = bdir.join(format!("{name}.apk"));
+            crate::android::build_apk(
+                &crate::android::Apk {
+                    package: &a.package,
+                    label: &name,
+                    target: a.target,
+                    program: &exe,
+                    deps: &a.deps,
+                    work: &bdir.join("apk"),
+                    output: &apk,
+                },
+                &a.sdk,
+                &a.ndk,
+                &a.signing,
+            )?;
+            ui.done(row, Line::new().text(a.package.clone()));
+            apk
+        }
+        None => exe,
+    };
     summarize(
         ui,
         emitted.functions,

@@ -163,10 +163,20 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
 /// The extras of an Android program: the window, sound and Android glue
 /// backends against the SDL3 and libopus builds in `deps`.
 #[must_use]
-pub fn android_extras(rt: &Path, deps: &crate::android::Deps) -> Extras {
+pub fn android_extras(
+    rt: &Path,
+    deps: &crate::android::Deps,
+    with_vk: bool,
+) -> std::io::Result<Extras> {
     let host = rt.join("host");
-    Extras {
-        vk: Vec::new(),
+    let vk_dir = rt.join("guests").join("switch").join("vk");
+    let mut vk = Vec::new();
+    if with_vk {
+        vk = c_files(&vk_dir)?;
+        vk.extend(c_files(&vk_dir.join("gen"))?);
+    }
+    Ok(Extras {
+        vk,
         window: Some(host.join("window_sdl3.c")),
         sdl3: Some(Sdl3 {
             cflags: vec![
@@ -184,7 +194,7 @@ pub fn android_extras(rt: &Path, deps: &crate::android::Deps) -> Extras {
             .iter()
             .map(|n| host.join(n))
             .collect(),
-    }
+    })
 }
 
 impl Extras {
