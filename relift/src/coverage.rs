@@ -41,6 +41,7 @@ use relift_switch::program::{self, Placed};
 
 use crate::hints::Hint;
 use crate::import::BoxError;
+use crate::settings::Settings;
 use crate::ui::Ui;
 
 /// The size of a loader-filled slot, in bytes.
@@ -371,8 +372,13 @@ pub fn json(reports: &[ModuleReport]) -> serde_json::Value {
 ///
 /// No project, an import that does not load, a `game.toml` hint that does
 /// not parse, or an `only` that names no module.
-pub fn run(as_json: bool, only: Option<&str>, ui: &mut Ui) -> Result<(), BoxError> {
-    let import = crate::build::import_dir()?;
+pub fn run(
+    settings: &Settings,
+    as_json: bool,
+    only: Option<&str>,
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
+    let import = crate::build::import_dir(settings)?;
     let (mods, _) = crate::build::load(&import)?;
     let placed = program::place(mods);
     if let Some(m) = only

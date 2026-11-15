@@ -44,14 +44,19 @@ fn read_toml(path: &Path) -> Result<toml::Table, BoxError> {
 }
 
 /// The import directory game.toml in the working directory names.
-pub(crate) fn import_dir() -> Result<PathBuf, BoxError> {
+pub(crate) fn import_dir(settings: &Settings) -> Result<PathBuf, BoxError> {
     let game = read_toml(Path::new("game.toml"))?;
     let dir = game
         .get("game")
         .and_then(|g| g.get("import_dir"))
         .and_then(|d| d.as_str())
         .ok_or("game.toml has no game.import_dir; run relift import first")?;
-    Ok(PathBuf::from(dir))
+    let dir = Path::new(dir);
+    if dir.is_absolute() {
+        Ok(dir.to_path_buf())
+    } else {
+        Ok(cache_root(settings)?.join(dir))
+    }
 }
 
 /// The modules of an import in load order, named, with its NPDM.
@@ -828,7 +833,7 @@ fn lift_and_emit(
     mods: &[PathBuf],
     ui: &mut Ui,
 ) -> Result<EmitRecord, BoxError> {
-    let import = import_dir()?;
+    let import = import_dir(settings)?;
     let (mut loaded, npdm) = load_slots(&import)?;
     let game = read_toml(Path::new("game.toml"))?;
     let title_id = npdm
@@ -1453,7 +1458,7 @@ pub fn run_build(
     }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
     let (name, _) = project_out(settings)?;
-    let import = import_dir()?;
+    let import = import_dir(settings)?;
     package(settings, &name, &built.exe, Some(&import), ui)
 }
 
@@ -1505,7 +1510,7 @@ pub fn run_run(
     }
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
     let built = build_project(settings, &targets, &[], Mode::Dev, ui)?;
-    let import = import_dir()?;
+    let import = import_dir(settings)?;
     let (mods, _) = load(&import)?;
     let placed = program::place(mods);
     let known = parse_entries(&std::fs::read_to_string(built.out.join(ENTRIES))?)?;

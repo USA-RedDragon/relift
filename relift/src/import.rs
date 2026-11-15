@@ -35,6 +35,20 @@ pub fn cache_root(settings: &Settings) -> Result<PathBuf, BoxError> {
     Err("no cache directory: set cache-dir".into())
 }
 
+/// The import directory as `game.toml` names it: relative to the cache
+/// root, so the manifest reads the same wherever the cache lives.
+///
+/// # Errors
+///
+/// As [`cache_root`].
+pub fn import_dir_value(settings: &Settings, dir: &Path) -> Result<String, BoxError> {
+    let root = cache_root(settings)?;
+    Ok(match dir.strip_prefix(&root) {
+        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+        Err(_) => dir.display().to_string(),
+    })
+}
+
 /// The import directory of the project in `project`.
 ///
 /// # Errors
@@ -131,7 +145,7 @@ pub fn run(
         guest: "switch".into(),
         title_id: format!("{:016x}", report.program_id),
         version: report.version,
-        import_dir: out.display().to_string(),
+        import_dir: import_dir_value(settings, &out)?,
         modules: report
             .modules
             .iter()

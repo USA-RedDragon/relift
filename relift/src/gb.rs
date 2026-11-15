@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use relift_build::{Compile, Plan};
 use relift_progress::{Line, Paint, duration, noun};
 
-use crate::import::{BoxError, cache_root};
+use crate::import::{BoxError, cache_root, import_dir_value};
 use crate::settings::Settings;
 use crate::ui::Ui;
 
@@ -131,7 +131,7 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
         "# game.toml, written by relift import.\n\n[game]\nguest = \"gb\"\ntitle = {}\nversion = {}\nimport_dir = {}\nrom = {}\nrom_sha256 = \"{sha}\"\nmodel = \"{}\"\n",
         quote(&title(&rom)),
         rom.get(0x14C).copied().unwrap_or(0),
-        quote(&out.display().to_string()),
+        quote(&import_dir_value(settings, &out)?),
         quote(&source.display().to_string()),
         default_model(&rom)
     );
@@ -161,12 +161,17 @@ struct Project {
     model: String,
 }
 
-fn project() -> Result<Project, BoxError> {
+fn project(settings: &Settings) -> Result<Project, BoxError> {
     let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
     let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
     let g = t.get("game").ok_or("game.toml has no [game]")?;
     let s = |k: &str| g.get(k).and_then(|v| v.as_str()).map(String::from);
     let dir = PathBuf::from(s("import_dir").ok_or("game.toml has no game.import_dir")?);
+    let dir = if dir.is_absolute() {
+        dir
+    } else {
+        cache_root(settings)?.join(dir)
+    };
     let rom = std::fs::read(dir.join(ROM_FILE)).map_err(|e| {
         format!(
             "{}: {e}; run relift import again",
@@ -289,7 +294,7 @@ pub fn build(
     release: bool,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
-    let p = project()?;
+    let p = project(settings)?;
     let (rom, hack) = patched(p.rom, mods, ui)?;
     let (name, out) = crate::build::project_out(settings)?;
     let cdir = out.join("c");

@@ -54,7 +54,7 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Command::Coverage { json, module } => {
-            relift::coverage::run(*json, module.as_deref(), &mut ui)
+            relift::coverage::run(&settings, *json, module.as_deref(), &mut ui)
         }
         Command::Diff {
             function,

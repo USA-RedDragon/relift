@@ -47,7 +47,12 @@ pub struct Extras {
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut v: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "c"))
         .collect();
@@ -136,7 +141,7 @@ pub fn find_moltenvk(cache_root: &Path) -> Option<LinkedVulkan> {
 ///
 /// # Errors
 ///
-/// The runtime's `guests/switch/vk` cannot be read.
+/// A source directory of the runtime cannot be read.
 pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
     let vk_dir = rt.join("guests").join("switch").join("vk");
     let mut vk = c_files(&vk_dir)?;

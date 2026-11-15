@@ -110,7 +110,7 @@ pub fn run(settings: &Settings, req: &Request<'_>, ui: &mut Ui) -> Result<u8, Bo
             s
         }
     };
-    let import = crate::build::import_dir()?;
+    let import = crate::build::import_dir(settings)?;
     let mut cmd = relift_proc::command(&gdb);
     cmd.args(["-q", "-batch", "-nx", "-iex", "set debuginfod enabled off"])
         .arg("-ex")
