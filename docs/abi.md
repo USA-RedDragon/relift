@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/a64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 3.
+Contract version: `RL_ABI_VERSION` 4.
 
 ## 0. Runtime layers
 
@@ -182,7 +182,8 @@ their offsets to it, and the A64 descriptor gives the core offset 840.
 | 840 | `pend` | pending record, 24 bytes |
 | 864 | `thread` | runtime thread object |
 | 872 | `disp_table`, `disp_lo`, `disp_count` | dispatch table view |
-| 896 | | size |
+| 896 | `time` | preemption clock, an `rl_time` (section 14.1) |
+| 960 | | size |
 
 `_Static_assert`s in the header pin every offset, the size and the alignment.
 
@@ -227,6 +228,11 @@ Reasons:
   each context so the inline lookup reads it through `c` (cached by clang
   thanks to `restrict`) instead of a global that a guest store could alias.
   [inferred from the memory prototype's global-reload result]
+- **time** is the preemption clock: another host thread ends its budget to
+  stop the thread at its next preemption point (section 14.1). It sits
+  after the core's block, in a cache line of its own that only the
+  scheduler writes, so the check of a running thread reads a line it
+  keeps. [inferred]
 - **64-byte alignment** keeps two threads' contexts off one cache line.
   [inferred]
 
@@ -1598,7 +1604,8 @@ stacks, not a wake-up of another host thread.
   have left; `rl_sched_enter` is gone (a fiber starts only when its CPU
   holds the run). A CPU that was not spawned runs on the calling thread's
   own stack, which keeps the one-CPU case free of fibers. These are runtime
-  calls, not part of the lifted-code contract, so `RL_ABI_VERSION` stays 3.
+  calls, not part of the lifted-code contract, so they leave
+  `RL_ABI_VERSION` alone.
 - **Not supported:** Intel CET shadow stacks and Windows CET compatibility
   would reject any user-mode stack switch; relift binaries are not marked
   for CET, so it does not trigger.
@@ -1617,6 +1624,87 @@ Measured with `make sched-bench` (2 CPUs, 2 million blocks each, budget step
 With 4096 ticks a hand-over is rare (about 2000 per run), so its time per
 hand-over includes cache refill and varies from run to run. Windows arm64
 builds (zig cc, llvm-mingw clang) link but were not run.
+
+## 14.1 Preemption points
+
+A guest OS whose kernel preempts a running thread when a better one becomes
+ready (Horizon does, at any instruction) needs lifted code to stop where it
+is, not only at its next system call. Preemption reuses the `rl_time` clock
+of the device scheduler's sync points (section 13), with a budget that
+another host thread ends instead of one the code counts down.
+
+- **Which exits.** A frontend whose `preempt_clock()` names an `rl_time`
+  (A64: `c->time`) makes these block exits preemption points: a jump back
+  inside the function (to the block's own or a lower address) that closes
+  a loop holding a call, a trap, a computed jump or another loop, or a loop
+  that waits on memory; every computed jump; and a jump or call to the
+  block's own or a lower address outside the function (recursion, a tail
+  call back). Returns, traps and indirect calls are not. Other frontends
+  emit nothing.
+- **A loop that waits on memory** is one whose jump back or a branch out
+  of it decides on a value that comes, through the loop's instructions
+  before it in address order, from a load, an exclusive access or an
+  intrinsic (a clock read): a spin-wait. It must have a check: a thread
+  spinning for a higher-priority thread of its core that wakes from a
+  sleep would otherwise never give the core up. [verified: `e2e_spin`
+  times out without the check]
+- **Why not every loop.** A check in a loop without calls that does not
+  wait on memory (a copy, a hash, a counted search) keeps clang from
+  unrolling and vectorizing it; checking every jump back cost
+  malloc_stress 48% more instructions and 17% more cycles. Such a loop
+  delays a preemption by one run of it, until the loop or function around
+  it reaches a check. A long loop of that kind at the top of a thread's
+  work is not preempted until it ends. [verified: cost table below]
+- **The check**, before the exit and before the loop fence:
+
+  ```c
+  if (RL_UNLIKELY(rl_time_spent(&c->time)))
+      rl_preempt(c);
+  ```
+
+  `rl_time_spent` is a relaxed atomic load of the budget compared with
+  zero: one load and a branch that is never taken while no preemption is
+  pending. The registers stay in their locals: `rl_preempt` only waits for
+  the core, so it needs none of them, and storing them would keep values
+  alive that the code otherwise drops (the flags above all). A first
+  version that stored and reloaded the context around `rl_sync` cost
+  malloc_stress 2.4 times the instructions; this form costs 1.5 times
+  (table below). [verified: perf stat, x86-64 Linux]
+- **The budget.** The A64 `ctx_init` sets it to `INT64_MAX`.
+  `rl_preempt_request(c)` stores 0 (any host thread);
+  `rl_preempt_clear(c)` stores `INT64_MAX` again.
+- **The slow path.** `rl_preempt` calls the hook set with
+  `rl_set_preempt_hook`, which must not touch the context's registers (they
+  are stale); without a hook it only clears the budget. The Switch layer's
+  hook is its svc exit check, `hos_sched_point`: the thread gives its core
+  up when the scheduler chose another thread there and waits until it is
+  chosen again.
+- **The Switch scheduler** (`guests/switch/ksched.c`) requests a
+  preemption of a core's holder when its selection for the core changes
+  and clears it when the holder keeps or gets the core, so the holder
+  leaves at its next svc or preemption point. `RELIFT_SCHED=free` never
+  requests one.
+
+Cost on libnx corpus programs (x86-64 Linux, Ryzen 9 7950X, clang 23,
+`perf stat -r 10` pinned to 4 cores, mean of 3 such runs, against the
+same build without checks; the host had a load average of about 50 from
+other work, so cycles are noisy while instruction counts are exact, and
+math_fp and dispatch run 2 to 3 ms, mostly start-up):
+
+| program | instructions, no checks | with the checks | cycles, no checks | with the checks |
+|---|---|---|---|---|
+| math_int | 128.5 M | 131.7 M (+2.5%) | 53.3 M | 47.7 M (-10%) |
+| math_fp | 2.74 M | 2.83 M (+3.1%) | 2.68 M | 2.62 M (-2.5%) |
+| malloc_stress | 2025 M | 2062 M (+1.8%) | 755 M | 757 M (+0.3%) |
+| dispatch | 5.95 M | 6.60 M (+11%) | 3.79 M | 4.26 M (+12%) |
+
+The cycle differences are within the noise: dispatch's three runs of the
+same binary spread from 3.80 M to 4.53 M cycles, and another session of the
+same pair measured -1.1%. Where dispatch's extra instructions sit was not
+broken down.
+
+The loop fence alone (section 9), measured the same way, changes the
+instruction counts by under 1% (math_int -0.8%, malloc_stress +0.15%).
 
 ## 15. WebAssembly modules
 

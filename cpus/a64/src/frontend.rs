@@ -136,6 +136,10 @@ impl Frontend for A64 {
         "&c->excl"
     }
 
+    fn preempt_clock(&self) -> Option<&'static str> {
+        Some("c->time")
+    }
+
     fn fp(
         &self,
         op: FpOp,

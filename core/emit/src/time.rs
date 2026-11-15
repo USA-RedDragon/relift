@@ -197,6 +197,14 @@ pub(crate) fn emit(
     })
 }
 
+/// The statements of a preemption point: when another host thread ended
+/// the budget of the preemption clock `clk`, call `rl_preempt`. The
+/// registers stay in their locals: the scheduler only waits, so storing
+/// them would keep values alive (flags above all) that the code drops.
+pub(crate) fn preempt(clk: &str) -> String {
+    format!("    if (RL_UNLIKELY(rl_time_spent(&{clk})))\n        rl_preempt(c);\n")
+}
+
 /// The statements of a sync point: when the budget is spent, store the
 /// context, call `rl_sync` with the exit target `next` and reload.
 pub(crate) fn sync(next: &str) -> String {

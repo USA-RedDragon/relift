@@ -250,6 +250,7 @@ int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (
 uint64_t rl_mrs_cntpct(rl_ctx *c) { (void)c; events |= 8; return 0; }
 void rl_msr_fpcr(rl_ctx *c, uint64_t v) { events |= 8; c->fpcr = (uint32_t)v; }
 void rl_wfe(rl_ctx *c) { (void)c; events |= 8; }
+void rl_preempt(rl_ctx *c) { c->time.budget = INT64_MAX; }
 int rl_a64_fp_flags(void) { return 0; }
 int rl_a64_fp_flags_on;
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn) { (void)c; (void)mem; (void)fn; abort(); }

@@ -151,6 +151,16 @@ pub trait Frontend {
         None
     }
 
+    /// The C lvalue of the preemption clock, an `rl_time` whose budget
+    /// another host thread ends to preempt the guest thread (docs/abi.md
+    /// section 14.1), such as `c->time`; the emitter then checks it at the
+    /// jumps back of loops that call, hold another loop or wait on memory, at computed
+    /// jumps and at recursive calls. `None` for a CPU whose threads are not
+    /// preempted.
+    fn preempt_clock(&self) -> Option<&'static str> {
+        None
+    }
+
     /// The registers [`Frontend::fp`] expressions read or write (the FP
     /// control and status registers).
     fn fp_state(&self) -> Vec<Reg>;

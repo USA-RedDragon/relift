@@ -657,6 +657,123 @@ fn loops_back(cx: &Ctx<'_>, b: &Block) -> bool {
     }
 }
 
+/// Whether the exit of `b` is a preemption point: a jump back inside the
+/// function that closes a loop holding a call, a trap, a computed jump or
+/// another loop, or a loop that waits on memory ([`waits`]); a computed
+/// jump; or a jump or call to its own or a lower address outside the
+/// function (recursion, a tail call back). Other loops (a copy, a hash, a
+/// counted search) have no check of their own, so clang keeps unrolling
+/// and vectorizing them: such a loop delays a preemption by one run of it,
+/// until the loop or function around it reaches a check.
+fn preempts(cx: &Ctx<'_>, b: &Block) -> bool {
+    let back = |t: u64| t <= b.pc;
+    let jump = |t: u64| {
+        if !back(t) {
+            false
+        } else if cx.inside(t) {
+            loop_has_work(cx, t, b.pc) || waits(cx, t, b)
+        } else {
+            true
+        }
+    };
+    match (b.exit.flow, b.exit.next) {
+        (Flow::Return | Flow::Trap(_), _) => false,
+        (Flow::Call { .. }, Next::Const(t)) => back(t),
+        (Flow::Call { .. }, _) => false,
+        (Flow::Jump, Next::Const(t)) => jump(t),
+        (
+            Flow::Jump,
+            Next::Select {
+                taken, not_taken, ..
+            },
+        ) => jump(taken) || jump(not_taken),
+        (Flow::Jump, Next::Dynamic(_)) => true,
+    }
+}
+
+/// Whether the loop from `from` to its jump back `b` waits on memory: the
+/// jump back or a branch out of the loop decides on a value that comes,
+/// through the loop's instructions before it in address order, from a load
+/// at an address the loop does not change (it reads one word again and
+/// again), an exclusive store's status or an intrinsic (a clock read).
+/// Such a loop may wait for a thread that needs its core (a spin-wait). A
+/// loop that leaves on a value it loads from moving addresses (a compare,
+/// a search) does not wait.
+fn waits(cx: &Ctx<'_>, from: u64, b: &Block) -> bool {
+    let regs = |blk: &Block, set: bool| -> BTreeSet<Reg> {
+        blk.insts
+            .iter()
+            .filter_map(|i| match i.op {
+                Op::Get(r) if !set => Some(r),
+                Op::Set(r, _) if set => Some(r),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut written = BTreeSet::new();
+    for (&pc, i) in cx.f.insts.range(from..=b.pc) {
+        match i {
+            Insn::Lifted { block: p, .. } => {
+                written.extend(regs(if pc == b.pc { b } else { p }, true))
+            }
+            Insn::Failed(_) => return true,
+        }
+    }
+    let mut needed = BTreeSet::new();
+    for (&pc, i) in cx.f.insts.range(from..=b.pc).rev() {
+        let Insn::Lifted { block: p, .. } = i else {
+            return true;
+        };
+        let p = if pc == b.pc { b } else { p };
+        let sets = regs(p, true);
+        if !sets.is_disjoint(&needed) {
+            let fixed = || regs(p, false).is_disjoint(&written);
+            let source = p.insts.iter().any(|i| match i.op {
+                Op::StoreExclusive { .. } | Op::Intrinsic(..) => true,
+                Op::Load { .. } | Op::LoadExclusive { .. } => fixed(),
+                _ => false,
+            });
+            if source {
+                return true;
+            }
+            needed.retain(|r| !sets.contains(r));
+            needed.extend(regs(p, false));
+        }
+        let leaves = |t: u64| t < from || t > b.pc;
+        if let Next::Select {
+            taken, not_taken, ..
+        } = p.exit.next
+            && (pc == b.pc || leaves(taken) || leaves(not_taken))
+        {
+            needed.extend(regs(p, false));
+        }
+    }
+    false
+}
+
+/// Whether the instructions from `from` to the jump back at `to` hold a
+/// call, a trap, a computed jump or another jump back.
+fn loop_has_work(cx: &Ctx<'_>, from: u64, to: u64) -> bool {
+    cx.f.insts.range(from..=to).any(|(&pc, i)| {
+        let Insn::Lifted { block: b, .. } = i else {
+            return true;
+        };
+        let back = |t: u64| t <= pc && cx.inside(t);
+        match (b.exit.flow, b.exit.next) {
+            (Flow::Call { .. } | Flow::Trap(_), _) | (_, Next::Dynamic(_)) => true,
+            (Flow::Return, _) => false,
+            _ if pc == to => false,
+            (Flow::Jump, Next::Const(t)) => back(t),
+            (
+                Flow::Jump,
+                Next::Select {
+                    taken, not_taken, ..
+                },
+            ) => back(taken) || back(not_taken),
+        }
+    })
+}
+
 /// The body of one instruction, or the raw word and reason it cannot be
 /// emitted.
 fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)> {
@@ -734,6 +851,9 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
         };
         s.push_str(&time::sync(&next));
+    }
+    if let Some(clk) = cx.fe.preempt_clock().filter(|_| preempts(cx, b)) {
+        s.push_str(&time::preempt(clk));
     }
     if loops_back(cx, b) {
         s.push_str("    RL_LOOP_FENCE();\n");

@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use relift_guest::Frontend;
 use relift_guest::toy::{Toy, branch, word};
+use relift_guest::{Frontend, Home, LiftFailure};
+use relift_ir::{FpOp, Reg, RegFile, Width};
 
 use super::*;
 
@@ -114,6 +115,171 @@ fn a_loop_back_edge_fences_and_a_forward_branch_does_not() {
     );
     assert!(!at(0x10c).contains("RL_LOOP_FENCE"), "{s}");
     assert_eq!(s.matches("RL_LOOP_FENCE();").count(), 1, "{s}");
+}
+
+/// The toy frontend with a preemption clock.
+struct Preempt;
+
+impl Frontend for Preempt {
+    fn granule(&self) -> u64 {
+        Toy.granule()
+    }
+    fn regs(&self) -> RegFile {
+        Toy.regs()
+    }
+    fn stack_pointer(&self) -> Option<Reg> {
+        Toy.stack_pointer()
+    }
+    fn preserved(&self) -> Vec<Reg> {
+        Toy.preserved()
+    }
+    fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure> {
+        Toy.lift(bytes, pc)
+    }
+    fn abi_headers(&self) -> &'static [&'static str] {
+        Toy.abi_headers()
+    }
+    fn home(&self, reg: Reg) -> Home {
+        Toy.home(reg)
+    }
+    fn intrinsic(&self, name: &str, args: &[String]) -> Option<String> {
+        Toy.intrinsic(name, args)
+    }
+    fn trap(&self, code: u32) -> String {
+        Toy.trap(code)
+    }
+    fn undefined(&self, pc: u64, insn: u64) -> String {
+        Toy.undefined(pc, insn)
+    }
+    fn monitor(&self) -> &'static str {
+        Toy.monitor()
+    }
+    fn fp(
+        &self,
+        op: FpOp,
+        from: Width,
+        to: Width,
+        args: &[String],
+        reg: &dyn Fn(Reg) -> String,
+    ) -> Option<String> {
+        Toy.fp(op, from, to, args, reg)
+    }
+    fn preempt_clock(&self) -> Option<&'static str> {
+        Some("c->time")
+    }
+    fn fp_state(&self) -> Vec<Reg> {
+        Toy.fp_state()
+    }
+    fn guard_state(&self, code: u32) -> Option<Reg> {
+        Toy.guard_state(code)
+    }
+    fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        Toy.guard_slow(code, pc, insn)
+    }
+}
+
+#[test]
+fn loops_with_work_computed_jumps_and_calls_back_are_preemption_points() {
+    let code = [
+        word(0x0a, 0, 1),    // 0x100 ld r0, [r1]
+        word(0x0d, 0, 0),    // 0x104 cmpz r0
+        branch(0x0e, 0, -2), // 0x108 bz 0x100: a loop without work
+        branch(0x02, 0, 3),  // 0x10c bl 0x118
+        branch(0x07, 0, -4), // 0x110 cbz r0, 0x100: a loop with a call
+        word(0x06, 0, 0),    // 0x114 br r0
+        branch(0x02, 0, -6), // 0x118 bl 0x100: a call back
+        word(0x03, 0, 0),    // 0x11c ret
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(
+        &Preempt,
+        &[function(0x100, &blocks)],
+        &[],
+        &Options::default(),
+    );
+    let s = shard(&out);
+    let at = |pc: u64| {
+        let from = s.find(&format!("L_{pc:x}: {{")).expect("label");
+        &s[from..from + s[from..].find("\n}\n").expect("end")]
+    };
+    let check = "    if (RL_UNLIKELY(rl_time_spent(&c->time)))\n        rl_preempt(c);\n";
+    assert!(
+        at(0x108).contains(&format!("{check}    RL_LOOP_FENCE();")),
+        "{s}"
+    );
+    assert!(
+        at(0x110).contains(&format!("{check}    RL_LOOP_FENCE();")),
+        "{s}"
+    );
+    assert!(at(0x114).contains(check), "{s}");
+    assert!(
+        at(0x118).contains(&format!("{check}    RL_STORE();\n    rc = F_100(c, mem);")),
+        "{s}"
+    );
+    assert_eq!(s.matches("rl_time_spent").count(), 4, "{s}");
+    let plain = emit(&Toy, &[function(0x100, &blocks)], &[], &Options::default());
+    assert!(!shard(&plain).contains("rl_time_spent"));
+}
+
+#[test]
+fn a_loop_that_leaves_on_a_loaded_value_waits_on_memory() {
+    let code = [
+        word(0x0a, 2, 1),    // 0x100 ld r2, [r1]
+        word(0x0d, 2, 0),    // 0x104 cmpz r2
+        branch(0x0e, 0, 2),  // 0x108 bz 0x110
+        branch(0x01, 0, -3), // 0x10c b 0x100
+        word(0x03, 0, 0),    // 0x110 ret
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(
+        &Preempt,
+        &[function(0x100, &blocks)],
+        &[],
+        &Options::default(),
+    );
+    assert_eq!(shard(&out).matches("rl_time_spent").count(), 1);
+}
+
+#[test]
+fn a_loop_that_leaves_on_a_value_loaded_from_moving_addresses_does_not_wait() {
+    let code = [
+        word(0x0a, 2, 1),    // 0x100 ld r2, [r1]
+        word(0x09, 1, 8),    // 0x104 addi r1, 8
+        word(0x0d, 2, 0),    // 0x108 cmpz r2
+        branch(0x0e, 0, 2),  // 0x10c bz 0x114
+        branch(0x01, 0, -4), // 0x110 b 0x100
+        word(0x03, 0, 0),    // 0x114 ret
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(
+        &Preempt,
+        &[function(0x100, &blocks)],
+        &[],
+        &Options::default(),
+    );
+    assert!(!shard(&out).contains("rl_time_spent"));
+}
+
+#[test]
+fn a_counted_loop_without_calls_has_no_preemption_point() {
+    let code = [
+        word(0x0a, 2, 1),      // 0x100 ld r2, [r1]
+        word(0x09, 0, 0xffff), // 0x104 addi r0, -1
+        word(0x0d, 0, 0),      // 0x108 cmpz r0
+        branch(0x0e, 0, 2),    // 0x10c bz 0x114
+        branch(0x01, 0, -4),   // 0x110 b 0x100
+        word(0x03, 0, 0),      // 0x114 ret
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(
+        &Preempt,
+        &[function(0x100, &blocks)],
+        &[],
+        &Options::default(),
+    );
+    let s = shard(&out);
+    assert!(!s.contains("rl_time_spent"), "{s}");
+    assert!(s.contains("RL_LOOP_FENCE();"), "{s}");
 }
 
 #[test]
