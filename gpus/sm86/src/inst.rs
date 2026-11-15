@@ -146,14 +146,17 @@ fn fmt_reg(f: &mut fmt::Formatter<'_>, prefix: &str, n: u8, zero: u8, m: &RegMod
     } else {
         write!(f, "{prefix}{n}")?;
     }
+    let inner = m.abs && matches!(m.swz, Swz::H(_));
+    if inner {
+        fmt_swz(f, m.swz)?;
+    }
     if m.abs {
         f.write_str("|")?;
     }
-    fmt_swz(f, m.swz)?;
     if m.reuse {
         f.write_str(".reuse")?;
     }
-    Ok(())
+    if inner { Ok(()) } else { fmt_swz(f, m.swz) }
 }
 
 fn fmt_swz(f: &mut fmt::Formatter<'_>, s: Swz) -> fmt::Result {
