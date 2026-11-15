@@ -5,8 +5,9 @@
 //! entry starts with the banks mapped at reset), ROM reads give the image's
 //! bytes (the window only while its bank is known), and RAM reads give what
 //! the same path stored. Calls are followed into the callee; a callee that
-//! runs too long, or whose path ends, is left as if it had returned with
-//! the caller's registers but `a` and the flags unknown. A branch on an unknown flag goes on along
+//! runs too long without returning to it from a call of its own, or whose
+//! path ends, is left as if it had returned with the caller's registers but
+//! `a` and the flags unknown. A branch on an unknown flag goes on along
 //! the fall-through and forks the other way with a smaller budget. A path
 //! ends at an unknown transfer, at a state it has been in before, at a ROM
 //! location the analysis did not decode, or when its budget is spent. Loops
@@ -15,7 +16,8 @@
 //! generator that writes opcodes with immediates stores those opcodes. Code
 //! copied to RAM runs on the same path, so code it stores is found too.
 //!
-//! Every byte stored at a known RAM address joins that address's value
+//! Every instruction a path runs in RAM is predicted.
+//! Every byte stored at a known RAM address also joins that address's value
 //! set (with the WRAM bank in effect, on a colour cartridge), marked as
 //! copied when the byte was read from ROM and generated otherwise. The
 //! code is then decoded from the RAM targets of the transfers the analysis
@@ -32,12 +34,12 @@ use crate::bankmodel::{BankModel, BankReg};
 use crate::fx::{FxMap, FxSet};
 use crate::loc::Loc;
 
-/// Most opcode keys lifted at one RAM address; an address with more is
-/// listed in [`RamOps::wide`] instead.
+/// Most opcode keys decoded from one RAM address's value set; an address
+/// with more is listed in [`RamOps::wide`] instead.
 pub const MAX_KEYS: usize = 32;
 
 /// Instructions the first path of one function may run, callees included.
-const ROOT_STEPS: u32 = 1 << 18;
+const ROOT_STEPS: u32 = 1 << 22;
 
 /// Instructions each path forked at an unknown branch may run.
 const FORK_STEPS: u32 = 1 << 12;
@@ -47,7 +49,7 @@ const FORKS_STEPS: u32 = 1 << 16;
 
 /// Instructions a call may run before the path gives it up and goes on
 /// after it.
-const CALL_STEPS: u32 = 1 << 12;
+const CALL_STEPS: u32 = 1 << 18;
 
 /// Most forked paths of one function waiting to run; the oldest is
 /// dropped for a new one.
@@ -282,6 +284,7 @@ impl Cell {
 struct Found {
     stores: FxMap<(u16, u8), Cell>,
     entries: FxSet<(u16, u8)>,
+    ran: FxMap<(u16, u16), RamClass>,
 }
 
 impl Found {
@@ -290,6 +293,10 @@ impl Found {
             self.stores.entry(k).or_default().join(&c);
         }
         self.entries.extend(o.entries);
+        for (k, c) in o.ran {
+            let e = self.ran.entry(k).or_insert(c);
+            *e = (*e).min(c);
+        }
     }
 }
 
@@ -638,6 +645,22 @@ impl Machine<'_> {
             s: Src::Imm,
         };
         let imm16 = i1.v.zip(i2.v).map(|(l, h)| u16::from_le_bytes([l, h]));
+        if pc >= 0x8000 {
+            let key = if op == 0xCB {
+                i1.v.map(|c| 0x100 | u16::from(c))
+            } else {
+                Some(u16::from(op))
+            };
+            if let Some(key) = key {
+                let class = if opb.s == Src::Rom {
+                    RamClass::Copied
+                } else {
+                    RamClass::Generated
+                };
+                let e = f.ran.entry((pc, key)).or_insert(class);
+                *e = (*e).min(class);
+            }
+        }
         p.pc = pc.wrapping_add(u16::from(len));
         let next = p.pc;
         let hl = pair(p, RH, RL);
@@ -1089,6 +1112,9 @@ impl Machine<'_> {
                                     }
                                     p.frames.truncate(keep);
                                 }
+                                if let Some(fr) = p.frames.last_mut() {
+                                    fr.at = p.steps;
+                                }
                                 p.pc = t;
                                 false
                             }
@@ -1189,7 +1215,17 @@ pub(crate) fn predict(
     }
     let called = called(&found.stores, m.cgb);
     entries.extend(called);
-    decode(&found.stores, &entries, m.cgb)
+    let mut ops = decode(&found.stores, &entries, m.cgb);
+    let mut all: BTreeMap<(u16, u16), RamClass> =
+        ops.ops.iter().map(|o| ((o.addr, o.key), o.class)).collect();
+    for (&k, &c) in &found.ran {
+        all.entry(k).or_insert(c);
+    }
+    ops.ops = all
+        .into_iter()
+        .map(|((addr, key), class)| RamOp { addr, key, class })
+        .collect();
+    ops
 }
 
 /// The RAM targets of calls and jumps copied to RAM: an address whose value
