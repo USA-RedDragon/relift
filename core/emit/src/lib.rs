@@ -139,6 +139,15 @@ pub struct Options {
     /// shard outside its window. When zero, functions fill each shard up
     /// to [`Options::shard_bytes`] and shards are numbered in order.
     pub window: u64,
+    /// Whether dispatch may enter a function at any of its instructions:
+    /// the unit table lists each instruction with the piece that switches
+    /// to it on `c->pc` (`RL_FN_FRAGMENT`). For guests whose runtime opens
+    /// every instruction at a boundary of its own, so that an interpreted
+    /// run can go back to lifted code at the next instruction it reaches.
+    /// The value masks instruction addresses: an address with bits outside
+    /// it names a continuation block of the instruction at the masked
+    /// address, kept in that instruction's piece.
+    pub enter_anywhere: Option<u64>,
 }
 
 impl Default for Options {
@@ -154,6 +163,7 @@ impl Default for Options {
             image_id: [0; 32],
             test_fault: None,
             window: 0,
+            enter_anywhere: None,
         }
     }
 }
@@ -262,6 +272,7 @@ pub fn emit_with(
                         opts.piece_bytes.max(1),
                         &opts.io_map,
                         opts.test_fault == Some(fns[k].entry),
+                        opts.enter_anywhere,
                     )
                 })
                 .collect()
@@ -356,7 +367,12 @@ pub fn emit_reusing(
     sink: &mut dyn FnMut(File),
 ) -> usize {
     let Stream { heads, lend, store } = *from;
-    let salt = reuse::salt(fe, opts.piece_bytes.max(1), &opts.io_map);
+    let salt = reuse::salt(
+        fe,
+        opts.piece_bytes.max(1),
+        &opts.io_map,
+        opts.enter_anywhere,
+    );
     emit_core(
         fe,
         heads,
@@ -377,6 +393,7 @@ pub fn emit_reusing(
                             opts.piece_bytes.max(1),
                             &opts.io_map,
                             fault,
+                            opts.enter_anywhere,
                         )
                     };
                     let Some(store) = store else {
@@ -510,6 +527,7 @@ fn emit_core(
         last: None,
     };
     let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
+    let mut inner: BTreeMap<u64, String> = BTreeMap::new();
     let budget = opts.shard_bytes.max(1);
     let mut done = std::collections::VecDeque::new();
     for (k, f) in fns.iter().enumerate() {
@@ -529,6 +547,9 @@ fn emit_core(
         w.window = window;
         undefined += e.undefined;
         flags.insert(f.entry, e.flags);
+        for (pc, piece) in &e.inner {
+            inner.entry(*pc).or_insert_with(|| piece.clone());
+        }
         // A shard map's range stops at the next function of the module, so
         // maps of different shards never overlap either.
         let span = fns
@@ -567,16 +588,31 @@ fn emit_core(
         // A split function: its pieces fill shards of their own, and each
         // piece has a map entry over the guest range it holds. The stub
         // has an empty range at the lowest address, so the table stays
-        // sorted.
-        if !w.cur.fns.is_empty() {
+        // sorted. A function split only to be entered anywhere that fits
+        // in a shard shares it.
+        let shared = opts.enter_anywhere.is_some() && e.len() <= budget;
+        if !w.cur.fns.is_empty() && (!shared || w.cur.body.len() + e.len() > budget) {
             w.flush();
             on(k, fns.len());
         }
         let names: Vec<String> = e.pieces.iter().map(|p| p.name.clone()).collect();
         let callees = e.callees;
+        if shared {
+            w.cur.callees.extend(callees.iter().copied());
+            w.cur.declared.extend(names.iter().cloned());
+        }
         let end = f.entry.saturating_add(span);
         let starts: Vec<u64> = e.pieces.iter().filter_map(|p| p.first_pc).collect();
-        let lo = starts.first().map_or(f.entry, |&s| s.min(f.entry));
+        let lo = if shared {
+            f.entry
+        } else {
+            starts.first().map_or(f.entry, |&s| s.min(f.entry))
+        };
+        let starts: Vec<u64> = if shared {
+            starts.iter().map(|&s| s.clamp(lo, end)).collect()
+        } else {
+            starts
+        };
         let mut held = 0;
         for p in e.pieces {
             if !w.cur.fns.is_empty() && w.cur.body.len() + p.text.len() > budget {
@@ -589,7 +625,11 @@ fn emit_core(
             let (start, size) = match p.first_pc {
                 None => (lo, 0),
                 Some(pc) => {
-                    let start = if held == 0 { lo } else { pc };
+                    let start = if held == 0 {
+                        lo
+                    } else {
+                        starts.get(held).copied().unwrap_or(pc)
+                    };
                     held += 1;
                     let stop = starts.get(held).copied().unwrap_or(end).min(end);
                     (start, stop.saturating_sub(start))
@@ -605,8 +645,10 @@ fn emit_core(
             });
             w.cur.defined.push(p.name);
         }
-        w.flush();
-        on(k + 1, fns.len());
+        if !shared {
+            w.flush();
+            on(k + 1, fns.len());
+        }
     }
     if !w.cur.fns.is_empty() {
         w.flush();
@@ -615,7 +657,7 @@ fn emit_core(
     let maps = std::mem::take(&mut w.maps);
     (w.sink)(File {
         name: "unit.c".into(),
-        text: unit_table(fe, &fns, overrides, &flags, &maps, opts),
+        text: unit_table(fe, &fns, overrides, &flags, &inner, &maps, opts),
         fns: Vec::new(),
     });
     undefined
@@ -801,6 +843,7 @@ fn unit_table(
     fns: &[&Head],
     overrides: &[Override],
     flags: &BTreeMap<u64, &'static str>,
+    inner: &BTreeMap<u64, String>,
     maps: &[(String, String)],
     opts: &Options,
 ) -> String {
@@ -813,6 +856,10 @@ fn unit_table(
     }
     for o in overrides.iter().filter(|o| o.declare) {
         let _ = writeln!(t, "RL_LIFTED({});", o.host_fn);
+    }
+    let pieces: BTreeSet<&str> = inner.values().map(String::as_str).collect();
+    for p in &pieces {
+        let _ = writeln!(t, "RL_LIFTED({p});");
     }
     for (m, shard) in maps {
         let _ = writeln!(t, "extern const rl_fn_map {m};");
@@ -839,6 +886,17 @@ fn unit_table(
             )
         })
         .collect();
+    let entry_of: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
+    for (pc, piece) in inner {
+        if !entry_of.contains(pc) && !overrides.iter().any(|o| o.entry == *pc) {
+            entries.push((
+                *pc,
+                format!(
+                    "    {{ UINT64_C({pc:#x}), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, {piece} }},"
+                ),
+            ));
+        }
+    }
     if let Some(resume) = fe.pad_resume() {
         let taken: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
         let mut pads: BTreeSet<u64> = fns.iter().flat_map(|f| f.pads.iter().copied()).collect();

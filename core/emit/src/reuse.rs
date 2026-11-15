@@ -58,11 +58,23 @@ impl<'a> Targets<'a> {
 
 /// The bytes that decide what the emitter makes of the functions of one
 /// emit apart from their own code.
-pub(crate) fn salt(fe: &dyn Frontend, piece_bytes: usize, io: &IoMap) -> Vec<u8> {
+pub(crate) fn salt(
+    fe: &dyn Frontend,
+    piece_bytes: usize,
+    io: &IoMap,
+    anywhere: Option<u64>,
+) -> Vec<u8> {
     let mut out = Vec::new();
     put_str(&mut out, fe.regs().name());
     put_uvar(&mut out, piece_bytes as u64);
     put_str(&mut out, &format!("{io:?}"));
+    match anywhere {
+        None => out.push(0),
+        Some(m) => {
+            out.push(1);
+            put_uvar(&mut out, m);
+        }
+    }
     out
 }
 
@@ -163,6 +175,11 @@ pub(crate) fn output(e: &Emitted1, targets: &Targets<'_>) -> Option<Vec<u8>> {
     }
     put_uvar(&mut out, e.undefined as u64);
     out.push(u8::try_from(flags).ok()?);
+    put_uvar(&mut out, e.inner.len() as u64);
+    for (pc, piece) in &e.inner {
+        put_uvar(&mut out, *pc);
+        put_str(&mut out, piece);
+    }
     Some(out)
 }
 
@@ -204,6 +221,11 @@ fn read(bytes: &[u8], all: &BTreeMap<u64, Target>) -> Result<Option<Emitted1>, B
     let flags = *FLAGS
         .get(usize::from(r.u8()?))
         .ok_or(BinError("bad flags"))?;
+    let mut inner = Vec::new();
+    for _ in 0..r.count()? {
+        let pc = r.uvar()?;
+        inner.push((pc, r.str()?.to_string()));
+    }
     if !r.is_empty() {
         return Err(BinError("trailing bytes"));
     }
@@ -212,5 +234,6 @@ fn read(bytes: &[u8], all: &BTreeMap<u64, Target>) -> Result<Option<Emitted1>, B
         callees,
         undefined,
         flags,
+        inner,
     }))
 }

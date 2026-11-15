@@ -39,6 +39,9 @@ pub(crate) struct Emitted1 {
     pub(crate) undefined: usize,
     /// The C expression of the function's `rl_fn_flags`.
     pub(crate) flags: &'static str,
+    /// Each instruction other than the entry, with the C function that
+    /// enters there by `c->pc`, when every instruction is an entry.
+    pub(crate) inner: Vec<(u64, String)>,
 }
 
 impl Emitted1 {
@@ -326,7 +329,11 @@ fn successors(f: &Function<'_>, pc: u64, b: Option<&Block>) -> Vec<u64> {
 
 /// Emits `f`; `targets` are every direct-call target of the module. A
 /// function whose C is longer than `piece_bytes` is split into pieces of
-/// about that size.
+/// about that size. With `anywhere` (the mask of instruction addresses),
+/// every instruction is an entry: the function is written as a stub and
+/// pieces, and each piece switches to any of its instructions. An address
+/// with bits outside the mask is a continuation of the instruction at its
+/// masked address, kept in that instruction's piece and not an entry.
 pub(crate) fn emit_function(
     fe: &dyn Frontend,
     f: &Function<'_>,
@@ -334,7 +341,10 @@ pub(crate) fn emit_function(
     piece_bytes: usize,
     io: &IoMap,
     test_fault: bool,
+    anywhere: Option<u64>,
 ) -> Emitted1 {
+    let mask = anywhere.filter(|_| f.insts.contains_key(&f.entry));
+    let anywhere = mask.is_some();
     let resumes = resume_points(f, targets);
     let mut blocks: BTreeMap<u64, Block> = f
         .insts
@@ -356,9 +366,10 @@ pub(crate) fn emit_function(
         blocks: &blocks,
         resumes: &resumes,
         io,
+        anywhere,
     };
     let whole = emit_piece(&env, &all, None);
-    if whole.text.len() <= piece_bytes || all.len() < 2 {
+    if !anywhere && (whole.text.len() <= piece_bytes || all.len() < 2) {
         return Emitted1 {
             pieces: vec![Piece {
                 name: f.name.clone(),
@@ -368,13 +379,15 @@ pub(crate) fn emit_function(
             callees: whole.callees,
             undefined: whole.undefined,
             flags: whole.flags,
+            inner: Vec::new(),
         };
     }
     // Divide in address order at instruction boundaries, by the size each
     // instruction took in the whole function.
     let mut piece_of = BTreeMap::new();
     let (mut k, mut size) = (0, 0);
-    for pc in &all {
+    let base = |pc: u64| mask.map_or(pc, |m| pc & m);
+    for pc in all.iter().filter(|&&pc| base(pc) == pc) {
         let n = whole.sizes.get(pc).copied().unwrap_or(0);
         if size > 0 && size + n > piece_bytes {
             k += 1;
@@ -382,6 +395,10 @@ pub(crate) fn emit_function(
         }
         size += n;
         piece_of.insert(*pc, k);
+    }
+    for pc in all.iter().filter(|&&pc| base(pc) != pc) {
+        let to = piece_of.get(&base(*pc)).copied().unwrap_or(k);
+        piece_of.insert(*pc, to);
     }
     let split = Split {
         piece_of,
@@ -416,11 +433,20 @@ pub(crate) fn emit_function(
             first_pc: pcs.first().copied(),
         });
     }
+    let inner = if anywhere {
+        all.iter()
+            .filter(|&&pc| pc != f.entry && base(pc) == pc)
+            .map(|pc| (*pc, split.names[split.piece_of[pc]].clone()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     Emitted1 {
         pieces,
         callees,
         undefined,
         flags,
+        inner,
     }
 }
 
@@ -433,6 +459,7 @@ struct Env<'a> {
     blocks: &'a BTreeMap<u64, Block>,
     resumes: &'a BTreeSet<u64>,
     io: &'a IoMap,
+    anywhere: bool,
 }
 
 /// One emitted C function over the instructions `pcs` of `f`.
@@ -453,6 +480,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         blocks,
         resumes,
         io,
+        anywhere,
     } = *env;
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let mut used: BTreeSet<Reg> = BTreeSet::new();
@@ -564,6 +592,9 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             }
             if s.piece_of.len() > own.len() {
                 entries.extend(resumes.iter().filter(|r| own.contains(r)));
+            }
+            if anywhere {
+                entries.extend(own.iter().copied());
             }
             let first = entries.first().copied().or(pcs.first().copied());
             t.push_str("    switch (c->pc) {\n");

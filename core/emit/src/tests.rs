@@ -345,6 +345,7 @@ fn shards_declare_their_foreign_callees() {
             image_id: [0; 32],
             test_fault: None,
             window: 0,
+            enter_anywhere: None,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -531,6 +532,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         image_id: [7; 32],
         test_fault: None,
         window: 0,
+        enter_anywhere: None,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -952,6 +954,15 @@ impl Store for Mem {
 }
 
 fn emit_with_store(fns: &[Function<'_>], overrides: &[Override], store: &Mem) -> Vec<File> {
+    emit_with_store_opts(fns, overrides, store, &Options::default())
+}
+
+fn emit_with_store_opts(
+    fns: &[Function<'_>],
+    overrides: &[Override],
+    store: &Mem,
+    opts: &Options,
+) -> Vec<File> {
     let heads: Vec<Head> = fns.iter().map(Head::of).collect();
     let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &Function<'_>)| {
         for &k in ks {
@@ -965,14 +976,9 @@ fn emit_with_store(fns: &[Function<'_>], overrides: &[Override], store: &Mem) ->
         lend: &lend,
         store: Some(store),
     };
-    emit_reusing(
-        &Toy,
-        &from,
-        overrides,
-        &Options::default(),
-        &mut |_, _| {},
-        &mut |f| files.push(f),
-    );
+    emit_reusing(&Toy, &from, overrides, opts, &mut |_, _| {}, &mut |f| {
+        files.push(f)
+    });
     files
 }
 
@@ -1027,4 +1033,109 @@ fn a_store_gives_back_the_c_of_unchanged_functions() {
         [(0x100, false), (0x10c, true)],
         "the caller of an overridden function is emitted again"
     );
+}
+
+#[test]
+fn a_store_keeps_apart_the_c_of_functions_entered_anywhere() {
+    let code = [word(0x03, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x100, &blocks)];
+    let anywhere = Options {
+        enter_anywhere: Some(u64::MAX),
+        ..Options::default()
+    };
+    let store = Mem::default();
+    let plain = emit_with_store(&fns, &[], &store);
+    let out = emit_with_store_opts(&fns, &[], &store, &anywhere);
+    assert_eq!(out, emit(&Toy, &fns, &[], &anywhere).files);
+    assert_ne!(out, plain);
+    assert_eq!(*store.reused.lock().unwrap(), [(0x100, false)]);
+    let again = emit_with_store_opts(&fns, &[], &store, &anywhere);
+    assert_eq!(again, out);
+    assert_eq!(*store.reused.lock().unwrap(), [(0x100, true)]);
+}
+
+#[test]
+fn a_function_entered_anywhere_lists_each_instruction_with_its_piece() {
+    let code = [word(0x03, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x100, &blocks)];
+    let out = emit(
+        &Toy,
+        &fns,
+        &[],
+        &Options {
+            unit_symbol: "u".into(),
+            enter_anywhere: Some(u64::MAX),
+            ..Options::default()
+        },
+    );
+    let unit = &out
+        .files
+        .iter()
+        .find(|f| f.name == "unit.c")
+        .expect("unit")
+        .text;
+    for pc in [0x104, 0x108] {
+        assert!(
+            unit.contains(&format!(
+                "{{ UINT64_C({pc:#x}), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, F_100_part1 }},"
+            )),
+            "{unit}"
+        );
+    }
+    let c = shard(&out);
+    assert!(c.contains("case UINT64_C(0x108): goto L_108;"), "{c}");
+    assert_eq!(out.files.len(), 3, "the pieces share the shard");
+}
+
+#[test]
+fn a_function_without_its_entry_instruction_is_not_split_to_be_entered_anywhere() {
+    let code = [word(0x03, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x100, &blocks[1..])];
+    let out = emit(
+        &Toy,
+        &fns,
+        &[],
+        &Options {
+            enter_anywhere: Some(u64::MAX),
+            ..Options::default()
+        },
+    );
+    assert!(!shard(&out).contains("_part1"), "{}", shard(&out));
+}
+
+#[test]
+fn a_continuation_stays_in_the_piece_of_its_instruction() {
+    let code = [word(0x03, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let mut blocks = lift_all(&code, 0x100);
+    let mut cont = blocks[1].1.clone();
+    cont.pc = 0x1_0104;
+    blocks.push((0x1_0104, cont));
+    let fns = [function(0x100, &blocks)];
+    let out = emit(
+        &Toy,
+        &fns,
+        &[],
+        &Options {
+            unit_symbol: "u".into(),
+            piece_bytes: 1,
+            enter_anywhere: Some(0xFFFF),
+            ..Options::default()
+        },
+    );
+    let c: String = out.files.iter().map(|f| f.text.as_str()).collect();
+    let piece = c
+        .split("RL_TEXT RL_LIFTED(")
+        .find(|p| p.contains("L_104: {"))
+        .expect("the piece of 0x104");
+    assert!(piece.contains("L_10104: {"), "{c}");
+    let unit = &out
+        .files
+        .iter()
+        .find(|f| f.name == "unit.c")
+        .expect("unit")
+        .text;
+    assert!(!unit.contains("0x10104"), "{unit}");
 }
