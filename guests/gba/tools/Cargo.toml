@@ -1,0 +1,21 @@
+[package]
+name = "relift-gba-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+relift-gba-formats = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+relift-cache = { workspace = true }
+relift-gba-formats = { workspace = true }
+relift-proc = { workspace = true }
+serde_json = { workspace = true }

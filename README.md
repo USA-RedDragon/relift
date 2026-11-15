@@ -61,6 +61,10 @@ computed jump left to the dispatcher with its reason (`slot`, `table` or
 
 Import is not available yet. `relift-gbrom` reads and checks a ROM header, and `relift-gbrom functions` lists the functions of a ROM per mapper bank.
 
+### Game Boy Advance
+
+Import is not available yet. `relift-gbarom` reads and checks a ROM header and lists the save library strings; multiboot images are refused.
+
 ## Building and running
 
 ```sh
@@ -88,11 +92,12 @@ next `relift build` lifts it with the rest (docs/abi.md section 6).
 | `relift-npdm` | Switch | show a `main.npdm` |
 | `relift-ir` | Switch | print the IR of A64 instruction words or NSO symbols |
 | `relift-gbrom` | Game Boy | show a ROM header and validate its checksums; `functions` lists functions per bank, unresolved transfers and code run from RAM |
+| `relift-gbarom` | Game Boy Advance | show a ROM header, validate logo hash, complement and size, list save library strings |
 
 ## Building
 
 ```sh
-cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools
+cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools -p relift-gba-tools
 pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
