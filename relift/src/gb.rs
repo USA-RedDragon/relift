@@ -499,8 +499,7 @@ pub fn build(
         &cdir,
         &files,
         &prog,
-        release,
-        android.as_ref(),
+        (release, android.as_ref()),
         ui,
     )?;
     let exe = match &android {
@@ -531,8 +530,7 @@ fn compile(
     cdir: &Path,
     lifted: &[PathBuf],
     prog: &[PathBuf],
-    release: bool,
-    android: Option<&android::AndroidBuild>,
+    (release, android): (bool, Option<&android::AndroidBuild>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt_real = crate::build::runtime_dir(settings);
