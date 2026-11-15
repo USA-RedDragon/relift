@@ -14,7 +14,7 @@ host's Vulkan driver.
 | Configuration | `guests/switch/vkgen/vkgen.toml` | The registry pin (tag, URL, sha256), core 1.0 to 1.3, the extension list, the hand-written commands and structs, the dropped types and the shadow-memory hooks. A game repository passes a second file with its extra extensions; lists concatenate. |
 | Generated C | `runtime/guests/switch/vk/gen/` (committed, `linguist-generated`) | Types and layout asserts (`vkg_types.h`), the command table (`vkg.h`, `vkg_thunks.c`), the converters (`vkg_convert.c`). CI regenerates them from the pinned `vk.xml` and fails on any difference. |
 | Hand-written C | `runtime/guests/switch/vk/*.c` | Handle table, arena, host loading, instance and device creation, memory mapping, callbacks, surfaces. |
-| Host library loading | `runtime/core/hostlib.c` | `dlopen` or `LoadLibrary` and the loader names per host (`libvulkan.so.1`, `libvulkan.1.dylib` or `libMoltenVK.dylib`, `vulkan-1.dll`), overridable with `RELIFT_VULKAN_LIBRARY`. The guest layer never names a host library. |
+| Host library loading | `runtime/core/hostlib.c` | `dlopen` or `LoadLibrary` and the loader names per host (`libvulkan.so.1`, `libvulkan.1.dylib` or `libMoltenVK.dylib`, `vulkan-1.dll`), overridable with `RELIFT_VULKAN_LIBRARY`. Apple builds link MoltenVK instead (`RL_VULKAN_LINKED`) and load nothing. The guest layer never names a host library. |
 
 The layer belongs to the guest layer, not a new one: it knows Horizon's
 guest (its ABI, its `VK_NN_vi_surface`), and the core charter forbids that in
@@ -159,11 +159,11 @@ Providers:
   `SDL_Vulkan_CreateSurface`. The player loads Vulkan through the backend
   (`SDL_Vulkan_LoadLibrary`, then `SDL_Vulkan_GetVkGetInstanceProcAddr` into
   `rl_vk_config.gipa`), so the surface and the forwarding layer use the same
-  loader, the bundled MoltenVK on macOS. Window close asks the guest to exit
+  loader; on macOS SDL finds the linked MoltenVK. Window close asks the guest to exit
   through `am` (`rl_am_request_exit`; a second close quits at once), and
   focus changes go to `rl_am_set_focus`. Keyboard and gamepads reach `hid`
-  through `rl_input_publish`. SDL3 handles macOS and Windows the same way; only
-  Linux (Wayland and X11) has been run so far.
+  through `rl_input_publish`. SDL3 handles macOS and Windows the same way;
+  Linux (Wayland and X11) and macOS (Apple M2, MoltenVK) have been run.
 
 ## Swapchains
 

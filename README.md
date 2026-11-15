@@ -30,7 +30,8 @@ relift ships no game code, keys or data, and never will.
   uses cargo to build the device library (rustyboi-core) into the cache.
 - clang (or `zig cc`) and ninja.
 - Optional: SDL3 for a window (`pkg-config sdl3`, or `RELIFT_SDL3_DIR`), a
-  Vulkan loader for Switch games that render, and SDL3 plus libopus for sound
+  Vulkan loader for Switch games that render (MoltenVK on macOS, linked
+  directly: Homebrew's `molten-vk` or `RELIFT_MOLTENVK_DIR`), and SDL3 plus libopus for sound
   (`runtime/README.md`). Without SDL3 the program runs headless.
 
 ## Quick start
