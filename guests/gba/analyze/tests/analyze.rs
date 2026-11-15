@@ -580,3 +580,44 @@ fn only_literal_loads_read_the_copy_of_ram_code_as_constants() {
     assert!(r.data.contains(&(0x0300_0018, 4)));
     assert!(!r.data.iter().any(|(x, _)| *x == 0x0300_001C));
 }
+
+#[test]
+fn jump_to_another_functions_entry_returns_where_that_function_returns() {
+    let mut a = Asm::new();
+    let t = 0x0800_0200;
+    let f = 0x0800_0280;
+    let veneer = 0x0800_0260;
+    a.arm(
+        0x0800_0100,
+        &[a_ldr_lit(0, 0x0800_0100, 0x0800_0108), a_bx(0), t | 1],
+    );
+    let call_f = t_bl(t + 2, f);
+    let call_v = t_bl(t + 6, veneer);
+    a.thumb(
+        t,
+        &[
+            T_PUSH_LR,
+            call_f[0],
+            call_f[1],
+            call_v[0],
+            call_v[1],
+            T_MOVS_R0_1,
+            T_POP_R0,
+            t_bx(0),
+        ],
+    );
+    a.thumb(veneer, &[t_ldr_lit(3, veneer, veneer + 4), t_bx(3)]);
+    a.w32(veneer + 4, f | 1);
+    a.thumb(f, &[T_MOVS_R0_1, T_BX_LR]);
+    let r = a.run(0x0800_0100);
+    let found = insts(&r);
+    assert!(found.contains(&(t + 0xA, true)));
+    assert!(found.contains(&(t + 0xE, true)));
+    let v = &r.functions[&Loc::rom(veneer, true)];
+    assert!(v.returns);
+    assert!(
+        v.edges
+            .iter()
+            .any(|x| x.target == Loc::rom(f, true) && x.kind == EdgeKind::Tail)
+    );
+}

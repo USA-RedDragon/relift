@@ -761,6 +761,32 @@ impl Run<'_> {
         }
     }
 
+    /// A jump from `site` to the entry of another function `to`: that
+    /// function returns to this function's caller, so its effects, its
+    /// returns and the registers it keeps are this function's from here.
+    fn tail(&mut self, site: Loc, to: Loc, st: &State) {
+        self.out.edges.push(Edge {
+            site,
+            target: to,
+            kind: EdgeKind::Tail,
+        });
+        let cs = self.env.summary(to);
+        let effects = cs.effects.clone();
+        self.apply(site, &effects, st);
+        if let Some(o) = cs.frame_exit {
+            self.frame_exit(site, o, st);
+        }
+        let cs = match cs.via {
+            Some((r, bx)) => self.via(site, to, r, bx, st, cs),
+            None => cs,
+        };
+        if cs.returns {
+            let mut after = st.clone();
+            after.clobber(cs.keep);
+            self.rets.push(after);
+        }
+    }
+
     /// A call whose arguments name both a ROM and a RAM address is run
     /// with those constants; what it writes to RAM becomes copies.
     fn constant_call(&mut self, site: Loc, callee: Loc, st: &State) {
@@ -940,11 +966,7 @@ impl Run<'_> {
                 }
                 for to in self.targets(site, v, thumb) {
                     if to != self.entry && self.env.entries.contains(&to) {
-                        self.out.edges.push(Edge {
-                            site,
-                            target: to,
-                            kind: EdgeKind::Tail,
-                        });
+                        self.tail(site, to, st);
                     } else {
                         self.succ(site, to, st.clone());
                     }
@@ -987,15 +1009,11 @@ impl Run<'_> {
                 }
                 for (addr, th) in es {
                     for to in self.targets(site, addr, th) {
+                        let mut s2 = st.clone();
+                        s2.regs[regs::T.index()] = Abs::K(u128::from(th));
                         if to != self.entry && self.env.entries.contains(&to) {
-                            self.out.edges.push(Edge {
-                                site,
-                                target: to,
-                                kind: EdgeKind::Tail,
-                            });
+                            self.tail(site, to, &s2);
                         } else {
-                            let mut s2 = st.clone();
-                            s2.regs[regs::T.index()] = Abs::K(u128::from(th));
                             self.succ(site, to, s2);
                         }
                     }

@@ -18,7 +18,9 @@
 //!   (`MOV LR,PC` then `BX` or `LDR PC`). The code after a call is reached
 //!   only when the callee has a path back to its entry `LR`. A callee that
 //!   leaves through a word its caller pushed (a `BL` to a shared epilogue)
-//!   ends the caller's frame instead. A callee that jumps to an address in
+//!   ends the caller's frame instead. A jump to another function's entry
+//!   (a tail call, a `BX` to code in RAM) returns where that function
+//!   returns and keeps what it keeps. A callee that jumps to an address in
 //!   an argument register (a `BX` veneer) is resolved with the caller's
 //!   value.
 //! - Data: words read at constant ROM addresses (literal pools, tables)
