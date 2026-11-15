@@ -294,6 +294,11 @@ int rl_gba_swi_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
     rl_gba_swi_status st = rl_gba_swi(rl_gba_bios_of(g), rl_gba_bios_bus(g), number, &s);
     for (unsigned i = 0; i < 4; i++)
         c->r[i] = s.r[i];
+    if (st == RL_GBA_SWI_OK || st == RL_GBA_SWI_UNKNOWN) {
+        c->spsr[2] = s.cpsr;
+        c->r[13] = s.sp_svc;
+        c->r[14] = s.ret;
+    }
     charge(c, rl_gba_bios_of(g)->cycles);
     c->code_ns = 0;
     switch (st) {

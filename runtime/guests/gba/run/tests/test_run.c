@@ -20,6 +20,8 @@ static const rl_guest_desc test_guest = {
 
 static struct {
     int handler_runs;
+    bool handler_div;
+    uint32_t div_r0;
     uint32_t handler_mode;
     uint32_t handler_lr;
     uint32_t handler_r0;
@@ -42,6 +44,16 @@ static int handler(rl_ctx *c, uint8_t *mem)
     rl_gba_cpu_write(c, mem, 0x04000202u, 2, f);
     uint32_t b = (uint32_t)rl_gba_cpu_read(c, mem, 0x03007FF8u, 2);
     rl_gba_cpu_write(c, mem, 0x03007FF8u, 2, b | f);
+    if (hs.handler_div) {
+        uint32_t lr = c->r[14];
+        c->r[0] = 100;
+        c->r[1] = 7;
+        rl_arm32_exception(c, RL_ARM32_SVC, 0x08000104u);
+        if (rl_gba_swi_trap(c, mem, 0x06))
+            return RL_PENDING;
+        hs.div_r0 = c->r[0];
+        c->r[14] = lr;
+    }
     c->r[1] = 0xBADu;
     c->time.budget -= 20;
     RL_MUSTTAIL return rl_indirect(c, c->r[14])(c, mem);
@@ -214,6 +226,20 @@ TEST(gba_run_vblankintrwait_takes_the_interrupt_inside_the_bios)
     uint64_t first = (160u - 126u) * RL_GBA_LINE_CYCLES - 841u;
     CHECK(hs.cycles_after > first + 2u * RL_GBA_FRAME_CYCLES);
     CHECK(hs.cycles_after < first + 2u * RL_GBA_FRAME_CYCLES + 2000u);
+    CHECK_EQ(run.c->depth, 0);
+}
+
+TEST(gba_run_a_swi_from_a_handler_inside_a_swi_returns_to_the_outer_caller)
+{
+    CHECK(boot(swi_main) == 0);
+    hs.handler_div = true;
+    CHECK_EQ(rl_gba_run_start(&run), RL_PENDING);
+    CHECK_EQ(rl_common(run.c)->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK_EQ(hs.swis, 3);
+    CHECK_EQ(hs.handler_runs, 3);
+    CHECK_EQ(hs.div_r0, 14u);
+    CHECK_EQ(hs.after_cpsr & 0xFFu, RL_ARM32_SYS);
+    CHECK_EQ(hs.after_sp, 0x03007F00u);
     CHECK_EQ(run.c->depth, 0);
 }
 
