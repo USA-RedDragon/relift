@@ -8,6 +8,13 @@
 
 #include <SDL3/SDL.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#include <relift/ios.h>
+#endif
+
 #include <stdlib.h>
 
 /** @brief Silence queued when playback starts on an empty stream (60 ms at 48 kHz), so scheduling jitter of the producer does not reach the device as a gap. */
@@ -41,6 +48,12 @@ static rl_audio_out *sdl_open(uint32_t rate, uint32_t channels)
     o->head.b = &g_sdl;
     o->stream = s;
     o->frame_bytes = channels * (uint32_t)sizeof(int16_t);
+    const char *name = SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(s));
+    rl_log(RL_LOG_INFO, "audio", "SDL %s output %s, %u Hz, %u channels", SDL_GetCurrentAudioDriver(), name ? name : "?",
+           rate, channels);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    rl_ios_log_audio_route();
+#endif
     return &o->head;
 }
 

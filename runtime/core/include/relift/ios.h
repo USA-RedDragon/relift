@@ -26,6 +26,9 @@ RL_RUNTIME_API void rl_ios_init(void);
 /** @brief Flushes what the program printed. Call before rl_ios_main returns. */
 RL_RUNTIME_API void rl_ios_flush(void);
 
+/** @brief Logs the AVAudioSession category and the ports of its current output route. */
+RL_RUNTIME_API void rl_ios_log_audio_route(void);
+
 /** @brief The app's Documents folder (no trailing slash; the Files app shows it), or NULL when SDL cannot tell. */
 RL_RUNTIME_API const char *rl_ios_documents_dir(void);
 

@@ -16,6 +16,9 @@
 #define SDL_MAIN_HANDLED
 #include <SDL3/SDL_main.h>
 
+#include <objc/message.h>
+#include <objc/runtime.h>
+
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -53,6 +56,29 @@ void rl_ios_init(void)
     const char *d = rl_ios_documents_dir();
     if (d && chdir(d) != 0)
         rl_log(RL_LOG_WARN, "ios", "cannot enter %s", d);
+}
+
+static id msg(id o, const char *sel) { return o ? ((id(*)(id, SEL))objc_msgSend)(o, sel_registerName(sel)) : NULL; }
+
+static const char *text(id s)
+{
+    const char *t = s ? ((const char *(*)(id, SEL))objc_msgSend)(s, sel_registerName("UTF8String")) : NULL;
+    return t ? t : "?";
+}
+
+void rl_ios_log_audio_route(void)
+{
+    id session = msg((id)objc_getClass("AVAudioSession"), "sharedInstance");
+    id outs = msg(msg(session, "currentRoute"), "outputs");
+    unsigned long n = outs ? ((unsigned long (*)(id, SEL))objc_msgSend)(outs, sel_registerName("count")) : 0;
+    double vol = session ? ((float (*)(id, SEL))objc_msgSend)(session, sel_registerName("outputVolume")) : -1;
+    rl_log(RL_LOG_INFO, "audio", "AVAudioSession category %s, volume %.2f, %lu output port%s", text(msg(session, "category")),
+           vol, n, n == 1 ? "" : "s");
+    for (unsigned long i = 0; i < n; i++) {
+        id port = ((id(*)(id, SEL, unsigned long))objc_msgSend)(outs, sel_registerName("objectAtIndex:"), i);
+        rl_log(RL_LOG_INFO, "audio", "route output %lu: %s (%s)", i, text(msg(port, "portName")),
+               text(msg(port, "portType")));
+    }
 }
 
 void rl_ios_flush(void)
