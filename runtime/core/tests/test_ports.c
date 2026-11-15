@@ -8,7 +8,9 @@
 #include <relift/override.h>
 #include <relift/settings.h>
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static const rl_control_decl pad_controls[] = {
     { "a", RL_CONTROL_BUTTON, "gamepad:east,key:x" },
@@ -261,4 +263,44 @@ TEST(ports_input_script_reads_the_environment_at_the_first_frame)
     CHECK(rl_ports_script_value("p1", "b", &v));
     CHECK(!rl_ports_script_value("p1", "a", &v));
     rl_ports_script_reset();
+}
+
+TEST(ports_input_script_follows_a_file)
+{
+    rl_ports_reset();
+    rl_ports_script_reset();
+    CHECK(rl_ports_declare(native, 2));
+    char path[512];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(path, sizeof path, "%s/rl_script_XXXXXX", tmp && *tmp ? tmp : "/tmp");
+    int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    FILE *f = fdopen(fd, "w");
+    CHECK(f != NULL);
+    CHECK(rl_ports_follow_script(path));
+    rl_input_snapshot s = blank();
+    rl_control_ref a = rl_ports_find("p1", "a");
+    rl_control_ref b = rl_ports_find("p2", "b");
+    fputs("2+2:p1.a\n5:p2", f);
+    fflush(f);
+    rl_ports_script_frame(1);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    rl_ports_script_frame(2);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    fputs(".b\n1+3:p1.a,", f);
+    fflush(f);
+    rl_ports_script_frame(4);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    rl_ports_script_frame(5);
+    CHECK(rl_ports_eval(b, &s) == 1.0f);
+    CHECK(rl_ports_eval(a, &s) == 1.0f);
+    rl_ports_script_frame(7);
+    CHECK(rl_ports_eval(a, &s) == 0.0f);
+    fputs("\nbad\n", f);
+    fclose(f);
+    rl_ports_script_frame(8);
+    CHECK(rl_ports_eval(b, &s) == 1.0f);
+    rl_ports_script_reset();
+    unlink(path);
+    CHECK(!rl_ports_follow_script(path));
 }

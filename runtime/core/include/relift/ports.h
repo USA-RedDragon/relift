@@ -92,9 +92,15 @@ RL_RUNTIME_API float rl_ports_read(rl_control_ref ref);
  * @brief Sets the input script, a debug tool: comma separated steps
  * `<frame>[+<frames>]:<port>.<control>[=<value>]`, each holding a control at
  * the value (default 1) for the frames (default 6) from a guest frame on.
- * Without a call, the first rl_ports_script_frame reads RELIFT_INPUT_SCRIPT. Returns false and keeps the old script when the text is invalid.
+ * Without a call, the first rl_ports_script_frame reads RELIFT_INPUT_SCRIPT (`@<path>` follows a file). Returns false and keeps the old script when the text is invalid.
  */
 RL_RUNTIME_API bool rl_ports_set_script(const char *text);
+/**
+ * @brief Follows a script file: each rl_ports_script_frame adds the steps
+ * appended to it since, a step whose frame has passed starting at once.
+ * Returns false when the file does not open.
+ */
+RL_RUNTIME_API bool rl_ports_follow_script(const char *path);
 /** @brief True when text is a valid input script (empty is valid). */
 RL_RUNTIME_API bool rl_ports_valid_script(const char *text);
 /** @brief The guest layer tells the input script the number of the frame the guest just finished. */

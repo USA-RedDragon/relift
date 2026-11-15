@@ -10,6 +10,11 @@
  * for `frames` frames (default 6). The guest layer counts frames with
  * rl_ports_script_frame; while a step holds a control, the step's value
  * replaces what the bindings read.
+ *
+ * `@<path>` instead of steps follows a file: at each frame the steps
+ * appended to it since the last frame are added, separated by commas or
+ * newlines, so a driver can steer a running game. A step whose frame has
+ * passed when it is read starts at that frame.
  */
 #include "core.h"
 
@@ -17,12 +22,14 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define SCRIPT_STEPS_MAX 1024u
 #define SCRIPT_HOLD_DEFAULT 6u
 #define SCRIPT_ID_MAX 64u
+#define SCRIPT_STEP_TEXT_MAX 256u
 
 typedef struct step {
     uint64_t start;
@@ -37,6 +44,10 @@ static step *g_steps;
 static uint32_t g_nsteps;
 static bool g_loaded;
 static uint64_t g_frame;
+static FILE *g_follow;
+static char g_pending[SCRIPT_STEP_TEXT_MAX];
+static size_t g_npending;
+static bool g_pending_bad;
 
 static bool parse_u64(const char **p, uint64_t *out)
 {
@@ -66,12 +77,12 @@ static bool parse_id(const char *s, size_t n, char *out)
 
 static bool parse_step(const char *s, size_t len, step *out)
 {
-    char buf[256];
-    while (len && *s == ' ') {
+    char buf[SCRIPT_STEP_TEXT_MAX];
+    while (len && (*s == ' ' || *s == '\r')) {
         s++;
         len--;
     }
-    while (len && s[len - 1] == ' ')
+    while (len && (s[len - 1] == ' ' || s[len - 1] == '\r'))
         len--;
     if (!len || len >= sizeof buf)
         return false;
@@ -154,6 +165,88 @@ bool rl_ports_valid_script(const char *text)
     return true;
 }
 
+static void stop_follow_locked(void)
+{
+    if (g_follow)
+        fclose(g_follow);
+    g_follow = NULL;
+    g_npending = 0;
+    g_pending_bad = false;
+}
+
+bool rl_ports_follow_script(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        rl_log(RL_LOG_WARN, "input", "input script file %s: %s; ignored", path, strerror(errno));
+        return false;
+    }
+    pthread_mutex_lock(&g_lock);
+    stop_follow_locked();
+    free(g_steps);
+    g_steps = NULL;
+    g_nsteps = 0;
+    g_follow = f;
+    g_loaded = true;
+    g_frame = 0;
+    pthread_mutex_unlock(&g_lock);
+    rl_log(RL_LOG_INFO, "input", "input script: following %s", path);
+    return true;
+}
+
+static void add_pending_locked(void)
+{
+    bool blank = true;
+    for (size_t i = 0; i < g_npending; i++)
+        if (g_pending[i] != ' ' && g_pending[i] != '\r')
+            blank = false;
+    step st;
+    if (blank && !g_pending_bad)
+        return;
+    if (g_pending_bad || g_nsteps >= SCRIPT_STEPS_MAX || !parse_step(g_pending, g_npending, &st)) {
+        rl_log(RL_LOG_WARN, "input", "input script: step \"%.*s\" is not <frame>[+<frames>]:<port>.<control>[=<value>]"
+                                     " or too many steps are held; ignored",
+               (int)g_npending, g_pending);
+        return;
+    }
+    step *grown = realloc(g_steps, (g_nsteps + 1) * sizeof *g_steps);
+    if (!grown)
+        return;
+    if (st.start < g_frame)
+        st.start = g_frame;
+    g_steps = grown;
+    g_steps[g_nsteps++] = st;
+}
+
+static void read_follow_locked(void)
+{
+    char buf[4096];
+    size_t got;
+    while ((got = fread(buf, 1, sizeof buf, g_follow)) > 0) {
+        for (size_t i = 0; i < got; i++) {
+            if (buf[i] == ',' || buf[i] == '\n') {
+                add_pending_locked();
+                g_npending = 0;
+                g_pending_bad = false;
+            } else if (g_npending + 1 < sizeof g_pending) {
+                g_pending[g_npending++] = buf[i];
+            } else {
+                g_pending_bad = true;
+            }
+        }
+    }
+    clearerr(g_follow);
+}
+
+static void drop_done_locked(void)
+{
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < g_nsteps; i++)
+        if (g_steps[i].start + g_steps[i].frames > g_frame)
+            g_steps[kept++] = g_steps[i];
+    g_nsteps = kept;
+}
+
 bool rl_ports_set_script(const char *text)
 {
     step *steps;
@@ -165,6 +258,7 @@ bool rl_ports_set_script(const char *text)
         return false;
     }
     pthread_mutex_lock(&g_lock);
+    stop_follow_locked();
     free(g_steps);
     g_steps = steps;
     g_nsteps = n;
@@ -185,7 +279,10 @@ static void load_locked(void)
     if (!text || !*text)
         return;
     pthread_mutex_unlock(&g_lock);
-    rl_ports_set_script(text);
+    if (text[0] == '@')
+        rl_ports_follow_script(text + 1);
+    else
+        rl_ports_set_script(text);
     pthread_mutex_lock(&g_lock);
 }
 
@@ -194,6 +291,10 @@ void rl_ports_script_frame(uint64_t frame)
     pthread_mutex_lock(&g_lock);
     load_locked();
     g_frame = frame;
+    if (g_follow) {
+        drop_done_locked();
+        read_follow_locked();
+    }
     for (uint32_t i = 0; i < g_nsteps; i++)
         if (g_steps[i].start == frame)
             rl_log(RL_LOG_INFO, "input", "input script: frame %llu: %s.%s = %g for %llu frames",
@@ -221,6 +322,7 @@ bool rl_ports_script_value(const char *port, const char *control, float *value)
 void rl_ports_script_reset(void)
 {
     pthread_mutex_lock(&g_lock);
+    stop_follow_locked();
     free(g_steps);
     g_steps = NULL;
     g_nsteps = 0;

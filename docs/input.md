@@ -103,3 +103,10 @@ RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./game
 ```
 
 `rl_ports_set_script` sets a script from code (tests).
+
+`RELIFT_INPUT_SCRIPT=@<path>` follows a file instead: at each guest frame the
+runtime adds the steps appended to the file since the last frame, separated
+by commas or newlines. A program that watches the game (for example frames
+from `RELIFT_VK_CAPTURE`) can steer it by appending steps; a step whose frame
+has already passed starts at once. `rl_ports_follow_script` does the same
+from code.
