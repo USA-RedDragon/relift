@@ -438,7 +438,16 @@ impl<'a> Run<'a> {
             | Mnemonic::Rst
             | Mnemonic::Ret
             | Mnemonic::Reti => {
-                let (taken, fall) = self.branch_states(&st, cond);
+                let (taken, mut fall) = self.branch_states(&st, cond);
+                if fall.is_none()
+                    && cond.is_some()
+                    && ins.branch_target(loc.addr) == Some(loc.addr)
+                    && let Some(t) = taken
+                {
+                    let mut s = t;
+                    s.kill_memory();
+                    fall = Some(s);
+                }
                 if let Some(t) = taken {
                     self.control(loc, &ins, t, next);
                 }
@@ -461,6 +470,7 @@ impl<'a> Run<'a> {
                 }
                 if mn == Mnemonic::Halt {
                     st.kill_memory();
+                    self.halt_bug(loc, next, st);
                 }
                 if matches!(mn, Mnemonic::Halt | Mnemonic::Ei) {
                     self.out.waits = true;
@@ -468,6 +478,41 @@ impl<'a> Run<'a> {
                 self.fall(loc, next, st);
             }
         }
+    }
+
+    /// After a halt with interrupts disabled and one pending, the next
+    /// instruction runs twice.
+    fn halt_bug(&mut self, loc: Loc, next: Option<u16>, st: State) {
+        let Some(n) = next else {
+            return;
+        };
+        let at = Loc { addr: n, ..loc };
+        let Some(ins) = self.env.image.fetch(at).and_then(|b| decode(b).ok()) else {
+            return;
+        };
+        let mn = ins.opcode.mnemonic;
+        if ins.opcode.is_illegal()
+            || matches!(
+                mn,
+                Mnemonic::Jr
+                    | Mnemonic::Jp
+                    | Mnemonic::Call
+                    | Mnemonic::Rst
+                    | Mnemonic::Ret
+                    | Mnemonic::Reti
+                    | Mnemonic::Halt
+                    | Mnemonic::Stop
+            )
+        {
+            return;
+        }
+        let mut s = st;
+        let mut events = Vec::new();
+        state::step(&self.cx(), &mut s, &ins, &mut events);
+        for w in events {
+            self.write_event(at, &s, w);
+        }
+        self.fall(loc, next, s);
     }
 
     fn branch_states(&self, st: &State, cond: Option<Cond>) -> (Option<State>, Option<State>) {

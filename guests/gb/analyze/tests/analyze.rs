@@ -744,6 +744,31 @@ fn a_callee_that_writes_no_bank_register_keeps_the_bank() {
 }
 
 #[test]
+fn a_branch_to_itself_is_left_by_an_interrupt() {
+    let r = Cart::new(0x19, 0x04)
+        .put(0, 0x150, &[0xAF, 0xFB, 0x28, 0xFE, 0x3E, 0x01, 0x18, 0xFE])
+        .analyze();
+    let entry = &r.functions[&Loc::fixed(0x100)];
+    assert!(entry.body.contains_key(&Loc::fixed(0x154)));
+}
+
+#[test]
+fn the_instruction_after_halt_may_run_twice() {
+    let r = Cart::new(0x19, 0x04)
+        .put(
+            0,
+            0x150,
+            &[
+                0xAF, 0x76, 0x3C, 0xFE, 0x02, 0x28, 0x02, 0x18, 0xFE, 0x3E, 0x01, 0x18, 0xFE,
+            ],
+        )
+        .analyze();
+    let entry = &r.functions[&Loc::fixed(0x100)];
+    assert!(entry.body.contains_key(&Loc::fixed(0x157)));
+    assert!(entry.body.contains_key(&Loc::fixed(0x159)));
+}
+
+#[test]
 fn code_walked_only_inside_a_caller_is_part_of_the_callee() {
     let r = Cart::new(0x19, 0x04)
         .put(
