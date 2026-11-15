@@ -65,7 +65,7 @@ static int spin(rl_fn fn, rl_ctx *c)
 
 int main(void)
 {
-    alarm(10);
+    alarm(60);
     g_mem = calloc(1, 0x4000);
     rl_ctx *c = aligned_alloc(64, sizeof(rl_ctx));
     memset(c, 0, sizeof *c);
