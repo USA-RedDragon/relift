@@ -39,6 +39,7 @@ mod fx;
 mod image;
 mod loc;
 mod probe;
+mod ramcode;
 mod report;
 mod state;
 
@@ -46,6 +47,7 @@ pub use analysis::{AnalyzeError, analyze, analyze_with};
 pub use bankmodel::{BankModel, BankReg, OutOfRange};
 pub use func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 pub use loc::Loc;
+pub use ramcode::{MAX_KEYS, RamClass, RamOp, RamOps};
 pub use report::{
     BankCoverage, Edge, Function, JumpTable, Origin, RamCode, RamPointerJump, Report, TableBound,
     Trampoline, Unresolved, UnresolvedKind,

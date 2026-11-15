@@ -1,0 +1,204 @@
+//! Instructions predicted to run from RAM, over synthetic cartridges.
+
+use relift_gb_analyze::{MAX_KEYS, RamClass, RamOps, analyze};
+use relift_gb_formats::banks::ROM_BANK_SIZE;
+use relift_gb_formats::synth::{self, Spec};
+
+fn predict(parts: &[(u16, &[u8])]) -> RamOps {
+    let mut rom = synth::rom(&Spec {
+        cart_type: 0x19,
+        rom_size: 0x02,
+        ..Spec::default()
+    });
+    rom[..0x100].fill(0xFF);
+    rom[0x150..].fill(0xFF);
+    for bank in rom.chunks_mut(ROM_BANK_SIZE).skip(1) {
+        bank.fill(0xFF);
+    }
+    rom[0x100..0x104].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
+    for (addr, code) in parts {
+        let at = usize::from(*addr);
+        rom[at..at + code.len()].copy_from_slice(code);
+    }
+    synth::fix_checksums(&mut rom);
+    analyze(&rom).expect("analyzes").ram_ops
+}
+
+fn ops(r: &RamOps) -> Vec<(u16, u16, RamClass)> {
+    r.ops.iter().map(|o| (o.addr, o.key, o.class)).collect()
+}
+
+#[test]
+fn a_routine_copied_through_a_helper_is_decoded_from_its_bytes() {
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x21, 0x00, 0x03, 0x11, 0x00, 0xC0, 0x01, 0x04, 0x00, 0xCD, 0x00, 0x02, 0xCD, 0x00,
+                0xC0, 0x18, 0xFE,
+            ],
+        ),
+        (
+            0x200,
+            &[0x2A, 0x12, 0x13, 0x0B, 0x78, 0xB1, 0x20, 0xF8, 0xC9],
+        ),
+        (0x300, &[0x3E, 0x05, 0x3C, 0xC9]),
+    ]);
+    assert_eq!(
+        ops(&r),
+        [
+            (0xC000, 0x3E, RamClass::Copied),
+            (0xC002, 0x3C, RamClass::Copied),
+            (0xC003, 0xC9, RamClass::Copied),
+        ]
+    );
+    assert_eq!(r.entries, [0xC000]);
+}
+
+#[test]
+fn a_high_page_routine_stored_through_c_is_decoded() {
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x0E, 0x80, 0x06, 0x0A, 0x21, 0x00, 0x03, 0x2A, 0xE2, 0x0C, 0x05, 0x20, 0xFA, 0xCD,
+                0x80, 0xFF, 0x18, 0xFE,
+            ],
+        ),
+        (
+            0x300,
+            &[0x3E, 0xC0, 0xE0, 0x46, 0x3E, 0x28, 0x3D, 0x20, 0xFD, 0xC9],
+        ),
+    ]);
+    let got: Vec<(u16, u16)> = r.ops.iter().map(|o| (o.addr, o.key)).collect();
+    assert_eq!(
+        got,
+        [
+            (0xFF80, 0x3E),
+            (0xFF82, 0xE0),
+            (0xFF84, 0x3E),
+            (0xFF86, 0x3D),
+            (0xFF87, 0x20),
+            (0xFF89, 0xC9),
+        ]
+    );
+    assert!(r.ops.iter().all(|o| o.class == RamClass::Copied));
+}
+
+#[test]
+fn generated_code_with_patched_immediates_gives_its_opcodes() {
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x21, 0x00, 0xDB, 0xCD, 0x00, 0x02, 0x3E, 0x07, 0xEA, 0x01, 0xDB, 0x21, 0x00, 0xC1,
+                0xCD, 0x00, 0xDB, 0x18, 0xFE,
+            ],
+        ),
+        (
+            0x200,
+            &[
+                0x06, 0x04, 0x3E, 0x36, 0x22, 0x23, 0x05, 0x20, 0xFB, 0x36, 0xC9, 0xC9,
+            ],
+        ),
+    ]);
+    assert_eq!(
+        ops(&r),
+        [
+            (0xDB00, 0x36, RamClass::Generated),
+            (0xDB02, 0x36, RamClass::Generated),
+            (0xDB04, 0x36, RamClass::Generated),
+            (0xDB06, 0x36, RamClass::Generated),
+            (0xDB08, 0xC9, RamClass::Generated),
+        ]
+    );
+}
+
+#[test]
+fn a_rewritten_jump_target_adds_no_opcode() {
+    let r = predict(&[(
+        0x150,
+        &[
+            0x3E, 0xC3, 0xEA, 0x00, 0xC0, 0x3E, 0x00, 0xEA, 0x01, 0xC0, 0x3E, 0x03, 0xEA, 0x02,
+            0xC0, 0x3E, 0x10, 0xEA, 0x01, 0xC0, 0xCD, 0x00, 0xC0, 0x18, 0xFE,
+        ],
+    )]);
+    assert_eq!(ops(&r), [(0xC000, 0xC3, RamClass::Generated)]);
+}
+
+#[test]
+fn a_cb_prefix_takes_the_key_of_the_next_byte() {
+    let r = predict(&[(
+        0x150,
+        &[
+            0x3E, 0xCB, 0xEA, 0x00, 0xC0, 0x3E, 0x37, 0xEA, 0x01, 0xC0, 0x3E, 0xC9, 0xEA, 0x02,
+            0xC0, 0xCD, 0x00, 0xC0, 0x18, 0xFE,
+        ],
+    )]);
+    assert_eq!(
+        ops(&r),
+        [
+            (0xC000, 0x137, RamClass::Generated),
+            (0xC002, 0xC9, RamClass::Generated),
+        ]
+    );
+}
+
+#[test]
+fn an_address_with_too_many_opcodes_is_listed_as_wide() {
+    let table: Vec<u8> = (0x40..0x68).collect();
+    assert!(table.len() > MAX_KEYS);
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x21, 0x00, 0x03, 0x06, 0x28, 0x2A, 0xEA, 0x00, 0xC0, 0x05, 0x20, 0xF9, 0xCD, 0x00,
+                0xC0, 0x18, 0xFE,
+            ],
+        ),
+        (0x300, &table),
+    ]);
+    assert!(r.ops.is_empty(), "{:?}", r.ops);
+    assert_eq!(r.wide, [0xC000]);
+}
+
+#[test]
+fn a_copy_from_the_bank_mapped_at_reset_keeps_its_nop_padding() {
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x21, 0x00, 0x40, 0x11, 0x00, 0xC0, 0x0E, 0x08, 0x2A, 0x12, 0x13, 0x0D, 0x20, 0xFA,
+                0xC3, 0x00, 0xC0,
+            ],
+        ),
+        (0x4000, &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0xC9]),
+    ]);
+    let mut want: Vec<(u16, u16, RamClass)> =
+        (0xC000..0xC006).map(|a| (a, 0, RamClass::Copied)).collect();
+    want.push((0xC006, 0x3C, RamClass::Copied));
+    want.push((0xC007, 0xC9, RamClass::Copied));
+    assert_eq!(ops(&r), want);
+}
+
+#[test]
+fn a_call_in_copied_code_names_more_code() {
+    let r = predict(&[
+        (
+            0x150,
+            &[
+                0x21, 0x00, 0x03, 0x11, 0x00, 0xC0, 0x0E, 0x08, 0x2A, 0x12, 0x13, 0x0D, 0x20, 0xFA,
+                0xCD, 0x00, 0xC0, 0x18, 0xFE,
+            ],
+        ),
+        (0x300, &[0xC9, 0xCD, 0x06, 0xC0, 0xC9, 0x00, 0x3C, 0xC9]),
+    ]);
+    assert_eq!(
+        ops(&r),
+        [
+            (0xC000, 0xC9, RamClass::Copied),
+            (0xC006, 0x3C, RamClass::Copied),
+            (0xC007, 0xC9, RamClass::Copied),
+        ]
+    );
+}

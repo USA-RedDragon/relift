@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::func::{AddressTaken, CallKind, CopyLoop, RamTransfer};
 use crate::loc::Loc;
+use crate::ramcode::RamOps;
 
 /// Why a transfer could not be followed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -220,4 +221,6 @@ pub struct Report {
     pub tables: Vec<JumpTable>,
     /// Jumps through pointers kept in RAM that were followed.
     pub ram_pointers: Vec<RamPointerJump>,
+    /// The instructions predicted to run from RAM.
+    pub ram_ops: RamOps,
 }

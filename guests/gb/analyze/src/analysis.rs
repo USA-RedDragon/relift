@@ -83,7 +83,7 @@ pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
         d.solve();
         let fences = d.fences();
         if fences.is_empty() {
-            return Ok(d.report(kind, banks));
+            return Ok(d.report(rom, kind, banks));
         }
         for (t, n) in fences {
             let m = limits.entry(t).or_insert(n);
@@ -93,7 +93,7 @@ pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
     let mut d = Driver::new(model, Image::new(rom), &limits);
     d.seed(rom, seen);
     d.solve();
-    Ok(d.report(kind, banks))
+    Ok(d.report(rom, kind, banks))
 }
 
 impl<'a> Driver<'a> {
@@ -460,7 +460,7 @@ impl Driver<'_> {
         }
     }
 
-    fn report(self, kind: MapperKind, banks: usize) -> Report {
+    fn report(self, rom: &[u8], kind: MapperKind, banks: usize) -> Report {
         let offset = |l: Loc| {
             if l.addr < 0x4000 {
                 usize::from(l.addr)
@@ -623,7 +623,7 @@ impl Driver<'_> {
         ram_sites.dedup();
         copies.sort_by_key(|(l, c)| (*l, c.at));
         copies.dedup();
-        let ram_code = ram_sites
+        let ram_code: Vec<RamCode> = ram_sites
             .into_iter()
             .map(|(function, transfer)| {
                 let copied_by = copies
@@ -656,6 +656,13 @@ impl Driver<'_> {
             .into_iter()
             .filter(|t| t.target.is_none_or(|l| !known.contains(&l)))
             .collect();
+        let roots: Vec<Loc> = functions.keys().copied().collect();
+        let targets: Vec<u16> = ram_code.iter().map(|c| c.transfer.target).collect();
+        let code: FxSet<Loc> = functions
+            .values()
+            .flat_map(|f| f.body.keys().copied())
+            .collect();
+        let ram_ops = crate::ramcode::predict(rom, &self.model, &roots, &code, &targets);
         Report {
             unreached_pointers,
             mapper: kind.name(),
@@ -668,6 +675,7 @@ impl Driver<'_> {
             ram_code,
             tables: tables.into_iter().collect(),
             ram_pointers: ram_pointers.into_iter().collect(),
+            ram_ops,
         }
     }
 }
