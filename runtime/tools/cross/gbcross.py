@@ -335,6 +335,11 @@ def main():
         print(f"{n} files compile")
         exe = link(args, tool, objs, devlib)
         print(f"linked {exe}")
+        guard = [sys.executable, "-I", os.path.join(HERE, "release_guard.py"), "--sources", os.path.join(ROOT, "runtime"), "--objects", os.path.join(args.work, "obj", args.target), "--binary", exe]
+        r = run(guard)
+        print((r.stdout + r.stderr).strip())
+        if r.returncode:
+            sys.exit(f"{args.target}: the release guard failed")
         if TARGETS[args.target]["kind"] == "android":
             check_alignment(exe)
         if args.run:
