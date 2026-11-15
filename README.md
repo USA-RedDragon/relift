@@ -138,6 +138,33 @@ run-time settings, input ports and bindings, mods and save kind. `relift info`
 prints the same document without running the program. A launcher reads it to
 build its settings and input screens (docs/input.md).
 
+### Linux: AppImage
+
+On Linux `relift build` also writes `<project>.AppImage` beside the program:
+one executable that runs on a mainstream distribution with nothing installed
+but glibc and the system's graphics stack. It holds the program, the shared
+libraries it needs that a distribution cannot be relied on to have (SDL3), a
+desktop file and icon (the game's own, else a generated one), the
+self-description (`relift info <game>.AppImage` reads it without running the
+game) and the license of everything bundled
+(`usr/share/licenses/<game>/BUNDLED.txt`). The Vulkan loader, GPU drivers,
+the C library and the display and audio servers are always the system's. A
+Switch game's romfs and DLC trees go inside; saves, settings and the SD card
+go to `$XDG_DATA_HOME/<game>` (default `~/.local/share/<game>`), never into
+the AppImage.
+
+It needs `appimagetool` on `PATH` (or `toolchain.appimagetool`); without it
+the build prints how to get it and still finishes. `package.appimage` is
+`auto` (the default), `always` (a missing tool fails the build) or `never`.
+`relift run` and the dev build are unchanged.
+
+To make the AppImage run on distributions older than this machine, run
+`runtime/tools/linux-sdk.sh` once. It builds SDL3 for glibc 2.28 into the
+cache; `relift build` then compiles with `zig cc` for that glibc and links
+that SDL3, and the AppImage asks glibc 2.28 or newer. Without it the program
+is built with the host compiler and asks the host's glibc (the build summary
+prints it).
+
 ## Tools
 
 | Binary | Guest | Does |
@@ -203,17 +230,19 @@ Per-game data lives in each game project's `game.toml`, not here.
 
 <!-- configulator:begin -->
 
-| Key               | Type    | Default | Environment              | Flag                | Description                                                                             |
-|-------------------|---------|---------|--------------------------|---------------------|-----------------------------------------------------------------------------------------|
-| `cache-dir`       | string  |         | `RELIFT_CACHE_DIR`       | `--cache-dir`       | where lifted, emitted and built artifacts are cached (empty: the user cache dir)        |
-| `jobs`            | integer | `0`     | `RELIFT_JOBS`            | `-j`, `--jobs`      | parallel compile jobs (0: one per CPU)                                                  |
-| `runtime-dir`     | string  |         | `RELIFT_RUNTIME_DIR`     | `--runtime-dir`     | the C runtime sources to build against (empty: the ones beside this relift's source)    |
-| `color`           | string  | `auto`  | `RELIFT_COLOR`           | `--color`           | color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never   |
-| `toolchain.clang` | string  |         | `RELIFT_TOOLCHAIN_CLANG` | `--toolchain.clang` | the clang driver                                                                        |
-| `toolchain.zig`   | string  |         | `RELIFT_TOOLCHAIN_ZIG`   | `--toolchain.zig`   | zig, for `zig cc` player builds                                                         |
-| `toolchain.ninja` | string  |         | `RELIFT_TOOLCHAIN_NINJA` | `--toolchain.ninja` | the ninja build tool                                                                    |
-| `emit.shard-kib`  | integer | `4096`  | `RELIFT_EMIT_SHARD_KIB`  | `--emit.shard-kib`  | the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C |
-| `emit.piece-kib`  | integer | `1024`  | `RELIFT_EMIT_PIECE_KIB`  | `--emit.piece-kib`  | the most KiB of C per C function; a larger guest function is split into several         |
+| Key                      | Type    | Default | Environment                     | Flag                       | Description                                                                                                                   |
+|--------------------------|---------|---------|---------------------------------|----------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `cache-dir`              | string  |         | `RELIFT_CACHE_DIR`              | `--cache-dir`              | where lifted, emitted and built artifacts are cached (empty: the user cache dir)                                              |
+| `jobs`                   | integer | `0`     | `RELIFT_JOBS`                   | `-j`, `--jobs`             | parallel compile jobs (0: one per CPU)                                                                                        |
+| `runtime-dir`            | string  |         | `RELIFT_RUNTIME_DIR`            | `--runtime-dir`            | the C runtime sources to build against (empty: the ones beside this relift's source)                                          |
+| `color`                  | string  | `auto`  | `RELIFT_COLOR`                  | `--color`                  | color in output: auto (a terminal that shows it, and NO_COLOR unset), always or never                                         |
+| `toolchain.clang`        | string  |         | `RELIFT_TOOLCHAIN_CLANG`        | `--toolchain.clang`        | the clang driver                                                                                                              |
+| `toolchain.zig`          | string  |         | `RELIFT_TOOLCHAIN_ZIG`          | `--toolchain.zig`          | zig, for `zig cc` player builds                                                                                               |
+| `toolchain.ninja`        | string  |         | `RELIFT_TOOLCHAIN_NINJA`        | `--toolchain.ninja`        | the ninja build tool                                                                                                          |
+| `toolchain.appimagetool` | string  |         | `RELIFT_TOOLCHAIN_APPIMAGETOOL` | `--toolchain.appimagetool` | appimagetool, which packs the Linux release output                                                                            |
+| `emit.shard-kib`         | integer | `4096`  | `RELIFT_EMIT_SHARD_KIB`         | `--emit.shard-kib`         | the most KiB of C per emitted file; clang needs about 120 bytes of memory per byte of C                                       |
+| `emit.piece-kib`         | integer | `1024`  | `RELIFT_EMIT_PIECE_KIB`         | `--emit.piece-kib`         | the most KiB of C per C function; a larger guest function is split into several                                               |
+| `package.appimage`       | string  | `auto`  | `RELIFT_PACKAGE_APPIMAGE`       | `--package.appimage`       | the Linux release output: auto (an AppImage when appimagetool is found), always (a build without appimagetool fails) or never |
 
 <!-- configulator:end -->
 

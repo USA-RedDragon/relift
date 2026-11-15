@@ -671,6 +671,45 @@ pub(crate) fn c_compiler(t: &crate::settings::Toolchain) -> Result<Vec<String>, 
     Ok(vec![zig.display().to_string(), "cc".into()])
 }
 
+/// The glibc the pinned SDK was built for (`runtime/tools/linux-sdk.sh`
+/// writes it beside its SDL3), when the SDK is there.
+pub(crate) fn pinned_glibc(cache_root: &Path) -> Option<String> {
+    let arch = std::env::consts::ARCH;
+    let file = cache_root
+        .join("sdk")
+        .join("sdl3")
+        .join(format!("{arch}-linux"))
+        .join("glibc");
+    let v = std::fs::read_to_string(file).ok()?;
+    let v = v.trim();
+    (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.')).then(|| v.to_string())
+}
+
+/// The compiler of a release build. On Linux, with the pinned SDK in the
+/// cache and zig on `PATH`, `zig cc` targeting that SDK's glibc, so the
+/// program asks no newer glibc than the libraries it ships with (a host
+/// compiler binds the host's newest symbol versions). Elsewhere, and
+/// whenever `toolchain.clang` is set, [`c_compiler`].
+pub(crate) fn release_compiler(settings: &Settings) -> Result<Vec<String>, BoxError> {
+    if cfg!(target_os = "linux")
+        && settings.toolchain.clang.as_os_str().is_empty()
+        && settings.package.appimage != "never"
+    {
+        if let (Some(v), Some(zig)) = (
+            pinned_glibc(&cache_root(settings)?),
+            tool(&settings.toolchain.zig, "zig"),
+        ) {
+            return Ok(vec![
+                zig.display().to_string(),
+                "cc".into(),
+                "-target".into(),
+                format!("{}-linux-gnu.{v}", std::env::consts::ARCH),
+            ]);
+        }
+    }
+    c_compiler(&settings.toolchain)
+}
+
 fn cc_name(cc: &[String]) -> String {
     let stem = |s: &String| {
         Path::new(s)
@@ -1067,7 +1106,11 @@ pub(crate) fn build_project(
         Vec::new()
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = c_compiler(&settings.toolchain)?;
+    let cc = if dev {
+        c_compiler(&settings.toolchain)?
+    } else {
+        release_compiler(settings)?
+    };
     let arch: Vec<String> = if cfg!(target_arch = "x86_64") {
         vec!["-mcx16".into()]
     } else {
@@ -1370,9 +1413,39 @@ pub fn run_build(
         if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
             return Err(format!("target {t}: only the host target builds so far").into());
         }
-        return crate::gb::build(settings, mods, ui).map(|_| ());
+        let built = crate::gb::build(settings, mods, true, ui)?;
+        let (name, _) = project_out(settings)?;
+        return package(settings, &name, &built.exe, None, ui);
     }
-    build_project(settings, targets, mods, Mode::Shipped, ui).map(|_| ())
+    let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
+    let (name, _) = project_out(settings)?;
+    let import = import_dir()?;
+    package(settings, &name, &built.exe, Some(&import), ui)
+}
+
+/// The release output of the host: on Linux an AppImage of the program.
+fn package(
+    settings: &Settings,
+    name: &str,
+    exe: &Path,
+    import: Option<&Path>,
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
+    let request = crate::appimage::Request { name, exe, import };
+    if let Some(p) = crate::appimage::package(settings, &request, ui)? {
+        let libs: Vec<&str> = p.bundled.iter().map(|b| b.soname.as_str()).collect();
+        ui.summary(&Line::new().text(format!("  appimage: {}", p.path.display())));
+        ui.summary(&Line::new().text(format!(
+            "  bundled: {}; needs glibc {} or newer",
+            if libs.is_empty() {
+                "no libraries".to_string()
+            } else {
+                libs.join(", ")
+            },
+            p.glibc.map_or("(none)".to_string(), |(a, b)| format!("{a}.{b}"))
+        )));
+    }
+    Ok(())
 }
 
 /// `relift run`: a dev build, then the program in the working directory,

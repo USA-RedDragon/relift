@@ -7,7 +7,11 @@ color = "auto"
 clang = ""
 zig = ""
 ninja = ""
+appimagetool = ""
 
 [emit]
 shard-kib = 4096
 piece-kib = 1024
+
+[package]
+appimage = "auto"

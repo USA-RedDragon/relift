@@ -283,7 +283,12 @@ pub struct Built {
 ///
 /// No import, a patch that does not apply, a ROM the analysis refuses, or
 /// a failed compile or link.
-pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<Built, BoxError> {
+pub fn build(
+    settings: &Settings,
+    mods: &[PathBuf],
+    release: bool,
+    ui: &mut Ui,
+) -> Result<Built, BoxError> {
     let p = project()?;
     let (rom, hack) = patched(p.rom, mods, ui)?;
     let (name, out) = crate::build::project_out(settings)?;
@@ -434,7 +439,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<Built
         crate::game_settings::generate_c(&game_settings).as_bytes(),
     )?;
     prog.push(settings_c);
-    compile(settings, &out, &cdir, &files, &prog, ui)?;
+    compile(settings, &out, &cdir, &files, &prog, release, ui)?;
     let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {}, {} instructions not lifted, {} in all",
@@ -458,11 +463,16 @@ fn compile(
     cdir: &Path,
     lifted: &[PathBuf],
     prog: &[PathBuf],
+    release: bool,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt = crate::build::runtime_dir(settings);
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = crate::build::c_compiler(&settings.toolchain)?;
+    let cc = if release {
+        crate::build::release_compiler(settings)?
+    } else {
+        crate::build::c_compiler(&settings.toolchain)?
+    };
     let zig = cc.len() > 1;
     let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
         .iter()
@@ -632,7 +642,11 @@ fn compile(
         .map(String::from)
         .into()
     } else {
-        ["-lpthread", "-lm", "-ldl"].map(String::from).into()
+        let mut l: Vec<String> = ["-lpthread", "-lm", "-ldl"].map(String::from).into();
+        if cc.len() > 1 && cfg!(target_os = "linux") {
+            l.push("-lunwind".into());
+        }
+        l
     };
     let plan = Plan {
         cc: cc.clone(),
@@ -665,7 +679,7 @@ fn compile(
 ///
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
-    let built = build(settings, &[], ui)?;
+    let built = build(settings, &[], false, ui)?;
     let mut cmd = relift_proc::command(&built.exe);
     if !built.source.as_os_str().is_empty() {
         cmd.arg("--save").arg(save_path(&built.source));

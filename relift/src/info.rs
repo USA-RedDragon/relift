@@ -422,7 +422,14 @@ pub fn run(binary: Option<&Path>, project_exes: &[PathBuf]) -> Result<(), BoxErr
             .ok_or("no built binary of this project; run relift build or name a binary")?,
     };
     let image = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let doc = section::read(&image).map_err(|e| format!("{}: {e}", path.display()))?;
+    let appimage = image.get(8..11) == Some(b"AI\x02");
+    let stored;
+    let doc = if appimage {
+        stored = crate::appimage::read_info(&path)?;
+        stored.as_slice()
+    } else {
+        section::read(&image).map_err(|e| format!("{}: {e}", path.display()))?
+    };
     let mut out = std::io::stdout().lock();
     out.write_all(doc)?;
     out.flush()?;

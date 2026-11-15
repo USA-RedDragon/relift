@@ -43,6 +43,20 @@ pub struct Settings {
 
     #[configulator(name = "emit", nested)]
     pub emit: Emit,
+
+    #[configulator(name = "package", nested)]
+    pub package: Package,
+}
+
+/// What a release build packages.
+#[derive(Config, Debug)]
+pub struct Package {
+    #[configulator(
+        name = "appimage",
+        default = "auto",
+        description = "the Linux release output: auto (an AppImage when appimagetool is found), always (a build without appimagetool fails) or never"
+    )]
+    pub appimage: String,
 }
 
 /// How lifted code is written as C.
@@ -74,11 +88,18 @@ pub struct Toolchain {
 
     #[configulator(name = "ninja", description = "the ninja build tool")]
     pub ninja: PathBuf,
+
+    #[configulator(
+        name = "appimagetool",
+        description = "appimagetool, which packs the Linux release output"
+    )]
+    pub appimagetool: PathBuf,
 }
 
 impl Validate for Settings {
     fn validate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         relift_progress::ColorChoice::parse(&self.color)?;
+        crate::appimage::Policy::parse(&self.package.appimage)?;
         Ok(())
     }
 }
