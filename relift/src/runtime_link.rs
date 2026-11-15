@@ -332,6 +332,7 @@ mod tests {
                 lib_dir: PathBuf::from("/m/lib"),
                 origin: "t".into(),
             }),
+            host: Vec::new(),
         };
         assert!(e.note().contains("MoltenVK linked (t)"));
         assert_eq!(e.defines(), ["-DRL_VULKAN_LINKED"]);
