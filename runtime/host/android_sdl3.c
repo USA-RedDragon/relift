@@ -63,4 +63,6 @@ void rl_android_init(void)
 
 const char *rl_android_files_dir(void) { return SDL_GetAndroidInternalStoragePath(); }
 
+const char *rl_android_external_dir(void) { return SDL_GetAndroidExternalStoragePath(); }
+
 #endif
