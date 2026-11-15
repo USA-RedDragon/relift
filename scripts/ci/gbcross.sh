@@ -9,4 +9,4 @@ run=()
 [ "$target" = windows-x64 ] && run=(--run)
 cargo build --locked -p relift
 python3 -I runtime/tools/cross/gbcross.py --target "$target" \
-  --relift "${CARGO_TARGET_DIR:-target}/debug/relift" --work "$CI_WORK/cross-$target" "${run[@]}"
+  --relift "${CARGO_TARGET_DIR:-target}/debug/relift" --work "$CI_WORK/cross-$target" ${run[@]+"${run[@]}"}
