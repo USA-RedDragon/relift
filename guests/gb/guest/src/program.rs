@@ -19,6 +19,12 @@ use relift_ir::{Block, Next};
 
 use crate::frontend::{Gb, device_map};
 
+/// The most instructions of a run of one filler byte (`nop`, `rst $38`)
+/// that are lifted; the rest of a run is left to dispatch, which runs it on
+/// the device library's CPU if it ever executes. Test ROMs pad whole banks
+/// with such runs, which discovery reaches by falling through.
+pub const FILLER_RUN: usize = 8;
+
 /// The bank of a unit of the fixed window in [`Unit::bank`].
 pub const FIXED: u32 = u32::MAX;
 
@@ -56,6 +62,8 @@ pub struct Lifted {
     /// Instructions an analysis function held in another bank's window,
     /// left to dispatch.
     pub foreign: usize,
+    /// Instructions of filler runs past [`FILLER_RUN`], left to dispatch.
+    pub filler: usize,
 }
 
 fn unit_key(l: Loc) -> u32 {
@@ -101,9 +109,25 @@ fn lift_function(
     let mut out = Vec::new();
     let mut end = u64::from(f.entry.addr);
     let mut todo: Vec<(Loc, u64)> = Vec::new();
+    let mut run: (Option<(Loc, u8)>, usize) = (None, 0);
     for (&l, &len) in &f.body {
         if unit_key(l) != own && l.is_window() {
             lifted.foreign += 1;
+            continue;
+        }
+        let byte = bytes_at(rom, l).and_then(|b| b.first().copied());
+        let filler = len == 1 && matches!(byte, Some(0x00 | 0xFF));
+        run = match (run, byte) {
+            ((Some((prev, b)), n), Some(now))
+                if filler && now == b && prev.bank == l.bank && prev.addr + 1 == l.addr =>
+            {
+                (Some((l, b)), n + 1)
+            }
+            (_, Some(now)) if filler => (Some((l, now)), 1),
+            _ => (None, 0),
+        };
+        if run.1 > FILLER_RUN {
+            lifted.filler += 1;
             continue;
         }
         if l.addr >= f.entry.addr {
@@ -395,6 +419,28 @@ mod tests {
         let first = first.split("L_151: {").next().expect("ends");
         assert!(first.contains("r10 = "), "{first}");
         assert!(first.contains("r9 = "), "{first}");
+    }
+
+    #[test]
+    fn a_long_run_of_filler_is_left_to_dispatch() {
+        let mut r = rom();
+        r[0x150..0x158].copy_from_slice(&[0x3E, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        for b in &mut r[0x158..0x200] {
+            *b = 0;
+        }
+        r[0x200..0x202].copy_from_slice(&[0x18, 0xFE]);
+        let report = relift_gb_analyze::analyze(&r).expect("analyzes");
+        let l = lift(&r, &report, [0; 32]);
+        let c: String = l.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        assert!(c.contains("L_159: {"), "{c}");
+        assert!(!c.contains("L_15a: {"), "{c}");
+        assert!(l.filler >= 0x200 - 0x15A, "{}", l.filler);
+        assert!(c.contains("rl_indirect(c, UINT64_C(0x15a))"), "{c}");
     }
 
     #[test]

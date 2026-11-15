@@ -355,7 +355,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<Built
             ),
             noun(lifted.units.len() as u64, "unit"),
             lifted.unlifted.len().max(undefined),
-            lifted.foreign
+            lifted.foreign + lifted.filler
         )),
     );
     let unlifted_file = out.join("unlifted.txt");
