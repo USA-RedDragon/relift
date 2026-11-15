@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use relift_guest::Module;
-use relift_ir::{BinOp, Block, ExtKind, Flow, Next, Op, Reg, Value};
+use relift_ir::{BinOp, Block, Endian, ExtKind, Flow, Next, Op, Reg, Value};
 
 use crate::Insn;
 
@@ -243,4 +243,120 @@ pub(crate) fn in_states(
         }
     }
     ins
+}
+
+/// The register and constant offset that make up address `v`: a register
+/// read, plus or minus a constant.
+pub(crate) fn base_offset(b: &Block, v: Value) -> Option<(Reg, u64)> {
+    match &b.insts[v.index()].op {
+        Op::Get(r) => Some((*r, 0)),
+        Op::Bin(op @ (BinOp::Add | BinOp::Sub), x, y) => {
+            let (r, off) = base_offset(b, *x)?;
+            let Op::Const(c) = &b.insts[y.index()].op else {
+                return None;
+            };
+            let c = u64::try_from(c.get() & u128::from(u64::MAX)).ok()?;
+            Some((
+                r,
+                if *op == BinOp::Add {
+                    off.wrapping_add(c)
+                } else {
+                    off.wrapping_sub(c)
+                },
+            ))
+        }
+        Op::Ext(_, x) | Op::Extract(x, 0) => base_offset(b, *x),
+        _ => None,
+    }
+}
+
+/// The frame slots of `base` that hold one constant: by offset from
+/// `base`, the bytes stored there. A slot counts when every store
+/// in the function at `base` plus that offset writes the same constant
+/// (the compiler spilling a table address it computed once) and no other
+/// such store overlaps it. `base` must be set at most once in the function
+/// other than by a load (the frame pointer set in the prologue; the
+/// epilogue's restore loads it), else nothing counts.
+/// Stores through another register are not seen: a slot they reach would
+/// read wrong, so callers use the values only where a wrong one is caught
+/// (jump table targets must be code).
+pub(crate) fn frame_slots(
+    insts: &BTreeMap<u64, Insn>,
+    states: &HashMap<u64, HashMap<Reg, u128>>,
+    base: Reg,
+) -> BTreeMap<u64, Vec<u8>> {
+    let mut writes = 0;
+    let mut slots: BTreeMap<u64, Option<Vec<u8>>> = BTreeMap::new();
+    let mut vals = Vec::new();
+    for (pc, i) in insts {
+        let Insn::Lifted(b) = i else {
+            continue;
+        };
+        let known = states.get(pc).cloned().unwrap_or_default();
+        vals.clear();
+        for n in 0..b.insts.len() {
+            let v = eval(b, &vals, &known, n);
+            vals.push(v);
+        }
+        for inst in &b.insts {
+            match &inst.op {
+                Op::Set(r, x)
+                    if *r == base && !matches!(b.insts[x.index()].op, Op::Load { .. }) =>
+                {
+                    writes += 1
+                }
+                Op::Store {
+                    addr,
+                    value,
+                    endian,
+                    ..
+                } => {
+                    let Some((r, off)) = base_offset(b, *addr) else {
+                        continue;
+                    };
+                    if r != base {
+                        continue;
+                    }
+                    let size = b.width_of(*value).map_or(0, |w| w.bits() / 8) as usize;
+                    let new = vals[value.index()].filter(|_| size > 0).map(|c| {
+                        let le = c.to_le_bytes();
+                        let mut v = le[..size.min(16)].to_vec();
+                        if *endian == Endian::Big {
+                            v.reverse();
+                        }
+                        v
+                    });
+                    match slots.get(&off) {
+                        Some(old) if old.as_ref() != new.as_ref() => {
+                            slots.insert(off, None);
+                        }
+                        Some(_) => {}
+                        None => {
+                            slots.insert(off, new);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if writes > 1 {
+        return BTreeMap::new();
+    }
+    let spans: Vec<(u64, u64)> = slots
+        .iter()
+        .map(|(&off, s)| (off, s.as_ref().map_or(1, |v| v.len() as u64)))
+        .collect();
+    let overlaps = |off: u64, n: u64| {
+        spans
+            .iter()
+            .any(|&(o, m)| o != off && o < off.wrapping_add(n) && off < o.wrapping_add(m))
+    };
+    slots
+        .into_iter()
+        .filter_map(|(off, s)| {
+            s.filter(|v| !overlaps(off, v.len() as u64))
+                .map(|v| (off, v))
+        })
+        .collect()
 }

@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use relift_guest::{Frontend, LiftFailure, Module, RootKind};
-use relift_ir::{Block, Flow, Next};
+use relift_ir::{Block, Flow, Next, Reg};
 
 /// Why analysis treats an address as a function entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -278,6 +278,11 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
         }
         let states = consts::in_states(&insts, entry, &preserved);
         let known = |a: u64| states.get(&a).cloned().unwrap_or_default();
+        let frame = |r: Reg| consts::frame_slots(&insts, &states, r);
+        let facts = tables::Known {
+            regs: &known,
+            frame: &frame,
+        };
         let module = lifter.module;
         let fe = lifter.fe;
         let mut found = false;
@@ -296,7 +301,7 @@ fn extent(lifter: &mut Lifter<'_>, entries: &BTreeSet<u64>, entry: u64) -> Exten
                 })
             };
             let t =
-                tables::resolve(module, pc, &b, fe, &mut at, &entering, &known).unwrap_or_default();
+                tables::resolve(module, pc, &b, fe, &mut at, &entering, &facts).unwrap_or_default();
             work.extend(
                 t.iter()
                     .copied()

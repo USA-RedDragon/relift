@@ -409,6 +409,81 @@ fn a_jump_table_body_may_store_to_the_stack() {
 }
 
 #[test]
+fn a_jump_table_base_spilled_to_a_frame_slot_is_read_back() {
+    // The table address is stored to the frame once and the body loads it
+    // back from there (newlib's __svfscanf_r does this).
+    let table = BASE + 0x48;
+    let m = module(
+        &[
+            word(0x04, 3, table as u16),   // 0x00 li r3, table
+            word(0x0b, 3, 2),              // 0x04 st [r2], r3
+            word(0x04, 0, 0),              // 0x08 li r0, 0
+            word(0x05, 0, 1),              // 0x0c add r0, r1
+            word(0x09, 0, (-3i16) as u16), // 0x10 addi r0, -3
+            word(0x0d, 0, 0),              // 0x14 cmpz r0
+            branch(0x0e, 0, 8),            // 0x18 bz +8 -> 0x38
+            word(0x0a, 0, 2),              // 0x1c ld r0, [r2]
+            word(0x05, 1, 1),              // 0x20 add r1, r1
+            word(0x05, 1, 1),              // 0x24 add r1, r1
+            word(0x05, 1, 1),              // 0x28 add r1, r1 (r1 *= 8)
+            word(0x05, 0, 1),              // 0x2c add r0, r1
+            word(0x0a, 0, 0),              // 0x30 ld r0, [r0]
+            word(0x06, 0, 0),              // 0x34 br r0
+            word(0x03, 0, 0),              // 0x38 ret
+            word(0x03, 0, 0),              // 0x3c ret
+            word(0x03, 0, 0),              // 0x40 ret
+            word(0x03, 0, 0),              // 0x44 ret
+        ],
+        &[0x1000u64 + 0x3c, 0x1000 + 0x40, 0x1000 + 0x44]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert_eq!(
+        a.functions[&BASE].tables[&(BASE + 0x34)],
+        [BASE + 0x3c, BASE + 0x40, BASE + 0x44]
+    );
+}
+
+#[test]
+fn a_jump_table_base_in_a_slot_stored_twice_with_different_values_is_left_alone() {
+    let table = BASE + 0x50;
+    let m = module(
+        &[
+            word(0x04, 3, table as u16),   // 0x00 li r3, table
+            word(0x0b, 3, 2),              // 0x04 st [r2], r3
+            word(0x04, 3, 0),              // 0x08 li r3, 0
+            word(0x0b, 3, 2),              // 0x0c st [r2], r3
+            word(0x04, 0, 0),              // 0x10 li r0, 0
+            word(0x05, 0, 1),              // 0x14 add r0, r1
+            word(0x09, 0, (-3i16) as u16), // 0x18 addi r0, -3
+            word(0x0d, 0, 0),              // 0x1c cmpz r0
+            branch(0x0e, 0, 8),            // 0x20 bz +8 -> 0x40
+            word(0x0a, 0, 2),              // 0x24 ld r0, [r2]
+            word(0x05, 1, 1),              // 0x28 add r1, r1
+            word(0x05, 1, 1),              // 0x2c add r1, r1
+            word(0x05, 1, 1),              // 0x30 add r1, r1 (r1 *= 8)
+            word(0x05, 0, 1),              // 0x34 add r0, r1
+            word(0x0a, 0, 0),              // 0x38 ld r0, [r0]
+            word(0x06, 0, 0),              // 0x3c br r0
+            word(0x03, 0, 0),              // 0x40 ret
+            word(0x03, 0, 0),              // 0x44 ret
+            word(0x03, 0, 0),              // 0x48 ret
+            word(0x03, 0, 0),              // 0x4c ret
+        ],
+        &[0x1000u64 + 0x44, 0x1000 + 0x48, 0x1000 + 0x4c]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>(),
+        &[BASE],
+    );
+    let a = discover(&Toy, &m);
+    assert!(!a.functions[&BASE].tables.contains_key(&(BASE + 0x3c)));
+}
+
+#[test]
 fn a_jump_table_body_that_stores_through_another_register_is_left_alone() {
     let table = BASE + 0x48;
     let m = module(

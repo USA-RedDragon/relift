@@ -20,12 +20,14 @@
 //! [`COPY_BACK`] instructions, fills from the same value) runs with that copy
 //! set to the index.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use relift_guest::{Frontend, Module};
 use relift_ir::interp::{self, Fault, GuestMemory, NoDevices, NoIntrinsics, State};
 use relift_ir::{Block, Flow, Next, Op, Reg, Value};
+
+use crate::consts;
 
 /// The most instructions between the conditional branch and the jump.
 const RUN_BACK: usize = 16;
@@ -69,11 +71,17 @@ fn has_memory(b: &Block) -> bool {
     })
 }
 
+/// Where the run puts the frame register of [`frame_base`], so its slots
+/// read from [`Image::frame`]: far from any module.
+const FRAME: u64 = 1 << 62;
+
 /// The module's bytes, read in place: table code only loads (the body is
 /// refused when it stores), so a write faults rather than copying the image.
+/// Reads at [`FRAME`] plus an offset give the frame slot there.
 struct Image<'a> {
     base: u64,
     bytes: &'a [u8],
+    frame: BTreeMap<u64, Vec<u8>>,
 }
 
 impl GuestMemory for Image<'_> {
@@ -83,6 +91,15 @@ impl GuestMemory for Image<'_> {
             size: u32::try_from(buf.len()).unwrap_or(u32::MAX),
             write: false,
         };
+        let at = addr.wrapping_sub(FRAME);
+        if let Some((&off, slot)) = self.frame.range(..=at).next_back()
+            && let Some(src) = usize::try_from(at - off)
+                .ok()
+                .and_then(|k| slot.get(k..k.checked_add(buf.len())?))
+        {
+            buf.copy_from_slice(src);
+            return Ok(());
+        }
         let off = addr
             .checked_sub(self.base)
             .and_then(|o| usize::try_from(o).ok())
@@ -238,11 +255,52 @@ fn slice(body: &[Arc<Block>]) -> Vec<Arc<Block>> {
     keep
 }
 
+/// What the constant propagation knows of a function, for [`resolve`].
+pub(crate) struct Known<'a> {
+    /// The registers known to be constant at an address.
+    pub(crate) regs: &'a dyn Fn(u64) -> HashMap<Reg, u128>,
+    /// The constant frame slots of a register ([`consts::frame_slots`]).
+    pub(crate) frame: &'a dyn Fn(Reg) -> BTreeMap<u64, Vec<u8>>,
+}
+
+/// The register the kept body loads a constant frame slot through (a table
+/// address the compiler spilled to the frame and reloads), with the slots
+/// `frame` gives for it; `None` when no load of the body reads one. The
+/// register must not be written earlier in the body nor known.
+fn frame_base(
+    body: &[Arc<Block>],
+    seeds: &HashMap<Reg, u128>,
+    frame: &dyn Fn(Reg) -> BTreeMap<u64, Vec<u8>>,
+) -> Option<(Reg, BTreeMap<u64, Vec<u8>>)> {
+    let mut written = BTreeSet::new();
+    for b in body {
+        for i in &b.insts {
+            if let Op::Load { addr, .. } = i.op
+                && let Some((r, off)) = consts::base_offset(b, addr)
+                && !written.contains(&r)
+                && !seeds.contains_key(&r)
+            {
+                let slots = frame(r);
+                if slots.contains_key(&off) {
+                    return Some((r, slots));
+                }
+            }
+        }
+        for i in &b.insts {
+            if let Op::Set(r, _) = i.op {
+                written.insert(r);
+            }
+        }
+    }
+    None
+}
+
 /// The targets of the computed jump `jump` at `pc`, or `None` when it is not
 /// a jump table this recognizes. `block_at` lifts the instruction at an
 /// address; `entering` gives the conditional branch of the function that
 /// jumps to an address; `known` gives the registers known to be constant at
-/// an address. The body may store to stack slots of `fe`'s stack pointer.
+/// an address and the constant frame slots of a register. The body may
+/// store to stack slots of `fe`'s stack pointer.
 pub(crate) fn resolve(
     module: &Module,
     pc: u64,
@@ -250,8 +308,10 @@ pub(crate) fn resolve(
     fe: &dyn Frontend,
     block_at: &mut dyn FnMut(u64) -> Option<Arc<Block>>,
     entering: &dyn Fn(u64) -> Option<Arc<Block>>,
-    known: &dyn Fn(u64) -> HashMap<Reg, u128>,
+    known: &Known<'_>,
 ) -> Option<Vec<u64>> {
+    let frame = known.frame;
+    let known = known.regs;
     if !matches!(
         (jump.exit.flow, jump.exit.next),
         (Flow::Jump, Next::Dynamic(_))
@@ -285,12 +345,17 @@ pub(crate) fn resolve(
     // The body is entered from the bound check's branch, so what holds
     // after that branch holds at the body, whatever else flows into it (a
     // call that never returns is followed by the body in the flow graph).
-    let seeds = if branch.insts.iter().any(|i| matches!(i.op, Op::Set(..))) {
+    let mut seeds = if branch.insts.iter().any(|i| matches!(i.op, Op::Set(..))) {
         known(start)
     } else {
         known(branch.pc)
     };
     let body = slice(&body);
+    let mut slots = BTreeMap::new();
+    if let Some((r, s)) = frame_base(&body, &seeds, frame) {
+        seeds.insert(r, u128::from(FRAME));
+        slots = s;
+    }
     if body
         .iter()
         .any(|b| b.insts.iter().any(|i| matches!(i.op, Op::Store { .. })))
@@ -319,6 +384,7 @@ pub(crate) fn resolve(
     let mut mem = Image {
         base: module.base,
         bytes: &module.image,
+        frame: slots,
     };
     let slots = body[0].regs.len();
     let seeded = |seeds: &HashMap<Reg, u128>| {
