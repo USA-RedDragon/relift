@@ -32,7 +32,8 @@ typedef struct gba_irq {
     gba_irq_state log[GBA_IRQ_LOG];
     unsigned n;
     bool line, wake;
-    uint64_t rise;
+    /** @brief When the line last rose, and when the halt wake did. */
+    uint64_t rise, wake_at;
     uint16_t wake_mask;
     uint64_t done;
     rl_event ev;

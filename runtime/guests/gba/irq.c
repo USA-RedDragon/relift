@@ -3,7 +3,9 @@
  * @brief The interrupt controller: IE, IF and IME with the console's
  * pipeline (a written or requested value reaches the registers' read side
  * one cycle later and the CPU's IRQ input two cycles later), the halt wake
- * line, and HALTCNT's halt and stop.
+ * line, and HALTCNT's halt and stop. A halt ends two cycles after the wake
+ * line rose, or one cycle after a DMA transfer that ran past that
+ * (NanoBoyAdvance's halt loop).
  *
  * Ported from ares (gba/cpu/cpu.cpp: stepIRQ, setInterruptFlag and the halt
  * loop of main; gba/cpu/io.cpp: IE, IF and IME), reshaped from a per-cycle
@@ -106,6 +108,8 @@ static void update(rl_gba *g, uint64_t x)
     }
     if (wake != q->wake) {
         q->wake = wake;
+        if (wake)
+            q->wake_at = x;
         set_line(g, RL_GBA_LINE_WAKE, wake);
     }
 }
@@ -213,11 +217,13 @@ void gba_halt(rl_gba *g)
     repost(g, g->irq.done);
     g->halted = true;
     rl_sched_set_mask(c, (1ull << RL_GBA_LINE_WAKE) | (1ull << RL_GBA_LINE_DMA));
+    bool dma = false;
     for (;;) {
         if (q->wake)
             break;
         if (gba_dma_due(g)) {
             gba_dma_run(g);
+            dma = true;
             continue;
         }
         if (!rl_sched_halt(c))
@@ -226,6 +232,8 @@ void gba_halt(rl_gba *g)
     g->halted = false;
     q->wake_mask = 0x3FFF;
     rl_sched_set_mask(c, (1ull << RL_GBA_LINE_IRQ) | (1ull << RL_GBA_LINE_DMA));
-    if (q->wake)
-        gba_charge(g, 2);
+    if (q->wake) {
+        uint64_t now = rl_sched_now(c), seen = q->wake_at + 1 > now ? q->wake_at + 1 : now;
+        gba_charge(g, dma ? (unsigned)(seen + 1 - now) : 2u);
+    }
 }
