@@ -338,12 +338,14 @@ pub fn decode(w: Word, pc: u64) -> Result<Inst> {
     let mut d = D { w, pc, i: mk("") };
     let g = d.get(12, 3) as u8;
     let gn = d.bit(15);
+    let op9 = d.get(0, 9);
     let guard = if g == 7 && !gn {
         None
+    } else if (0x80..0x100).contains(&op9) {
+        Some(Operand::UPred(g, gn))
     } else {
         Some(Operand::Pred(g, gn))
     };
-    let op9 = d.get(0, 9);
     let ok = alu::decode(&mut d, op9)?
         || ctl::decode(&mut d, op9)?
         || mem::decode(&mut d, op9)?

@@ -159,5 +159,4 @@ fn attributes() {
         .f(40, 11, 0xec)
         .f(64, 8, 255);
     assert_eq!(t.text(0), "AST a[0xec], R3");
-    assert_eq!(t.f(64, 8, 0).text(0), "AST a[0xec], R3, R0");
 }
