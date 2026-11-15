@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use relift_analyze::{EntryKind, Insn, discover_more};
 use relift_build::{Compile, Plan};
+use relift_cpu_arm64::cpu::Cpu;
 use relift_cpu_arm64::frontend::Arm64;
 use relift_guest::Module;
 use relift_switch::program::{self, Placed};
@@ -166,6 +167,7 @@ pub struct Loaded {
 /// The dev server's state: the program's modules, every entry lifted so
 /// far, and how to build a library.
 pub struct Server {
+    cpu: Cpu,
     placed: Vec<Placed>,
     modules: Vec<Module>,
     known: Vec<BTreeMap<u64, EntryKind>>,
@@ -180,9 +182,10 @@ pub struct Server {
 }
 
 impl Server {
-    /// A server for the build of `placed` whose entries are `known` (per
-    /// module), writing its libraries under `dir`.
+    /// A server for the build of `placed` for the CPU `cpu` whose entries
+    /// are `known` (per module), writing its libraries under `dir`.
     pub fn new(
+        cpu: Cpu,
         placed: Vec<Placed>,
         known: Vec<BTreeMap<u64, EntryKind>>,
         abi: u32,
@@ -193,6 +196,7 @@ impl Server {
         let image_id = crate::build::image_id(&placed);
         let modules = placed.iter().map(program::module).collect();
         Server {
+            cpu,
             placed,
             modules,
             known,
@@ -249,9 +253,7 @@ impl Server {
                 format!("{target:#x} is already a lifted entry"),
             ));
         }
-        let cpu = Arm64 {
-            cpu: relift_switch::CPU,
-        };
+        let cpu = Arm64 { cpu: self.cpu };
         let module = &self.modules[i];
         let p = &self.placed[i];
         let analysis = discover_more(&cpu, module, &self.known[i], &[target]);

@@ -51,6 +51,14 @@ choice applies to the update packages of a `.nup`. The program ID comes from
 has them; they give the game's title and icon (`docs/packaging.md`).
 Encrypted dumps are refused: convert them with a separate tool first.
 
+The CPU code is lifted for comes from `main.npdm` as well: a program whose
+kernel capabilities grant SVC 0x80 is a Switch 2 program (Cortex-A78C, with
+pointer authentication), any other one a Switch program (Cortex-A57), and
+Switch programs a Switch 2 runs keep the Cortex-A57 they were compiled for.
+A program without an NPDM (homebrew) is a Switch program; `console =
+"switch2"` (or `"switch"`) in the `[game]` table of `game.toml` overrides the
+choice.
+
 `relift build --mods <list>` builds code mods in: Atmosphere or Ryujinx mod
 directories, `.ips` files and `.pchtxt` files, applied in order. Two mods that
 write different bytes at one address are refused. Data mods and cheats are

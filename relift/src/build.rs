@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use relift_analyze::{EntryKind, Insn, Outline, Progress};
 use relift_build::{Compile, Event, Plan};
+use relift_cpu_arm64::cpu::Cpu;
 use relift_cpu_arm64::frontend::Arm64;
 use relift_guest::{Frontend, Root, RootKind};
 use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration, noun};
@@ -88,10 +89,41 @@ fn load_slots(import: &Path) -> Result<(Vec<crate::mods::user::Loaded>, Option<N
         });
     }
     mods.sort_by_key(|m| slot_rank(&m.slot));
-    let npdm = std::fs::read(import.join("exefs").join("main.npdm"))
+    Ok((mods, read_npdm(import)))
+}
+
+/// The import's `main.npdm`, if it has one that parses.
+fn read_npdm(import: &Path) -> Option<Npdm> {
+    std::fs::read(import.join("exefs").join("main.npdm"))
         .ok()
-        .and_then(|b| Npdm::parse(&b).ok());
-    Ok((mods, npdm))
+        .and_then(|b| Npdm::parse(&b).ok())
+}
+
+/// The CPU of a program with the NPDM `npdm` ([`relift_switch::cpu::cpu`]),
+/// on the console `game.console` of `game` names when it names one
+/// (`switch` or `switch2`): the choice for a program without an NPDM, or
+/// with one that does not tell.
+pub(crate) fn program_cpu(npdm: Option<&Npdm>, game: &toml::Table) -> Result<Cpu, BoxError> {
+    let console = match game.get("game").and_then(|g| g.get("console")) {
+        None => None,
+        Some(v) => {
+            let name = v.as_str().unwrap_or_default();
+            Some(relift_switch::cpu::Console::from_name(name).ok_or_else(|| {
+                format!("game.toml: game.console is {v}, not \"switch\" or \"switch2\"")
+            })?)
+        }
+    };
+    Ok(relift_switch::cpu::cpu(npdm, console)?)
+}
+
+/// The CPU of the project's program ([`program_cpu`]), from the import
+/// `game.toml` in the working directory names.
+pub(crate) fn project_cpu(settings: &Settings) -> Result<Cpu, BoxError> {
+    let import = import_dir(settings)?;
+    program_cpu(
+        read_npdm(&import).as_ref(),
+        &read_toml(Path::new("game.toml"))?,
+    )
 }
 
 fn c_ident(s: &str) -> String {
@@ -203,10 +235,10 @@ pub(crate) fn build_dir_flag(out: &Path) -> String {
 /// the emitted C files and the unit symbols.
 fn emit_modules(
     settings: &Settings,
+    cpu: Cpu,
     placed: &[Placed],
     cdir: &Path,
     ui: &mut Ui,
-    rows: &[usize],
     hints: &BTreeSet<Hint>,
     stage: &mut Stage,
 ) -> Result<Emitted, BoxError> {
@@ -225,12 +257,11 @@ fn emit_modules(
         total: String::new(),
     };
     let mut census = crate::total::Census::default();
+    let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
     let mut fpcr = crate::fpcr::Fpcr::default();
-    let cpu = Arm64 {
-        cpu: relift_switch::CPU,
-    };
-    for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
+    let cpu = Arm64 { cpu };
+    for (i, (p, &row)) in placed.iter().zip(&rows).enumerate() {
         let module = module_with_hints(p, hints);
         ui.begin(row, "discover");
         let mut lifting = false;
@@ -565,7 +596,7 @@ fn emit_modules(
     if settings.emit.cold {
         done.total.push_str(&format!("all {}\n", census.line()));
     }
-    done.fpcr = fpcr.finish(&fpsr.linkage(), settings.emit.fpcr_guards);
+    done.fpcr = fpcr.finish(&cpu.cpu, &fpsr.linkage(), settings.emit.fpcr_guards);
     drop(fpcr);
     done.fpsr = fpsr.finish()?;
     Ok(done)
@@ -1138,6 +1169,7 @@ fn lift_and_emit(
         ui.note(&Line::new().text(n));
     }
     let game = read_toml(Path::new("game.toml"))?;
+    let target_cpu = program_cpu(npdm.as_ref(), &game)?;
     let title_id = npdm
         .as_ref()
         .map(|n| format!("{:016x}", n.program_id))
@@ -1161,17 +1193,14 @@ fn lift_and_emit(
         std::env::consts::OS,
         std::env::consts::ARCH
     ));
-    let rows: Vec<usize> = placed.iter().map(|p| ui.row(&p.name)).collect();
     let cdir = out.join("c");
     let hints = crate::hints::read(Path::new("game.toml"))?;
     let mut game_settings = crate::game_settings::read(Path::new("game.toml"))?;
     game_settings.extend(stage.settings());
     crate::game_settings::check_dir(Path::new("overrides"), &game_settings)?;
-    let emitted = emit_modules(settings, &placed, &cdir, ui, &rows, &hints, &mut stage)?;
+    let emitted = emit_modules(settings, target_cpu, &placed, &cdir, ui, &hints, &mut stage)?;
     let mut emitted = emitted;
-    let cpu = Arm64 {
-        cpu: relift_switch::CPU,
-    };
+    let cpu = Arm64 { cpu: target_cpu };
     let mods_c = stage.mods_c(cpu.abi_headers());
     if let Some(text) = &mods_c {
         let path = cdir.join("mods.c");
@@ -2079,6 +2108,7 @@ pub fn run_run(
     let hot = built.out.join("dev").join("hot");
     let _ = std::fs::remove_dir_all(&hot);
     let mut server = crate::dev::Server::new(
+        project_cpu(settings)?,
         placed,
         known,
         abi,

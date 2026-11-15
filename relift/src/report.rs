@@ -487,9 +487,10 @@ fn switch_site(settings: &Settings, out: &Path, site: &Place) -> Vec<String> {
         .map(|s| (s.addr, s.name.clone()))
         .collect();
     let addrs: std::collections::BTreeSet<u64> = slots.keys().copied().collect();
-    let cpu = relift_cpu_arm64::frontend::Arm64 {
-        cpu: relift_switch::CPU,
+    let Ok(cpu) = crate::build::project_cpu(settings) else {
+        return Vec::new();
     };
+    let cpu = relift_cpu_arm64::frontend::Arm64 { cpu };
     let preserved = relift_guest::Frontend::preserved(&cpu);
     let at = site.addr;
     relift_analyze::each_lifted(&cpu, &m, &[outline], |_, f| {

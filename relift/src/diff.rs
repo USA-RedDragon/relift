@@ -63,9 +63,10 @@ pub fn host_name(what: &str) -> Result<String, BoxError> {
 /// # Errors
 ///
 /// A broken pipe or a line out of the protocol.
-pub fn serve(flip_read: u64) -> Result<(), BoxError> {
+pub fn serve(settings: &Settings, flip_read: u64) -> Result<(), BoxError> {
     let mut wire = Wire::stdio();
-    let mut engine = IrEngine::new(relift_switch::CPU).flip_read(flip_read);
+    let cpu = crate::build::project_cpu(settings)?;
+    let mut engine = IrEngine::new(cpu).flip_read(flip_read);
     serve_wire(&mut wire, &mut engine, &mut std::io::stderr())?;
     Ok(())
 }
@@ -87,7 +88,7 @@ fn script(rt: &Path) -> Result<PathBuf, BoxError> {
 /// start.
 pub fn run(settings: &Settings, req: &Request<'_>, ui: &mut Ui) -> Result<u8, BoxError> {
     if req.serve {
-        serve(req.flip_read)?;
+        serve(settings, req.flip_read)?;
         return Ok(0);
     }
     let what = req.function.ok_or("a function is needed (or --serve)")?;

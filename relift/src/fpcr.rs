@@ -25,7 +25,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use relift_analyze::{Layout, Outline};
-use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::cpu::Cpu;
 use relift_cpu_arm64::fpcr::{self, Code, Host};
 use relift_ir::Block;
 use relift_switch::program::Placed;
@@ -158,7 +158,7 @@ impl Fpcr {
 
     /// Runs the proof over every module added, with the program's
     /// `linkage`; `guards` (`emit.fpcr-guards`) keeps the guards anyway.
-    pub fn finish(&self, linkage: &Linkage, guards: bool) -> Plan {
+    pub fn finish(&self, cpu: &Cpu, linkage: &Linkage, guards: bool) -> Plan {
         let mut sites: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
         for m in &self.mods {
             for o in (m.base..m.text_end).step_by(4) {
@@ -198,12 +198,11 @@ impl Fpcr {
             .flat_map(|o| o.tables.iter().map(|(&pc, ts)| (pc, ts.clone())))
             .collect();
         let lifted: RefCell<HashMap<u64, Option<Arc<Block>>>> = RefCell::new(HashMap::new());
-        let features = relift_switch::CPU_FEATURES;
         let block = |pc: u64| -> Option<Arc<Block>> {
             if let Some(b) = lifted.borrow().get(&pc) {
                 return b.clone();
             }
-            let b = self.lift(pc, &features);
+            let b = self.lift(pc, cpu);
             lifted.borrow_mut().insert(pc, b.clone());
             b
         };
@@ -301,13 +300,13 @@ impl Fpcr {
         }
     }
 
-    fn lift(&self, pc: u64, features: &Features) -> Option<Arc<Block>> {
+    fn lift(&self, pc: u64, cpu: &Cpu) -> Option<Arc<Block>> {
         let m = self.module_of(pc)?;
         if pc >= m.text_end {
             return None;
         }
         let w = word(&m.image, pc - m.base)?;
-        relift_cpu_arm64::lift::lift_for_emit(w, pc, features)
+        relift_cpu_arm64::lift::lift_for_emit(w, pc, cpu)
             .ok()
             .map(Arc::new)
     }

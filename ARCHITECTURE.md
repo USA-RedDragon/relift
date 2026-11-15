@@ -173,9 +173,14 @@ single-step traces, registers, memory, I/O registers, frame and audio
 hashes; see `check/oracle/nba/README.md`).
 
 `relift-cpu-arm64` lifts each encoding with its Sail-generated template when it
-has one, else with a hand-written lifter, always for a CPU feature set
-(`decode::Features`, from the guest descriptor: `relift_switch::CPU_FEATURES`
-is the Cortex-A57, Armv8.0-A plus AES, PMULL, SHA1, SHA256 and CRC32). The
+has one, else with a hand-written lifter, always for a CPU (`cpu::Cpu`: a
+feature set, `decode::Features`, and the address layout, `cpu::Va`), which
+the guest picks per program: `relift_switch::cpu` gives the Cortex-A57
+(Armv8.0-A plus AES, PMULL, SHA1, SHA256 and CRC32) to Switch programs and
+the Cortex-A78C (with pointer authentication) to Switch 2 programs, those
+whose NPDM grants SVC 0x80, with the 39-bit layout Horizon gives every
+64-bit process. The pointer authentication templates are generated for that
+layout and refuse any other at lift time. The
 decoder refuses encodings whose AARCHMRS feature condition fails, so they
 lift to UNDEFINED as on that CPU; where the Sail semantics test a feature
 the template tests `St::has` at lift time (one template for every level),

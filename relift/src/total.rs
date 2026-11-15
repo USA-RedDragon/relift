@@ -385,7 +385,10 @@ mod tests {
 
     fn cpu() -> Arm64 {
         Arm64 {
-            cpu: relift_switch::CPU,
+            cpu: relift_cpu_arm64::cpu::Cpu::new(
+                relift_switch::cpu::Console::Switch.features(),
+                relift_cpu_arm64::cpu::Va::BITS39,
+            ),
         }
     }
 

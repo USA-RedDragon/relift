@@ -399,7 +399,7 @@ pub fn run(
         .flat_map(|l| l.exports.iter().map(|(n, _)| n.clone()))
         .collect();
     let cpu = Arm64 {
-        cpu: relift_switch::CPU,
+        cpu: crate::build::project_cpu(settings)?,
     };
     let preserved = cpu.preserved();
     let mut reports = Vec::new();
