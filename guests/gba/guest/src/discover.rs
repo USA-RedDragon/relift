@@ -38,6 +38,16 @@ const FRAME: u128 = 0x0F80_0000;
 /// return.
 const RET: u32 = 0x0E00_0000;
 
+/// The most bytes of RAM a path remembers.
+const MEM_BYTES: usize = 1 << 16;
+
+/// The most instructions of a leaf run in place at its calls.
+const INLINE: usize = 24;
+
+/// The most instructions a function's start runs on known values before
+/// the paths are met (a copy loop runs to its end).
+const CONCRETE: usize = 1 << 15;
+
 /// The most instruction visits per function, against runaway joins.
 const VISITS: usize = 1 << 16;
 
@@ -83,6 +93,8 @@ pub struct Function {
     /// Whether the function may return (a jump to its entry LR, or a
     /// computed jump the discovery cannot follow).
     pub returns: bool,
+    /// Whether it makes a direct call.
+    pub calls_out: bool,
 }
 
 /// A transfer the discovery could not follow.
@@ -105,6 +117,9 @@ pub struct Report {
     pub unresolved: Vec<Unresolved>,
     /// Instructions that do not lift, with the reason.
     pub failed: BTreeMap<Loc, String>,
+    /// The bytes of work RAM that code runs from, as the ROM's copies left
+    /// them where the path transferred there.
+    pub ram: BTreeMap<u32, u8>,
 }
 
 impl Report {
@@ -119,7 +134,7 @@ impl Report {
 }
 
 /// A value whose bits in `k` are known to be those of `v`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 struct Kv {
     v: u128,
     k: u128,
@@ -347,7 +362,7 @@ fn eval(b: &Block, rom: &Rom<'_>, inp: &Regs, mem_in: &Mem) -> Step {
                             stores.push((a, x as u32));
                         }
                         for i in 0..n {
-                            if remembers(a) {
+                            if remembers(a) && mem.len() < MEM_BYTES {
                                 mem.insert(a.wrapping_add(i), (x >> (8 * i)) as u8);
                             }
                         }
@@ -441,6 +456,47 @@ fn by_mode(b: &Block, rom: &Rom<'_>, inp: &Regs, mem: &Mem) -> Option<Step> {
     all
 }
 
+/// The copy or fill of `CpuSet` (0x0B) and `CpuFastSet` (0x0C) with known
+/// operands, into the path's RAM.
+fn bios_copy(rom: &Rom<'_>, number: u32, r: &Regs, mem: &mut Mem) {
+    if number != 0x0B && number != 0x0C {
+        return;
+    }
+    let get = |n: u32| reg(r, regs::r(n), Width::W32).map(|v| v as u32);
+    let (Some(src), Some(dst), Some(ctl)) = (get(0), get(1), get(2)) else {
+        if let Some(d) = get(1) {
+            mem.retain(|a, _| *a < d);
+        } else {
+            mem.clear();
+        }
+        return;
+    };
+    let fill = ctl & (1 << 24) != 0;
+    let (unit, count) = if number == 0x0C {
+        (4u32, (ctl & 0x1F_FFFF).div_ceil(8) * 8)
+    } else {
+        (if ctl & (1 << 26) != 0 { 4 } else { 2 }, ctl & 0x1F_FFFF)
+    };
+    let (src, dst) = (src & !(unit - 1), dst & !(unit - 1));
+    let byte = |a: u32, mem: &Mem| {
+        mem.get(&a)
+            .copied()
+            .or_else(|| rom.read(a, 1).map(|v| v as u8))
+    };
+    for i in 0..count.min(0x10000) * unit {
+        let from = if fill { src + i % unit } else { src + i };
+        let to = dst + i;
+        match byte(from, mem) {
+            Some(b) if remembers(to) && mem.len() < MEM_BYTES => {
+                mem.insert(to, b);
+            }
+            _ => {
+                mem.remove(&to);
+            }
+        }
+    }
+}
+
 /// The registers a call leaves unknown (the AAPCS scratch registers, the
 /// flags and LR).
 fn after_call(r: &mut Regs) {
@@ -492,9 +548,308 @@ impl Walk<'_> {
         r
     }
 
+    /// The instruction unit at `at`: from the ROM, else from RAM the path
+    /// stored known bytes to, else from the RAM image copies left.
+    fn code(&self, at: Loc, mem: &Mem) -> Option<u32> {
+        if let Some(w) = self.rom.unit(at) {
+            return Some(w);
+        }
+        (0..at.size())
+            .rev()
+            .map(|i| {
+                let a = at.addr.wrapping_add(i);
+                mem.get(&a).or_else(|| self.report.ram.get(&a)).copied()
+            })
+            .try_fold(0u32, |acc, b| b.map(|b| (acc << 8) | u32::from(b)))
+    }
+
+    /// Keeps the work RAM `mem` holds as code that runs from RAM, for an
+    /// entry the path transfers to there.
+    fn keep_ram(&mut self, to: u32, mem: &Mem) {
+        if !matches!(to >> 24, 0x02 | 0x03) {
+            return;
+        }
+        for (&a, &v) in mem {
+            if matches!(a >> 24, 0x02 | 0x03) {
+                self.report.ram.entry(a).or_insert(v);
+            }
+        }
+    }
+
+    /// The entry `t` of a call or vector in the state `thumb`, made a
+    /// function: whether it returns.
+    fn callee(
+        &mut self,
+        at: Loc,
+        t: Option<u32>,
+        thumb: Option<bool>,
+        out: &Regs,
+        mem: &Mem,
+    ) -> bool {
+        match (t, thumb) {
+            (Some(t), Some(th)) => {
+                self.keep_ram(t, mem);
+                self.call(
+                    Loc {
+                        addr: t & !1,
+                        thumb: th,
+                    },
+                    psr(out),
+                )
+            }
+            _ => {
+                self.report.unresolved.push(Unresolved {
+                    at,
+                    why: "a call to an unknown target",
+                });
+                true
+            }
+        }
+    }
+
+    /// The state after a call of `callee` from `out`: the callee run in
+    /// place when it is a small leaf (a SWI wrapper, an accessor), else the
+    /// state a call leaves.
+    fn after(&mut self, callee: Option<Loc>, out: &Regs, mem: &Mem) -> (Regs, Mem) {
+        if let Some(c) = callee
+            && let Some(f) = self.report.functions.get(&c)
+            && f.calls.is_empty()
+            && !f.calls_out
+            && f.instructions.len() <= INLINE
+            && let Some(r) = self.inline(c, out, mem)
+        {
+            return r;
+        }
+        let mut o = out.clone();
+        after_call(&mut o);
+        (o, Mem::new())
+    }
+
+    /// Runs the leaf at `entry` from the caller's state; the state at its
+    /// returns, met.
+    fn inline(&mut self, entry: Loc, out: &Regs, mem: &Mem) -> Option<(Regs, Mem)> {
+        let mut init = out.clone();
+        init[regs::r(14).index()] = Kv::known(u128::from(RET));
+        init[regs::T.index()] = Kv::known(u128::from(entry.thumb));
+        let mut scratch = Function::default();
+        let mut state: BTreeMap<Loc, (Regs, Mem)> = BTreeMap::from([(entry, (init, mem.clone()))]);
+        let mut work = VecDeque::from([entry]);
+        let mut back: Option<(Regs, Mem)> = None;
+        let mut visits = 0;
+        while let Some(at) = work.pop_front() {
+            visits += 1;
+            if visits > 4 * INLINE {
+                return None;
+            }
+            let (inp, min) = state[&at].clone();
+            for (to, r, m) in self.step(&mut scratch, at, &inp, &min, true) {
+                if to.addr == RET {
+                    match &mut back {
+                        None => back = Some((r, m)),
+                        Some((br, bm)) => {
+                            meet(br, &r);
+                            meet_mem(bm, &m);
+                        }
+                    }
+                    continue;
+                }
+                match state.get_mut(&to) {
+                    None => {
+                        state.insert(to, (r, m));
+                        work.push_back(to);
+                    }
+                    Some((old, old_mem)) => {
+                        let a = meet(old, &r);
+                        if meet_mem(old_mem, &m) || a {
+                            work.push_back(to);
+                        }
+                    }
+                }
+            }
+        }
+        back.map(|(mut r, m)| {
+            r[regs::r(14).index()] = Kv::UNKNOWN;
+            r[regs::T.index()] = out[regs::T.index()];
+            (r, m)
+        })
+    }
+
+    /// The successors of the instruction at `at` from the state `inp`,
+    /// `min`; a return goes to [`RET`]. `quiet` reports nothing (a leaf run
+    /// in place).
+    fn step(
+        &mut self,
+        f: &mut Function,
+        at: Loc,
+        inp: &Regs,
+        min: &Mem,
+        quiet: bool,
+    ) -> Vec<(Loc, Regs, Mem)> {
+        let mut next: Vec<(Loc, Regs, Mem)> = Vec::new();
+        let Some(word) = self.code(at, min) else {
+            if !quiet {
+                self.report.unresolved.push(Unresolved {
+                    at,
+                    why: "the code is outside the ROM and the RAM copies",
+                });
+            }
+            return next;
+        };
+        f.instructions.insert(at);
+        let l = match lift::lift(word, at.addr, at.thumb) {
+            Ok(l) => l,
+            Err(e) => {
+                if !quiet {
+                    self.report.failed.insert(at, e.to_string());
+                }
+                return next;
+            }
+        };
+        let mut s = eval(&l.block, &self.rom, inp, min);
+        if s.may_run && s.targets.contains(&None) && reg(inp, regs::M, Width::new(5)).is_none() {
+            s = by_mode(&l.block, &self.rom, inp, min).unwrap_or(s);
+        }
+        for &(a, v) in &s.stores {
+            if a == IRQ_VECTOR && !quiet {
+                let h = Loc {
+                    addr: v & !1,
+                    thumb: v & 1 != 0,
+                };
+                self.keep_ram(h.addr, &s.mem);
+                if self.report.irq_handlers.insert(h) {
+                    self.entry(h, [Kv::known(0x12), Kv::known(1), Kv::UNKNOWN]);
+                }
+            }
+        }
+        let fall = at.addr.wrapping_add(at.size());
+        if s.may_skip {
+            next.push((Loc { addr: fall, ..at }, inp.clone(), min.clone()));
+        }
+        if !s.may_run {
+            return next;
+        }
+        let thumb = reg(&s.out, regs::T, Width::W1).map(|t| t != 0);
+        match l.block.exit.flow {
+            Flow::Call { ret } if l.block.exit.next == Next::Const(0x08) => {
+                let number = if at.thumb {
+                    word & 0xFF
+                } else {
+                    (word >> 16) & 0xFF
+                };
+                let mut o = inp.clone();
+                let mut m = min.clone();
+                bios_copy(&self.rom, number, inp, &mut m);
+                for n in 0..4 {
+                    o[regs::r(n).index()] = Kv::UNKNOWN;
+                }
+                next.push((
+                    Loc {
+                        addr: ret as u32,
+                        ..at
+                    },
+                    o,
+                    m,
+                ));
+            }
+            Flow::Call { ret } => {
+                f.calls_out = true;
+                let t = self.bl_pair(at, word).or(s.targets[0]);
+                let back = quiet || self.callee(at, t, thumb, &s.out, &s.mem);
+                let callee = t.zip(thumb).map(|(t, th)| Loc {
+                    addr: t & !1,
+                    thumb: th,
+                });
+                let (o, m) = if quiet {
+                    let mut o = s.out.clone();
+                    after_call(&mut o);
+                    (o, Mem::new())
+                } else {
+                    self.after(callee, &s.out, &s.mem)
+                };
+                if back {
+                    next.push((
+                        Loc {
+                            addr: ret as u32,
+                            ..at
+                        },
+                        o,
+                        m,
+                    ));
+                }
+            }
+            Flow::Jump | Flow::Return => {
+                let lr = reg(&s.out, regs::r(14), Width::W32).map(|v| v as u32 & !1);
+                let dynamic = matches!(l.block.exit.next, Next::Dynamic(_));
+                if dynamic && lr == Some(fall) {
+                    f.calls.insert(at);
+                    let back = quiet || self.callee(at, s.targets[0], thumb, &s.out, &s.mem);
+                    let mut o = s.out.clone();
+                    after_call(&mut o);
+                    o[regs::T.index()] = Kv::known(u128::from(at.thumb));
+                    if back {
+                        next.push((Loc { addr: fall, ..at }, o, Mem::new()));
+                    }
+                    return next;
+                }
+                for t in &s.targets {
+                    if *t == Some(RET) {
+                        f.returns = true;
+                        next.push((
+                            Loc {
+                                addr: RET,
+                                thumb: false,
+                            },
+                            s.out.clone(),
+                            s.mem.clone(),
+                        ));
+                        continue;
+                    }
+                    if let (true, Some(t)) = (dynamic, t) {
+                        f.jumps.entry(at.addr).or_default().insert(t & !1);
+                    }
+                    match (t, thumb) {
+                        (Some(t), Some(th)) => {
+                            if !quiet && (at.addr >> 24) != (t >> 24) {
+                                self.keep_ram(*t, &s.mem);
+                            }
+                            next.push((
+                                Loc {
+                                    addr: t & !1,
+                                    thumb: th,
+                                },
+                                s.out.clone(),
+                                s.mem.clone(),
+                            ));
+                        }
+                        (None, _) if dynamic => {
+                            f.returns = true;
+                            if !quiet {
+                                self.report.unresolved.push(Unresolved {
+                                    at,
+                                    why: "a computed jump (a return, or missed code)",
+                                });
+                            }
+                        }
+                        _ => {
+                            if !quiet {
+                                self.report.unresolved.push(Unresolved {
+                                    at,
+                                    why: "a jump in an unknown state",
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Flow::Trap(_) => {
+                next.push((Loc { addr: fall, ..at }, s.out.clone(), s.mem.clone()));
+            }
+        }
+        next
+    }
+
     fn function(&mut self, entry: Loc, p: Psr) -> Function {
         let mut f = Function::default();
-        let mut state: BTreeMap<Loc, (Regs, Mem)> = BTreeMap::new();
         let mut init = unknown();
         init[regs::T.index()] = Kv::known(u128::from(entry.thumb));
         init[regs::r(13).index()] = Kv::known(FRAME);
@@ -502,8 +857,23 @@ impl Walk<'_> {
         for (r, v) in PSR.iter().zip(p) {
             init[r.index()] = v;
         }
-        state.insert(entry, (init, Mem::new()));
-        let mut work = VecDeque::from([entry]);
+        let (mut at, mut regs_now, mut mem_now) = (entry, init, Mem::new());
+        let mut seen: BTreeSet<(Loc, u64)> = BTreeSet::new();
+        for _ in 0..CONCRETE {
+            let mut h = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(&regs_now, &mut h);
+            if !seen.insert((at, std::hash::Hasher::finish(&h))) {
+                break;
+            }
+            let mut n = self.step(&mut f, at, &regs_now, &mem_now, false);
+            if n.len() != 1 || n[0].0.addr == RET {
+                break;
+            }
+            let (to, r, m) = n.remove(0);
+            (at, regs_now, mem_now) = (to, r, m);
+        }
+        let mut state: BTreeMap<Loc, (Regs, Mem)> = BTreeMap::from([(at, (regs_now, mem_now))]);
+        let mut work = VecDeque::from([at]);
         let mut visits = 0;
         while let Some(at) = work.pop_front() {
             visits += 1;
@@ -515,165 +885,18 @@ impl Walk<'_> {
                 break;
             }
             let (inp, min) = state[&at].clone();
-            let Some(word) = self.rom.unit(at) else {
-                self.report.unresolved.push(Unresolved {
-                    at,
-                    why: "the code is outside the ROM",
-                });
-                continue;
-            };
-            f.instructions.insert(at);
-            let l = match lift::lift(word, at.addr, at.thumb) {
-                Ok(l) => l,
-                Err(e) => {
-                    self.report.failed.insert(at, e.to_string());
+            for (to, r, m) in self.step(&mut f, at, &inp, &min, false) {
+                if to.addr == RET {
                     continue;
                 }
-            };
-            let mut s = eval(&l.block, &self.rom, &inp, &min);
-            if s.may_run && s.targets.contains(&None) && reg(&inp, regs::M, Width::new(5)).is_none()
-            {
-                s = by_mode(&l.block, &self.rom, &inp, &min).unwrap_or(s);
-            }
-            for &(a, v) in &s.stores {
-                if a == IRQ_VECTOR {
-                    let h = Loc {
-                        addr: v & !1,
-                        thumb: v & 1 != 0,
-                    };
-                    if self.report.irq_handlers.insert(h) {
-                        self.entry(h, [Kv::known(0x12), Kv::known(1), Kv::UNKNOWN]);
-                    }
-                }
-            }
-            let fall = at.addr.wrapping_add(at.size());
-            let mut next: Vec<(Loc, Regs, Mem)> = Vec::new();
-            if s.may_skip {
-                next.push((Loc { addr: fall, ..at }, inp.clone(), min.clone()));
-            }
-            if s.may_run {
-                let thumb = reg(&s.out, regs::T, Width::W1).map(|t| t != 0);
-                match l.block.exit.flow {
-                    Flow::Call { ret } if l.block.exit.next == Next::Const(0x08) => {
-                        let mut o = inp.clone();
-                        for n in 0..4 {
-                            o[regs::r(n).index()] = Kv::UNKNOWN;
-                        }
-                        next.push((
-                            Loc {
-                                addr: ret as u32,
-                                ..at
-                            },
-                            o,
-                            Mem::new(),
-                        ));
-                    }
-                    Flow::Call { ret } => {
-                        let pair = self.bl_pair(at, word);
-                        let t = pair.or(s.targets[0]);
-                        let back = match (t, thumb) {
-                            (Some(t), Some(th)) => self.call(
-                                Loc {
-                                    addr: t & !1,
-                                    thumb: th,
-                                },
-                                psr(&s.out),
-                            ),
-                            _ => {
-                                self.report.unresolved.push(Unresolved {
-                                    at,
-                                    why: "a call to an unknown target",
-                                });
-                                true
-                            }
-                        };
-                        let mut o = s.out.clone();
-                        after_call(&mut o);
-                        if back {
-                            next.push((
-                                Loc {
-                                    addr: ret as u32,
-                                    ..at
-                                },
-                                o,
-                                Mem::new(),
-                            ));
-                        }
-                    }
-                    Flow::Jump | Flow::Return => {
-                        let lr = reg(&s.out, regs::r(14), Width::W32).map(|v| v as u32 & !1);
-                        let dynamic = matches!(l.block.exit.next, Next::Dynamic(_));
-                        if dynamic && lr == Some(fall) {
-                            f.calls.insert(at);
-                            let back = match (s.targets[0], thumb) {
-                                (Some(t), Some(th)) => self.call(
-                                    Loc {
-                                        addr: t & !1,
-                                        thumb: th,
-                                    },
-                                    psr(&s.out),
-                                ),
-                                _ => {
-                                    self.report.unresolved.push(Unresolved {
-                                        at,
-                                        why: "a call through an unknown register",
-                                    });
-                                    true
-                                }
-                            };
-                            let mut o = s.out.clone();
-                            after_call(&mut o);
-                            o[regs::T.index()] = Kv::known(u128::from(at.thumb));
-                            if back {
-                                next.push((Loc { addr: fall, ..at }, o, Mem::new()));
-                            }
-                        } else {
-                            for t in &s.targets {
-                                if *t == Some(RET) {
-                                    f.returns = true;
-                                    continue;
-                                }
-                                if let (true, Some(t)) = (dynamic, t) {
-                                    f.jumps.entry(at.addr).or_default().insert(t & !1);
-                                }
-                                match (t, thumb) {
-                                    (Some(t), Some(th)) => next.push((
-                                        Loc {
-                                            addr: t & !1,
-                                            thumb: th,
-                                        },
-                                        s.out.clone(),
-                                        s.mem.clone(),
-                                    )),
-                                    (None, _) if dynamic => {
-                                        f.returns = true;
-                                        self.report.unresolved.push(Unresolved {
-                                            at,
-                                            why: "a computed jump (a return, or missed code)",
-                                        });
-                                    }
-                                    _ => self.report.unresolved.push(Unresolved {
-                                        at,
-                                        why: "a jump in an unknown state",
-                                    }),
-                                }
-                            }
-                        }
-                    }
-                    Flow::Trap(_) => {
-                        next.push((Loc { addr: fall, ..at }, s.out.clone(), s.mem.clone()));
-                    }
-                }
-            }
-            for (to, regs, mem) in next {
                 match state.get_mut(&to) {
                     None => {
-                        state.insert(to, (regs, mem));
+                        state.insert(to, (r, m));
                         work.push_back(to);
                     }
                     Some((old, old_mem)) => {
-                        let a = meet(old, &regs);
-                        if meet_mem(old_mem, &mem) || a {
+                        let a = meet(old, &r);
+                        if meet_mem(old_mem, &m) || a {
                             work.push_back(to);
                         }
                     }

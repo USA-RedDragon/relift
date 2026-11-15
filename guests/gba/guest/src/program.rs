@@ -2,7 +2,9 @@
 //!
 //! Every function the discovery found becomes a C function at its entry
 //! address; a function holds the instructions it reaches in their state.
-//! The runtime finds a function by address alone, so an address that is
+//! Code in work RAM is lifted from the bytes the ROM's copies leave there
+//! (`Report::ram`); code the game writes there later is missed code. The
+//! runtime finds a function by address alone, so an address that is
 //! the entry in both states keeps the first one found (ARM before Thumb).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,16 +51,49 @@ pub fn host_name(l: Loc) -> String {
     format!("gba_{}_{:08x}", if l.thumb { 't' } else { 'a' }, l.addr)
 }
 
-fn raw(rom: &[u8], l: Loc) -> u64 {
-    let off = (l.addr - ROM_BASE) as usize;
-    let n = l.size() as usize;
-    let v = rom
-        .get(off..off + n)
-        .unwrap_or_default()
-        .iter()
-        .rev()
-        .fold(0u64, |a, b| (a << 8) | u64::from(*b));
-    if l.thumb { v | RAW_THUMB } else { v }
+/// The code the build lifts from: the ROM, and work RAM as the ROM's
+/// copies leave it.
+struct Images<'a> {
+    rom: &'a [u8],
+    ewram: Vec<u8>,
+    iwram: Vec<u8>,
+}
+
+impl<'a> Images<'a> {
+    fn new(rom: &'a [u8], report: &Report) -> Images<'a> {
+        let mut ewram = vec![0u8; 0x4_0000];
+        let mut iwram = vec![0u8; 0x8000];
+        for (&a, &b) in &report.ram {
+            match a >> 24 {
+                0x02 => ewram[(a & 0x3_FFFF) as usize] = b,
+                0x03 => iwram[(a & 0x7FFF) as usize] = b,
+                _ => {}
+            }
+        }
+        Images { rom, ewram, iwram }
+    }
+
+    /// The image holding `addr` and the address it starts at.
+    fn of(&self, addr: u32) -> (&[u8], u32) {
+        match addr >> 24 {
+            0x02 => (&self.ewram, addr & !0x3_FFFF),
+            0x03 => (&self.iwram, addr & !0x7FFF),
+            _ => (self.rom, ROM_BASE),
+        }
+    }
+
+    fn raw(&self, l: Loc) -> u64 {
+        let (img, base) = self.of(l.addr);
+        let off = l.addr.wrapping_sub(base) as usize;
+        let n = l.size() as usize;
+        let v = img
+            .get(off..off + n)
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .fold(0u64, |a, b| (a << 8) | u64::from(*b));
+        if l.thumb { v | RAW_THUMB } else { v }
+    }
 }
 
 type Lifts = Vec<(u64, Result<Block, LiftFailure>, u64)>;
@@ -76,12 +111,14 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         .flat_map(|f| f.calls.iter().map(|l| l.addr))
         .collect();
     let fe = Gba::with_calls(calls);
+    let images = Images::new(rom, report);
     let mut unlifted = Vec::new();
     let mut seen_entry = BTreeSet::new();
     let mut lifted: Vec<Lifting> = Vec::new();
     let mut instructions = BTreeSet::new();
     for (entry, f) in &report.functions {
-        if !seen_entry.insert(entry.addr) || (entry.addr >> 24) < 0x08 {
+        if !seen_entry.insert(entry.addr) || !matches!(entry.addr >> 24, 0x02 | 0x03 | 0x08..=0x0D)
+        {
             continue;
         }
         let mut blocks: BTreeMap<u64, (Result<Block, LiftFailure>, u64)> = BTreeMap::new();
@@ -91,7 +128,8 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             if blocks.contains_key(&pc) {
                 continue;
             }
-            let r = fe.lift_at(rom, ROM_BASE, l.addr, l.thumb);
+            let (img, base) = images.of(l.addr);
+            let r = fe.lift_at(img, base, l.addr, l.thumb);
             if let Err(e) = &r
                 && instructions.insert(l)
             {
@@ -104,7 +142,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             if l.addr >= entry.addr {
                 end = end.max(pc + u64::from(l.size()));
             }
-            blocks.insert(pc, (r, raw(rom, l)));
+            blocks.insert(pc, (r, images.raw(l)));
         }
         let span = (end - u64::from(entry.addr)).max(2);
         let tables = f
