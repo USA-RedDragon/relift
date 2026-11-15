@@ -32,9 +32,13 @@
 //! copied when the byte was read from ROM and generated otherwise. The
 //! code is then decoded from the RAM targets of the transfers the analysis
 //! found, of the direct jumps and calls from ROM the paths took, and of the
-//! calls and jumps in copied code: at each address every opcode of the set
-//! is a candidate and gives its own next address from its length; a CB
-//! prefix takes the keys of the byte after it.
+//! calls and jumps in copied code that no path ran: at each address every
+//! opcode of the set is a candidate (at an address a path ran, only the
+//! opcodes it ran there) and gives its own next address from its length; a
+//! CB prefix takes the keys of the byte after it. A set holds the bytes of
+//! every test a driver copied to the same place, so a jump whose target
+//! bytes vary is followed only into copied bytes, and decoding stops after a
+//! run of copied NOPs, the padding after a routine.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -87,6 +91,10 @@ const MAX_PER_ENTRY: usize = 4096;
 /// sled. A `$00` or `$FF` among other values is taken as the fill of RAM
 /// cleared before the code was stored, and decoding does not go on past it.
 const NOP_RUN: u32 = 4;
+
+/// Most copied NOPs in a row decoded: ROM padding copied with a routine,
+/// past which the routine has ended.
+const COPIED_NOP_RUN: u32 = 32;
 
 /// Where the opcode byte of a predicted instruction came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1408,7 +1416,11 @@ pub(crate) fn predict(
     }
     let called = called(&found.stores, m.cgb);
     entries.extend(called);
-    let mut ops = decode(&found.stores, &entries, m.cgb);
+    let mut ran: FxMap<u16, Vec<u16>> = FxMap::default();
+    for &(a, k) in found.ran.keys() {
+        ran.entry(norm(a)).or_default().push(k);
+    }
+    let mut ops = decode(&found.stores, &entries, m.cgb, &ran);
     let mut all: BTreeMap<(u16, u16), RamClass> =
         ops.ops.iter().map(|o| ((o.addr, o.key), o.class)).collect();
     for (&k, &c) in &found.ran {
@@ -1476,19 +1488,30 @@ fn cell_at(stores: &FxMap<(u16, u8), Cell>, a: u16, bucket: u8, cgb: bool) -> Ce
     c
 }
 
-fn decode(stores: &FxMap<(u16, u8), Cell>, entries: &BTreeSet<(u16, u8)>, cgb: bool) -> RamOps {
+fn decode(
+    stores: &FxMap<(u16, u8), Cell>,
+    entries: &BTreeSet<(u16, u8)>,
+    cgb: bool,
+    ran: &FxMap<u16, Vec<u16>>,
+) -> RamOps {
     let mut ops: BTreeMap<(u16, u16), RamClass> = BTreeMap::new();
     let mut wide = BTreeSet::new();
     let mut done: FxSet<(u16, u8)> = FxSet::default();
     for &(entry, bucket) in entries {
-        let mut todo = vec![(entry, 0u32)];
+        if ran.contains_key(&entry) {
+            continue;
+        }
+        let mut todo = vec![(entry, 0u32, false)];
         let mut n = 0usize;
-        while let Some((a, nops)) = todo.pop() {
-            if n >= MAX_PER_ENTRY || !is_ram(a) || !done.insert((a, bucket)) {
+        while let Some((a, nops, guess)) = todo.pop() {
+            if n >= MAX_PER_ENTRY || !is_ram(a) {
                 continue;
             }
             let cell = cell_at(stores, a, bucket, cgb);
-            if cell.count() == 0 {
+            if cell.count() == 0
+                || (guess && cell.values().all(|v| cell.class(v) == RamClass::Generated))
+                || !done.insert((a, bucket))
+            {
                 continue;
             }
             if cell.count() > MAX_KEYS {
@@ -1496,8 +1519,25 @@ fn decode(stores: &FxMap<(u16, u8), Cell>, entries: &BTreeSet<(u16, u8)>, cgb: b
                 continue;
             }
             let at = |o: u16| cell_at(stores, a.wrapping_add(o), bucket, cgb);
-            for op in cell.values() {
-                let class = cell.class(op);
+            let keys: Vec<u16> = match ran.get(&a) {
+                Some(k) => k.clone(),
+                None => cell.values().map(u16::from).collect(),
+            };
+            let mut cbs = false;
+            for key in keys {
+                if key >= 0x100 {
+                    if !cbs {
+                        cbs = true;
+                        todo.push((a.wrapping_add(2), 0, false));
+                    }
+                    continue;
+                }
+                let op = key as u8;
+                let class = if cell.values().any(|v| v == op) {
+                    cell.class(op)
+                } else {
+                    RamClass::Generated
+                };
                 if op == 0xCB {
                     let c = at(1);
                     if c.count() > MAX_KEYS {
@@ -1509,24 +1549,27 @@ fn decode(stores: &FxMap<(u16, u8), Cell>, entries: &BTreeSet<(u16, u8)>, cgb: b
                         let k = (a, 0x100 | u16::from(v));
                         ops.entry(k).or_insert(class);
                     }
-                    todo.push((a.wrapping_add(2), 0));
+                    todo.push((a.wrapping_add(2), 0, false));
                     continue;
                 }
                 n += 1;
                 ops.entry((a, u16::from(op))).or_insert(class);
                 let len = u16::from(BASE[usize::from(op)].length);
                 let next = a.wrapping_add(len);
-                let rel = |todo: &mut Vec<(u16, u32)>| {
-                    for o in at(1).values() {
-                        todo.push((next.wrapping_add_signed(i16::from(o as i8)), 0));
+                let rel = |todo: &mut Vec<(u16, u32, bool)>| {
+                    let o = at(1);
+                    for v in o.values() {
+                        let t = next.wrapping_add_signed(i16::from(v as i8));
+                        todo.push((t, 0, o.count() > 1));
                     }
                 };
-                let abs = |todo: &mut Vec<(u16, u32)>| {
+                let abs = |todo: &mut Vec<(u16, u32, bool)>| {
                     let (l, h) = (at(1), at(2));
+                    let guess = l.count() * h.count() > 1;
                     if l.count() * h.count() <= MAX_KEYS {
                         for hv in h.values() {
                             for lv in l.values() {
-                                todo.push((u16::from_be_bytes([hv, lv]), 0));
+                                todo.push((u16::from_be_bytes([hv, lv]), 0, guess));
                             }
                         }
                     }
@@ -1555,13 +1598,14 @@ fn decode(stores: &FxMap<(u16, u8), Cell>, entries: &BTreeSet<(u16, u8)>, cgb: b
                     _ => true,
                 };
                 if falls && (!matches!(op, 0x00 | 0xFF) || cell.count() == 1) {
-                    let run = if op == 0 && class == RamClass::Generated {
-                        nops + 1
+                    let run = if op == 0 { nops + 1 } else { 0 };
+                    let most = if class == RamClass::Generated {
+                        NOP_RUN
                     } else {
-                        0
+                        COPIED_NOP_RUN
                     };
-                    if run <= NOP_RUN {
-                        todo.push((next, run));
+                    if run <= most {
+                        todo.push((next, run, false));
                     }
                 }
             }

@@ -145,7 +145,7 @@ fn a_cb_prefix_takes_the_key_of_the_next_byte() {
 }
 
 #[test]
-fn an_address_with_too_many_opcodes_is_wide_but_keeps_the_one_run() {
+fn an_address_with_too_many_values_keeps_the_opcode_run_there() {
     let table: Vec<u8> = (0x40..0x68).collect();
     assert!(table.len() > MAX_KEYS);
     let r = predict(&[
@@ -159,7 +159,6 @@ fn an_address_with_too_many_opcodes_is_wide_but_keeps_the_one_run() {
         (0x300, &table),
     ]);
     assert_eq!(ops(&r), [(0xC000, 0x67, RamClass::Copied)]);
-    assert_eq!(r.wide, [0xC000]);
 }
 
 #[test]
