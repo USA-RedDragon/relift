@@ -22,7 +22,8 @@
 //!   `audible`, `ref` (repeatable, absolute paths), `skip` (repeatable,
 //!   `start-end` as a half-open byte range), `region` (`oam` or `vram`),
 //!   `input` (`frame[@ly]:buttons,...`, buttons joined by `+`, `-` releases
-//!   all), `cart` (`lazy_sram_cs`) and `mode` (`dmg`, `cgb` or `agb`).
+//!   all), `cart` (`lazy_sram_cs`) and `mode` (read and ignored: the
+//!   hardware is the machine's, and the colours of a PNG reference decide the colour conversion).
 //!
 //! `protocol=run` grades nothing: it runs `frames` LCD frames (or `cycles`)
 //! and passes, reporting `frame <16 hex digits> serial <escaped text>`.
@@ -269,7 +270,6 @@ impl Case {
         let mut expect_hex = None;
         let mut lazy = false;
         let mut audible = false;
-        let mut mode = String::from("dmg");
         for line in spec.lines() {
             let line = line.trim();
             if line.is_empty() {
@@ -301,7 +301,7 @@ impl Case {
                 "expect_hex" => expect_hex = Some(v.to_string()),
                 "audible" => audible = v == "true",
                 "cart" => lazy = v == "lazy_sram_cs",
-                "mode" => mode = v.to_string(),
+                "mode" => {}
                 other => return Err(format!("unknown spec key {other:?}")),
             }
         }
@@ -371,14 +371,10 @@ impl Case {
             "gambatte_audio" => Kind::Audio { audible },
             other => return Err(format!("unknown protocol {other:?}")),
         };
-        let cgb_mode = matches!(mode.as_str(), "cgb" | "agb");
-        if cgb_mode {
-            let csp = matches!(kind, Kind::Csp { .. });
-            m.gb.set_cgb_color_conversion(if csp {
-                ColorCorrection::Linear
-            } else {
-                ColorCorrection::Lcd
-            });
+        match kind {
+            Kind::Run => {}
+            Kind::Csp { .. } => m.gb.set_cgb_color_conversion(ColorCorrection::Linear),
+            _ => m.gb.set_cgb_color_conversion(ColorCorrection::Lcd),
         }
         if matches!(kind, Kind::Audio { .. }) {
             m.gb.ext_set_audio(true);
