@@ -17,8 +17,12 @@
 //! report themselves through the frontend's undefined-instruction entry.
 
 mod func;
+mod reuse;
 mod time;
 mod value;
+
+use reuse::Targets;
+pub use reuse::{Key, Store};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -127,6 +131,14 @@ pub struct Options {
     /// entry of a function whose first integer add is emitted as a subtract.
     /// It is the miscompile `relift diff` must find.
     pub test_fault: Option<u64>,
+    /// When not zero, the guest bytes of a shard window: a shard holds
+    /// only functions whose entries lie in one window of this many bytes
+    /// from [`Options::module_base`], and is named by the window
+    /// (`shard0012`, then `shard0012_1` when the window needs more than
+    /// one). A change to one function then moves no function to another
+    /// shard outside its window. When zero, functions fill each shard up
+    /// to [`Options::shard_bytes`] and shards are numbered in order.
+    pub window: u64,
 }
 
 impl Default for Options {
@@ -141,6 +153,7 @@ impl Default for Options {
             io_map: relift_ir::IoMap::memory(),
             image_id: [0; 32],
             test_fault: None,
+            window: 0,
         }
     }
 }
@@ -199,7 +212,7 @@ pub struct Output {
 }
 
 /// What a direct transfer to an entry calls.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Target {
     /// The C function.
     pub(crate) name: String,
@@ -242,17 +255,19 @@ pub fn emit_with(
         &mut |ks, targets| {
             ks.iter()
                 .map(|&k| {
-                    func::emit_function(
+                    let e = func::emit_function(
                         fe,
                         &fns[k],
-                        targets,
+                        &Targets::new(targets),
                         opts.piece_bytes.max(1),
                         &opts.io_map,
                         opts.test_fault == Some(fns[k].entry),
-                    )
+                    );
+                    (e, None)
                 })
                 .collect()
         },
+        None,
         &mut |f| out.files.push(f),
     );
     out
@@ -312,6 +327,27 @@ pub fn emit_streamed(
     on: &mut dyn FnMut(usize, usize),
     sink: &mut dyn FnMut(File),
 ) -> usize {
+    emit_reusing(fe, heads, lend, overrides, opts, None, on, sink)
+}
+
+/// As [`emit_streamed`], taking the C of each function whose input and
+/// direct-call targets are unchanged from `store` and keeping the C of
+/// every function there. The files are the same as without a store.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "emit_streamed's arguments and the store"
+)]
+pub fn emit_reusing(
+    fe: &(dyn Frontend + Sync),
+    heads: &[Head],
+    lend: &Lend<'_>,
+    overrides: &[Override],
+    opts: &Options,
+    store: Option<&dyn Store>,
+    on: &mut dyn FnMut(usize, usize),
+    sink: &mut dyn FnMut(File),
+) -> usize {
+    let salt = reuse::salt(fe, opts.piece_bytes.max(1), &opts.io_map);
     emit_core(
         fe,
         heads,
@@ -323,14 +359,32 @@ pub fn emit_streamed(
             parallel(&groups, |g| {
                 let mut out = Vec::with_capacity(g.len());
                 lend(g, &mut |_, f| {
-                    out.push(func::emit_function(
-                        fe,
-                        f,
-                        targets,
-                        opts.piece_bytes.max(1),
-                        &opts.io_map,
-                        opts.test_fault == Some(f.entry),
-                    ));
+                    let fault = opts.test_fault == Some(f.entry);
+                    let emit = |seen: &Targets<'_>| {
+                        func::emit_function(
+                            fe,
+                            f,
+                            seen,
+                            opts.piece_bytes.max(1),
+                            &opts.io_map,
+                            fault,
+                        )
+                    };
+                    let Some(store) = store else {
+                        out.push((emit(&Targets::new(targets)), None));
+                        return;
+                    };
+                    let key = store.key(&reuse::input(fe, &salt, f, fault));
+                    if let Some(bytes) = store.get(&key)
+                        && let Some(e) = reuse::reuse(&bytes, targets)
+                    {
+                        out.push((e, Some((key, bytes, true))));
+                        return;
+                    }
+                    let seen = Targets::new(targets);
+                    let e = emit(&seen);
+                    let kept = reuse::output(&e, &seen).map(|b| (key, b, false));
+                    out.push((e, kept));
                 });
                 out
             })
@@ -338,6 +392,7 @@ pub fn emit_streamed(
             .flatten()
             .collect()
         },
+        store,
         sink,
     )
 }
@@ -376,9 +431,13 @@ fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R>
     out.into_iter().map(|r| r.1).collect()
 }
 
+/// One function's C as [`Store::keep`] takes it: its key, its bytes and
+/// whether they came from the store.
+type Kept = Option<(Key, Vec<u8>, bool)>;
+
 /// Gives the C of a run of functions, by index, with the direct-call
 /// targets of the module.
-type Compute<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<func::Emitted1> + 'c;
+type Compute<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<(func::Emitted1, Kept)> + 'c;
 
 /// Emits the functions `heads`, whose C `compute` gives for a run of
 /// indices into them, and gives each file to `sink`.
@@ -389,6 +448,7 @@ fn emit_core(
     opts: &Options,
     on: &mut dyn FnMut(usize, usize),
     compute: &mut Compute<'_>,
+    store: Option<&dyn Store>,
     sink: &mut dyn FnMut(File),
 ) -> usize {
     let mut targets: BTreeMap<u64, Target> = heads
@@ -433,6 +493,8 @@ fn emit_core(
         maps: Vec::new(),
         sink,
         cur: Shard::default(),
+        window: None,
+        last: None,
     };
     let mut flags: BTreeMap<u64, &'static str> = BTreeMap::new();
     let budget = opts.shard_bytes.max(1);
@@ -442,9 +504,19 @@ fn emit_core(
             let end = kept.len().min(k + BATCH);
             done.extend(compute(&kept[k..end], &targets));
         }
-        let Some(e) = done.pop_front() else {
+        let Some((e, kept)) = done.pop_front() else {
             break;
         };
+        if let (Some(s), Some((key, bytes, reused))) = (store, kept) {
+            s.keep(f.entry, &key, &bytes, reused);
+        }
+        let window =
+            (opts.window > 0).then(|| f.entry.saturating_sub(opts.module_base) / opts.window);
+        if window != w.window && !w.cur.fns.is_empty() {
+            w.flush();
+            on(k, fns.len());
+        }
+        w.window = window;
         undefined += e.undefined;
         flags.insert(f.entry, e.flags);
         // A shard map's range stops at the next function of the module, so
@@ -574,9 +646,14 @@ struct Shards<'a> {
     header: String,
     opts: &'a Options,
     targets: &'a BTreeMap<u64, Target>,
-    maps: Vec<String>,
+    /// The map and the file name of each shard written.
+    maps: Vec<(String, String)>,
     sink: &'a mut dyn FnMut(File),
     cur: Shard,
+    /// The window of the shard being filled, with [`Options::window`].
+    window: Option<u64>,
+    /// The window and number in it of the last shard written.
+    last: Option<(u64, u32)>,
 }
 
 impl Shards<'_> {
@@ -646,8 +723,23 @@ impl Shards<'_> {
                 infos.push_str("#endif\n");
             }
         }
-        let shard = format!("shard{i:04}");
-        let map = format!("{}_map{i}", opts.unit_symbol);
+        let (n, sub) = match self.window {
+            None => (i as u64, 0),
+            Some(w) => match self.last {
+                Some((l, s)) if l == w => (w, s + 1),
+                _ => (w, 0),
+            },
+        };
+        if let Some(w) = self.window {
+            self.last = Some((w, sub));
+        }
+        let suffix = if sub == 0 {
+            String::new()
+        } else {
+            format!("_{sub}")
+        };
+        let shard = format!("shard{n:04}{suffix}");
+        let map = format!("{}_map{n}{suffix}", opts.unit_symbol);
         let mut owners: Vec<(u64, String)> = Vec::new();
         for f in &sh.fns {
             let o = (f.fn_addr, f.part.clone());
@@ -663,7 +755,7 @@ impl Shards<'_> {
                 "\nRL_TEXT_BOUNDS_DECLARE();\nstatic const rl_fn_info fns[] = {{\n{infos}    {{ 0 }},\n}};\n#if RL_PART == 0\n#define RL_PART_MAP {map}\n#else\n#define RL_PART_MAP {map}_p1\n#endif\nconst rl_fn_map RL_PART_MAP;\nconst rl_fn_map RL_PART_MAP = {{ RL_FN_MAP_VERSION, (uint32_t)(sizeof fns / sizeof fns[0]) - 1u, fns, {:?}, {shard:?}, UINT64_C({:#x}), RL_TEXT_LO, RL_TEXT_HI }};\n",
                 opts.unit_name, opts.module_base
             );
-            self.maps.push(map);
+            self.maps.push((map, shard.clone()));
             (self.sink)(File {
                 name: format!("{shard}.c"),
                 text,
@@ -678,7 +770,7 @@ impl Shards<'_> {
             opts.unit_name,
             opts.module_base
         );
-        self.maps.push(map);
+        self.maps.push((map, shard.clone()));
         (self.sink)(File {
             name: format!("{shard}.c"),
             text,
@@ -699,7 +791,7 @@ fn unit_table(
     fns: &[&Head],
     overrides: &[Override],
     flags: &BTreeMap<u64, &'static str>,
-    maps: &[String],
+    maps: &[(String, String)],
     opts: &Options,
 ) -> String {
     let mut t = includes(fe);
@@ -712,13 +804,13 @@ fn unit_table(
     for o in overrides.iter().filter(|o| o.declare) {
         let _ = writeln!(t, "RL_LIFTED({});", o.host_fn);
     }
-    for (i, m) in maps.iter().enumerate() {
+    for (m, shard) in maps {
         let _ = writeln!(t, "extern const rl_fn_map {m};");
         if opts.parts {
             let _ = writeln!(
                 t,
                 "#ifdef {}\nextern const rl_fn_map {m}_p1;\n#endif",
-                shard_part_macro(&format!("shard{i:04}"))
+                shard_part_macro(shard)
             );
         }
     }
@@ -774,13 +866,13 @@ fn unit_table(
         t.push_str("    { 0, 0, 0, 0 },\n");
     }
     t.push_str("};\nstatic const rl_fn_map *const maps[] = {");
-    for (i, m) in maps.iter().enumerate() {
+    for (m, shard) in maps {
         let _ = write!(t, " &{m},");
         if opts.parts {
             let _ = write!(
                 t,
                 "\n#ifdef {}\n &{m}_p1,\n#endif\n",
-                shard_part_macro(&format!("shard{i:04}"))
+                shard_part_macro(shard)
             );
         }
     }

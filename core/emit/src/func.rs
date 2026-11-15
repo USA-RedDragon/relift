@@ -18,7 +18,7 @@ use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 
 use crate::time;
 use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
-use crate::{Function, Insn, Target};
+use crate::{Function, Insn, Targets};
 
 /// One C function of an emitted guest function.
 pub(crate) struct Piece {
@@ -63,7 +63,7 @@ struct Split {
 struct Ctx<'a> {
     fe: &'a dyn Frontend,
     f: &'a Function<'a>,
-    targets: &'a BTreeMap<u64, Target>,
+    targets: &'a Targets<'a>,
     callees: BTreeSet<u64>,
     hoisted: BTreeSet<Reg>,
     /// The landing-pad check's sp local, when the function has resume points.
@@ -85,7 +85,7 @@ fn flag(r: Reg) -> String {
 /// extent only code it owns, which may include an address that is also the
 /// entry of another function (an address-taken label inside it), and a jump
 /// there must keep the function's state rather than leave it.
-fn inside(f: &Function<'_>, _targets: &BTreeMap<u64, Target>, t: u64) -> bool {
+fn inside(f: &Function<'_>, _targets: &Targets<'_>, t: u64) -> bool {
     f.insts.contains_key(&t)
 }
 
@@ -148,7 +148,7 @@ fn prepare(b: &Block) -> Block {
 /// stored, and dropping its write there changes nothing observable.
 fn live_out(
     f: &Function<'_>,
-    targets: &BTreeMap<u64, Target>,
+    targets: &Targets<'_>,
     blocks: &BTreeMap<u64, Block>,
     regs: usize,
 ) -> BTreeMap<u64, Vec<u64>> {
@@ -256,7 +256,7 @@ fn live_out(
 fn drop_dead_sets(
     fe: &dyn Frontend,
     f: &Function<'_>,
-    targets: &BTreeMap<u64, Target>,
+    targets: &Targets<'_>,
     blocks: BTreeMap<u64, Block>,
 ) -> BTreeMap<u64, Block> {
     let regs = fe.regs();
@@ -286,7 +286,7 @@ fn drop_dead_sets(
 }
 
 /// The return addresses of the calls in `f` that are resume points.
-fn resume_points(f: &Function<'_>, targets: &BTreeMap<u64, Target>) -> BTreeSet<u64> {
+fn resume_points(f: &Function<'_>, targets: &Targets<'_>) -> BTreeSet<u64> {
     f.pads
         .iter()
         .copied()
@@ -330,7 +330,7 @@ fn successors(f: &Function<'_>, pc: u64, b: Option<&Block>) -> Vec<u64> {
 pub(crate) fn emit_function(
     fe: &dyn Frontend,
     f: &Function<'_>,
-    targets: &BTreeMap<u64, Target>,
+    targets: &Targets<'_>,
     piece_bytes: usize,
     io: &IoMap,
     test_fault: bool,
@@ -429,7 +429,7 @@ pub(crate) fn emit_function(
 struct Env<'a> {
     fe: &'a dyn Frontend,
     f: &'a Function<'a>,
-    targets: &'a BTreeMap<u64, Target>,
+    targets: &'a Targets<'a>,
     blocks: &'a BTreeMap<u64, Block>,
     resumes: &'a BTreeSet<u64>,
     io: &'a IoMap,
@@ -865,9 +865,9 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         Flow::Return => s.push_str("    RL_STORE();\n    return RL_OK;\n"),
         Flow::Call { ret } => {
             let call = match b.exit.next {
-                Next::Const(t) if cx.targets.contains_key(&t) => {
+                Next::Const(t) if let Some(target) = cx.targets.get(&t) => {
                     cx.callees.insert(t);
-                    format!("{}(c, mem)", cx.targets[&t].name)
+                    format!("{}(c, mem)", target.name)
                 }
                 Next::Const(t) => format!("rl_indirect(c, UINT64_C({t:#x}))(c, mem)"),
                 Next::Dynamic(v) => format!("rl_indirect(c, {})(c, mem)", val(v)),

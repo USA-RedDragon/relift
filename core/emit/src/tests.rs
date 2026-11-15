@@ -344,6 +344,7 @@ fn shards_declare_their_foreign_callees() {
             io_map: relift_ir::IoMap::memory(),
             image_id: [0; 32],
             test_fault: None,
+            window: 0,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -529,6 +530,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         io_map: relift_ir::IoMap::memory(),
         image_id: [7; 32],
         test_fault: None,
+        window: 0,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -868,4 +870,158 @@ fn a_declared_override_is_declared_where_it_is_called() {
     assert!(s.contains("rc = rl_modsw_108(c, mem);"), "{s}");
     let unit = &out.files.last().expect("unit").text;
     assert!(unit.contains("RL_LIFTED(rl_modsw_108);"), "{unit}");
+}
+
+#[test]
+fn shards_hold_one_window_each_and_are_named_by_it() {
+    let code = [word(0x03, 0, 0); 3];
+    let mut blocks = lift_all(&code[..2], 0x100);
+    blocks.extend(lift_all(&code[2..], 0x140));
+    let fns = [
+        function(0x100, &blocks[0..1]),
+        function(0x104, &blocks[1..2]),
+        function(0x140, &blocks[2..3]),
+    ];
+    let names = |opts: &Options| -> Vec<String> {
+        let out = emit(&Toy, &fns, &[], opts);
+        out.files.iter().map(|f| f.name.clone()).collect()
+    };
+    let windowed = Options {
+        module_base: 0x100,
+        window: 0x40,
+        ..Options::default()
+    };
+    assert_eq!(
+        names(&windowed),
+        [PRELUDE_NAME, "shard0000.c", "shard0001.c", "unit.c"]
+    );
+    let tiny = Options {
+        shard_bytes: 1,
+        parts: true,
+        ..windowed
+    };
+    assert_eq!(
+        names(&tiny),
+        [
+            PRELUDE_NAME,
+            "shard0000.c",
+            "shard0000_1.c",
+            "shard0001.c",
+            "unit.c"
+        ]
+    );
+    let out = emit(&Toy, &fns, &[], &tiny);
+    assert!(
+        out.files[2]
+            .text
+            .contains("RL_PART_MAP rl_unit_module_map0_1\n")
+    );
+    let unit = &out.files[4].text;
+    assert!(
+        unit.contains(
+            "#ifdef RL_PART1_shard0000_1\nextern const rl_fn_map rl_unit_module_map0_1_p1;"
+        ),
+        "{unit}"
+    );
+}
+
+#[derive(Default)]
+struct Mem {
+    kept: std::sync::Mutex<BTreeMap<Key, Vec<u8>>>,
+    reused: std::sync::Mutex<Vec<(u64, bool)>>,
+}
+
+impl Store for Mem {
+    fn key(&self, input: &[u8]) -> Key {
+        let mut k = [0u8; 32];
+        for (i, b) in input.iter().enumerate() {
+            k[i % 32] = k[i % 32].wrapping_mul(31).wrapping_add(*b);
+        }
+        k[0] ^= input.len() as u8;
+        k
+    }
+
+    fn get(&self, key: &Key) -> Option<Vec<u8>> {
+        self.kept.lock().unwrap().get(key).cloned()
+    }
+
+    fn keep(&self, entry: u64, key: &Key, output: &[u8], reused: bool) {
+        self.kept.lock().unwrap().insert(*key, output.to_vec());
+        self.reused.lock().unwrap().push((entry, reused));
+    }
+}
+
+fn emit_with_store(fns: &[Function<'_>], overrides: &[Override], store: &Mem) -> Vec<File> {
+    let heads: Vec<Head> = fns.iter().map(Head::of).collect();
+    let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &Function<'_>)| {
+        for &k in ks {
+            sink(k, &fns[k]);
+        }
+    };
+    let mut files = Vec::new();
+    store.reused.lock().unwrap().clear();
+    emit_reusing(
+        &Toy,
+        &heads,
+        &lend,
+        overrides,
+        &Options::default(),
+        Some(store),
+        &mut |_, _| {},
+        &mut |f| files.push(f),
+    );
+    files
+}
+
+#[test]
+fn a_store_gives_back_the_c_of_unchanged_functions() {
+    let code = [
+        branch(0x02, 0, 2),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+        word(0x04, 1, 7),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [
+        function(0x100, &blocks[0..2]),
+        function(0x108, &blocks[2..3]),
+        function(0x10c, &blocks[3..5]),
+    ];
+    let store = Mem::default();
+    let first = emit_with_store(&fns, &[], &store);
+    assert_eq!(first, emit(&Toy, &fns, &[], &Options::default()).files);
+    assert!(store.reused.lock().unwrap().iter().all(|r| !r.1));
+    let again = emit_with_store(&fns, &[], &store);
+    assert_eq!(again, first);
+    assert_eq!(
+        *store.reused.lock().unwrap(),
+        [(0x100, true), (0x108, true), (0x10c, true)]
+    );
+    let other = lift_all(&[word(0x04, 1, 8), word(0x03, 0, 0)], 0x10c);
+    let changed = [
+        function(0x100, &blocks[0..2]),
+        function(0x108, &blocks[2..3]),
+        function(0x10c, &other),
+    ];
+    let out = emit_with_store(&changed, &[], &store);
+    assert_eq!(out, emit(&Toy, &changed, &[], &Options::default()).files);
+    assert_eq!(
+        *store.reused.lock().unwrap(),
+        [(0x100, true), (0x108, true), (0x10c, false)]
+    );
+    let host = [Override {
+        entry: 0x108,
+        host_fn: "host_108".into(),
+        may_unwind: true,
+        resume_point: true,
+        declare: false,
+    }];
+    let out = emit_with_store(&fns, &host, &store);
+    assert_eq!(out, emit(&Toy, &fns, &host, &Options::default()).files);
+    assert_eq!(
+        *store.reused.lock().unwrap(),
+        [(0x100, false), (0x10c, true)],
+        "the caller of an overridden function is emitted again"
+    );
 }
