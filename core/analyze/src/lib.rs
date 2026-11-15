@@ -532,7 +532,7 @@ impl Outline {
 }
 
 /// `f` of each of `outlines` lifted again with `fe` from `module`, in
-/// order, on up to one thread per CPU. Functions lifted at the same time
+/// order, on up to the `jobs` setting's threads. Functions lifted at the same time
 /// share the blocks of the instructions they have in common.
 pub fn each_lifted<R: Send>(
     fe: &(dyn Frontend + Sync),
@@ -837,45 +837,16 @@ fn explore<T: Send>(
 const GROUP: usize = 16;
 
 /// `f` of each group of up to [`GROUP`] neighboring items of `items`,
-/// flattened in order, on up to one thread per CPU; `f` gives one result
+/// flattened in order, on up to the `jobs` setting's threads; `f` gives one result
 /// per item of its group.
 fn grouped<T: Sync, R: Send>(items: &[T], f: impl Fn(&[T]) -> Vec<R> + Sync) -> Vec<R> {
     let groups: Vec<&[T]> = items.chunks(GROUP).collect();
     parallel(&groups, |g| f(g)).into_iter().flatten().collect()
 }
 
-/// `f` of every item of `items`, in order, on up to one thread per CPU.
+/// `f` of every item of `items`, in order, on up to the `jobs` setting's threads.
 pub fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    let threads = std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(items.len());
-    if threads <= 1 {
-        return items.iter().map(f).collect();
-    }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
-        let workers: Vec<_> = (0..threads)
-            .map(|_| {
-                s.spawn(|| {
-                    let mut mine = Vec::new();
-                    loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(item) = items.get(i) else {
-                            break;
-                        };
-                        mine.push((i, f(item)));
-                    }
-                    mine
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
-            .collect()
-    });
-    out.sort_unstable_by_key(|r| r.0);
-    out.into_iter().map(|r| r.1).collect()
+    relift_proc::workers::parallel(items, f)
 }
 
 #[cfg(test)]

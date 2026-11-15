@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 relift-cpu-sm83 = { workspace = true }
 relift-gb-formats = { workspace = true }
+relift-proc = { workspace = true }
 
 [lints]
 workspace = true

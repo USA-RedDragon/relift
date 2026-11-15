@@ -1423,31 +1423,17 @@ pub(crate) fn predict(
         nibbles: model.kind() == Some(relift_gb_formats::MapperKind::Mbc2),
         code,
     };
-    let jobs = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZero::get)
-        .clamp(1, 8);
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let found = std::thread::scope(|s| {
-        let hs: Vec<_> = (0..jobs)
-            .map(|_| {
-                let (m, next) = (&m, &next);
-                s.spawn(move || {
-                    let mut f = Found::default();
-                    while let Some(&r) =
-                        roots.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-                    {
-                        m.run_root(m.start(r), &mut f);
-                    }
-                    f
-                })
-            })
-            .collect();
-        let mut all = Found::default();
-        for h in hs {
-            if let Ok(f) = h.join() {
-                all.join(f);
-            }
+    let found = relift_proc::workers::run(relift_proc::workers::jobs().min(8), || {
+        let mut f = Found::default();
+        while let Some(&r) = roots.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+            m.run_root(m.start(r), &mut f);
         }
+        f
+    })
+    .into_iter()
+    .fold(Found::default(), |mut all, f| {
+        all.join(f);
         all
     });
     let mut entries: BTreeSet<(u16, u8)> = found.entries.iter().copied().collect();

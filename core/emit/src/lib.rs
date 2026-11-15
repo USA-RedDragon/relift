@@ -425,38 +425,9 @@ pub fn emit_reusing(
     )
 }
 
-/// `f` of every item of `items`, in order, on up to one thread per CPU.
+/// `f` of every item of `items`, in order, on up to the `jobs` setting's threads.
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    let threads = std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(items.len());
-    if threads <= 1 {
-        return items.iter().map(f).collect();
-    }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
-        let workers: Vec<_> = (0..threads)
-            .map(|_| {
-                s.spawn(|| {
-                    let mut mine = Vec::new();
-                    loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(item) = items.get(i) else {
-                            break;
-                        };
-                        mine.push((i, f(item)));
-                    }
-                    mine
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|w| w.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
-            .collect()
-    });
-    out.sort_unstable_by_key(|r| r.0);
-    out.into_iter().map(|r| r.1).collect()
+    relift_proc::workers::parallel(items, f)
 }
 
 /// One function's C as [`Store::keep`] takes it: its entry, key, bytes

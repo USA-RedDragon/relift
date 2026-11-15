@@ -39,6 +39,7 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
+    relift_proc::workers::set_jobs(settings.jobs);
     let mut ui = relift::ui::open(&settings, &cli);
     let result = match &cli.command {
         Command::Import { dump, update } => {

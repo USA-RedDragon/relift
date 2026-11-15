@@ -196,26 +196,21 @@ fn tree_hash_at(root: &Path, cache: Option<&Path>, started: i128) -> std::io::Re
     let next = std::sync::atomic::AtomicUsize::new(0);
     let done = std::sync::Mutex::new(Vec::new());
     let failed = std::sync::Mutex::new(None);
-    let workers = std::thread::available_parallelism().map_or(1, usize::from);
-    std::thread::scope(|sc| {
-        for _ in 0..workers.min(todo.len()) {
-            sc.spawn(|| {
-                loop {
-                    let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(&i) = todo.get(n) else { break };
-                    let path = root.join(&keyed[i].1);
-                    let r = std::fs::metadata(&path)
-                        .map(|m| stamp(&m))
-                        .and_then(|st| hash_file(&path).map(|h| (i, st, h)));
-                    match r {
-                        Ok(v) => done.lock().expect("lock").push(v),
-                        Err(e) => {
-                            *failed.lock().expect("lock") = Some(e);
-                            break;
-                        }
-                    }
+    relift_proc::workers::run(relift_proc::workers::jobs().min(todo.len()), || {
+        loop {
+            let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(&i) = todo.get(n) else { break };
+            let path = root.join(&keyed[i].1);
+            let r = std::fs::metadata(&path)
+                .map(|m| stamp(&m))
+                .and_then(|st| hash_file(&path).map(|h| (i, st, h)));
+            match r {
+                Ok(v) => done.lock().expect("lock").push(v),
+                Err(e) => {
+                    *failed.lock().expect("lock") = Some(e);
+                    break;
                 }
-            });
+            }
         }
     });
     if let Some(e) = failed.into_inner().expect("lock") {

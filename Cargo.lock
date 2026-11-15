@@ -909,6 +909,7 @@ version = "0.1.0"
 dependencies = [
  "relift-guest",
  "relift-ir",
+ "relift-proc",
 ]
 
 [[package]]
@@ -983,6 +984,7 @@ dependencies = [
  "relift-guest",
  "relift-host",
  "relift-ir",
+ "relift-proc",
 ]
 
 [[package]]
@@ -1013,6 +1015,7 @@ version = "0.1.0"
 dependencies = [
  "relift-cpu-sm83",
  "relift-gb-formats",
+ "relift-proc",
 ]
 
 [[package]]
