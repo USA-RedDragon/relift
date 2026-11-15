@@ -1,6 +1,9 @@
-//! The PNG icon of a game: the identity's icon converted to PNG, or a
-//! generated one when the game has none (a cartridge header holds no
-//! image). AppImage and desktop menus want PNG.
+//! The icon of a game as PNG, made once at build time from the guest's own
+//! image (a Switch control icon is JPEG). The converted PNG is what the
+//! self-description embeds; the window, the Windows `.ico`, the Android
+//! launcher sizes and the AppImage icon all come from those bytes. A game
+//! without an icon gets a generated one only for launcher and desktop
+//! entries, never for a window.
 
 use relift_info::Icon;
 use sha2::{Digest, Sha256};
@@ -142,6 +145,170 @@ fn generated(seed: &str) -> Rgb {
     }
 }
 
+/// The icon of a game from a JPEG image: converted to PNG, with its size.
+/// `None` when the bytes do not decode.
+#[must_use]
+pub fn from_jpeg(bytes: &[u8]) -> Option<Icon> {
+    let img = decode_jpeg(bytes)?;
+    Some(Icon {
+        format: "png".into(),
+        width: u32::try_from(img.width).ok()?,
+        height: u32::try_from(img.height).ok()?,
+        data: crate::identity::base64(&encode(&img)),
+    })
+}
+
+fn inflate_stored(z: &[u8]) -> Option<Vec<u8>> {
+    let mut at = 2;
+    let mut out = Vec::new();
+    loop {
+        let head = *z.get(at)?;
+        let len = usize::from(u16::from_le_bytes(z.get(at + 1..at + 3)?.try_into().ok()?));
+        let nlen = u16::from_le_bytes(z.get(at + 3..at + 5)?.try_into().ok()?);
+        if head & 6 != 0 || nlen != !(len as u16) {
+            return None;
+        }
+        out.extend(z.get(at + 5..at + 5 + len)?);
+        at += 5 + len;
+        if head & 1 == 1 {
+            return Some(out);
+        }
+    }
+}
+
+/// Decodes a PNG of the form [`encode`] writes (8-bit RGB, no filter,
+/// stored blocks); any other PNG is `None`.
+fn decode_own(png: &[u8]) -> Option<Rgb> {
+    let rest = png.strip_prefix(b"\x89PNG\r\n\x1a\n")?;
+    let mut at = 0;
+    let mut dims = None;
+    let mut z = Vec::new();
+    while let Some(len) = rest.get(at..at + 4) {
+        let len = u32::from_be_bytes(len.try_into().ok()?) as usize;
+        let kind = rest.get(at + 4..at + 8)?;
+        let body = rest.get(at + 8..at + 8 + len)?;
+        match kind {
+            b"IHDR" => {
+                if body.get(8..13)? != [8, 2, 0, 0, 0] {
+                    return None;
+                }
+                let w = u32::from_be_bytes(body.get(..4)?.try_into().ok()?) as usize;
+                let h = u32::from_be_bytes(body.get(4..8)?.try_into().ok()?) as usize;
+                dims = Some((w, h));
+            }
+            b"IDAT" => z.extend(body),
+            _ => {}
+        }
+        at += 12 + len;
+    }
+    let (width, height) = dims?;
+    let raw = inflate_stored(&z)?;
+    if width == 0 || raw.len() != (width * 3 + 1) * height {
+        return None;
+    }
+    let mut pixels = Vec::with_capacity(width * height * 3);
+    for row in raw.chunks(width * 3 + 1) {
+        if row[0] != 0 {
+            return None;
+        }
+        pixels.extend(&row[1..]);
+    }
+    Some(Rgb {
+        width,
+        height,
+        pixels,
+    })
+}
+
+/// `img` scaled to `size` by `size` pixels, averaging the source pixels
+/// each target pixel covers (a nearest pixel when scaling up).
+fn scaled(img: &Rgb, size: usize) -> Rgb {
+    let mut pixels = Vec::with_capacity(size * size * 3);
+    for y in 0..size {
+        let (y0, y1) = span(y, size, img.height);
+        for x in 0..size {
+            let (x0, x1) = span(x, size, img.width);
+            let mut sum = [0usize; 3];
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let at = (sy * img.width + sx) * 3;
+                    for (c, v) in sum.iter_mut().enumerate() {
+                        *v += usize::from(img.pixels[at + c]);
+                    }
+                }
+            }
+            let n = (y1 - y0) * (x1 - x0);
+            pixels.extend(sum.map(|v| (v / n) as u8));
+        }
+    }
+    Rgb {
+        width: size,
+        height: size,
+        pixels,
+    }
+}
+
+fn span(i: usize, to: usize, from: usize) -> (usize, usize) {
+    let a = i * from / to;
+    let b = ((i + 1) * from).div_ceil(to).max(a + 1);
+    (a, b.min(from))
+}
+
+/// The game's image: its own icon (PNG made by this module), or with
+/// `generate` the generated one. `None` for a game without an icon when
+/// `generate` is off.
+fn image_of(icon: Option<&Icon>, seed: &str, generate: bool) -> Option<Rgb> {
+    icon.and_then(|i| decode_own(&unbase64(&i.data)?))
+        .or_else(|| generate.then(|| generated(seed)))
+}
+
+/// The Android launcher icons: `(resource directory, PNG)` for each density.
+/// A game without an icon gets the generated one (the launcher needs some
+/// icon).
+#[must_use]
+pub fn launcher_pngs(icon: Option<&Icon>, seed: &str) -> Vec<(&'static str, Vec<u8>)> {
+    const SIZES: [(&str, usize); 5] = [
+        ("mipmap-mdpi", 48),
+        ("mipmap-hdpi", 72),
+        ("mipmap-xhdpi", 96),
+        ("mipmap-xxhdpi", 144),
+        ("mipmap-xxxhdpi", 192),
+    ];
+    let Some(img) = image_of(icon, seed, true) else {
+        return Vec::new();
+    };
+    SIZES
+        .iter()
+        .map(|(dir, n)| (*dir, encode(&scaled(&img, *n))))
+        .collect()
+}
+
+/// A Windows `.ico` of the game's own icon, PNG entries at 16, 32, 48 and
+/// 256 pixels; `None` for a game without one (the executable keeps the
+/// system's icon).
+#[must_use]
+pub fn ico(icon: Option<&Icon>) -> Option<Vec<u8>> {
+    let img = image_of(icon, "", false)?;
+    let sizes = [16usize, 32, 48, 256];
+    let pngs: Vec<Vec<u8>> = sizes.iter().map(|n| encode(&scaled(&img, *n))).collect();
+    let mut out = Vec::new();
+    out.extend([0u8, 0, 1, 0]);
+    out.extend((sizes.len() as u16).to_le_bytes());
+    let mut offset = 6 + 16 * sizes.len();
+    for (n, png) in sizes.iter().zip(&pngs) {
+        out.push(if *n >= 256 { 0 } else { *n as u8 });
+        out.push(if *n >= 256 { 0 } else { *n as u8 });
+        out.extend([0, 0, 1, 0, 32, 0]);
+        out.extend((png.len() as u32).to_le_bytes());
+        out.extend((offset as u32).to_le_bytes());
+        offset += png.len();
+    }
+    for png in pngs {
+        out.extend(png);
+    }
+    Some(out)
+}
+
 /// The PNG bytes of the game's icon. `seed` (the game's name) decides the
 /// generated icon of a game without one.
 #[must_use]
@@ -207,5 +374,97 @@ mod tests {
             data: crate::identity::base64(b"not a jpeg"),
         };
         assert_eq!(png(Some(&broken), "y"), png(None, "y"));
+    }
+
+    fn gradient() -> Icon {
+        let mut pixels = Vec::new();
+        for y in 0..64u8 {
+            for x in 0..64u8 {
+                pixels.extend([x * 4, y * 4, 128]);
+            }
+        }
+        let img = Rgb {
+            width: 64,
+            height: 64,
+            pixels,
+        };
+        Icon {
+            format: "png".into(),
+            width: 64,
+            height: 64,
+            data: crate::identity::base64(&encode(&img)),
+        }
+    }
+
+    #[test]
+    fn our_png_decodes_back_to_the_same_pixels() {
+        let icon = gradient();
+        let img = decode_own(&unbase64(&icon.data).unwrap()).unwrap();
+        assert_eq!((img.width, img.height), (64, 64));
+        assert_eq!(&img.pixels[..3], &[0, 0, 128]);
+        assert_eq!(&img.pixels[63 * 3..64 * 3], &[252, 0, 128]);
+        assert!(decode_own(b"\x89PNG\r\n\x1a\nnope").is_none());
+    }
+
+    #[test]
+    fn a_jpeg_becomes_a_png_with_its_size() {
+        let jpeg: &[u8] = include_bytes!("../tests/icon.jpg");
+        let icon = from_jpeg(jpeg).unwrap();
+        assert_eq!(
+            (icon.format.as_str(), icon.width, icon.height),
+            ("png", 16, 8)
+        );
+        let img = decode_own(&unbase64(&icon.data).unwrap()).unwrap();
+        assert_eq!((img.width, img.height), (16, 8));
+        assert!(from_jpeg(b"not a jpeg").is_none());
+    }
+
+    #[test]
+    fn the_launcher_gets_five_densities_and_a_game_without_icon_a_generated_one() {
+        for icon in [Some(gradient()), None] {
+            let l = launcher_pngs(icon.as_ref(), "g");
+            let dirs: Vec<_> = l.iter().map(|(d, _)| *d).collect();
+            assert_eq!(
+                dirs,
+                [
+                    "mipmap-mdpi",
+                    "mipmap-hdpi",
+                    "mipmap-xhdpi",
+                    "mipmap-xxhdpi",
+                    "mipmap-xxxhdpi"
+                ]
+            );
+            for ((_, png), n) in l.iter().zip([48u32, 72, 96, 144, 192]) {
+                assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), n);
+            }
+        }
+    }
+
+    #[test]
+    fn the_ico_lists_its_entries_and_a_game_without_icon_has_none() {
+        assert!(ico(None).is_none());
+        let ico = ico(Some(&gradient())).unwrap();
+        assert_eq!(&ico[..6], &[0, 0, 1, 0, 4, 0]);
+        let entry = |i: usize| &ico[6 + 16 * i..22 + 16 * i];
+        assert_eq!((entry(0)[0], entry(3)[0]), (16, 0));
+        for i in 0..4 {
+            let len = u32::from_le_bytes(entry(i)[8..12].try_into().unwrap()) as usize;
+            let at = u32::from_le_bytes(entry(i)[12..16].try_into().unwrap()) as usize;
+            assert_eq!(&ico[at..at + 8], b"\x89PNG\r\n\x1a\n");
+            assert!(at + len <= ico.len());
+        }
+    }
+
+    #[test]
+    fn scaling_down_averages_and_up_repeats() {
+        let img = Rgb {
+            width: 2,
+            height: 2,
+            pixels: vec![0, 0, 0, 100, 100, 100, 100, 100, 100, 200, 200, 200],
+        };
+        assert_eq!(scaled(&img, 1).pixels, [100, 100, 100]);
+        let up = scaled(&img, 4);
+        assert_eq!(&up.pixels[..3], &[0, 0, 0]);
+        assert_eq!(&up.pixels[(3 * 4 + 3) * 3..], &[200, 200, 200]);
     }
 }

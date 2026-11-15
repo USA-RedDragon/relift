@@ -353,6 +353,7 @@ pub fn switch_document(
 ///
 /// The header does not decode.
 pub fn handheld_document(
+    name: &str,
     rom: &[u8],
     gba: bool,
     settings: Vec<Setting>,
@@ -367,6 +368,8 @@ pub fn handheld_document(
     };
     let mut info = Info::new(env!("CARGO_PKG_VERSION"));
     info.identity = hack.map_or(id, |h| h.identity.clone());
+    info.identity.names = std::iter::once(("default".to_string(), name.to_string())).collect();
+    info.identity.default_language = info.identity.first_language();
     info.save = save;
     info.mods = mods;
     info.settings = if gba {
@@ -517,8 +520,21 @@ mod tests {
                 "[input.port.dial]\nkind = \"Rotary dial\"\n[input.port.dial.control.turn]\nkind = \"axis\"\n",
             )
             .unwrap();
-        let info = handheld_document(&rom, true, game, &ports, Mods::default(), None).unwrap();
+        let info = handheld_document(
+            "My Project",
+            &rom,
+            true,
+            game,
+            &ports,
+            Mods::default(),
+            None,
+        )
+        .unwrap();
         assert_eq!(info.identity.platform, "gba");
+        assert_eq!(info.identity.names.len(), 1);
+        assert_eq!(info.identity.title(&["French"]), Some("My Project"));
+        assert_eq!(info.identity.default_language.as_deref(), Some("default"));
+        assert!(info.identity.icon.is_none());
         assert_eq!(info.settings.runtime.len(), 5);
         assert_eq!(info.settings.game.len(), 1);
         let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();

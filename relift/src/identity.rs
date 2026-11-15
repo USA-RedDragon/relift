@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use relift_gb_formats::{CgbFlag, Header};
-use relift_info::{Icon, Identity, Patch, Save};
+use relift_info::{Identity, Patch, Save};
 
 const NACP_LANGUAGES: [&str; 16] = [
     "AmericanEnglish",
@@ -100,12 +100,8 @@ pub fn from_nacp(nacp: &[u8], title_id: u64, icon: Option<&[u8]>) -> Result<Iden
     }
     let version = text(&nacp[NACP_VERSION..NACP_VERSION + 16]);
     id.version = (!version.is_empty()).then_some(version);
-    id.icon = icon.map(|b| Icon {
-        format: "jpeg".into(),
-        width: 0,
-        height: 0,
-        data: base64(b),
-    });
+    id.default_language = id.first_language();
+    id.icon = icon.and_then(crate::icon::from_jpeg);
     Ok(id)
 }
 
@@ -245,7 +241,8 @@ mod tests {
 
     #[test]
     fn a_nacp_gives_names_publishers_version_and_icon() {
-        let id = from_nacp(&nacp(), 0x0100_0000_0000_1234, Some(&[1, 2, 3, 4])).unwrap();
+        let jpeg: &[u8] = include_bytes!("../tests/icon.jpg");
+        let id = from_nacp(&nacp(), 0x0100_0000_0000_1234, Some(jpeg)).unwrap();
         assert_eq!(id.platform, "switch");
         assert_eq!(id.title_id.as_deref(), Some("0100000000001234"));
         assert_eq!(id.names["AmericanEnglish"], "Synth");
@@ -255,8 +252,15 @@ mod tests {
         assert_eq!(id.version.as_deref(), Some("1.0.2"));
         let icon = id.icon.unwrap();
         assert_eq!(
-            (icon.format.as_str(), icon.data.as_str()),
-            ("jpeg", "AQIDBA==")
+            (icon.format.as_str(), icon.width, icon.height),
+            ("png", 16, 8)
+        );
+        assert_eq!(id.default_language.as_deref(), Some("AmericanEnglish"));
+        assert!(
+            from_nacp(&nacp(), 1, Some(b"not a jpeg"))
+                .unwrap()
+                .icon
+                .is_none()
         );
         assert!(from_nacp(&[0; 16], 0, None).is_err());
     }

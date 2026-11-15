@@ -163,7 +163,6 @@ struct Project {
     rom: Vec<u8>,
     dir: PathBuf,
     source: PathBuf,
-    title: String,
     model: String,
 }
 
@@ -188,7 +187,6 @@ fn project(settings: &Settings) -> Result<Project, BoxError> {
         rom,
         dir,
         source: s("rom").map(PathBuf::from).unwrap_or_default(),
-        title: s("title").unwrap_or_default(),
         model: s("model").unwrap_or_else(|| "cgb".into()),
     })
 }
@@ -474,7 +472,7 @@ pub fn build(
                 &lifted.sleds,
                 &lifted.ram,
                 &relift_gb::program::Program {
-                    title: &p.title,
+                    title: &name,
                     model: &p.model,
                     save: &save,
                     android: android.is_some(),
@@ -502,6 +500,7 @@ pub fn build(
         ..relift_info::Mods::default()
     };
     let doc = crate::info::handheld_document(
+        &name,
         &rom,
         false,
         game_settings.clone(),
@@ -515,6 +514,7 @@ pub fn build(
             *b = 0;
         }
         crate::info::handheld_document(
+            &name,
             &fixed,
             false,
             game_settings.clone(),
@@ -558,7 +558,7 @@ pub fn build(
     Ok(Built {
         exe,
         source: p.source,
-        title: p.title,
+        title: doc.identity.title(&[]).unwrap_or(&name).to_string(),
         android,
     })
 }

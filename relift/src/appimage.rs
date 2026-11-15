@@ -160,12 +160,7 @@ pub(crate) fn slug(name: &str) -> String {
 }
 
 pub(crate) fn display_name(info: &Info, fallback: &str) -> String {
-    let n = &info.identity.names;
-    let pick = n
-        .get("AmericanEnglish")
-        .or_else(|| n.get("default"))
-        .or_else(|| n.values().next())
-        .map_or(fallback, String::as_str);
+    let pick = info.identity.title(&[]).unwrap_or(fallback);
     let clean: String = pick.chars().filter(|c| !c.is_control()).collect();
     let clean = clean.trim();
     if clean.is_empty() {
@@ -610,15 +605,18 @@ mod tests {
     }
 
     #[test]
-    fn the_title_prefers_american_english_then_default() {
+    fn the_title_is_the_default_language_then_the_first_present() {
         let mut i = Info::new("0");
         assert_eq!(display_name(&i, "proj"), "proj");
         i.identity.names.insert("default".into(), "D".into());
-        i.identity.names.insert("French".into(), "F".into());
         assert_eq!(display_name(&i, "proj"), "D");
+        i.identity.names.insert("French".into(), "F".into());
+        i.identity.default_language = i.identity.first_language();
+        assert_eq!(display_name(&i, "proj"), "F");
         i.identity
             .names
             .insert("AmericanEnglish".into(), "A\n".into());
+        i.identity.default_language = i.identity.first_language();
         assert_eq!(display_name(&i, "proj"), "A");
     }
 
