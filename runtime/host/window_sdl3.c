@@ -22,6 +22,13 @@
 
 #include "core.h"
 
+#ifdef __ANDROID__
+#define VK_USE_PLATFORM_ANDROID_KHR
+#include <vulkan/vulkan.h>
+
+#include "hostlib.h"
+#endif
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -469,10 +476,14 @@ static const char *const *sdl_vulkan_extensions(void) { return g_exts; }
 
 static void *sdl_vulkan_gipa(void)
 {
+#ifdef __ANDROID__
+    return rl_hostlib_vulkan_gipa();
+#else
     SDL_FunctionPointer f = SDL_Vulkan_GetVkGetInstanceProcAddr();
     void *p;
     memcpy(&p, &f, sizeof p);
     return p;
+#endif
 }
 
 typedef struct surface_req {
@@ -486,7 +497,21 @@ static void do_surface(void *p)
 {
     surface_req *r = p;
     VkSurfaceKHR s = 0;
+#ifdef __ANDROID__
+    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)(uintptr_t)rl_hostlib_vulkan_gipa();
+    PFN_vkCreateAndroidSurfaceKHR create =
+        gipa ? (PFN_vkCreateAndroidSurfaceKHR)gipa((VkInstance)r->instance, "vkCreateAndroidSurfaceKHR") : NULL;
+    VkAndroidSurfaceCreateInfoKHR info = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
+        .window = SDL_GetPointerProperty(SDL_GetWindowProperties(r->w->w), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER,
+                                         NULL),
+    };
+    r->ok = create && info.window && create((VkInstance)r->instance, &info, NULL, &s) == VK_SUCCESS;
+    if (!r->ok)
+        SDL_SetError("vkCreateAndroidSurfaceKHR failed");
+#else
     r->ok = SDL_Vulkan_CreateSurface(r->w->w, (VkInstance)r->instance, NULL, &s);
+#endif
     if (!r->ok)
         rl_log(RL_LOG_ERROR, "window", "SDL could not create a Vulkan surface: %s", SDL_GetError());
     memcpy(&r->surface, &s, sizeof r->surface);

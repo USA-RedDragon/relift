@@ -79,11 +79,18 @@ CFLAGS_BASE += -DRL_HOST_AUDIO -DRL_HOST_OPUS $(shell pkg-config --cflags opus s
 LDLIBS += $(shell pkg-config --libs opus sdl3)
 endif
 ifeq ($(VIDEO),sdl3)
-HOST_SRCS += host/window_sdl3.c
+HOST_SRCS += host/window_sdl3.c $(if $(ANDROID),host/android_sdl3.c)
 CFLAGS_BASE += -DRL_HOST_VIDEO $(shell pkg-config --cflags sdl3)
-LDLIBS += $(shell pkg-config --libs sdl3)
+LDLIBS += $(shell pkg-config --libs sdl3) $(if $(ANDROID),-llog)
 else ifneq ($(VIDEO),none)
 $(error VIDEO must be none or sdl3)
+endif
+# Android: ADRENOTOOLS_DIR=<cache>/sdk/adrenotools/aarch64-android (tools/cross/android_deps.py)
+# lets video.gpu_driver load a custom Vulkan driver package.
+ADRENOTOOLS_DIR ?=
+ifneq ($(and $(ANDROID),$(ADRENOTOOLS_DIR)),)
+CFLAGS_BASE += -DRL_ADRENOTOOLS -I$(ADRENOTOOLS_DIR)/include
+LDLIBS += -L$(ADRENOTOOLS_DIR)/lib -ladrenotools
 endif
 ifneq ($(APPLE),)
 MOLTENVK_DIR ?= $(firstword $(patsubst %/lib/libMoltenVK.dylib,%,$(wildcard /opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib /usr/local/opt/molten-vk/lib/libMoltenVK.dylib)))

@@ -21,7 +21,12 @@ RL_RUNTIME_API void *rl_hostlib_sym(void *lib, const char *name);
 
 /**
  * @brief The host Vulkan loader's vkGetInstanceProcAddr, or NULL when no
- * loader is installed. Tries RELIFT_VULKAN_LIBRARY, then, in a build linked
+ * loader is installed. On Android, in a build with libadrenotools
+ * (RL_ADRENOTOOLS), video.gpu_driver may name an installed driver package
+ * (gpu_driver.h): the first call that sees one loads it once, through a
+ * second instance of the system loader, and every later call returns that
+ * loader; a package that does not load falls back to the system driver.
+ * Otherwise tries RELIFT_VULKAN_LIBRARY, then, in a build linked
  * against a Vulkan implementation (RL_VULKAN_LINKED, MoltenVK on Apple
  * hosts), the linked one, then the host's default names (libvulkan.so.1 on
  * Linux, libvulkan.1.dylib and libMoltenVK.dylib on macOS, vulkan-1.dll on

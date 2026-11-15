@@ -631,8 +631,29 @@ static void build_image(void)
     }
 }
 
+#ifdef __ANDROID__
+#include <relift/android.h>
+
+#include <stdio.h>
+#include <sys/stat.h>
+
+__attribute__((visibility("default"))) int SDL_main(int argc, char **argv);
+
+int SDL_main(int argc, char **argv)
+{
+    char sdmc[4096];
+    rl_android_init();
+    if (rl_android_files_dir() && !getenv("RELIFT_SDMC")) {
+        snprintf(sdmc, sizeof sdmc, "%s/sdmc", rl_android_files_dir());
+        mkdir(sdmc, 0771);
+        setenv("RELIFT_SDMC", sdmc, 0);
+    }
+    if (!getenv("RELIFT_VIDEO"))
+        setenv("RELIFT_VIDEO", "sdl3", 0);
+#else
 int main(int argc, char **argv)
 {
+#endif
     if (!rl_hostlib_vulkan_gipa() && !getenv("RELIFT_VK_REQUIRE")) {
         fprintf(stderr, "vk_present: no host Vulkan loader; skipped\n");
         return SKIP;
