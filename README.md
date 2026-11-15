@@ -114,9 +114,12 @@ and the frames are paced on that output's queue. The battery save is a raw
 
 The devices come from rustyboi-core (`guests/gb/devices`), driven at every
 instruction boundary; lifted code runs the instruction bodies. Code with no
-lifted function (code copied to RAM, or missed by discovery) runs on the
-device library's CPU one instruction at a time until it returns or reaches
-lifted code. CI builds and runs 38 corpus cases through this path
+lifted function (code missed by discovery, or code in RAM no run has shown
+yet) runs on the device library's CPU one instruction at a time until it
+reaches lifted code. The program adds what it had to run that way to
+`learned.txt` in the project's import directory, and the next `relift build`
+lifts it; `--interp-log FILE` lists every such instruction and why it ran
+there. CI builds and runs 38 corpus cases through this path
 (`runtime/guests/gb/devtests/ci_cases.toml`).
 
 ### Game Boy Advance

@@ -20,9 +20,10 @@ use relift_ir::{Block, Next};
 use crate::frontend::{Gb, device_map};
 
 /// The most instructions of a run of one filler byte (`nop`, `rst $38`)
-/// that are lifted; the rest of a run is left to dispatch, which runs it on
-/// the device library's CPU if it ever executes. Test ROMs pad whole banks
-/// with such runs, which discovery reaches by falling through.
+/// that are lifted one by one. The rest of a `nop` run is a sled
+/// ([`Lifted::sleds`]), which the runtime runs as one loop; the rest of a
+/// `rst $38` run is left to dispatch. Test ROMs pad whole banks with such
+/// runs, which discovery reaches by falling through.
 pub const FILLER_RUN: usize = 8;
 
 /// The bank of a unit of the fixed window in [`Unit::bank`].
@@ -59,11 +60,33 @@ pub struct Lifted {
     pub units: Vec<Unit>,
     /// Instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
-    /// Instructions an analysis function held in another bank's window,
-    /// left to dispatch.
+    /// Instructions an analysis function held in another bank's window;
+    /// each is lifted once more in that bank's unit, in a function of
+    /// its own there that dispatch enters at any instruction.
     pub foreign: usize,
-    /// Instructions of filler runs past [`FILLER_RUN`], left to dispatch.
+    /// Instructions of filler runs past [`FILLER_RUN`] that are not
+    /// sleds, left to dispatch.
     pub filler: usize,
+    /// Runs of `nop` past [`FILLER_RUN`] as (unit bank, first address,
+    /// end address), which the runtime runs as one loop.
+    pub sleds: Vec<(u32, u16, u16)>,
+    /// Instructions lifted at RAM addresses as (address, opcode key, host
+    /// name), in the units whose bank is [`RAM_UNIT`].
+    pub ram: Vec<(u16, u16, String)>,
+}
+
+/// The [`Unit::bank`] of a unit of instructions lifted at RAM addresses,
+/// which the runtime reaches through its RAM table rather than dispatch.
+pub const RAM_UNIT: u32 = u32::MAX - 1;
+
+/// What earlier runs recorded in the learned file.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Learned {
+    /// ROM locations run without lifted code.
+    pub rom: Vec<Loc>,
+    /// RAM instructions run without lifted code, as (address, opcode key):
+    /// the opcode, or 0x100 plus the byte after a CB prefix.
+    pub ram: Vec<(u16, u16)>,
 }
 
 fn unit_key(l: Loc) -> u32 {
@@ -103,6 +126,8 @@ fn lift_function(
     rom: &[u8],
     f: &relift_gb_analyze::Function,
     lifted: &mut Lifted,
+    foreign: &mut BTreeMap<Loc, u8>,
+    sleds: &mut BTreeSet<(u32, u16)>,
 ) -> Lifts {
     let own = unit_key(f.entry);
     let bank = (own != FIXED).then_some(u64::from(own));
@@ -113,6 +138,7 @@ fn lift_function(
     for (&l, &len) in &f.body {
         if unit_key(l) != own && l.is_window() {
             lifted.foreign += 1;
+            foreign.insert(l, len);
             continue;
         }
         let byte = bytes_at(rom, l).and_then(|b| b.first().copied());
@@ -127,7 +153,11 @@ fn lift_function(
             _ => (None, 0),
         };
         if run.1 > FILLER_RUN {
-            lifted.filler += 1;
+            if byte == Some(0x00) {
+                sleds.insert((unit_key(l), l.addr));
+            } else {
+                lifted.filler += 1;
+            }
             continue;
         }
         if l.addr >= f.entry.addr {
@@ -182,22 +212,80 @@ fn lift_function(
     }
 }
 
+/// Functions in their own bank's unit for the instructions that analysis
+/// functions of other units held there and no function of the bank lifts:
+/// one per bank, entered at its lowest instruction.
+fn homes(
+    groups: &BTreeMap<u32, Vec<(Loc, Lifts)>>,
+    foreign: &BTreeMap<Loc, u8>,
+) -> Vec<(Loc, relift_gb_analyze::Function)> {
+    let held: BTreeSet<(u32, u64)> = groups
+        .iter()
+        .flat_map(|(&k, list)| {
+            list.iter()
+                .flat_map(move |(_, f)| f.blocks.iter().map(move |(pc, ..)| (k, *pc)))
+        })
+        .collect();
+    let mut by_bank: BTreeMap<u32, BTreeMap<Loc, u8>> = BTreeMap::new();
+    for (&l, &len) in foreign {
+        let key = unit_key(l);
+        if !held.contains(&(key, u64::from(l.addr))) {
+            by_bank.entry(key).or_default().insert(l, len);
+        }
+    }
+    by_bank
+        .into_values()
+        .filter_map(|body| {
+            let entry = *body.keys().next()?;
+            let bytes = body.values().map(|&n| usize::from(n)).sum();
+            Some((
+                entry,
+                relift_gb_analyze::Function {
+                    entry,
+                    origin: relift_gb_analyze::Origin::Root,
+                    body,
+                    bytes,
+                    switches_bank: false,
+                    trampoline: None,
+                },
+            ))
+        })
+        .collect()
+}
+
 /// Lifts every function of `report` (an analysis of `rom`) into units and
-/// emits them; `image_id` identifies the ROM to the runtime.
+/// emits them, with the instructions at RAM addresses in `ram` (address,
+/// opcode key; see [`Learned::ram`]); `image_id` identifies the ROM to the
+/// runtime.
 #[must_use]
-pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
+pub fn lift(rom: &[u8], report: &Report, ram: &[(u16, u16)], image_id: [u8; 32]) -> Lifted {
     let fe = Gb::new();
     let mut lifted = Lifted::default();
     let mut groups: BTreeMap<u32, Vec<(Loc, Lifts)>> = BTreeMap::new();
+    let mut foreign = BTreeMap::new();
+    let mut sleds = BTreeSet::new();
     for f in report.functions.values() {
         if !f.entry.is_window() && f.entry.addr >= 0x8000 {
             continue;
         }
-        let l = lift_function(&fe, rom, f, &mut lifted);
+        let l = lift_function(&fe, rom, f, &mut lifted, &mut foreign, &mut sleds);
+        if l.blocks.is_empty() {
+            continue;
+        }
         groups
             .entry(unit_key(f.entry))
             .or_default()
             .push((f.entry, l));
+    }
+    for (entry, f) in homes(&groups, &foreign) {
+        let l = lift_function(&fe, rom, &f, &mut lifted, &mut BTreeMap::new(), &mut sleds);
+        groups.entry(unit_key(entry)).or_default().push((entry, l));
+    }
+    for (key, addr) in sleds {
+        match lifted.sleds.last_mut() {
+            Some((k, _, end)) if *k == key && *end == addr => *end = addr + 1,
+            _ => lifted.sleds.push((key, addr, addr + 1)),
+        }
     }
     groups.entry(FIXED).or_default();
     let window: BTreeSet<(u64, u64)> = groups
@@ -260,6 +348,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             unit_symbol: symbol.clone(),
             io_map: device_map(),
             image_id,
+            enter_anywhere: Some(0xFFFF),
             ..Options::default()
         };
         let output = relift_emit::emit(&fe, &fns, &[], &opts);
@@ -271,6 +360,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             functions: fns.len(),
         });
     }
+    lift_ram(ram, image_id, &mut lifted);
     lifted
 }
 
@@ -311,6 +401,10 @@ pub struct Program<'a> {
     /// Build the entry for an Android app: `SDL_main` in a shared library,
     /// with `save` a file name in the app's files directory.
     pub android: bool,
+    /// The file the program adds the ROM locations it ran without lifted
+    /// code to, which the next build reads ([`read_learned`]); empty for
+    /// none.
+    pub learn: &'a str,
 }
 
 fn c_string(s: &str) -> String {
@@ -329,7 +423,135 @@ fn c_string(s: &str) -> String {
     o
 }
 
-/// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it, `rom`).
+/// A learned file as the program writes it: lines `BBB:AAAA` (a ROM
+/// location, bank and address in hex) and `ram AAAA KKK` (a RAM address
+/// and opcode key in hex); lines that do not parse are left out.
+#[must_use]
+pub fn read_learned(text: &str) -> Learned {
+    let mut out = Learned::default();
+    for l in text.lines() {
+        let l = l.trim();
+        if let Some(rest) = l.strip_prefix("ram ") {
+            let mut it = rest.split_whitespace();
+            let a = it.next().and_then(|a| u16::from_str_radix(a, 16).ok());
+            let k = it.next().and_then(|k| u16::from_str_radix(k, 16).ok());
+            if let (Some(a), Some(k)) = (a, k)
+                && a >= 0x8000
+                && k < 0x200
+            {
+                out.ram.push((a, k));
+            }
+        } else if let Some((b, a)) = l.split_once(':')
+            && let (Ok(bank), Ok(addr)) = (u16::from_str_radix(b, 16), u16::from_str_radix(a, 16))
+        {
+            out.rom.push(Loc { bank, addr });
+        }
+    }
+    out
+}
+
+/// The units of the instructions at RAM addresses in `ram` (address,
+/// opcode key): each one lifted with its operands read as it runs, as a
+/// function of its own. The k-th key of an address goes to a unit of keys
+/// k at addresses of one residue mod 4, so no function of a unit starts
+/// where another one's instruction ends (up to 3 bytes on): a transfer
+/// there must go through the RAM table, which checks the opcode fetched,
+/// not straight to the function.
+fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
+    let fe = Gb::new();
+    let mut by_pc: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
+    for &(pc, k) in ram {
+        if pc >= 0x8000 && k < 0x200 {
+            by_pc.entry(pc).or_default().insert(k);
+        }
+    }
+    let mut groups: Vec<Vec<(u16, u16, Lifts)>> = Vec::new();
+    for (&pc, keys) in &by_pc {
+        for (i, &k) in keys.iter().enumerate() {
+            let bytes = if k >= 0x100 {
+                vec![0xCB, (k & 0xFF) as u8, 0]
+            } else {
+                vec![k as u8, 0, 0]
+            };
+            let raw = bytes.iter().fold(0u64, |a, b| (a << 8) | u64::from(*b));
+            let mut blocks: Vec<(u64, Result<Block, LiftFailure>, u64)> = Vec::new();
+            let mut todo = vec![u64::from(pc)];
+            while let Some(at) = todo.pop() {
+                let r = fe.lift(&bytes, at);
+                if let Ok(b) = &r
+                    && let Next::Select { taken, .. } = b.exit.next
+                    && taken >= HALF
+                    && taken & 0xFFFF == u64::from(pc)
+                    && !blocks.iter().any(|(a, ..)| *a == taken)
+                {
+                    todo.push(taken);
+                }
+                if r.is_err() {
+                    continue;
+                }
+                blocks.push((at, r, raw));
+            }
+            if blocks.is_empty() {
+                continue;
+            }
+            blocks.sort_by_key(|(a, ..)| *a);
+            let g = i * 4 + usize::from(pc & 3);
+            if groups.len() <= g {
+                groups.resize_with(g + 1, Vec::new);
+            }
+            groups[g].push((pc, k, Lifts { blocks, span: 1 }));
+        }
+    }
+    for (i, list) in groups.iter().enumerate() {
+        let fns: Vec<Function<'_>> = list
+            .iter()
+            .map(|(pc, k, l)| Function {
+                entry: u64::from(*pc),
+                name: format!("gb_ram_{pc:04x}_{k:03x}"),
+                guest_name: None,
+                span: 1,
+                insts: l
+                    .blocks
+                    .iter()
+                    .filter_map(|(at, r, raw)| {
+                        r.as_ref()
+                            .ok()
+                            .map(|block| (*at, Insn::Lifted { block, raw: *raw }))
+                    })
+                    .collect(),
+                tables: BTreeMap::new(),
+                pads: BTreeSet::new(),
+            })
+            .collect();
+        let symbol = format!("rl_unit_gb_ram{i}");
+        let opts = Options {
+            unit_name: format!("ram{i}"),
+            unit_symbol: symbol.clone(),
+            io_map: device_map(),
+            image_id,
+            ..Options::default()
+        };
+        let output = relift_emit::emit(&fe, &fns, &[], &opts);
+        for f in &fns {
+            let k = list
+                .iter()
+                .find(|(pc, ..)| u64::from(*pc) == f.entry)
+                .map(|(_, k, _)| *k);
+            if let Some(k) = k {
+                lifted.ram.push((f.entry as u16, k, f.name.clone()));
+            }
+        }
+        lifted.units.push(Unit {
+            bank: RAM_UNIT,
+            symbol,
+            dir: format!("ram{i}"),
+            output,
+            functions: fns.len(),
+        });
+    }
+}
+
+/// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it).
 #[must_use]
 pub fn rom_c(rom: &[u8]) -> String {
     let mut t = relift_guest::blob::blob_c("rl_gb_rom", "c/rom.bin", rom);
@@ -340,7 +562,12 @@ pub fn rom_c(rom: &[u8]) -> String {
 
 /// `program.c`: the unit list and `main`.
 #[must_use]
-pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
+pub fn program_c(
+    units: &[Unit],
+    sleds: &[(u32, u16, u16)],
+    ram: &[(u16, u16, String)],
+    p: &Program<'_>,
+) -> String {
     let mut t = String::from(
         "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"gbmain.h\"\n",
     );
@@ -348,8 +575,25 @@ pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
         let _ = writeln!(t, "extern const rl_unit {};", u.symbol);
     }
     t.push_str("extern const uint8_t rl_gb_rom[];\nextern const size_t rl_gb_rom_len;\n");
+    if !ram.is_empty() {
+        for (_, _, name) in ram {
+            let _ = writeln!(t, "RL_LIFTED({name});");
+        }
+        t.push_str("static const rl_gb_ram ram[] = {\n");
+        for (pc, k, name) in ram {
+            let _ = writeln!(t, "    {{ {pc:#x}u, {k:#x}u, {name} }},");
+        }
+        t.push_str("};\n");
+    }
+    if !sleds.is_empty() {
+        t.push_str("static const rl_gb_sled sleds[] = {\n");
+        for (bank, start, end) in sleds {
+            let _ = writeln!(t, "    {{ UINT32_C({bank:#x}), {start:#x}u, {end:#x}u }},");
+        }
+        t.push_str("};\n");
+    }
     t.push_str("static const rl_gb_unit units[] = {\n");
-    for u in units {
+    for u in units.iter().filter(|u| u.bank != RAM_UNIT) {
         let _ = writeln!(t, "    {{ &{}, UINT32_C({:#x}) }},", u.symbol, u.bank);
     }
     t.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
@@ -366,8 +610,8 @@ pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
     }
     let _ = write!(
         t,
-        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {} }};\n    int status = rl_gb_main(&prog, argc, argv);\n{}    return status;\n}}\n",
-        units.len(),
+        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {}, {}, {}, {}u, {}, {}u }};\n    int status = rl_gb_main(&prog, argc, argv);\n{}    return status;\n}}\n",
+        units.iter().filter(|u| u.bank != RAM_UNIT).count(),
         c_string(p.title),
         c_string(p.model),
         if p.android {
@@ -375,6 +619,11 @@ pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
         } else {
             c_string(p.save)
         },
+        c_string(p.learn),
+        if sleds.is_empty() { "NULL" } else { "sleds" },
+        sleds.len(),
+        if ram.is_empty() { "NULL" } else { "ram" },
+        ram.len(),
         if p.android {
             "    rl_android_flush();\n"
         } else {
@@ -404,7 +653,7 @@ mod tests {
     fn the_fixed_window_and_each_bank_are_units_of_their_own() {
         let rom = rom();
         let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
-        let l = lift(&rom, &report, [0; 32]);
+        let l = lift(&rom, &report, &[], [0; 32]);
         let banks: Vec<u32> = l.units.iter().map(|u| u.bank).collect();
         assert_eq!(banks, [FIXED, 1]);
         assert!(l.unlifted.is_empty(), "{:?}", l.unlifted);
@@ -435,7 +684,7 @@ mod tests {
         let mut r = rom();
         r[0x150..0x153].copy_from_slice(&[0x1C, 0x1C, 0xC9]);
         let report = relift_gb_analyze::analyze(&r).expect("analyzes");
-        let l = lift(&r, &report, [0; 32]);
+        let l = lift(&r, &report, &[], [0; 32]);
         let c: String = l.units[0]
             .output
             .files
@@ -449,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_run_of_filler_is_left_to_dispatch() {
+    fn a_long_run_of_nop_is_a_sled() {
         let mut r = rom();
         r[0x150..0x158].copy_from_slice(&[0x3E, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         for b in &mut r[0x158..0x200] {
@@ -457,7 +706,7 @@ mod tests {
         }
         r[0x200..0x202].copy_from_slice(&[0x18, 0xFE]);
         let report = relift_gb_analyze::analyze(&r).expect("analyzes");
-        let l = lift(&r, &report, [0; 32]);
+        let l = lift(&r, &report, &[], [0; 32]);
         let c: String = l.units[0]
             .output
             .files
@@ -466,22 +715,134 @@ mod tests {
             .collect();
         assert!(c.contains("L_159: {"), "{c}");
         assert!(!c.contains("L_15a: {"), "{c}");
-        assert!(l.filler >= 0x200 - 0x15A, "{}", l.filler);
+        assert_eq!(l.filler, 0);
+        assert!(l.sleds.contains(&(FIXED, 0x15A, 0x200)), "{:?}", l.sleds);
         assert!(c.contains("rl_indirect(c, UINT64_C(0x15a))"), "{c}");
+        let prog = program_c(
+            &l.units,
+            &l.sleds,
+            &l.ram,
+            &Program {
+                title: "T",
+                model: "dmg",
+                save: "",
+                android: false,
+                learn: "",
+            },
+        );
+        assert!(
+            prog.contains("{ UINT32_C(0xffffffff), 0x15au, 0x200u },"),
+            "{prog}"
+        );
+    }
+
+    #[test]
+    fn every_lifted_instruction_is_an_entry_of_dispatch() {
+        let rom = rom();
+        let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
+        let l = lift(&rom, &report, &[], [0; 32]);
+        let unit = l.units[0]
+            .output
+            .files
+            .iter()
+            .find(|f| f.name == "unit.c")
+            .expect("unit.c");
+        assert!(
+            unit.text
+                .contains("{ UINT64_C(0x152), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT,"),
+            "{}",
+            unit.text
+        );
+    }
+
+    #[test]
+    fn a_seen_root_at_an_illegal_opcode_is_no_function() {
+        let mut r = rom();
+        r[0x300] = 0xD3;
+        let report = relift_gb_analyze::analyze_with(&r, &[Loc::fixed(0x300)]).expect("analyzes");
+        let l = lift(&r, &report, &[], [0; 32]);
+        let c: String = l.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        assert!(!c.contains("goto L_300;") || c.contains("L_300: {"), "{c}");
+    }
+
+    #[test]
+    fn the_learned_file_gives_rom_locations_and_ram_opcodes() {
+        let l =
+            read_learned("001:4abc\n000:0150\nram c000 0c3\nram ff80 13e\nram 1000 000\nnoise\n");
+        assert_eq!(
+            l.rom,
+            [
+                Loc {
+                    bank: 1,
+                    addr: 0x4ABC
+                },
+                Loc::fixed(0x150)
+            ]
+        );
+        assert_eq!(l.ram, [(0xC000, 0xC3), (0xFF80, 0x13E)]);
+    }
+
+    #[test]
+    fn ram_instructions_read_their_operands_as_they_run() {
+        let rom = rom();
+        let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
+        let l = lift(
+            &rom,
+            &report,
+            &[(0xC000, 0xC3), (0xC000, 0x3E), (0xFF80, 0x13E)],
+            [0; 32],
+        );
+        assert_eq!(
+            l.ram.iter().map(|(pc, k, _)| (*pc, *k)).collect::<Vec<_>>(),
+            [(0xC000, 0x3E), (0xFF80, 0x13E), (0xC000, 0xC3)]
+        );
+        let ram: String = l
+            .units
+            .iter()
+            .filter(|u| u.bank == RAM_UNIT)
+            .flat_map(|u| u.output.files.iter().map(|f| f.text.as_str()))
+            .collect();
+        assert!(ram.contains("rl_gb_operand(c, "), "{ram}");
+        assert!(ram.contains("gb_ram_c000_0c3"), "{ram}");
+        let prog = program_c(
+            &l.units,
+            &l.sleds,
+            &l.ram,
+            &Program {
+                title: "T",
+                model: "dmg",
+                save: "",
+                android: false,
+                learn: "",
+            },
+        );
+        assert!(
+            prog.contains("{ 0xc000u, 0xc3u, gb_ram_c000_0c3 },"),
+            "{prog}"
+        );
+        assert!(!prog.contains("&rl_unit_gb_ram0"), "{prog}");
     }
 
     #[test]
     fn the_program_lists_the_units_with_their_banks() {
         let rom = rom();
         let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
-        let l = lift(&rom, &report, [0; 32]);
+        let l = lift(&rom, &report, &[], [0; 32]);
         let c = program_c(
             &l.units,
+            &l.sleds,
+            &l.ram,
             &Program {
                 title: "T\"",
                 model: "cgb",
                 save: "a.sav",
                 android: false,
+                learn: "",
             },
         );
         assert!(
@@ -489,26 +850,29 @@ mod tests {
             "{c}"
         );
         assert!(c.contains("{ &rl_unit_gb_b001, UINT32_C(0x1) },"), "{c}");
-        assert!(c.contains("\"T\\\"\", \"cgb\", \"a.sav\""), "{c}");
+        assert!(c.contains("\"T\\\"\", \"cgb\", \"a.sav\", \"\""), "{c}");
     }
 
     #[test]
     fn the_android_entry_is_sdl_main_with_the_save_in_the_files_dir() {
         let rom = rom();
         let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
-        let l = lift(&rom, &report, [0; 32]);
+        let l = lift(&rom, &report, &[], [0; 32]);
         let c = program_c(
             &l.units,
+            &l.sleds,
+            &l.ram,
             &Program {
                 title: "T",
                 model: "cgb",
                 save: "a.sav",
                 android: true,
+                learn: "",
             },
         );
         assert!(c.contains("int SDL_main(int argc, char **argv)"), "{c}");
         assert!(!c.contains("int main("), "{c}");
         assert!(c.contains("rl_android_files_dir()"), "{c}");
-        assert!(c.contains("\"T\", \"cgb\", save }"), "{c}");
+        assert!(c.contains("\"T\", \"cgb\", save, \"\""), "{c}");
     }
 }

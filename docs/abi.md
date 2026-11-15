@@ -1590,11 +1590,36 @@ stall where rustyboi places it.
   library's CPU (`rl_gb_trap`); so does an instruction whose fetched opcode
   is not the ROM byte the code was lifted from (OAM DMA), whose fetch did not
   advance pc (the HALT bug), or that may trigger the DMG OAM bug (a 16-bit
-  register in `$FE00-$FEFF`).
+  register in `$FE00-$FEFF`). An instruction with operand bytes in ROM runs
+  there too while an OAM DMA may hold the bus (the 656 dots after a write to
+  `$FF46`), because its operand fetches may read the DMA's bytes rather than
+  the ROM's.
+- Every lifted instruction is a dispatch entry (`Options::enter_anywhere`):
+  the unit table lists each one with the piece that switches to it on
+  `c->pc` (`RL_FN_FRAGMENT`), so a redirect or the interpreter goes back to
+  lifted code at the next instruction it reaches. Window instructions that a
+  function of another bank's unit held are lifted once more in their own
+  bank's unit.
+- A run of more than 8 `nop` is a sled (`rl_gb_sled`): dispatch there runs
+  each `nop` at its own boundary in one loop, with no C per byte.
+- Code in RAM is lifted per (address, opcode): `rl_gb_ram` entries, with the
+  immediate operands read as the instruction runs (`rl_gb_operand`, so code
+  the program rewrites keeps working) and jump and call targets computed.
+  Dispatch at a RAM address picks the function for the opcode the library
+  fetched (for `CB`, with the byte after it), and the interpreter runs any
+  other.
+- The learned file (`learned.txt` in the import directory, `--learn FILE`,
+  `--no-learn`): at exit the program adds the ROM locations where the
+  interpreter was entered or jumped to (`BBB:AAAA`) and the RAM instructions
+  it ran (`ram AAAA KKK`). The next `relift build` takes the ROM locations
+  as analysis roots (`Origin::Seen`: code, because it ran) and lifts the RAM
+  instructions, so a second build runs them lifted.
 - Code with no lifted function runs on the library's CPU through the SM83
   dispatch miss (`rl_sm83_set_miss`) until the frame returns or it reaches
-  the entry of a lifted function. `--stats` counts its entries and
-  instructions apart for ROM and RAM.
+  lifted code. `--stats` counts its entries and instructions apart for ROM
+  and RAM; `--interp-log FILE` writes every instruction it ran and every
+  entry into it with the cause (a transfer from lifted code, an interrupt,
+  the start, a return of the outermost frame, an unwind).
 - [open: block-level syncing through the scheduler, which needs the library
   to report the next cycle anything can change]
 ## 14. Fibers

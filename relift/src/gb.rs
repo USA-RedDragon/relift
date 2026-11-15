@@ -30,6 +30,10 @@ const LIFTED_OPT: &str = "-O0";
 /// The ROM's file name in the import directory.
 const ROM_FILE: &str = "rom.gb";
 
+/// The file in the import directory where the program adds the ROM
+/// locations it ran without lifted code; the next build lifts them.
+const LEARNED_FILE: &str = "learned.txt";
+
 /// Whether `path` is a Game Boy cartridge image: a file whose header
 /// decodes, with the Nintendo logo or a `.gb`, `.gbc` or `.sgb` name.
 #[must_use]
@@ -157,6 +161,7 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
 
 struct Project {
     rom: Vec<u8>,
+    dir: PathBuf,
     source: PathBuf,
     title: String,
     model: String,
@@ -181,6 +186,7 @@ fn project(settings: &Settings) -> Result<Project, BoxError> {
     })?;
     Ok(Project {
         rom,
+        dir,
         source: s("rom").map(PathBuf::from).unwrap_or_default(),
         title: s("title").unwrap_or_default(),
         model: s("model").unwrap_or_else(|| "cgb".into()),
@@ -354,14 +360,24 @@ pub fn build(
     ));
     let row = ui.row("rom");
     ui.begin(row, "analyze");
-    let report = match relift_gb_analyze::analyze(&rom) {
+    let learn = p.dir.join(LEARNED_FILE);
+    let learned = std::fs::read_to_string(&learn)
+        .map(|t| relift_gb::program::read_learned(&t))
+        .unwrap_or_default();
+    let seen = &learned.rom;
+    let report = match relift_gb_analyze::analyze_with(&rom, seen) {
         Ok(r) => {
             ui.done(
                 row,
                 Line::new().text(format!(
-                    "{}, {} unresolved",
+                    "{}, {} unresolved{}",
                     noun(r.functions.len() as u64, "function"),
-                    r.unresolved.len()
+                    r.unresolved.len(),
+                    if seen.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} seen at run time", seen.len())
+                    }
                 )),
             );
             Some(r)
@@ -380,7 +396,7 @@ pub fn build(
     ui.begin(row, "lift");
     let image_id = relift_switch_formats::sha256(&rom);
     let lifted = match &report {
-        Some(r) => relift_gb::program::lift(&rom, r, image_id),
+        Some(r) => relift_gb::program::lift(&rom, r, &learned.ram, image_id),
         None => relift_gb::program::lift_nothing(image_id),
     };
     let mut files = Vec::new();
@@ -408,14 +424,15 @@ pub fn build(
     ui.done(
         row,
         Line::new().text(format!(
-            "{} in {}, {} not lifted, {} left to dispatch",
+            "{} in {}, {} not lifted, {} left to dispatch, {}",
             noun(
                 lifted.units.iter().map(|u| u.functions as u64).sum(),
                 "function"
             ),
             noun(lifted.units.len() as u64, "unit"),
             lifted.unlifted.len().max(undefined),
-            lifted.foreign + lifted.filler
+            lifted.filler,
+            noun(lifted.sleds.len() as u64, "nop sled")
         )),
     );
     let unlifted_file = out.join("unlifted.txt");
@@ -435,11 +452,14 @@ pub fn build(
             "program.c",
             relift_gb::program::program_c(
                 &lifted.units,
+                &lifted.sleds,
+                &lifted.ram,
                 &relift_gb::program::Program {
                     title: &p.title,
                     model: &p.model,
                     save: &save,
                     android: android.is_some(),
+                    learn: &learn.display().to_string(),
                 },
             ),
         ),

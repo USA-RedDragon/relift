@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use relift_cpu_sm83::{HALF, Sm83, SyncPolicy, decode, irq};
+use relift_cpu_sm83::{HALF, OPERAND, Options, Sm83, SyncPolicy, decode, irq, lift_bytes};
 use relift_guest::{Frontend, Home, LiftFailure, WasmIntrinsic};
 use relift_ir::{
     AddrClass, Block, Builder, CryptoOp, Exit, Flow, FpOp, Inst, IoMap, Next, Op, Reg, RegFile,
@@ -33,6 +33,11 @@ pub const SYNC_CHECK: u32 = 8;
 pub const SYNC_BANK_SHIFT: u32 = 4;
 /// The shift of a call's return address in the sync info.
 pub const SYNC_RET_SHIFT: u32 = 16;
+
+/// The first address of RAM: code from here on is lifted with its operand
+/// bytes read when it runs (`rl_gb_operand`), and the runtime picks the
+/// lifted instruction by the opcode it fetched.
+pub const RAM: u64 = 0x8000;
 
 /// The opcodes the library's CPU runs through `rl_gb_trap`.
 pub const NATIVE: [u8; 4] = [0xF3, 0xFB, 0x76, 0x10];
@@ -147,7 +152,22 @@ impl Frontend for Gb {
         {
             return Gb::native(bytes, pc);
         }
-        let mut b = self.inner.lift(bytes, pc)?;
+        let mut b = if pc & 0xFFFF >= RAM {
+            let opts = Options {
+                map: self.inner.map.clone(),
+                sync: self.inner.sync,
+                live_operands: true,
+            };
+            lift_bytes(bytes, pc, &opts).map_err(|e| LiftFailure {
+                insn: bytes
+                    .iter()
+                    .take(3)
+                    .fold(0u64, |acc, b| (acc << 8) | u64::from(*b)),
+                message: e.to_string(),
+            })?
+        } else {
+            self.inner.lift(bytes, pc)?
+        };
         if !matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)) {
             b.insts.push(Inst {
                 op: Op::Sync,
@@ -168,6 +188,7 @@ impl Frontend for Gb {
     fn intrinsic(&self, name: &str, args: &[String]) -> Option<String> {
         match name {
             irq::RETI => Some("rl_gb_reti(c)".into()),
+            OPERAND => Some(format!("rl_gb_operand(c, {})", args.first()?)),
             _ => self.inner.intrinsic(name, args),
         }
     }
