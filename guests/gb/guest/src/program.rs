@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use relift_cpu_sm83::{HALF, decode};
+use relift_cpu_sm83::{HALF, Mnemonic, decode};
 use relift_emit::{Function, Insn, Options, Output};
 use relift_gb_analyze::{Loc, Report};
 use relift_guest::{Frontend, LiftFailure};
@@ -265,6 +265,8 @@ pub fn lift(rom: &[u8], report: &Report, ram: &[(u16, u16)], image_id: [u8; 32])
 /// Functions over every address of the units `keys` (a bank, or [`FIXED`])
 /// that starts an instruction the bytes decode to and no function of the
 /// unit lifts: a superset of the code there, entered at any instruction.
+/// An unused opcode is left out: the device library's CPU runs it, as it
+/// runs one in code that discovery found.
 fn superset(
     rom: &[u8],
     groups: &BTreeMap<u32, Vec<(Loc, Lifts)>>,
@@ -294,6 +296,9 @@ fn superset(
                 continue;
             };
             let Ok(ins) = decode(bytes) else { continue };
+            if ins.opcode.mnemonic == Mnemonic::Illegal {
+                continue;
+            }
             let len = ins.length();
             if usize::from(addr) + usize::from(len) > usize::from(hi) {
                 continue;
@@ -872,6 +877,23 @@ mod tests {
         let c = fixed(&all);
         assert!(c.contains("L_300: {"), "{c}");
         assert!(c.contains("L_301: {"), "{c}");
+    }
+
+    #[test]
+    fn the_superset_leaves_an_unused_opcode_to_the_device_library() {
+        let mut r = rom();
+        r[0x300..0x302].copy_from_slice(&[0xD3, 0xC9]);
+        let report = relift_gb_analyze::analyze(&r).expect("analyzes");
+        let all = lift_superset(&r, &report, &[], [0; 32], &[FIXED]);
+        let c: String = all.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        assert!(!c.contains("L_300: {"), "{c}");
+        assert!(c.contains("L_301: {"), "{c}");
+        assert!(!c.contains("rl_undefined"), "{c}");
     }
 
     #[test]
