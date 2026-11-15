@@ -29,6 +29,16 @@ extern int t_svc_rc;
  * t_svc_rc: a wait that gives the core to the threads the test started.
  */
 void t_sleep(uint64_t ns);
+/**
+ * @brief Gives the core to the other guest threads until cond holds. There is
+ * no bound: the runner's per-test alarm ends a test whose condition never
+ * comes, so a loaded host cannot make it fail by being slow.
+ */
+#define T_WAIT_UNTIL(cond) \
+    do { \
+        while (!(cond)) \
+            t_sleep(1000000); \
+    } while (0)
 /** @brief Grows the heap to size with svcSetHeapSize and returns its guest address (0 on failure). */
 uint64_t t_heap(rl_ctx *c, uint64_t size);
 /** @brief Registers lifted-signature host functions at guest addresses (one unit). */

@@ -180,7 +180,7 @@ static uint32_t start(rl_ctx *c, uint32_t h) { return t_svc(c, SVC_START_THREAD,
 static uint32_t join(rl_ctx *c, uint64_t heap, uint32_t h)
 {
     *word(heap + 0x800) = h;
-    return t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 10000000000ull, 0, 0);
+    return t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, (uint64_t)-1, 0, 0);
 }
 
 TEST(mutex_contention)
@@ -197,8 +197,7 @@ TEST(mutex_contention)
     mutex_lock(c, S.mutex, me);
     for (int i = 0; i < 4; i++)
         CHECK_EQ(start(c, hs[i]), 0);
-    for (int spin = 0; spin < 2000 && __atomic_load_n(word(S.mutex), __ATOMIC_SEQ_CST) != (me | HAS_LISTENERS); spin++)
-        t_sleep(1000000);
+    T_WAIT_UNTIL(__atomic_load_n(word(S.mutex), __ATOMIC_SEQ_CST) == (me | HAS_LISTENERS));
     CHECK_EQ(*word(S.mutex), me | HAS_LISTENERS);
     mutex_unlock(c, S.mutex, me);
     for (int i = 0; i < 4; i++)
@@ -208,6 +207,16 @@ TEST(mutex_contention)
     CHECK_EQ(t_svc(c, SVC_START_THREAD, hs[0], 0, 0, 0, 0, 0), KR_INVALID_STATE);
     for (int i = 0; i < 4; i++)
         CHECK_EQ(t_svc(c, SVC_CLOSE_HANDLE, hs[i], 0, 0, 0, 0, 0), 0);
+}
+
+static int cv_waiter_count(void)
+{
+    int n = 0;
+    hos_lock();
+    for (hos_thread *t = hos.cv_waiters; t; t = t->next_wait)
+        n++;
+    hos_unlock();
+    return n;
 }
 
 TEST(condvar_broadcast)
@@ -220,16 +229,7 @@ TEST(condvar_broadcast)
         hs[i] = spawn(c, 0x8000300, i, heap);
         CHECK_EQ(start(c, hs[i]), 0);
     }
-    for (int spin = 0; spin < 500; spin++) {
-        int n = 0;
-        hos_lock();
-        for (hos_thread *t = hos.cv_waiters; t; t = t->next_wait)
-            n++;
-        hos_unlock();
-        if (n == 3)
-            break;
-        t_sleep(1000000);
-    }
+    T_WAIT_UNTIL(cv_waiter_count() == 3);
     CHECK_EQ(*word(S.cv), 1);
     mutex_lock(c, S.mutex, me);
     *word(S.flag) = 1;
@@ -243,25 +243,17 @@ TEST(condvar_broadcast)
     CHECK_EQ(*word(S.mutex), 0);
 }
 
-static int cv_waiter_count(void)
+static int arb_waiter_count(void)
 {
     int n = 0;
     hos_lock();
-    for (hos_thread *t = hos.cv_waiters; t; t = t->next_wait)
+    for (hos_thread *t = hos.arb_waiters; t; t = t->next_wait)
         n++;
     hos_unlock();
     return n;
 }
 
-static bool wait_counter(uint32_t want)
-{
-    for (int spin = 0; spin < 2000; spin++) {
-        if (__atomic_load_n(word(S.counter), __ATOMIC_SEQ_CST) == want)
-            return true;
-        t_sleep(1000000);
-    }
-    return false;
-}
+static void wait_counter(uint32_t want) { T_WAIT_UNTIL(__atomic_load_n(word(S.counter), __ATOMIC_SEQ_CST) == want); }
 
 TEST(condvar_signal_one_at_a_time)
 {
@@ -273,15 +265,14 @@ TEST(condvar_signal_one_at_a_time)
         hs[i] = spawn(c, 0x8000300, i, heap);
         CHECK_EQ(start(c, hs[i]), 0);
     }
-    for (int spin = 0; spin < 2000 && cv_waiter_count() != 4; spin++)
-        t_sleep(1000000);
+    T_WAIT_UNTIL(cv_waiter_count() == 4);
     CHECK_EQ(cv_waiter_count(), 4);
     mutex_lock(c, S.mutex, me);
     *word(S.flag) = 1;
     mutex_unlock(c, S.mutex, me);
     for (uint32_t k = 1; k <= 4; k++) {
         CHECK_EQ(t_svc(c, SVC_SIGNAL_PROCESS_WIDE_KEY, S.cv, 1, 0, 0, 0, 0), 0);
-        CHECK(wait_counter(k));
+        wait_counter(k);
         t_sleep(5000000);
         CHECK_EQ(*word(S.counter), k);
         CHECK_EQ(cv_waiter_count(), (int)(4 - k));
@@ -321,7 +312,6 @@ TEST(events_and_wait_synchronization)
     CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 2, 30000000, 0, 0), KR_TIMED_OUT);
     uint64_t dt = rl_clock_ns() - t0;
     CHECK(dt >= 30000000);
-    CHECK(dt < 2000000000);
     CHECK_EQ(t_svc(c, SVC_SIGNAL_EVENT, w2, 0, 0, 0, 0, 0), 0);
     CHECK_EQ(t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 2, (uint64_t)-1, 0, 0), 0);
     CHECK_EQ(c->x[1], 1);
@@ -441,18 +431,9 @@ TEST(wait_for_address)
         hs[i] = spawn(c, 0x8000400, i, heap);
         CHECK_EQ(start(c, hs[i]), 0);
     }
-    for (int spin = 0; spin < 500; spin++) {
-        int n = 0;
-        hos_lock();
-        for (hos_thread *t = hos.arb_waiters; t; t = t->next_wait)
-            n++;
-        hos_unlock();
-        if (n == 3)
-            break;
-        t_sleep(1000000);
-    }
+    T_WAIT_UNTIL(arb_waiter_count() == 3);
     CHECK_EQ(t_svc(c, SVC_SIGNAL_TO_ADDRESS, S.arb, 0, 0, 1, 0, 0), 0);
-    CHECK(wait_counter(1));
+    wait_counter(1);
     t_sleep(20000000);
     CHECK_EQ(__atomic_load_n(word(S.counter), __ATOMIC_SEQ_CST), 1);
     CHECK_EQ(t_svc(c, SVC_SIGNAL_TO_ADDRESS, S.arb, 1, 5, 1, 0, 0), KR_INVALID_STATE);

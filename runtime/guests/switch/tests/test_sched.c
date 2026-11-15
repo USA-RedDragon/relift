@@ -13,7 +13,6 @@
 #include <stdlib.h>
 
 #define HAS_LISTENERS 0x40000000u
-#define LIMIT_NS 5000000000ull
 #define SLEEP_FLAG_NS 10000000ull
 
 static struct {
@@ -58,10 +57,8 @@ static void set(int *p, int v) { __atomic_store_n(p, v, __ATOMIC_SEQ_CST); }
 
 static bool host_wait_flag(int *p)
 {
-    uint64_t t0 = rl_clock_ns();
-    while (!get(p))
-        if (rl_clock_ns() - t0 > LIMIT_NS)
-            return false;
+    while (!get(p)) {
+    }
     return true;
 }
 
@@ -176,8 +173,7 @@ static int w_host_wait(rl_ctx *c, uint8_t *mem)
     (void)mem;
     int i = idx_of(c);
     hos_sched_leave();
-    uint64_t t0 = rl_clock_ns();
-    while (!get(&S.flag[i + 1]) && rl_clock_ns() - t0 < LIMIT_NS)
+    while (!get(&S.flag[i + 1]))
         rl_sleep_ns(1000000);
     hos_sched_return();
     S.ok[i] = get(&S.flag[i + 1]);
@@ -229,7 +225,7 @@ static uint32_t start(rl_ctx *c, uint32_t h) { return t_svc(c, SVC_START_THREAD,
 static uint32_t join(rl_ctx *c, uint64_t heap, uint32_t h)
 {
     *(uint32_t *)(void *)(t_mem() + heap + 0x800) = h;
-    return t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, 10000000000ull, 0, 0);
+    return t_svc(c, SVC_WAIT_SYNCHRONIZATION, 0, heap + 0x800, 1, (uint64_t)-1, 0, 0);
 }
 
 static hos_thread *thread_of(uint32_t h)
@@ -309,9 +305,8 @@ TEST(a_thread_that_wakes_preempts_a_lower_one_at_its_next_preemption_point)
         CHECK_EQ(woke, 0);
     }
     CHECK(timely);
-    uint64_t t0 = rl_clock_ns();
     int points = 0;
-    while (!get(&S.flag[0]) && rl_clock_ns() - t0 < LIMIT_NS) {
+    while (!get(&S.flag[0])) {
         if (rl_time_spent(&c->time)) {
             points++;
             rl_preempt(c);
@@ -448,8 +443,7 @@ TEST(a_mutex_owner_inherits_its_waiters_priority)
     hos_thread *self = hos_current();
     uint32_t h = spawn(c, heap, F_LOCK, 0, 30, 1);
     CHECK_EQ(start(c, h), 0);
-    for (int k = 0; k < 2000 && self->prio != 30; k++)
-        t_sleep(1000000);
+    T_WAIT_UNTIL(__atomic_load_n(&self->prio, __ATOMIC_SEQ_CST) == 30);
     CHECK_EQ(self->prio, 30);
     CHECK_EQ(t_svc(c, SVC_GET_THREAD_PRIORITY, 0, HOS_CUR_THREAD, 0, 0, 0, 0), 0);
     CHECK_EQ(c->x[1], 44);
