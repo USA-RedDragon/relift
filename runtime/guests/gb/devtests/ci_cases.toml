@@ -388,3 +388,23 @@ protocol = "png"
 refs = ["turtle-tests/window_y_trigger/window_y_trigger.png"]
 timeout_frames = 0xf
 timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gambatte:gambatte/sound/ch1_duty0_pattern_pos0_dmg08_cgb04c_outaudio0:cgb"
+rom = "gambatte/sound/ch1_duty0_pattern_pos0_dmg08_cgb04c_outaudio0.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "gambatte_audio"
+audible = false
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
+id = "gambatte:gambatte/sound/ch1_duty0_pattern_pos7_dmg08_cgb04c_outaudio1:cgb"
+rom = "gambatte/sound/ch1_duty0_pattern_pos7_dmg08_cgb04c_outaudio1.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "gambatte_audio"
+audible = true
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
