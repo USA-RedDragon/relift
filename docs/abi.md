@@ -991,6 +991,19 @@ are also call boundaries. [inferred]
   runtime never enters the program entry again, since it does not deliver
   exceptions through it; landing pads, once lifted, must be marked as
   entered from elsewhere]
+- The census names the functions the walk climbed through to the one where
+  it stopped. A read whose value goes to memory counts as observed even
+  when the program only restores it: a physics engine's FPU guard saves
+  the environment with `fegetenv` into its own object and restores it with
+  `fesetenv`, but the binary does not give object extents, so it cannot
+  show that no other load reads the saved word. The guard runs inside
+  virtual methods whose addresses escape, so the read's region is every
+  instruction its thread may run since its start, and no run-time scheme
+  is exact without producing flags there: the flags at the read depend on
+  every FP result of that prefix. Such a program stays program-wide.
+  [verified: a game built with that one read ignored is bounded; inferred:
+  resolving the virtual call sites would leave most FP functions in the
+  region]
 - A read that cannot run has no region. A function is entered when its
   address escapes, when it has no call site, or from a block that runs in
   an entered function. In the program start (the first module's entry,
