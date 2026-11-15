@@ -508,9 +508,10 @@ impl Fpsr {
                 } else {
                     fp.join(", ")
                 },
-                r.unbounded
-                    .as_ref()
-                    .map_or_else(String::new, |u| format!("; unbounded: {u}"))
+                r.unbounded.as_ref().map_or_else(String::new, |u| {
+                    let via: Vec<String> = r.chain.iter().map(|&e| self.name(e)).collect();
+                    format!("; unbounded: {u}, reached through {}", via.join(" <- "))
+                })
             );
         }
         t

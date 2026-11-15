@@ -129,6 +129,9 @@ pub struct Region {
     pub touched: usize,
     /// Why the region could not be bounded, if it could not.
     pub unbounded: Option<String>,
+    /// When unbounded, the functions the walk went through to the one
+    /// where it stopped, starting at the read's.
+    pub chain: Vec<u64>,
     /// Whether the read can run: a read in a function that cannot be
     /// entered, or in a dead block of a start, has no region.
     pub entered: bool,
@@ -175,6 +178,10 @@ struct Walker<'a> {
     fp: BTreeSet<u64>,
     touched: BTreeSet<u64>,
     work: Vec<Item>,
+    /// The function whose item the walk is at.
+    cur: usize,
+    /// By function: the one the walk came from when it first went there.
+    from: HashMap<usize, usize>,
 }
 
 impl Walker<'_> {
@@ -220,6 +227,7 @@ impl Walker<'_> {
                     "the block at {at:#x} reaches {e:#x}, which is no function"
                 ));
             }
+            self.from.entry(self.index[&e]).or_insert(self.cur);
             self.work.push(Item::Tail(e));
             on |= !self.must.contains(&e);
         }
@@ -239,6 +247,7 @@ impl Walker<'_> {
         }
         for &(g, b) in self.callers.get(&e).into_iter().flatten() {
             if self.live.runs(self.p, g, b) {
+                self.from.entry(g).or_insert(f);
                 self.work.push(Item::Whole(g, b, true));
             }
         }
@@ -252,6 +261,7 @@ impl Walker<'_> {
                     if self.seen.contains(&(f, b, true)) || !self.seen.insert((f, b, up)) {
                         continue;
                     }
+                    self.cur = f;
                     let func = &self.p.fns[f];
                     let blk = &func.blocks[b];
                     self.touched.insert(func.entry);
@@ -267,6 +277,7 @@ impl Walker<'_> {
                         continue;
                     }
                     let f = self.index[&e];
+                    self.cur = f;
                     for (b, blk) in self.p.fns[f].blocks.iter().enumerate() {
                         match &blk.end {
                             End::Return => self.work.push(Item::Whole(f, b, false)),
@@ -282,6 +293,21 @@ impl Walker<'_> {
             }
         }
         Ok(())
+    }
+
+    /// The functions from `start` back to where the walk is.
+    fn chain(&self, start: usize) -> Vec<u64> {
+        let mut at = self.cur;
+        let mut out = vec![at];
+        let mut seen = HashSet::from([at]);
+        while at != start
+            && let Some(&g) = self.from.get(&at)
+            && seen.insert(g)
+        {
+            out.push(g);
+            at = g;
+        }
+        out.iter().rev().map(|&i| self.p.fns[i].entry).collect()
     }
 }
 
@@ -488,6 +514,7 @@ pub fn decide(p: &Program) -> Decision {
                     fp: BTreeSet::new(),
                     touched: 0,
                     unbounded: None,
+                    chain: Vec::new(),
                     entered: false,
                 });
                 continue;
@@ -506,8 +533,11 @@ pub fn decide(p: &Program) -> Decision {
                 fp: BTreeSet::new(),
                 touched: BTreeSet::from([f.entry]),
                 work: Vec::new(),
+                cur: i,
+                from: HashMap::new(),
             };
             let r = w.preds(i, b, true).and_then(|()| w.run());
+            let chain = if r.is_err() { w.chain(i) } else { Vec::new() };
             for &e in &w.fp {
                 d.flagged.entry(e).or_insert(Reason::Region);
             }
@@ -517,6 +547,7 @@ pub fn decide(p: &Program) -> Decision {
                 fp: w.fp,
                 touched: w.touched.len(),
                 unbounded: r.err(),
+                chain,
                 entered: true,
             });
         }
@@ -780,6 +811,26 @@ mod tests {
             starts: BTreeSet::new(),
         };
         assert!(decide(&p).program_wide());
+        // A read in a leaf whose caller's address is taken: the walk names
+        // the functions it climbed through.
+        let p = Program {
+            fns: vec![
+                func(0x100, vec![bb(0x100, false, false, &[], End::Return)], &[0]),
+                func(
+                    0x200,
+                    vec![
+                        bb(0x200, false, false, &[1], call(0x100)),
+                        bb(0x210, false, false, &[], End::Return),
+                    ],
+                    &[],
+                ),
+            ],
+            escaped: BTreeSet::from([0x200]),
+            starts: BTreeSet::new(),
+        };
+        let d = decide(&p);
+        assert!(d.program_wide());
+        assert_eq!(d.regions[0].chain, vec![0x100, 0x200]);
         // A write before the indirect call bounds it.
         let p = Program {
             fns: vec![func(
