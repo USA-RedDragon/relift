@@ -56,6 +56,26 @@ pub enum Home {
     },
 }
 
+/// The return check of a CPU with a link register ([`Frontend::return_link`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReturnLink {
+    /// The link register: its value at a function's entry is where the
+    /// function's caller expects it to return.
+    pub reg: Reg,
+    /// The C lvalue that carries the expected return address from the stub
+    /// of a split function to its pieces, such as `c->ra`.
+    pub slot: &'static str,
+    /// The runtime function a return to another target calls, as
+    /// `int f(rl_ctx *c, uint64_t target, uint64_t pc)` with the context
+    /// stored; it returns `RL_PENDING`.
+    pub far_return: &'static str,
+    /// The runtime function a tail transfer calls when the link register no
+    /// longer holds the expected return address, as
+    /// `int f(rl_ctx *c, uint8_t *mem, rl_fn target)` with the context
+    /// stored.
+    pub far_jump: &'static str,
+}
+
 /// How the WebAssembly emitter (`relift-emit-wasm`) carries an intrinsic;
 /// the counterpart of the C that [`Frontend::intrinsic`] gives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,6 +211,15 @@ pub trait Frontend {
     /// jumps and at recursive calls. `None` for a CPU whose threads are not
     /// preempted.
     fn preempt_clock(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// How lifted returns check their target (docs/abi.md section 5.2):
+    /// a return goes back to the host caller only when its target is the
+    /// link register's value at the function's entry, and anything else
+    /// continues at the target through the runtime. `None` returns to the
+    /// host caller whatever the target.
+    fn return_link(&self) -> Option<ReturnLink> {
         None
     }
 

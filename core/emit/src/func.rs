@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use relift_guest::{Frontend, Home};
+use relift_guest::{Frontend, Home, ReturnLink};
 use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 
 use crate::callee::Shape;
@@ -100,6 +100,10 @@ struct Ctx<'a> {
     /// The guest address of the instruction being written: the site a
     /// transfer through dispatch names when it misses, or [`SITE_NONE`].
     site: u64,
+    /// The return check, when the frontend has one, and whether a tail
+    /// transfer must check the link register against `rl_ra` (it may have
+    /// changed since entry).
+    link: Option<(ReturnLink, bool)>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -179,8 +183,12 @@ impl Ctx<'_> {
             if let Some((s, k)) = self.split {
                 let to = s.piece_of[&t];
                 if to != k {
+                    let ra = match self.link {
+                        Some((l, _)) => format!(" {} = rl_ra;", l.slot),
+                        None => String::new(),
+                    };
                     return format!(
-                        "{}c->pc = UINT64_C({t:#x}); RL_MUSTTAIL return {}(c, mem);",
+                        "{}c->pc = UINT64_C({t:#x});{ra} RL_MUSTTAIL return {}(c, mem);",
                         self.lead(),
                         s.names[to]
                     );
@@ -190,7 +198,10 @@ impl Ctx<'_> {
         }
         if let Some(target) = self.targets.get(&t) {
             self.callees.insert(t);
-            return format!("{}RL_MUSTTAIL return {}(c, mem);", self.lead(), target.name);
+            return self.tail(&target.name.clone());
+        }
+        if let Some((_, true)) = self.link {
+            return self.tail(&format!("rl_indirect(c, UINT64_C({t:#x}))"));
         }
         format!(
             "{}RL_JUMP(UINT64_C({t:#x}), UINT64_C({:#x}));",
@@ -199,10 +210,34 @@ impl Ctx<'_> {
         )
     }
 
+    /// A tail transfer to the C function `f` that leaves the function: a
+    /// tail call while the link register holds the address the function's
+    /// caller expects, else the runtime's far jump.
+    fn tail(&self, f: &str) -> String {
+        match self.link {
+            Some((l, true)) => format!(
+                "{}if (RL_UNLIKELY({} != rl_ra)) return {}(c, mem, {f}); RL_MUSTTAIL return {f}(c, mem);",
+                self.lead(),
+                home(self.fe, l.reg),
+                l.far_jump
+            ),
+            _ => format!("{}RL_MUSTTAIL return {f}(c, mem);", self.lead()),
+        }
+    }
+
     /// The stores of the dirty registers before a jump on the same line.
     fn lead(&self) -> String {
         let s = self.store(&self.dirty);
         if s.is_empty() { s } else { s + " " }
+    }
+}
+
+/// The C lvalue of the context home of register `r`, which must be a
+/// field.
+fn home(fe: &dyn Frontend, r: Reg) -> String {
+    match fe.home(r) {
+        Home::Field(lv) => lv,
+        Home::Flag { word, bit } => format!("(({word} >> {bit}) & 1u)"),
     }
 }
 
@@ -497,10 +532,14 @@ pub(crate) fn emit_function(
             .map(|i| format!("{}_part{}", f.name, i + 1))
             .collect(),
     };
+    let ra = match fe.return_link() {
+        Some(l) => format!("    {} = {};\n", l.slot, home(fe, l.reg)),
+        None => String::new(),
+    };
     let mut pieces = vec![Piece {
         name: f.name.clone(),
         text: format!(
-            "\nRL_TEXT RL_LIFTED({})\n{{\n    c->pc = UINT64_C({:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
+            "\nRL_TEXT RL_LIFTED({})\n{{\n{ra}    c->pc = UINT64_C({:#x});\n    RL_MUSTTAIL return {}(c, mem);\n}}\n",
             f.name, f.entry, split.names[split.piece_of[&f.entry]]
         ),
         first_pc: None,
@@ -610,6 +649,14 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if has_fp {
         used.extend(fe.fp_state());
     }
+    let returns = pcs
+        .iter()
+        .filter_map(|pc| blocks.get(pc))
+        .any(|b| b.exit.flow == Flow::Return);
+    let link = fe.return_link().and_then(|l| {
+        let moved = split.is_some() || written.contains(&l.reg);
+        (split.is_some() || returns || moved).then_some((l, moved))
+    });
     used.extend(hoisted.iter().copied());
     used.extend(lp_reg);
     let regs = fe.regs();
@@ -684,6 +731,14 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if let Some(clk) = clock {
         let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
     }
+    if let Some((l, _)) = link {
+        let from = if split.is_some() {
+            l.slot.to_string()
+        } else {
+            home(fe, l.reg)
+        };
+        let _ = writeln!(t, "    const uint64_t rl_ra = {from};\n    (void)rl_ra;");
+    }
     t.push_str("    int rc;\n    (void)rc;\n");
     if plan.shared().is_some() {
         t.push_str("    unsigned rl_k = 0;\n");
@@ -721,6 +776,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         used: &used,
         slow: Vec::new(),
         site: 0,
+        link,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -1085,20 +1141,8 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         cx.dirty = cx.plan.none().clone();
     };
     if cx.clock.is_some() && matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)) {
-        let next = match b.exit.next {
-            Next::Const(t) => format!("UINT64_C({t:#x})"),
-            Next::Select {
-                cond,
-                taken,
-                not_taken,
-            } => format!(
-                "({} ? UINT64_C({taken:#x}) : UINT64_C({not_taken:#x}))",
-                val(cond)
-            ),
-            Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
-        };
         let rl = cx.reload(cx.plan.exit_live(b.pc));
-        s.push_str(&time::sync(cx.fe, b, &next, &out_store, &rl));
+        s.push_str(&time::sync(cx.fe, b, &next_expr(b, &val), &out_store, &rl));
     }
     if let Some(clk) = cx.fe.preempt_clock().filter(|_| preempts(cx, b)) {
         s.push_str(&time::preempt(clk));
@@ -1107,10 +1151,22 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         s.push_str("    RL_LOOP_FENCE();\n");
     }
     match b.exit.flow {
-        Flow::Return => {
-            s.push_str(&Ctx::line(&out_store, "    "));
-            s.push_str("    return RL_OK;\n");
-        }
+        Flow::Return => match cx.link {
+            Some((l, _)) => {
+                let _ = writeln!(
+                    s,
+                    "    uint64_t rl_to = {};\n{}    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return {}(c, rl_to, UINT64_C({:#x}));",
+                    next_expr(b, &val),
+                    Ctx::line(&out_store, "    "),
+                    l.far_return,
+                    b.pc
+                );
+            }
+            None => {
+                s.push_str(&Ctx::line(&out_store, "    "));
+                s.push_str("    return RL_OK;\n");
+            }
+        },
         Flow::Call { ret } => {
             let call = match b.exit.next {
                 Next::Const(t) if let Some(target) = cx.targets.get(&t) => {
@@ -1157,17 +1213,38 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     }
                     s.push_str("    default: break;\n    }\n");
                 }
-                let _ = writeln!(
-                    s,
-                    "{}    RL_JUMP({}, UINT64_C({:#x}));",
-                    Ctx::line(&out_store, "    "),
-                    val(v),
-                    b.pc
-                );
+                let _ = match cx.link {
+                    Some((_, true)) => {
+                        writeln!(s, "    {}", cx.tail(&format!("rl_indirect(c, {})", val(v))))
+                    }
+                    _ => writeln!(
+                        s,
+                        "{}    RL_JUMP({}, UINT64_C({:#x}));",
+                        Ctx::line(&out_store, "    "),
+                        val(v),
+                        b.pc
+                    ),
+                };
             }
         },
     }
     Ok(s)
+}
+
+/// The C expression of the guest address the exit of `b` goes to.
+fn next_expr(b: &Block, val: &dyn Fn(Value) -> String) -> String {
+    match b.exit.next {
+        Next::Const(t) => format!("UINT64_C({t:#x})"),
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => format!(
+            "({} ? UINT64_C({taken:#x}) : UINT64_C({not_taken:#x}))",
+            val(cond)
+        ),
+        Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
+    }
 }
 
 /// The statements that reload the registers of `set` (of the piece's

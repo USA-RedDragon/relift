@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use relift_guest::toy::{Toy, branch, word};
-use relift_guest::{Frontend, Home, LiftFailure};
+use relift_guest::{Frontend, Home, LiftFailure, ReturnLink};
 use relift_ir::{FpOp, Reg, RegFile, Width};
 
 use super::*;
@@ -140,10 +140,25 @@ fn a_loop_back_edge_fences_and_a_forward_branch_does_not() {
     assert_eq!(s.matches("RL_LOOP_FENCE();").count(), 1, "{s}");
 }
 
-/// The toy frontend with a preemption clock.
-struct Preempt;
+/// The toy frontend with a preemption clock or a return check.
+struct Toyx {
+    clock: bool,
+    link: bool,
+}
 
-impl Frontend for Preempt {
+/// The toy frontend with a preemption clock.
+const PREEMPT: Toyx = Toyx {
+    clock: true,
+    link: false,
+};
+
+/// The toy frontend with a return check on its link register `r3`.
+const LINKED: Toyx = Toyx {
+    clock: false,
+    link: true,
+};
+
+impl Frontend for Toyx {
     fn granule(&self) -> u64 {
         Toy.granule()
     }
@@ -188,7 +203,15 @@ impl Frontend for Preempt {
         Toy.fp(op, from, to, args, reg)
     }
     fn preempt_clock(&self) -> Option<&'static str> {
-        Some("c->time")
+        self.clock.then_some("c->time")
+    }
+    fn return_link(&self) -> Option<ReturnLink> {
+        self.link.then_some(ReturnLink {
+            reg: Reg(3),
+            slot: "c->ra",
+            far_return: "rl_ret_far",
+            far_jump: "rl_jump_far",
+        })
     }
     fn fp_state(&self) -> Vec<Reg> {
         Toy.fp_state()
@@ -215,7 +238,7 @@ fn loops_with_work_computed_jumps_and_calls_back_are_preemption_points() {
     ];
     let blocks = lift_all(&code, 0x100);
     let out = emit(
-        &Preempt,
+        &PREEMPT,
         &[function(0x100, &blocks)],
         &[],
         &Options::default(),
@@ -257,7 +280,7 @@ fn a_loop_that_leaves_on_a_loaded_value_waits_on_memory() {
     ];
     let blocks = lift_all(&code, 0x100);
     let out = emit(
-        &Preempt,
+        &PREEMPT,
         &[function(0x100, &blocks)],
         &[],
         &Options::default(),
@@ -277,7 +300,7 @@ fn a_loop_that_leaves_on_a_value_loaded_from_moving_addresses_does_not_wait() {
     ];
     let blocks = lift_all(&code, 0x100);
     let out = emit(
-        &Preempt,
+        &PREEMPT,
         &[function(0x100, &blocks)],
         &[],
         &Options::default(),
@@ -297,7 +320,7 @@ fn a_counted_loop_without_calls_has_no_preemption_point() {
     ];
     let blocks = lift_all(&code, 0x100);
     let out = emit(
-        &Preempt,
+        &PREEMPT,
         &[function(0x100, &blocks)],
         &[],
         &Options::default(),
@@ -1653,4 +1676,82 @@ fn word_layout_ram_takes_bytes_at_xor_3_halves_at_xor_2_and_words_as_they_are() 
         words_store(3, "a_", "v_"),
         "rl_st8(mem, (a_ + 0) ^ 3, (uint8_t)((v_) >> 16)); rl_st8(mem, (a_ + 1) ^ 3, (uint8_t)((v_) >> 8)); rl_st8(mem, (a_ + 2) ^ 3, (uint8_t)((v_) >> 0));"
     );
+}
+
+#[test]
+fn a_return_goes_to_the_caller_only_at_the_link_value_of_entry() {
+    let code = [word(0x04, 0, 5), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(
+        &LINKED,
+        &[function(0x100, &blocks)],
+        &[],
+        &Options::default(),
+    );
+    let s = shard(&out);
+    assert!(s.contains("    const uint64_t rl_ra = c->x[3];\n"), "{s}");
+    assert!(
+        s.contains("    uint64_t rl_to = (uint64_t)r3;\n    c->x[0] = r0;\n    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return rl_ret_far(c, rl_to, UINT64_C(0x104));"),
+        "{s}"
+    );
+    let plain = emit(&Toy, &[function(0x100, &blocks)], &[], &Options::default());
+    assert!(!shard(&plain).contains("rl_ra"), "{}", shard(&plain));
+}
+
+#[test]
+fn a_tail_call_checks_the_link_register_only_where_the_function_writes_it() {
+    let code = [
+        word(0x04, 3, 0x40),
+        branch(0x01, 0, 2),
+        branch(0x01, 0, 1),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [
+        function(0x100, &blocks[0..2]),
+        function(0x108, &blocks[2..3]),
+        function(0x10c, &blocks[3..4]),
+    ];
+    let out = emit(&LINKED, &fns, &[], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("c->x[3] = r3; if (RL_UNLIKELY(c->x[3] != rl_ra)) return rl_jump_far(c, mem, F_10c); RL_MUSTTAIL return F_10c(c, mem);"),
+        "{s}"
+    );
+    let f108 = &s[s.find("RL_TEXT RL_LIFTED(F_108)").expect("F_108")..];
+    let f108 = &f108[..f108.find("\n}\n").expect("end")];
+    assert!(
+        f108.contains("    RL_MUSTTAIL return F_10c(c, mem);"),
+        "{f108}"
+    );
+    assert!(!f108.contains("rl_ra"), "{f108}");
+}
+
+#[test]
+fn split_pieces_carry_the_expected_return_address_through_the_context() {
+    let code = [
+        word(0x04, 0, 5),
+        branch(0x07, 1, 2),
+        word(0x05, 0, 1),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let opts = Options {
+        piece_bytes: 1,
+        ..Options::default()
+    };
+    let out = emit(&LINKED, &[function(0x100, &blocks)], &[], &opts);
+    let all: String = out.files.iter().map(|f| f.text.as_str()).collect();
+    assert!(
+        all.contains(
+            "RL_TEXT RL_LIFTED(F_100)\n{\n    c->ra = c->x[3];\n    c->pc = UINT64_C(0x100);"
+        ),
+        "{all}"
+    );
+    assert!(all.contains("    const uint64_t rl_ra = c->ra;\n"), "{all}");
+    assert!(
+        all.contains("c->x[0] = r0; c->pc = UINT64_C(0x104); c->ra = rl_ra; RL_MUSTTAIL return F_100_part2(c, mem);"),
+        "{all}"
+    );
+    assert!(all.contains("if (RL_LIKELY(rl_to == rl_ra))"), "{all}");
 }

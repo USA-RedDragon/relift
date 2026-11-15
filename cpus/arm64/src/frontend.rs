@@ -1,7 +1,7 @@
 //! The A64 [`Frontend`]: lifting through [`crate::lift`] and the A64 half of
 //! the lifted-code ABI (`runtime/cpus/arm64/include/relift/arm64/abi.h`).
 
-use relift_guest::{Frontend, Home, LiftFailure, WasmIntrinsic};
+use relift_guest::{Frontend, Home, LiftFailure, ReturnLink, WasmIntrinsic};
 use relift_ir::{Block, CryptoOp, FpOp, FpRound, Reg, RegFile, Width};
 
 use crate::decode::Features;
@@ -144,6 +144,15 @@ impl Frontend for Arm64 {
 
     fn preempt_clock(&self) -> Option<&'static str> {
         Some("c->time")
+    }
+
+    fn return_link(&self) -> Option<ReturnLink> {
+        Some(ReturnLink {
+            reg: regs::x(30),
+            slot: "c->ra",
+            far_return: "rl_arm64_ret_far",
+            far_jump: "rl_arm64_jump_far",
+        })
     }
 
     fn fp(
