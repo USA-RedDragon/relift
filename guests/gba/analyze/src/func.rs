@@ -112,6 +112,10 @@ pub(crate) struct Env<'a> {
     pub ptrs: &'a HashMap<u32, BTreeSet<u32>>,
     pub cache: &'a RefCell<HashMap<(Loc, u32), Lifted>>,
     pub runs: &'a RefCell<Runs>,
+    /// ROM addresses where a table ends: the bases of the tables
+    /// discovered code reads that it also takes as constants, and the
+    /// function entries.
+    pub stops: &'a BTreeSet<u32>,
 }
 
 impl Env<'_> {
@@ -155,6 +159,11 @@ pub(crate) struct FnRun {
     pub bad_tables: Vec<Loc>,
     /// Thumb code addresses (bit 0 set) read from ROM tables and stored.
     pub escaped: Vec<u32>,
+    /// ROM addresses in the image read as constants from ROM words.
+    pub refs: Vec<u32>,
+    /// The ROM tables read: base and the address after the last entry
+    /// read.
+    pub tab_reads: Vec<(u32, u32)>,
 }
 
 struct Run<'a> {
@@ -427,6 +436,15 @@ impl Run<'_> {
 
     fn effects(&mut self, loc: Loc, out: &Out) {
         self.out.data.extend(out.data.iter().copied());
+        for &(a, n) in &out.data {
+            if n == 4
+                && Region::of(a) == Region::Rom
+                && let Some(v) = self.env.image.read(None, a, 4)
+                && self.env.image.in_image(v)
+            {
+                self.out.refs.push(v);
+            }
+        }
         for &(a, n, v) in &out.stores {
             if n == 4 {
                 self.store(a, v);
@@ -626,7 +644,10 @@ impl Run<'_> {
     /// The code addresses in the table at `base` with `stride`: the first
     /// `n` entries at most, from the first while each is a code address
     /// (zero entries are skipped), with the state from bit 0 when `thumb`
-    /// is `None`. The ROM words read are data.
+    /// is `None`. A ROM table also ends before the next stop (the base of
+    /// another table, an address discovered code both takes as a constant
+    /// and reads as a table, or a function entry). The ROM words read are
+    /// data.
     fn table_entries(
         &mut self,
         base: u32,
@@ -636,8 +657,25 @@ impl Run<'_> {
     ) -> Vec<(u32, bool)> {
         let mut out = Vec::new();
         let ram = Region::of(base).is_ram();
+        let cut = if ram {
+            u32::MAX
+        } else {
+            self.env
+                .stops
+                .range(base.saturating_add(1)..)
+                .next()
+                .copied()
+                .unwrap_or(u32::MAX)
+        };
+        let mut end = base;
         for i in 0..MAX_TABLE.min(n) {
             let a = base.wrapping_add(i * stride);
+            if !ram {
+                end = a.saturating_add(4);
+            }
+            if a.checked_add(4).is_none_or(|e| e > cut) {
+                break;
+            }
             let mut vals: Vec<u32> = Vec::new();
             if ram {
                 for c in self.env.image.copies_at(a) {
@@ -678,6 +716,9 @@ impl Run<'_> {
                 self.out.data.push((a, 4));
             }
             out.extend(here);
+        }
+        if !ram {
+            self.out.tab_reads.push((base, end));
         }
         out.sort_unstable();
         out.dedup();

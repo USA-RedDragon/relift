@@ -34,8 +34,12 @@
 //!   through. A jump through a word of a ROM table with a constant base
 //!   and stride follows the entries from the base while each is a code
 //!   address, and only as many as the index can reach by its known bits
-//!   (a byte load, a mask, a shift). A value not known times a constant
-//!   is an index with that stride (a table of structures).
+//!   (a byte load, a mask, a shift). The table ends before the next stop:
+//!   the base of another table that code takes as a constant, or a
+//!   function entry. Stops are known only once the code is, so discovery
+//!   runs again while a stop found falls inside a table read past it. A
+//!   value not known times a constant is an index with that stride (a
+//!   table of structures).
 //! - Pointers: a constant word stored to a constant RAM address and later
 //!   jumped through or called gives the target; so do the words of a copy
 //!   in RAM. An odd word in the image that discovered code reads as a

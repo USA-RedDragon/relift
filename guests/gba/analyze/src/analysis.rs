@@ -45,6 +45,8 @@ impl std::error::Error for AnalyzeError {}
 
 /// The reset entry.
 pub const RESET: u32 = 0x0800_0000;
+/// Discovery rounds before the table stops are taken as they are.
+const MAX_ROUNDS: usize = 8;
 /// Function runs per function before the fixed point gives up.
 const MAX_RUNS_PER_FUNCTION: usize = 1024;
 
@@ -92,25 +94,45 @@ pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
     Ok(discover(image, site))
 }
 
+/// Runs discovery to its fixed point with the table stops known so far.
+/// A ROM table runs at most to the next stop, and the stops (the bases of
+/// other tables taken as constants, function entries) are only known once
+/// the code is: when one found falls inside a table that was read past it, the
+/// discovery starts again with it known, until no table is read past a
+/// stop.
 fn discover(image: Image<'_>, entry: Loc) -> Report {
-    let mut d = Driver {
-        image,
-        roots: BTreeMap::new(),
-        origins: HashMap::new(),
-        entries: HashSet::new(),
-        runs: HashMap::new(),
-        run_count: HashMap::new(),
-        summaries: HashMap::new(),
-        ptrs: HashMap::new(),
-        callers: HashMap::new(),
-        readers: HashMap::new(),
-        irq: BTreeSet::new(),
-        queue: BTreeSet::new(),
-        cache: RefCell::new(HashMap::new()),
-        conc: RefCell::new(HashMap::new()),
-        no_tables: BTreeSet::new(),
-        rejected: BTreeSet::new(),
-    };
+    let mut stops = BTreeSet::new();
+    let mut cache = RefCell::new(HashMap::new());
+    let mut conc = RefCell::new(HashMap::new());
+    for _ in 0..MAX_ROUNDS {
+        let mut d = Driver::new(image.clone(), stops, cache, conc);
+        d.add_root(entry, Origin::Entry);
+        loop {
+            d.solve();
+            if !d.address_taken() {
+                break;
+            }
+        }
+        let found = d.found_stops();
+        let cut = d
+            .runs
+            .values()
+            .flat_map(|r| r.tab_reads.iter())
+            .chain(d.scans.iter())
+            .any(|&(base, end)| {
+                found
+                    .range(base.saturating_add(1)..end)
+                    .any(|s| !d.stops.contains(s))
+            });
+        if !cut {
+            return d.report();
+        }
+        stops = std::mem::take(&mut d.stops);
+        stops.extend(found);
+        cache = std::mem::take(&mut d.cache);
+        conc = std::mem::take(&mut d.conc);
+    }
+    let mut d = Driver::new(image, stops, cache, conc);
     d.add_root(entry, Origin::Entry);
     loop {
         d.solve();
@@ -138,9 +160,67 @@ struct Driver<'a> {
     conc: RefCell<crate::func::Runs>,
     no_tables: BTreeSet<Loc>,
     rejected: BTreeSet<Loc>,
+    stops: BTreeSet<u32>,
+    /// The address-taken tables found: base and the address after the last
+    /// word read.
+    scans: Vec<(u32, u32)>,
 }
 
-impl Driver<'_> {
+impl<'a> Driver<'a> {
+    fn new(
+        image: Image<'a>,
+        stops: BTreeSet<u32>,
+        cache: RefCell<HashMap<(Loc, u32), Lifted>>,
+        conc: RefCell<crate::func::Runs>,
+    ) -> Driver<'a> {
+        Driver {
+            image,
+            roots: BTreeMap::new(),
+            origins: HashMap::new(),
+            entries: HashSet::new(),
+            runs: HashMap::new(),
+            run_count: HashMap::new(),
+            summaries: HashMap::new(),
+            ptrs: HashMap::new(),
+            callers: HashMap::new(),
+            readers: HashMap::new(),
+            irq: BTreeSet::new(),
+            queue: BTreeSet::new(),
+            cache,
+            conc,
+            no_tables: BTreeSet::new(),
+            rejected: BTreeSet::new(),
+            stops,
+            scans: Vec::new(),
+        }
+    }
+
+    /// The table stops the discovered code gives: the ROM addresses it
+    /// both reads as a constant word and reads a table at (a base that is
+    /// an offset into another table is no stop), and the ROM function
+    /// entries.
+    fn found_stops(&self) -> BTreeSet<u32> {
+        let refs: HashSet<u32> = self
+            .runs
+            .values()
+            .flat_map(|r| r.refs.iter().copied())
+            .collect();
+        let mut s: BTreeSet<u32> = self
+            .runs
+            .values()
+            .flat_map(|r| r.tab_reads.iter().map(|t| t.0))
+            .filter(|b| refs.contains(b))
+            .chain(self.scans.iter().map(|t| t.0))
+            .collect();
+        s.extend(
+            self.entries
+                .iter()
+                .filter(|l| l.copy.is_none())
+                .map(|l| l.addr),
+        );
+        s
+    }
+
     fn add_root(&mut self, l: Loc, o: Origin) {
         self.roots.entry(l).or_insert(o);
         self.add_entry(l, o);
@@ -208,6 +288,7 @@ impl Driver<'_> {
             }
         }
         let word = |a: u32| self.image.read(None, a, 4);
+        let mut scans = Vec::new();
         for &a in &words {
             let Some(v) = word(a) else { continue };
             if v & 1 == 1 && v >> 24 == 0x08 && self.image.in_image(v & !1) {
@@ -218,14 +299,19 @@ impl Driver<'_> {
                 while let Some(e) = word(t) {
                     if !(e & 1 == 1 && e >> 24 == 0x08 && self.image.in_image(e & !1))
                         || data.contains(&t) && !words.contains(&t)
+                        || t > v && self.stops.range(v + 1..=t + 3).next().is_some()
                     {
                         break;
                     }
                     cands.insert(e);
                     t += 4;
                 }
+                if t > v {
+                    scans.push((v, t + 4));
+                }
             }
         }
+        self.scans.extend(scans);
         let mut added = false;
         for v in cands {
             let l = Loc::rom(v & !1, true);
@@ -243,6 +329,7 @@ impl Driver<'_> {
                     ptrs: &self.ptrs,
                     cache: &self.cache,
                     runs: &self.conc,
+                    stops: &self.stops,
                 };
                 func::run(&env, l, State::entry(true), &self.no_tables)
             };
@@ -283,6 +370,7 @@ impl Driver<'_> {
                     ptrs: &self.ptrs,
                     cache: &self.cache,
                     runs: &self.conc,
+                    stops: &self.stops,
                 };
                 let mut st = State::entry(f.thumb);
                 match self.roots.get(&f) {

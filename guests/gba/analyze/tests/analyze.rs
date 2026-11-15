@@ -696,3 +696,61 @@ fn masked_index_reads_only_the_entries_it_can_reach() {
     assert!(!found.contains(&(cases[4], false)));
     assert!(!r.data.contains(&(table + 16, 4)));
 }
+
+#[test]
+fn rom_table_ends_where_the_next_table_starts() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let (t, u) = (0x0800_0200, 0x0800_0240);
+    a.arm(
+        e,
+        &[
+            a_ldr_lit(0, e, e + 0x20),
+            A_MOV_LR_PC,
+            a_bx(0),
+            a_ldr_lit(0, e + 0xC, e + 0x24),
+            A_MOV_LR_PC,
+            a_bx(0),
+            a_b(e + 0x18, e + 0x18),
+            0,
+            t | 1,
+            u | 1,
+        ],
+    );
+    let (ta, tb) = (0x0800_0300, 0x0800_030C);
+    for (f, table) in [(t, ta), (u, tb)] {
+        a.thumb(
+            f,
+            &[
+                T_LSLS_R0_R0_2,
+                t_ldr_lit(1, f + 2, f + 0xC),
+                0x5808,
+                t_bx(0),
+                0,
+                0,
+            ],
+        );
+        a.w32(f + 0xC, table);
+    }
+    let cases: Vec<u32> = (0..5).map(|i| 0x0800_0340 + 0x10 * i).collect();
+    for (i, c) in cases.iter().enumerate() {
+        a.w32(ta + 4 * i as u32, *c);
+        a.arm(*c, &[A_MOV_R0_1, A_BX_LR]);
+    }
+    a.w32(tb + 8, 0x1234_5678);
+    let r = a.run(e);
+    let body = |f: u32| -> BTreeSet<u32> {
+        r.functions[&Loc::rom(f, true)]
+            .instructions
+            .keys()
+            .map(|l| l.addr)
+            .collect()
+    };
+    let (bt, bu) = (body(t), body(u));
+    for c in &cases[..3] {
+        assert!(bt.contains(c) && !bu.contains(c), "{c:#x}");
+    }
+    for c in &cases[3..] {
+        assert!(bu.contains(c) && !bt.contains(c), "{c:#x}");
+    }
+}

@@ -6,6 +6,7 @@ use relift_gba_formats::rom::OFFSET_MASK;
 use crate::loc::{Loc, Region};
 use crate::report::{CopyKind, RamCopy};
 
+#[derive(Clone)]
 pub(crate) struct Image<'a> {
     rom: &'a [u8],
     pub copies: Vec<RamCopy>,
