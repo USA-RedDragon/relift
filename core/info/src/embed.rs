@@ -15,7 +15,7 @@ pub const PE_SECTION: &str = ".rlinfo";
 #[must_use]
 pub fn c_source(doc: &[u8]) -> String {
     let mut t = String::new();
-    t.push_str("#include <stdio.h>\n");
+    t.push_str("#include <stdio.h>\n#ifdef _WIN32\n#include <fcntl.h>\n#include <io.h>\n#endif\n");
     let _ = write!(
         t,
         "#if defined(__APPLE__)\n#define RL_INFO_SECTION __attribute__((section(\"__DATA,{MACHO_SECTION}\")))\n#elif defined(_WIN32)\n#define RL_INFO_SECTION __attribute__((section(\"{PE_SECTION}\")))\n#else\n#define RL_INFO_SECTION __attribute__((section(\"{ELF_SECTION}\")))\n#endif\n"
@@ -37,7 +37,7 @@ pub fn c_source(doc: &[u8]) -> String {
     }
     t.push_str("};\n");
     t.push_str(
-        "int relift_info_main(void)\n{\n#ifdef _WIN32\n    _setmode(_fileno(stdout), 0x8000);\n#endif\n    size_t n = fwrite(relift_info_bytes, 1, sizeof relift_info_bytes, stdout);\n    return (n == sizeof relift_info_bytes && fflush(stdout) == 0) ? 0 : 1;\n}\n",
+        "int relift_info_main(void)\n{\n#ifdef _WIN32\n    _setmode(_fileno(stdout), _O_BINARY);\n#endif\n    size_t n = fwrite(relift_info_bytes, 1, sizeof relift_info_bytes, stdout);\n    return (n == sizeof relift_info_bytes && fflush(stdout) == 0) ? 0 : 1;\n}\n",
     );
     t
 }
@@ -54,5 +54,17 @@ mod tests {
         }
         assert!(c.contains("relift_info_bytes[3]"));
         assert!(c.contains(" 123, 125, 10,"));
+    }
+
+    #[test]
+    fn the_source_includes_what_the_windows_binary_mode_call_needs() {
+        let c = c_source(b"{}\n");
+        let win = c.find("#ifdef _WIN32").unwrap();
+        let setmode = c.find("_setmode").unwrap();
+        assert!(win < setmode);
+        for h in ["<io.h>", "<fcntl.h>"] {
+            let at = c.find(h).unwrap();
+            assert!(at < setmode, "{h}");
+        }
     }
 }
