@@ -240,6 +240,9 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
     unsigned mode = spsr & 0x1Fu;
     bool banked = mode == RL_ARM32_USR || mode == RL_ARM32_SYS || mode == RL_ARM32_SVC;
     memcpy(c->r, bios_regs, (banked ? 15 : 13) * sizeof c->r[0]);
+    uint32_t svc_sp = c->bank_svc[0];
+    if (mode != RL_ARM32_SVC)
+        c->bank_svc[0] = bios_regs[15];
     r->stats.bios_irqs++;
     unsigned size = (spsr & 0x20u) ? 2u : 4u;
     uint32_t back = (lr - 4u) & ~(size - 1u);
@@ -266,6 +269,8 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
     }
     c->r[13] = sp;
     c->r[14] = lr_mode;
+    if (mode != RL_ARM32_SVC)
+        c->bank_svc[0] = svc_sp;
     rl_arm32_set_cpsr(c, saved);
     memcpy(c->r, regs, sizeof regs);
     return RL_GBA_POINT_TAKEN;
