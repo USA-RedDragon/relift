@@ -16,7 +16,14 @@
 //! generator that writes opcodes with immediates stores those opcodes. Code
 //! copied to RAM runs on the same path, so code it stores is found too.
 //!
-//! Every instruction a path runs in RAM is predicted.
+//! A path that jumps from ROM into RAM, as a test driver does when it hands
+//! control to a test it copied there, gets a budget of its own for that
+//! code; when the path ends there it goes on, with its memory but unknown
+//! registers, at the ROM targets of the jumps that code holds, so the
+//! driver's next round copies its next test.
+//!
+//! Every instruction a path runs in RAM is predicted, and so is the code
+//! decoded from the bytes a path holds where it jumps into RAM from ROM.
 //! Every byte stored at a known RAM address also joins that address's value
 //! set (with the WRAM bank in effect, on a colour cartridge), marked as
 //! copied when the byte was read from ROM and generated otherwise. The
@@ -54,6 +61,13 @@ const CALL_STEPS: u32 = 1 << 18;
 /// Most forked paths of one function waiting to run; the oldest is
 /// dropped for a new one.
 const MAX_PENDING: usize = 64;
+
+/// Instructions a path may run in RAM code it jumped to from ROM before it
+/// goes on at that code's exits to ROM.
+const LAUNCH_STEPS: u32 = 1 << 24;
+
+/// Most times the paths of one function go on at the exits of RAM code.
+const MAX_LAUNCHES: usize = 64;
 
 /// Most states one function's paths remember having been in; the
 /// memory starts again when it is full.
@@ -201,6 +215,16 @@ struct Path {
     steps: u32,
     limit: u32,
     frames: Vec<Frame>,
+    main: bool,
+    free: bool,
+    launch: Option<Launch>,
+}
+
+#[derive(Clone)]
+struct Launch {
+    exits: Vec<u16>,
+    start: u32,
+    limit: u32,
 }
 
 impl Path {
@@ -325,7 +349,7 @@ fn banked(a: u16) -> bool {
 
 impl Machine<'_> {
     fn decoded(&self, p: &Path) -> bool {
-        if p.pc >= 0x8000 {
+        if p.pc >= 0x8000 || p.free {
             return true;
         }
         let at = if p.pc < 0x4000 {
@@ -974,9 +998,11 @@ impl Machine<'_> {
         let fork = |p: &Path| {
             let mut q = p.clone();
             q.limit = q.steps.saturating_add(FORK_STEPS);
+            q.main = false;
+            q.launch = None;
             q
         };
-        let mut first = true;
+        let mut launches = 0usize;
         let again = |seen: &mut FxSet<u64>, p: &Path| {
             if seen.len() >= MAX_SEEN {
                 seen.clear();
@@ -991,7 +1017,12 @@ impl Machine<'_> {
         };
         while let Some(mut p) = work.pop_back() {
             loop {
-                if p.steps >= p.limit || (!first && forks >= FORKS_STEPS) {
+                if p.steps >= p.limit
+                    || p.launch
+                        .as_ref()
+                        .is_some_and(|l| p.steps - l.start >= LAUNCH_STEPS)
+                    || (!p.main && forks >= FORKS_STEPS)
+                {
                     break;
                 }
                 if p.frames
@@ -1007,7 +1038,7 @@ impl Machine<'_> {
                     }
                     break;
                 }
-                if !first {
+                if !p.main {
                     forks += 1;
                 }
                 p.steps += 1;
@@ -1023,11 +1054,25 @@ impl Machine<'_> {
                     self.enter(p, f, pc, t);
                     p.pc = t;
                 };
+                let jumped = |p: &mut Path, t: u16, f: &mut Found| {
+                    if pc < 0x8000 && is_ram(t) && p.main && p.launch.is_none() {
+                        p.launch = Some(Launch {
+                            exits: self.image(p, f, t),
+                            start: p.steps,
+                            limit: p.limit,
+                        });
+                        p.limit = p.limit.saturating_add(LAUNCH_STEPS);
+                    } else if pc >= 0x8000 && t < 0x8000 {
+                        p.launch = None;
+                        p.free = true;
+                    }
+                };
                 let dead = match flow {
                     Flow::Next | Flow::Branch(Some(false), _) => false,
                     Flow::Stop | Flow::Jump(None) | Flow::Branch(Some(true), None) => true,
                     Flow::Jump(Some(t)) | Flow::Branch(Some(true), Some(t)) => {
                         goto(&mut p, t, f);
+                        jumped(&mut p, t, f);
                         if t <= pc && again(&mut seen, &p) {
                             break;
                         }
@@ -1115,6 +1160,10 @@ impl Machine<'_> {
                                 if let Some(fr) = p.frames.last_mut() {
                                     fr.at = p.steps;
                                 }
+                                if pc >= 0x8000 && t < 0x8000 {
+                                    p.launch = None;
+                                    p.free = true;
+                                }
                                 p.pc = t;
                                 false
                             }
@@ -1126,8 +1175,79 @@ impl Machine<'_> {
                     break;
                 }
             }
-            first = false;
+            if let Some(l) = p
+                .launch
+                .take()
+                .filter(|_| p.main && launches < MAX_LAUNCHES)
+            {
+                launches += 1;
+                for t in l.exits {
+                    let mut q = p.clone();
+                    q.r = [U; 8];
+                    (q.z, q.n, q.h, q.c) = (None, None, None, None);
+                    q.sp = Sp::Unknown;
+                    q.pc = t;
+                    q.limit = l.limit.saturating_add(p.steps - l.start);
+                    q.frames.clear();
+                    q.free = true;
+                    q.launch = None;
+                    work.push_back(q);
+                }
+            }
         }
+    }
+
+    /// Decodes the code `p` holds in RAM from `entry` through its known
+    /// bytes, adds its instructions to `f`, and gives the ROM targets of
+    /// its jumps.
+    fn image(&self, p: &Path, f: &mut Found, entry: u16) -> Vec<u16> {
+        let mut out = BTreeSet::new();
+        let mut done: FxSet<u16> = FxSet::default();
+        let mut todo = vec![entry];
+        while let Some(a) = todo.pop() {
+            if !is_ram(a) || done.len() >= MAX_PER_ENTRY || !done.insert(a) {
+                continue;
+            }
+            let b = |o: u16| self.read(p, Some(a.wrapping_add(o))).v;
+            let opb = self.read(p, Some(a));
+            let Some(op) = opb.v else { continue };
+            let (len, key) = if op == 0xCB {
+                let Some(c) = b(1) else { continue };
+                (2, 0x100 | u16::from(c))
+            } else {
+                (u16::from(BASE[usize::from(op)].length), u16::from(op))
+            };
+            let class = if opb.s == Src::Rom {
+                RamClass::Copied
+            } else {
+                RamClass::Generated
+            };
+            let e = f.ran.entry((a, key)).or_insert(class);
+            *e = (*e).min(class);
+            let next = a.wrapping_add(len);
+            let abs = b(1).zip(b(2)).map(|(l, h)| u16::from_le_bytes([l, h]));
+            let rel = b(1).map(|o| next.wrapping_add_signed(i16::from(o as i8)));
+            let (target, falls) = match op {
+                0x18 => (rel, false),
+                0x20 | 0x28 | 0x30 | 0x38 => (rel, true),
+                0xC3 => (abs, false),
+                0xC2 | 0xCA | 0xD2 | 0xDA | 0xC4 | 0xCC | 0xD4 | 0xDC | 0xCD => (abs, true),
+                0xC9 | 0xD9 | 0xE9 | 0xD3 | 0xDB | 0xDD | 0xE3 | 0xE4 | 0xEB | 0xEC | 0xED
+                | 0xF4 | 0xFC | 0xFD => (None, false),
+                _ => (None, true),
+            };
+            if let Some(t) = target {
+                if is_ram(t) {
+                    todo.push(t);
+                } else if t < 0x8000 && matches!(op, 0xC2 | 0xC3 | 0xCA | 0xD2 | 0xDA) {
+                    out.insert(t);
+                }
+            }
+            if falls {
+                todo.push(next);
+            }
+        }
+        out.into_iter().collect()
     }
 
     fn start(&self, at: Loc) -> Path {
@@ -1156,6 +1276,9 @@ impl Machine<'_> {
             steps: 0,
             limit: ROOT_STEPS,
             frames: Vec::new(),
+            main: true,
+            free: false,
+            launch: None,
         }
     }
 }
