@@ -1,0 +1,124 @@
+name: Cross
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  ZIG_VERSION: 0.17.1
+  ZIG_SHA256: 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+
+jobs:
+  release-guard:
+    name: release builds load no code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The guard rejects what it should
+        run: python3 -I runtime/tools/cross/test_release_guard.py
+
+      - name: The runtime sources load no code and map no executable memory
+        run: python3 -I runtime/tools/cross/release_guard.py --sources runtime
+
+  linux:
+    name: cross ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [windows-x64, android-arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            .
+            guests/gb/devices
+
+      - name: Install zig and the Rust std for Windows
+        if: matrix.target == 'windows-x64'
+        run: |
+          dir="$RUNNER_TEMP/zig"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/zig.tar.xz" "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+          echo "$ZIG_SHA256  $dir/zig.tar.xz" | sha256sum -c -
+          tar -xJf "$dir/zig.tar.xz" -C "$dir"
+          echo "$dir/zig-x86_64-linux-$ZIG_VERSION" >> "$GITHUB_PATH"
+          rustup target add x86_64-pc-windows-gnullvm
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y wine64
+
+      - name: Install the Rust std for Android
+        if: matrix.target == 'android-arm64'
+        run: |
+          rustup target add aarch64-linux-android
+          echo "$ANDROID_NDK_HOME"
+          cat "$ANDROID_NDK_HOME/source.properties"
+
+      - name: Build relift
+        run: cargo build --locked -p relift
+
+      - name: Cross-build the runtime and a Game Boy program, check the release, run it
+        run: |
+          python3 -I runtime/tools/cross/gbcross.py --target ${{ matrix.target }} \
+            --relift target/debug/relift --work "$RUNNER_TEMP/cross" \
+            ${{ matrix.target == 'windows-x64' && '--run' || '' }}
+
+  macos:
+    name: cross ${{ matrix.target }}
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-x64
+            rust: x86_64-apple-darwin
+          - target: ios-arm64
+            rust: aarch64-apple-ios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.rust }}
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            .
+            guests/gb/devices
+
+      - name: Build relift
+        run: cargo build --locked -p relift
+
+      - name: Cross-build the runtime and a Game Boy program, check the release
+        run: |
+          python3 -I runtime/tools/cross/gbcross.py --target ${{ matrix.target }} \
+            --relift target/debug/relift --work "$RUNNER_TEMP/cross"

@@ -161,6 +161,8 @@ def host_build(args, env):
     cache = env["RELIFT_CACHE_DIR"]
     game = glob.glob(os.path.join(cache, "projects", "*", "build", "host", "build.ninja"))
     runtime = glob.glob(os.path.join(cache, "gb-runtime", "*", "build.ninja"))
+    if not game and not shutil.which("ninja"):
+        raise Missing("ninja, which relift needs to leave its compile commands for this script: apt install ninja-build, or brew install ninja")
     if len(game) != 1 or len(runtime) != 1:
         sys.exit(f"{cache}: expected one game and one runtime build.ninja, found {game} {runtime}")
     return game[0], runtime[0]
