@@ -307,7 +307,9 @@ typedef struct rl_fn_map {
  * functions, so a host pc in [RL_TEXT_LO, RL_TEXT_HI) is lifted code and
  * belongs to the nearest function start below it.
  */
-#if defined(_WIN32)
+#if defined(RL_COLD_TEXT) && defined(__ELF__) && defined(__x86_64__)
+#define RL_TEXT_SECTION "relift_cold"
+#elif defined(_WIN32)
 #define RL_TEXT_SECTION "relift$m"
 #elif defined(__APPLE__)
 #define RL_TEXT_SECTION "__TEXT,__relift_text,regular,pure_instructions"
@@ -322,7 +324,14 @@ typedef struct rl_fn_map {
  * unit that names RL_TEXT_LO and RL_TEXT_HI. On Windows, exactly one
  * translation unit per image also expands RL_TEXT_BOUNDS_DEFINE().
  */
-#if defined(_WIN32)
+#if defined(RL_COLD_TEXT) && defined(__ELF__) && defined(__x86_64__)
+#define RL_TEXT_BOUNDS_DECLARE()                                                                        \
+    extern const char __start_relift_cold[] __attribute__((visibility("hidden")));                     \
+    extern const char __stop_relift_cold[] __attribute__((visibility("hidden")))
+#define RL_TEXT_BOUNDS_DEFINE()
+#define RL_TEXT_LO ((const void *)__start_relift_cold)
+#define RL_TEXT_HI ((const void *)__stop_relift_cold)
+#elif defined(_WIN32)
 #define RL_TEXT_BOUNDS_DECLARE() void rl_text_lo_mark(void); void rl_text_hi_mark(void)
 #define RL_TEXT_BOUNDS_DEFINE()                                                                         \
     __attribute__((section("relift$a"), used)) void rl_text_lo_mark(void) {}                            \

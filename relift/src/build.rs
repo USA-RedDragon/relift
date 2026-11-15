@@ -537,6 +537,8 @@ fn emit_modules(
                 dir: &dir,
                 window,
                 shard_bytes: kib(settings.emit.shard_kib),
+                piece_bytes: kib(settings.emit.cold_piece_kib),
+                first: settings.emit.cold_first,
             };
             let made = emit_cold(&cold, stage, ui, row)?;
             census.add(&made.census);
@@ -586,8 +588,16 @@ fn emit_function<'a>(
     }
 }
 
-/// The C bytes of one piece of a cold function.
-const COLD_PIECE_BYTES: usize = 1 << 10;
+/// Whether the cold copy is built with the large code model and linked after
+/// `.bss` ([`COLD_SCRIPT`]): on x86-64 ELF, where hot code reaches its data
+/// and the runtime's only within 2 GiB, so the cold copy must not sit
+/// between them.
+const COLD_FAR: bool =
+    cfg!(target_arch = "x86_64") && !cfg!(windows) && !cfg!(target_vendor = "apple");
+
+/// The linker script fragment that puts the cold copy's text after `.bss`,
+/// in a segment of its own (GNU ld and lld).
+const COLD_SCRIPT: &str = "SECTIONS { . = ALIGN(CONSTANT(MAXPAGESIZE)); relift_cold : { *(relift_cold) } } INSERT AFTER .bss;\n";
 
 /// What [`emit_cold`] takes of one module.
 struct ColdModule<'a> {
@@ -606,6 +616,9 @@ struct ColdModule<'a> {
     dir: &'a Path,
     window: u64,
     shard_bytes: usize,
+    piece_bytes: usize,
+    /// The cold copy runs every function: it calls only itself.
+    first: bool,
 }
 
 /// What [`emit_cold`] made of one module.
@@ -641,9 +654,10 @@ fn emit_cold(
         .values()
         .chain(sup.layout.functions.values())
         .filter(|o| {
-            o.runs
-                .iter()
-                .any(|&(first, n)| (0..u64::from(n)).any(|k| !hot.contains(&(first + 4 * k))))
+            m.first
+                || o.runs
+                    .iter()
+                    .any(|&(first, n)| (0..u64::from(n)).any(|k| !hot.contains(&(first + 4 * k))))
         })
         .collect();
     all.sort_by_key(|o| o.entry);
@@ -658,13 +672,18 @@ fn emit_cold(
         })
         .collect();
     let mut calls: Vec<relift_emit::Override> = m.overrides.to_vec();
-    calls.extend(m.heads.values().map(|h| relift_emit::Override {
-        entry: h.entry,
-        host_fn: h.name.clone(),
-        may_unwind: true,
-        resume_point: false,
-        declare: true,
-    }));
+    calls.extend(
+        m.heads
+            .values()
+            .filter(|_| !m.first)
+            .map(|h| relift_emit::Override {
+                entry: h.entry,
+                host_fn: h.name.clone(),
+                may_unwind: true,
+                resume_point: false,
+                declare: true,
+            }),
+    );
     let raw = |pc: u64| {
         module.bytes_at(pc).and_then(|b| b.get(..4)).map_or(0, |w| {
             u64::from(u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
@@ -705,7 +724,7 @@ fn emit_cold(
             &[],
             &relift_emit::Options {
                 shard_bytes: m.shard_bytes,
-                piece_bytes: COLD_PIECE_BYTES,
+                piece_bytes: m.piece_bytes,
                 unit_name: format!("{} (cold)", p.name),
                 unit_symbol: unit.clone(),
                 module_base: p.base,
@@ -713,6 +732,7 @@ fn emit_cold(
                 enter_anywhere: Some(u64::MAX),
                 calls: calls.clone(),
                 entry_ranges: true,
+                piece_syms: false,
                 ..relift_emit::Options::default()
             },
             &mut |d, total| {
@@ -1131,12 +1151,21 @@ fn lift_and_emit(
     }
     relift_cache::write_if_changed(&out.join(ENTRIES), emitted.entries.as_bytes())?;
     relift_cache::write_if_changed(&out.join("total.txt"), emitted.total.as_bytes())?;
-    let units: Vec<String> = emitted
-        .units
-        .iter()
-        .chain(&emitted.cold_units)
-        .cloned()
-        .collect();
+    let units: Vec<String> = if settings.emit.cold_first {
+        emitted
+            .cold_units
+            .iter()
+            .chain(&emitted.units)
+            .cloned()
+            .collect()
+    } else {
+        emitted
+            .units
+            .iter()
+            .chain(&emitted.cold_units)
+            .cloned()
+            .collect()
+    };
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
     let fpsr = emitted.fpsr;
@@ -1485,11 +1514,17 @@ pub(crate) fn build_project(
         "-gline-tables-only" => None,
         _ => Some(f.clone()),
     })
-    .chain([
-        "-g0".into(),
-        "-fno-asynchronous-unwind-tables".into(),
-        "-fno-unwind-tables".into(),
-    ])
+    .chain(
+        [
+            "-g0",
+            "-fno-asynchronous-unwind-tables",
+            "-fno-unwind-tables",
+            "-DRL_COLD_TEXT",
+        ]
+        .map(String::from),
+    )
+    .chain(pic.iter().cloned())
+    .chain((COLD_FAR && android.is_none()).then(|| "-mcmodel=large".to_string()))
     .collect();
     let lifted_flags = if emitted.fp_program_wide {
         flag_flags.clone()
@@ -1612,7 +1647,7 @@ pub(crate) fn build_project(
     };
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = relift_build::job_count(settings.jobs);
-    let libs: Vec<String> = if android.is_some() {
+    let mut libs: Vec<String> = if android.is_some() {
         [
             "-lm",
             "-ldl",
@@ -1628,6 +1663,12 @@ pub(crate) fn build_project(
     } else {
         ["-lpthread", "-lm"].map(String::from).into()
     };
+    if COLD_FAR && android.is_none() && !emitted.cold.is_empty() {
+        let script = out.join("cold.ld");
+        relift_cache::write_if_changed(&script, COLD_SCRIPT.as_bytes())?;
+        libs.push("-T".into());
+        libs.push(script.display().to_string());
+    }
     let rt_lib = if cfg!(windows) {
         bdir.join(runtime_lib_name())
     } else {

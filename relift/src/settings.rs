@@ -125,6 +125,20 @@ pub struct Emit {
         description = "also emit a cold copy of every function that dispatch enters at any instruction, so no guest code is missed"
     )]
     pub cold: bool,
+
+    #[configulator(
+        name = "cold-piece-kib",
+        default = "4",
+        description = "the most KiB of C per C function of the cold copy"
+    )]
+    pub cold_piece_kib: u32,
+
+    #[configulator(
+        name = "cold-first",
+        default = "false",
+        description = "for tests: run every function from the cold copy, which then calls only itself"
+    )]
+    pub cold_first: bool,
 }
 
 /// Host tools relift drives. An empty path means look it up on `PATH`.

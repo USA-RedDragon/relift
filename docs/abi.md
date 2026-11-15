@@ -420,9 +420,22 @@ has a dispatch slot that is not empty, so no guest jump can miss.
   These functions exist only in the cold copy.
 - **Cold copy.** Each module gets a second unit, `rl_cold_<i>_<module>`:
   every function of the hot layout and every superset function, emitted
-  with `enter_anywhere` in pieces of about 1 KiB of C, in shards of their
+  with `enter_anywhere` in pieces of about 4 KiB of C (`emit.cold-piece-kib`;
+  1 KiB pieces hold about three guest instructions, and their per-piece
+  table entries and names cost more than the code), in shards of their
   own under `c/<i>_<module>/cold/`, built at `-Os` without debug info or
-  unwind tables (crash reports walk frame pointers). Its unit lists each run
+  unwind tables (crash reports walk frame pointers, and guest exceptions
+  unwind through `RL_PENDING`, not host tables). The function maps name
+  every piece by its function (`Options::piece_syms`). On x86-64 ELF the
+  copy is built with `-mcmodel=large` and `-DRL_COLD_TEXT`, which puts it in
+  the section `relift_cold`, and the link adds a script fragment that places
+  that section after `.bss` in a segment of its own: hot code and the
+  runtime reach `.data` and `.bss` with 32-bit PC-relative relocations, and
+  the cold copy between them would push them past 2 GiB. On arm64 (ADRP
+  reaches 4 GiB; the linkers add branch thunks) and Windows the copy stays
+  in `relift_text`. `emit.cold-first`, for tests, registers the cold units
+  first and stops cold code from calling hot functions, so every function
+  runs from the cold copy. Its unit lists each run
   of consecutive instructions of one piece as one `RL_FN_RANGE` entry
   (`Options::entry_ranges`), which fills every empty slot of its range. A
   function every instruction of which is a hot entry gets no cold copy. Its direct calls and

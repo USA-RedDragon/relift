@@ -17,6 +17,8 @@ codesign-keychain = ""
 shard-kib = 4096
 piece-kib = 1024
 cold = true
+cold-piece-kib = 4
+cold-first = false
 
 [package]
 appimage = "auto"
