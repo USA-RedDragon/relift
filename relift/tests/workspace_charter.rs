@@ -75,6 +75,7 @@ const STANDALONE: &[&str] = &[
     "relift-emit-wasm",
     "relift-gb-analyze",
     "relift-gb-tools",
+    "relift-gba-analyze",
     "relift-gba-formats",
     "relift-gba-tools",
     "relift-switch-tools",
@@ -266,6 +267,14 @@ const CHARTERS: &[Charter] = &[
             "relift-proc",
             "serde_json",
         ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-gba-analyze",
+        band: 2,
+        why: "Game Boy Advance function discovery across ARM and Thumb, over the ARMv4T lifter and the cartridge format; analysis only",
+        normal: &["relift-cpu-arm32", "relift-gba-formats", "relift-ir"],
+        dev: &["relift-gba-formats"],
         build: NONE,
     },
     Charter {

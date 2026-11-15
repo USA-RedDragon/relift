@@ -1025,6 +1025,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gba-analyze"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-arm32",
+ "relift-gba-formats",
+ "relift-ir",
+]
+
+[[package]]
 name = "relift-gba-formats"
 version = "0.1.0"
 dependencies = [
