@@ -194,6 +194,7 @@ static void on_frame(void *user, const uint16_t *pixels, uint64_t when)
     (void)when;
     host *H = user;
     H->frames++;
+    rl_ports_script_frame(H->frames);
     if (H->png_dir && H->frames % H->png_every == 0) {
         char path[4096];
         snprintf(path, sizeof path, "%s/frame%06u.png", H->png_dir, H->frames);
