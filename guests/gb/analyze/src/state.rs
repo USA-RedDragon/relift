@@ -256,15 +256,26 @@ impl<T: Eq + std::hash::Hash> Pool<T> {
     }
 }
 
+/// The frames made by storing slots in a frame and by joining two.
+#[derive(Default)]
+struct FrameOps {
+    with: FxMap<(Frame, [(u8, Val); 2]), Frame>,
+    join: FxMap<(Frame, Frame), Frame>,
+    store: FxMap<(Stored, u16, Val), Stored>,
+    meet: FxMap<(Stored, Stored), Stored>,
+}
+
 thread_local! {
     static FRAMES: RefCell<Pool<Slots>> = RefCell::new(Pool::new([Val::Top; SLOTS]));
     static STORES: RefCell<Pool<Cells>> = RefCell::new(Pool::new([(0, Val::Top); CELLS]));
+    static OPS: RefCell<FrameOps> = RefCell::new(FrameOps::default());
 }
 
 /// Forget the stacks and stored bytes of earlier analyses.
 pub(crate) fn reset_pools() {
     FRAMES.with_borrow_mut(|f| *f = Pool::new([Val::Top; SLOTS]));
     STORES.with_borrow_mut(|f| *f = Pool::new([(0, Val::Top); CELLS]));
+    OPS.with_borrow_mut(|o| *o = FrameOps::default());
 }
 
 /// The stack slots of a state.
@@ -286,23 +297,33 @@ impl Frame {
         FRAMES.with_borrow(|f| f.all[self.0 as usize][i])
     }
 
-    fn with(self, set: &[(usize, Val)]) -> Frame {
-        if set.iter().all(|(i, v)| self.get(*i) == *v) {
+    fn with(self, set: [(u8, Val); 2]) -> Frame {
+        if set.iter().all(|(i, v)| self.get(usize::from(*i)) == *v) {
             return self;
+        }
+        if let Some(f) = OPS.with_borrow(|o| o.with.get(&(self, set)).copied()) {
+            return f;
         }
         let mut s = *self.slots();
         for (i, v) in set {
-            s[*i] = *v;
+            s[usize::from(i)] = v;
         }
-        Frame::of(s)
+        let f = Frame::of(s);
+        OPS.with_borrow_mut(|o| o.with.insert((self, set), f));
+        f
     }
 
     fn join(self, other: Frame) -> Frame {
         if self == other {
             return self;
         }
+        if let Some(f) = OPS.with_borrow(|o| o.join.get(&(self, other)).copied()) {
+            return f;
+        }
         let (a, b) = (self.slots(), other.slots());
-        Frame::of(std::array::from_fn(|i| join_val(a[i], b[i])))
+        let f = Frame::of(std::array::from_fn(|i| join_val(a[i], b[i])));
+        OPS.with_borrow_mut(|o| o.join.insert((self, other), f));
+        f
     }
 }
 
@@ -320,6 +341,37 @@ impl Stored {
     /// The address and value of each stored byte.
     pub(crate) fn get(self) -> Rc<Cells> {
         STORES.with_borrow(|f| f.all[self.0 as usize].clone())
+    }
+
+    fn with(self, addr: u16, v: Val) -> Stored {
+        if let Some(s) = OPS.with_borrow(|o| o.store.get(&(self, addr, v)).copied()) {
+            return s;
+        }
+        let mut cells = *self.get();
+        if let Some(c) = cells.iter_mut().find(|c| c.0 == addr) {
+            c.1 = v;
+        } else {
+            cells.rotate_right(1);
+            cells[0] = (addr, v);
+        }
+        let s = Stored::of(cells);
+        OPS.with_borrow_mut(|o| o.store.insert((self, addr, v), s));
+        s
+    }
+
+    fn meet(self, other: Stored) -> Stored {
+        if let Some(s) = OPS.with_borrow(|o| o.meet.get(&(self, other)).copied()) {
+            return s;
+        }
+        let (mut a, b) = (*self.get(), other.get());
+        for c in &mut a {
+            if c.1 != Val::Top && !b.contains(c) {
+                *c = (0, Val::Top);
+            }
+        }
+        let s = Stored::of(a);
+        OPS.with_borrow_mut(|o| o.meet.insert((self, other), s));
+        s
     }
 }
 
@@ -428,13 +480,7 @@ impl State {
         }
         self.stack = self.stack.join(other.stack);
         if self.cells != other.cells {
-            let (mut a, b) = (*self.cells.get(), other.cells.get());
-            for c in &mut a {
-                if c.1 != Val::Top && !b.contains(c) {
-                    *c = (0, Val::Top);
-                }
-            }
-            self.cells = Stored::of(a);
+            self.cells = self.cells.meet(other.cells);
         }
         if self.z != other.z {
             self.z = None;
@@ -471,7 +517,8 @@ impl State {
 
     pub(crate) fn set_slot(&mut self, off: i16, v: Val) {
         if (STACK_LO..STACK_HI).contains(&off) {
-            self.stack = self.stack.with(&[((off - STACK_LO) as usize, v)]);
+            let i = (off - STACK_LO) as u8;
+            self.stack = self.stack.with([(i, v), (i, v)]);
         }
     }
 
@@ -489,8 +536,8 @@ impl State {
         if let Some(sp) = self.sp {
             let sp = sp - 2;
             if (STACK_LO..STACK_HI - 1).contains(&sp) {
-                let i = (sp - STACK_LO) as usize;
-                self.stack = self.stack.with(&[(i, l), (i + 1, h)]);
+                let i = (sp - STACK_LO) as u8;
+                self.stack = self.stack.with([(i, l), (i + 1, h)]);
             } else {
                 self.set_slot(sp, l);
                 self.set_slot(sp + 1, h);
@@ -570,14 +617,7 @@ impl State {
         if !plain_ram(addr) {
             return;
         }
-        let mut cells = *self.cells.get();
-        if let Some(c) = cells.iter_mut().find(|c| c.0 == addr) {
-            c.1 = v;
-        } else {
-            cells.rotate_right(1);
-            cells[0] = (addr, v);
-        }
-        self.cells = Stored::of(cells);
+        self.cells = self.cells.with(addr, v);
     }
 
     /// Constant bytes stored on this path, with their addresses.
