@@ -271,6 +271,7 @@ fn device_library(
         "--manifest-path",
     ])
     .arg(&manifest)
+    .current_dir(manifest.parent().unwrap_or(rt))
     .env("CARGO_TARGET_DIR", &target);
     if let Some(t) = triple {
         cmd.args(["--target", t]);
