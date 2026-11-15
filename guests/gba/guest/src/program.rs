@@ -126,9 +126,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
     let calls: BTreeSet<u32> = report
         .functions
         .values()
-        .flat_map(|f| f.edges.iter())
-        .filter(|e| e.kind == EdgeKind::LinkedJump)
-        .map(|e| e.site.addr)
+        .flat_map(|f| f.linked.iter().map(|l| l.addr))
         .collect();
     let fe = Gba::with_calls(calls);
     let mut unlifted = Vec::new();

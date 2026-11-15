@@ -188,6 +188,8 @@ pub(crate) struct FnRun {
     /// Some instruction run writes the mode, a mask, an SPSR or a banked
     /// register.
     pub writes_psr: bool,
+    /// Computed jumps with the link register set to the next instruction.
+    pub linked: BTreeSet<Loc>,
 }
 
 struct Run<'a> {
@@ -1028,6 +1030,9 @@ impl Run<'_> {
 
     fn jump(&mut self, site: Loc, enc: Encoding, t: Abs, out: &Out, link: bool) {
         let st = &out.st;
+        if link && !matches!(t, Abs::K(v) if v as u32 == Self::fall_loc(site).addr) {
+            self.out.linked.insert(site);
+        }
         if !link
             && matches!(t, Abs::Tab { .. } | Abs::Top | Abs::B { .. })
             && !self.no_tables.contains(&site)

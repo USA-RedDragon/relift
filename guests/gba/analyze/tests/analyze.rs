@@ -848,3 +848,25 @@ fn a_word_stored_through_an_argument_reads_back() {
     assert!(!insts(&r).contains(&(f + 0xC, false)));
     assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
 }
+
+#[test]
+fn a_linked_jump_through_an_unknown_pointer_is_a_call() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    a.arm(
+        e,
+        &[
+            a_ldr_lit(1, e, e + 0x18),
+            0xE591_0000,
+            0xE28F_E000,
+            a_bx(0),
+            A_MOV_R0_1,
+            a_b(e + 0x14, e + 0x14),
+            0x0300_1000,
+        ],
+    );
+    let r = a.run(e);
+    let f = &r.functions[&Loc::rom(BASE, false)];
+    assert!(f.linked.contains(&Loc::rom(e + 0xC, false)));
+    assert!(insts(&r).contains(&(e + 0x10, false)));
+}

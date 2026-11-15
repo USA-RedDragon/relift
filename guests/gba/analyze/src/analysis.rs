@@ -533,6 +533,7 @@ impl<'a> Driver<'a> {
                     edges,
                     tables: r.tables.clone(),
                     returns: self.summaries.get(l).is_some_and(|s| s.returns),
+                    linked: r.linked.clone(),
                 },
             );
             unresolved.extend(r.unresolved.iter().cloned());

@@ -186,6 +186,9 @@ pub struct Function {
     pub tables: Vec<Table>,
     /// Whether some path returns.
     pub returns: bool,
+    /// Its computed jumps that are calls: the link register holds the
+    /// address of the next instruction.
+    pub linked: BTreeSet<Loc>,
 }
 
 /// A BIOS call.
