@@ -452,6 +452,12 @@ impl<'m, C: Cpu> Gen<'m, C> {
         fail(format!("unbound {name}"))
     }
 
+    /// The current value of the register `name`: the last write, or its
+    /// initial value.
+    pub fn reg(&mut self, name: &str) -> R<V> {
+        self.reg_get(name)
+    }
+
     fn reg_get(&mut self, name: &str) -> R<V> {
         if let Some(v) = self.regs.get(name) {
             return Ok(v.clone());
