@@ -1417,6 +1417,7 @@ int vkh_vkDestroyDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkDestroySwapchainKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem);

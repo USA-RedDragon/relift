@@ -87,6 +87,7 @@ hand_commands = [
     "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
     "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
     "vkGetPhysicalDeviceSurfacePresentModesKHR",
+    "vkGetPhysicalDeviceSurfaceFormatsKHR",
     "vkCreateSwapchainKHR",
     "vkDestroySwapchainKHR",
     "vkGetSwapchainImagesKHR",

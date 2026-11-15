@@ -200,6 +200,37 @@ int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *m
     return vkf_end(&k);
 }
 
+int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
+{
+    static const VkSurfaceFormatKHR formats[] = {
+        { VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+        { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+    };
+    const uint32_t n = sizeof formats / sizeof formats[0];
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    VkPhysicalDevice pd = vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
+    if (!pd)
+        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceSurfaceFormatsKHR, c->x[0]);
+    uint64_t gcount = c->x[2], glist = c->x[3];
+    VkResult r = VK_SUCCESS;
+    if (!gcount)
+        r = VK_ERROR_INITIALIZATION_FAILED;
+    else if (!glist)
+        rl_st32(mem, gcount, n);
+    else {
+        uint32_t cap = vkf_g32(&k, gcount), w = cap < n ? cap : n;
+        for (uint32_t i = 0; i < w; i++) {
+            rl_st32(mem, glist + 8u * i, (uint32_t)formats[i].format);
+            rl_st32(mem, glist + 8u * i + 4u, (uint32_t)formats[i].colorSpace);
+        }
+        rl_st32(mem, gcount, w);
+        r = w < n ? VK_INCOMPLETE : VK_SUCCESS;
+    }
+    c->x[0] = (uint32_t)r;
+    return vkf_end(&k);
+}
+
 static uint32_t memory_type(const vkf_dev *d, uint32_t bits)
 {
     for (uint32_t i = 0; i < d->type_count; i++)

@@ -327,7 +327,7 @@ static int make_swapchain(gpu *g)
     for (uint32_t i = 0; i < nf; i++) {
         VkSurfaceFormatKHR f;
         memcpy(&f, g_mem + gf + i * sizeof f, sizeof f);
-        if (f.format == VK_FORMAT_B8G8R8A8_UNORM)
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM || f.format == VK_FORMAT_R8G8B8A8_UNORM)
             fmt = f;
     }
     VkSwapchainCreateInfoKHR ci = {

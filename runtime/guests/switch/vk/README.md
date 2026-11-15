@@ -194,6 +194,13 @@ an image back only once the frame presented after it is shown. A game that
 picks its mode from the list (The Forge prefers immediate when vsync is off)
 gets FIFO, as on the console.
 
+`vkGetPhysicalDeviceSurfaceFormatsKHR` reports the console layer's fixed list
+too, `R8G8B8A8_SRGB` and `R8G8B8A8_UNORM` in sRGB nonlinear: guest images
+are the layer's own and the present blit converts to whatever the host
+surface takes. Forwarding the host's list broke start-up: a Wayland surface
+on NVIDIA answered 28 formats, then 14, then more than 14 between a game's
+count and list calls, and The Forge asserts on that `VK_INCOMPLETE`.
+
 ## Loading
 
 `vk_window.o` registers `rl_vk_switch_hook()` from a constructor (`rl_switch_register_auto_hook`) and `rl_switch_main` adds it by itself; a program calls nothing. A build must link the object (`librelift_switch_vk.a` only with `-Wl,--whole-archive`, `-force_load` or `/WHOLEARCHIVE`, since nothing else references it).

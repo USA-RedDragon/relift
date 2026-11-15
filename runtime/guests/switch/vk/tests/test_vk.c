@@ -881,6 +881,12 @@ TEST(vk_vi_surface_presents_headless)
         CHECK(VKR(G("vkGetPhysicalDeviceSurfaceFormatsKHR", pds[i], surface, gfn, gfmts)) >= 0);
         VkSurfaceFormatKHR fmt;
         memcpy(&fmt, g_mem + gfmts, sizeof fmt);
+        CHECK_EQ(g32(gfn), 2);
+        CHECK_EQ(fmt.format, VK_FORMAT_R8G8B8A8_SRGB);
+        CHECK_EQ(g32(gfmts + 8), VK_FORMAT_R8G8B8A8_UNORM);
+        rl_st32(g_mem, gfn, 1);
+        CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceFormatsKHR", pds[i], surface, gfn, gfmts)), VK_INCOMPLETE);
+        CHECK_EQ(g32(gfn), 1);
         uint64_t gmn = galloc(4), gmodes = galloc(16);
         CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfacePresentModesKHR", pds[i], surface, gmn, 0)), VK_SUCCESS);
         CHECK_EQ(g32(gmn), 1);
