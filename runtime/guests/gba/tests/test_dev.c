@@ -106,6 +106,36 @@ TEST(the_irq_line_rises_two_cycles_after_the_request)
     mach_free(&m);
 }
 
+TEST(the_cpu_sees_the_irq_line_as_it_was_when_its_last_access_began)
+{
+    mach m = mach_new();
+    mach_wr(&m, 10, 0x04000200u, 2, 0x0001u);
+    mach_wr(&m, 12, 0x04000208u, 2, 1u);
+    mach_to(&m, 50);
+    rl_gba_request_irq(m.g, RL_GBA_IRQ_VBLANK);
+    mach_to(&m, 51);
+    rl_gba_store(m.g, 0x02000000u, 2, 0, false);
+    CHECK_EQ(mach_now(&m), 54u);
+    CHECK(!rl_gba_irq_sample(m.g));
+    CHECK(rl_gba_irq_line(m.g));
+    rl_gba_fetch(m.g, 0x03000000u, 4, false);
+    CHECK(rl_gba_irq_sample(m.g));
+    rl_gba_write(m.g, 0x04000202u, 2, 1u);
+    mach_to(&m, 100);
+    rl_gba_request_irq(m.g, RL_GBA_IRQ_VBLANK);
+    mach_to(&m, 102);
+    rl_gba_store(m.g, 0x02000000u, 2, 0, false);
+    CHECK(rl_gba_irq_sample(m.g));
+    rl_gba_write(m.g, 0x04000202u, 2, 1u);
+    mach_to(&m, 200);
+    rl_gba_request_irq(m.g, RL_GBA_IRQ_VBLANK);
+    rl_gba_idle(m.g, 2);
+    CHECK(!rl_gba_irq_sample(m.g));
+    rl_gba_idle(m.g, 1);
+    CHECK(rl_gba_irq_sample(m.g));
+    mach_free(&m);
+}
+
 TEST(only_the_bios_halts_and_the_halt_ends_at_the_interrupt)
 {
     mach m = mach_new();

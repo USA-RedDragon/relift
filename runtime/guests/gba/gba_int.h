@@ -32,6 +32,7 @@ typedef struct gba_irq {
     gba_irq_state log[GBA_IRQ_LOG];
     unsigned n;
     bool line, wake;
+    uint64_t rise;
     uint16_t wake_mask;
     uint64_t done;
     rl_event ev;
@@ -176,6 +177,7 @@ struct rl_gba {
 
     bool halt_req, stop_req, halted, in_bios;
     uint64_t dma_overlap;
+    uint64_t acc_start;
 
     rl_gba_bios bios;
     rl_gba_bus bios_bus;

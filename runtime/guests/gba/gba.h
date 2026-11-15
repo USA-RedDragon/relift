@@ -258,6 +258,17 @@ rl_gba_bios *rl_gba_bios_of(rl_gba *g);
  */
 const rl_gba_bus *rl_gba_bios_bus(rl_gba *g);
 
+/**
+ * @brief True when the CPU, at the end of the instruction whose last bus
+ * access (rl_gba_fetch, rl_gba_load, rl_gba_store or the last cycle of
+ * rl_gba_idle) was the latest one, takes an interrupt (when its I bit
+ * allows): the IRQ input is asserted and rose no later than the first cycle
+ * of that access. The console does not see a request that arrives during
+ * the wait states of the instruction's last access until the end of the
+ * next instruction. Runs the events due first.
+ */
+bool rl_gba_irq_sample(rl_gba *g);
+
 /** @brief Callbacks into the CPU layer. */
 typedef struct rl_gba_cpu_hooks {
     /** @brief Passed to every callback. */

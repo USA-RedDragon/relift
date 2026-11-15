@@ -98,6 +98,8 @@ static void update(rl_gba *g, uint64_t x)
     bool wake = (w.ie & w.iflag & q->wake_mask) != 0;
     if (line != q->line) {
         q->line = line;
+        if (line)
+            q->rise = x;
         set_line(g, RL_GBA_LINE_IRQ, line);
     }
     if (wake != q->wake) {
@@ -180,6 +182,13 @@ void gba_irq_attach(rl_gba *g)
 }
 
 bool rl_gba_irq_line(const rl_gba *g) { return g->irq.line; }
+
+bool rl_gba_irq_sample(rl_gba *g)
+{
+    if (g->cpu)
+        rl_sched_run(g->cpu);
+    return g->irq.line && g->irq.rise <= g->acc_start;
+}
 
 void rl_gba_request_irq(rl_gba *g, uint16_t sources) { gba_irq_set(g, sources, gba_now(g)); }
 
