@@ -5,10 +5,17 @@
 
 - sources: no file under DIR (the runtime, tests excluded) maps executable
   memory (PROT_EXEC, MAP_JIT, PAGE_EXECUTE*, FILE_MAP_EXECUTE) or calls
-  dlopen or LoadLibrary, except hostlib.c and its header (host libraries such as the Vulkan
-  loader) and devload.c (the hot-load path, built only with RL_HOTLOAD).
+  dlopen, LoadLibrary or adrenotools_open_libvulkan, except hostlib.c and its
+  header (host libraries such as the Vulkan loader) and devload.c (the
+  hot-load path, built only with RL_HOTLOAD).
 - objects: no object file under DIR holds the hot-load connection
-  (RELIFT_DEV_SOCKET), and only hostlib objects import dlopen or LoadLibrary.
+  (RELIFT_DEV_SOCKET), and only hostlib objects import dlopen, LoadLibrary or
+  adrenotools_open_libvulkan.
+
+A release loads no game code at run time. What hostlib.c loads are GPU and
+system libraries: the host's Vulkan loader, and on Android the Vulkan driver
+package the user installed and picked with video.gpu_driver, which
+libadrenotools opens next to the system loader (core/gpu_driver.h).
 - binary: ELF, PE or Mach-O with no hot-load connection and no segment or
   section that is both writable and executable.
 
@@ -22,7 +29,7 @@ import struct
 import sys
 
 EXEC_API = re.compile(rb"\b(PROT_EXEC|MAP_JIT|PAGE_EXECUTE\w*|FILE_MAP_EXECUTE|VirtualProtect\w*Exec\w*)\b")
-LOAD_API = re.compile(rb"\b(dlopen|LoadLibrary[AWX]?(?:Ex[AW]?)?|LoadPackagedLibrary)\b")
+LOAD_API = re.compile(rb"\b(dlopen|LoadLibrary[AWX]?(?:Ex[AW]?)?|LoadPackagedLibrary|adrenotools_open_libvulkan)\b")
 ALLOWED_LOAD = {"hostlib.c", "hostlib.h", "devload.c"}
 HOTLOAD = b"RELIFT_DEV_SOCKET"
 
@@ -60,8 +67,8 @@ def scan_objects(root):
                 data = f.read()
             if HOTLOAD in data:
                 bad.append(f"{path}: holds the hot-load connection")
-            if "hostlib" not in fn and re.search(rb"(?<![A-Za-z_])(dlopen|LoadLibrary[AW])\b", data):
-                bad.append(f"{path}: imports dlopen or LoadLibrary and is not hostlib")
+            if "hostlib" not in fn and re.search(rb"(?<![A-Za-z_])(dlopen|LoadLibrary[AW]|adrenotools_open_libvulkan)\b", data):
+                bad.append(f"{path}: imports a library loader and is not hostlib")
     return bad
 
 

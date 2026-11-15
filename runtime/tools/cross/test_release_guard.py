@@ -30,6 +30,25 @@ class ReleaseGuard(unittest.TestCase):
     def test_load_library_in_a_runtime_source_fails(self):
         self.assertEqual(guard("--sources", self.source('void f(void) { LoadLibraryW(L"x"); }\n')).returncode, 1)
 
+    def test_a_driver_load_outside_hostlib_fails(self):
+        r = guard("--sources", self.source("void f(void) { adrenotools_open_libvulkan(0, 0, 0, 0, 0, 0, 0, 0); }\n"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("adrenotools_open_libvulkan outside hostlib.c", r.stderr)
+
+    def test_a_driver_load_in_hostlib_passes(self):
+        d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
+        with open(os.path.join(d, "hostlib.c"), "w") as f:
+            f.write("void f(void) { adrenotools_open_libvulkan(0, 0, 0, 0, 0, 0, 0, 0); }\n")
+        self.assertEqual(guard("--sources", d).returncode, 0)
+
+    def test_an_object_that_loads_a_driver_fails(self):
+        d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
+        with open(os.path.join(d, "window.o"), "wb") as f:
+            f.write(b"\x7fELF....\0adrenotools_open_libvulkan\0")
+        r = guard("--objects", d)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("imports a library loader", r.stderr)
+
     def test_executable_memory_fails(self):
         r = guard("--sources", self.source("int p = PROT_READ | PROT_EXEC;\n"))
         self.assertEqual(r.returncode, 1)
