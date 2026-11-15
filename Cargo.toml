@@ -23,6 +23,7 @@ relift-cpu-sm83 = { path = "cpus/sm83" }
 relift-gb-analyze = { path = "guests/gb/analyze" }
 relift-gb-formats = { path = "guests/gb/formats" }
 relift-gb-tools = { path = "guests/gb/tools" }
+relift-gba-formats = { path = "guests/gba/formats" }
 relift-emit = { path = "core/emit" }
 relift-emit-wasm = { path = "core/emit-wasm" }
 relift-guest = { path = "core/guest" }

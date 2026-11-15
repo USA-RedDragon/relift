@@ -75,6 +75,7 @@ const STANDALONE: &[&str] = &[
     "relift-emit-wasm",
     "relift-gb-analyze",
     "relift-gb-tools",
+    "relift-gba-formats",
     "relift-switch-tools",
     "relift-switch-vkgen",
 ];
@@ -264,6 +265,14 @@ const CHARTERS: &[Charter] = &[
             "relift-proc",
             "serde_json",
         ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-gba-formats",
+        band: 2,
+        why: "the Game Boy Advance cartridge format: header, complement and logo hash, size and mirror rules, save library strings and multiboot detection; reads bytes only",
+        normal: &["sha2"],
+        dev: NONE,
         build: NONE,
     },
     Charter {

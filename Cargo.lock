@@ -1011,6 +1011,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gba-formats"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.11.1",
+]
+
+[[package]]
+name = "relift-gba-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "relift-gba-formats",
+ "relift-proc",
+ "serde_json",
+]
+
+[[package]]
 name = "relift-guest"
 version = "0.1.0"
 dependencies = [
