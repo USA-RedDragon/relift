@@ -423,11 +423,12 @@ RL_RUNTIME_API int rl_units_register(const rl_unit *const *units, uint32_t count
 /**
  * @brief Checks each code map against its units and the dispatch table
  * (docs/abi.md section 5.1): every RL_CODE_HOT slot is an entry of the hot
- * unit, every RL_CODE_COLD slot an entry of the cold unit and none of the
- * hot one, and every RL_CODE_TRAP slot an entry of neither and still empty.
+ * unit and set, every RL_CODE_COLD slot set and no entry of the hot unit
+ * (the cold unit's entries and ranges filled it), and every RL_CODE_TRAP
+ * slot no hot entry and still empty.
  * Then stores trap in every RL_CODE_TRAP slot and, when cold_first is not
- * NULL (a dev build), cold_first in every RL_CODE_COLD slot that holds the
- * cold unit's function, so the first dispatch to each is logged
+ * NULL (a dev build), cold_first in every RL_CODE_COLD slot, so the first
+ * dispatch to each is logged
  * (rl_core_cold). Call after every static unit is registered. Returns 0 or
  * -1 (a map failed its checks).
  */

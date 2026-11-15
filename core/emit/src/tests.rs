@@ -369,6 +369,7 @@ fn shards_declare_their_foreign_callees() {
             enter_anywhere: None,
             regs_in_context: false,
             calls: Vec::new(),
+            entry_ranges: false,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -558,6 +559,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         enter_anywhere: None,
         regs_in_context: false,
         calls: Vec::new(),
+        entry_ranges: false,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -1235,4 +1237,40 @@ fn calls_go_to_the_named_functions_of_another_emit() {
     assert!(unit.contains("{ UINT64_C(0x108), "), "{unit}");
     assert!(unit.contains(", C_108 },"), "{unit}");
     assert!(!unit.contains("F_108"), "{unit}");
+}
+
+#[test]
+fn entry_ranges_list_a_run_of_one_piece_once() {
+    let code = [
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [function(0x100, &blocks)];
+    let out = emit(
+        &Toy,
+        &fns,
+        &[],
+        &Options {
+            unit_symbol: "u".into(),
+            enter_anywhere: Some(u64::MAX),
+            entry_ranges: true,
+            ..Options::default()
+        },
+    );
+    let unit = &out
+        .files
+        .iter()
+        .find(|f| f.name == "unit.c")
+        .expect("unit")
+        .text;
+    assert!(
+        unit.contains(
+            "{ UINT64_C(0x104), 12u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT | RL_FN_RANGE, F_100_part1 },"
+        ),
+        "{unit}"
+    );
+    assert!(!unit.contains("UINT64_C(0x108)"), "{unit}");
 }

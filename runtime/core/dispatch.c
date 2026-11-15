@@ -143,11 +143,13 @@ int rl_units_register(const rl_unit *const *units, uint32_t count)
         if (!unit_ok(cpu, units[k]))
             return -1;
         for (uint32_t i = 0; i < units[k]->fn_count; i++) {
-            uint64_t a = units[k]->fns[i].guest_addr;
+            const rl_fn_entry *e = &units[k]->fns[i];
+            uint64_t a = e->guest_addr;
+            uint64_t end = a + ((e->flags & RL_FN_RANGE) && e->guest_size > gran ? e->guest_size : gran);
             if (a < lo)
                 lo = a;
-            if (a + gran > hi)
-                hi = a + gran;
+            if (end > hi)
+                hi = end;
         }
     }
     for (uint32_t k = 0; k < count; k++)
@@ -164,9 +166,12 @@ int rl_units_register(const rl_unit *const *units, uint32_t count)
         }
         for (uint32_t i = 0; i < units[k]->fn_count; i++) {
             const rl_fn_entry *e = &units[k]->fns[i];
-            rl_fn *slot = &g_table[(e->guest_addr - g_lo) >> sh];
-            if (!*slot || (e->flags & RL_FN_OVERRIDE))
-                *slot = e->fn;
+            uint64_t n = (e->flags & RL_FN_RANGE) ? (e->guest_size + gran - 1) >> sh : 1;
+            for (uint64_t j = 0; j < (n ? n : 1); j++) {
+                rl_fn *slot = &g_table[((e->guest_addr - g_lo) >> sh) + j];
+                if (!*slot || (e->flags & RL_FN_OVERRIDE))
+                    *slot = e->fn;
+            }
         }
     }
     return 0;
@@ -251,10 +256,10 @@ static int code_map_walk(const rl_code_map *m, rl_fn trap, rl_fn cold_first, boo
                (unsigned long long)m->lo);
         return -1;
     }
-    uint32_t kh = 0, kc = 0;
+    uint32_t kh = 0;
     uint64_t bad = 0, first = 0;
     unsigned first_cls = 0;
-    bool first_hot = false, first_cold = false, first_full = false;
+    bool first_hot = false, first_full = false;
     uint64_t base = (m->lo - g_lo) >> sh;
     for (uint32_t p = 0; p < m->page_count; p++) {
         if (m->pages[p] >= m->pattern_count) {
@@ -268,36 +273,33 @@ static int code_map_walk(const rl_code_map *m, rl_fn trap, rl_fn cold_first, boo
             uint64_t a = m->lo + (i << sh);
             unsigned cls = (pat[s / 4] >> (2 * (s % 4))) & 3u;
             const rl_fn_entry *h = entry_at(m->hot, &kh, a);
-            const rl_fn_entry *cd = entry_at(m->cold, &kc, a);
             rl_fn *slot = &g_table[base + i];
             if (fill) {
                 if (cls == RL_CODE_TRAP)
                     *slot = trap;
-                else if (cls == RL_CODE_COLD && cold_first && *slot == cd->fn) {
+                else if (cls == RL_CODE_COLD && cold_first) {
                     g_cold[base + i] = *slot;
                     *slot = cold_first;
                 }
                 continue;
             }
             bool ok = cls == RL_CODE_HOT    ? h && *slot
-                      : cls == RL_CODE_COLD ? cd && !h && *slot
-                      : cls == RL_CODE_TRAP ? !h && !cd && !*slot
+                      : cls == RL_CODE_COLD ? !h && *slot
+                      : cls == RL_CODE_TRAP ? !h && !*slot
                                             : false;
             if (!ok && !bad++) {
                 first = a;
                 first_cls = cls;
                 first_hot = h != NULL;
-                first_cold = cd != NULL;
                 first_full = *slot != NULL;
             }
         }
     }
     if (bad) {
         rl_log(RL_LOG_ERROR, "dispatch",
-               "code map of %s: %llu slots disagree with its units, the first at 0x%llx (class %s, hot entry %s, "
-               "cold entry %s, slot %s)",
+               "code map of %s: %llu slots disagree with its units, the first at 0x%llx (class %s, hot entry %s, slot %s)",
                name, (unsigned long long)bad, (unsigned long long)first, class_name(first_cls), first_hot ? "yes" : "no",
-               first_cold ? "yes" : "no", first_full ? "set" : "empty");
+               first_full ? "set" : "empty");
         return -1;
     }
     return 0;

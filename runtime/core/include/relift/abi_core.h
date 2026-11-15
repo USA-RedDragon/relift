@@ -227,7 +227,9 @@ enum rl_fn_flags {
     /** @brief The entry is not a function start (indirect jump target, hot-loaded fragment). */
     RL_FN_FRAGMENT = 1u << 2,
     /** @brief The entry is a host override of a guest symbol and replaces any lifted entry. */
-    RL_FN_OVERRIDE = 1u << 3
+    RL_FN_OVERRIDE = 1u << 3,
+    /** @brief The entry fills every empty slot of [guest_addr, guest_addr + guest_size) with fn, rather than the one at guest_addr (a run of instructions of one enter-anywhere piece). */
+    RL_FN_RANGE = 1u << 4
 };
 
 /** @brief One function a unit provides. */

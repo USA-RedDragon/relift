@@ -159,6 +159,9 @@ pub struct Options {
     /// such as the functions of another emit of the same module. They are
     /// not listed in the unit table.
     pub calls: Vec<Override>,
+    /// With `enter_anywhere`, list each run of consecutive instructions of
+    /// one piece as one `RL_FN_RANGE` entry instead of one entry each.
+    pub entry_ranges: bool,
 }
 
 impl Default for Options {
@@ -177,6 +180,7 @@ impl Default for Options {
             enter_anywhere: None,
             regs_in_context: false,
             calls: Vec::new(),
+            entry_ranges: false,
         }
     }
 }
@@ -893,19 +897,40 @@ fn unit_table(
     } else {
         BTreeSet::new()
     };
-    for (pc, piece) in inner {
-        if !entry_of.contains(pc)
-            && !pads_of.contains(pc)
-            && !overrides.iter().any(|o| o.entry == *pc)
-        {
-            entries.push((
-                *pc,
+    let granule = fe.granule();
+    let mut run: Option<(u64, u64, &str)> = None;
+    let close = |run: Option<(u64, u64, &str)>, entries: &mut Vec<(u64, String)>| {
+        if let Some((lo, n, piece)) = run {
+            let line = if opts.entry_ranges && n > 1 {
                 format!(
-                    "    {{ UINT64_C({pc:#x}), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, {piece} }},"
-                ),
-            ));
+                    "    {{ UINT64_C({lo:#x}), {}u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT | RL_FN_RANGE, {piece} }},",
+                    n * granule
+                )
+            } else {
+                format!(
+                    "    {{ UINT64_C({lo:#x}), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, {piece} }},"
+                )
+            };
+            entries.push((lo, line));
+        }
+    };
+    for (pc, piece) in inner {
+        if entry_of.contains(pc) || pads_of.contains(pc) || overrides.iter().any(|o| o.entry == *pc)
+        {
+            close(run.take(), &mut entries);
+            continue;
+        }
+        match run {
+            Some((lo, n, p)) if opts.entry_ranges && p == piece && lo + n * granule == *pc => {
+                run = Some((lo, n + 1, p));
+            }
+            _ => {
+                close(run.take(), &mut entries);
+                run = Some((*pc, 1, piece.as_str()));
+            }
         }
     }
+    close(run.take(), &mut entries);
     if let Some(resume) = fe.pad_resume() {
         let taken: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
         let mut pads: BTreeSet<u64> = fns.iter().flat_map(|f| f.pads.iter().copied()).collect();
