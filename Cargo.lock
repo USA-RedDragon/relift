@@ -1092,6 +1092,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-gpu-sm86"
+version = "0.1.0"
+
+[[package]]
 name = "relift-guest"
 version = "0.1.0"
 dependencies = [
