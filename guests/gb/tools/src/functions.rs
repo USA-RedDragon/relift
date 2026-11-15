@@ -5,7 +5,9 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::Args;
-use relift_gb_analyze::{CallKind, Function, Loc, Origin, Report, TableBound, analyze_with};
+use relift_gb_analyze::{
+    CallKind, Function, Loc, MAX_KEYS, Origin, RamClass, Report, TableBound, analyze_with,
+};
 use serde_json::{Value, json};
 
 use crate::{BoxError, input, print_json};
@@ -178,6 +180,14 @@ fn to_json(report: &Report, summary: bool, instructions: bool) -> Value {
                 "counts": c.counts,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+        "ram_ops": {
+            "entries": report.ram_ops.entries,
+            "wide": report.ram_ops.wide,
+            "max_keys": MAX_KEYS,
+            "ops": report.ram_ops.ops.iter().map(|o| json!({
+                "addr": o.addr, "key": o.key, "class": o.class.name(),
+            })).collect::<Vec<_>>(),
+        },
     })
 }
 
@@ -302,6 +312,22 @@ fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
                 addrs(&c.sources),
                 addrs(&c.dests)
             )?;
+        }
+    }
+    let ops = &report.ram_ops;
+    let count = |c: RamClass| ops.ops.iter().filter(|o| o.class == c).count();
+    writeln!(
+        out,
+        "instructions predicted in RAM: {} ({} copied, {} generated) from {} entries, {} addresses over {MAX_KEYS} keys",
+        ops.ops.len(),
+        count(RamClass::Copied),
+        count(RamClass::Generated),
+        ops.entries.len(),
+        ops.wide.len()
+    )?;
+    if !summary {
+        for o in &ops.ops {
+            writeln!(out, "  ${:04X} {:03x} {}", o.addr, o.key, o.class.name())?;
         }
     }
     Ok(())
