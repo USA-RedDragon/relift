@@ -6,9 +6,13 @@
  * A Switch title never sees its window change size, so a guest swapchain
  * keeps the extent and format it was created with. The host swapchain behind
  * it follows the host surface: it is recreated whenever the surface reports
- * out of date or suboptimal, or the provider's extent generation changes, and
- * the present letterboxes the guest image into it. The guest never gets
- * VK_ERROR_OUT_OF_DATE_KHR or VK_SUBOPTIMAL_KHR from a resize.
+ * out of date, suboptimal with a new extent or transform, or the provider's
+ * extent generation changes, and the present letterboxes the guest image into
+ * it. The host swapchain asks for no rotation: on a display turned from its
+ * native orientation (Android) the presentation engine rotates, and the
+ * suboptimal result that asks for pre-rotation does not recreate it. The
+ * guest never gets VK_ERROR_OUT_OF_DATE_KHR or VK_SUBOPTIMAL_KHR from a
+ * resize.
  *
  * Presents are paced like the console's FIFO queue: each frame is shown at
  * the first vsync of vi_vsync_after that follows its present and the frame
@@ -64,6 +68,7 @@ typedef struct vkf_swap {
     bool offscreen;
     VkSemaphore ready[HOST_MAX];
     VkExtent2D host_extent;
+    VkSurfaceTransformFlagBitsKHR host_hint;
     VkSemaphore retired[RETIRED_MAX];
     uint32_t nretired;
     bool stale;
@@ -399,7 +404,9 @@ fail:
     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 }
 
-/** @brief Makes the host swapchain match the host surface. VK_NOT_READY while the surface has no area. Lock held. */
+/** @brief Makes the host swapchain match the host surface. The blit does not rotate, so the presentation engine turns
+ * the image when the display is not in its native orientation. VK_NOT_READY while the surface has no area. Lock
+ * held. */
 static VkResult host_create(vkf_swap *s)
 {
     if (s->offscreen)
@@ -412,6 +419,9 @@ static VkResult host_create(vkf_swap *s)
     uint64_t gen;
     vkf_surface_extent((uint64_t)(uintptr_t)s->surface, guest, host, &gen);
     VkExtent2D e = caps.currentExtent;
+    VkSurfaceTransformFlagBitsKHR transform = caps.currentTransform;
+    if (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+        transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     if (e.width == UINT32_MAX) {
         e.width = host[0] < caps.minImageExtent.width ? caps.minImageExtent.width : host[0];
         e.height = host[1] < caps.minImageExtent.height ? caps.minImageExtent.height : host[1];
@@ -444,7 +454,7 @@ static VkResult host_create(vkf_swap *s)
         .imageArrayLayers = 1,
         .imageUsage = usage,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = caps.currentTransform,
+        .preTransform = transform,
         .compositeAlpha = alpha,
         .presentMode = pick_mode(s),
         .clipped = VK_TRUE,
@@ -471,6 +481,7 @@ static VkResult host_create(vkf_swap *s)
         DFN(s, vkCreateSemaphore)(s->dev, &sci, NULL, &s->ready[i]);
     s->host_n = n;
     s->host_extent = e;
+    s->host_hint = caps.currentTransform;
     s->gen = gen;
     s->stale = false;
     s->creations++;
@@ -478,6 +489,19 @@ static VkResult host_create(vkf_swap *s)
         rl_log(RL_LOG_INFO, "vk", "host swapchain %ux%u, format %d, %u images, for guest %ux%u", e.width, e.height,
                fmt.format, n, s->extent.width, s->extent.height);
     return VK_SUCCESS;
+}
+
+/** @brief A suboptimal host swapchain needs a new one: not when the surface only asks for the rotation the
+ * presentation engine already does. Lock held. */
+static bool suboptimal_stale(vkf_swap *s)
+{
+    VkSurfaceCapabilitiesKHR caps;
+    if (IFN(s, vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(s->phys, s->surface, &caps) < 0)
+        return true;
+    if (caps.currentTransform != s->host_hint)
+        return true;
+    return caps.currentExtent.width != UINT32_MAX && (caps.currentExtent.width != s->host_extent.width ||
+                                                      caps.currentExtent.height != s->host_extent.height);
 }
 
 static void swap_free(vkf_swap *s)
@@ -783,7 +807,8 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             break;
         }
         if (r == VK_SUBOPTIMAL_KHR) {
-            s->stale = true;
+            if (suboptimal_stale(s))
+                s->stale = true;
             r = VK_SUCCESS;
         }
         if (r != VK_SUCCESS)
@@ -1029,10 +1054,10 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     };
     r = s->offscreen ? VK_SUCCESS : DFN(s, vkQueuePresentKHR)(q, &pi);
     show(s, i);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && suboptimal_stale(s)))
         s->stale = true;
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
         r = VK_SUCCESS;
-    }
 out:
     pthread_mutex_unlock(&s->lock);
     if (r == VK_SUCCESS)
