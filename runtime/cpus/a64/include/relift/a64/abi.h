@@ -795,22 +795,38 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
 #endif
 }
 
+/**
+ * @brief Hides from the compiler what it knows of u on the path that
+ * reaches it. Where a fast path and the call of its slow path meet, the
+ * compiler would otherwise copy the code after the meeting into both, to
+ * use on the fast path what the fixup test proved (on x86-64 that doubled
+ * the code of FP-heavy functions). The slow path is rare, so the copy
+ * gains nothing.
+ */
+#if defined(__aarch64__)
+#define RL_FP_OPAQUE(u) ((void)0)
+#else
+#define RL_FP_OPAQUE(u) __asm__("" : "+r"(u))
+#endif
+
 #if defined(RL_FP_FLAGS)
 #define RL_FP_RESULT_(slow, U, r, tiny)                                                \
     do {                                                                               \
         U u_;                                                                          \
         memcpy(&u_, &r, sizeof u_);                                                    \
         if (rl_fp_flags_fixup((uint64_t)u_, sizeof(U) * 8, tiny))                      \
-            return slow(a, b, fpcr, fpsr);                                             \
+            u_ = slow(a, b, fpcr, fpsr);                                               \
+        RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
     } while (0)
 #else
 #define RL_FP_RESULT_(slow, U, r, tiny)                                                \
     do {                                                                               \
         U u_;                                                                          \
-        if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
-            return slow(a, b, fpcr, fpsr);                                             \
         memcpy(&u_, &r, sizeof u_);                                                    \
+        if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
+            u_ = slow(a, b, fpcr, fpsr);                                               \
+        RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
     } while (0)
 #endif
@@ -858,9 +874,10 @@ static inline uint32_t rl_fmuladd32(uint32_t addend, uint32_t a, uint32_t b, uin
     memcpy(&x, &a, 4);
     memcpy(&y, &b, 4);
     r = __builtin_fmaf(x, y, z);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        return rl_fp32_muladd(addend, a, b, fpcr, fpsr);
     memcpy(&u, &r, 4);
+    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
+        u = rl_fp32_muladd(addend, a, b, fpcr, fpsr);
+    RL_FP_OPAQUE(u);
     return u;
 }
 
@@ -875,9 +892,10 @@ static inline uint64_t rl_fmuladd64(uint64_t addend, uint64_t a, uint64_t b, uin
     memcpy(&x, &a, 8);
     memcpy(&y, &b, 8);
     r = __builtin_fma(x, y, z);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        return rl_fp64_muladd(addend, a, b, fpcr, fpsr);
     memcpy(&u, &r, 8);
+    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
+        u = rl_fp64_muladd(addend, a, b, fpcr, fpsr);
+    RL_FP_OPAQUE(u);
     return u;
 }
 
@@ -890,9 +908,10 @@ static inline uint32_t rl_fsqrt32(uint32_t a, uint32_t fpcr, uint32_t *fpsr)
     uint32_t u;
     memcpy(&x, &a, 4);
     r = __builtin_sqrtf(x);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        return rl_fp32_sqrt(a, fpcr, fpsr);
     memcpy(&u, &r, 4);
+    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
+        u = rl_fp32_sqrt(a, fpcr, fpsr);
+    RL_FP_OPAQUE(u);
     return u;
 }
 
@@ -905,9 +924,10 @@ static inline uint64_t rl_fsqrt64(uint64_t a, uint32_t fpcr, uint32_t *fpsr)
     uint64_t u;
     memcpy(&x, &a, 8);
     r = __builtin_sqrt(x);
-    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
-        return rl_fp64_sqrt(a, fpcr, fpsr);
     memcpy(&u, &r, 8);
+    if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))
+        u = rl_fp64_sqrt(a, fpcr, fpsr);
+    RL_FP_OPAQUE(u);
     return u;
 }
 
