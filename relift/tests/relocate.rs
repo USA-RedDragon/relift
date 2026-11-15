@@ -221,3 +221,58 @@ fn rebuilding_one_hard_linked_copy_leaves_the_other_untouched() {
         "the rebuild changed a file of the linked copy"
     );
 }
+
+fn blob_dependencies(embed: bool) -> Option<String> {
+    let clang = relift_build::find_tool("clang")?;
+    let root = tiny::scratch(if embed { "blob-embed" } else { "blob-incbin" });
+    let dir = root.join("with spaces/build");
+    std::fs::create_dir_all(dir.join("c")).expect("the dir is creatable");
+    let bytes: Vec<u8> = (0..=255).collect();
+    relift_cache::write_if_changed(&dir.join("c/image0.bin"), &bytes).expect("the blob writes");
+    let c = relift_guest::blob::blob_c("rl_image0", "c/image0.bin", &bytes);
+    relift_cache::write_if_changed(&dir.join("c/image0.c"), c.as_bytes())
+        .expect("the source writes");
+    let mut flags = vec!["-std=c11", "-I."];
+    if !embed {
+        flags.extend(["-U__has_embed", "-Wno-builtin-macro-redefined"]);
+    }
+    let out = relift_proc::command(clang)
+        .args(&flags)
+        .args([
+            "-MD",
+            "-MF",
+            "image0.o.d",
+            "-c",
+            "c/image0.c",
+            "-o",
+            "image0.o",
+        ])
+        .current_dir(&dir)
+        .output()
+        .expect("clang runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let deps = std::fs::read_to_string(dir.join("image0.o.d")).expect("the depfile reads");
+    assert!(
+        !deps.contains(root.to_str().expect("utf-8 path")),
+        "an absolute path under the build: {deps}"
+    );
+    Some(deps)
+}
+
+#[test]
+fn an_embedded_blob_is_recorded_by_a_path_relative_to_the_build() {
+    if blob_dependencies(true).is_none() {
+        eprintln!("skipped: no clang on PATH");
+    }
+}
+
+#[test]
+fn an_included_blob_is_recorded_by_a_path_relative_to_the_build() {
+    if blob_dependencies(false).is_none() {
+        eprintln!("skipped: no clang on PATH");
+    }
+}
