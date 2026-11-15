@@ -1456,6 +1456,87 @@ static void small_descriptors(VkPhysicalDeviceLimits *l)
     l->maxPushConstantsSize = 64;
 }
 
+static uint64_t ubo_pool(uint64_t dev, VkDescriptorPoolCreateFlags flags)
+{
+    VkDescriptorPoolSize size = { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 4 };
+    VkDescriptorPoolCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = flags,
+        .maxSets = 4,
+        .poolSizeCount = 1,
+        .pPoolSizes = GP(gput(&size, sizeof size)),
+    };
+    uint64_t out = galloc(8);
+    rl_st64(g_mem, out, 0);
+    return VKR(G("vkCreateDescriptorPool", dev, gput(&ci, sizeof ci), 0, out)) == VK_SUCCESS ? g64(out) : 0;
+}
+
+static uint64_t ubo_sets(uint64_t dev, uint64_t pool, uint64_t layout, uint32_t n)
+{
+    uint64_t layouts = galloc(8u * n), sets = galloc(8u * n);
+    for (uint32_t i = 0; i < n; i++) {
+        rl_st64(g_mem, layouts + 8u * i, layout);
+        rl_st64(g_mem, sets + 8u * i, 0);
+    }
+    VkDescriptorSetAllocateInfo ai = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = (VkDescriptorPool)(uintptr_t)pool,
+        .descriptorSetCount = n,
+        .pSetLayouts = GP(layouts),
+    };
+    if (VKR(G("vkAllocateDescriptorSets", dev, gput(&ai, sizeof ai), sets)) != VK_SUCCESS)
+        return 0;
+    for (uint32_t i = 0; i < n; i++)
+        if (!g64(sets + 8u * i))
+            return 0;
+    return sets;
+}
+
+TEST(vk_descriptor_pools_hold_more_than_their_counts)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t dev = make_device(pds[0], queue_family(pds[0], 0), NULL, 0);
+    CHECK(dev != 0);
+    VkDescriptorSetLayoutBinding b = {
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_ALL,
+    };
+    VkDescriptorSetLayoutCreateInfo lci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = GP(gput(&b, sizeof b)),
+    };
+    uint64_t gl = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateDescriptorSetLayout", dev, gput(&lci, sizeof lci), 0, gl)), VK_SUCCESS);
+    uint64_t layout = g64(gl);
+    uint64_t pool = ubo_pool(dev, 0);
+    CHECK(pool != 0);
+    CHECK(ubo_sets(dev, pool, layout, 3) != 0);
+    CHECK(ubo_sets(dev, pool, layout, 64) != 0);
+    CHECK(ubo_sets(dev, pool, layout, 2) != 0);
+    CHECK_EQ(VKR(G("vkResetDescriptorPool", dev, pool, 0)), VK_SUCCESS);
+    CHECK(ubo_sets(dev, pool, layout, 40) != 0);
+    G("vkDestroyDescriptorPool", dev, pool, 0);
+    uint64_t fpool = ubo_pool(dev, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
+    CHECK(fpool != 0);
+    uint64_t sets = ubo_sets(dev, fpool, layout, 20);
+    CHECK(sets != 0);
+    CHECK_EQ(VKR(G("vkFreeDescriptorSets", dev, fpool, 20, sets)), VK_SUCCESS);
+    sets = ubo_sets(dev, fpool, layout, 20);
+    CHECK(sets != 0);
+    CHECK_EQ(VKR(G("vkFreeDescriptorSets", dev, fpool, 1, sets + 8u * 19)), VK_SUCCESS);
+    G("vkDestroyDescriptorPool", dev, fpool, 0);
+    CHECK(ubo_sets(dev, ubo_pool(dev, 0), layout, 9) != 0);
+    G("vkDestroyDescriptorSetLayout", dev, layout, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
 static int32_t set_layout(uint64_t dev, uint32_t samplers, uint64_t *out)
 {
     VkDescriptorSetLayoutBinding b = {
@@ -1605,4 +1686,29 @@ TEST(vk_a_feature_the_host_lacks_is_hidden_and_refused)
     uint64_t dev;
     CHECK_EQ(create_device(pd, gput(&want, sizeof want), &dev), VK_ERROR_FEATURE_NOT_PRESENT);
     finish(0);
+    uint64_t gl = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateDescriptorSetLayout", dev, gput(&lci, sizeof lci), 0, gl)), VK_SUCCESS);
+    uint64_t layout = g64(gl);
+    uint64_t pool = ubo_pool(dev, 0);
+    CHECK(pool != 0);
+    CHECK(ubo_sets(dev, pool, layout, 3) != 0);
+    CHECK(ubo_sets(dev, pool, layout, 64) != 0);
+    CHECK(ubo_sets(dev, pool, layout, 2) != 0);
+    CHECK_EQ(VKR(G("vkResetDescriptorPool", dev, pool, 0)), VK_SUCCESS);
+    CHECK(ubo_sets(dev, pool, layout, 40) != 0);
+    G("vkDestroyDescriptorPool", dev, pool, 0);
+    uint64_t fpool = ubo_pool(dev, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
+    CHECK(fpool != 0);
+    uint64_t sets = ubo_sets(dev, fpool, layout, 20);
+    CHECK(sets != 0);
+    CHECK_EQ(VKR(G("vkFreeDescriptorSets", dev, fpool, 20, sets)), VK_SUCCESS);
+    sets = ubo_sets(dev, fpool, layout, 20);
+    CHECK(sets != 0);
+    CHECK_EQ(VKR(G("vkFreeDescriptorSets", dev, fpool, 1, sets + 8u * 19)), VK_SUCCESS);
+    G("vkDestroyDescriptorPool", dev, fpool, 0);
+    CHECK(ubo_sets(dev, ubo_pool(dev, 0), layout, 9) != 0);
+    G("vkDestroyDescriptorSetLayout", dev, layout, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
 }

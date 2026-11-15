@@ -127,6 +127,18 @@ device (`vkQueueSubmit`, `vkQueueSubmit2`, `vkQueueBindSparse`,
 queue lock, which Vulkan's external synchronization rules would otherwise leave
 to the guest.
 
+## Descriptor pools
+
+The console driver does not hold a descriptor pool to its per-type counts,
+and games size pools for it (one allocates 16,384 sets of a layout from a pool
+created for 1,024 descriptors of that type). Drivers that enforce the counts
+(MoltenVK) fail those allocations with `VK_ERROR_OUT_OF_POOL_MEMORY`. When a
+host pool runs out, `vk_desc.c` creates another host pool with the guest's
+parameters behind the same guest pool, doubling the counts if one copy cannot
+hold the allocation, and allocates from it. Freeing a set goes to the host
+pool it came from; resetting or destroying the guest pool applies to all of
+them.
+
 ## Handles
 
 Dispatchable handles (instance, physical device, device, queue, command

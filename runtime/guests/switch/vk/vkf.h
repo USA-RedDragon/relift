@@ -124,6 +124,10 @@ struct vkf_dev {
     char host_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     /** @brief The host memory type behind each Switch memory type. */
     uint8_t host_type[VK_MAX_MEMORY_TYPES];
+    /** @brief Descriptor pool records (vk_desc.c), keyed by VkDescriptorPool. */
+    struct vkf_map *dpools;
+    /** @brief Protects dpools. */
+    pthread_mutex_t dpool_lock;
 };
 
 /** @brief A small hash map from nonzero 64-bit keys to pointers. */
@@ -331,6 +335,8 @@ int vkf_vm_set(uint64_t addr, uint64_t size, uint32_t perm, int content);
 void vkf_mem_device_setup(vkf_call *k, vkf_dev *d, void *phys, const char ***exts, uint32_t *n_exts, void **pnext);
 /** @brief Releases every memory record of a device (after vkDestroyDevice). */
 void vkf_mem_device_teardown(vkf_dev *d);
+/** @brief Destroys the host descriptor pools added behind guest pools and frees their records. */
+void vkf_desc_device_teardown(vkf_call *k, vkf_dev *d, void *dev);
 /** @brief Copies every shadow-mapped range of the call's device from guest to host. */
 void vkf_shadow_flush(vkf_call *k);
 /** @brief Copies host-cached shadow-mapped ranges of the call's device from host to guest. */

@@ -846,6 +846,8 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     pthread_mutex_init(&d->lock, NULL);
     pthread_mutex_init(&d->queue_lock, NULL);
     d->mems = vkf_map_new();
+    pthread_mutex_init(&d->dpool_lock, NULL);
+    d->dpools = vkf_map_new();
     const char **extra = NULL;
     uint32_t n_extra = 0;
     void *chain = NULL;
@@ -887,6 +889,8 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     if (r >= 0)
         r = VKF_FN(k.fns, vkCreateDevice)(pd, ci, NULL, &dev);
     if (r < 0) {
+        vkf_map_free(d->dpools);
+        pthread_mutex_destroy(&d->dpool_lock);
         vkf_map_free(d->mems);
         pthread_mutex_destroy(&d->queue_lock);
         pthread_mutex_destroy(&d->lock);
@@ -918,11 +922,13 @@ int vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
     vkf_obj *o = k.obj;
     vkf_dev *d = o->dev;
     vkf_swap_device_teardown(o);
+    vkf_desc_device_teardown(&k, d, dev);
     VKF_FN(k.fns, vkDestroyDevice)(dev, NULL);
     vkf_mem_device_teardown(d);
     vkf_obj_remove_children(o);
     vkf_obj_remove(o);
     vkf_map_free(d->mems);
+    pthread_mutex_destroy(&d->dpool_lock);
     pthread_mutex_destroy(&d->queue_lock);
     pthread_mutex_destroy(&d->lock);
     free(d);
