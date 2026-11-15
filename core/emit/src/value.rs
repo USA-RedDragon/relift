@@ -149,12 +149,15 @@ pub(crate) enum Emitted {
 /// The C for instruction `i` of `b`, or why it cannot be expressed.
 ///
 /// `inl` holds the expressions that stand for some values in place of
-/// their locals ([`inlined`]).
+/// their locals ([`inlined`]), and `zero` the registers a guard earlier in
+/// the block has shown to be zero (a guard leaves when its
+/// [`Frontend::guard_state`] is not).
 pub(crate) fn emit_op(
     fe: &dyn Frontend,
     b: &Block,
     i: usize,
     inl: &[Option<String>],
+    zero: &[Reg],
     io: &IoMap,
 ) -> Result<Emitted, String> {
     let inst = &b.insts[i];
@@ -353,7 +356,14 @@ pub(crate) fn emit_op(
         Op::Fp(op, args) => {
             let from = args.first().map(|v| wv(*v)).unwrap_or(w);
             let exprs: Vec<String> = args.iter().map(|v| val(*v)).collect();
-            match fe.fp(*op, from, w, &exprs, &|r| reg(r)) {
+            let state = |r: Reg| {
+                if zero.contains(&r) {
+                    "0u".to_string()
+                } else {
+                    reg(r)
+                }
+            };
+            match fe.fp(*op, from, w, &exprs, &state) {
                 Some(e) => fit(&e, w),
                 None => {
                     let sign = lit(1u128 << (w.bits() - 1), w);

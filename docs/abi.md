@@ -1268,6 +1268,13 @@ are also call boundaries. [inferred]
     `relift/tests/emit_interp` and `emit_flags` compare the two. In a
     commercial game that handling was about a sixth of the lifted code.
     [verified: emit_interp, emit_flags]
+  - After a block's FPCR guard the emitter passes the helpers FPCR as the
+    constant 0 (the guard left the block otherwise), so a NaN or a flag
+    fix-up calls `rl_fp32_add_cold` and its siblings: FPCR zero and no
+    FPSR pointer, with clang's `preserve_all` convention on x86-64 and
+    arm64, so the rare call does not make the lifted code spill the
+    registers, vector registers included, it holds around the operation.
+    [measured: a commercial game's lifted code]
   - Non-default modes on x86-64 go to the slow path. If Horizon's default
     FPCR turns out to set FZ or DN, x86-64 needs a fast path for that mode
     before performance work. [open]

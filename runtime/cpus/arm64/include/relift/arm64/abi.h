@@ -648,6 +648,38 @@ RL_RUNTIME_API uint64_t rl_fp_to_fixed(uint64_t a, unsigned from_bits, unsigned 
 /** @brief FixedToFP (SCVTF, UCVTF, fixed-point forms). */
 RL_RUNTIME_API uint64_t rl_fixed_to_fp(uint64_t a, unsigned from_bits, unsigned to_bits, unsigned fbits, int is_unsigned, uint32_t rmode, uint32_t fpcr, uint32_t *fpsr);
 
+/**
+ * @brief The calling convention of the slow paths the inline fast paths
+ * take with FPCR zero and no FPSR pointer (rl_fp32_add_cold and the rest):
+ * the callee keeps every register, vector registers included, so the rare
+ * call costs the lifted code around it no spills.
+ */
+#if defined(__has_attribute)
+#if __has_attribute(preserve_all) && (defined(__x86_64__) || defined(__aarch64__))
+#define RL_FP_COLD __attribute__((preserve_all))
+#endif
+#endif
+#ifndef RL_FP_COLD
+#define RL_FP_COLD
+#endif
+
+/** @brief rl_fp32_add with FPCR zero and no FPSR pointer, for the inline fast path's slow case. */
+RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_add_cold(uint32_t a, uint32_t b);
+/** @brief rl_fp32_sub, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_sub_cold(uint32_t a, uint32_t b);
+/** @brief rl_fp32_mul, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_mul_cold(uint32_t a, uint32_t b);
+/** @brief rl_fp32_div, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint32_t rl_fp32_div_cold(uint32_t a, uint32_t b);
+/** @brief rl_fp64_add, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_add_cold(uint64_t a, uint64_t b);
+/** @brief rl_fp64_sub, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_sub_cold(uint64_t a, uint64_t b);
+/** @brief rl_fp64_mul, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_mul_cold(uint64_t a, uint64_t b);
+/** @brief rl_fp64_div, as rl_fp32_add_cold. */
+RL_RUNTIME_API RL_FP_COLD uint64_t rl_fp64_div_cold(uint64_t a, uint64_t b);
+
 /*
  * FPSR flags on host hardware (docs/abi.md section 10.1). The lifted
  * functions the build's flags-live analysis marks are compiled with
@@ -815,7 +847,7 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
         U u_;                                                                          \
         memcpy(&u_, &r, sizeof u_);                                                    \
         if (rl_fp_flags_fixup((uint64_t)u_, sizeof(U) * 8, tiny))                      \
-            u_ = slow(a, b, fpcr, fpsr);                                               \
+            u_ = fpcr == 0 && fpsr == 0 ? slow##_cold(a, b) : slow(a, b, fpcr, fpsr);  \
         RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
     } while (0)
@@ -825,7 +857,7 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
         U u_;                                                                          \
         memcpy(&u_, &r, sizeof u_);                                                    \
         if (rl_fp_nan_fixup() && RL_UNLIKELY(r != r))                                  \
-            u_ = slow(a, b, fpcr, fpsr);                                               \
+            u_ = fpcr == 0 && fpsr == 0 ? slow##_cold(a, b) : slow(a, b, fpcr, fpsr);  \
         RL_FP_OPAQUE(u_);                                                              \
         return u_;                                                                     \
     } while (0)

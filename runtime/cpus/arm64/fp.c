@@ -1166,3 +1166,15 @@ int rl_fpn_compare_bool(unsigned bits, uint64_t a, uint64_t b, int kind, uint32_
     commit(&v, fpsr);
     return (int)r;
 }
+
+#define COLD(name, U) \
+    RL_FP_COLD U name##_cold(U a, U b) { return name(a, b, 0, NULL); }
+
+COLD(rl_fp32_add, uint32_t)
+COLD(rl_fp32_sub, uint32_t)
+COLD(rl_fp32_mul, uint32_t)
+COLD(rl_fp32_div, uint32_t)
+COLD(rl_fp64_add, uint64_t)
+COLD(rl_fp64_sub, uint64_t)
+COLD(rl_fp64_mul, uint64_t)
+COLD(rl_fp64_div, uint64_t)

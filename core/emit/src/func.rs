@@ -930,6 +930,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     let mut s = String::new();
     let mut sets = Vec::new();
     let inl = inlined(b);
+    let mut zero: Vec<Reg> = Vec::new();
     let val = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
     for (i, inst) in b.insts.iter().enumerate() {
         if inl[i].is_some() {
@@ -939,7 +940,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         if let Some(clk) = call {
             let _ = writeln!(s, "    {clk}.budget = {};", time::BUDGET);
         }
-        let emitted = emit_op(cx.fe, b, i, &inl, cx.io).map_err(|m| (raw, m))?;
+        let emitted = emit_op(cx.fe, b, i, &inl, &zero, cx.io).map_err(|m| (raw, m))?;
         match emitted {
             Emitted::Value(e) => {
                 let ty = cty(inst.width.unwrap_or(relift_ir::Width::W1));
@@ -950,6 +951,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             }
             Emitted::Set(r, e) => sets.push((r, e)),
             Emitted::Guard(c, code) => {
+                zero.extend(cx.fe.guard_state(code));
                 let cond = match cx.fe.guard_state(code) {
                     Some(r) if cx.hoisted.contains(&r) => flag(r),
                     _ => val(c),
