@@ -141,9 +141,9 @@ void gba_pf_step(rl_gba *g, unsigned clocks)
     }
 }
 
-static void pf_reset(rl_gba *g)
+static void pf_reset(rl_gba *g, gba_who who)
 {
-    if (g->pf.wait == 1)
+    if (g->pf.wait == 1 && (who == GBA_DMA || is_rom(g->code_at[1] & ~1u)))
         gba_charge(g, 1);
     g->pf.stopped = true;
     g->pf.ahead = false;
@@ -244,12 +244,12 @@ uint32_t gba_bus_read(rl_gba *g, gba_who who, uint32_t addr, unsigned size, bool
         bool burst = rom_seq(g, who, seq);
         if (who == GBA_DMA)
             g->dma_rom_burst = true;
-        pf_reset(g);
+        pf_reset(g, who);
         v = rom_timed(g, addr, size, burst);
         if (gba_eeprom_hit(g, addr))
             v = gba_eeprom_read(g, size);
     } else if (addr >= 0x0E000000u && addr < 0x10000000u) {
-        pf_reset(g);
+        pf_reset(g, who);
         gba_charge(g, wait_cart(g, addr, false));
         v = gba_mem_read(g, addr, size);
     } else {
@@ -266,7 +266,7 @@ void gba_bus_write(rl_gba *g, gba_who who, uint32_t addr, unsigned size, uint32_
         bool burst = rom_seq(g, who, seq);
         if (who == GBA_DMA)
             g->dma_rom_burst = true;
-        pf_reset(g);
+        pf_reset(g, who);
         uint32_t a = size == 4 ? addr & ~3u : addr & ~1u;
         for (unsigned i = 0; i < (size == 4 ? 2u : 1u); i++, a += 2) {
             if (!burst)
@@ -281,7 +281,7 @@ void gba_bus_write(rl_gba *g, gba_who who, uint32_t addr, unsigned size, uint32_
         return;
     }
     if (addr >= 0x0E000000u && addr < 0x10000000u) {
-        pf_reset(g);
+        pf_reset(g, who);
         gba_charge(g, wait_cart(g, addr, false));
     } else {
         plain_cost(g, addr, size);
@@ -325,6 +325,8 @@ static uint32_t fetch_timed(rl_gba *g, uint32_t addr, unsigned size, bool seq)
     bool burst = g->rom_burst && seq;
     gba_prefetch *p = &g->pf;
     uint32_t v;
+    if (pf_on(g) && !p->stopped && p->ahead && addr != p->addr && addr == p->load)
+        p->addr = p->load;
     bool held = pf_on(g) ? !pf_empty(p) || p->ahead || !p->stopped : !pf_empty(p) || p->drain;
     if ((addr & 0x1FFFEu) && addr == p->addr && held) {
         gba_pf_step(g, 1);
