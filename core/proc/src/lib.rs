@@ -15,3 +15,5 @@ use std::process::Command;
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     Command::new(program)
 }
+
+pub mod workers;
