@@ -7,10 +7,11 @@
 //! keeps a frame whose functions all came back unchanged as it is, and
 //! writes the others; frames no index names are removed.
 
+use std::collections::VecDeque;
 use std::collections::{BTreeSet, HashMap};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::JoinHandle;
 
 use relift_emit::Key;
@@ -44,7 +45,53 @@ type Named = (usize, Result<String, String>);
 struct Job {
     slot: usize,
     name: String,
-    content: Vec<u8>,
+    content: Vec<Vec<u8>>,
+}
+
+/// The frames waiting to be compressed: at most [`WORKERS`], so a build
+/// that emits faster than it compresses holds a bounded amount of C.
+struct Queue {
+    state: Mutex<(VecDeque<Job>, bool)>,
+    more: Condvar,
+    room: Condvar,
+}
+
+impl Queue {
+    fn new() -> Queue {
+        Queue {
+            state: Mutex::new((VecDeque::new(), false)),
+            more: Condvar::new(),
+            room: Condvar::new(),
+        }
+    }
+
+    fn push(&self, job: Job) {
+        let mut st = lock(&self.state);
+        while st.0.len() >= WORKERS {
+            st = self.room.wait(st).unwrap_or_else(PoisonError::into_inner);
+        }
+        st.0.push_back(job);
+        self.more.notify_one();
+    }
+
+    fn close(&self) {
+        lock(&self.state).1 = true;
+        self.more.notify_all();
+    }
+
+    fn pop(&self) -> Option<Job> {
+        let mut st = lock(&self.state);
+        loop {
+            if let Some(j) = st.0.pop_front() {
+                self.room.notify_one();
+                return Some(j);
+            }
+            if st.1 {
+                return None;
+            }
+            st = self.more.wait(st).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
 }
 
 /// What a build has kept so far.
@@ -52,7 +99,6 @@ struct Build {
     window: Option<u64>,
     cur: Vec<Kept>,
     frames: Vec<Frame>,
-    jobs: Option<mpsc::SyncSender<Job>>,
     reused: usize,
     total: usize,
 }
@@ -79,6 +125,7 @@ pub struct EmitStore {
     loaded: Mutex<HashMap<usize, Arc<Vec<u8>>>>,
     build: Mutex<Build>,
     names: Arc<Mutex<Vec<Named>>>,
+    queue: Arc<Queue>,
     workers: Vec<JoinHandle<()>>,
 }
 
@@ -123,9 +170,13 @@ fn read_index(bytes: &[u8], tool: &[u8; 32], window: u64) -> Result<Vec<Frame>, 
     Ok(frames)
 }
 
-fn write_frame(dir: &Path, name: String, content: &[u8]) -> Result<String, String> {
+fn write_frame(dir: &Path, name: String, content: &[Vec<u8>]) -> Result<String, String> {
     let path = dir.join(format!("{name}.zst"));
-    let z = zstd::encode_all(content, 1).map_err(|e| e.to_string())?;
+    let mut enc = zstd::stream::Encoder::new(Vec::new(), 1).map_err(|e| e.to_string())?;
+    for piece in content {
+        enc.write_all(piece).map_err(|e| e.to_string())?;
+    }
+    let z = enc.finish().map_err(|e| e.to_string())?;
     relift_cache::write_if_changed(&path, &z).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(name)
 }
@@ -151,18 +202,15 @@ impl EmitStore {
                 by_key.insert(e.0, (f, k));
             }
         }
-        let (tx, rx) = mpsc::sync_channel::<Job>(WORKERS);
-        let rx = Arc::new(Mutex::new(rx));
+        let queue = Arc::new(Queue::new());
         let names = Arc::new(Mutex::new(Vec::new()));
         let workers = (0..WORKERS)
             .map(|_| {
-                let rx = Arc::clone(&rx);
+                let queue = Arc::clone(&queue);
                 let names = Arc::clone(&names);
                 let dir = dir.to_path_buf();
                 std::thread::spawn(move || {
-                    loop {
-                        let job = lock(&rx).recv();
-                        let Ok(job) = job else { break };
+                    while let Some(job) = queue.pop() {
                         let r = write_frame(&dir, job.name, &job.content);
                         lock(&names).push((job.slot, r));
                     }
@@ -182,11 +230,11 @@ impl EmitStore {
                 window: None,
                 cur: Vec::new(),
                 frames: Vec::new(),
-                jobs: Some(tx),
                 reused: 0,
                 total: 0,
             }),
             names,
+            queue,
             workers,
         })
     }
@@ -221,11 +269,13 @@ impl EmitStore {
             });
             return;
         }
-        let mut content = Vec::new();
+        let mut content = Vec::with_capacity(cur.len());
         let mut entries = Vec::with_capacity(cur.len());
+        let mut at = 0;
         for k in cur {
-            entries.push((k.key, content.len(), k.bytes.len()));
-            content.extend_from_slice(&k.bytes);
+            entries.push((k.key, at, k.bytes.len()));
+            at += k.bytes.len();
+            content.push(k.bytes);
         }
         let slot = b.frames.len();
         b.frames.push(Frame {
@@ -234,13 +284,11 @@ impl EmitStore {
             entries,
         });
         let name = format!("{}_{slot}", self.build_id);
-        if let Some(tx) = &b.jobs {
-            let _ = tx.send(Job {
-                slot,
-                name,
-                content,
-            });
-        }
+        self.queue.push(Job {
+            slot,
+            name,
+            content,
+        });
     }
 
     /// Writes the index of this build and removes the frames it no longer
@@ -256,13 +304,12 @@ impl EmitStore {
                 window: None,
                 cur: Vec::new(),
                 frames: Vec::new(),
-                jobs: None,
                 reused: 0,
                 total: 0,
             },
         );
         self.close(&mut b);
-        b.jobs = None;
+        self.queue.close();
         for w in self.workers {
             w.join().map_err(|_| "an emit store worker panicked")?;
         }
@@ -304,10 +351,11 @@ impl EmitStore {
 
 impl relift_emit::Store for EmitStore {
     fn key(&self, input: &[u8]) -> Key {
-        let mut all = Vec::with_capacity(32 + input.len());
-        all.extend_from_slice(&self.tool);
-        all.extend_from_slice(input);
-        relift_switch_formats::sha256(&all)
+        use sha2::{Digest as _, Sha256};
+        let mut h = Sha256::new();
+        h.update(self.tool);
+        h.update(input);
+        h.finalize().into()
     }
 
     fn get(&self, key: &Key) -> Option<Vec<u8>> {
