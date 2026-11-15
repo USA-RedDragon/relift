@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(info.identity.title(&["French"]), Some("My Project"));
         assert_eq!(info.identity.default_language.as_deref(), Some("default"));
         assert!(info.identity.icon.is_none());
-        assert_eq!(info.settings.runtime.len(), 12);
+        assert_eq!(info.settings.runtime.len(), 13);
         assert_eq!(info.settings.game.len(), 1);
         let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p1", "dial"]);

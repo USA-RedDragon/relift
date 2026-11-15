@@ -138,6 +138,15 @@ pub fn runtime_settings() -> Vec<Setting> {
             },
         ),
         s(
+            "vk.decode_bc",
+            "Decode compressed textures",
+            "Give the host GPU BC1 to BC7 textures as uncompressed ones, decoded on the CPU at upload. auto: only the formats the host GPU cannot sample (Apple, some Adreno and Mali)",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: ["auto", "on", "off"].map(String::from).into(),
+            },
+        ),
+        s(
             "kernel.layout",
             "Address space layout",
             "compact: the regions the game uses packed at the lowest bases, so less host address space is reserved; console: the console's exact region sizes",
@@ -816,7 +825,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 12);
+        assert_eq!(section(Vec::new()).runtime.len(), 13);
     }
 
     #[test]

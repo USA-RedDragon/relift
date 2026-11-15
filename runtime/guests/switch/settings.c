@@ -1,7 +1,8 @@
 /**
  * @file settings.c
  * @brief The settings of the Switch layer: where saves go, which host
- * Vulkan device the guest sees and whether attachments keep their contents.
+ * Vulkan device the guest sees, whether attachments keep their contents and
+ * whether compressed textures are decoded.
  */
 #include "hid_priv.h"
 #include "services.h"
@@ -47,6 +48,16 @@ static const rl_setting_def g_defs[] = {
         .description = "Pass the game's DONT_CARE attachment load and store ops as LOAD and STORE, as the console keeps "
                        "the contents. auto: only on host GPUs known to lose them (Apple)",
         .env = "RELIFT_VK_KEEP_ATTACHMENTS",
+        .choices = g_keep,
+        .nchoices = 3,
+    },
+    {
+        .key = "vk.decode_bc",
+        .type = RL_SETTING_ENUM,
+        .label = "Decode compressed textures",
+        .description = "Give the host GPU BC1 to BC7 textures as uncompressed ones, decoded on the CPU at upload. auto: "
+                       "only the formats the host GPU cannot sample (Apple, some Adreno and Mali)",
+        .env = "RELIFT_VK_DECODE_BC",
         .choices = g_keep,
         .nchoices = 3,
     },
