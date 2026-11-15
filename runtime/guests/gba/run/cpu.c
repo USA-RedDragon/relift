@@ -13,12 +13,13 @@
  *
  * SWI runs the high-level BIOS (bios/bios.h) after the lifted exception
  * entry and returns from the exception. An IRQ is taken at a sync point
- * when the machine's IRQ line is up and the I bit clear: the exception
- * entry, the BIOS stub (which stacks registers and calls the
+ * when the machine's IRQ line is up, the I bit clear and the line rose by
+ * the first cycle of the instruction's last access (rl_gba_irq_sample): the
+ * exception entry, the BIOS stub (which stacks registers and calls the
  * handler at 0x03FFFFFC with LR 0x138) and, when the handler jumps to 0x138,
- * the stub's return. Inside a BIOS call that waits (IntrWait, Halt), the machine calls
- * back where the console takes the interrupt; the handler then runs from
- * system mode as under the console's BIOS.
+ * the stub's return. Inside a BIOS call that waits (IntrWait, Halt), the
+ * machine calls back where the console takes the interrupt; the handler then
+ * runs from system mode as under the console's BIOS.
  */
 #include "cpu.h"
 
@@ -127,6 +128,10 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
         r->check(r->check_user, c);
     if (c->i || !rl_gba_irq_line(g))
         return RL_NO_IRQ;
+    if (!rl_gba_irq_sample(g)) {
+        rl_sched_break(r->k);
+        return RL_NO_IRQ;
+    }
     r->stats.irqs++;
     rl_arm32_exception(c, RL_ARM32_IRQ, (uint32_t)next + 4u);
     uint32_t h = stub_entry(c);

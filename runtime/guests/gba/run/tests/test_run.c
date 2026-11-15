@@ -232,3 +232,20 @@ TEST(gba_run_an_irq_at_a_sync_point_runs_the_stub_and_returns)
     CHECK_EQ(*rl_arm32_banked(run.c, RL_ARM32_IRQ, 14), 0x08000208u);
     CHECK(hs.cycles_after > 160u * RL_GBA_LINE_CYCLES + RL_GBA_FRAME_CYCLES);
 }
+
+TEST(gba_run_an_irq_rising_after_the_last_access_began_waits_an_instruction)
+{
+    CHECK(boot(spin_main) == 0);
+    rl_ctx *c = run.c;
+    rl_sched_run(run.k);
+    setup_irq(c, NULL);
+    rl_gba_cpu_fetch(c, 0x03000000u, 0);
+    rl_gba_request_irq(run.g, RL_GBA_IRQ_VBLANK);
+    c->time.budget -= 4;
+    CHECK_EQ(rl_sync(c, NULL, 0x03000004u), RL_OK);
+    CHECK(rl_gba_irq_line(run.g));
+    CHECK_EQ(hs.handler_runs, 0);
+    rl_gba_cpu_fetch(c, 0x03000004u, 0);
+    CHECK_EQ(rl_sync(c, NULL, 0x03000008u), RL_OK);
+    CHECK_EQ(hs.handler_runs, 1);
+}

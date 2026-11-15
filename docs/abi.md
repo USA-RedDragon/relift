@@ -1734,7 +1734,9 @@ CPU layer `runtime/cpus/arm32` and the glue in `runtime/guests/gba/run`.
   the refill after a taken branch (`rl_gba_cpu_refill`).
 - Every instruction ends in a sync point (`rl_sync`). The IRQ line is a
   scheduler line masked while the I bit is set: lifted code reports writes of
-  I (`rl_arm32_set_i`). An IRQ taken at a sync point enters IRQ mode, runs
+  I (`rl_arm32_set_i`). An instruction ends with the IRQ taken only when the
+  line rose by the first cycle of its last access (`rl_gba_irq_sample`); a
+  later rise waits for the next instruction. An IRQ taken at a sync point enters IRQ mode, runs
   the HLE BIOS stub's entry, calls the handler as a nested host call with LR
   0x138, and at 0x138 runs the stub's return and restores the CPSR.
 - SWI lifts to a trap after the exception entry; `rl_gba_swi_trap` runs the
