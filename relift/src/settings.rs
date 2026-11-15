@@ -100,6 +100,24 @@ pub struct Package {
         description = "the issuer ID of the notarization API key"
     )]
     pub notarize_issuer: String,
+
+    #[configulator(
+        name = "ios-id",
+        description = "the bundle identifier of the iOS app (empty: dev.relift.game.<project folder>)"
+    )]
+    pub ios_id: String,
+
+    #[configulator(
+        name = "ios-identity",
+        description = "the keychain identity that signs the iOS app for a device (empty: the first Apple Development identity)"
+    )]
+    pub ios_identity: String,
+
+    #[configulator(
+        name = "ios-profile",
+        description = "the provisioning profile of the iOS app (empty: one from Xcode's profile folders that covers the bundle identifier)"
+    )]
+    pub ios_profile: PathBuf,
 }
 
 /// How lifted code is written as C.

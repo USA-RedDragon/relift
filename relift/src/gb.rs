@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use relift_build::{Compile, Plan};
 use relift_progress::{Line, Paint, duration, noun};
 
-use crate::android;
+use crate::cross;
 use crate::import::{BoxError, cache_root, import_dir_value};
 use crate::settings::Settings;
 use crate::ui::Ui;
@@ -317,8 +317,8 @@ pub struct Built {
     pub source: PathBuf,
     /// The title the game goes by, empty when it has none.
     pub title: String,
-    /// The Android build, when the target is one.
-    pub android: Option<android::AndroidBuild>,
+    /// The build for another target, when there is one.
+    pub cross: Option<cross::Build>,
 }
 
 /// `relift build` of the Game Boy project in the working directory, with
@@ -332,17 +332,17 @@ pub fn build(
     settings: &Settings,
     mods: &[PathBuf],
     release: bool,
-    target: Option<android::Target>,
+    target: Option<cross::Target>,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
     let p = project(settings)?;
     let (name, host_out) = crate::build::project_out(settings)?;
-    let android = target
-        .map(|t| android::AndroidBuild::prepare(settings, t, &name))
+    let cross = target
+        .map(|t| cross::Build::prepare(settings, t, &name))
         .transpose()?;
     let (rom, hack) = patched(p.rom, mods, ui)?;
-    let out = match &android {
-        Some(a) => host_out.with_file_name(a.target.name),
+    let out = match &cross {
+        Some(c) => host_out.with_file_name(c.name()),
         None => host_out,
     };
     let cdir = out.join("c");
@@ -351,9 +351,9 @@ pub fn build(
         "relift build: {name} ({}, {} KiB, {})",
         title(&rom),
         rom.len() / 1024,
-        android.as_ref().map_or_else(
+        cross.as_ref().map_or_else(
             || format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
-            |a| a.target.name.to_string()
+            |c| c.name().to_string()
         )
     ));
     let row = ui.row("rom");
@@ -454,7 +454,7 @@ pub fn build(
     );
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, unlifted_list.as_bytes())?;
-    let save = if android.is_some() {
+    let save = if cross.is_some() {
         "battery.sav".to_string()
     } else if p.source.as_os_str().is_empty() {
         String::new()
@@ -475,7 +475,9 @@ pub fn build(
                     title: &name,
                     model: &p.model,
                     save: &save,
-                    android: android.is_some(),
+                    entry: cross
+                        .as_ref()
+                        .map_or(relift_gb::program::Entry::Main, cross::Build::entry),
                     learn: &learn.display().to_string(),
                 },
             ),
@@ -487,7 +489,7 @@ pub fn build(
     }
     let platform = if is_color(&rom) { "gbc" } else { "gb" };
     let mut ports = relift_input::native_ports(platform)?;
-    if android.is_some()
+    if cross.is_some()
         && let Some(t) = relift_input::touchpad_port(platform)
     {
         ports.add_port(t)?;
@@ -548,11 +550,11 @@ pub fn build(
         &cdir,
         &files,
         &prog,
-        (release, android.as_ref()),
+        (release, cross.as_ref()),
         ui,
     )?;
-    let exe = match &android {
-        Some(_) => out.join("libmain.so"),
+    let exe = match &cross {
+        Some(c) => out.join(c.program()),
         None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
     };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
@@ -569,7 +571,7 @@ pub fn build(
         exe,
         source: p.source,
         title: doc.identity.title(&[]).unwrap_or(&name).to_string(),
-        android,
+        cross,
     })
 }
 
@@ -579,7 +581,7 @@ fn compile(
     cdir: &Path,
     lifted: &[PathBuf],
     prog: &[PathBuf],
-    (release, android): (bool, Option<&android::AndroidBuild>),
+    (release, cross): (bool, Option<&cross::Build>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt_real = crate::build::runtime_dir(settings);
@@ -598,8 +600,8 @@ fn compile(
         )?
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = match android {
-        Some(a) => vec![a.ndk.clang.display().to_string()],
+    let cc = match cross {
+        Some(c) => c.cc(),
         None if release => crate::build::release_compiler(settings)?,
         None => crate::build::c_compiler(&settings.toolchain)?,
     };
@@ -608,7 +610,7 @@ fn compile(
         .iter()
         .map(|s| s.to_string())
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
-        .chain(android.map(|_| "-fPIC".to_string()))
+        .chain(cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string()))
         .collect();
     let static_rt = cfg!(windows).then_some("-DRL_STATIC_RUNTIME".to_string());
     let lifted_flags: Vec<String> = base
@@ -628,8 +630,8 @@ fn compile(
         ])
         .chain(static_rt.clone())
         .collect();
-    let mut extras = match android {
-        Some(a) => crate::runtime_link::android_extras(&rt, &a.deps, false)?,
+    let mut extras = match cross {
+        Some(c) => c.extras(&rt, false)?,
         None => crate::runtime_link::extras(&rt, &croot)?,
     };
     extras.vk.clear();
@@ -699,7 +701,7 @@ fn compile(
     }
     let jobs = relift_build::job_count(settings.jobs);
     let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let shared = android.is_some() || !cfg!(windows);
+    let shared = cross.is_some() || !cfg!(windows);
     let key: String = relift_switch_formats::sha256(
         format!(
             "{cc:?}\n{:?}",
@@ -731,10 +733,10 @@ fn compile(
     rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
         if shared { rt_obj(s) } else { obj(s, "rt") }
     }));
-    let triple = android.map(|a| a.target.triple);
+    let triple = cross.map(cross::Build::triple);
     let devices = device_library(settings, &rt_real, triple)?;
-    let output = out.join(match android {
-        Some(_) => "libmain.so".to_string(),
+    let output = out.join(match cross {
+        Some(c) => c.program().to_string(),
         None => format!("game{}", std::env::consts::EXE_SUFFIX),
     });
     let row = ui.row("");
@@ -779,17 +781,8 @@ fn compile(
         compiles.extend(rt_plan_compiles);
     }
     let pools = crate::build::memory_pools(&mut compiles, jobs);
-    let libs: Vec<String> = if android.is_some() {
-        [
-            "-lm",
-            "-ldl",
-            "-shared",
-            "-Wl,-soname,libmain.so",
-            "-Wl,-z,max-page-size=16384",
-            "-Wl,--no-undefined",
-        ]
-        .map(String::from)
-        .into()
+    let libs: Vec<String> = if let Some(c) = cross {
+        c.libs()
     } else if cfg!(windows) {
         [
             "-lpthread",

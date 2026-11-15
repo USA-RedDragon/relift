@@ -272,6 +272,36 @@ pub fn android_extras(
     })
 }
 
+/// The extras of an iOS program: the window, sound and iOS glue backends
+/// against the static SDL3 and libopus in `deps`.
+#[must_use]
+pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps) -> Extras {
+    let host = rt.join("host");
+    Extras {
+        vk: Vec::new(),
+        window: Some(host.join("window_sdl3.c")),
+        sdl3: Some(Sdl3 {
+            cflags: vec![
+                format!("-I{}", deps.sdl3_include.display()),
+                format!("-I{}", deps.opus_include.display()),
+            ],
+            libs: vec![
+                deps.sdl3_lib.display().to_string(),
+                deps.opus_lib.display().to_string(),
+            ],
+            origin: "iOS static".into(),
+        }),
+        vulkan: None,
+        host: ["audio_sdl3.c", "opus_libopus.c", "ios_sdl3.c"]
+            .iter()
+            .map(|n| host.join(n))
+            .collect(),
+        opus_src: None,
+        opus: None,
+        adrenotools: None,
+    }
+}
+
 impl Extras {
     /// What the build prints about the window, audio and Opus backends.
     pub fn note(&self) -> String {

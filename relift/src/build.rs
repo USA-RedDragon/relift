@@ -1415,16 +1415,19 @@ pub(crate) fn build_project(
     let (name, out) = project_out(settings)?;
     let android = match targets {
         [] => None,
-        [t] if t == "host" => None,
-        [t] => match crate::android::target(t) {
-            Some(a) if mode == Mode::Shipped => {
+        [t] => match crate::cross::target(t)? {
+            None => None,
+            Some(crate::cross::Target::Android(a)) if mode == Mode::Shipped => {
                 Some(crate::android::AndroidBuild::prepare(settings, a, &name)?)
             }
-            Some(_) => return Err("relift run does not run on Android yet".into()),
-            None => {
-                return Err(
-                    format!("target {t}: unknown; try host, android-arm64 or android-x64").into(),
-                );
+            Some(crate::cross::Target::Android(_)) => {
+                return Err("relift run does not run on Android yet".into());
+            }
+            Some(crate::cross::Target::Ios(_)) => {
+                return Err(format!(
+                    "target {t}: only Game Boy projects build for iOS so far (a Switch game needs MoltenVK linked in)"
+                )
+                .into());
             }
         },
         [t, ..] => return Err(format!("target {t}: only one target builds at a time").into()),
@@ -1836,20 +1839,25 @@ pub fn run_build(
         if targets.len() > 1 {
             return Err("one target at a time for a Game Boy build".into());
         }
-        let android = match targets.first().map(String::as_str) {
-            None | Some("host") => None,
-            Some(t) => Some(crate::android::target(t).ok_or_else(|| {
-                format!("target {t}: unknown; try host, android-arm64 or android-x64")
-            })?),
+        let target = match targets.first() {
+            Some(t) => crate::cross::target(t)?,
+            None => None,
         };
-        let built = crate::gb::build(settings, mods, true, android, ui)?;
+        let built = crate::gb::build(settings, mods, true, target, ui)?;
         let (name, _) = project_out(settings)?;
         let request = PackageRequest {
             name: &name,
             label: &built.title,
             exe: &built.exe,
             import: None,
-            android: built.android.as_ref(),
+            android: match &built.cross {
+                Some(crate::cross::Build::Android(a)) => Some(a.as_ref()),
+                _ => None,
+            },
+            ios: match &built.cross {
+                Some(crate::cross::Build::Ios(i)) => Some(i.as_ref()),
+                _ => None,
+            },
         };
         return package(settings, &request, ui);
     }
@@ -1862,6 +1870,7 @@ pub fn run_build(
         exe: &built.exe,
         import: Some(&import),
         android: built.android.as_ref(),
+        ios: None,
     };
     package(settings, &request, ui)
 }
@@ -1877,17 +1886,31 @@ struct PackageRequest<'a> {
     import: Option<&'a Path>,
     /// The Android build, when the target is one.
     android: Option<&'a crate::android::AndroidBuild>,
+    /// The iOS build, when the target is one.
+    ios: Option<&'a crate::ios::IosBuild>,
 }
 
-/// The release output of the target: an APK for Android, a signed `.app` on
-/// macOS, on Linux an AppImage of the program.
+/// The release output of the target: an APK for Android, an app bundle for
+/// iOS, a signed `.app` on macOS, on Linux an AppImage of the program.
 fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result<(), BoxError> {
+    let label = if req.label.is_empty() {
+        req.name
+    } else {
+        req.label
+    };
+    if let Some(i) = req.ios {
+        let icon = crate::icon::png(None, req.name);
+        let app = crate::ios::package(i, req.exe, req.name, label, &icon, ui)?;
+        ui.summary(&Line::new().text(format!("  app: {}", app.display())));
+        if let crate::ios::Signing::Unsigned(why) = &i.signing {
+            ui.summary(&Line::new().paint(
+                Paint::Yellow,
+                format!("  not signed: {why}; a device installs only a signed app"),
+            ));
+        }
+        return Ok(());
+    }
     if let Some(a) = req.android {
-        let label = if req.label.is_empty() {
-            req.name
-        } else {
-            req.label
-        };
         let l = crate::android::launcher(req.exe, req.name, label)?;
         let apk = crate::android::package(a, req.exe, req.name, &l.label, &l.icons, ui)?;
         ui.summary(&Line::new().text(format!("  apk: {}", apk.display())));

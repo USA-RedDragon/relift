@@ -29,3 +29,6 @@ notarize = false
 notarize-key = ""
 notarize-key-id = ""
 notarize-issuer = ""
+ios-id = ""
+ios-identity = ""
+ios-profile = ""

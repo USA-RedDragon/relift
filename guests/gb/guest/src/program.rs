@@ -484,13 +484,25 @@ pub struct Program<'a> {
     pub model: &'a str,
     /// The save file the program reads and writes unless told otherwise.
     pub save: &'a str,
-    /// Build the entry for an Android app: `SDL_main` in a shared library,
-    /// with `save` a file name in the app's files directory.
-    pub android: bool,
+    /// How the program enters.
+    pub entry: Entry,
     /// The file the program adds the ROM locations it ran without lifted
     /// code to, which the next build reads ([`read_learned`]); empty for
     /// none.
     pub learn: &'a str,
+}
+
+/// How the program enters, and where a bare save name lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    /// `main`, with `save` a path.
+    Main,
+    /// `SDL_main` in the shared library of an Android app, with `save` a
+    /// file name in the app's files directory.
+    Android,
+    /// `rl_ios_main`, which the iOS glue's `main` runs once the app has
+    /// launched, with `save` a file name in the app's Documents.
+    Ios,
 }
 
 fn c_string(s: &str) -> String {
@@ -684,16 +696,31 @@ pub fn program_c(
         let _ = writeln!(t, "    {{ &{}, UINT32_C({:#x}) }},", u.symbol, u.bank);
     }
     t.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
-    if p.android {
-        t.push_str(
-            "#include <stdio.h>\n#include <relift/android.h>\n#include <relift/settings.h>\n__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)\n{\n    rl_android_init();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = rl_android_files_dir();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", ",
+    let mobile = |t: &mut String, header: &str, sig: &str, init: &str, dir: &str| {
+        let _ = write!(
+            t,
+            "#include <stdio.h>\n#include <relift/{header}>\n#include <relift/settings.h>\n{sig}\n{{\n    {init}();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = {dir}();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", {});\n",
+            c_string(p.save)
         );
-        t.push_str(&c_string(p.save));
-        t.push_str(");\n");
-    } else {
-        t.push_str(
+    };
+    match p.entry {
+        Entry::Android => mobile(
+            &mut t,
+            "android.h",
+            "__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)",
+            "rl_android_init",
+            "rl_android_files_dir",
+        ),
+        Entry::Ios => mobile(
+            &mut t,
+            "ios.h",
+            "int rl_ios_main(int argc, char **argv)",
+            "rl_ios_init",
+            "rl_ios_documents_dir",
+        ),
+        Entry::Main => t.push_str(
             "int main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
-        );
+        ),
     }
     let _ = write!(
         t,
@@ -701,20 +728,20 @@ pub fn program_c(
         units.iter().filter(|u| u.bank != RAM_UNIT).count(),
         c_string(p.title),
         c_string(p.model),
-        if p.android {
-            "save".into()
-        } else {
+        if p.entry == Entry::Main {
             c_string(p.save)
+        } else {
+            "save".into()
         },
         c_string(p.learn),
         if sleds.is_empty() { "NULL" } else { "sleds" },
         sleds.len(),
         if ram.is_empty() { "NULL" } else { "ram" },
         ram.len(),
-        if p.android {
-            "    rl_android_flush();\n"
-        } else {
-            ""
+        match p.entry {
+            Entry::Android => "    rl_android_flush();\n",
+            Entry::Ios => "    rl_ios_flush();\n",
+            Entry::Main => "",
         }
     );
     t
@@ -814,7 +841,7 @@ mod tests {
                 title: "T",
                 model: "dmg",
                 save: "",
-                android: false,
+                entry: Entry::Main,
                 learn: "",
             },
         );
@@ -943,7 +970,7 @@ mod tests {
                 title: "T",
                 model: "dmg",
                 save: "",
-                android: false,
+                entry: Entry::Main,
                 learn: "",
             },
         );
@@ -967,7 +994,7 @@ mod tests {
                 title: "T\"",
                 model: "cgb",
                 save: "a.sav",
-                android: false,
+                entry: Entry::Main,
                 learn: "",
             },
         );
@@ -992,7 +1019,7 @@ mod tests {
                 title: "T",
                 model: "cgb",
                 save: "a.sav",
-                android: true,
+                entry: Entry::Android,
                 learn: "",
             },
         );
@@ -1000,5 +1027,28 @@ mod tests {
         assert!(!c.contains("int main("), "{c}");
         assert!(c.contains("rl_android_files_dir()"), "{c}");
         assert!(c.contains("\"T\", \"cgb\", save, \"\""), "{c}");
+    }
+
+    #[test]
+    fn the_ios_entry_is_run_by_the_glue_with_the_save_in_documents() {
+        let rom = rom();
+        let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
+        let l = lift(&rom, &report, &[], [0; 32]);
+        let c = program_c(
+            &l.units,
+            &l.sleds,
+            &l.ram,
+            &Program {
+                title: "T",
+                model: "cgb",
+                save: "a.sav",
+                entry: Entry::Ios,
+                learn: "",
+            },
+        );
+        assert!(c.contains("int rl_ios_main(int argc, char **argv)"), "{c}");
+        assert!(!c.contains("int main("), "{c}");
+        assert!(c.contains("rl_ios_documents_dir()"), "{c}");
+        assert!(c.contains("rl_ios_flush();"), "{c}");
     }
 }
