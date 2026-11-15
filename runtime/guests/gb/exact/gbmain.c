@@ -9,6 +9,7 @@
 #include "exact_int.h"
 #include "sm83.h"
 
+#include <relift/audio.h>
 #include <relift/ports.h>
 #include <relift/settings.h>
 #include <relift/window.h>
@@ -25,6 +26,8 @@ extern const uint32_t rl_gbc_ports_count;
 
 #define FRAME_NS 16742706ull
 #define SAVE_EVERY 600u
+#define AUDIO_CHUNK 2048u
+#define AUDIO_AHEAD (3u * RLGBD_AUDIO_RATE / 60u)
 
 static const struct {
     const char *name;
@@ -55,6 +58,15 @@ typedef struct host {
     size_t saved_len;
     bool stats;
     bool live;
+    bool audio;
+    rl_audio_out *out;
+    const char *wav;
+    int16_t *wav_pcm;
+    size_t wav_frames;
+    size_t wav_cap;
+    uint64_t audio_hash;
+    uint64_t audio_frames;
+    int audio_peak;
     rl_control_ref pad[8];
     uint64_t next_ns;
     uint64_t checked;
@@ -143,8 +155,84 @@ static void load_save(host *H)
     }
 }
 
+static void audio_keep(host *H, const int16_t *pcm, uint32_t frames)
+{
+    for (uint32_t i = 0; i < frames * 2; i++) {
+        uint16_t v = (uint16_t)pcm[i];
+        H->audio_hash = (H->audio_hash ^ (v & 0xFFu)) * 0x100000001b3ull;
+        H->audio_hash = (H->audio_hash ^ (v >> 8)) * 0x100000001b3ull;
+        int a = pcm[i] < 0 ? -(int)pcm[i] : pcm[i];
+        if (a > H->audio_peak)
+            H->audio_peak = a;
+    }
+    H->audio_frames += frames;
+    if (!H->wav)
+        return;
+    if (H->wav_frames + frames > H->wav_cap) {
+        size_t cap = H->wav_cap ? H->wav_cap * 2 : 65536;
+        while (cap < H->wav_frames + frames)
+            cap *= 2;
+        int16_t *n = realloc(H->wav_pcm, cap * 4);
+        if (!n) {
+            H->wav = NULL;
+            return;
+        }
+        H->wav_pcm = n;
+        H->wav_cap = cap;
+    }
+    memcpy(H->wav_pcm + H->wav_frames * 2, pcm, (size_t)frames * 4);
+    H->wav_frames += frames;
+}
+
+static void audio_drain(host *H)
+{
+    if (!H->audio)
+        return;
+    float in[AUDIO_CHUNK * 2];
+    int16_t pcm[AUDIO_CHUNK * 2];
+    size_t n;
+    while ((n = rlgbd_audio_take(H->h, in, AUDIO_CHUNK)) > 0) {
+        for (size_t i = 0; i < n * 2; i++) {
+            float v = in[i] * 32767.0f;
+            pcm[i] = (int16_t)(v > 32767.0f ? 32767 : v < -32767.0f ? -32767 : v);
+        }
+        audio_keep(H, pcm, (uint32_t)n);
+        rl_audio_write(H->out, pcm, (uint32_t)n);
+    }
+}
+
+static void le32(uint8_t *p, uint32_t v)
+{
+    for (int i = 0; i < 4; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static bool wav_write(const host *H)
+{
+    uint32_t bytes = (uint32_t)(H->wav_frames * 4);
+    uint8_t h[44] = "RIFFxxxxWAVEfmt \x10\0\0\0\1\0\2\0xxxxxxxx\4\0\x10\0data";
+    le32(h + 4, 36 + bytes);
+    le32(h + 24, RLGBD_AUDIO_RATE);
+    le32(h + 28, RLGBD_AUDIO_RATE * 4);
+    le32(h + 40, bytes);
+    FILE *f = fopen(H->wav, "wb");
+    bool ok = f && fwrite(h, 1, 44, f) == 44 && (!bytes || fwrite(H->wav_pcm, 1, bytes, f) == bytes);
+    if (f && fclose(f) != 0)
+        ok = false;
+    return ok;
+}
+
+static void audio_pace(host *H)
+{
+    while (!__atomic_load_n(&H->quit, __ATOMIC_ACQUIRE) && rl_audio_queued(H->out) > AUDIO_AHEAD) {
+        struct timespec d = {0, 1000000L};
+        nanosleep(&d, NULL);
+    }
+}
+
 static void on_frame(host *H)
 {
+    audio_drain(H);
     if (H->png_dir && H->png_every && H->frames % H->png_every == 0) {
         char path[4096];
         snprintf(path, sizeof path, "%s/frame%06u.png", H->png_dir, H->frames);
@@ -164,7 +252,9 @@ static void on_frame(host *H)
         save_now(H);
     if (H->stop_frames && !H->in_case && H->frames >= H->stop_frames)
         H->quit = true;
-    if (H->win) {
+    if (H->win && H->out) {
+        audio_pace(H);
+    } else if (H->win) {
         uint64_t t = now_ns();
         if (!H->next_ns || t > H->next_ns + 4 * FRAME_NS)
             H->next_ns = t;
@@ -271,6 +361,11 @@ static int run_body(void *arg)
         H->win = b->open(H->p->title && *H->p->title ? H->p->title : "relift", 160 * 4, 144 * 4);
         H->live = H->win != NULL;
     }
+    if (H->audio && H->win) {
+        H->out = rl_audio_open(RLGBD_AUDIO_RATE, 2);
+        if (H->out)
+            rl_audio_pause(H->out, false);
+    }
     rlgbd_regs r;
     rlgbd_get_regs(H->h, &r);
     a->c->a = r.a;
@@ -283,6 +378,9 @@ static int run_body(void *arg)
     a->c->l = r.l;
     a->c->sp = r.sp;
     int code = rl_gbx_run(a->c, a->mem, r.pc);
+    audio_drain(H);
+    rl_audio_close(H->out);
+    H->out = NULL;
     if (H->win) {
         b->close(H->win);
         H->win = NULL;
@@ -318,7 +416,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     H.p = p;
     H.save = p->save;
     const char *model = p->model, *case_file = NULL, *input = NULL;
-    bool headless = false, check = false;
+    bool headless = false, check = false, no_audio = false;
     rl_settings_declare_runtime();
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
@@ -339,6 +437,10 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
             H.png_dir = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png-every"))
             H.png_every = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
+        else if (!strcmp(a, "--wav"))
+            H.wav = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--no-audio"))
+            no_audio = true;
         else if (!strcmp(a, "--save"))
             H.save = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--no-save"))
@@ -400,6 +502,9 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
         fprintf(stderr, "relift-gb: the device library refused the cartridge\n");
         return 1;
     }
+    H.audio = !no_audio && !case_file;
+    if (H.audio)
+        rlgbd_audio_enable(H.h, 1);
     if (check)
         H.ref = rlgbd_new_with((uint32_t)hw, p->rom, p->rom_len, flags);
     if (spec) {
@@ -450,6 +555,13 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     }
     if (H.ref)
         fprintf(stderr, "relift-gb: check: %llu steps matched\n", (unsigned long long)H.checked);
+    if (H.audio && (H.wav || H.stop_frames))
+        fprintf(stderr, "relift-gb: audio: %llu frames at %u Hz, peak %d, hash %016llx\n", (unsigned long long)H.audio_frames,
+                RLGBD_AUDIO_RATE, H.audio_peak, (unsigned long long)H.audio_hash);
+    if (H.wav && !wav_write(&H)) {
+        fprintf(stderr, "relift-gb: could not write %s\n", H.wav);
+        ret = ret ? ret : 1;
+    }
     if (H.png && rlgbd_write_png(H.h, H.png) != 0) {
         fprintf(stderr, "relift-gb: could not write %s\n", H.png);
         ret = ret ? ret : 1;
@@ -459,6 +571,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
         print_stats();
     fflush(stdout);
     free(spec);
+    free(H.wav_pcm);
     free(H.saved);
     rlgbd_free(H.ref);
     rlgbd_free(H.h);

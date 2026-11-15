@@ -40,6 +40,7 @@ typedef struct rl_gb_program {
  * corpus case spec, rlgbd_case_open; exit 0 pass, 1 fail, 3 unsupported),
  * --input SCRIPT (frame[@ly]:buttons,... as a case's input), --png FILE (the
  * last frame at exit), --png-dir DIR with --png-every N (every Nth frame),
+ * --wav FILE (the sound as 16-bit stereo at RLGBD_AUDIO_RATE), --no-audio,
  * --save FILE, --no-save, --stats (counters on stderr), --check (lockstep
  * against the library's own CPU, stopping at the first difference), and the
  * runtime's --relift-set and --relift-settings.

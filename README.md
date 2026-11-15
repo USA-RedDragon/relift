@@ -72,8 +72,11 @@ the imported ROM, the format other emulators read. Options of the program:
 `--model dmg|mgb|sgb|cgb|agb|...`, `--frames N` (stop after N frames and
 print the frame hash and the serial output), `--input` (a scripted joypad,
 `frame:buttons,...`), `--png FILE`, `--png-dir DIR --png-every N`,
-`--case FILE` (grade a test ROM by a corpus case spec), `--stats` and
-`--check` (lockstep against the device library's own CPU).
+`--wav FILE` (record the sound, 44100 Hz stereo, and print its length, peak
+and hash), `--no-audio`, `--case FILE` (grade a test ROM by a corpus case
+spec, sound cases included), `--stats` and `--check` (lockstep against the
+device library's own CPU). In a window the sound goes to the host output, and
+the frames are paced on that output's queue.
 
 The devices come from rustyboi-core (`guests/gb/devices`), driven at every
 instruction boundary; lifted code runs the instruction bodies. Code with no
