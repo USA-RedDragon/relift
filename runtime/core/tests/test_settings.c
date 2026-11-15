@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static const char *const g_modes[] = { "off", "low", "high" };
@@ -32,6 +33,39 @@ static void fresh(void)
     rl_settings_reset();
     unsetenv("RL_TEST_NAME");
     CHECK_EQ(rl_settings_declare(g_defs, NDEFS), (int)NDEFS);
+}
+
+static int make_dirs(const char *path)
+{
+    char buf[512];
+    size_t n = strlen(path);
+    if (n == 0 || n >= sizeof buf)
+        return -1;
+    memcpy(buf, path, n + 1);
+    for (size_t i = 1; i <= n; i++) {
+        if (buf[i] != '/' && buf[i] != '\0')
+            continue;
+        char c = buf[i];
+        buf[i] = '\0';
+        if (mkdir(buf, 0700) != 0 && access(buf, F_OK) != 0)
+            return -1;
+        buf[i] = c;
+    }
+    return 0;
+}
+
+static void remove_dirs_up_to(const char *leaf, const char *top)
+{
+    char buf[512];
+    size_t keep = strlen(top);
+    snprintf(buf, sizeof buf, "%s", leaf);
+    for (;;) {
+        rmdir(buf);
+        char *slash = strrchr(buf, '/');
+        if (!slash || (size_t)(slash - buf) < keep)
+            break;
+        *slash = '\0';
+    }
 }
 
 static char *write_tmp(const char *text)
@@ -254,8 +288,12 @@ TEST(settings_user_file_is_read_only_with_an_app_and_no_launcher_file)
     unsetenv("XDG_DATA_HOME");
     char udir[400];
     CHECK(rl_settings_user_dir(udir, sizeof udir, "g"));
-    snprintf(cmd, sizeof cmd, "mkdir -p '%s' && printf '{\"scale\": 5}' > '%s/settings.json'", udir, udir);
-    CHECK_EQ(system(cmd), 0);
+    CHECK_EQ(make_dirs(udir), 0);
+    snprintf(cmd, sizeof cmd, "%s/settings.json", udir);
+    FILE *sf = fopen(cmd, "w");
+    CHECK(sf != NULL);
+    fputs("{\"scale\": 5}", sf);
+    fclose(sf);
     char *argv[] = { "x", NULL };
     CHECK_EQ(rl_settings_args(1, argv), 0);
     rl_settings_set_app("g");
@@ -268,8 +306,9 @@ TEST(settings_user_file_is_read_only_with_an_app_and_no_launcher_file)
     CHECK_EQ(rl_settings_args(3, argv2), 1);
     unlink(f);
     CHECK_EQ(rl_setting_int("scale"), 1);
-    snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
-    CHECK_EQ(system(cmd), 0);
+    snprintf(cmd, sizeof cmd, "%s/settings.json", udir);
+    unlink(cmd);
+    remove_dirs_up_to(udir, dir);
 }
 
 TEST(override_api_reads_the_same_values)
