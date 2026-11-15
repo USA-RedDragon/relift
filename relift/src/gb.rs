@@ -574,7 +574,7 @@ fn compile(
             flags: rt_flags
                 .iter()
                 .cloned()
-                .chain(crate::build::source_dir_flag(s))
+                .chain([crate::build::build_dir_flag(out)])
                 .collect(),
             pool: None,
             stage: 0,

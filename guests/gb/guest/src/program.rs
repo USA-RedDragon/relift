@@ -329,7 +329,7 @@ fn c_string(s: &str) -> String {
 /// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it, `rom`).
 #[must_use]
 pub fn rom_c(rom: &[u8]) -> String {
-    let mut t = relift_guest::blob::blob_c("rl_gb_rom", "rom.bin", rom);
+    let mut t = relift_guest::blob::blob_c("rl_gb_rom", "c/rom.bin", rom);
     t.push_str("#include <stddef.h>\nextern const size_t rl_gb_rom_len;\n");
     let _ = writeln!(t, "const size_t rl_gb_rom_len = {}u;", rom.len());
     t

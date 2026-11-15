@@ -6,9 +6,11 @@ use std::fmt::Write;
 /// `file` (the file `bytes` is written to beside it).
 ///
 /// A compiler with `#embed` reads the file as data. Any other compiler gets
-/// the same array from an assembler `.incbin`, which needs the directory of
-/// `file` as an include directory and which dependency files do not track,
-/// so the text carries a hash of `bytes` to change with them.
+/// the same array from an assembler `.incbin`, which dependency files do not
+/// track, so the text carries a hash of `bytes` to change with them. `file`
+/// is relative to the build directory, which the compile has as an include
+/// directory (a path relative to the including file would be recorded in
+/// the dependency file as an absolute one).
 #[must_use]
 pub fn blob_c(symbol: &str, file: &str, bytes: &[u8]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;

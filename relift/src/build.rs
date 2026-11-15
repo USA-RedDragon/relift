@@ -181,12 +181,12 @@ fn unlifted_line(module: &str, pc: u64, word: u64, message: &str) -> String {
     format!("{module}\t{pc:#x}\t{word:08x}\t{message}\n")
 }
 
-/// `-I` of the directory of a generated C file, where an assembler
-/// `.incbin` in it looks for the data file next to it.
-pub(crate) fn source_dir_flag(src: &Path) -> Option<String> {
-    src.parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .map(|d| format!("-I{}", d.display()))
+/// `-I` of the build directory, where generated C files name their data
+/// files as `c/<name>`: an assembler `.incbin` and a compiler's `#embed`
+/// both find them there, and a dependency file records the path as
+/// written instead of the directory of the including file.
+pub(crate) fn build_dir_flag(out: &Path) -> String {
+    format!("-I{}", out.display())
 }
 
 /// Lifts and emits `placed` into `cdir`, one directory per module; returns
@@ -1278,7 +1278,7 @@ pub(crate) fn build_project(
             flags: prog_flags
                 .iter()
                 .cloned()
-                .chain(source_dir_flag(s))
+                .chain([build_dir_flag(&out)])
                 .collect(),
             pool: None,
             stage: 0,
