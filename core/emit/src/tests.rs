@@ -1162,3 +1162,41 @@ fn a_continuation_stays_in_the_piece_of_its_instruction() {
         .text;
     assert!(!unit.contains("0x10104"), "{unit}");
 }
+
+#[test]
+fn a_landing_pad_entered_anywhere_keeps_its_resume_entry() {
+    let code = [
+        branch(0x02, 0, 3),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks[0..3]);
+    f.pads = BTreeSet::from([0x108]);
+    let g = function(0x10c, &blocks[3..4]);
+    let out = emit(
+        &Toy,
+        &[f, g],
+        &[],
+        &Options {
+            enter_anywhere: Some(u64::MAX),
+            ..Options::default()
+        },
+    );
+    let unit = &out.files.last().expect("unit").text;
+    assert!(
+        unit.contains(
+            "{ UINT64_C(0x108), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, rl_toy_pad_resume },"
+        ),
+        "{unit}"
+    );
+    assert!(
+        !unit.contains("UINT64_C(0x108), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, F_100"),
+        "{unit}"
+    );
+    assert!(
+        unit.contains("{ UINT64_C(0x104), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, F_100_part1 },"),
+        "{unit}"
+    );
+}

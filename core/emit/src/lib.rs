@@ -869,8 +869,16 @@ fn unit_table(
         })
         .collect();
     let entry_of: BTreeSet<u64> = entries.iter().map(|(a, _)| *a).collect();
+    let pads_of: BTreeSet<u64> = if fe.pad_resume().is_some() {
+        fns.iter().flat_map(|f| f.pads.iter().copied()).collect()
+    } else {
+        BTreeSet::new()
+    };
     for (pc, piece) in inner {
-        if !entry_of.contains(pc) && !overrides.iter().any(|o| o.entry == *pc) {
+        if !entry_of.contains(pc)
+            && !pads_of.contains(pc)
+            && !overrides.iter().any(|o| o.entry == *pc)
+        {
             entries.push((
                 *pc,
                 format!(
