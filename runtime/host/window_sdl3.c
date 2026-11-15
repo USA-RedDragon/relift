@@ -36,6 +36,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+#define RL_MOBILE 1
+#endif
+
 typedef struct sdl_win {
     rl_window head;
     SDL_Window *w;
@@ -94,6 +101,10 @@ static int sdl_init(void)
         SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
         return -1;
     }
+#if defined(__APPLE__) && TARGET_OS_IPHONE && !defined(RL_VULKAN_LINKED)
+    rl_log(RL_LOG_INFO, "window", "SDL %s video driver, no Vulkan", SDL_GetCurrentVideoDriver());
+    return 0;
+#endif
     if (!SDL_Vulkan_LoadLibrary(getenv("RELIFT_VULKAN_LIBRARY"))) {
         rl_log(RL_LOG_WARN, "window", "SDL could not load Vulkan: %s", SDL_GetError());
         return 0;
@@ -408,9 +419,12 @@ static void do_open(void *p)
     if (!title)
         title = r->title;
     SDL_SetAppMetadata(title, NULL, NULL);
-    SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
-#ifdef __ANDROID__
+    SDL_WindowFlags flags = (g_exts ? SDL_WINDOW_VULKAN : 0) | SDL_WINDOW_RESIZABLE;
+#ifdef RL_MOBILE
     flags |= SDL_WINDOW_FULLSCREEN;
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
     SDL_Window *sw = SDL_CreateWindow(title, (int)r->width, (int)r->height, flags);
     if (!sw) {
