@@ -8,7 +8,9 @@
  * the event loop in run serves. Keyboard, mouse and gamepads become
  * rl_input snapshots; with no gamepad connected, pad 0 follows the keyboard.
  */
+#include <relift/appinfo.h>
 #include <relift/input.h>
+#include <relift/settings.h>
 #include <relift/window.h>
 
 #include "core.h"
@@ -16,6 +18,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -250,6 +253,48 @@ static void on_loop(SDL_MainThreadCallback fn, void *arg)
         SDL_RunOnMainThread(fn, arg, true);
 }
 
+#define TAG_MAX 8
+#define TAG_LEN 64
+
+/** @brief The game's title for this host: the language setting, then the host's preferred languages. */
+static const char *app_title(char tags[TAG_MAX][TAG_LEN])
+{
+    const char *list[TAG_MAX];
+    size_t n = 0;
+    const char *setting = rl_setting_str("language");
+    if (setting && *setting) {
+        snprintf(tags[n], TAG_LEN, "%s", setting);
+        list[n] = tags[n];
+        n++;
+    }
+    int count = 0;
+    SDL_Locale **loc = SDL_GetPreferredLocales(&count);
+    for (int i = 0; loc && i < count && n < TAG_MAX; i++) {
+        snprintf(tags[n], TAG_LEN, "%s%s%s", loc[i]->language, loc[i]->country ? "_" : "", loc[i]->country ? loc[i]->country : "");
+        list[n] = tags[n];
+        n++;
+    }
+    SDL_free(loc);
+    return rl_app_title(list, n);
+}
+
+static void set_icon(SDL_Window *sw)
+{
+    size_t n = 0;
+    const uint8_t *png = rl_app_icon_png(&n);
+    if (!png)
+        return;
+    SDL_IOStream *io = SDL_IOFromConstMem(png, n);
+    SDL_Surface *icon = io ? SDL_LoadPNG_IO(io, true) : NULL;
+    if (!icon) {
+        rl_log(RL_LOG_WARN, "window", "the game's icon could not be read: %s", SDL_GetError());
+        return;
+    }
+    if (!SDL_SetWindowIcon(sw, icon))
+        rl_log(RL_LOG_WARN, "window", "SDL could not set the window icon: %s", SDL_GetError());
+    SDL_DestroySurface(icon);
+}
+
 typedef struct open_req {
     const char *title;
     uint32_t width, height;
@@ -259,15 +304,21 @@ typedef struct open_req {
 static void do_open(void *p)
 {
     open_req *r = p;
+    char tags[TAG_MAX][TAG_LEN];
+    const char *title = app_title(tags);
+    if (!title)
+        title = r->title;
+    SDL_SetAppMetadata(title, NULL, NULL);
     SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
 #ifdef __ANDROID__
     flags |= SDL_WINDOW_FULLSCREEN;
 #endif
-    SDL_Window *sw = SDL_CreateWindow(r->title, (int)r->width, (int)r->height, flags);
+    SDL_Window *sw = SDL_CreateWindow(title, (int)r->width, (int)r->height, flags);
     if (!sw) {
         rl_log(RL_LOG_ERROR, "window", "SDL could not open a window: %s", SDL_GetError());
         return;
     }
+    set_icon(sw);
     sdl_win *w = calloc(1, sizeof *w);
     if (!w)
         abort();

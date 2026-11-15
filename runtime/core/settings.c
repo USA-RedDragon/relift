@@ -48,6 +48,14 @@ static const rl_setting_def g_runtime_defs[] = {
         .choices = g_video_choices,
         .nchoices = 4,
     },
+    {
+        .key = "language",
+        .type = RL_SETTING_STRING,
+        .label = "Title language",
+        .description = "The language of the game's window title: a language name such as AmericanEnglish or French, "
+                       "or a locale such as ja or fr_CA. Empty follows the host's language",
+        .env = "RELIFT_LANGUAGE",
+    },
 };
 
 static char *g_mods[RL_SETTINGS_MODS_MAX];

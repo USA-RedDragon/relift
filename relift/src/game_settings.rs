@@ -90,6 +90,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             },
         ),
         s(
+            "language",
+            "Title language",
+            "The language of the game's window title: a language name such as AmericanEnglish or French, or a locale such as ja or fr_CA. Empty follows the host's language",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "save.dir",
             "Save folder",
             "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
@@ -736,7 +743,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 5);
+        assert_eq!(section(Vec::new()).runtime.len(), 6);
     }
 
     #[test]
