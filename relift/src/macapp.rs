@@ -5,7 +5,9 @@
 //! the per-user folders, the libraries it links (SDL3, MoltenVK and what
 //! they link, from outside `/usr/lib` and `/System`) into
 //! `Contents/Frameworks` with their install names rewritten to `@rpath`, and
-//! the import's `romfs/` and `dlc/` into `Contents/Resources`. Everything is
+//! the import's `romfs/` and `dlc/` into `Contents/Resources`, beside the
+//! game's icon (`AppIcon.icns`); `Info.plist` names the bundle with the
+//! game's title. Everything is
 //! then signed inside out: with the configured identity under the hardened
 //! runtime and a secure timestamp, or ad hoc when there is none. The program
 //! needs no entitlement: it never generates code, and the libraries inside
@@ -99,6 +101,9 @@ fn xml(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// The game's icon in the bundle's `Contents/Resources`.
+const ICON_FILE: &str = "AppIcon.icns";
+
 /// The bundle's `Info.plist`.
 pub fn info_plist(slug: &str, name: &str) -> String {
     let id: String = slug
@@ -110,6 +115,7 @@ pub fn info_plist(slug: &str, name: &str) -> String {
         ("CFBundleDisplayName", xml(name)),
         ("CFBundleIdentifier", format!("relift.game.{id}")),
         ("CFBundleExecutable", xml(slug)),
+        ("CFBundleIconFile", ICON_FILE.into()),
         ("CFBundlePackageType", "APPL".into()),
         ("CFBundleInfoDictionaryVersion", "6.0".into()),
         ("CFBundleShortVersionString", "1.0".into()),
@@ -469,6 +475,10 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
         info_plist(slug, name).as_bytes(),
     )?;
     relift_cache::write_if_changed(&contents.join("PkgInfo"), b"APPL????")?;
+    relift_cache::write_if_changed(
+        &resources.join(ICON_FILE),
+        &crate::icon::icns(info.identity.icon.as_ref(), name),
+    )?;
     for f in &done {
         sign(signing, &frameworks.join(f))?;
     }
@@ -568,6 +578,8 @@ mod tests {
         assert!(p.contains("<string>A &amp; B</string>"));
         assert!(p.contains("<key>CFBundleExecutable</key>\n\t<string>a-b</string>"));
         assert!(p.contains("relift.game.a-b"));
+        assert!(p.contains("<key>CFBundleIconFile</key>\n\t<string>AppIcon.icns</string>"));
+        assert!(p.contains("<key>CFBundleDisplayName</key>\n\t<string>A &amp; B</string>"));
     }
 
     #[test]

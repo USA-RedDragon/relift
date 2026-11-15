@@ -309,6 +309,36 @@ pub fn ico(icon: Option<&Icon>) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// A macOS `.icns` of the game's icon, PNG entries from 16 to 256 pixels
+/// (with the Retina variants). A game without an icon gets the generated
+/// one for `seed` (Finder and the Dock need some icon).
+#[must_use]
+pub fn icns(icon: Option<&Icon>, seed: &str) -> Vec<u8> {
+    const SIZES: [(&[u8; 4], usize); 7] = [
+        (b"icp4", 16),
+        (b"ic11", 32),
+        (b"icp5", 32),
+        (b"ic12", 64),
+        (b"ic07", 128),
+        (b"ic13", 256),
+        (b"ic08", 256),
+    ];
+    let Some(img) = image_of(icon, seed, true) else {
+        return Vec::new();
+    };
+    let mut body = Vec::new();
+    for (kind, n) in SIZES {
+        let png = encode(&scaled(&img, n));
+        body.extend(kind);
+        body.extend(((png.len() + 8) as u32).to_be_bytes());
+        body.extend(png);
+    }
+    let mut out = b"icns".to_vec();
+    out.extend(((body.len() + 8) as u32).to_be_bytes());
+    out.extend(body);
+    out
+}
+
 /// The PNG bytes of the game's icon. `seed` (the game's name) decides the
 /// generated icon of a game without one.
 #[must_use]
@@ -452,6 +482,44 @@ mod tests {
             let at = u32::from_le_bytes(entry(i)[12..16].try_into().unwrap()) as usize;
             assert_eq!(&ico[at..at + 8], b"\x89PNG\r\n\x1a\n");
             assert!(at + len <= ico.len());
+        }
+    }
+
+    #[test]
+    fn the_icns_holds_a_png_for_each_size() {
+        for icon in [Some(gradient()), None] {
+            let icns = icns(icon.as_ref(), "g");
+            assert_eq!(&icns[..4], b"icns");
+            assert_eq!(
+                u32::from_be_bytes(icns[4..8].try_into().unwrap()) as usize,
+                icns.len()
+            );
+            let mut at = 8;
+            let mut seen = Vec::new();
+            while at < icns.len() {
+                let len = u32::from_be_bytes(icns[at + 4..at + 8].try_into().unwrap()) as usize;
+                let png = &icns[at + 8..at + len];
+                assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+                seen.push((
+                    std::str::from_utf8(&icns[at..at + 4]).unwrap().to_string(),
+                    u32::from_be_bytes(png[16..20].try_into().unwrap()),
+                ));
+                at += len;
+            }
+            assert_eq!(at, icns.len());
+            let want: Vec<(String, u32)> = [
+                ("icp4", 16),
+                ("ic11", 32),
+                ("icp5", 32),
+                ("ic12", 64),
+                ("ic07", 128),
+                ("ic13", 256),
+                ("ic08", 256),
+            ]
+            .iter()
+            .map(|(k, n)| ((*k).to_string(), *n))
+            .collect();
+            assert_eq!(seen, want);
         }
     }
 

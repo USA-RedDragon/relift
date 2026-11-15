@@ -167,15 +167,15 @@ setting (`RELIFT_LANGUAGE`), else of the host's language settings, falling
 back to the default language, and the game's icon as its window icon (Linux
 under X11 and Wayland, macOS, where it is also the Dock icon, and Windows).
 On Windows the program also links the icon and the title as its icon and
-version resources. The AppImage's desktop entry and icon, and the Android
-launcher label and icon (`relift::icon::launcher_pngs`), come from the same
-data.
+version resources. The AppImage's desktop entry and icon, the Android
+launcher label and icon (`relift::icon::launcher_pngs`), and the name and
+`.icns` icon of the macOS `.app` come from the same data.
 
 A cartridge header holds neither a readable title nor an image, so a Game
 Boy, Game Boy Color or Game Boy Advance program is titled with the project
 name, its window has no icon, and a Windows executable keeps the system's
-default one. Only the desktop entry of an AppImage and an Android launcher,
-which need some icon, get a generated one.
+default one. Only the desktop entry of an AppImage, an Android launcher and a
+macOS `.app`, which need some icon, get a generated one.
 
 ### Linux: AppImage
 
