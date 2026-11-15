@@ -401,18 +401,14 @@ static bool is_call(uint8_t op)
     return op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC || (op & 0xC7) == 0xC7;
 }
 
-static bool is_jump(uint8_t op)
-{
-    return op == 0xC3 || op == 0xC2 || op == 0xCA || op == 0xD2 || op == 0xDA || op == 0x18 || op == 0x20 || op == 0x28 ||
-           op == 0x30 || op == 0x38 || op == 0xE9;
-}
-
 static int region(uint16_t pc) { return pc < WINDOW_END ? RL_GBX_ROM : RL_GBX_RAM; }
 
 /**
  * @brief The interpreter: the open instruction at G.ipc and the ones after
  * it on the library's CPU until the frame returns (the stack pointer rises
- * above where it was at entry through a return).
+ * above where it was at entry through a return) or reaches the entry of a
+ * lifted function, which it calls when a call got there and goes on in
+ * otherwise.
  */
 static int interp(rl_ctx *c, uint8_t *mem)
 {
@@ -427,8 +423,8 @@ static int interp(rl_ctx *c, uint8_t *mem)
         uint16_t after = (uint16_t)(at + g_len[op]);
         if (is_return(op) && c->sp > base)
             return returned(c, mem, pc);
-        rl_fn f = pc != after ? lifted_at(pc) : NULL;
-        if (f && is_call(op) && c->sp == (uint16_t)(sp0 - 2)) {
+        rl_fn f = lifted_at(pc);
+        if (f && pc != after && is_call(op) && c->sp == (uint16_t)(sp0 - 2)) {
             if (enter_frame(after, 0) != 0)
                 return redirect(c, pc, RL_GBX_DEPTH);
             int b = boundary(c, mem, pc, true);
@@ -441,7 +437,7 @@ static int interp(rl_ctx *c, uint8_t *mem)
                 return r;
             continue;
         }
-        if (f && is_jump(op)) {
+        if (f) {
             int b = boundary(c, mem, pc, true);
             if (b == MOVED)
                 return redirect(c, c->pc, RL_GBX_NATIVE);
@@ -461,16 +457,16 @@ int rl_gbx_run(rl_ctx *c, uint8_t *mem, uint16_t pc)
     for (;;) {
         G.depth = 0;
         rl_pending *p = &rl_common(c)->pend;
+        int r = RL_OK;
         if (need) {
-            int b = boundary(c, mem, pc, true);
-            if (b == MOVED) {
+            r = boundary(c, mem, pc, true);
+            if (r == MOVED) {
                 pc = c->pc;
                 continue;
             }
-            if (b != RL_OK)
-                return p->kind == RL_PEND_EXIT_PROCESS ? (int)p->code : 1;
         }
-        int r = find(pc)(c, mem);
+        if (r == RL_OK)
+            r = find(pc)(c, mem);
         if (r == RL_OK) {
             pc = G.ret_to;
             need = false;
@@ -482,6 +478,9 @@ int rl_gbx_run(rl_ctx *c, uint8_t *mem, uint16_t pc)
             need = true;
             continue;
         }
-        return p->kind == RL_PEND_EXIT_PROCESS ? (int)p->code : 1;
+        if (p->kind == RL_PEND_EXIT_PROCESS)
+            return (int)p->code;
+        rl_log(RL_LOG_ERROR, "gb", "lifted code stopped at pc 0x%04x (pending kind %u)", (unsigned)c->pc, (unsigned)p->kind);
+        return 1;
     }
 }

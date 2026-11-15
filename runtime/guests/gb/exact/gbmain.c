@@ -435,11 +435,14 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     rl_gbx_set_poll(poll, &H);
     rl_window_set_events(on_window, &H);
     run_args ra = {.H = &H, .c = t->ctx, .mem = mem};
-    rl_window_main(run_body, &ra);
+    int code = rl_window_main(run_body, &ra);
     rl_window_set_events(NULL, NULL);
     int ret = 0;
     if (H.diverged) {
         ret = 70;
+    } else if (H.in_case && H.verdict == RLGBD_CASE_CONTINUE) {
+        printf("relift-gb: fail: the run stopped before a verdict (status %d)\n", code);
+        ret = 1;
     } else if (H.in_case) {
         const char *word = H.verdict == RLGBD_CASE_PASS ? "pass" : H.verdict == RLGBD_CASE_UNSUPPORTED ? "unsupported" : "fail";
         printf("relift-gb: %s: %s\n", word, rlgbd_case_detail(H.h));
