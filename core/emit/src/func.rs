@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use relift_guest::{Frontend, Home};
 use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 
+use crate::state::{Plan, Regs, plan};
 use crate::time;
 use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
 use crate::{Function, Insn, Options, Targets};
@@ -79,6 +80,14 @@ struct Ctx<'a> {
     clock: Option<&'static str>,
     /// Whether the registers stay in their homes ([`Options::regs_in_context`]).
     in_context: bool,
+    /// The piece's stores and reloads.
+    plan: &'a Plan,
+    /// The registers that may be dirty where the code being written runs.
+    dirty: Regs,
+    /// The registers the piece writes.
+    written: &'a BTreeSet<Reg>,
+    /// The registers the piece has locals for.
+    used: &'a BTreeSet<Reg>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -99,6 +108,56 @@ impl Ctx<'_> {
         inside(self.f, self.targets, t)
     }
 
+    /// The statements that store the registers of `set` the piece writes
+    /// (and the budget) to the context.
+    fn store(&self, set: &Regs) -> String {
+        let mut t = String::new();
+        if let Some(clk) = self.clock {
+            let _ = write!(t, "{clk}.budget = {}; ", time::BUDGET);
+        }
+        let mut words: BTreeMap<String, Vec<(u32, Reg)>> = BTreeMap::new();
+        for &r in self
+            .written
+            .iter()
+            .filter(|r| !self.in_context && set.contains(**r))
+        {
+            match self.fe.home(r) {
+                Home::Field(lv) => {
+                    let _ = write!(t, "{lv} = {}; ", reg(r));
+                }
+                Home::Flag { word, bit } => words.entry(word).or_default().push((bit, r)),
+            }
+        }
+        for (word, bits) in words {
+            let mask: u64 = bits.iter().map(|(b, _)| 1u64 << b).sum();
+            let _ = write!(t, "{word} = ({word} & ~{mask:#x}u)");
+            for (bit, r) in bits {
+                let _ = write!(t, " | ((uint32_t){} << {bit})", reg(r));
+            }
+            t.push_str("; ");
+        }
+        t.trim_end().to_string()
+    }
+
+    /// The statements that reload the registers of `set` from the context.
+    fn reload(&self, set: &Regs) -> String {
+        if self.in_context {
+            let mut flags = self.plan.none().clone();
+            self.hoisted.iter().for_each(|&r| flags.insert(r));
+            return reload(self.fe, self.clock, &self.hoisted, &BTreeSet::new(), &flags);
+        }
+        reload(self.fe, self.clock, &self.hoisted, self.used, set)
+    }
+
+    /// `s` as an indented line of its own, or nothing when it is empty.
+    fn line(s: &str, indent: &str) -> String {
+        if s.is_empty() {
+            String::new()
+        } else {
+            format!("{indent}{s}\n")
+        }
+    }
+
     /// A transfer to the constant `t` that leaves no frame behind.
     fn jump(&mut self, t: u64) -> String {
         if self.inside(t) {
@@ -106,7 +165,8 @@ impl Ctx<'_> {
                 let to = s.piece_of[&t];
                 if to != k {
                     return format!(
-                        "RL_STORE(); c->pc = UINT64_C({t:#x}); RL_MUSTTAIL return {}(c, mem);",
+                        "{}c->pc = UINT64_C({t:#x}); RL_MUSTTAIL return {}(c, mem);",
+                        self.lead(),
                         s.names[to]
                     );
                 }
@@ -115,9 +175,18 @@ impl Ctx<'_> {
         }
         if let Some(target) = self.targets.get(&t) {
             self.callees.insert(t);
-            return format!("RL_STORE(); RL_MUSTTAIL return {}(c, mem);", target.name);
+            return format!("{}RL_MUSTTAIL return {}(c, mem);", self.lead(), target.name);
         }
-        format!("RL_STORE(); RL_MUSTTAIL return rl_indirect(c, UINT64_C({t:#x}))(c, mem);")
+        format!(
+            "{}RL_MUSTTAIL return rl_indirect(c, UINT64_C({t:#x}))(c, mem);",
+            self.lead()
+        )
+    }
+
+    /// The stores of the dirty registers before a jump on the same line.
+    fn lead(&self) -> String {
+        let s = self.store(&self.dirty);
+        if s.is_empty() { s } else { s + " " }
     }
 }
 
@@ -456,11 +525,11 @@ pub(crate) fn emit_function(
 
 /// What every piece of a function is emitted from.
 #[derive(Clone, Copy)]
-struct Env<'a> {
-    fe: &'a dyn Frontend,
-    f: &'a Function<'a>,
+pub(crate) struct Env<'a> {
+    pub(crate) fe: &'a dyn Frontend,
+    pub(crate) f: &'a Function<'a>,
     targets: &'a Targets<'a>,
-    blocks: &'a BTreeMap<u64, Block>,
+    pub(crate) blocks: &'a BTreeMap<u64, Block>,
     resumes: &'a BTreeSet<u64>,
     io: &'a IoMap,
     anywhere: bool,
@@ -525,65 +594,10 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     used.extend(lp_reg);
     let regs = fe.regs();
     let name = split.map_or(f.name.as_str(), |(s, k)| s.names[k].as_str());
-    let mut t = String::new();
-    let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({name})\n{{");
-    for &r in &used {
-        let ty = cty(regs.width(r));
-        let _ = match (fe.home(r), in_context) {
-            (Home::Field(lv), false) => writeln!(t, "    {ty} {} = {lv};", reg(r)),
-            (Home::Field(lv), true) => writeln!(t, "#define {} ({lv})", reg(r)),
-            (Home::Flag { word, bit }, false) => {
-                writeln!(t, "    {ty} {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
-            }
-            (Home::Flag { word, bit }, true) => {
-                writeln!(t, "#define {} (({ty})(({word} >> {bit}) & 1u))", reg(r))
-            }
-        };
-    }
-    for &r in &hoisted {
-        let _ = writeln!(t, "    int {} = {} != 0;", flag(r), reg(r));
-    }
-    if let Some(clk) = clock {
-        let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
-    }
-    t.push_str("    int rc;\n    (void)rc;\n");
-    t.push_str("#define RL_STORE() do {");
-    if let Some(clk) = clock {
-        let _ = write!(t, " {clk}.budget = {};", time::BUDGET);
-    }
-    for &r in written.iter().filter(|_| !in_context) {
-        let _ = match fe.home(r) {
-            Home::Field(lv) => write!(t, " {lv} = {};", reg(r)),
-            Home::Flag { word, bit } => write!(
-                t,
-                " {word} = ({word} & ~(1u << {bit})) | ((uint32_t){} << {bit});",
-                reg(r)
-            ),
-        };
-    }
-    t.push_str(" } while (0)\n#define RL_RELOAD() do {");
-    if let Some(clk) = clock {
-        let _ = write!(t, " {} = {clk}.budget;", time::BUDGET);
-    }
-    for &r in used.iter().filter(|_| !in_context) {
-        let ty = cty(regs.width(r));
-        let _ = match fe.home(r) {
-            Home::Field(lv) => write!(t, " {} = {lv};", reg(r)),
-            Home::Flag { word, bit } => {
-                write!(t, " {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
-            }
-        };
-    }
-    for &r in &hoisted {
-        let _ = write!(t, " {} = {} != 0;", flag(r), reg(r));
-    }
-    t.push_str(" } while (0)\n");
-    match split {
-        None => {
-            let _ = writeln!(t, "    goto {};", label(f.entry));
-        }
+    // The instructions the piece is entered at with the context up to date.
+    let entries: BTreeSet<u64> = match split {
+        None => [f.entry].into(),
         Some((s, k)) => {
-            // The instructions other pieces (and the stub) enter this one at.
             let own: BTreeSet<u64> = pcs.iter().copied().collect();
             let mut entries: BTreeSet<u64> = BTreeSet::new();
             for (&pc, &p) in &s.piece_of {
@@ -606,6 +620,46 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             if anywhere {
                 entries.extend(own.iter().copied());
             }
+            entries
+        }
+    };
+    let plan = plan(env, pcs, clock.is_some(), lp_reg);
+    let mut load = Regs::new(regs.len());
+    for &e in &entries {
+        load.union(plan.live_at(e));
+    }
+    let mut t = String::new();
+    let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({name})\n{{");
+    for &r in &used {
+        let ty = cty(regs.width(r));
+        let _ = match (fe.home(r), in_context) {
+            (Home::Field(lv), true) => writeln!(t, "#define {} ({lv})", reg(r)),
+            (Home::Flag { word, bit }, true) => {
+                writeln!(t, "#define {} (({ty})(({word} >> {bit}) & 1u))", reg(r))
+            }
+            _ if !load.contains(r) => writeln!(t, "    {ty} {};", reg(r)),
+            (Home::Field(lv), false) => writeln!(t, "    {ty} {} = {lv};", reg(r)),
+            (Home::Flag { word, bit }, false) => {
+                writeln!(t, "    {ty} {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
+            }
+        };
+    }
+    for &r in &hoisted {
+        if in_context || load.contains(r) {
+            let _ = writeln!(t, "    int {} = {} != 0;", flag(r), reg(r));
+        } else {
+            let _ = writeln!(t, "    int {};", flag(r));
+        }
+    }
+    if let Some(clk) = clock {
+        let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
+    }
+    t.push_str("    int rc;\n    (void)rc;\n");
+    match split {
+        None => {
+            let _ = writeln!(t, "    goto {};", label(f.entry));
+        }
+        Some(_) => {
             let first = entries.first().copied().or(pcs.first().copied());
             t.push_str("    switch (c->pc) {\n");
             for e in &entries {
@@ -628,6 +682,10 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         io,
         clock,
         in_context,
+        dirty: Regs::new(regs.len()),
+        plan: &plan,
+        written: &written,
+        used: &used,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -650,7 +708,13 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             },
             Err((insn, _)) => {
                 undefined += 1;
-                let _ = writeln!(t, "    RL_STORE();\n    return {};", fe.undefined(pc, insn));
+                let st = cx.store(plan.dirty_in(pc));
+                let _ = writeln!(
+                    t,
+                    "{}    return {};",
+                    Ctx::line(&st, "    "),
+                    fe.undefined(pc, insn)
+                );
             }
         }
         t.push_str("}\n");
@@ -659,10 +723,13 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     if lp_reg.is_some() {
         t.push_str("lp_dispatch:\n    switch (c->pend.pc) {\n");
         for r in resumes {
+            cx.dirty = Regs::new(regs.len());
             let next = cx.jump(*r);
+            let rl = cx.reload(plan.live_at(*r));
             let _ = writeln!(
                 t,
-                "    case UINT64_C({r:#x}):\n        c->pend.kind = RL_PEND_NONE;\n        RL_RELOAD();\n        {next}"
+                "    case UINT64_C({r:#x}):\n        c->pend.kind = RL_PEND_NONE;\n{}        {next}",
+                Ctx::line(&rl, "        ")
             );
         }
         let _ = writeln!(
@@ -671,7 +738,6 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             f.entry
         );
     }
-    t.push_str("#undef RL_STORE\n#undef RL_RELOAD\n");
     for &r in used.iter().filter(|_| in_context) {
         let _ = writeln!(t, "#undef {}", reg(r));
     }
@@ -857,10 +923,17 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     .fe
                     .guard_slow(code, b.pc, raw)
                     .unwrap_or_else(|| cx.fe.undefined(b.pc, raw));
-                let next = cx.jump(b.pc + u64::from(b.len));
+                let to = b.pc + u64::from(b.len);
+                let st = cx.store(cx.plan.dirty_in(b.pc));
+                let rl = cx.reload(cx.plan.live_at(to));
+                let saved = std::mem::replace(&mut cx.dirty, cx.plan.none().clone());
+                let next = cx.jump(to);
+                cx.dirty = saved;
                 let _ = writeln!(
                     s,
-                    "    if (RL_UNLIKELY({cond})) {{\n        RL_STORE();\n        rc = {slow};\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n        RL_RELOAD();\n        {next}\n    }}"
+                    "    if (RL_UNLIKELY({cond})) {{\n{}        rc = {slow};\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n{}        {next}\n    }}",
+                    Ctx::line(&st, "        "),
+                    Ctx::line(&rl, "        ")
                 );
             }
         }
@@ -886,11 +959,20 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         ),
         None => "    if (RL_UNLIKELY(rc))\n        return RL_PENDING;".to_string(),
     };
-    let after = |s: &mut String, call: String| {
+    cx.dirty = cx.plan.dirty_out(b.pc);
+    let out_store = cx.store(&cx.dirty);
+    let after = |cx: &mut Ctx<'_>, s: &mut String, call: String, to: u64| {
+        let rl = cx.reload(cx.plan.live_at(to));
         let _ = writeln!(
             s,
-            "    RL_STORE();\n    rc = {call};\n{check}\n    RL_RELOAD();"
+            "{}    rc = {call};\n{check}\n{}",
+            Ctx::line(&out_store, "    "),
+            Ctx::line(&rl, "    ").trim_end_matches('\n')
         );
+        if s.ends_with("\n\n") {
+            s.pop();
+        }
+        cx.dirty = cx.plan.none().clone();
     };
     if cx.clock.is_some() && matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)) {
         let next = match b.exit.next {
@@ -905,7 +987,8 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             ),
             Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
         };
-        s.push_str(&time::sync(cx.fe, b, &next));
+        let rl = cx.reload(cx.plan.exit_live(b.pc));
+        s.push_str(&time::sync(cx.fe, b, &next, &out_store, &rl));
     }
     if let Some(clk) = cx.fe.preempt_clock().filter(|_| preempts(cx, b)) {
         s.push_str(&time::preempt(clk));
@@ -914,7 +997,10 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         s.push_str("    RL_LOOP_FENCE();\n");
     }
     match b.exit.flow {
-        Flow::Return => s.push_str("    RL_STORE();\n    return RL_OK;\n"),
+        Flow::Return => {
+            s.push_str(&Ctx::line(&out_store, "    "));
+            s.push_str("    return RL_OK;\n");
+        }
         Flow::Call { ret } => {
             let call = match b.exit.next {
                 Next::Const(t) if let Some(target) = cx.targets.get(&t) => {
@@ -925,17 +1011,16 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 Next::Dynamic(v) => format!("rl_indirect(c, {})(c, mem)", val(v)),
                 Next::Select { .. } => return Err((raw, "a conditional call".into())),
             };
-            after(&mut s, call);
+            after(cx, &mut s, call, ret);
             let _ = writeln!(s, "    {}", cx.jump(ret));
         }
         Flow::Trap(code) => {
-            after(&mut s, cx.fe.trap(code));
-            match b.exit.next {
-                Next::Const(t) => {
-                    let _ = writeln!(s, "    {}", cx.jump(t));
-                }
-                _ => return Err((raw, "a trap with a computed resume".into())),
-            }
+            let Next::Const(t) = b.exit.next else {
+                return Err((raw, "a trap with a computed resume".into()));
+            };
+            let trap = cx.fe.trap(code);
+            after(cx, &mut s, trap, t);
+            let _ = writeln!(s, "    {}", cx.jump(t));
         }
         Flow::Jump => match b.exit.next {
             Next::Const(t) => {
@@ -964,11 +1049,40 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 }
                 let _ = writeln!(
                     s,
-                    "    RL_STORE();\n    RL_MUSTTAIL return rl_indirect(c, {})(c, mem);",
+                    "{}    RL_MUSTTAIL return rl_indirect(c, {})(c, mem);",
+                    Ctx::line(&out_store, "    "),
                     val(v)
                 );
             }
         },
     }
     Ok(s)
+}
+
+/// The statements that reload the registers of `set` (of the piece's
+/// locals `used`) from the context, with the budget and the hoisted guard
+/// flags of the registers reloaded.
+fn reload(
+    fe: &dyn Frontend,
+    clock: Option<&'static str>,
+    hoisted: &BTreeSet<Reg>,
+    used: &BTreeSet<Reg>,
+    set: &Regs,
+) -> String {
+    let regs = fe.regs();
+    let mut t = String::new();
+    if let Some(clk) = clock {
+        let _ = write!(t, "{} = {clk}.budget; ", time::BUDGET);
+    }
+    for &r in used.iter().filter(|r| set.contains(**r)) {
+        let ty = cty(regs.width(r));
+        let _ = match fe.home(r) {
+            Home::Field(lv) => write!(t, "{} = {lv}; ", reg(r)),
+            Home::Flag { word, bit } => write!(t, "{} = ({ty})(({word} >> {bit}) & 1u); ", reg(r)),
+        };
+    }
+    for &r in hoisted.iter().filter(|r| set.contains(**r)) {
+        let _ = write!(t, "{} = {} != 0; ", flag(r), reg(r));
+    }
+    t.trim_end().to_string()
 }

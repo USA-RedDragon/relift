@@ -47,12 +47,15 @@ fn locals_labels_and_exits() {
     let out = emit(&Toy, &[function(0x100, &blocks)], &[], &Options::default());
     let s = shard(&out);
     assert!(s.contains("RL_TEXT RL_LIFTED(F_100)\n{"), "{s}");
-    assert!(s.contains("uint64_t r0 = c->x[0];"), "{s}");
+    assert!(
+        s.contains("uint64_t r0;\n    uint64_t r1 = c->x[1];"),
+        "{s}"
+    );
     assert!(s.contains("goto L_100;"), "{s}");
     assert!(s.contains("if (v2) { goto L_10c; }\n}\nL_108: {"), "{s}");
     assert!(s.contains("return RL_OK;"), "{s}");
     assert!(
-        s.contains("#define RL_STORE() do { c->x[0] = r0; } while (0)"),
+        s.contains("L_10c: {\n    c->x[0] = r0;\n    return RL_OK;"),
         "{s}"
     );
     assert_eq!(out.undefined, 0);
@@ -76,7 +79,7 @@ fn registers_in_the_context_are_macros_with_nothing_to_store() {
     let s = shard(&out);
     assert!(s.contains("#define r0 (c->x[0])"), "{s}");
     assert!(!s.contains("uint64_t r0 ="), "{s}");
-    assert!(s.contains("#define RL_STORE() do { } while (0)"), "{s}");
+    assert!(!s.contains("c->x[0] = r0;"), "{s}");
     assert!(s.contains("#undef r0\n#undef r1\n#undef r3\n}"), "{s}");
 }
 
@@ -98,7 +101,9 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
     let out = emit(&Toy, &fns, &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("rc = F_108(c, mem);\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n    RL_RELOAD();\n}\nL_104: {"),
+        s.contains(
+            "rc = F_108(c, mem);\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n}\nL_104: {"
+        ),
         "{s}"
     );
     assert!(s.contains("RL_MUSTTAIL return F_108(c, mem);"), "{s}");
@@ -234,7 +239,9 @@ fn loops_with_work_computed_jumps_and_calls_back_are_preemption_points() {
     );
     assert!(at(0x114).contains(check), "{s}");
     assert!(
-        at(0x118).contains(&format!("{check}    RL_STORE();\n    rc = F_100(c, mem);")),
+        at(0x118).contains(&format!(
+            "{check}    c->x[3] = r3;\n    rc = F_100(c, mem);"
+        )),
         "{s}"
     );
     assert_eq!(s.matches("rl_time_spent").count(), 4, "{s}");
@@ -434,11 +441,13 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("if (RL_UNLIKELY(v2)) {\n        RL_STORE();\n        rc = toy_slow(c, mem, UINT64_C(0x200), 0x55u);"),
+        s.contains(
+            "if (RL_UNLIKELY(v2)) {\n        rc = toy_slow(c, mem, UINT64_C(0x200), 0x55u);"
+        ),
         "{s}"
     );
     assert!(
-        s.contains("        RL_RELOAD();\n        goto L_204;\n    }"),
+        s.contains("        r3 = c->x[3];\n        goto L_204;\n    }"),
         "{s}"
     );
 }
@@ -452,7 +461,7 @@ fn jump_tables_branch_to_their_targets_inside_the_function() {
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("    switch (r0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_STORE();\n    RL_MUSTTAIL return rl_indirect(c, r0)(c, mem);"),
+        s.contains("    switch (r0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_MUSTTAIL return rl_indirect(c, r0)(c, mem);"),
         "{s}"
     );
 }
@@ -502,7 +511,7 @@ fn calls_to_a_resume_point_override_go_through_the_landing_pad_dispatch() {
         "{s}"
     );
     assert!(
-        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x104):\n        c->pend.kind = RL_PEND_NONE;\n        RL_RELOAD();\n        goto L_104;"),
+        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x104):\n        c->pend.kind = RL_PEND_NONE;\n        r3 = c->x[3];\n        goto L_104;"),
         "{s}"
     );
     assert!(s.contains("rl_bad_resume(c, mem, UINT64_C(0x100));"), "{s}");
@@ -614,13 +623,15 @@ fn a_large_function_is_split_into_pieces_in_shards_of_their_own() {
     );
     assert!(
         all.contains(
-            "RL_STORE(); c->pc = UINT64_C(0x104); RL_MUSTTAIL return F_100_part2(c, mem);"
+            "c->x[0] = r0; c->pc = UINT64_C(0x104); RL_MUSTTAIL return F_100_part2(c, mem);"
         ),
         "{all}"
     );
     // The back edge from the last piece enters the second at 0x104.
     assert!(
-        all.contains("if (v2) { RL_STORE(); c->pc = UINT64_C(0x10c); RL_MUSTTAIL return F_100_part4(c, mem); }"),
+        all.contains(
+            "if (v2) { c->pc = UINT64_C(0x10c); RL_MUSTTAIL return F_100_part4(c, mem); }"
+        ),
         "{all}"
     );
     let shards: Vec<&File> = out
@@ -867,7 +878,7 @@ fn landing_pads_are_resume_points_with_a_table_entry_of_their_own() {
         "{s}"
     );
     assert!(
-        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x108):\n        c->pend.kind = RL_PEND_NONE;\n        RL_RELOAD();\n        goto L_108;"),
+        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x108):\n        c->pend.kind = RL_PEND_NONE;\n        r3 = c->x[3];\n        goto L_108;"),
         "{s}"
     );
     assert!(

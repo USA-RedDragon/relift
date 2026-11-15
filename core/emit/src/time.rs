@@ -2,7 +2,7 @@
 //!
 //! The clock's budget lives in the C local `budget` of the function; the
 //! function stores it to the context before every runtime call and reloads
-//! it after (see `RL_STORE` and `RL_RELOAD` in `func.rs`).
+//! it after (see `state.rs`).
 
 use relift_guest::Frontend;
 use relift_ir::{Block, Endian, IoKind, IoMap, Op, Value, Width};
@@ -233,14 +233,14 @@ pub(crate) fn preempt(clk: &str) -> String {
     format!("    if (RL_UNLIKELY(rl_time_spent(&{clk})))\n        rl_preempt(c);\n")
 }
 
-/// The statements of a sync point: when the budget is spent, store the
-/// context, call `rl_sync` (or the frontend's [`Frontend::sync_call`]) with
-/// the exit target `next` and reload.
-pub(crate) fn sync(fe: &dyn Frontend, b: &Block, next: &str) -> String {
+/// The statements of a sync point: when the budget is spent, run `store`
+/// (the context stores), call `rl_sync` (or the frontend's
+/// [`Frontend::sync_call`]) with the exit target `next` and run `reload`.
+pub(crate) fn sync(fe: &dyn Frontend, b: &Block, next: &str, store: &str, reload: &str) -> String {
     let call = fe
         .sync_call(b, next)
         .unwrap_or_else(|| format!("rl_sync(c, mem, {next})"));
-    format!("    RL_E_SYNC({call});\n")
+    format!("    RL_E_SYNC({store}, {call}, {reload});\n")
 }
 
 #[cfg(test)]

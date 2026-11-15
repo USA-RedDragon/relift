@@ -275,10 +275,13 @@ int F(rl_ctx *restrict c, uint8_t *mem);   /* RL_LIFTED(F) */
   above). This does not depend on the guest following AAPCS64.
   [verified shape: exceptions prototype; the slice prototype found this
   traffic to be the main per-call cost]
-- **Exit rule:** at RET and before a tail call, store every register written
-  on any path. A path that did not write a register stores the value it
-  loaded, which forces a load (in the slice prototype a strlen loaded x10/x11 only for
-  this). Allowed optimization: the emitter may skip storing x9-x17 and
+- **Exit rule:** at RET and before a tail call, store every register that
+  may be dirty: written since entry or since the last boundary on some path
+  there. A register dirty on one path only is stored on every path, so a
+  path that did not write it must hold its current value in the local: the
+  emitter reloads (or loads at entry) every register a later read or store
+  needs. A register neither dirty nor needed is not touched: its field
+  already holds it (`core/emit/src/state.rs`). Allowed optimization: the emitter may skip storing x9-x17 and
   v16-v31 (and the upper halves of v8-v15) at exits when its interprocedural
   analysis shows no caller reads them before writing. The full-state checker
   build always stores everything. [inferred; open: the analysis]

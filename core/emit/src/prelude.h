@@ -6,14 +6,14 @@
 
 typedef __int128 rl_e_s128;
 
-#define RL_E_SYNC(call)                                                                                                \
+#define RL_E_SYNC(store, call, reload)                                                                                 \
     do {                                                                                                               \
         if (RL_UNLIKELY(budget <= 0)) {                                                                                \
-            RL_STORE();                                                                                                \
+            store                                                                                                      \
             rc = (call);                                                                                               \
             if (RL_UNLIKELY(rc))                                                                                       \
                 return RL_PENDING;                                                                                     \
-            RL_RELOAD();                                                                                               \
+            reload                                                                                                     \
         }                                                                                                              \
     } while (0)
 
