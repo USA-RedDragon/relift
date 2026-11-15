@@ -175,6 +175,71 @@ fn round_trip_lists_every_package() {
     assert_eq!(base.romfs_dirs(), ["data", "void"]);
 }
 
+fn meta_after_table(good: &[u8]) -> Vec<u8> {
+    let n = open(good.to_vec()).expect("opens");
+    let sb = n.superblock().clone();
+    let toc = n.toc();
+    let toc_end = usize::try_from(sb.toc_offset + sb.toc_size).unwrap();
+    let blob = usize::try_from(sb.blob_offset).unwrap();
+    let mut gap = Vec::new();
+    let mut metas = Vec::new();
+    for p in &toc.packages {
+        let at = usize::try_from(p.meta_offset).unwrap();
+        let len = p.meta_size as usize;
+        metas.push(if len == 0 { 0 } else { toc_end + gap.len() });
+        gap.extend_from_slice(&good[at..at + len]);
+    }
+    let new_blob = (toc_end + gap.len()).div_ceil(16) * 16;
+    let delta = (new_blob - blob) as u64;
+    let mut out = good[..toc_end].to_vec();
+    out.extend_from_slice(&gap);
+    out.resize(new_blob, 0);
+    out.extend_from_slice(&good[blob..]);
+    let base = usize::try_from(sb.toc_offset).unwrap() + 0x30;
+    let put =
+        |out: &mut Vec<u8>, at: usize, v: u64| out[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    for (i, m) in metas.iter().enumerate() {
+        put(&mut out, base + i * 0x40 + 0x20, *m as u64);
+    }
+    let files = base + toc.packages.len() * 0x40 + toc.dirs.len() * 0x18;
+    for (j, f) in toc.files.iter().enumerate() {
+        if f.extent_size > 0 {
+            put(&mut out, files + j * 0x50 + 0x10, f.extent_offset + delta);
+        }
+    }
+    put(&mut out, 0x38, new_blob as u64);
+    put(&mut out, 0x40, sb.file_size + delta);
+    let hash =
+        relift_switch_formats::sha256(&out[usize::try_from(sb.toc_offset).unwrap()..toc_end]);
+    out[0x18..0x38].copy_from_slice(&hash);
+    out
+}
+
+#[test]
+fn meta_blocks_between_the_table_and_the_blob_region() {
+    let f = fixture();
+    let good = container(&f);
+    let moved = meta_after_table(&good);
+    let n = open(moved).expect("opens");
+    let sb = n.superblock();
+    let base = &n.packages()[0];
+    assert!(base.record.meta_offset >= sb.toc_offset + sb.toc_size);
+    assert!(base.record.meta_offset < sb.blob_offset);
+    assert_eq!(base.display_version().as_deref(), Some("1.0.0"));
+    assert_eq!(base.npdm_program_id(), Some(BASE_ID));
+    assert_eq!(n.packages()[2].display_version().as_deref(), Some("1.2.0"));
+    assert_eq!(read_named(&n, &base.exefs(), "main"), f.main_base);
+    assert_eq!(read_named(&n, &base.romfs(), "data/big.txt"), f.big);
+    let mut inside = meta_after_table(&good);
+    let at = usize::try_from(sb.toc_offset).unwrap() + 0x30 + 0x20;
+    let into_table = sb.toc_offset + sb.toc_size - 8;
+    inside[at..at + 8].copy_from_slice(&into_table.to_le_bytes());
+    let toc_end = usize::try_from(sb.toc_offset + sb.toc_size).unwrap();
+    let hash = relift_switch_formats::sha256(&inside[0x80..toc_end]);
+    inside[0x18..0x38].copy_from_slice(&hash);
+    assert!(matches!(open(inside), Err(Error::Format(_))));
+}
+
 #[test]
 fn newest_update_is_the_default() {
     let f = fixture();

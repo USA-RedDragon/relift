@@ -182,7 +182,9 @@ pub struct PackageRecord {
     pub kind: PackageKind,
     /// Flags: bit 0 is `standalone_update`.
     pub flags: u8,
-    /// The absolute offset of the meta block, or 0.
+    /// The absolute offset of the meta block, or 0. The spec places it
+    /// anywhere after the table: producers write it after the extents or
+    /// in the gap between the table and `blob_offset`.
     pub meta_offset: u64,
     /// The size of the meta block, or 0.
     pub meta_size: u32,
@@ -608,7 +610,7 @@ fn read_meta(storage: &dyn Storage, sb: &Superblock, r: &PackageRecord) -> Resul
         sb.file_size,
         "NUP meta block",
     )?;
-    if r.meta_offset < sb.blob_offset {
+    if r.meta_offset < sb.toc_offset.saturating_add(sb.toc_size) {
         return malformed("NUP: meta block overlaps the header or table");
     }
     let b = read_vec(storage, r.meta_offset, size)?;
