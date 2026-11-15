@@ -566,12 +566,13 @@ static void shadow_sync(vkf_call *k, bool to_host)
     pthread_mutex_unlock(&d->lock);
 }
 
-const uint8_t *vkf_mem_bytes(vkf_call *k, VkDevice dev, uint64_t memory, uint64_t off, uint64_t size, bool *unmap)
+const uint8_t *vkf_mem_bytes(vkf_call *k, VkDevice dev, uint64_t memory, uint64_t off, uint64_t size, bool *unmap, bool *cached)
 {
     *unmap = false;
     vkf_mem *r = mem_of(k->obj->dev, memory);
     if (!r || off > r->size || size > r->size - off)
         return NULL;
+    *cached = (r->flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) || r->mode == RL_VK_MAP_SHADOW;
     if (r->va && (r->mapped || r->mode == RL_VK_MAP_IMPORT))
         return vkf.cfg.vm->base + r->va + off;
     if (!(r->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))

@@ -15,7 +15,9 @@
  * that executes it). The source buffer's bytes are read through its memory
  * binding: the guest's mapping, or a host mapping of host-visible memory
  * the guest has not mapped; a region in device-only memory stays undecoded,
- * with a log line. Copies between two such images copy the substitute
+ * with a log line. Memory the CPU does not cache is copied out in one pass
+ * first (a decoder reading it in small loads runs several times slower).
+ * Staging prefers host-cached memory for the same reason. Copies between two such images copy the substitute
  * texels; copies from such an image to a buffer would need an encoder and
  * are dropped, with a log line. Linear images keep their format.
  */
@@ -370,7 +372,10 @@ static uint8_t *stage(vkf_call *k, VkDevice dev, cb_uploads *u, uint64_t n, VkBu
         return NULL;
     VkMemoryRequirements req;
     VKF_FN(k->fns, vkGetBufferMemoryRequirements)(dev, ch.buf, &req);
-    uint32_t t = pick_type(d, req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    const VkMemoryPropertyFlags coherent = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t t = pick_type(d, req.memoryTypeBits, coherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    if (t == UINT32_MAX)
+        t = pick_type(d, req.memoryTypeBits, coherent);
     VkMemoryAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = t };
     void *p = NULL;
     if (t == UINT32_MAX || VKF_FN(k->fns, vkAllocateMemory)(dev, &ai, NULL, &ch.mem) < 0) {
@@ -687,8 +692,8 @@ static void run_upload(vkf_call *k, VkDevice dev, const upload *up)
 {
     vkf_dev *d = k->obj->dev;
     const binding *b = vkf_map_get(d->buffers, up->buffer);
-    bool unmap = false;
-    const uint8_t *src = b ? vkf_mem_bytes(k, dev, b->memory, b->offset + up->offset, up->src_bytes, &unmap) : NULL;
+    bool unmap = false, cached = false;
+    const uint8_t *src = b ? vkf_mem_bytes(k, dev, b->memory, b->offset + up->offset, up->src_bytes, &unmap, &cached) : NULL;
     if (!src) {
         if (rl_once(0x55504C4F41440000ull | (b ? 1u : 0u)))
             rl_log(RL_LOG_WARN, "vk", "an upload to an image in a decoded format reads %s; its texels stay unset",
@@ -696,6 +701,19 @@ static void run_upload(vkf_call *k, VkDevice dev, const upload *up)
         return;
     }
     uint64_t t0 = now_ns();
+    if (!cached) {
+        static _Thread_local uint8_t *copy;
+        static _Thread_local uint64_t copy_size;
+        if (copy_size < up->src_bytes) {
+            free(copy);
+            copy = malloc(up->src_bytes);
+            copy_size = copy ? up->src_bytes : 0;
+        }
+        if (copy) {
+            memcpy(copy, src, up->src_bytes);
+            src = copy;
+        }
+    }
     vkf_decode_region(up->f, src, up->row_pitch, up->slice_pitch, up->w, up->h, up->slices, up->dst);
     vkf_decode_note(up->src_bytes, (uint64_t)up->w * up->h * up->slices * up->f->texel_bytes, now_ns() - t0);
     vkf_mem_bytes_done(k, dev, b->memory, unmap);

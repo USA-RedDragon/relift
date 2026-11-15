@@ -213,8 +213,11 @@ void vkf_image_device_teardown(const vkf_fns *fns, void *dev, vkf_dev *d);
 void vkf_decode_uploads(vkf_call *k, VkDevice dev, const VkCommandBuffer *cbs, uint32_t n);
 /** @brief Releases the upload records of a command buffer that is reset or freed. */
 void vkf_decode_cb_reset(const vkf_fns *fns, void *dev, vkf_dev *d, void *cb, bool freed);
-/** @brief Bytes of guest memory at offset off of a VkDeviceMemory; *unmap set when the layer mapped it for the caller. */
-const uint8_t *vkf_mem_bytes(vkf_call *k, VkDevice dev, uint64_t memory, uint64_t off, uint64_t size, bool *unmap);
+/**
+ * @brief Bytes of guest memory at offset off of a VkDeviceMemory; *unmap set
+ * when the layer mapped it for the caller, *cached when the CPU caches them.
+ */
+const uint8_t *vkf_mem_bytes(vkf_call *k, VkDevice dev, uint64_t memory, uint64_t off, uint64_t size, bool *unmap, bool *cached);
 /** @brief Ends vkf_mem_bytes. */
 void vkf_mem_bytes_done(vkf_call *k, VkDevice dev, uint64_t memory, bool unmap);
 /** @brief Fails a vkCreateImage past a host limit below the Switch's (vk_props.c). */
