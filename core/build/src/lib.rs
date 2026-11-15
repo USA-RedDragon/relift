@@ -40,6 +40,11 @@ pub struct Plan {
     pub link_flags: Vec<String>,
     /// Ninja pools by name, with their depth.
     pub pools: Vec<(String, u32)>,
+    /// The directory the build may move with: paths under it are written
+    /// to `build.ninja` relative to the build directory, so the file, the
+    /// command lines Ninja hashes and the depfiles read the same wherever
+    /// the directory lives. `None` writes every path as given.
+    pub root: Option<PathBuf>,
 }
 
 /// The memory a compiler needs for a source file, estimated from its size:
@@ -155,13 +160,71 @@ fn nj(p: &Path) -> String {
         .replace(':', "$:")
 }
 
-/// The text of `build.ninja` for `plan`. The link reads its objects from a
+/// `p` relative to `dir` when both are under `root`, else `p` as given.
+fn relative(root: &Path, dir: &Path, p: &Path) -> PathBuf {
+    if !p.is_absolute() || !p.starts_with(root) || !dir.starts_with(root) {
+        return p.to_path_buf();
+    }
+    let mut a = dir.components().peekable();
+    let mut b = p.components().peekable();
+    while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+        if x != y {
+            break;
+        }
+        a.next();
+        b.next();
+    }
+    let mut out = PathBuf::new();
+    for _ in a {
+        out.push("..");
+    }
+    out.extend(b);
+    if out.as_os_str().is_empty() {
+        out.push(".");
+    }
+    out
+}
+
+/// A flag whose value is a path: the path moved by `relative`.
+fn relative_flag(root: &Path, dir: &Path, flag: &str) -> String {
+    for prefix in ["", "-I", "-L"] {
+        if let Some(rest) = flag.strip_prefix(prefix) {
+            let p = Path::new(rest);
+            if p.is_absolute() && p.starts_with(root) {
+                return format!("{prefix}{}", relative(root, dir, p).display());
+            }
+        }
+    }
+    flag.to_string()
+}
+
+/// Escapes `$` in a Ninja variable value.
+fn nv(s: &str) -> String {
+    s.replace('$', "$$")
+}
+
+/// The text of `build.ninja` for `plan` as run in `dir`. The link reads its objects from a
 /// response file: ninja runs each command as one `sh -c` string, which
 /// Linux caps at 128 KiB, and a game's thousands of shard objects pass it.
-pub fn ninja_file(plan: &Plan) -> String {
+pub fn ninja_file(plan: &Plan, dir: &Path) -> String {
+    let (p, f): (
+        Box<dyn Fn(&Path) -> PathBuf>,
+        Box<dyn Fn(&String) -> String>,
+    ) = match &plan.root {
+        Some(root) => (
+            Box::new(|x| relative(root, dir, x)),
+            Box::new(|x| relative_flag(root, dir, x)),
+        ),
+        None => (Box::new(Path::to_path_buf), Box::new(String::clone)),
+    };
+    let debug_dir = if plan.root.is_some() {
+        " -fdebug-compilation-dir=."
+    } else {
+        ""
+    };
     let cc: Vec<String> = plan.cc.iter().map(|s| sh(s)).collect();
     let mut t = format!(
-        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
+        "ninja_required_version = 1.3\ncc = {}\n\nrule cc\n  command = $cc $flags{debug_dir} -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = cc $in\n\nrule link\n  command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n  description = link $out\n\n",
         cc.join(" ")
     );
     // Stage `k` waits (order-only) on the phony `stage<k-1>`, which stands
@@ -172,7 +235,7 @@ pub fn ninja_file(plan: &Plan) -> String {
             .compiles
             .iter()
             .filter(|c| c.stage == k)
-            .map(|c| nj(&c.obj))
+            .map(|c| nj(&p(&c.obj)))
             .collect();
         if k > 0 {
             objs.push(format!("stage{}", k - 1));
@@ -183,7 +246,7 @@ pub fn ninja_file(plan: &Plan) -> String {
         let _ = writeln!(t, "pool {name}\n  depth = {depth}\n");
     }
     for c in &plan.compiles {
-        let flags: Vec<String> = c.flags.iter().map(|s| sh(s)).collect();
+        let flags: Vec<String> = c.flags.iter().map(|s| nv(&sh(&f(s)))).collect();
         let after = if c.stage > 0 {
             format!(" || stage{}", c.stage - 1)
         } else {
@@ -192,23 +255,23 @@ pub fn ninja_file(plan: &Plan) -> String {
         let _ = writeln!(
             t,
             "build {}: cc {}{after}\n  flags = {}",
-            nj(&c.obj),
-            nj(&c.src),
+            nj(&p(&c.obj)),
+            nj(&p(&c.src)),
             flags.join(" ")
         );
         if let Some(p) = &c.pool {
             let _ = writeln!(t, "  pool = {p}");
         }
     }
-    let objs: Vec<String> = plan.compiles.iter().map(|c| nj(&c.obj)).collect();
-    let libs: Vec<String> = plan.link_flags.iter().map(|s| sh(s)).collect();
+    let objs: Vec<String> = plan.compiles.iter().map(|c| nj(&p(&c.obj))).collect();
+    let libs: Vec<String> = plan.link_flags.iter().map(|s| nv(&sh(&f(s)))).collect();
     let _ = writeln!(
         t,
         "\nbuild {}: link {}\n  libs = {}\n\ndefault {}",
-        nj(&plan.output),
+        nj(&p(&plan.output)),
         objs.join(" "),
         libs.join(" "),
-        nj(&plan.output)
+        nj(&p(&plan.output))
     );
     t
 }
@@ -454,7 +517,7 @@ pub fn build_with(
         }
     }
     if let Some(n) = ninja {
-        relift_cache::write_if_changed(&dir.join("build.ninja"), ninja_file(plan).as_bytes())?;
+        relift_cache::write_if_changed(&dir.join("build.ninja"), ninja_file(plan, dir).as_bytes())?;
         let mut cmd = relift_proc::command(n);
         cmd.current_dir(dir)
             .env("NINJA_STATUS", "@%f/%t/%r ")
@@ -524,6 +587,7 @@ mod tests {
             output: "game".into(),
             link_flags: vec!["-lm".into()],
             pools: Vec::new(),
+            root: None,
         }
     }
 
@@ -532,16 +596,84 @@ mod tests {
         let mut p = plan();
         p.pools = vec![("heavy".into(), 2)];
         p.compiles[0].pool = Some("heavy".into());
-        let t = ninja_file(&p);
+        let t = ninja_file(&p, Path::new("."));
         assert!(t.contains("pool heavy\n  depth = 2\n"), "{t}");
         assert!(t.contains("  pool = heavy\n"), "{t}");
         let mut b = p.compiles[0].clone();
         b.obj = "obj/b.o".into();
         b.stage = 1;
         p.compiles.push(b);
-        let t = ninja_file(&p);
+        let t = ninja_file(&p, Path::new("."));
         assert!(t.contains("build stage0: phony obj/a.o\n"), "{t}");
         assert!(t.contains("build obj/b.o: cc c/a$ b.c || stage0\n"), "{t}");
+    }
+
+    fn moved(root: &str) -> (Plan, PathBuf) {
+        let at = |p: &str| Path::new(root).join(p);
+        let dir = at("projects/g/build/host");
+        let plan = Plan {
+            cc: vec!["clang".into()],
+            compiles: vec![Compile {
+                src: dir.join("c/u.c"),
+                obj: dir.join("obj/u.o"),
+                flags: vec![
+                    "-O2".into(),
+                    format!(
+                        "-I{}",
+                        at("projects/g/build/host/runtime/core/include").display()
+                    ),
+                    "-I/usr/include/SDL3".into(),
+                ],
+                pool: None,
+                stage: 0,
+            }],
+            output: dir.join("game"),
+            link_flags: vec![
+                dir.join("rt/librelift_rt.so").display().to_string(),
+                "-Wl,-rpath,$ORIGIN/rt".into(),
+            ],
+            pools: Vec::new(),
+            root: Some(root.into()),
+        };
+        (plan, dir)
+    }
+
+    #[test]
+    fn paths_under_the_root_do_not_depend_on_where_it_is() {
+        let (a, da) = moved("/home/a/cache");
+        let (b, db) = moved("/mnt/other place/cache");
+        let (ta, tb) = (ninja_file(&a, &da), ninja_file(&b, &db));
+        assert_eq!(ta, tb);
+        assert!(!ta.contains("/home/a"), "{ta}");
+        assert!(ta.contains("build obj/u.o: cc c/u.c\n"), "{ta}");
+        assert!(ta.contains("-Iruntime/core/include"), "{ta}");
+        assert!(ta.contains("-I/usr/include/SDL3"), "{ta}");
+        assert!(ta.contains("-fdebug-compilation-dir=."), "{ta}");
+        assert!(
+            ta.contains(
+                "build game: link obj/u.o\n  libs = rt/librelift_rt.so '-Wl,-rpath,$$ORIGIN/rt'"
+            ),
+            "{ta}"
+        );
+    }
+
+    #[test]
+    fn relative_paths_climb_out_of_the_build_directory() {
+        let root = Path::new("/c");
+        let dir = Path::new("/c/projects/g/build/host/rt");
+        assert_eq!(
+            relative(root, dir, Path::new("/c/projects/g/build/host/obj/u.o")),
+            Path::new("../obj/u.o")
+        );
+        assert_eq!(
+            relative(root, dir, Path::new("/c/gb-runtime/src")),
+            Path::new("../../../../../gb-runtime/src")
+        );
+        assert_eq!(relative(root, dir, dir), Path::new("."));
+        assert_eq!(
+            relative(root, dir, Path::new("/usr/lib")),
+            Path::new("/usr/lib")
+        );
     }
 
     #[test]
@@ -572,7 +704,7 @@ mod tests {
 
     #[test]
     fn ninja_file_escapes_paths_and_quotes_flags() {
-        let t = ninja_file(&plan());
+        let t = ninja_file(&plan(), Path::new("."));
         assert!(
             t.contains("command = $cc @$out.rsp -o $out $libs\n  rspfile = $out.rsp\n  rspfile_content = $in\n"),
             "{t}"

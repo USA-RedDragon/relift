@@ -466,7 +466,21 @@ fn compile(
     release: bool,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
-    let rt = crate::build::runtime_dir(settings);
+    let rt_real = crate::build::runtime_dir(settings);
+    let croot = crate::paths::canonical(cache_root(settings)?)?;
+    let rt = {
+        let base = croot.join("gb-runtime");
+        std::fs::create_dir_all(&base)?;
+        let lock_path = base.join("lock");
+        relift_cache::write_if_changed(&lock_path, b"")?;
+        let lock = std::fs::File::open(&lock_path)?;
+        lock.lock()?;
+        crate::build::mirror_runtime(
+            &rt_real,
+            &base.join("src"),
+            &["core", "cpus/sm83", "guests/gb", "host"],
+        )?
+    };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
     let cc = if release {
         crate::build::release_compiler(settings)?
@@ -497,7 +511,7 @@ fn compile(
         ])
         .chain(static_rt.clone())
         .collect();
-    let mut extras = crate::runtime_link::extras(&rt, &cache_root(settings)?)?;
+    let mut extras = crate::runtime_link::extras(&rt, &croot)?;
     extras.vk.clear();
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
@@ -564,13 +578,20 @@ fn compile(
     let jobs = relift_build::job_count(settings.jobs);
     let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
     let shared = !cfg!(windows);
-    let key: String =
-        relift_switch_formats::sha256(format!("{cc:?}\n{rt_flags:?}\n{}", rt.display()).as_bytes())
-            [..8]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-    let rt_dir = cache_root(settings)?.join("gb-runtime").join(&key);
+    let key: String = relift_switch_formats::sha256(
+        format!(
+            "{cc:?}\n{:?}",
+            rt_flags
+                .iter()
+                .filter(|f| !f.starts_with("-I"))
+                .collect::<Vec<_>>()
+        )
+        .as_bytes(),
+    )[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let rt_dir = croot.join("gb-runtime").join(&key);
     let rt_obj = |s: &Path| {
         let stem = s.strip_prefix(&rt).unwrap_or(s);
         rt_dir.join("obj").join(stem).with_extension("o")
@@ -588,7 +609,7 @@ fn compile(
     rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
         if shared { rt_obj(s) } else { obj(s, "rt") }
     }));
-    let devices = device_library(settings, &rt)?;
+    let devices = device_library(settings, &rt_real)?;
     let row = ui.row("");
     ui.begin(row, "compile");
     let mut link: Vec<String> = Vec::new();
@@ -607,6 +628,7 @@ fn compile(
             output: rt_o.clone(),
             link_flags: ["-r", "-nostdlib"].map(String::from).into(),
             pools,
+            root: Some(croot.clone()),
         };
         n += crate::build::build_plans(
             ui,
@@ -659,6 +681,7 @@ fn compile(
             .chain(extras.libs())
             .collect(),
         pools,
+        root: Some(croot.clone()),
     };
     n += crate::build::build_plans(
         ui,

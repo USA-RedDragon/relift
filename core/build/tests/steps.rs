@@ -32,6 +32,7 @@ fn plan(dir: &Path, clang: &Path, bodies: &[&str]) -> Plan {
         output: dir.join("game"),
         link_flags: Vec::new(),
         pools: Vec::new(),
+        root: None,
     }
 }
 

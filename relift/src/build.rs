@@ -977,6 +977,18 @@ fn shlib_flags(name: &str) -> Vec<String> {
     }
 }
 
+/// The link flag that finds the shared library in `dir` beside the program,
+/// wherever the pair lives.
+pub(crate) fn rpath_here(dir: &str) -> Option<String> {
+    if cfg!(windows) {
+        None
+    } else if cfg!(target_os = "macos") {
+        Some(format!("-Wl,-rpath,@loader_path/{dir}"))
+    } else {
+        Some(format!("-Wl,-rpath,$ORIGIN/{dir}"))
+    }
+}
+
 /// The file name of the runtime library on this host.
 pub(crate) fn runtime_lib_name() -> &'static str {
     if cfg!(windows) {
@@ -1065,6 +1077,28 @@ pub(crate) fn runtime_dir(settings: &Settings) -> PathBuf {
     }
 }
 
+/// The runtime sources a build compiles, copied under the project's build
+/// directory (`layers` of `src` into `dst`), so the compile commands name
+/// files inside the cache and read the same wherever the cache or relift
+/// lives. Only what changed is written, so a copy of another version of
+/// the runtime rebuilds only what differs.
+pub(crate) fn mirror_runtime(src: &Path, dst: &Path, layers: &[&str]) -> Result<PathBuf, BoxError> {
+    for layer in layers {
+        relift_cache::sync_tree(
+            &src.join(layer),
+            &dst.join(layer),
+            &|rel| match rel.extension() {
+                Some(e) => e == "c" || e == "h" || e == "S",
+                None => !rel
+                    .file_name()
+                    .is_some_and(|n| n == "tests" || n == "devtests"),
+            },
+        )
+        .map_err(|e| format!("{}: {e}", src.join(layer).display()))?;
+    }
+    Ok(dst.to_path_buf())
+}
+
 pub(crate) fn build_project(
     settings: &Settings,
     targets: &[String],
@@ -1091,11 +1125,12 @@ pub(crate) fn build_project(
     let cdir = out.join("c");
     let unlifted_file = out.join("unlifted.txt");
     let (lifted, prog) = (emitted.lifted, emitted.prog);
-    let rt = if settings.runtime_dir.as_os_str().is_empty() {
-        PathBuf::from(RUNTIME_DIR)
-    } else {
-        settings.runtime_dir.clone()
-    };
+    let croot = crate::paths::canonical(cache_root(settings)?)?;
+    let rt = mirror_runtime(
+        &runtime_dir(settings),
+        &out.join("runtime"),
+        &["core", "cpus/a64", "guests/switch", "host"],
+    )?;
     let dev = mode == Mode::Dev;
     let hotload: Vec<String> = if dev {
         vec!["-DRL_HOTLOAD".into()]
@@ -1161,7 +1196,7 @@ pub(crate) fn build_project(
     } else {
         lifted_flags
     };
-    let extras = crate::runtime_link::extras(&rt, &cache_root(settings)?)?;
+    let extras = crate::runtime_link::extras(&rt, &croot)?;
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
         .iter()
@@ -1282,6 +1317,7 @@ pub(crate) fn build_project(
                     .chain(extras.libs())
                     .collect(),
                 pools,
+                root: Some(croot.clone()),
             },
             bdir.join("rt"),
         ));
@@ -1293,13 +1329,11 @@ pub(crate) fn build_project(
                 output: exe.clone(),
                 link_flags: [rt_lib.display().to_string()]
                     .into_iter()
-                    .chain(
-                        (!cfg!(windows))
-                            .then(|| format!("-Wl,-rpath,{}", bdir.join("rt").display())),
-                    )
+                    .chain(rpath_here("rt"))
                     .chain(libs.iter().cloned())
                     .collect(),
                 pools,
+                root: Some(croot.clone()),
             },
             bdir.clone(),
         ));
@@ -1313,6 +1347,7 @@ pub(crate) fn build_project(
                 output: exe.clone(),
                 link_flags: libs.iter().cloned().chain(extras.libs()).collect(),
                 pools,
+                root: Some(croot.clone()),
             },
             bdir.clone(),
         ));

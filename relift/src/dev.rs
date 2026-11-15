@@ -355,6 +355,7 @@ impl Server {
             output: lib.clone(),
             link_flags: self.tools.hot_link.clone(),
             pools: Vec::new(),
+            root: None,
         };
         relift_build::build_with(
             &plan,
