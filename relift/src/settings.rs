@@ -57,6 +57,24 @@ pub struct Package {
         description = "the Linux release output: auto (an AppImage when appimagetool is found), always (a build without appimagetool fails) or never"
     )]
     pub appimage: String,
+
+    #[configulator(
+        name = "android-id",
+        description = "the application id of the Android APK (empty: dev.relift.game.<project folder>)"
+    )]
+    pub android_id: String,
+
+    #[configulator(
+        name = "android-keystore",
+        description = "the keystore that signs the APK, with the key alias relift (empty: a debug key in the cache)"
+    )]
+    pub android_keystore: PathBuf,
+
+    #[configulator(
+        name = "android-keystore-pass",
+        description = "the password of the keystore and its key"
+    )]
+    pub android_keystore_pass: String,
 }
 
 /// How lifted code is written as C.
@@ -94,6 +112,18 @@ pub struct Toolchain {
         description = "appimagetool, which packs the Linux release output"
     )]
     pub appimagetool: PathBuf,
+
+    #[configulator(
+        name = "android-sdk",
+        description = "the Android SDK with build-tools and platforms (empty: ANDROID_HOME, then common places)"
+    )]
+    pub android_sdk: PathBuf,
+
+    #[configulator(
+        name = "android-ndk",
+        description = "the Android NDK (empty: ANDROID_NDK_HOME, then the SDK's newest)"
+    )]
+    pub android_ndk: PathBuf,
 }
 
 impl Validate for Settings {

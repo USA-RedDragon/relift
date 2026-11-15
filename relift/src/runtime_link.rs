@@ -44,6 +44,9 @@ pub struct Extras {
     pub window: Option<PathBuf>,
     pub sdl3: Option<Sdl3>,
     pub vulkan: Option<LinkedVulkan>,
+    /// Host backends beyond the window (sound, Android glue), compiled with
+    /// SDL3's flags.
+    pub host: Vec<PathBuf>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -153,7 +156,35 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         window: sdl3.as_ref().map(|_| window),
         sdl3,
         vulkan: find_moltenvk(cache_root),
+        host: Vec::new(),
     })
+}
+
+/// The extras of an Android program: the window, sound and Android glue
+/// backends against the SDL3 and libopus builds in `deps`.
+#[must_use]
+pub fn android_extras(rt: &Path, deps: &crate::android::Deps) -> Extras {
+    let host = rt.join("host");
+    Extras {
+        vk: Vec::new(),
+        window: Some(host.join("window_sdl3.c")),
+        sdl3: Some(Sdl3 {
+            cflags: vec![
+                format!("-I{}", deps.sdl3_include.display()),
+                format!("-I{}", deps.opus_include.display()),
+            ],
+            libs: vec![
+                deps.sdl3_lib.display().to_string(),
+                deps.opus_lib.display().to_string(),
+                "-llog".into(),
+            ],
+            origin: "Android prebuilt".into(),
+        }),
+        host: ["audio_sdl3.c", "opus_libopus.c", "android_sdl3.c"]
+            .iter()
+            .map(|n| host.join(n))
+            .collect(),
+    }
 }
 
 impl Extras {
@@ -177,6 +208,9 @@ impl Extras {
         }
         if self.vulkan.is_some() {
             d.push("-DRL_VULKAN_LINKED".into());
+        }
+        if !self.host.is_empty() {
+            d.push("-DRL_HOST_AUDIO".into());
         }
         d
     }
@@ -216,18 +250,20 @@ impl Extras {
                 stage: 0,
             })
             .collect();
-        if let (Some(w), Some(sdl3)) = (&self.window, &self.sdl3) {
-            out.push(Compile {
-                src: w.clone(),
-                obj: obj(w),
-                flags: rt_flags
-                    .iter()
-                    .cloned()
-                    .chain(sdl3.cflags.iter().cloned())
-                    .collect(),
-                pool: None,
-                stage: 0,
-            });
+        if let Some(sdl3) = &self.sdl3 {
+            for w in self.window.iter().chain(&self.host) {
+                out.push(Compile {
+                    src: w.clone(),
+                    obj: obj(w),
+                    flags: rt_flags
+                        .iter()
+                        .cloned()
+                        .chain(sdl3.cflags.iter().cloned())
+                        .collect(),
+                    pool: None,
+                    stage: 0,
+                });
+            }
         }
         out
     }
@@ -263,6 +299,7 @@ mod tests {
             window: None,
             sdl3: None,
             vulkan: None,
+            host: Vec::new(),
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());

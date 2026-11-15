@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use relift_build::{Compile, Plan};
 use relift_progress::{Line, Paint, duration, noun};
 
+use crate::android;
 use crate::import::{BoxError, cache_root, import_dir_value};
 use crate::settings::Settings;
 use crate::ui::Ui;
@@ -212,11 +213,19 @@ fn patched(
     Ok((data, last))
 }
 
-fn device_library_path(settings: &Settings) -> Result<PathBuf, BoxError> {
-    Ok(cache_root(settings)?
-        .join("gb-devices")
-        .join("release")
-        .join(device_library_name(cfg!(all(windows, target_env = "msvc")))))
+fn device_target_dir(settings: &Settings, triple: Option<&str>) -> Result<PathBuf, BoxError> {
+    Ok(cache_root(settings)?.join(match triple {
+        Some(t) => format!("gb-devices-{t}"),
+        None => "gb-devices".into(),
+    }))
+}
+
+fn device_library_path(settings: &Settings, triple: Option<&str>) -> Result<PathBuf, BoxError> {
+    let dir = device_target_dir(settings, triple)?;
+    let dir = triple.map_or(dir.clone(), |t| dir.join(t));
+    Ok(dir.join("release").join(device_library_name(
+        cfg!(all(windows, target_env = "msvc")) && triple.is_none(),
+    )))
 }
 
 fn device_library_name(msvc: bool) -> &'static str {
@@ -229,7 +238,11 @@ fn device_library_name(msvc: bool) -> &'static str {
 
 /// The device library, built with cargo from `guests/gb/devices` into the
 /// cache the first time and whenever its sources change.
-fn device_library(settings: &Settings, rt: &Path) -> Result<PathBuf, BoxError> {
+fn device_library(
+    settings: &Settings,
+    rt: &Path,
+    triple: Option<&str>,
+) -> Result<PathBuf, BoxError> {
     let manifest = rt
         .join("..")
         .join("guests")
@@ -243,22 +256,41 @@ fn device_library(settings: &Settings, rt: &Path) -> Result<PathBuf, BoxError> {
         )
         .into());
     }
-    let target = cache_root(settings)?.join("gb-devices");
-    let lib = device_library_path(settings)?;
-    let status = relift_proc::command("cargo")
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--quiet",
-            "--manifest-path",
-        ])
-        .arg(&manifest)
-        .env("CARGO_TARGET_DIR", &target)
-        .status()
+    let target = device_target_dir(settings, triple)?;
+    let lib = device_library_path(settings, triple)?;
+    let mut cmd = relift_proc::command("cargo");
+    cmd.args([
+        "build",
+        "--release",
+        "--locked",
+        "--quiet",
+        "--manifest-path",
+    ])
+    .arg(&manifest)
+    .env("CARGO_TARGET_DIR", &target);
+    if let Some(t) = triple {
+        cmd.args(["--target", t]);
+    }
+    let out = cmd
+        .output()
         .map_err(|e| format!("cargo (for the Game Boy device library): {e}"))?;
-    if !status.success() || !lib.is_file() {
-        return Err(format!("building the Game Boy device library failed ({status})").into());
+    if !out.status.success() || !lib.is_file() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let hint = match triple {
+            Some(t)
+                if err.contains("can't find crate for `std`")
+                    || err.contains("may not be installed") =>
+            {
+                format!("; the Rust std for {t} is missing: run `rustup target add {t}`")
+            }
+            _ => String::new(),
+        };
+        return Err(format!(
+            "building the Game Boy device library failed ({}){hint}\n{}",
+            out.status,
+            err.trim_end()
+        )
+        .into());
     }
     Ok(lib)
 }
@@ -271,6 +303,40 @@ fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
         .collect();
     v.sort();
     Ok(v)
+}
+
+/// What building for Android needs beyond the lift: the tools, the SDL3 and
+/// libopus builds, the signing key and the application id.
+struct AndroidBuild {
+    target: android::Target,
+    ndk: android::Ndk,
+    sdk: android::Sdk,
+    deps: android::Deps,
+    signing: android::Signing,
+    package: String,
+}
+
+impl AndroidBuild {
+    fn prepare(settings: &Settings, target: android::Target, name: &str) -> Result<Self, BoxError> {
+        let cache = cache_root(settings)?;
+        let sdk = android::Sdk::find(settings)?;
+        let package = if settings.package.android_id.is_empty() {
+            android::default_package(name)
+        } else {
+            settings.package.android_id.clone()
+        };
+        if !android::valid_package(&package) {
+            return Err(format!("package.android-id {package}: not a Java package name").into());
+        }
+        Ok(Self {
+            target,
+            ndk: android::Ndk::find(settings, target)?,
+            deps: android::Deps::find(&cache, target)?,
+            signing: android::Signing::find(settings, &sdk, &cache)?,
+            sdk,
+            package,
+        })
+    }
 }
 
 /// What a build produced.
@@ -292,19 +358,29 @@ pub fn build(
     settings: &Settings,
     mods: &[PathBuf],
     release: bool,
+    target: Option<android::Target>,
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
     let p = project(settings)?;
+    let (name, host_out) = crate::build::project_out(settings)?;
+    let android = target
+        .map(|t| AndroidBuild::prepare(settings, t, &name))
+        .transpose()?;
     let (rom, hack) = patched(p.rom, mods, ui)?;
-    let (name, out) = crate::build::project_out(settings)?;
+    let out = match &android {
+        Some(a) => host_out.with_file_name(a.target.name),
+        None => host_out,
+    };
     let cdir = out.join("c");
     std::fs::create_dir_all(&cdir)?;
     ui.title(&format!(
-        "relift build: {name} ({}, {} KiB, {}-{})",
+        "relift build: {name} ({}, {} KiB, {})",
         title(&rom),
         rom.len() / 1024,
-        std::env::consts::OS,
-        std::env::consts::ARCH
+        android.as_ref().map_or_else(
+            || format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+            |a| a.target.name.to_string()
+        )
     ));
     let row = ui.row("rom");
     ui.begin(row, "analyze");
@@ -374,7 +450,9 @@ pub fn build(
     );
     let unlifted_file = out.join("unlifted.txt");
     relift_cache::write_if_changed(&unlifted_file, unlifted_list.as_bytes())?;
-    let save = if p.source.as_os_str().is_empty() {
+    let save = if android.is_some() {
+        "battery.sav".to_string()
+    } else if p.source.as_os_str().is_empty() {
         String::new()
     } else {
         save_path(&p.source).display().to_string()
@@ -391,6 +469,7 @@ pub fn build(
                     title: &p.title,
                     model: &p.model,
                     save: &save,
+                    android: android.is_some(),
                 },
             ),
         ),
@@ -444,8 +523,11 @@ pub fn build(
         crate::game_settings::generate_c(&game_settings).as_bytes(),
     )?;
     prog.push(settings_c);
-    compile(settings, &out, &cdir, &files, &prog, release, ui)?;
-    let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    compile(settings, &out, &cdir, &files, &prog, release, android.as_ref(), ui)?;
+    let exe = match &android {
+        Some(a) => package_apk(a, &out, &name, &p.title, ui)?,
+        None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+    };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {}, {} instructions not lifted, {} in all",
         noun(
@@ -462,6 +544,42 @@ pub fn build(
     })
 }
 
+fn package_apk(
+    a: &AndroidBuild,
+    out: &Path,
+    name: &str,
+    title: &str,
+    ui: &mut Ui,
+) -> Result<PathBuf, BoxError> {
+    let row = ui.row("");
+    ui.begin(row, "package");
+    let apk = out.join(format!("{name}.apk"));
+    android::build_apk(
+        &android::Apk {
+            package: &a.package,
+            label: if title.is_empty() { name } else { title },
+            target: a.target,
+            program: &out.join("libmain.so"),
+            deps: &a.deps,
+            work: &out.join("apk"),
+            output: &apk,
+        },
+        &a.sdk,
+        &a.ndk,
+        &a.signing,
+    )?;
+    ui.done(
+        row,
+        Line::new().text(format!(
+            "{} ({}, signed with the {} key)",
+            a.package,
+            a.target.abi,
+            if a.signing.debug { "debug" } else { "given" }
+        )),
+    );
+    Ok(apk)
+}
+
 fn compile(
     settings: &Settings,
     out: &Path,
@@ -469,6 +587,7 @@ fn compile(
     lifted: &[PathBuf],
     prog: &[PathBuf],
     release: bool,
+    android: Option<&AndroidBuild>,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt_real = crate::build::runtime_dir(settings);
@@ -487,16 +606,17 @@ fn compile(
         )?
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = if release {
-        crate::build::release_compiler(settings)?
-    } else {
-        crate::build::c_compiler(&settings.toolchain)?
+    let cc = match android {
+        Some(a) => vec![a.ndk.clang.display().to_string()],
+        None if release => crate::build::release_compiler(settings)?,
+        None => crate::build::c_compiler(&settings.toolchain)?,
     };
     let zig = cc.len() > 1;
     let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
         .iter()
         .map(|s| s.to_string())
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
+        .chain(android.map(|_| "-fPIC".to_string()))
         .collect();
     let static_rt = cfg!(windows).then_some("-DRL_STATIC_RUNTIME".to_string());
     let lifted_flags: Vec<String> = base
@@ -516,7 +636,10 @@ fn compile(
         ])
         .chain(static_rt.clone())
         .collect();
-    let mut extras = crate::runtime_link::extras(&rt, &croot)?;
+    let mut extras = match android {
+        Some(a) => crate::runtime_link::android_extras(&rt, &a.deps),
+        None => crate::runtime_link::extras(&rt, &croot)?,
+    };
     extras.vk.clear();
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
@@ -582,7 +705,7 @@ fn compile(
     }
     let jobs = relift_build::job_count(settings.jobs);
     let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let shared = !cfg!(windows);
+    let shared = android.is_some() || !cfg!(windows);
     let key: String = relift_switch_formats::sha256(
         format!(
             "{cc:?}\n{:?}",
@@ -614,7 +737,12 @@ fn compile(
     rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
         if shared { rt_obj(s) } else { obj(s, "rt") }
     }));
-    let devices = device_library(settings, &rt_real)?;
+    let triple = android.map(|a| a.target.triple);
+    let devices = device_library(settings, &rt_real, triple)?;
+    let output = out.join(match android {
+        Some(_) => "libmain.so".to_string(),
+        None => format!("game{}", std::env::consts::EXE_SUFFIX),
+    });
     let row = ui.row("");
     ui.begin(row, "compile");
     let mut link: Vec<String> = Vec::new();
@@ -644,9 +772,9 @@ fn compile(
             "",
         )?;
         drop(lock);
-        let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+        let exe = output.clone();
         let time = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        let newer = [rt_o.as_path(), &device_library_path(settings)?]
+        let newer = [rt_o.as_path(), &device_library_path(settings, triple)?]
             .iter()
             .any(|p| time(p) > time(&exe));
         if newer && exe.exists() {
@@ -657,7 +785,18 @@ fn compile(
         compiles.extend(rt_plan_compiles);
     }
     let pools = crate::build::memory_pools(&mut compiles, jobs);
-    let libs: Vec<String> = if cfg!(windows) {
+    let libs: Vec<String> = if android.is_some() {
+        [
+            "-lm",
+            "-ldl",
+            "-shared",
+            "-Wl,-soname,libmain.so",
+            "-Wl,-z,max-page-size=16384",
+            "-Wl,--no-undefined",
+        ]
+        .map(String::from)
+        .into()
+    } else if cfg!(windows) {
         [
             "-lpthread",
             "-lm",
@@ -678,7 +817,7 @@ fn compile(
     let plan = Plan {
         cc: cc.clone(),
         compiles,
-        output: out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+        output,
         link_flags: link
             .into_iter()
             .chain(std::iter::once(devices.display().to_string()))
@@ -707,7 +846,7 @@ fn compile(
 ///
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
-    let built = build(settings, &[], false, ui)?;
+    let built = build(settings, &[], false, None, ui)?;
     let mut cmd = relift_proc::command(&built.exe);
     if !built.source.as_os_str().is_empty() {
         cmd.arg("--save").arg(save_path(&built.source));

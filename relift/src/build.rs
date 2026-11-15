@@ -1112,7 +1112,12 @@ pub(crate) fn build_project(
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
     if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-        return Err(format!("target {t}: only the host target builds so far").into());
+        let why = if crate::android::target(t).is_some() {
+            "Android builds of Switch games are not supported yet (Game Boy projects build)"
+        } else {
+            "only the host target builds so far"
+        };
+        return Err(format!("target {t}: {why}").into());
     }
     let (name, out) = project_out(settings)?;
     if let Some(rec) = std::env::var_os(EMIT_RECORD) {
@@ -1449,10 +1454,19 @@ pub fn run_build(
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     if crate::gb::is_project() {
-        if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-            return Err(format!("target {t}: only the host target builds so far").into());
+        if targets.len() > 1 {
+            return Err("one target at a time for a Game Boy build".into());
         }
-        let built = crate::gb::build(settings, mods, true, ui)?;
+        let android = match targets.first().map(String::as_str) {
+            None | Some("host") => None,
+            Some(t) => Some(crate::android::target(t).ok_or_else(|| {
+                format!("target {t}: unknown; try host, android-arm64 or android-x64")
+            })?),
+        };
+        let built = crate::gb::build(settings, mods, true, android, ui)?;
+        if android.is_some() {
+            return Ok(());
+        }
         let (name, _) = project_out(settings)?;
         return package(settings, &name, &built.exe, None, ui);
     }

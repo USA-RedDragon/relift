@@ -8,6 +8,8 @@ clang = ""
 zig = ""
 ninja = ""
 appimagetool = ""
+android-sdk = ""
+android-ndk = ""
 
 [emit]
 shard-kib = 4096
@@ -15,3 +17,6 @@ piece-kib = 1024
 
 [package]
 appimage = "auto"
+android-id = ""
+android-keystore = ""
+android-keystore-pass = ""

@@ -1,6 +1,7 @@
 //! The `relift` command's settings and subcommand tree, as a library so the
 //! integration tests can name them.
 
+pub mod android;
 pub mod appimage;
 pub mod appimage_runtime;
 pub mod build;

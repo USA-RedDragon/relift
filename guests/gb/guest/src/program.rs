@@ -308,6 +308,9 @@ pub struct Program<'a> {
     pub model: &'a str,
     /// The save file the program reads and writes unless told otherwise.
     pub save: &'a str,
+    /// Build the entry for an Android app: `SDL_main` in a shared library,
+    /// with `save` a file name in the app's files directory.
+    pub android: bool,
 }
 
 fn c_string(s: &str) -> String {
@@ -349,13 +352,29 @@ pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
     for u in units {
         let _ = writeln!(t, "    {{ &{}, UINT32_C({:#x}) }},", u.symbol, u.bank);
     }
+    t.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
+    if p.android {
+        t.push_str(
+            "#include <stdio.h>\n#include <relift/android.h>\n__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)\n{\n    rl_android_init();\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = rl_android_files_dir();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", ",
+        );
+        t.push_str(&c_string(p.save));
+        t.push_str(");\n");
+    } else {
+        t.push_str(
+            "int main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
+        );
+    }
     let _ = write!(
         t,
-        "}};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {} }};\n    return rl_gb_main(&prog, argc, argv);\n}}\n",
+        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {} }};\n    return rl_gb_main(&prog, argc, argv);\n}}\n",
         units.len(),
         c_string(p.title),
         c_string(p.model),
-        c_string(p.save)
+        if p.android {
+            "save".into()
+        } else {
+            c_string(p.save)
+        }
     );
     t
 }
@@ -457,6 +476,7 @@ mod tests {
                 title: "T\"",
                 model: "cgb",
                 save: "a.sav",
+                android: false,
             },
         );
         assert!(
@@ -465,5 +485,25 @@ mod tests {
         );
         assert!(c.contains("{ &rl_unit_gb_b001, UINT32_C(0x1) },"), "{c}");
         assert!(c.contains("\"T\\\"\", \"cgb\", \"a.sav\""), "{c}");
+    }
+
+    #[test]
+    fn the_android_entry_is_sdl_main_with_the_save_in_the_files_dir() {
+        let rom = rom();
+        let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
+        let l = lift(&rom, &report, [0; 32]);
+        let c = program_c(
+            &l.units,
+            &Program {
+                title: "T",
+                model: "cgb",
+                save: "a.sav",
+                android: true,
+            },
+        );
+        assert!(c.contains("int SDL_main(int argc, char **argv)"), "{c}");
+        assert!(!c.contains("int main("), "{c}");
+        assert!(c.contains("rl_android_files_dir()"), "{c}");
+        assert!(c.contains("\"T\", \"cgb\", save }"), "{c}");
     }
 }
