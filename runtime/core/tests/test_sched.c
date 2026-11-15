@@ -1016,3 +1016,32 @@ TEST(sched_core_init_checks_the_clock_offset)
     CHECK(rl_ctx_time(t->ctx) == &t->ctx->time);
     rl_thread_free(t);
 }
+
+static int preempt_calls;
+
+static void count_preempt(rl_ctx *c)
+{
+    preempt_calls++;
+    rl_preempt_clear(c);
+}
+
+TEST(sched_preempt_runs_the_hook_or_clears_the_budget)
+{
+    CHECK_EQ(rl_core_init(&clock_guest, &clock_cpu), 0);
+    struct rl_thread *t = rl_thread_alloc();
+    rl_preempt_clear(t->ctx);
+    CHECK(!rl_time_spent(rl_ctx_time(t->ctx)));
+    rl_preempt_request(t->ctx);
+    CHECK(rl_time_spent(rl_ctx_time(t->ctx)));
+    preempt_calls = 0;
+    rl_set_preempt_hook(count_preempt);
+    rl_preempt(t->ctx);
+    CHECK_EQ(preempt_calls, 1);
+    CHECK(!rl_time_spent(rl_ctx_time(t->ctx)));
+    rl_set_preempt_hook(NULL);
+    rl_preempt_request(t->ctx);
+    rl_preempt(t->ctx);
+    CHECK_EQ(preempt_calls, 1);
+    CHECK(!rl_time_spent(rl_ctx_time(t->ctx)));
+    rl_thread_free(t);
+}

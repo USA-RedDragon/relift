@@ -48,7 +48,11 @@ uint32_t rl_host_get_fpcr(void)
 #endif
 }
 
-static void ctx_init(rl_ctx *c) { c->fpcr = RL_FPCR_DEFAULT | (rl_a64_exact_flags() ? RL_FPCR_EXACT : 0u); }
+static void ctx_init(rl_ctx *c)
+{
+    c->fpcr = RL_FPCR_DEFAULT | (rl_a64_exact_flags() ? RL_FPCR_EXACT : 0u);
+    c->time.budget = INT64_MAX;
+}
 
 static void bind(rl_ctx *c)
 {
@@ -69,6 +73,7 @@ static const rl_cpu_desc g_a64 = {
     .common_offset = RL_A64_COMMON_OFFSET,
     .code_shift = RL_A64_CODE_SHIFT,
     .big_endian = false,
+    .time_offset = offsetof(rl_ctx, time),
     .ctx_init = ctx_init,
     .bind = bind,
     .describe = describe,

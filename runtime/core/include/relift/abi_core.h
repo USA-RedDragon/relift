@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 3u
+#define RL_ABI_VERSION 4u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0
@@ -162,6 +162,21 @@ typedef struct rl_time {
 _Static_assert(offsetof(rl_time, budget) == 0, "time budget");
 _Static_assert(offsetof(rl_time, deadline) == 8, "time deadline");
 _Static_assert(sizeof(rl_time) == 16, "rl_time size");
+
+/**
+ * @brief Whether the budget of t is spent, read at a preemption point of a
+ * CPU whose guest OS preempts threads (docs/abi.md section 14.1): there the
+ * budget stays positive while the thread may run on, and another host thread
+ * ends it to make the thread call rl_preempt.
+ */
+static inline int rl_time_spent(rl_time *t) { return __atomic_load_n(&t->budget, __ATOMIC_RELAXED) <= 0; }
+/**
+ * @brief The slow path of a preemption point: runs the guest layer's
+ * scheduler, which may block until the thread may run again. The context's
+ * register fields are stale here (the registers live in the caller's
+ * locals) and stay untouched.
+ */
+RL_RUNTIME_API void rl_preempt(rl_ctx *c);
 
 /** @brief The interrupt hook's answer when no interrupt is taken. */
 #define RL_NO_IRQ UINT64_MAX

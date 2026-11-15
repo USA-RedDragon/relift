@@ -55,7 +55,8 @@ TEST(a64_descriptor_matches_the_context)
 {
     const rl_cpu_desc *d = rl_a64_cpu();
     CHECK_EQ(d->ctx_size, sizeof(rl_ctx));
-    CHECK_EQ(d->ctx_size, 896);
+    CHECK_EQ(d->ctx_size, 960);
+    CHECK_EQ(d->time_offset, offsetof(rl_ctx, time));
     CHECK_EQ(d->ctx_align, 64);
     CHECK_EQ(d->common_offset, offsetof(rl_ctx, pend));
     CHECK_EQ(d->code_shift, 2);

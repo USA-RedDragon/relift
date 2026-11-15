@@ -2,7 +2,8 @@
  * @file sync.c
  * @brief The lifted-code entries of the device scheduler, rl_sync,
  * rl_io_read and rl_io_write, and rl_sched_attach, which binds a guest
- * thread's clock to a scheduler CPU (relift/sched.h).
+ * thread's clock to a scheduler CPU (relift/sched.h); and rl_preempt, the
+ * preemption point's entry to the guest layer's scheduler.
  */
 #include "core.h"
 #include "sched_int.h"
@@ -18,6 +19,32 @@ int rl_sched_attach(rl_sched_cpu *c, struct rl_thread *t)
     c->sched->bind = rl_thread_bind;
     t->clock = c;
     return 0;
+}
+
+static rl_preempt_hook *g_preempt;
+
+void rl_set_preempt_hook(rl_preempt_hook *hook) { g_preempt = hook; }
+
+void rl_preempt(rl_ctx *c)
+{
+    if (g_preempt)
+        g_preempt(c);
+    else
+        rl_preempt_clear(c);
+}
+
+void rl_preempt_request(rl_ctx *c)
+{
+    rl_time *t = rl_ctx_time(c);
+    if (t)
+        __atomic_store_n(&t->budget, 0, __ATOMIC_RELEASE);
+}
+
+void rl_preempt_clear(rl_ctx *c)
+{
+    rl_time *t = rl_ctx_time(c);
+    if (t)
+        __atomic_store_n(&t->budget, INT64_MAX, __ATOMIC_RELAXED);
 }
 
 static rl_sched_cpu *ctx_clock(rl_ctx *c)

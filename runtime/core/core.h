@@ -135,6 +135,21 @@ RL_RUNTIME_API rl_ctx_common *rl_common(rl_ctx *c);
 /** @brief The clock of a context (rl_cpu_desc.time_offset), or NULL when the CPU has none. */
 RL_RUNTIME_API rl_time *rl_ctx_time(rl_ctx *c);
 
+/**
+ * @brief What rl_preempt runs: the guest layer's scheduler, at a preemption
+ * point whose clock budget another host thread ended (docs/abi.md section
+ * 14.1). The guest registers are in the lifted code's locals, not in c, so
+ * the hook must neither read nor write them; it may block, and it clears
+ * the budget before it returns.
+ */
+typedef void rl_preempt_hook(rl_ctx *c);
+/** @brief Sets the preemption hook; without one rl_preempt only clears the budget. */
+RL_RUNTIME_API void rl_set_preempt_hook(rl_preempt_hook *hook);
+/** @brief Ends the budget of c's clock from any host thread, so c's thread runs the preemption hook at its next preemption point. */
+RL_RUNTIME_API void rl_preempt_request(rl_ctx *c);
+/** @brief Gives c's clock a budget that does not run out: no preemption pending. */
+RL_RUNTIME_API void rl_preempt_clear(rl_ctx *c);
+
 /** @brief Converts a 16-bit value between guest and host byte order (the CPU descriptor's big_endian). */
 RL_RUNTIME_API uint16_t rl_guest_order16(uint16_t v);
 /** @brief Converts a 32-bit value between guest and host byte order. */

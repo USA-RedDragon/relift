@@ -147,6 +147,8 @@ struct rl_ctx {
     uint64_t disp_lo;
     /** @brief Number of entries in disp_table. */
     uint64_t disp_count;
+    /** @brief Preemption clock: its budget stays positive while the thread may run on; the guest layer ends it to preempt the thread. */
+    rl_time time;
 } __attribute__((aligned(64)));
 
 _Static_assert(sizeof(rl_v128) == 16, "rl_v128 size");
@@ -167,7 +169,8 @@ _Static_assert(offsetof(rl_ctx, thread) == 864, "thread");
 _Static_assert(offsetof(rl_ctx, disp_table) == 872, "disp_table");
 _Static_assert(offsetof(rl_ctx, disp_lo) == 880, "disp_lo");
 _Static_assert(offsetof(rl_ctx, disp_count) == 888, "disp_count");
-_Static_assert(sizeof(rl_ctx) == 896, "rl_ctx size");
+_Static_assert(offsetof(rl_ctx, time) == 896, "time");
+_Static_assert(sizeof(rl_ctx) == 960, "rl_ctx size");
 _Static_assert(_Alignof(rl_ctx) == 64, "rl_ctx alignment");
 
 /** @brief Offset of the core's block (rl_ctx_common) in rl_ctx: pend to disp_count. */
