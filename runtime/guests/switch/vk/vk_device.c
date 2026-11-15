@@ -60,6 +60,11 @@ static VkPhysicalDevice choose(vkf_call *k, VkInstance inst)
             pick = all[i];
     if (want && *want && !pick)
         rl_log(RL_LOG_WARN, "vk", "vk.device=%s matches no host device; choosing one", want);
+    if (pick && !presents(io, pick))
+        rl_log(RL_LOG_WARN, "vk",
+               "vk.device=%s: %s cannot present to this video backend's surfaces, so the game's swapchain "
+               "will fail; choose another device or video backend",
+               want, name_of(k->fns, pick, &p));
     for (uint32_t i = 0; i < n && !pick; i++)
         if (usable(k->fns, all[i]) && presents(io, all[i]))
             pick = all[i];
