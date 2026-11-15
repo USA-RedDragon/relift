@@ -3,14 +3,15 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::decode::{Features, decode_for};
 use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
 use relift_cpu_arm64::lift::system;
 use relift_cpu_arm64::lift::{self, LiftError};
-use relift_cpu_arm64::regs;
+use relift_cpu_arm64::regs::{self, CHECK_PAC_KEYS, PacKey};
 use relift_ir::interp::{self, Fault, FlatMemory, GuestMemory, Intrinsics, State};
 use relift_ir::{Block, Flow};
 use unicorn_engine::RegisterARM64 as R;
+use unicorn_engine::RegisterARM64CP;
 use unicorn_engine::Unicorn;
 use unicorn_engine::unicorn_const::{Arch, Mode, Prot, uc_error};
 
@@ -26,6 +27,10 @@ pub const CODE_SIZE: u64 = 0x20_0000;
 pub const DATA: u64 = 0x100_2000_0000;
 /// The data window's size.
 pub const DATA_SIZE: usize = 0x4000;
+/// Where pointer authentication runs see the data window a second time:
+/// [`DATA`] has bit 40 set, outside the 39-bit address range the keys are
+/// checked in, so an authenticated pointer can only reach this alias.
+pub const PAUTH_DATA: u64 = 0x20_2000_0000;
 
 /// The guest state a check compares.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,6 +105,7 @@ const XREGS: [R; 31] = [
 pub struct Emu {
     uc: Unicorn<'static, ()>,
     loaded: Vec<u32>,
+    el1: Option<bool>,
 }
 
 impl Emu {
@@ -113,7 +119,76 @@ impl Emu {
         Ok(Emu {
             uc,
             loaded: Vec::new(),
+            el1: None,
         })
+    }
+
+    /// Runs at EL1 with the check keys while `pauth` is true, and at the
+    /// exception level Unicorn starts in (EL3) otherwise. The first switch
+    /// to EL1 enables the keys and the 39-bit address layout of the Switch
+    /// kernel's EL0 view; the EL1&0 regime has the same upper and lower
+    /// ranges as EL0.
+    fn set_el(&mut self, pauth: bool) -> Result<(), uc_error> {
+        match self.el1 {
+            Some(cur) if cur == pauth => return Ok(()),
+            None if !pauth => return Ok(()),
+            _ => {}
+        }
+        if pauth && self.el1.is_none() {
+            self.setup_pauth()?;
+        }
+        let mode = if pauth { EL1H } else { EL3H };
+        self.uc.reg_write(R::PSTATE, mode)?;
+        if pauth {
+            self.uc
+                .mem_map(PAUTH_DATA, DATA_SIZE as u64, Prot::READ | Prot::WRITE)?;
+        } else if self.el1 == Some(true) {
+            self.uc.mem_unmap(PAUTH_DATA, DATA_SIZE as u64)?;
+        }
+        self.el1 = Some(pauth);
+        Ok(())
+    }
+
+    fn setup_pauth(&mut self) -> Result<(), uc_error> {
+        const KEY_REGS: [(u32, u32); 5] = [(1, 0), (1, 2), (2, 0), (2, 2), (3, 0)];
+        for (k, (crm, op2)) in KEY_REGS.iter().enumerate() {
+            for (hi, v) in [(1, CHECK_PAC_KEYS[2 * k]), (0, CHECK_PAC_KEYS[2 * k + 1])] {
+                self.coproc(3, 0, 2, *crm, op2 + hi, Some(v))?;
+            }
+        }
+        let sctlr = self.coproc(3, 0, 1, 0, 0, None)?;
+        self.coproc(3, 0, 1, 0, 0, Some(sctlr | SCTLR_PAUTH))?;
+        self.coproc(3, 0, 2, 0, 2, Some(25 | 25 << 16))?;
+        let hcr = self.coproc(3, 4, 1, 1, 0, None)?;
+        self.coproc(3, 4, 1, 1, 0, Some(hcr | 3 << 40 | 1 << 31))?;
+        let scr = self.coproc(3, 6, 1, 1, 0, None)?;
+        self.coproc(3, 6, 1, 1, 0, Some(scr | 3 << 16 | 1 << 10 | 1))?;
+        Ok(())
+    }
+
+    fn coproc(
+        &mut self,
+        op0: u32,
+        op1: u32,
+        crn: u32,
+        crm: u32,
+        op2: u32,
+        write: Option<u64>,
+    ) -> Result<u64, uc_error> {
+        let mut reg = RegisterARM64CP::new()
+            .op0(op0)
+            .op1(op1)
+            .crn(crn)
+            .crm(crm)
+            .op2(op2);
+        match write {
+            Some(v) => {
+                reg.val = v;
+                self.uc.reg_write_arm64_coproc(&reg)?;
+            }
+            None => self.uc.reg_read_arm64_coproc(&mut reg)?,
+        }
+        Ok(reg.val)
     }
 
     fn load(&mut self, words: &[u32]) -> Result<(), uc_error> {
@@ -137,6 +212,8 @@ impl Emu {
     /// instruction before it notices the count is reached.
     pub fn run(&mut self, words: &[u32], input: &Guest) -> Result<Outcome, uc_error> {
         self.load(words)?;
+        let pauth = words.iter().any(|w| is_pauth(*w));
+        self.set_el(pauth)?;
         let uc = &mut self.uc;
         for (r, v) in XREGS.iter().zip(input.x) {
             uc.reg_write(*r, v)?;
@@ -154,10 +231,15 @@ impl Emu {
             uc.reg_write_long(qreg(i), &v.to_le_bytes())?;
         }
         uc.mem_write(DATA, &input.mem)?;
+        if pauth {
+            uc.mem_write(PAUTH_DATA, &input.mem)?;
+        }
         let r = uc.emu_start(CODE, u64::MAX, 0, words.len());
         match r {
             Ok(()) => {}
             Err(uc_error::FETCH_UNMAPPED) => {}
+            Err(uc_error::EXCEPTION) if pauth && uc.reg_read(R::PC)? >> 48 != 0 => {}
+            Err(uc_error::EXCEPTION) if pauth && uc.reg_read(R::PC)? >> 48 != 0 => {}
             Err(e) => return Ok(Outcome::Fault(format!("{e:?}"))),
         }
         let mut out = Guest {
@@ -187,6 +269,24 @@ impl Emu {
         uc.mem_read(DATA, &mut out.mem)?;
         Ok(Outcome::Done(Box::new(out)))
     }
+}
+
+/// PSTATE of EL1 with SP_EL1, and of EL3 with SP_EL3.
+const EL1H: u64 = 0x5;
+const EL3H: u64 = 0xd;
+
+/// SCTLR_EL1's EnIA, EnIB, EnDA and EnDB.
+const SCTLR_PAUTH: u64 = 1 << 31 | 1 << 30 | 1 << 27 | 1 << 13;
+
+/// Whether `w` is a pointer authentication instruction.
+pub fn is_pauth(w: u32) -> bool {
+    const PREFIXES: [&str; 11] = [
+        "PAC", "AUT", "XPAC", "BRAA", "BRAB", "BLRAA", "BLRAB", "RETAA", "RETAB", "LDRAA", "LDRAB",
+    ];
+    decode_for(w, &Features::ALL).is_some_and(|i| {
+        let n = i.encoding.name();
+        PREFIXES.iter().any(|p| n.starts_with(p))
+    })
 }
 
 /// `UC_CPU_ARM64_MAX`: every feature Unicorn's QEMU implements, so forms
@@ -315,6 +415,7 @@ pub fn lift_all(words: &[u32]) -> Result<Vec<Block>, String> {
 struct Memory {
     data: FlatMemory,
     code: Vec<u8>,
+    alias: bool,
 }
 
 fn code_image(words: &[u32]) -> Vec<u8> {
@@ -330,8 +431,20 @@ impl Memory {
     }
 }
 
+impl Memory {
+    fn unalias(&self, addr: u64, n: usize) -> u64 {
+        let end = addr.wrapping_add(n as u64);
+        if self.alias && addr >= PAUTH_DATA && end <= PAUTH_DATA + DATA_SIZE as u64 {
+            addr - PAUTH_DATA + DATA
+        } else {
+            addr
+        }
+    }
+}
+
 impl GuestMemory for Memory {
     fn read(&mut self, addr: u64, buf: &mut [u8]) -> Result<(), Fault> {
+        let addr = self.unalias(addr, buf.len());
         if !Memory::in_code(addr, buf.len()) {
             return self.data.read(addr, buf);
         }
@@ -346,6 +459,7 @@ impl GuestMemory for Memory {
     }
 
     fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), Fault> {
+        let addr = self.unalias(addr, data.len());
         if Memory::in_code(addr, data.len()) {
             return Err(Fault {
                 addr,
@@ -371,10 +485,9 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
     st.regs[regs::FPCR.index()] = u128::from(input.fpcr);
     st.regs[regs::FPSR.index()] = u128::from(input.fpsr);
     st.regs[regs::FP_FLAGS.index()] = u128::from(FP_FLAGS.load(Ordering::Relaxed));
-    for (i, key) in regs::PacKey::ALL.iter().enumerate() {
-        for (j, hi) in [true, false].into_iter().enumerate() {
-            st.regs[key.reg(hi).index()] = u128::from(regs::CHECK_PAC_KEYS[2 * i + j]);
-        }
+    for (k, key) in PacKey::ALL.iter().enumerate() {
+        st.regs[key.reg(true).index()] = u128::from(CHECK_PAC_KEYS[2 * k]);
+        st.regs[key.reg(false).index()] = u128::from(CHECK_PAC_KEYS[2 * k + 1]);
     }
     let mut intr = Arm64Intrinsics { host: 0 };
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
@@ -386,6 +499,7 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
             bytes: input.mem.clone(),
         },
         code: code_image(words),
+        alias: words.iter().any(|w| is_pauth(*w)),
     };
     let mut pc = CODE;
     for b in blocks {

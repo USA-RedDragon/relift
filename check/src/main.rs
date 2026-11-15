@@ -83,6 +83,7 @@ struct Report {
     authenticated: u64,
     auth_failed: u64,
     mutation: Option<String>,
+    pauth: Option<String>,
     first: Option<String>,
 }
 
@@ -256,6 +257,7 @@ fn check_form(
         words.push(word);
         ps.push(prepare(words, g, opts, &mut rep));
     }
+    rep.pauth = states::take_pauth_stats();
     run_all(oracle, slow, &ps, &mut rep)?;
     Ok(rep)
 }
@@ -308,7 +310,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
         (true, false) => "MISSED",
     };
     println!(
-        "{verdict:6} {name:28} {}/{} matched, {} both faulted, {} unplaced{}{}{}{}",
+        "{verdict:6} {name:28} {}/{} matched, {} both faulted, {} unplaced{}{}{}{}{}",
         rep.matched,
         rep.states,
         rep.both_faulted,
@@ -329,6 +331,10 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
         rep.mutation
             .as_ref()
             .map(|m| format!(", mutation: {m}"))
+            .unwrap_or_default(),
+        rep.pauth
+            .as_ref()
+            .map(|p| format!(", states: {p}"))
             .unwrap_or_default(),
         rep.first
             .as_ref()

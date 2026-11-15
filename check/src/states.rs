@@ -4,8 +4,9 @@
 use crate::emu::lift;
 use relift_cpu_arm64::decode::{Encoding, Features, Insn, decode_for};
 
-use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, Guest};
+use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, Guest, PAUTH_DATA};
 use crate::oracle::fill_window;
+use std::sync::Mutex;
 
 /// FPSR's cumulative bits: QC (27), IDC (7), IXC, UFC, OFC, DZC and IOC
 /// (4 to 0).
@@ -233,6 +234,7 @@ pub fn kind(enc: Encoding) -> Kind {
         || n.contains("_ldstord")
         || n.ends_with("_memop")
         || n.contains("_ldapstl")
+        || n.ends_with("_ldst_pac")
     {
         Kind::Mem { aligned: true }
     } else if n.contains("_ldst") || n.contains("_asisdls") {
@@ -278,6 +280,10 @@ fn mem_offset(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<i64> {
             None => 2 + (f("opc") >> 1),
         };
         Some(sext(f("imm7"), 7) << pair)
+    } else if n.ends_with("_ldst_pac") {
+        let w = insn.word;
+        let imm10 = ((w >> 22) & 1) << 9 | (w >> 12) & 0x1ff;
+        Some(sext(imm10, 10) << 3)
     } else if n.ends_with("_ldst_regoff") {
         let m = f("Rm");
         if m == f("Rn") {
@@ -313,6 +319,9 @@ fn mem_offset(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<i64> {
 pub fn prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Vec<u32> {
     const CLREX: u32 = 0xd503_3f5f;
     let name = insn.encoding.name();
+    if let Some(words) = pauth_prelude(insn, g, r) {
+        return words;
+    }
     if !name.contains("_ldstexclr") {
         return Vec::new();
     }
@@ -413,4 +422,311 @@ pub fn state(insn: &Insn, r: &mut Rng) -> Option<Guest> {
         return None;
     }
     Some(g)
+}
+
+/// How many states of each pointer authentication scenario were built since
+/// the last [`take_pauth_stats`].
+static PAUTH_STATS: Mutex<[u64; Scenario::COUNT]> = Mutex::new([0; Scenario::COUNT]);
+
+/// What a pointer authentication state does to the pointer it checks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scenario {
+    /// Signed with the key and modifier the instruction checks.
+    Valid,
+    /// Signed, then one bit of the PAC field flipped.
+    PacTampered,
+    /// Signed, then one address bit flipped.
+    AddrTampered,
+    /// Signed, then the modifier changed.
+    WrongModifier,
+    /// Signed with the other key of the same kind.
+    WrongKey,
+    /// Not signed: canonical and non-canonical values as they come.
+    Unsigned,
+}
+
+impl Scenario {
+    const COUNT: usize = 6;
+    const NAMES: [&'static str; Self::COUNT] = [
+        "signed",
+        "pac-tampered",
+        "address-tampered",
+        "wrong-modifier",
+        "wrong-key",
+        "unsigned",
+    ];
+
+    fn pick(r: &mut Rng) -> Scenario {
+        match r.below(100) {
+            0..35 => Scenario::Valid,
+            35..50 => Scenario::PacTampered,
+            50..60 => Scenario::AddrTampered,
+            60..68 => Scenario::WrongModifier,
+            68..76 => Scenario::WrongKey,
+            _ => Scenario::Unsigned,
+        }
+    }
+}
+
+/// The scenario counts since the last call, as a report fragment, or `None`
+/// when no pointer authentication state was built.
+pub fn take_pauth_stats() -> Option<String> {
+    let mut s = PAUTH_STATS.lock().expect("stats lock");
+    let counts = std::mem::take(&mut *s);
+    if counts.iter().all(|c| *c == 0) {
+        return None;
+    }
+    let parts: Vec<String> = Scenario::NAMES
+        .iter()
+        .zip(counts)
+        .map(|(n, c)| format!("{c} {n}"))
+        .collect();
+    Some(parts.join(", "))
+}
+
+const VA_MASK: u64 = (1 << 39) - 1;
+
+/// A pointer: canonical in the 39-bit layout (upper bits zero, or all ones),
+/// or one of the non-canonical shapes (bit 55 against the upper bits, random
+/// upper bits).
+fn pauth_pointer(r: &mut Rng, canonical: bool) -> u64 {
+    let low = r.next() & VA_MASK;
+    let pick = if canonical { r.below(60) } else { r.below(100) };
+    match pick {
+        0..30 => low,
+        30..60 => low | !VA_MASK,
+        60..68 => low | 1 << 55,
+        68..76 => low | (r.next() & 0xff7f_ff80_0000_0000),
+        76..84 => reg_value(r),
+        _ => r.next(),
+    }
+}
+
+/// The register an authentication instruction takes a modifier from.
+#[derive(Clone, Copy)]
+enum Modifier {
+    Zero,
+    /// `x0` to `x30`, or SP for 31.
+    Reg(u32),
+}
+
+/// The pointer register, modifier and key (0 IA, 1 IB, 2 DA, 3 DB) of a
+/// pointer authentication instruction, and whether it is one that checks a
+/// signature (`AUT*`, `BRA*`, `BLRA*`, `RETA*`, `LDRA*`) or strips one.
+struct PauthForm {
+    ptr: u32,
+    modifier: Modifier,
+    key: u32,
+    checks: bool,
+    branches: bool,
+    loads: bool,
+    hint: bool,
+}
+
+fn pauth_form(insn: &Insn) -> Option<PauthForm> {
+    let name = insn.encoding.name();
+    let w = insn.word;
+    let mnemonic = name.split('_').next()?;
+    let b = key_b(mnemonic);
+    let mut f = PauthForm {
+        ptr: 30,
+        modifier: Modifier::Zero,
+        key: 0,
+        checks: true,
+        branches: false,
+        loads: false,
+        hint: false,
+    };
+    if name.ends_with("_hints") {
+        f.hint = true;
+        f.key = u32::from(b);
+        if mnemonic.starts_with("XPAC") {
+            f.checks = false;
+        } else if mnemonic.ends_with("1716") {
+            f.ptr = 17;
+            f.modifier = Modifier::Reg(16);
+        } else if mnemonic.ends_with("SP") {
+            f.modifier = Modifier::Reg(31);
+        } else if !mnemonic.ends_with('Z') {
+            return None;
+        }
+        return Some(f);
+    }
+    if name.ends_with("_dp_1src") && !name.starts_with("PACGA") {
+        f.ptr = w & 31;
+        let data = mnemonic.contains('D');
+        f.key = u32::from(data) * 2 + u32::from(b);
+        if mnemonic.starts_with("XPAC") {
+            f.checks = false;
+            f.key = u32::from(data) * 2;
+        } else if !name.contains("_64Z_") {
+            f.modifier = Modifier::Reg((w >> 5) & 31);
+        }
+        return Some(f);
+    }
+    if name.ends_with("_branch_reg")
+        && ["BRA", "BLRA", "RETA"]
+            .iter()
+            .any(|p| mnemonic.starts_with(p))
+    {
+        f.key = u32::from(b);
+        f.branches = true;
+        if mnemonic.starts_with("RET") {
+            f.modifier = Modifier::Reg(31);
+        } else {
+            f.ptr = (w >> 5) & 31;
+            if !name.contains("_64_") {
+                f.modifier = Modifier::Reg(w & 31);
+            }
+        }
+        return Some(f);
+    }
+    if name.ends_with("_ldst_pac") {
+        f.ptr = (w >> 5) & 31;
+        f.key = 2 + u32::from(b);
+        f.loads = true;
+        return Some(f);
+    }
+    None
+}
+
+/// Whether the mnemonic names the B key.
+fn key_b(m: &str) -> bool {
+    if ["BRAB", "BLRAB", "RETAB", "LDRAB"]
+        .iter()
+        .any(|p| m.starts_with(p))
+    {
+        return true;
+    }
+    let rest = m
+        .strip_prefix("PAC")
+        .or_else(|| m.strip_prefix("AUT"))
+        .unwrap_or("");
+    let rest = rest.get(1..).unwrap_or("");
+    let rest = rest.strip_prefix('Z').unwrap_or(rest);
+    rest.starts_with('B')
+}
+
+fn pac_word(f: &PauthForm, insn: &Insn, key: u32) -> u32 {
+    if f.hint {
+        return 0xd503_201f | (pac_hint(insn, key) << 5);
+    }
+    match f.modifier {
+        Modifier::Reg(m) => 0xdac1_0000 | key << 10 | m << 5 | f.ptr,
+        Modifier::Zero => 0xdac1_23e0 | key << 10 | f.ptr,
+    }
+}
+
+/// The `HINT` number of the `PAC*` instruction that signs for the hint-space
+/// instruction `insn` with `key`.
+fn pac_hint(insn: &Insn, key: u32) -> u32 {
+    let m = insn.encoding.name();
+    let base = if m.contains("1716") {
+        8
+    } else if m.contains("SP") {
+        25
+    } else {
+        24
+    };
+    base + 2 * key
+}
+
+fn eor_bit(reg: u32, bit: u32) -> u32 {
+    0xd240_0000 | ((64 - bit) & 63) << 16 | reg << 5 | reg
+}
+
+/// The setup of a pointer authentication instruction: the pointer register
+/// (and the modifier) set to values that exercise the interesting paths, and
+/// the words that sign the pointer, with the key and modifier of the
+/// instruction or others, and tamper with it. `None` for any other form.
+fn pauth_prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<Vec<u32>> {
+    let name = insn.encoding.name();
+    let is = ["PAC", "AUT", "XPAC", "BRA", "BLRA", "RETA", "LDRA"]
+        .iter()
+        .any(|p| name.starts_with(p));
+    if !is {
+        return None;
+    }
+    let Some(f) = pauth_form(insn) else {
+        if name.starts_with("PACGA") && insn.get("Rn") != 31 {
+            g.x[insn.get("Rn") as usize] = pauth_pointer(r, false);
+        }
+        return Some(Vec::new());
+    };
+    let align = if f.branches { !3u64 } else { !0u64 };
+    let signer = name.starts_with("PAC");
+    let scenario = if signer {
+        Scenario::Unsigned
+    } else {
+        Scenario::pick(r)
+    };
+    let signs = !signer;
+    let set = |g: &mut Guest, reg: u32, v: u64| {
+        if reg == 31 {
+            g.sp = v & !15;
+        } else {
+            g.x[reg as usize] = v;
+        }
+    };
+    if let Modifier::Reg(m) = f.modifier {
+        let v = reg_value(r);
+        set(g, m, v);
+    }
+    let ptr_is_sp = f.ptr == 31 && (f.loads || f.branches);
+    if f.ptr == 31 && !ptr_is_sp {
+        PAUTH_STATS.lock().expect("stats lock")[Scenario::Unsigned as usize] += 1;
+        return Some(Vec::new());
+    }
+    let canonical = scenario != Scenario::Unsigned || signer;
+    let mut p = pauth_pointer(r, canonical) & align;
+    if f.loads {
+        // Unicorn's LDRAA and LDRAB take SP as the modifier where the
+        // architecture says zero: the two agree with SP zero.
+        if f.ptr != 31 {
+            g.sp = 0;
+        }
+        let base = if f.ptr == 31 {
+            g.sp
+        } else {
+            g.x[f.ptr as usize]
+        };
+        let alias = base.wrapping_sub(DATA).wrapping_add(PAUTH_DATA);
+        if scenario != Scenario::Unsigned {
+            p = alias;
+        }
+    }
+    if f.ptr == 31 {
+        g.sp = p & !15;
+        PAUTH_STATS.lock().expect("stats lock")[Scenario::Unsigned as usize] += 1;
+        return Some(Vec::new());
+    }
+    g.x[f.ptr as usize] = p;
+    let mut words = Vec::new();
+    let mut counted = scenario;
+    if signs && scenario != Scenario::Unsigned {
+        let key = if scenario == Scenario::WrongKey {
+            f.key ^ 1
+        } else {
+            f.key
+        };
+        words.push(pac_word(&f, insn, key));
+        match scenario {
+            Scenario::PacTampered => {
+                let bits: Vec<u32> = (39..=54).chain(56..64).collect();
+                words.push(eor_bit(f.ptr, r.pick(&bits)));
+            }
+            Scenario::AddrTampered => {
+                let lo = if f.branches { 2 } else { 0 };
+                words.push(eor_bit(f.ptr, lo + r.below(39 - u64::from(lo)) as u32));
+            }
+            Scenario::WrongModifier => match f.modifier {
+                Modifier::Reg(31) => words.push(0xd100_43ff),
+                Modifier::Reg(m) if m != f.ptr => words.push(eor_bit(m, 0)),
+                _ => counted = Scenario::Valid,
+            },
+            _ => {}
+        }
+    }
+    PAUTH_STATS.lock().expect("stats lock")[counted as usize] += 1;
+    Some(words)
 }
