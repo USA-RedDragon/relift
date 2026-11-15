@@ -77,6 +77,35 @@ static inline rl_e_vq rl_e_u2v(rl_u128 u) { return u; }
 static inline rl_u128 rl_e_v2u(rl_e_vq v) { return v; }
 #endif
 
+/*
+ * The carry (cf) and overflow (vf) of x + y and x - y, as A64 sets C and V:
+ * a subtract carries when it does not borrow.
+ */
+static inline int rl_e_cf_add64(uint64_t x, uint64_t y) { return (uint64_t)(x + y) < x; }
+static inline int rl_e_cf_sub64(uint64_t x, uint64_t y) { return x >= y; }
+static inline int rl_e_vf_add64(uint64_t x, uint64_t y)
+{
+    int64_t t;
+    return __builtin_add_overflow((int64_t)x, (int64_t)y, &t);
+}
+static inline int rl_e_vf_sub64(uint64_t x, uint64_t y)
+{
+    int64_t t;
+    return __builtin_sub_overflow((int64_t)x, (int64_t)y, &t);
+}
+static inline int rl_e_cf_add32(uint32_t x, uint32_t y) { return (uint32_t)(x + y) < x; }
+static inline int rl_e_cf_sub32(uint32_t x, uint32_t y) { return x >= y; }
+static inline int rl_e_vf_add32(uint32_t x, uint32_t y)
+{
+    int32_t t;
+    return __builtin_add_overflow((int32_t)x, (int32_t)y, &t);
+}
+static inline int rl_e_vf_sub32(uint32_t x, uint32_t y)
+{
+    int32_t t;
+    return __builtin_sub_overflow((int32_t)x, (int32_t)y, &t);
+}
+
 static inline int64_t rl_e_sx64(uint64_t v, unsigned w)
 {
     return w >= 64 ? (int64_t)v : (int64_t)(v << (64 - w)) >> (64 - w);

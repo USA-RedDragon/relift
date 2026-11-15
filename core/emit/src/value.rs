@@ -386,6 +386,20 @@ pub(crate) fn emit_op(
             };
             fit(&e, w)
         }
+        Op::Cmp(op @ (CmpOp::Eq | CmpOp::Ne), x, y)
+            if let Some(e) = carry_test(b, *x, *y).or_else(|| carry_test(b, *y, *x)) =>
+        {
+            let (ext, x, y, sub, n) = e;
+            let (vx, vy) = (val(x), val(y));
+            let name = match (ext, sub) {
+                (ExtKind::Zero, false) => "cf_add",
+                (ExtKind::Zero, true) => "cf_sub",
+                (ExtKind::Sign, false) => "vf_add",
+                (ExtKind::Sign, true) => "vf_sub",
+            };
+            let not = if *op == CmpOp::Eq { "!" } else { "" };
+            format!("{not}rl_e_{name}{n}({vx}, {vy})")
+        }
         Op::Cmp(op, x, y) => {
             let wx = wv(*x);
             let (vx, vy) = (val(*x), val(*y));
@@ -576,6 +590,53 @@ pub(crate) fn emit_op(
         }
     };
     Ok(Emitted::Value(e))
+}
+
+/// The flag test of an add with carry in 0, or of a subtract (an add of the
+/// complement with carry in 1), that the Sail `AddWithCarry` builds: `a` the
+/// 32- or 64-bit result extended to 128 bits and `s` the exact sum of the
+/// operands extended the same way, compared for equality. Gives the
+/// extension (zero: the carry, sign: the overflow), the operands, whether it
+/// subtracts and the width, so the emitter tests the flag on the operands
+/// with one host compare instead of in 128 bits.
+fn carry_test(b: &Block, a: Value, s: Value) -> Option<(ExtKind, Value, Value, bool, u32)> {
+    let op = |v: Value| &b.insts[v.index()].op;
+    let width = |v: Value| b.insts[v.index()].width.map_or(0, Width::bits);
+    let sum = |v: Value| -> Option<(ExtKind, Value, Value, u128)> {
+        let Op::Bin(BinOp::Add, l, c) = *op(v) else {
+            return None;
+        };
+        let Op::Const(c) = *op(c) else { return None };
+        let Op::Bin(BinOp::Add, ex, ey) = *op(l) else {
+            return None;
+        };
+        let (Op::Ext(k, x), Op::Ext(k2, y)) = (op(ex), op(ey)) else {
+            return None;
+        };
+        (k == k2 && width(v) == 128).then_some((*k, *x, *y, c.get()))
+    };
+    let Op::Ext(k, r) = *op(a) else { return None };
+    let Op::Extract(t, 0) = *op(r) else {
+        return None;
+    };
+    let (ks, x, y, c) = sum(s)?;
+    let (_, x2, y2, c2) = sum(t)?;
+    let n = width(r);
+    if k != ks
+        || x != x2
+        || y != y2
+        || c != c2
+        || width(x) != n
+        || width(y) != n
+        || !matches!(n, 32 | 64)
+    {
+        return None;
+    }
+    match (c, op(y)) {
+        (0, _) => Some((k, x, y, false, n)),
+        (1, Op::Un(UnOp::Not, z)) if width(*z) == n => Some((k, x, *z, true, n)),
+        _ => None,
+    }
 }
 
 /// Bits `lo..lo + w` of the vector `x` (`w` at most 64) as a lane read of
