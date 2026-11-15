@@ -16,7 +16,7 @@ what runs and what does not.
 |---|---|---|
 | Nintendo Switch | ARM64 (`cpus/arm64`, generated from Arm's Sail model) | Test programs built with libnx run end to end. Commercial Switch games have reached gameplay on Linux x86-64 in test runs; most games are untested and many will fail. Includes Vulkan forwarding, a core scheduler with preemption points, hot-load, code and data mods, input and settings. |
 | Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | `relift import`, `build` and `run` work on ROMs. Test ROMs from public corpora pass in CI. Retail Game Boy Color games reach their title screens in test runs. |
-| Game Boy Advance | ARMv4T (`cpus/arm32`) | Pieces only, no `relift import` yet. The ARMv4T lifter, the machine core (bus timing, interrupts, timers, DMA, display, picture unit), the high-level BIOS, the cartridge saves and the keypad are built and tested against console records and the NanoBoyAdvance oracle. Whole-ROM discovery and the CPU runtime layer are planned. |
+| Game Boy Advance | ARMv4T (`cpus/arm32`) | `relift import`, `build` and `run` work on ROMs. jsmolka's arm, thumb and save tests pass and match the NanoBoyAdvance oracle's memory and frames. Retail games boot their first frames; code they copy to RAM in ways discovery does not follow yet is missed code. |
 
 relift ships no game code, keys or data, and never will.
 
@@ -128,11 +128,25 @@ CI builds and runs 38 corpus cases through this path
 
 ### Game Boy Advance
 
-Import is not available yet. `relift-gbarom` reads and checks a ROM header and
-lists the save library strings and the multiboot entry of an image that fits
-work RAM. `relift-gbarom functions` lists the functions of a ROM across ARM
-and Thumb code, the code it copies to work RAM and the transfers it cannot
-resolve; `--multiboot` reads a multiboot image.
+```sh
+relift import game.gba
+relift build
+relift run          # or build/host/game --headless --frames 600 --png last.png
+```
+
+The import copies the ROM into the project; the build finds its code from
+the reset entry and the IRQ vector, lifts ARM and Thumb code (and code the
+ROM copies to work RAM) into one unit and links the runtime's ARMv4T and
+GBA layers. The program runs on the high-level BIOS; no BIOS image is
+needed. The backup (SRAM, Flash or EEPROM) is a `.sav` next to the ROM, or
+in the `save.dir` setting's folder. Missed code stops the program with a
+report; hot-loading is not available for this guest yet.
+
+`relift-gbarom` reads and checks a ROM header and lists the save library
+strings and the multiboot entry of an image that fits work RAM.
+`relift-gbarom functions` lists the functions of a ROM across ARM and Thumb
+code, the code it copies to work RAM and the transfers it cannot resolve;
+`--multiboot` reads a multiboot image.
 
 ## Building and running
 

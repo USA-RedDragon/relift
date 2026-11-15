@@ -1710,6 +1710,44 @@ stall where rustyboi places it.
   the start, a return of the outermost frame, an unwind).
 - [open: block-level syncing through the scheduler, which needs the library
   to report the next cycle anything can change]
+
+### The Game Boy Advance
+
+ARMv4T code (`relift/arm32/abi.h`, `relift/gba/run.h`, the frontend in
+`guests/gba/guest`) runs on the machine in `runtime/guests/gba` through the
+CPU layer `runtime/cpus/arm32` and the glue in `runtime/guests/gba/run`.
+
+- `rl_ctx` holds r0 to r14 of the current mode, the CPSR in parts (one byte
+  per flag, the Thumb bit, the mode bits, the masks) and the SPSRs and banked
+  registers of relift-cpu-arm32's register file, so a mode change in lifted
+  code is a plain swap of fields. The dispatch granule is a halfword; one
+  table covers ARM and Thumb code, so an address is the entry of one state.
+- Every load and store goes to the machine's bus (`rl_gba_cpu_read`,
+  `rl_gba_cpu_write`, from `Frontend::io_calls`), which charges the region's
+  wait states to the clock. The bus gets the address as the CPU puts it out
+  (before the lifter's alignment): the machine aligns it except for the
+  8-bit backup. The block's tick keeps only the internal cycles; the fetch of
+  the next instruction (`rl_arm32_fetch`) and the refill after a taken branch
+  (`rl_arm32_refill`) cost the code region's wait states, a sequential Game
+  Pak fetch one cycle while WAITCNT's prefetch bit is set.
+- Every instruction ends in a sync point (`rl_sync`). The IRQ line is a
+  scheduler line masked while the I bit is set: lifted code reports writes of
+  I (`rl_arm32_set_i`). An IRQ taken at a sync point enters IRQ mode, runs
+  the HLE BIOS stub's entry, calls the handler as a nested host call with LR
+  0x138, and at 0x138 runs the stub's return and restores the CPSR.
+- SWI lifts to a trap after the exception entry; `rl_gba_swi_trap` runs the
+  HLE BIOS call and returns from the exception. Inside IntrWait and Halt the
+  machine calls back where the console takes the interrupt, and the handler
+  runs there as on the console's BIOS.
+- ARMv4T has no return instruction. A lifted call (BL, the second half of a
+  Thumb BL pair, `MOV LR,PC` then `BX`) pushes its return address on the
+  context's frame stack (`rl_arm32_call`), and `rl_indirect` to the address
+  on top returns from the host frame. A computed jump anywhere else goes
+  through dispatch; a redirect (`rl_arm32_redirect`, SoftReset) restarts the
+  run loop with no open frame.
+- Missed code stops the program with the crash report; hot-loading for this
+  guest is open.
+
 ## 14. Fibers
 
 The device scheduler (`relift/sched.h`) runs every guest CPU of a machine on
