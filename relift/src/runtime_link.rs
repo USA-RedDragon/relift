@@ -10,6 +10,13 @@
 //!
 //! With none of them the game builds without a window backend and runs
 //! headless.
+//!
+//! On Apple hosts the runtime links MoltenVK directly instead of loading a
+//! Vulkan loader at run time (`-DRL_VULKAN_LINKED`), so the program loads no
+//! code at run time and the same path serves iOS. MoltenVK comes from the
+//! first of `RELIFT_MOLTENVK_DIR`, `<cache>/sdk/moltenvk/<arch>-<os>/` and
+//! Homebrew's `molten-vk`, each a directory with `lib/libMoltenVK.dylib`.
+//! Without one the runtime looks for a loader at run time.
 
 use std::path::{Path, PathBuf};
 
@@ -23,12 +30,20 @@ pub struct Sdl3 {
     pub origin: String,
 }
 
+/// The Vulkan implementation the program links instead of loading one.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LinkedVulkan {
+    pub lib_dir: PathBuf,
+    pub origin: String,
+}
+
 /// The extra runtime sources, flags and libraries of one build.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Extras {
     pub vk: Vec<PathBuf>,
     pub window: Option<PathBuf>,
     pub sdl3: Option<Sdl3>,
+    pub vulkan: Option<LinkedVulkan>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -88,8 +103,36 @@ pub fn find_sdl3(cache_root: &Path) -> Option<Sdl3> {
     from_dir(&pinned, "pinned prebuilt".into()).or_else(from_pkg_config)
 }
 
-/// The extra sources of the runtime at `rt`, with SDL3 looked up under
-/// `cache_root`.
+fn moltenvk_in(dir: &Path, origin: &str) -> Option<LinkedVulkan> {
+    let lib_dir = dir.join("lib");
+    lib_dir
+        .join("libMoltenVK.dylib")
+        .is_file()
+        .then(|| LinkedVulkan {
+            lib_dir,
+            origin: origin.into(),
+        })
+}
+
+/// MoltenVK for an Apple host, or `None` on other hosts and when absent.
+pub fn find_moltenvk(cache_root: &Path) -> Option<LinkedVulkan> {
+    if !cfg!(target_vendor = "apple") {
+        return None;
+    }
+    if let Some(d) = std::env::var_os("RELIFT_MOLTENVK_DIR").filter(|v| !v.is_empty()) {
+        return moltenvk_in(Path::new(&d), "RELIFT_MOLTENVK_DIR");
+    }
+    let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    moltenvk_in(
+        &cache_root.join("sdk").join("moltenvk").join(target),
+        "pinned prebuilt",
+    )
+    .or_else(|| moltenvk_in(Path::new("/opt/homebrew/opt/molten-vk"), "Homebrew"))
+    .or_else(|| moltenvk_in(Path::new("/usr/local/opt/molten-vk"), "Homebrew"))
+}
+
+/// The extra sources of the runtime at `rt`, with SDL3 and MoltenVK looked
+/// up under `cache_root`.
 ///
 /// # Errors
 ///
@@ -104,30 +147,47 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         vk,
         window: sdl3.as_ref().map(|_| window),
         sdl3,
+        vulkan: find_moltenvk(cache_root),
     })
 }
 
 impl Extras {
     /// What the build prints about the window backend.
     pub fn note(&self) -> String {
-        match &self.sdl3 {
+        let window = match &self.sdl3 {
             Some(s) => format!("window: SDL3 ({})", s.origin),
             None => "window: SDL3 not found, building headless (set RELIFT_SDL3_DIR)".into(),
+        };
+        match &self.vulkan {
+            Some(v) => format!("{window}; Vulkan: MoltenVK linked ({})", v.origin),
+            None => window,
         }
     }
 
     /// Defines every runtime file needs.
     pub fn defines(&self) -> Vec<String> {
+        let mut d = Vec::new();
         if self.sdl3.is_some() {
-            vec!["-DRL_HOST_VIDEO".into()]
-        } else {
-            Vec::new()
+            d.push("-DRL_HOST_VIDEO".into());
         }
+        if self.vulkan.is_some() {
+            d.push("-DRL_VULKAN_LINKED".into());
+        }
+        d
     }
 
     /// Link flags.
     pub fn libs(&self) -> Vec<String> {
-        self.sdl3.as_ref().map_or_else(Vec::new, |s| s.libs.clone())
+        let mut l = self.sdl3.as_ref().map_or_else(Vec::new, |s| s.libs.clone());
+        if let Some(v) = &self.vulkan {
+            let dir = v.lib_dir.display();
+            l.extend([
+                format!("-L{dir}"),
+                format!("-Wl,-rpath,{dir}"),
+                "-lMoltenVK".into(),
+            ]);
+        }
+        l
     }
 
     /// Compiles for the extra sources. `rt_flags` are the runtime's flags
@@ -197,9 +257,31 @@ mod tests {
             vk: Vec::new(),
             window: None,
             sdl3: None,
+            vulkan: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
         assert!(e.libs().is_empty());
+    }
+
+    #[test]
+    fn missing_moltenvk_dir_is_not_found() {
+        assert_eq!(moltenvk_in(Path::new("/nonexistent"), "x"), None);
+    }
+
+    #[test]
+    fn linked_moltenvk_defines_and_links_it() {
+        let e = Extras {
+            vk: Vec::new(),
+            window: None,
+            sdl3: None,
+            vulkan: Some(LinkedVulkan {
+                lib_dir: PathBuf::from("/m/lib"),
+                origin: "t".into(),
+            }),
+        };
+        assert!(e.note().contains("MoltenVK linked (t)"));
+        assert_eq!(e.defines(), ["-DRL_VULKAN_LINKED"]);
+        assert_eq!(e.libs(), ["-L/m/lib", "-Wl,-rpath,/m/lib", "-lMoltenVK"]);
     }
 }
