@@ -86,6 +86,7 @@ hand_commands = [
     "vkDestroyDebugReportCallbackEXT",
     "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
     "vkGetPhysicalDeviceSurfaceCapabilities2KHR",
+    "vkGetPhysicalDeviceSurfacePresentModesKHR",
     "vkCreateSwapchainKHR",
     "vkDestroySwapchainKHR",
     "vkGetSwapchainImagesKHR",

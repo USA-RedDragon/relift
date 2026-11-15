@@ -183,6 +183,12 @@ handles are ids from the layer (`0x57` in the top byte). Commands on
 swapchains the layer does not implement (`vkGetSwapchainStatusKHR`, shared,
 counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.
 
+The console's own swapchain layer (`NvSwapchain` in the `vulkan` module)
+offers only `VK_PRESENT_MODE_FIFO_KHR` and sets swap interval 1 on the
+window. `vkGetPhysicalDeviceSurfacePresentModesKHR` reports FIFO alone too, so
+a game that picks its mode from the list (The Forge prefers immediate when
+vsync is off) gets FIFO, as on the console.
+
 ## Loading
 
 `vk_window.o` registers `rl_vk_switch_hook()` from a constructor (`rl_switch_register_auto_hook`) and `rl_switch_main` adds it by itself; a program calls nothing. A build must link the object (`librelift_switch_vk.a` only with `-Wl,--whole-archive`, `-force_load` or `/WHOLEARCHIVE`, since nothing else references it).

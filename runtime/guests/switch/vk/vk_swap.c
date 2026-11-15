@@ -167,6 +167,29 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *
     return vkf_end(&k);
 }
 
+int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem)
+{
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    VkPhysicalDevice pd = vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
+    if (!pd)
+        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceSurfacePresentModesKHR, c->x[0]);
+    uint64_t gcount = c->x[2], gmodes = c->x[3];
+    VkResult r = VK_SUCCESS;
+    if (!gcount)
+        r = VK_ERROR_INITIALIZATION_FAILED;
+    else if (!gmodes)
+        rl_st32(mem, gcount, 1);
+    else if (!vkf_g32(&k, gcount))
+        r = VK_INCOMPLETE;
+    else {
+        rl_st32(mem, gmodes, VK_PRESENT_MODE_FIFO_KHR);
+        rl_st32(mem, gcount, 1);
+    }
+    c->x[0] = (uint32_t)r;
+    return vkf_end(&k);
+}
+
 static uint32_t memory_type(const vkf_dev *d, uint32_t bits)
 {
     for (uint32_t i = 0; i < d->type_count; i++)

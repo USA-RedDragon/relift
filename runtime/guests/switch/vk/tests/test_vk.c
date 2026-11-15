@@ -872,6 +872,15 @@ TEST(vk_vi_surface_presents_headless)
         CHECK(VKR(G("vkGetPhysicalDeviceSurfaceFormatsKHR", pds[i], surface, gfn, gfmts)) >= 0);
         VkSurfaceFormatKHR fmt;
         memcpy(&fmt, g_mem + gfmts, sizeof fmt);
+        uint64_t gmn = galloc(4), gmodes = galloc(16);
+        CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfacePresentModesKHR", pds[i], surface, gmn, 0)), VK_SUCCESS);
+        CHECK_EQ(g32(gmn), 1);
+        rl_st32(g_mem, gmn, 4);
+        CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfacePresentModesKHR", pds[i], surface, gmn, gmodes)), VK_SUCCESS);
+        CHECK_EQ(g32(gmn), 1);
+        CHECK_EQ(g32(gmodes), VK_PRESENT_MODE_FIFO_KHR);
+        rl_st32(g_mem, gmn, 0);
+        CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfacePresentModesKHR", pds[i], surface, gmn, gmodes)), VK_INCOMPLETE);
         const char *dexts[] = { "VK_KHR_swapchain" };
         uint64_t dev = make_device(pds[i], qf, dexts, 1);
         CHECK(dev != 0);
