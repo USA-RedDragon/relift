@@ -78,6 +78,8 @@ pub enum Command {
     },
     /// Compare one lifted function with the reference interpreter in a live run.
     ///
+    /// Switch projects only.
+    ///
     /// Builds a dev build and runs it under gdb. At each call of the function
     /// the same guest function runs in the interpreter from the same registers
     /// and live guest memory, the lifted code runs with the other threads
@@ -123,7 +125,8 @@ pub enum Command {
     },
     /// List what discovery could not resolve: per module, functions,
     /// instructions not lifted and every unresolved indirect call or jump,
-    /// with hints from earlier hot-load runs.
+    /// with hints from earlier hot-load runs. Switch projects only; for a
+    /// Game Boy ROM use `relift-gbrom functions`.
     Coverage {
         /// Print JSON instead of text.
         #[arg(long)]
