@@ -413,7 +413,15 @@ pub fn build(
                     .into_iter()
                     .collect(),
             };
-            relift_gb::program::lift_superset(&rom, r, &learned.ram, image_id, &keys)
+            let ram: Vec<(u16, u16)> = learned
+                .ram
+                .iter()
+                .copied()
+                .chain(r.ram_ops.ops.iter().map(|o| (o.addr, o.key)))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            relift_gb::program::lift_superset(&rom, r, &ram, image_id, &keys)
         }
         None => relift_gb::program::lift_nothing(image_id),
     };
