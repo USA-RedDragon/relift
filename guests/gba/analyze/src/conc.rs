@@ -9,6 +9,11 @@
 //! after [`MAX_STEPS`] instructions. When it returns, the written RAM bytes whose
 //! values are known are what the call leaves there, whatever the call is
 //! (a copy loop, a decompressor).
+//!
+//! A word the run loads from RAM it did not write is the symbol of that
+//! address; where the run stores such a word unchanged to a constant RAM
+//! address, the destination holds what the source held (a RAM-to-RAM
+//! copy), which the run reports as a move.
 
 use std::collections::BTreeMap;
 
@@ -17,7 +22,7 @@ use relift_cpu_arm32::decode::Encoding;
 use crate::eval::{self, SCRATCH_STACK, Scratch};
 use crate::func::{Args, Env};
 use crate::loc::{Loc, Region};
-use crate::val::{Abs, LR, SP, State};
+use crate::val::{Abs, Base, LR, SP, State, Sym};
 
 /// The return address the run's caller leaves in `lr`.
 const SENTINEL: u32 = 0x0F00_0000;
@@ -28,16 +33,26 @@ fn fetch(env: &Env<'_>, m: &Scratch, loc: Loc) -> Option<u32> {
     if loc.region().is_ram() {
         let mut v = 0u32;
         for i in (0..loc.size()).rev() {
-            v = v << 8 | u32::from(*m.get(&(loc.addr + i))?);
+            v = v << 8 | u32::from((*m.get(&(loc.addr + i))?)?);
         }
         return Some(v);
     }
     env.image.fetch(loc)
 }
 
-/// The RAM ranges a call to `callee` with `r0`-`r12` = `args` writes, or
-/// `None` when the run cannot be completed with constants.
-pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Vec<(u32, Vec<u8>)>> {
+/// What a run with constant inputs leaves in RAM.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Written {
+    /// The bytes written with known values, as ranges.
+    pub ranges: Vec<(u32, Vec<u8>)>,
+    /// Words copied unchanged from RAM the run did not write: destination
+    /// and source.
+    pub moves: Vec<(u32, u32)>,
+}
+
+/// What a call to `callee` with `r0`-`r12` = `args` writes, or `None`
+/// when the run cannot be completed with constants.
+pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Written> {
     let mut st = State::entry(callee.thumb);
     for (i, r) in st.regs.iter_mut().enumerate().take(15) {
         *r = match args.get(i) {
@@ -48,10 +63,14 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Vec<(u3
     st.regs[usize::from(SP)] = Abs::K(u128::from(SCRATCH_STACK - 0x10));
     st.regs[usize::from(LR)] = Abs::K(u128::from(SENTINEL));
     let mut m = Scratch::new();
+    let mut moves: BTreeMap<u32, u32> = BTreeMap::new();
     let mut loc = callee;
     for _ in 0..MAX_STEPS {
         if loc.addr == SENTINEL {
-            return Some(ranges(&m));
+            return Some(Written {
+                ranges: ranges(&m),
+                moves: moves.into_iter().collect(),
+            });
         }
         let word = fetch(env, &m, loc)?;
         let lifted = env.lift(loc, word).ok()?;
@@ -69,6 +88,22 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Vec<(u3
         );
         if out.may_skip && out.may_run || out.stores.iter().any(|s| s.0.k().is_none()) {
             return None;
+        }
+        for &(a, n, v) in &out.stores {
+            let Some(a) = a.k32() else { continue };
+            let w = a & !3;
+            moves.retain(|d, _| d.wrapping_add(4) <= a || *d >= a.wrapping_add(u32::from(n)));
+            if let Abs::S(Sym {
+                base: Base::Mem(s),
+                off: 0,
+                align: 0,
+            }) = v
+                && n == 4
+                && w == a
+                && Region::of(a).is_ram()
+            {
+                moves.insert(a, s);
+            }
         }
         if !out.may_run {
             loc.addr = loc.addr.wrapping_add(loc.size());
@@ -92,7 +127,7 @@ fn ranges(m: &Scratch) -> Vec<(u32, Vec<u8>)> {
     let ram: BTreeMap<u32, u8> = m
         .iter()
         .filter(|(a, _)| Region::of(**a).is_ram())
-        .map(|(a, b)| (*a, *b))
+        .filter_map(|(a, b)| Some((*a, (*b)?)))
         .collect();
     let mut out: Vec<(u32, Vec<u8>)> = Vec::new();
     for (a, b) in ram {

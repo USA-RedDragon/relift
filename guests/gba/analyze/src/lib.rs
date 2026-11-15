@@ -52,7 +52,17 @@
 //!   (`r0`-`r12`) hold a ROM and a RAM address and which runs to its
 //!   return on constants alone (a copy loop, a decompressor) makes a
 //!   [`RamCopy`]; code reached in its destination is lifted from those
-//!   bytes at its run address.
+//!   bytes at its run address. Two RAM addresses work the same way: a
+//!   word such a run loads from RAM it did not write and stores unchanged
+//!   to a constant address is moved there, and the pointers known at the
+//!   source hold at the destination too (a table copied within RAM).
+//! - Wrappers: a function that passes an argument on to a callee that
+//!   both loads and stores through pointers (a copy) is run again at each
+//!   call that gives it a constant ROM or RAM address, with those
+//!   constants; what that run copies and stores is the caller's. Such
+//!   runs nest three deep.
+//! - RAM tables: a word loaded from a RAM address plus a scaled index
+//!   reads the pointers known at each entry.
 //!
 //! Function runs are repeated until the summaries (returns, registers
 //! kept, argument effects), the entries and the RAM facts stop changing.

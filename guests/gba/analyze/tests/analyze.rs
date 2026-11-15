@@ -870,3 +870,70 @@ fn a_linked_jump_through_an_unknown_pointer_is_a_call() {
     assert!(f.linked.contains(&Loc::rom(e + 0xC, false)));
     assert!(insts(&r).contains(&(e + 0x10, false)));
 }
+
+#[test]
+fn a_table_copied_through_a_wrapper_and_moved_in_ram_resolves_a_jump() {
+    let mut a = Asm::new();
+    let t = 0x0800_0200;
+    let wrap = 0x0800_0280;
+    let copy = 0x0800_02C0;
+    let cb = 0x0800_0340;
+    let rom_tab = 0x0800_0400;
+    let (ram_a, ram_b, var) = (0x0300_0100, 0x0300_0200, 0x0300_0300);
+    a.arm(
+        0x0800_0100,
+        &[a_ldr_lit(0, 0x0800_0100, 0x0800_0108), a_bx(0), t | 1],
+    );
+    let bl_wrap = t_bl(t + 2, wrap);
+    let bl_copy = t_bl(t + 0xC, copy);
+    a.thumb(
+        t,
+        &[
+            t_ldr_lit(0, t, t + 0x20),
+            bl_wrap[0],
+            bl_wrap[1],
+            t_ldr_lit(0, t + 6, t + 0x24),
+            t_ldr_lit(1, t + 8, t + 0x28),
+            0x2208,
+            bl_copy[0],
+            bl_copy[1],
+            t_ldr_lit(2, t + 0x10, t + 0x2C),
+            0x6812,
+            0x00D2,
+            t_ldr_lit(3, t + 0x16, t + 0x24),
+            0x189B,
+            0x6858,
+            t_bx(0),
+            0,
+        ],
+    );
+    a.arm(t + 0x20, &[rom_tab, ram_b, ram_a, var]);
+    let bl = t_bl(wrap + 8, copy);
+    a.thumb(
+        wrap,
+        &[
+            T_PUSH_LR,
+            0x1C01,
+            t_ldr_lit(0, wrap + 4, wrap + 0x10),
+            0x2208,
+            bl[0],
+            bl[1],
+            T_POP_R0,
+            t_bx(0),
+        ],
+    );
+    a.w32(wrap + 0x10, ram_a);
+    a.thumb(
+        copy,
+        &[0x680B, 0x6003, 0x3004, 0x3104, 0x3A04, 0xD1F9, T_BX_LR],
+    );
+    a.arm(rom_tab, &[0, cb | 1]);
+    a.thumb(cb, &[T_MOVS_R0_1, T_BX_LR]);
+    let r = a.run(0x0800_0100);
+    assert!(
+        r.copies.iter().any(|c| c.dst == ram_a && c.len() == 8),
+        "{:?}",
+        r.copies
+    );
+    assert!(insts(&r).contains(&(cb, true)), "{:?}", r.unresolved);
+}

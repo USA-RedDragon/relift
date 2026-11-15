@@ -50,6 +50,12 @@ pub(crate) struct Summary {
     /// the interrupt masks, an SPSR or a banked register: the caller keeps
     /// them (a SWI restores them before it returns).
     pub psr: bool,
+    /// It, or a function it calls, both loads and stores through
+    /// addresses neither constant nor on its stack: it may copy.
+    pub writes: bool,
+    /// It passes an argument on to a call of such a function: with
+    /// constant arguments its run can learn more.
+    pub spec: bool,
 }
 
 impl Summary {
@@ -67,6 +73,8 @@ impl Summary {
             effects: Rc::from(Vec::new()),
             frame_exit: None,
             psr: true,
+            writes: false,
+            spec: false,
         }
     }
 
@@ -120,8 +128,25 @@ pub(crate) type Lifted = Result<Rc<(Encoding, Block)>, LiftError>;
 /// read, since code may keep to no calling convention.
 pub(crate) type Args = [Abs; 13];
 
-/// The RAM ranges a constant call wrote, by callee and arguments.
-pub(crate) type Runs = HashMap<(Loc, Args), Option<Rc<Vec<(u32, Vec<u8>)>>>>;
+/// What a constant call wrote, by callee and arguments.
+pub(crate) type Runs = HashMap<(Loc, Args), Option<Rc<crate::conc::Written>>>;
+
+/// What a run on a caller's constants found: copies, constant stores,
+/// RAM-to-RAM moves, IRQ handlers.
+#[derive(Default)]
+pub(crate) struct Special {
+    copies: Vec<RamCopy>,
+    ptr_stores: Vec<(u32, u32)>,
+    moves: Vec<(u32, u32)>,
+    irq: Vec<u32>,
+}
+
+/// The runs on callers' constants, by callee and arguments, with the
+/// version of the facts they used.
+pub(crate) type Specials = HashMap<(Loc, Args), (u64, Rc<Special>)>;
+
+/// How deep runs of a function on its caller's constants nest.
+const MAX_SPEC_DEPTH: u8 = 3;
 
 pub(crate) struct Env<'a> {
     pub image: &'a Image<'a>,
@@ -134,6 +159,11 @@ pub(crate) struct Env<'a> {
     /// discovered code reads that it also takes as constants, and the
     /// function entries.
     pub stops: &'a BTreeSet<u32>,
+    /// How many runs on a caller's constants this run is inside.
+    pub depth: u8,
+    pub specials: &'a RefCell<Specials>,
+    /// Changes whenever a summary, a copy or a RAM constant does.
+    pub version: u64,
 }
 
 impl Env<'_> {
@@ -190,6 +220,17 @@ pub(crate) struct FnRun {
     pub writes_psr: bool,
     /// Computed jumps with the link register set to the next instruction.
     pub linked: BTreeSet<Loc>,
+    /// Words a constant call copied from RAM to RAM: destination, source.
+    pub moves: Vec<(u32, u32)>,
+    /// Some store goes through an address neither constant nor on the
+    /// stack.
+    pub ptr_store: bool,
+    /// Some load does.
+    pub ptr_load: bool,
+    /// A callee may copy.
+    pub writes: bool,
+    /// Some call passes an argument on to a callee that writes.
+    pub spec: bool,
 }
 
 struct Run<'a> {
@@ -481,7 +522,11 @@ impl Run<'_> {
                 self.out.refs.push(v);
             }
         }
+        self.out.ptr_load |= out.ptr_load;
         for &(a, n, v) in &out.stores {
+            if a.k().is_none() && a.stack_off().is_none() {
+                self.out.ptr_store = true;
+            }
             if n == 4 {
                 self.store(a, v);
             }
@@ -661,8 +706,23 @@ impl Run<'_> {
                 kind,
             });
             self.out.edge_psr.push(st.psr());
-            self.constant_call(site, callee, st);
+            let ran = self.constant_call(site, callee, st);
             let cs = self.env.summary(callee);
+            self.out.writes |= cs.writes;
+            let addr = |a: Abs| {
+                is_param(a)
+                    || a.k32()
+                        .is_some_and(|k| Region::of(k).is_ram() || self.env.image.is_source(k))
+            };
+            if (cs.writes || cs.spec)
+                && (0..4).any(|r| is_param(st.reg(r)))
+                && (0..4).filter(|r| addr(st.reg(*r))).count() >= 2
+            {
+                self.out.spec = true;
+            }
+            if cs.spec && !ran {
+                self.special(callee, st);
+            }
             let effects = cs.effects.clone();
             self.apply(site, &effects, st);
             if let Some(o) = cs.frame_exit {
@@ -716,6 +776,7 @@ impl Run<'_> {
             }
             let mut vals: Vec<u32> = Vec::new();
             if ram {
+                self.out.reads.insert(a);
                 for c in self.env.image.copies_at(a) {
                     if let Some(v) = self.env.image.read(Some(c), a, 4) {
                         vals.push(v);
@@ -873,13 +934,16 @@ impl Run<'_> {
     /// A call whose registers name both a ROM and a RAM address is run
     /// with the constants in `r0`-`r12`; what it writes to RAM becomes
     /// copies.
-    fn constant_call(&mut self, site: Loc, callee: Loc, st: &State) {
+    fn constant_call(&mut self, site: Loc, callee: Loc, st: &State) -> bool {
         let args: Args = std::array::from_fn(|i| st.reg(i as u8));
         let ks: Vec<u32> = args.iter().filter_map(|a| a.k32()).collect();
-        if !ks.iter().any(|a| Region::of(*a).is_ram())
-            || !ks.iter().any(|a| self.env.image.is_source(*a))
-        {
-            return;
+        let ram: BTreeSet<u32> = ks
+            .iter()
+            .copied()
+            .filter(|a| Region::of(*a).is_ram())
+            .collect();
+        if ram.is_empty() || !(ks.iter().any(|a| self.env.image.is_source(*a)) || ram.len() > 1) {
+            return false;
         }
         let key = (callee, args);
         let cached = self.env.runs.borrow().get(&key).cloned();
@@ -891,7 +955,8 @@ impl Run<'_> {
                 g
             }
         };
-        for (dst, bytes) in got.iter().flat_map(|v| v.iter()) {
+        let Some(w) = got else { return true };
+        for (dst, bytes) in &w.ranges {
             if bytes.len() >= 4 {
                 self.out.copies.push(RamCopy {
                     site,
@@ -902,6 +967,61 @@ impl Run<'_> {
                 });
             }
         }
+        self.out.moves.extend(w.moves.iter().copied());
+        true
+    }
+
+    /// A call that passes constants to a function that passes its
+    /// arguments on to a writer: the callee is run again with them, and
+    /// the copies and constant stores that run finds are this run's.
+    fn special(&mut self, callee: Loc, st: &State) {
+        if self.env.depth >= MAX_SPEC_DEPTH
+            || !(0..13u8).any(|r| {
+                st.reg(r)
+                    .k32()
+                    .is_some_and(|a| Region::of(a).is_ram() || self.env.image.is_source(a))
+            })
+        {
+            return;
+        }
+        let args: Args = std::array::from_fn(|i| match st.reg(i as u8) {
+            a @ Abs::K(_) => a,
+            _ => Abs::Top,
+        });
+        let key = (callee, args);
+        let cached = self.env.specials.borrow().get(&key).cloned();
+        let sp = match cached {
+            Some((v, sp)) if v == self.env.version => sp,
+            _ => {
+                let mut entry = State::entry(callee.thumb);
+                entry.set_psr(&st.psr());
+                for (r, a) in args.iter().enumerate() {
+                    if a.k().is_some() {
+                        entry.regs[r] = *a;
+                    }
+                }
+                let env = Env {
+                    depth: self.env.depth + 1,
+                    ..*self.env
+                };
+                let r = run(&env, callee, entry, self.no_tables);
+                let sp = Rc::new(Special {
+                    copies: r.copies,
+                    ptr_stores: r.ptr_stores,
+                    moves: r.moves,
+                    irq: r.irq,
+                });
+                self.env
+                    .specials
+                    .borrow_mut()
+                    .insert(key, (self.env.version, sp.clone()));
+                sp
+            }
+        };
+        self.out.copies.extend(sp.copies.iter().cloned());
+        self.out.ptr_stores.extend(sp.ptr_stores.iter().copied());
+        self.out.moves.extend(sp.moves.iter().copied());
+        self.out.irq.extend(sp.irq.iter().copied());
     }
 
     /// A call to `callee`, which jumps to the address in entry register
@@ -1336,6 +1456,8 @@ impl Run<'_> {
             }
         }
         s.effects = Rc::from(std::mem::take(&mut self.out.peffects));
+        s.writes = self.out.writes || self.out.ptr_store && self.out.ptr_load;
+        s.spec = self.out.spec;
         self.out.summary = Some(s);
         self.out
     }

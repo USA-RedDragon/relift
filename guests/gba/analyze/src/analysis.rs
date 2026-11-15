@@ -152,6 +152,11 @@ struct Driver<'a> {
     run_count: HashMap<Loc, usize>,
     summaries: HashMap<Loc, Summary>,
     ptrs: HashMap<u32, BTreeSet<u32>>,
+    /// RAM words copied to other RAM words: source to destinations.
+    moves: HashMap<u32, BTreeSet<u32>>,
+    specials: RefCell<func::Specials>,
+    /// Counts the changes of summaries, copies and RAM constants.
+    version: u64,
     callers: HashMap<Loc, BTreeSet<Loc>>,
     /// The mode, masks, SPSRs and banked registers at each call site of a
     /// function, by function and site.
@@ -188,6 +193,9 @@ impl<'a> Driver<'a> {
             run_count: HashMap::new(),
             summaries: HashMap::new(),
             ptrs: HashMap::new(),
+            moves: HashMap::new(),
+            specials: RefCell::new(HashMap::new()),
+            version: 0,
             callers: HashMap::new(),
             site_psr: HashMap::new(),
             entry_psr: HashMap::new(),
@@ -338,6 +346,9 @@ impl<'a> Driver<'a> {
                     cache: &self.cache,
                     runs: &self.conc,
                     stops: &self.stops,
+                    depth: 0,
+                    specials: &self.specials,
+                    version: self.version,
                 };
                 func::run(&env, l, State::entry(true), &self.no_tables)
             };
@@ -379,6 +390,9 @@ impl<'a> Driver<'a> {
                     cache: &self.cache,
                     runs: &self.conc,
                     stops: &self.stops,
+                    depth: 0,
+                    specials: &self.specials,
+                    version: self.version,
                 };
                 let mut st = State::entry(f.thumb);
                 let edges_only =
@@ -412,6 +426,7 @@ impl<'a> Driver<'a> {
         }
         let sum = run.summary.clone().unwrap_or_else(Summary::unknown);
         if self.summaries.get(&f) != Some(&sum) {
+            self.version += 1;
             self.summaries.insert(f, sum);
             if let Some(cs) = self.callers.get(&f) {
                 self.queue.extend(cs.iter().copied());
@@ -444,11 +459,10 @@ impl<'a> Driver<'a> {
         for &a in &run.reads {
             self.readers.entry(a).or_default().insert(f);
         }
-        for &(a, v) in &run.ptr_stores {
-            if self.ptrs.entry(a).or_default().insert(v)
-                && let Some(rs) = self.readers.get(&a)
-            {
-                self.queue.extend(rs.iter().copied());
+        let mut learned: Vec<(u32, u32)> = run.ptr_stores.clone();
+        for &(d, s) in &run.moves {
+            if self.moves.entry(s).or_default().insert(d) {
+                learned.extend(self.ptrs.get(&s).into_iter().flatten().map(|v| (d, *v)));
             }
         }
         let mut new_copy = false;
@@ -460,19 +474,17 @@ impl<'a> Driver<'a> {
                 .any(|o| o.dst == c.dst && o.bytes == c.bytes)
             {
                 self.image.copies.push(c.clone());
+                self.version += 1;
                 new_copy = true;
                 for (i, w) in c.bytes.as_chunks::<4>().0.iter().enumerate() {
                     let a = c.dst + 4 * i as u32;
-                    let v = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
-                    if a.is_multiple_of(4)
-                        && self.ptrs.entry(a).or_default().insert(v)
-                        && let Some(rs) = self.readers.get(&a)
-                    {
-                        self.queue.extend(rs.iter().copied());
+                    if a.is_multiple_of(4) {
+                        learned.push((a, u32::from_le_bytes([w[0], w[1], w[2], w[3]])));
                     }
                 }
             }
         }
+        self.learn(learned);
         let mut new_irq = false;
         for &v in &run.irq {
             new_irq |= self.irq.insert(v);
@@ -493,6 +505,23 @@ impl<'a> Driver<'a> {
         }
         if new_copy || new_irq {
             self.resolve_irq();
+        }
+    }
+
+    /// Adds constant words stored in RAM, and what they reach through the
+    /// RAM-to-RAM copies; runs the readers of every word that changes.
+    fn learn(&mut self, mut work: Vec<(u32, u32)>) {
+        while let Some((a, v)) = work.pop() {
+            if !self.ptrs.entry(a).or_default().insert(v) {
+                continue;
+            }
+            self.version += 1;
+            if let Some(rs) = self.readers.get(&a) {
+                self.queue.extend(rs.iter().copied());
+            }
+            if let Some(ds) = self.moves.get(&a) {
+                work.extend(ds.iter().map(|d| (*d, v)));
+            }
         }
     }
 

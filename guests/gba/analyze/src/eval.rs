@@ -37,6 +37,8 @@ pub(crate) struct Out {
     pub data: Vec<(u32, u8)>,
     /// DMA channels it enables.
     pub dma: Vec<DmaStart>,
+    /// A load goes through an address neither constant nor on the stack.
+    pub ptr_load: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -336,8 +338,10 @@ fn dma_store(st: &mut State, addr: u32, n: u8, v: Abs, out: &mut Vec<DmaStart>) 
 }
 
 /// Memory known byte by byte, for a run with constant inputs: work RAM
-/// and the run's own stack.
-pub(crate) type Scratch = std::collections::HashMap<u32, u8>;
+/// and the run's own stack. A byte the run wrote with a value not known
+/// is `None`; a byte not in the map still holds what it held before the
+/// run.
+pub(crate) type Scratch = std::collections::HashMap<u32, Option<u8>>;
 
 /// The run's private stack, below this address.
 pub(crate) const SCRATCH_STACK: u32 = 0x0F01_0000;
@@ -380,6 +384,7 @@ pub(crate) fn eval(
         stores: Vec::new(),
         data: Vec::new(),
         dma: Vec::new(),
+        ptr_load: false,
     };
     let mut cx = Ctx {
         b,
@@ -477,15 +482,19 @@ pub(crate) fn eval(
                     _ => Abs::Top,
                 })
             }
-            Op::Load { addr, .. } | Op::IoLoad { addr, .. } => Ev::A(load(
-                &mut out,
-                loc,
-                image,
-                cx.get(*addr),
-                w / 8,
-                literal,
-                scratch.as_deref(),
-            )),
+            Op::Load { addr, .. } | Op::IoLoad { addr, .. } => {
+                let a = cx.get(*addr);
+                out.ptr_load |= a.k().is_none() && a.stack_off().is_none();
+                Ev::A(load(
+                    &mut out,
+                    loc,
+                    image,
+                    cx.get(*addr),
+                    w / 8,
+                    literal,
+                    scratch.as_deref(),
+                ))
+            }
             Op::Store { addr, value, .. } | Op::IoStore { addr, value, .. } => {
                 let n = (cx.width(*value) / 8) as u8;
                 store(
@@ -563,7 +572,7 @@ fn load(
         && n == 4
         && base % 4 == 0
         && stride % 4 == 0
-        && (image.in_image(base) || !image.copies_at(base).is_empty())
+        && (image.in_image(base) || Region::of(base).is_ram())
     {
         return Abs::Tab {
             base,
@@ -578,9 +587,12 @@ fn load(
                 && in_scratch(a)
             {
                 let a = a & !(n - 1);
+                if n == 4 && Region::of(a).is_ram() && (0..4).all(|i| !m.contains_key(&(a + i))) {
+                    return Abs::sym(Base::Mem(a), 0);
+                }
                 let mut v = 0u128;
                 for i in (0..n).rev() {
-                    let Some(b) = m.get(&(a + i)) else {
+                    let Some(Some(b)) = m.get(&(a + i)) else {
                         return Abs::Top;
                     };
                     v = v << 8 | u128::from(*b);
@@ -643,10 +655,7 @@ fn store(out: &mut Out, addr: Abs, n: u8, v: Abs, scratch: Option<&mut Scratch>)
         {
             let a = a & !(u32::from(n) - 1);
             for i in 0..u32::from(n) {
-                match v {
-                    Abs::K(x) => m.insert(a + i, (x >> (8 * i)) as u8),
-                    _ => m.remove(&(a + i)),
-                };
+                m.insert(a + i, v.k().map(|x| (x >> (8 * i)) as u8));
             }
         }
         let mut ev = Vec::new();
