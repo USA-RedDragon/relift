@@ -95,6 +95,8 @@ void bios_lz77(bios_call *c, bool vram)
         for (unsigned k = 0; k < 8 && len; k++, flags <<= 1) {
             if (flags & 0x80u) {
                 uint32_t hi = bios_ld8(c, src, false), lo = bios_ld8(c, src + 1, false);
+                if (src >= 0x08000000u && src < 0x0E000000u)
+                    bios_wait_seq(c, src + 1, 1);
                 src += 2;
                 uint32_t back = (((hi << 8) | lo) & 0xFFFu) + 1;
                 rem = (hi >> 4) + 3;

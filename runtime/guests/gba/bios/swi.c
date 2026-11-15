@@ -88,6 +88,13 @@ static bool bus_timed(const rl_gba_bus *bus) { return bus->load && bus->store &&
 
 void bios_tick(bios_call *c, unsigned n) { c->cyc += n; }
 
+void bios_wait_seq(bios_call *c, uint32_t a, unsigned size)
+{
+    unsigned n = access_cycles(c, a & ~(size - 1u), size, true);
+    c->bus_cyc -= n ? 1u : 0u;
+    c->cyc += n ? n - 1u : 0u;
+}
+
 void bios_point(bios_call *c, uint32_t pc)
 {
     if (!c->timed || (c->psr & 0x80u))

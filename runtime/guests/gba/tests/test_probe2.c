@@ -80,12 +80,6 @@ typedef enum gap_reason {
      * console's address inside Halt.
      */
     R_RETURN,
-    /**
-     * LZ77UnCompWram and LZ77UnCompVram from Game Pak ROM: the whole-call
-     * model, fitted to the console records (source in work RAM), is 7 cycles
-     * short; it needs records with the source in ROM.
-     */
-    R_LZ,
 } gap_reason;
 
 typedef struct gap {
@@ -95,7 +89,6 @@ typedef struct gap {
 } gap;
 
 static const gap gaps[] = {
-    {"open_bus", 4, R_LZ},
     {"A_irq_CpuSet16_copy_ws4317", 509, R_INSIDE},
     {"A_irq_CpuSet16_fill_ws4317", 438, R_INSIDE},
     {"A_irq_CpuSet32_copy_ws4317", 436, R_INSIDE},
@@ -118,7 +111,7 @@ static const gap gaps[] = {
     {"A_irq_RLUnCompVram_ws0000", 365, R_INSIDE},
     {"A_irq_CpuSet32_copy_ws4317_dma3", 213, R_DMA},
     {"A_hblankdma_CpuSet16_copy_ws4317", 106, R_HBLANK},
-    {"A_hblankdma_LZ77UnCompWram_ws4317", 309, R_HBLANK},
+    {"A_hblankdma_LZ77UnCompWram_ws4317", 219, R_HBLANK},
     {"halt_ime1", 96, R_RETURN},
 };
 

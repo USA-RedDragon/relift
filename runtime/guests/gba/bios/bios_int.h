@@ -177,6 +177,8 @@ void bios_save(bios_call *c, unsigned first, unsigned last, bool lr);
 
 /** @brief Counts n cycles of the call (bios_flush spends them). */
 void bios_tick(bios_call *c, unsigned n);
+/** @brief Counts the wait states of a sequential access of size bytes at a, without the access. */
+void bios_wait_seq(bios_call *c, uint32_t a, unsigned size);
 /**
  * @brief On a timed bus, takes a pending interrupt before the instruction at
  * pc unless c->psr masks it: LR_irq = pc + 4, SPSR_irq = c->psr, the
