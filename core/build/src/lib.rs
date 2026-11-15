@@ -198,6 +198,28 @@ fn relative_flag(root: &Path, dir: &Path, flag: &str) -> String {
     flag.to_string()
 }
 
+/// How the paths of a plan are written: moved to be relative to the build
+/// directory when it has a root.
+struct Paths<'a> {
+    base: Option<(&'a Path, &'a Path)>,
+}
+
+impl Paths<'_> {
+    fn path(&self, p: &Path) -> PathBuf {
+        match self.base {
+            Some((root, dir)) => relative(root, dir, p),
+            None => p.to_path_buf(),
+        }
+    }
+
+    fn flag(&self, f: &str) -> String {
+        match self.base {
+            Some((root, dir)) => relative_flag(root, dir, f),
+            None => f.to_string(),
+        }
+    }
+}
+
 /// Escapes `$` in a Ninja variable value.
 fn nv(s: &str) -> String {
     s.replace('$', "$$")
@@ -207,16 +229,11 @@ fn nv(s: &str) -> String {
 /// response file: ninja runs each command as one `sh -c` string, which
 /// Linux caps at 128 KiB, and a game's thousands of shard objects pass it.
 pub fn ninja_file(plan: &Plan, dir: &Path) -> String {
-    let (p, f): (
-        Box<dyn Fn(&Path) -> PathBuf>,
-        Box<dyn Fn(&String) -> String>,
-    ) = match &plan.root {
-        Some(root) => (
-            Box::new(|x| relative(root, dir, x)),
-            Box::new(|x| relative_flag(root, dir, x)),
-        ),
-        None => (Box::new(Path::to_path_buf), Box::new(String::clone)),
+    let at = Paths {
+        base: plan.root.as_deref().map(|r| (r, dir)),
     };
+    let p = |x: &Path| at.path(x);
+    let f = |x: &String| at.flag(x);
     let debug_dir = if plan.root.is_some() {
         " -fdebug-compilation-dir=."
     } else {
