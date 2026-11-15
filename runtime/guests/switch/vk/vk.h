@@ -71,6 +71,13 @@ typedef struct rl_vk_surface_provider {
      * can.
      */
     bool (*presents)(void *user, void *host_instance, void *gipa, void *physical_device, uint32_t family);
+    /**
+     * @brief The surfaces are never shown: a guest swapchain renders each
+     * present into images the layer owns instead of a host swapchain, and
+     * every device and queue family supports the surface. For drivers that
+     * cannot present to a surface of this kind (NVIDIA on headless ones).
+     */
+    bool offscreen;
     /** @brief Passed to create, extent and presents. */
     void *user;
 } rl_vk_surface_provider;

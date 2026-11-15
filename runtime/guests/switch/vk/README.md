@@ -58,8 +58,8 @@ group of it (`vk_device.c`), chosen when the instance first enumerates them.
 `RELIFT_VK_DEVICE` picks it by a part of its name. Otherwise it is the first
 host device whose queue family 0 has graphics and compute and, when the guest
 enabled `VK_NN_vi_surface`, that can present through the surface provider
-(`rl_vk_surface_provider.presents`; the headless provider asks the host with a
-probe surface, since not every driver presents to `VK_EXT_headless_surface`).
+(`rl_vk_surface_provider.presents`; the headless provider has none, every
+device takes it).
 
 ## Queue families
 
@@ -145,7 +145,11 @@ and `VK_KHR_swapchain` forwarding.
 Providers:
 
 - Headless (`rl_vk_headless_surfaces`, `VK_EXT_headless_surface`): tests and
-  offscreen runs. Lavapipe presents to it; NVIDIA's Linux driver 615 does not.
+  offscreen runs. NVIDIA's Linux driver reports no queue family that presents to
+  it and no surface formats, so the provider is `offscreen`: a swapchain on it
+  has no host swapchain, each present blits into two images the layer owns
+  (sized by `extent`), the layer answers surface support itself and signals
+  the guest's acquire semaphore and fence with an empty submit.
 - Window (`rl_vk_window_surfaces`, `vk_window.c`): the player. It needs a
   window backend that is up (`core/include/relift/window.h`; SDL3 in
   `runtime/host/window_sdl3.c`, built with `VIDEO=sdl3`). Each `vi` layer the

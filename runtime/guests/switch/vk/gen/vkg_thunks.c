@@ -3275,24 +3275,6 @@ static int vkt_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t
     return vkf_end(&k);
 }
 
-static int vkt_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceSurfaceSupportKHR, c->x[0]);
-    uint32_t a1 = (uint32_t)(c->x[1]);
-    VkSurfaceKHR a2 = (VkSurfaceKHR)(uintptr_t)(c->x[2]);
-    VkBool32 * a3 = (VkBool32 *)vkf_ptr(&k, c->x[3]);
-    PFN_vkGetPhysicalDeviceSurfaceSupportKHR fn = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)k.fns->f[VKG_vkGetPhysicalDeviceSurfaceSupportKHR];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceSupportKHR);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
 static int vkt_vkGetPhysicalDeviceToolProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -4737,7 +4719,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetPhysicalDeviceSurfaceFormats2KHR,
     vkh_vkGetPhysicalDeviceSurfaceFormatsKHR,
     vkh_vkGetPhysicalDeviceSurfacePresentModesKHR,
-    vkt_vkGetPhysicalDeviceSurfaceSupportKHR,
+    vkh_vkGetPhysicalDeviceSurfaceSupportKHR,
     vkt_vkGetPhysicalDeviceToolProperties,
     vkt_vkGetPipelineCacheData,
     vkt_vkGetPrivateData,

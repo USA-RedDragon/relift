@@ -27,6 +27,7 @@
 
 #define SWAP_MAX 8u
 #define HOST_MAX 16u
+#define OFFSCREEN_IMAGES 2u
 #define RETIRED_MAX 64u
 #define SWAP_TAG 0x5700000000000000ull
 
@@ -59,6 +60,8 @@ typedef struct vkf_swap {
     VkSwapchainKHR host;
     uint32_t host_n;
     VkImage host_img[HOST_MAX];
+    VkDeviceMemory host_mem[HOST_MAX];
+    bool offscreen;
     VkSemaphore ready[HOST_MAX];
     VkExtent2D host_extent;
     VkSemaphore retired[RETIRED_MAX];
@@ -138,6 +141,12 @@ void vkf_vi_caps(uint64_t surface, VkSurfaceCapabilitiesKHR *caps)
                                 VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 }
 
+static bool offscreen_surfaces(void)
+{
+    const rl_vk_surface_provider *p = vkf.cfg.surfaces;
+    return p && p->offscreen;
+}
+
 int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -149,7 +158,13 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *m
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
     VkSurfaceCapabilitiesKHR *caps = vkf_ptr(&k, c->x[2]);
-    VkResult r = caps ? fn(pd, (VkSurfaceKHR)(uintptr_t)c->x[1], caps) : VK_ERROR_INITIALIZATION_FAILED;
+    VkResult r = VK_ERROR_INITIALIZATION_FAILED;
+    if (caps && offscreen_surfaces()) {
+        memset(caps, 0, sizeof *caps);
+        r = VK_SUCCESS;
+    } else if (caps) {
+        r = fn(pd, (VkSurfaceKHR)(uintptr_t)c->x[1], caps);
+    }
     if (r >= 0)
         vkf_vi_caps(c->x[1], caps);
     c->x[0] = (uint32_t)r;
@@ -168,7 +183,13 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *
         return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceCapabilities2KHR);
     const VkPhysicalDeviceSurfaceInfo2KHR *info = vkg_ain_VkPhysicalDeviceSurfaceInfo2KHR(&k, c->x[1], 1);
     VkSurfaceCapabilities2KHR *caps = vkg_ain_VkSurfaceCapabilities2KHR(&k, c->x[2], 1);
-    VkResult r = info && caps ? fn(pd, info, caps) : VK_ERROR_INITIALIZATION_FAILED;
+    VkResult r = VK_ERROR_INITIALIZATION_FAILED;
+    if (info && caps && offscreen_surfaces()) {
+        memset(&caps->surfaceCapabilities, 0, sizeof caps->surfaceCapabilities);
+        r = VK_SUCCESS;
+    } else if (info && caps) {
+        r = fn(pd, info, caps);
+    }
     if (r >= 0) {
         vkf_vi_caps((uint64_t)(uintptr_t)info->surface, &caps->surfaceCapabilities);
         vkg_aout_VkSurfaceCapabilities2KHR(&k, c->x[2], caps, 1);
@@ -312,9 +333,77 @@ static VkPresentModeKHR pick_mode(vkf_swap *s)
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
+static bool have_host(const vkf_swap *s) { return s->offscreen ? s->host_n != 0 : s->host != NULL; }
+
+static void offscreen_destroy(vkf_swap *s)
+{
+    for (uint32_t i = 0; i < s->host_n; i++) {
+        DFN(s, vkDestroyImage)(s->dev, s->host_img[i], NULL);
+        DFN(s, vkFreeMemory)(s->dev, s->host_mem[i], NULL);
+    }
+    s->host_n = 0;
+}
+
+/** @brief Makes the offscreen host images match the host extent. VK_NOT_READY while it has no area. Lock held. */
+static VkResult offscreen_create(vkf_swap *s)
+{
+    uint32_t guest[2], host[2];
+    uint64_t gen;
+    vkf_surface_extent((uint64_t)(uintptr_t)s->surface, guest, host, &gen);
+    if (!host[0] || !host[1])
+        return VK_NOT_READY;
+    wait_all(s);
+    offscreen_destroy(s);
+    const vkf_dev *d = s->dobj->dev;
+    VkImageCreateInfo ii = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = s->format,
+        .extent = { host[0], host[1], 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    for (uint32_t i = 0; i < OFFSCREEN_IMAGES; i++) {
+        VkResult r = DFN(s, vkCreateImage)(s->dev, &ii, NULL, &s->host_img[i]);
+        if (r < 0)
+            goto fail;
+        s->host_n = i + 1;
+        VkMemoryRequirements req;
+        DFN(s, vkGetImageMemoryRequirements)(s->dev, s->host_img[i], &req);
+        VkMemoryAllocateInfo ai = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = req.size,
+            .memoryTypeIndex = memory_type(d, req.memoryTypeBits),
+        };
+        s->host_mem[i] = NULL;
+        r = DFN(s, vkAllocateMemory)(s->dev, &ai, NULL, &s->host_mem[i]);
+        if (r >= 0)
+            r = DFN(s, vkBindImageMemory)(s->dev, s->host_img[i], s->host_mem[i], 0);
+        if (r < 0) {
+            rl_log(RL_LOG_ERROR, "vk", "offscreen host image %ux%u: %d", host[0], host[1], r);
+            goto fail;
+        }
+    }
+    s->host_extent = (VkExtent2D){ host[0], host[1] };
+    s->gen = gen;
+    s->stale = false;
+    s->creations++;
+    return VK_SUCCESS;
+fail:
+    offscreen_destroy(s);
+    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+}
+
 /** @brief Makes the host swapchain match the host surface. VK_NOT_READY while the surface has no area. Lock held. */
 static VkResult host_create(vkf_swap *s)
 {
+    if (s->offscreen)
+        return offscreen_create(s);
     VkSurfaceCapabilitiesKHR caps;
     VkResult r = IFN(s, vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(s->phys, s->surface, &caps);
     if (r < 0)
@@ -394,7 +483,7 @@ static VkResult host_create(vkf_swap *s)
 static void swap_free(vkf_swap *s)
 {
     wait_all(s);
-    if (s->host || s->nretired)
+    if (s->host || s->nretired || s->host_n)
         DFN(s, vkDeviceWaitIdle)(s->dev);
     for (uint32_t i = 0; i < s->n; i++) {
         DFN(s, vkDestroyImage)(s->dev, s->img[i], NULL);
@@ -405,6 +494,8 @@ static void swap_free(vkf_swap *s)
         DFN(s, vkDestroyCommandPool)(s->dev, s->pool, NULL);
     if (s->host)
         DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
+    if (s->offscreen)
+        offscreen_destroy(s);
     retire_semaphores(s);
     for (uint32_t j = 0; j < s->nretired; j++)
         DFN(s, vkDestroySemaphore)(s->dev, s->retired[j], NULL);
@@ -483,6 +574,7 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     s->fns = k.fns;
     s->phys = k.obj->parent->host;
     s->ifns = k.obj->parent->fns;
+    s->offscreen = offscreen_surfaces();
     s->surface = ci->surface;
     s->format = ci->imageFormat;
     s->color_space = ci->imageColorSpace;
@@ -625,7 +717,7 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
         uint32_t guest[2], host[2];
         uint64_t gen;
         vkf_surface_extent((uint64_t)(uintptr_t)s->surface, guest, host, &gen);
-        if ((!s->host || s->stale || gen != s->gen) && !any_held(s)) {
+        if ((!have_host(s) || s->stale || gen != s->gen) && !any_held(s)) {
             r = host_create(s);
             if (r == VK_NOT_READY) {
                 if (!timeout || (timeout != UINT64_MAX && now_ns() - start >= (int64_t)timeout)) {
@@ -676,7 +768,12 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             s->busy[i] = false;
         }
         uint32_t hi = 0;
-        r = DFN(s, vkAcquireNextImageKHR)(s->dev, s->host, timeout, sem, fence, &hi);
+        if (s->offscreen) {
+            hi = i % s->host_n;
+            r = VK_SUCCESS;
+        } else {
+            r = DFN(s, vkAcquireNextImageKHR)(s->dev, s->host, timeout, sem, fence, &hi);
+        }
         if (r == VK_ERROR_OUT_OF_DATE_KHR && !any_held(s)) {
             s->stale = true;
             continue;
@@ -701,6 +798,27 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
     return r;
 }
 
+static uint32_t family_of(const vkf_dev *d, const vkf_fns *fns, VkDevice dev, VkQueue q);
+
+/** @brief Offscreen swapchains have no host acquire to signal the guest's semaphore and fence: an empty submit does. */
+static VkResult acquire_signal(vkf_call *k, const vkf_swap *s, VkSemaphore sem, VkFence fence)
+{
+    if (!s->offscreen || (!sem && !fence))
+        return VK_SUCCESS;
+    const vkf_dev *d = k->obj->dev;
+    VkQueue q = NULL;
+    DFN(s, vkGetDeviceQueue)(s->dev, d->nqueue_families ? d->queue_families[0] : 0, 0, &q);
+    VkSubmitInfo si = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .signalSemaphoreCount = sem ? 1 : 0,
+        .pSignalSemaphores = &sem,
+    };
+    vkf_queue_lock(k);
+    VkResult r = DFN(s, vkQueueSubmit)(q, 1, &si, fence);
+    vkf_queue_unlock(k);
+    return r;
+}
+
 int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -715,6 +833,8 @@ int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
                                              (VkFence)(uintptr_t)c->x[4], &idx)
                               : VK_ERROR_UNKNOWN;
     vkf_wait_return(&k);
+    if (r == VK_SUCCESS)
+        r = acquire_signal(&k, s, (VkSemaphore)(uintptr_t)c->x[3], (VkFence)(uintptr_t)c->x[4]);
     if (r == VK_SUCCESS)
         rl_st32(mem, c->x[5], idx);
     c->x[0] = (uint32_t)r;
@@ -740,6 +860,8 @@ int vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem)
         if (s)
             r = swap_acquire(s, timeout, sem, fence, &idx);
         vkf_wait_return(&k);
+        if (s && r == VK_SUCCESS)
+            r = acquire_signal(&k, s, sem, fence);
     }
     if (r == VK_SUCCESS)
         rl_st32(mem, c->x[2], idx);
@@ -889,7 +1011,7 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .pWaitDstStageMask = stages,
         .commandBufferCount = 1,
         .pCommandBuffers = &s->cmd[i],
-        .signalSemaphoreCount = 1,
+        .signalSemaphoreCount = s->offscreen ? 0 : 1,
         .pSignalSemaphores = &s->ready[hi],
     };
     r = DFN(s, vkQueueSubmit)(q, 1, &si, s->done[i]);
@@ -905,7 +1027,7 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .pSwapchains = &s->host,
         .pImageIndices = &hi,
     };
-    r = DFN(s, vkQueuePresentKHR)(q, &pi);
+    r = s->offscreen ? VK_SUCCESS : DFN(s, vkQueuePresentKHR)(q, &pi);
     show(s, i);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
         s->stale = true;

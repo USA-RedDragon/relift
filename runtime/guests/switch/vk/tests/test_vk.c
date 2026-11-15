@@ -5,7 +5,9 @@
  * the guest context, thunks reached through vkGetInstanceProcAddr and the
  * dispatch table, run against the host's real Vulkan driver (lavapipe in
  * CI). The layer shows one physical device; RELIFT_VK_DEVICE picks it by a
- * part of its name. With no host Vulkan the tests are skipped, unless
+ * part of its name, and RELIFT_VK_LIST_DEVICES=1 prints the host's device
+ * names (one per line) instead of running, for make test to run the tests
+ * on each. With no host Vulkan the tests are skipped, unless
  * RELIFT_VK_REQUIRE is set (CI sets it where lavapipe is installed).
  */
 #include "a64.h"
@@ -33,6 +35,51 @@ __attribute__((constructor(200))) static void skip_without_vulkan(void)
     if (rl_hostlib_vulkan_gipa() || getenv("RELIFT_VK_REQUIRE"))
         return;
     fprintf(stderr, "relift runtime tests: no host Vulkan loader; Vulkan forwarding tests skipped\n");
+    _exit(0);
+}
+
+__attribute__((constructor(201))) static void list_devices(void)
+{
+    if (!getenv("RELIFT_VK_LIST_DEVICES"))
+        return;
+    void *g = rl_hostlib_vulkan_gipa();
+    PFN_vkGetInstanceProcAddr gipa;
+    memcpy(&gipa, &g, sizeof gipa);
+    PFN_vkCreateInstance create = (PFN_vkCreateInstance)gipa(NULL, "vkCreateInstance");
+    PFN_vkEnumerateInstanceExtensionProperties props =
+        (PFN_vkEnumerateInstanceExtensionProperties)gipa(NULL, "vkEnumerateInstanceExtensionProperties");
+    if (!create || !props)
+        _exit(0);
+    uint32_t n = 0;
+    props(NULL, &n, NULL);
+    VkExtensionProperties *ext = calloc(n ? n : 1, sizeof *ext);
+    props(NULL, &n, ext);
+    const char *portability = "VK_KHR_portability_enumeration";
+    bool have = false;
+    for (uint32_t i = 0; i < n; i++)
+        have = have || !strcmp(ext[i].extensionName, portability);
+    free(ext);
+    VkInstanceCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = have ? 1u : 0u,
+        .enabledExtensionCount = have ? 1u : 0u,
+        .ppEnabledExtensionNames = &portability,
+    };
+    VkInstance inst = NULL;
+    if (create(&ci, NULL, &inst) < 0)
+        _exit(0);
+    PFN_vkEnumeratePhysicalDevices enumerate = (PFN_vkEnumeratePhysicalDevices)gipa(inst, "vkEnumeratePhysicalDevices");
+    PFN_vkGetPhysicalDeviceProperties properties =
+        (PFN_vkGetPhysicalDeviceProperties)gipa(inst, "vkGetPhysicalDeviceProperties");
+    VkPhysicalDevice pd[16];
+    uint32_t count = 16;
+    if (enumerate(inst, &count, pd) >= 0)
+        for (uint32_t i = 0; i < count; i++) {
+            VkPhysicalDeviceProperties p;
+            properties(pd[i], &p);
+            printf("%s\n", p.deviceName);
+        }
+    fflush(stdout);
     _exit(0);
 }
 
@@ -838,7 +885,7 @@ static int64_t mono_ns(void)
 TEST(vk_vi_surface_presents_headless)
 {
     g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
-    g_resizable.presents = rl_vk_headless_surfaces()->presents;
+    g_resizable.offscreen = rl_vk_headless_surfaces()->offscreen;
     g_host_w = g_host_h = 64;
     g_host_gen = 0;
     CHECK_EQ(boot(&g_resizable), 0);

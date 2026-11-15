@@ -58,31 +58,35 @@ static int32_t headless_create(void *user, void *host_instance, void *gipa, uint
     return r;
 }
 
-static bool headless_presents(void *user, void *host_instance, void *gipa, void *physical_device, uint32_t family)
-{
-    uint64_t s = 0;
-    if (headless_create(user, host_instance, gipa, 0, &s) < 0 || !s)
-        return false;
-    PFN_vkGetInstanceProcAddr get;
-    memcpy(&get, &gipa, sizeof get);
-    PFN_vkVoidFunction raw = get(host_instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
-    PFN_vkGetPhysicalDeviceSurfaceSupportKHR support;
-    memcpy(&support, &raw, sizeof support);
-    raw = get(host_instance, "vkDestroySurfaceKHR");
-    PFN_vkDestroySurfaceKHR destroy;
-    memcpy(&destroy, &raw, sizeof destroy);
-    VkBool32 ok = VK_FALSE;
-    if (!support || support(physical_device, family, (VkSurfaceKHR)(uintptr_t)s, &ok) < 0)
-        ok = VK_FALSE;
-    if (destroy)
-        destroy(host_instance, (VkSurfaceKHR)(uintptr_t)s, NULL);
-    return ok;
-}
-
 static const rl_vk_surface_provider headless = {
     .instance_extensions = headless_exts,
     .create = headless_create,
-    .presents = headless_presents,
+    .offscreen = true,
 };
 
 const rl_vk_surface_provider *rl_vk_headless_surfaces(void) { return &headless; }
+
+int vkh_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem)
+{
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    VkPhysicalDevice pd = vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
+    if (!pd)
+        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceSurfaceSupportKHR, c->x[0]);
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR fn = VKF_FN(k.fns, vkGetPhysicalDeviceSurfaceSupportKHR);
+    if (!fn)
+        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceSupportKHR);
+    VkBool32 *out = vkf_ptr(&k, c->x[3]);
+    VkResult r = VK_ERROR_INITIALIZATION_FAILED;
+    if (out) {
+        const rl_vk_surface_provider *sp = vkf.cfg.surfaces;
+        if (sp && sp->offscreen) {
+            *out = VK_TRUE;
+            r = VK_SUCCESS;
+        } else {
+            r = fn(pd, (uint32_t)c->x[1], (VkSurfaceKHR)(uintptr_t)c->x[2], out);
+        }
+    }
+    c->x[0] = (uint32_t)r;
+    return vkf_end(&k);
+}
