@@ -201,7 +201,7 @@ fn bounded_thumb_jump_table_resolves_every_case() {
     let t = 0x0800_0200;
     a.arm(
         0x0800_0100,
-        &[a_ldr_lit(0, 0x0800_0100, 0x0800_0108), a_bx(0), t | 1],
+        &[a_ldr_lit(1, 0x0800_0100, 0x0800_0108), a_bx(1), t | 1],
     );
     let table = 0x0800_0220;
     let cases = [0x0800_0240, 0x0800_0244, 0x0800_0248];
@@ -226,7 +226,7 @@ fn bounded_thumb_jump_table_resolves_every_case() {
     }
     a.w32(table + 12, 0x0800_0301);
     let r = a.run(0x0800_0100);
-    let f = r.functions.get(&Loc::rom(t, true)).expect("switch");
+    let f = r.functions.get(&Loc::rom(BASE, false)).expect("switch");
     assert_eq!(f.tables.len(), 1);
     assert_eq!(f.tables[0].max, 2);
     assert_eq!(
@@ -400,7 +400,7 @@ fn shared_epilogue_reached_by_bl_ends_the_callers_frame() {
     let r = a.run(0x0800_0100);
     let found = insts(&r);
     assert!(!found.contains(&(t + 6, true)));
-    assert!(r.functions[&Loc::rom(t, true)].returns);
+    assert!(r.functions[&Loc::rom(BASE, false)].returns);
     assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
 }
 

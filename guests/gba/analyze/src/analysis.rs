@@ -189,7 +189,10 @@ impl Driver<'_> {
         let mut added = false;
         for v in cands {
             let l = Loc::rom(v & !1, true);
-            if self.entries.contains(&l) || self.rejected.contains(&l) {
+            if self.entries.contains(&l)
+                || self.rejected.contains(&l)
+                || code.get(&l.addr) == Some(&(l.addr, true))
+            {
                 continue;
             }
             let run = {
