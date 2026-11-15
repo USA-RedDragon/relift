@@ -1,0 +1,16 @@
+[package]
+name = "relift-gba"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-cpu-arm32 = { workspace = true }
+relift-emit = { workspace = true }
+relift-guest = { workspace = true }
+relift-ir = { workspace = true }
+
+[lints]
+workspace = true

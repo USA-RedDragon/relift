@@ -24,6 +24,7 @@ relift-gb = { path = "guests/gb/guest" }
 relift-gb-analyze = { path = "guests/gb/analyze" }
 relift-gb-formats = { path = "guests/gb/formats" }
 relift-gb-tools = { path = "guests/gb/tools" }
+relift-gba = { path = "guests/gba/guest" }
 relift-gba-analyze = { path = "guests/gba/analyze" }
 relift-gba-formats = { path = "guests/gba/formats" }
 relift-gba-tools = { path = "guests/gba/tools" }
