@@ -64,6 +64,18 @@ fn up_to_date(text: &str) -> bool {
     text.contains("compile  up to date") || text.contains("compile  0 files")
 }
 
+fn why_dirty(cache: &Path) -> String {
+    let dir = cache.join("projects/tiny/build/host");
+    let out = relift_proc::command("ninja")
+        .args(["-n", "-d", "explain"])
+        .current_dir(dir)
+        .output();
+    out.map_or_else(
+        |e| e.to_string(),
+        |o| String::from_utf8_lossy(&o.stderr).into_owned(),
+    )
+}
+
 #[test]
 fn a_linked_copy_of_the_cache_and_a_moved_project_build_nothing() {
     if !tools() {
@@ -81,20 +93,22 @@ fn a_linked_copy_of_the_cache_and_a_moved_project_build_nothing() {
     link_tree(&root.join("cache"), &there.join("cache"));
     copy_tree(&project, &there.join("tiny"));
     std::fs::remove_dir_all(root.join("cache")).expect("the first cache goes");
+    let explained = why_dirty(&there.join("cache"));
     let moved = run(&there.join("tiny"), &there.join("cache"), &["build"]);
     assert!(
         up_to_date(&moved),
-        "a linked copy compiles nothing: {moved}"
+        "a linked copy compiles nothing: {moved}{explained}"
     );
     assert_eq!(game(&there.join("cache"), "tiny"), built);
 
     let again = root.join("moved");
     std::fs::create_dir_all(&again).expect("the parent is creatable");
     std::fs::rename(there.join("tiny"), again.join("tiny")).expect("the project moves");
+    let explained = why_dirty(&there.join("cache"));
     let after = run(&again.join("tiny"), &there.join("cache"), &["build"]);
     assert!(
         up_to_date(&after),
-        "a moved project compiles nothing: {after}"
+        "a moved project compiles nothing: {after}{explained}"
     );
     assert_eq!(game(&there.join("cache"), "tiny"), built);
 }
