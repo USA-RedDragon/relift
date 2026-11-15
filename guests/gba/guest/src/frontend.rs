@@ -181,6 +181,24 @@ impl Gba {
     }
 }
 
+/// The address before alignment, when instruction `k` aligns one: the
+/// templates clear the low bits (`concat(extract(x, n), 0)`), and the bus
+/// is given the address the CPU puts out, which the machine aligns except
+/// for the 8-bit backup, whose byte lane it selects.
+fn unaligned(b: &Block, k: usize) -> Option<Value> {
+    let Op::Concat(h, l) = b.insts[k].op else {
+        return None;
+    };
+    let Op::Const(z) = b.insts[l.index()].op else {
+        return None;
+    };
+    let Op::Extract(x, n) = b.insts[h.index()].op else {
+        return None;
+    };
+    let lw = b.width_of(l)?.bits();
+    (z.get() == 0 && u32::from(n) == lw && b.width_of(x) == Some(Width::W32)).then_some(x)
+}
+
 /// Routes memory to the bus, splits the cost into internal cycles, fetch
 /// and refill, reports writes of I and closes the block with a sync point.
 fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
@@ -191,10 +209,12 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
             _ => 0,
         })
         .sum();
+    let unaligned: Vec<Option<Value>> = (0..b.insts.len()).map(|k| unaligned(b, k)).collect();
+    let addr_of = |a: Value| unaligned[a.index()].unwrap_or(a);
     for i in &mut b.insts {
         i.op = match std::mem::replace(&mut i.op, Op::Sync) {
             Op::Load { addr, endian, .. } => Op::IoLoad {
-                addr,
+                addr: addr_of(addr),
                 endian,
                 kind: IoKind::Device,
             },
@@ -204,7 +224,7 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
                 endian,
                 ..
             } => Op::IoStore {
-                addr,
+                addr: addr_of(addr),
                 value,
                 endian,
                 kind: IoKind::Device,
@@ -418,6 +438,21 @@ mod tests {
             assert!(matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)));
             assert_eq!(intrinsics(&b), [FETCH_ARM]);
         }
+    }
+
+    #[test]
+    fn the_bus_gets_the_address_before_alignment() {
+        let img = arm(&[0xE1C1_00B1]);
+        let b = Gba::new().lift_at(&img, BASE, BASE, false).expect("lifts");
+        let addr = b
+            .insts
+            .iter()
+            .find_map(|i| match i.op {
+                Op::IoStore { addr, .. } => Some(addr),
+                _ => None,
+            })
+            .expect("a store");
+        assert!(!matches!(b.insts[addr.index()].op, Op::Concat(..)));
     }
 
     #[test]

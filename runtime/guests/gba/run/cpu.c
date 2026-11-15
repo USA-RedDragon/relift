@@ -3,7 +3,9 @@
  * @brief The ARMv4T CPU on the Game Boy Advance machine.
  *
  * Lifted code makes every data access through the machine's bus
- * (rl_gba_load, rl_gba_store), which charges its wait states to the CPU's
+ * (rl_gba_load, rl_gba_store, given the address as the CPU puts it out: the
+ * machine aligns it except for the 8-bit backup), which charges its wait
+ * states to the CPU's
  * clock; code fetches cost what the machine's wait table says, with a
  * sequential Game Pak fetch at one cycle while the prefetch buffer is on.
  *
@@ -38,9 +40,8 @@ static void update_prefetch(rl_ctx *c)
 uint64_t rl_gba_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
 {
     (void)mem;
-    uint32_t a = (uint32_t)addr & ~(size - 1u);
-    unsigned seq = rl_arm32_data_seq(c, a, size);
-    return rl_gba_load(machine(c), a, size, seq);
+    unsigned seq = rl_arm32_data_seq(c, (uint32_t)addr & ~(size - 1u), size);
+    return rl_gba_load(machine(c), (uint32_t)addr, size, seq);
 }
 
 void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value)
@@ -48,7 +49,7 @@ void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
     (void)mem;
     uint32_t a = (uint32_t)addr & ~(size - 1u);
     unsigned seq = rl_arm32_data_seq(c, a, size);
-    rl_gba_store(machine(c), a, size, (uint32_t)value, seq);
+    rl_gba_store(machine(c), (uint32_t)addr, size, (uint32_t)value, seq);
     if (a < 0x04000208u && a + size > 0x04000204u)
         update_prefetch(c);
 }
