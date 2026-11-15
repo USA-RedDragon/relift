@@ -54,7 +54,8 @@ pub fn is_rom(path: &Path) -> bool {
 /// logo or comes from a file named `.gba` (`named`).
 #[must_use]
 pub fn is_rom_image(rom: &[u8], named: bool) -> bool {
-    relift_gba_formats::Header::parse(rom).is_ok_and(|h| named || h.checks().logo)
+    relift_gba_formats::Header::parse(rom)
+        .is_ok_and(|h| h.entry_target().is_some() && (named || h.checks().logo))
 }
 
 /// Whether the project's `game.toml` names the Game Boy Advance guest.
