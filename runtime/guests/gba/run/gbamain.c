@@ -148,10 +148,11 @@ static void print_stats(host *H)
     const rl_arm32_stats *a = rl_arm32_get_stats();
     fprintf(stderr,
             "relift-gba: frames %u, cycles %llu, swis %llu (%llu unknown), irqs %llu (%llu in the BIOS), returns %llu, "
-            "redirects %llu, misses %llu\n",
+            "redirects %llu, misses %llu, code changes %llu\n",
             H->frames, (unsigned long long)rl_sched_cycles(H->run.k), (unsigned long long)s->swis,
             (unsigned long long)s->unknown_swis, (unsigned long long)s->irqs, (unsigned long long)s->bios_irqs,
-            (unsigned long long)a->returns, (unsigned long long)a->redirects, (unsigned long long)a->misses);
+            (unsigned long long)a->returns, (unsigned long long)a->redirects, (unsigned long long)a->misses,
+            (unsigned long long)s->code_changes);
 }
 
 static void report(host *H, rl_ctx *c)
@@ -326,6 +327,8 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
         fprintf(stderr, "relift-gba: cannot create the machine\n");
         return 1;
     }
+    H.run.variants = p->variants;
+    H.run.variant_count = p->variant_count;
     if (!no_save && si.kind != RL_GBA_SAVE_NONE) {
         if (save)
             snprintf(H.save, sizeof H.save, "%s", save);

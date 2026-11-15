@@ -11,6 +11,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/** @brief A lifted function in work RAM: its entry (bit 0 set in Thumb state) and the unit it was lifted from there. */
+typedef struct rl_gba_variant {
+    uint32_t at;
+    uint32_t unit;
+    rl_fn fn;
+} rl_gba_variant;
+
 /** @brief What program.c gives rl_gba_main. */
 typedef struct rl_gba_program {
     const uint8_t *rom;
@@ -21,6 +28,9 @@ typedef struct rl_gba_program {
     const char *title;
     /** @brief The path of the ROM the project imported, which names the save (rl_gba_save_path); "" for none. */
     const char *rom_path;
+    /** @brief Every lifted function in work RAM, sorted by at and unit: where code that finds other bytes than it was lifted from goes on. */
+    const rl_gba_variant *variants;
+    uint32_t variant_count;
 } rl_gba_program;
 
 /**

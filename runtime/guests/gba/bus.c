@@ -255,7 +255,28 @@ void gba_bus_write(rl_gba *g, gba_who who, uint32_t addr, unsigned size, uint32_
     gba_mem_write(g, addr, size, value);
 }
 
+static uint32_t fetch_timed(rl_gba *g, uint32_t addr, unsigned size, bool seq);
+
 uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq)
+{
+    uint32_t v = fetch_timed(g, addr, size, seq);
+    g->code_at[0] = g->code_at[1];
+    g->code_unit[0] = g->code_unit[1];
+    g->code_at[1] = (addr & ~(size - 1u)) | (size == 2u);
+    g->code_unit[1] = size == 2u ? v & 0xFFFFu : v;
+    return v;
+}
+
+uint32_t rl_gba_code_unit(const rl_gba *g, uint32_t addr, unsigned size)
+{
+    uint32_t at = addr | (size == 2u);
+    for (int i = 1; i >= 0; i--)
+        if (g->code_at[i] == at)
+            return g->code_unit[i];
+    return rl_gba_peek(g, addr, size);
+}
+
+static uint32_t fetch_timed(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 {
     gba_dma_run(g);
     g->dma_overlap = 0;

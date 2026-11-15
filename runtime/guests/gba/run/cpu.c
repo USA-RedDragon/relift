@@ -35,6 +35,9 @@
 
 static rl_gba_run *g_run;
 
+/** @brief The unit rl_gba_cpu_fetch_code found when it returned 1. */
+static uint32_t g_found;
+
 rl_gba_run *rl_gba_run_current(void) { return g_run; }
 
 static rl_gba *machine(rl_ctx *c) { return c->machine; }
@@ -63,6 +66,44 @@ void rl_gba_cpu_fetch(rl_ctx *c, uint32_t pc, unsigned thumb)
     rl_gba_fetch(machine(c), pc + 2u * size, size, !c->code_ns);
     c->code_ns = 0;
     c->data_open = 0;
+}
+
+int rl_gba_cpu_fetch_code(rl_ctx *c, uint32_t pc, unsigned thumb, uint32_t unit)
+{
+    uint32_t got = rl_gba_code_unit(machine(c), pc, thumb ? 2u : 4u);
+    if (got != unit) {
+        g_found = got;
+        return 1;
+    }
+    rl_gba_cpu_fetch(c, pc, thumb);
+    return 0;
+}
+
+static int unknown_code(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return rl_guest_fatal(c, "gba", "the code at 0x%08x (%s) is now 0x%0*x, which no lifted code was made from",
+                          c->pc & ~1u, c->t ? "Thumb" : "ARM", c->t ? 4 : 8, g_found);
+}
+
+rl_fn rl_gba_cpu_variant(rl_ctx *c, uint32_t pc, unsigned thumb)
+{
+    rl_gba_run *r = g_run;
+    uint32_t at = pc | thumb;
+    r->stats.code_changes++;
+    c->pc = pc;
+    size_t lo = 0, hi = r->variant_count;
+    while (lo < hi) {
+        size_t m = lo + (hi - lo) / 2;
+        const rl_gba_variant *v = &r->variants[m];
+        if (v->at < at || (v->at == at && v->unit < g_found))
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    if (lo < r->variant_count && r->variants[lo].at == at && r->variants[lo].unit == g_found)
+        return r->variants[lo].fn;
+    return unknown_code;
 }
 
 void rl_gba_cpu_idle(rl_ctx *c, uint32_t n)

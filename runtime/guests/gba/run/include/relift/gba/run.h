@@ -22,6 +22,19 @@ RL_RUNTIME_API void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uin
  * an exception return. Ends the previous instruction's data accesses.
  */
 RL_RUNTIME_API void rl_gba_cpu_fetch(rl_ctx *c, uint32_t pc, unsigned thumb);
+/**
+ * @brief The first cycle of an instruction in work RAM lifted from unit:
+ * when the CPU fetched another unit at pc (the last two code fetches read
+ * what the pipeline holds; with neither at pc, memory now), returns 1 and
+ * does nothing; otherwise runs rl_gba_cpu_fetch and returns 0.
+ */
+RL_RUNTIME_API int rl_gba_cpu_fetch_code(rl_ctx *c, uint32_t pc, unsigned thumb, uint32_t unit);
+/**
+ * @brief After rl_gba_cpu_fetch_code returned 1 at pc: the lifted function
+ * whose entry is pc in that state, lifted from the unit the CPU fetched
+ * there. With none it gives a function that stops the guest with a report.
+ */
+RL_RUNTIME_API rl_fn rl_gba_cpu_variant(rl_ctx *c, uint32_t pc, unsigned thumb);
 /** @brief n internal cycles of the CPU, which leave the bus to the prefetch buffer. */
 RL_RUNTIME_API void rl_gba_cpu_idle(rl_ctx *c, uint32_t n);
 /** @brief A taken branch to target refills the pipeline: a nonsequential and a sequential fetch there. */

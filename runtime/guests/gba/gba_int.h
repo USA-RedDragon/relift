@@ -221,6 +221,9 @@ struct rl_gba {
     gba_prefetch pf;
     bool rom_burst;
     uint16_t page_addr;
+    /** @brief The last two code fetches, oldest first: address (bit 0 set for a halfword) and what it read. */
+    uint32_t code_at[2];
+    uint32_t code_unit[2];
 
     gba_irq irq;
     gba_timer tm[4];

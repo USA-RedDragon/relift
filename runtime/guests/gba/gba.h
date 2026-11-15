@@ -192,6 +192,12 @@ rl_device *rl_gba_device(rl_gba *g, rl_gba_slot slot);
  */
 uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq);
 /**
+ * @brief The size-byte instruction unit at addr (aligned) as the CPU runs
+ * it: what one of the last two code fetches read there (the pipeline holds
+ * it, whatever was stored since), or memory now when neither was at addr.
+ */
+uint32_t rl_gba_code_unit(const rl_gba *g, uint32_t addr, unsigned size);
+/**
  * @brief A data read of size bytes (1, 2 or 4) at addr, aligned; seq true
  * for the second and later words of LDM. Runs a DMA transfer that is due
  * first (the CPU waits for it), charges the access and returns the value,

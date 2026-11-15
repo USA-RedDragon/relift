@@ -12,6 +12,7 @@
 
 #include "arm32.h"
 #include "gba.h"
+#include "gbamain.h"
 
 /** @brief Called at every interrupt check (a sync point whose budget ran out) with the registers stored. */
 typedef void rl_gba_check_fn(void *user, rl_ctx *c);
@@ -26,7 +27,10 @@ typedef struct rl_gba_run_stats {
     uint64_t irqs;
     /** @brief Interrupts entered inside a BIOS call (IntrWait, Halt). */
     uint64_t bios_irqs;
+    /** @brief Instructions in RAM that found other code than they were lifted from. */
+    uint64_t code_changes;
 } rl_gba_run_stats;
+
 
 /** @brief The CPU of one machine. */
 typedef struct rl_gba_run {
@@ -40,6 +44,9 @@ typedef struct rl_gba_run {
     rl_gba_check_fn *check;
     void *check_user;
     rl_gba_run_stats stats;
+    /** @brief Every lifted function in work RAM, sorted by at and unit (rl_gba_cpu_variant). */
+    const rl_gba_variant *variants;
+    uint32_t variant_count;
 } rl_gba_run;
 
 /**

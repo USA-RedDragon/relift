@@ -4,8 +4,9 @@
  * lifted functions: the post-boot registers, data accesses through the
  * bus with their wait states, SWI through the high-level BIOS (a
  * VBlankIntrWait whose interrupt runs inside the BIOS call), IRQ entry at
- * a sync point through the BIOS stub and back, and the order of the code
- * fetches.
+ * a sync point through the BIOS stub and back, the order of the code
+ * fetches, and code in RAM that checks the unit the CPU fetched (the
+ * pipeline's copy for the next two, memory otherwise).
  */
 #include "cpu.h"
 #include "runner.h"
@@ -250,4 +251,50 @@ TEST(gba_run_an_irq_rising_after_the_last_access_began_waits_an_instruction)
     rl_gba_cpu_fetch(c, 0x03000004u, 0);
     CHECK_EQ(rl_sync(c, NULL, 0x03000008u), RL_OK);
     CHECK_EQ(hs.handler_runs, 1);
+}
+
+static int variant_a(rl_ctx *c, uint8_t *mem)
+{
+    (void)c;
+    (void)mem;
+    return 11;
+}
+
+static int variant_b(rl_ctx *c, uint8_t *mem)
+{
+    (void)c;
+    (void)mem;
+    return 22;
+}
+
+static const rl_gba_variant variants[] = {
+    {0x03000100u, 0xE12FFF1Eu, variant_a},
+    {0x03000100u, 0xE3A00001u, variant_b},
+    {0x03000103u, 0x4770u, variant_a},
+};
+
+TEST(gba_run_code_in_ram_runs_the_unit_the_cpu_fetched)
+{
+    CHECK(boot(swi_main) == 0);
+    rl_ctx *c = run.c;
+    run.variants = variants;
+    run.variant_count = 3;
+    rl_sched_run(run.k);
+    rl_gba_cpu_write(c, NULL, 0x03000100u, 4, 0xE3A00001u);
+    rl_gba_cpu_write(c, NULL, 0x03000104u, 4, 0xE1A00000u);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000100u, 0, 0xE3A00001u), 0);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000100u, 0, 0xE12FFF1Eu), 1);
+    CHECK_EQ(rl_gba_cpu_variant(c, 0x03000100u, 0)(c, NULL), 22);
+    CHECK_EQ(run.stats.code_changes, 1);
+    rl_gba_cpu_refill(c, 0x03000100u, 0, 1);
+    rl_gba_cpu_write(c, NULL, 0x03000100u, 4, 0xE12FFF1Eu);
+    rl_gba_cpu_write(c, NULL, 0x03000104u, 4, 0xE12FFF1Eu);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000100u, 0, 0xE3A00001u), 0);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000104u, 0, 0xE1A00000u), 0);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000108u, 0, 0xE12FFF1Eu), 1);
+    CHECK_EQ(rl_gba_cpu_variant(c, 0x03000108u, 0) == variant_a, 0);
+    rl_gba_cpu_write(c, NULL, 0x03000102u, 2, 0x4770u);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000102u, 1, 0x4770u), 0);
+    CHECK_EQ(rl_gba_cpu_fetch_code(c, 0x03000102u, 1, 0x46C0u), 1);
+    CHECK(rl_gba_cpu_variant(c, 0x03000102u, 1) == variant_a);
 }
