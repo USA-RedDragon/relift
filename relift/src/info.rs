@@ -2,6 +2,7 @@
 //! design 006 assembled from the import and `game.toml`, the C file that
 //! embeds it, and the reader of a built binary.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,106 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> 
     Ok(())
 }
 
+/// A file's identity as the tree-hash cache sees it: if none of these
+/// changed, neither did its contents.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    size: u64,
+    mtime: i128,
+    ctime: i128,
+    inode: u64,
+}
+
+fn nanos(t: std::io::Result<std::time::SystemTime>) -> i128 {
+    match t {
+        Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => i128::try_from(d.as_nanos()).unwrap_or(0),
+            Err(e) => -i128::try_from(e.duration().as_nanos()).unwrap_or(0),
+        },
+        Err(_) => 0,
+    }
+}
+
+#[cfg(unix)]
+fn stamp(m: &std::fs::Metadata) -> Stamp {
+    use std::os::unix::fs::MetadataExt as _;
+    Stamp {
+        size: m.len(),
+        mtime: i128::from(m.mtime()) * 1_000_000_000 + i128::from(m.mtime_nsec()),
+        ctime: i128::from(m.ctime()) * 1_000_000_000 + i128::from(m.ctime_nsec()),
+        inode: m.ino(),
+    }
+}
+
+#[cfg(not(unix))]
+fn stamp(m: &std::fs::Metadata) -> Stamp {
+    Stamp {
+        size: m.len(),
+        mtime: nanos(m.modified()),
+        ctime: 0,
+        inode: 0,
+    }
+}
+
+/// Files modified this close to the moment they were hashed may still be
+/// written to within the clock's granularity, so their stamp proves
+/// nothing and they are hashed again next time.
+const RACY: i128 = 2_000_000_000;
+
+const HASHES_MAGIC: &str = "relift romfs hashes 1";
+
+fn read_hashes(path: &Path) -> HashMap<String, (Stamp, String)> {
+    let mut out = HashMap::new();
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return out;
+    };
+    let mut lines = text.lines();
+    if lines.next() != Some(HASHES_MAGIC) {
+        return out;
+    }
+    for l in lines {
+        let mut it = l.splitn(6, ' ');
+        let (Some(size), Some(mtime), Some(ctime), Some(inode), Some(hash), Some(key)) = (
+            it.next().and_then(|v| v.parse().ok()),
+            it.next().and_then(|v| v.parse().ok()),
+            it.next().and_then(|v| v.parse().ok()),
+            it.next().and_then(|v| v.parse().ok()),
+            it.next().filter(|h| h.len() == 64),
+            it.next(),
+        ) else {
+            continue;
+        };
+        out.insert(
+            key.to_string(),
+            (
+                Stamp {
+                    size,
+                    mtime,
+                    ctime,
+                    inode,
+                },
+                hash.to_string(),
+            ),
+        );
+    }
+    out
+}
+
+fn hash_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    use std::io::Read as _;
+    let mut f = std::fs::File::open(path)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().into())
+}
+
 /// The hash of a directory tree: SHA-256 over, for each file in sorted
 /// path order, the `/`-separated relative path, a NUL and the SHA-256 of
 /// its contents.
@@ -47,6 +148,23 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> 
 ///
 /// A directory or file cannot be read.
 pub fn tree_hash(root: &Path) -> std::io::Result<String> {
+    tree_hash_cached(root, None)
+}
+
+/// [`tree_hash`] with the SHA-256 of each file kept in `cache` under the
+/// file's size, modification and change times and inode: a file whose
+/// stamp is unchanged is not read again, a file whose stamp changed is
+/// hashed again, and so is a file modified within two seconds of the
+/// previous hash. The result is the same as without the cache.
+///
+/// # Errors
+///
+/// A directory or file cannot be read.
+pub fn tree_hash_cached(root: &Path, cache: Option<&Path>) -> std::io::Result<String> {
+    tree_hash_at(root, cache, nanos(Ok(std::time::SystemTime::now())))
+}
+
+fn tree_hash_at(root: &Path, cache: Option<&Path>, started: i128) -> std::io::Result<String> {
     let mut files = Vec::new();
     walk(root, root, &mut files)?;
     let mut keyed: Vec<(String, PathBuf)> = files
@@ -61,13 +179,86 @@ pub fn tree_hash(root: &Path) -> std::io::Result<String> {
         })
         .collect();
     keyed.sort();
+    let known = cache.map(read_hashes).unwrap_or_default();
+    let mut hashes: Vec<Option<(Stamp, [u8; 32])>> = vec![None; keyed.len()];
+    let mut todo: Vec<usize> = Vec::new();
+    for (i, (key, rel)) in keyed.iter().enumerate() {
+        let st = stamp(&std::fs::metadata(root.join(rel))?);
+        let hit = known
+            .get(key)
+            .filter(|(s, _)| *s == st)
+            .and_then(|(_, h)| decode_hex(h));
+        match hit {
+            Some(h) => hashes[i] = Some((st, h)),
+            None => todo.push(i),
+        }
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let done = std::sync::Mutex::new(Vec::new());
+    let failed = std::sync::Mutex::new(None);
+    let workers = std::thread::available_parallelism().map_or(1, usize::from);
+    std::thread::scope(|sc| {
+        for _ in 0..workers.min(todo.len()) {
+            sc.spawn(|| {
+                loop {
+                    let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&i) = todo.get(n) else { break };
+                    let path = root.join(&keyed[i].1);
+                    let r = std::fs::metadata(&path)
+                        .map(|m| stamp(&m))
+                        .and_then(|st| hash_file(&path).map(|h| (i, st, h)));
+                    match r {
+                        Ok(v) => done.lock().expect("lock").push(v),
+                        Err(e) => {
+                            *failed.lock().expect("lock") = Some(e);
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    if let Some(e) = failed.into_inner().expect("lock") {
+        return Err(e);
+    }
+    for (i, st, h) in done.into_inner().expect("lock") {
+        hashes[i] = Some((st, h));
+    }
     let mut all = Sha256::new();
-    for (key, rel) in keyed {
+    let mut text = String::from(HASHES_MAGIC);
+    text.push('\n');
+    for ((key, _), h) in keyed.iter().zip(&hashes) {
+        let (st, h) = h.expect("every file hashed");
         all.update(key.as_bytes());
         all.update([0]);
-        all.update(Sha256::digest(std::fs::read(root.join(rel))?));
+        all.update(h);
+        if started - st.mtime > RACY && !key.contains('\n') {
+            let _ = writeln!(
+                text,
+                "{} {} {} {} {} {key}",
+                st.size,
+                st.mtime,
+                st.ctime,
+                st.inode,
+                hex(&h)
+            );
+        }
+    }
+    if let Some(c) = cache {
+        let _ = relift_cache::write_if_changed(c, text.as_bytes());
     }
     Ok(hex(&all.finalize()))
+}
+
+fn decode_hex(s: &str) -> Option<[u8; 32]> {
+    let mut out = [0u8; 32];
+    if s.len() != 64 {
+        return None;
+    }
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(out)
 }
 
 /// The document of a Switch build.
@@ -132,7 +323,7 @@ pub fn switch_document(
     info.needs = Needs {
         romfs: if romfs.is_dir() {
             Some(TreeNeed {
-                hash: tree_hash(&romfs)?,
+                hash: tree_hash_cached(&romfs, Some(&import.with_file_name("romfs-hashes.txt")))?,
             })
         } else {
             None
@@ -253,6 +444,34 @@ mod tests {
         assert_eq!(tree_hash(&a).unwrap(), tree_hash(&b).unwrap());
         relift_cache::write_if_changed(&b.join("x"), b"3").unwrap();
         assert_ne!(tree_hash(&a).unwrap(), tree_hash(&b).unwrap());
+    }
+
+    #[test]
+    fn the_cached_tree_hash_matches_and_follows_changes() {
+        let a = scratch("info-tree-cached");
+        std::fs::create_dir_all(a.join("d")).unwrap();
+        relift_cache::write_if_changed(&a.join("x"), b"1").unwrap();
+        relift_cache::write_if_changed(&a.join("d/y"), b"22").unwrap();
+        let later = nanos(Ok(std::time::SystemTime::now())) + 3_600_000_000_000;
+        let cache = scratch("info-tree-cached-store").join("hashes.txt");
+        let plain = tree_hash(&a).unwrap();
+        assert_eq!(tree_hash_at(&a, Some(&cache), later).unwrap(), plain);
+        assert_eq!(std::fs::read_to_string(&cache).unwrap().lines().count(), 3);
+        let text = std::fs::read_to_string(&cache).unwrap();
+        let forged = text.replace(&hex(&Sha256::digest(b"1")), &"0".repeat(64));
+        assert_ne!(forged, text);
+        relift_cache::write_if_changed(&cache, forged.as_bytes()).unwrap();
+        assert_ne!(tree_hash_at(&a, Some(&cache), later).unwrap(), plain);
+        relift_cache::write_if_changed(&cache, text.as_bytes()).unwrap();
+        relift_cache::write_if_changed(&a.join("x"), b"3").unwrap();
+        assert_ne!(tree_hash_at(&a, Some(&cache), later).unwrap(), plain);
+        assert_eq!(
+            tree_hash_at(&a, Some(&cache), later).unwrap(),
+            tree_hash(&a).unwrap()
+        );
+        assert_eq!(std::fs::read_to_string(&cache).unwrap().lines().count(), 3);
+        tree_hash_at(&a, Some(&cache), 0).unwrap();
+        assert_eq!(std::fs::read_to_string(&cache).unwrap().lines().count(), 1);
     }
 
     #[test]
