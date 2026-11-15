@@ -288,8 +288,13 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-gba-tools",
         band: 2,
-        why: "single-purpose tools for Game Boy Advance files, thin wrappers over relift-gba-formats",
-        normal: &["clap", "relift-gba-formats", "serde_json"],
+        why: "single-purpose tools for Game Boy Advance files, thin wrappers over relift-gba-formats and relift-gba-analyze",
+        normal: &[
+            "clap",
+            "relift-gba-analyze",
+            "relift-gba-formats",
+            "serde_json",
+        ],
         dev: &[
             "relift-cache",
             "relift-gba-formats",

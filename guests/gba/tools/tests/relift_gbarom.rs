@@ -143,3 +143,72 @@ fn bad_inputs_fail_with_one_line() {
     let hex_bad = gbarom(&d, &[path(&p), "--logo-sha256", "zz"]);
     assert_eq!(hex_bad.status.code(), Some(1));
 }
+
+fn code_rom(indirect: bool) -> Vec<u8> {
+    let mut rom = synth::rom(&Spec::default());
+    let words: [u32; 3] = if indirect {
+        [0xE591_0000, 0xE12F_FF10, 0]
+    } else {
+        [0xE59F_0000, 0xE12F_FF10, 0x0800_0101]
+    };
+    for (i, w) in words.iter().enumerate() {
+        rom[0xC0 + 4 * i..0xC4 + 4 * i].copy_from_slice(&w.to_le_bytes());
+    }
+    rom[0x100..0x102].copy_from_slice(&0x4770u16.to_le_bytes());
+    synth::fix_complement(&mut rom);
+    rom
+}
+
+#[test]
+fn functions_lists_arm_and_thumb_code_as_json() {
+    let d = dir("gbarom-functions");
+    let p = put(&d, "code.gba", &code_rom(false));
+    let v = json(&gbarom(
+        &d,
+        &["functions", path(&p), "--json", "--instructions"],
+    ));
+    assert_eq!(v["function_count"], 1);
+    let f = &v["functions"][0];
+    assert_eq!(f["entry"]["text"], "A:08000000");
+    assert_eq!(f["origin"], "entry");
+    let insts: Vec<String> = f["instructions"]
+        .as_array()
+        .expect("instructions")
+        .iter()
+        .map(|i| {
+            format!(
+                "{:X}{}",
+                i[0].as_u64().unwrap_or(0),
+                i[1].as_str().unwrap_or("")
+            )
+        })
+        .collect();
+    assert_eq!(insts, ["8000000A", "80000C0A", "80000C4A", "8000100T"]);
+    assert_eq!(v["data"][0], serde_json::json!([0x0800_00C8u32, 4]));
+    assert_eq!(v["regions"][0]["region"], "rom");
+}
+
+#[test]
+fn functions_text_and_strict() {
+    let d = dir("gbarom-functions-strict");
+    let good = put(&d, "good.gba", &code_rom(false));
+    let out = gbarom(&d, &["functions", path(&good), "--strict"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("1 functions"), "{text}");
+    assert!(
+        text.contains("rom: 3 ARM and 1 Thumb instructions"),
+        "{text}"
+    );
+    let bad = put(&d, "bad.gba", &code_rom(true));
+    assert!(gbarom(&d, &["functions", path(&bad)]).status.success());
+    let out = gbarom(&d, &["functions", path(&bad), "--strict"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("1 unresolved transfers"));
+    let v = json(&gbarom(
+        &d,
+        &["functions", path(&bad), "--json", "--summary"],
+    ));
+    assert_eq!(v["unresolved_by_kind"]["indirect-jump"], 1);
+    assert_eq!(v["functions"].as_array().map(Vec::len), Some(0));
+}

@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 clap = { workspace = true }
+relift-gba-analyze = { workspace = true }
 relift-gba-formats = { workspace = true }
 serde_json = { workspace = true }
 

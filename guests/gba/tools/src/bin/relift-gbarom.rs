@@ -1,16 +1,17 @@
 //! `relift-gbarom`: print the header of a Game Boy Advance ROM, validate
 //! its logo hash, complement and size, and scan it for save library
-//! strings.
+//! strings, or list its functions.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use relift_gba_formats::checksum::{LOGO_SHA256, hex, parse_sha256};
 use relift_gba_formats::header::MAX_ROM;
 use relift_gba_formats::save::{self, SaveString};
 use relift_gba_formats::{Header, Rom};
+use relift_gba_tools::functions::{self, FunctionsArgs};
 use relift_gba_tools::{BoxError, input, print_json, run};
 use serde_json::{Value, json};
 
@@ -18,10 +19,17 @@ use serde_json::{Value, json};
 /// and list the save library strings it carries. Multiboot images are
 /// refused.
 #[derive(Parser, Debug)]
-#[command(name = "relift-gbarom", version)]
+#[command(
+    name = "relift-gbarom",
+    version,
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// The ROM image, or - for stdin.
-    rom: PathBuf,
+    #[arg(required = true)]
+    rom: Option<PathBuf>,
     /// Print JSON.
     #[arg(long)]
     json: bool,
@@ -34,14 +42,26 @@ struct Cli {
     logo_sha256: Option<String>,
 }
 
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Find the functions of a ROM across ARM and Thumb code, with the code
+    /// copied to work RAM and the transfers that cannot be resolved.
+    Functions(FunctionsArgs),
+}
+
 fn main() -> ExitCode {
     run::<Cli>("relift-gbarom", |cli| {
+        let rom_path = match (cli.command, cli.rom) {
+            (Some(Command::Functions(a)), _) => return functions::run(&a),
+            (None, Some(p)) => p,
+            (None, None) => return Err("a ROM path is required".into()),
+        };
         let expected = match &cli.logo_sha256 {
             Some(s) => parse_sha256(s).ok_or("--logo-sha256 needs 64 hex digits")?,
             None => LOGO_SHA256,
         };
-        let bytes = input(&cli.rom)?;
-        let header = Header::parse(&bytes).map_err(|e| format!("{}: {e}", cli.rom.display()))?;
+        let bytes = input(&rom_path)?;
+        let header = Header::parse(&bytes).map_err(|e| format!("{}: {e}", rom_path.display()))?;
         let strings = save::scan(&bytes);
         let report = Report {
             header: &header,

@@ -1,6 +1,9 @@
 //! Shared plumbing of the single-purpose tools for Game Boy Advance files
 //! (`relift-gbarom`): inputs from files or stdin, JSON and the one-line
-//! error exit. All format logic lives in `relift-gba-formats`.
+//! error exit. All format logic lives in `relift-gba-formats`, discovery in
+//! `relift-gba-analyze`.
+
+pub mod functions;
 
 use std::io::{Read, Write};
 use std::path::Path;
