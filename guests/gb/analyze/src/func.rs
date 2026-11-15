@@ -51,6 +51,13 @@ pub(crate) struct Summary {
     /// It is run inside its callers only to resolve the addresses it
     /// stores to; its transfers do not depend on them.
     pub store_only: bool,
+    /// Its transfers do not depend on its callers: what depends on them is
+    /// only the addresses it stores to and exit values that are an entry
+    /// register pair plus a constant.
+    pub relative: bool,
+    /// Its computed transfers were found by running it for every value of
+    /// the entry register they depend on.
+    pub enumerated: bool,
 }
 
 /// How control reaches a callee.
@@ -170,6 +177,7 @@ pub(crate) struct Outcome {
     /// It halts or enables interrupts, so an interrupt handler may leave
     /// a loop that has no exit of its own.
     pub waits: bool,
+    pub enumerated: bool,
     pub touches: bool,
     pub bank_reg: Option<usize>,
     pub target_regs: Option<(usize, usize)>,
@@ -209,13 +217,23 @@ pub(crate) struct Env<'a> {
     pub probes: &'a RefCell<Probes>,
     pub budget: RefCell<usize>,
     pub inline_body: RefCell<FxMap<Loc, BTreeMap<Loc, u8>>>,
+    pub transfers: RefCell<TransferCache>,
 }
+
+/// The computed transfers of a function for every value of one entry
+/// register, by site.
+pub(crate) type Transfers = FxMap<Loc, BTreeSet<u16>>;
+
+/// [`Transfers`] by function and entry register; `None` when the runs do
+/// not all end in a return.
+pub(crate) type TransferCache = FxMap<(Loc, usize), Option<Rc<Transfers>>>;
 
 const MAX_DEPTH: u8 = 4;
 const MAX_CHAIN: u8 = 6;
 const MAX_TABLE: usize = 256;
 const MAX_SPS: u8 = 4;
 const EXIT_STEPS: usize = 20_000;
+const ENUM_STEPS: usize = 65_536;
 
 /// How a run started.
 #[derive(Clone, Copy, Debug)]
@@ -242,6 +260,7 @@ struct Run<'a> {
     work: Vec<Key>,
     states: FxMap<Key, State>,
     sps: FxMap<Loc, u8>,
+    tails: BTreeSet<Loc>,
 }
 
 type Key = (Loc, Option<i16>, u32);
@@ -292,6 +311,7 @@ impl<'a> Run<'a> {
             work: Vec::new(),
             states: FxMap::default(),
             sps: FxMap::default(),
+            tails: BTreeSet::new(),
         }
     }
 
@@ -334,6 +354,12 @@ impl<'a> Run<'a> {
 
     fn enter(&mut self, loc: Loc, mut st: State) {
         pin(self.env.model, loc, &mut st);
+        if loc != self.func
+            && st.sp == Some(self.entry_sp())
+            && self.env.summaries.get(&loc).is_some_and(|s| s.enumerated)
+        {
+            self.tails.insert(loc);
+        }
         let mut key = key_of(loc, &st);
         if !self.states.contains_key(&key) {
             let n = self.sps.entry(loc).or_insert(0);
@@ -698,9 +724,26 @@ impl<'a> Run<'a> {
                     s.ver[r] = ver;
                     continue;
                 }
+                v if v.depends_on_entry() => Val::Top,
                 v => v,
             };
             s.set(r, v);
+        }
+        for (h, l) in [(state::B, state::C), (state::D, state::E), (H, L)] {
+            if let (Val::Hi(a), Val::Lo(b)) = (sum.regs[h], sum.regs[l])
+                && a == b
+                && a.step == 0
+                && let Base::Pair(eh, el) = a.base
+            {
+                let w = word_of(st.regs[usize::from(eh)], st.regs[usize::from(el)]);
+                let w = match w {
+                    Word::Const(_) | Word::Sym(_) => state::add_word(w, Word::Const(a.off)),
+                    _ => Word::Other,
+                };
+                let (vh, vl) = state::split(w);
+                s.set(h, vh);
+                s.set(l, vl);
+            }
         }
         s.lo = match sum.lo {
             Bv::Entry => st.lo,
@@ -760,7 +803,7 @@ impl<'a> Run<'a> {
             }
             return;
         }
-        if self.depth() >= MAX_DEPTH && sum.store_only {
+        if self.depth() >= MAX_DEPTH && (sum.store_only || sum.relative) {
             for k in &sum.exits {
                 let s = self.apply(&sum, &st);
                 self.fall(site, Some(ret.wrapping_add(*k)), s);
@@ -1048,6 +1091,26 @@ impl<'a> Run<'a> {
             return;
         }
         let w = word_of(h, l);
+        if !matches!(w, Word::Const(_) | Word::Load(_))
+            && let Some(t) = self.enumerated(at)
+        {
+            self.out.enumerated = true;
+            for addr in t {
+                match self.flow(&st, addr) {
+                    Ok(loc) if !is_ram(addr) => {
+                        self.branches.push((at, loc));
+                        self.enter(loc, st);
+                    }
+                    _ => self.unresolved(
+                        at,
+                        UnresolvedKind::IndirectJump,
+                        format!("computed target ${addr:04X}"),
+                        false,
+                    ),
+                }
+            }
+            return;
+        }
         let from_ram = matches!(w, Word::Load(_));
         let targets = match self.targets(at, w, h, l, &st) {
             Some(t) => t,
@@ -1168,6 +1231,48 @@ impl<'a> Run<'a> {
                 None
             }
         }
+    }
+
+    /// The targets of the computed transfer at `at` when running the
+    /// function for every value of one entry register, with every other
+    /// register unknown, reaches it with a constant address on every run.
+    fn enumerated(&self, at: Loc) -> Option<BTreeSet<u16>> {
+        let froms: Vec<Loc> = std::iter::once(self.func)
+            .chain(self.tails.iter().copied())
+            .collect();
+        for f in froms {
+            let mut st = State::symbolic();
+            pin(self.env.model, f, &mut st);
+            for r in 0..7 {
+                let key = (f, r);
+                let cached = self.env.transfers.borrow().get(&key).cloned();
+                let t = match cached {
+                    Some(t) => t,
+                    None => {
+                        let mut b = self.env.budget.borrow_mut();
+                        if *b < ENUM_STEPS {
+                            return None;
+                        }
+                        let t = crate::probe::transfers(
+                            &self.cx(),
+                            f,
+                            &st,
+                            r,
+                            self.env.summaries,
+                            &mut b,
+                        )
+                        .map(Rc::new);
+                        drop(b);
+                        self.env.transfers.borrow_mut().insert(key, t.clone());
+                        t
+                    }
+                };
+                if let Some(set) = t.as_ref().and_then(|t| t.get(&at)) {
+                    return Some(set.clone());
+                }
+            }
+        }
+        None
     }
 
     fn cell_targets(&mut self, at: Loc, cell: u16, st: &State) -> Option<Vec<(u16, Option<u16>)>> {

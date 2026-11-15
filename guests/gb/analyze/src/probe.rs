@@ -9,12 +9,15 @@
 
 use relift_cpu_sm83::{Cond, Immediate, Mnemonic, Operand, Reg16, decode};
 
+use std::collections::BTreeSet;
+
 use crate::func::Summary;
 use crate::fx::FxMap;
 use crate::loc::Loc;
 use crate::state::{self, Base, Bv, Ctx, State, Sym, Val, WindowBank, Word, Write};
 
 const STEPS: usize = 1024;
+const EXHAUST: usize = 4096;
 const SENTINEL: u16 = 0xFFFF;
 
 /// Run `entry` as a call from `st`; the state at its return, or `None` when
@@ -22,6 +25,39 @@ const SENTINEL: u16 = 0xFFFF;
 /// outside its stack.
 pub(crate) fn run(cx: &Ctx<'_>, entry: Loc, st: State) -> Option<State> {
     run_to(cx, entry, st, SENTINEL, STEPS, None).and_then(|(s, a)| (a == SENTINEL).then_some(s))
+}
+
+/// The computed transfers inside `entry` for every value of entry register
+/// `r`, with all other registers unknown: for each site, the addresses
+/// control went to. `None` unless every run decides its path, decodes every
+/// instruction it reaches and returns to its caller.
+pub(crate) fn transfers(
+    cx: &Ctx<'_>,
+    entry: Loc,
+    st: &State,
+    r: usize,
+    effects: &FxMap<Loc, Summary>,
+    budget: &mut usize,
+) -> Option<FxMap<Loc, BTreeSet<u16>>> {
+    let mut out: FxMap<Loc, BTreeSet<u16>> = FxMap::default();
+    for i in 0..=255u8 {
+        let mut s = *st;
+        for x in 0..7 {
+            s.set(x, if x == r { Val::Const(i) } else { Val::Top });
+        }
+        let mut log = Trail::default();
+        let steps = EXHAUST.min(*budget);
+        let res = walk(cx, entry, s, SENTINEL, steps, Some(effects), Some(&mut log));
+        *budget = budget.saturating_sub(log.used);
+        let (_, a) = res?;
+        if a != SENTINEL {
+            return None;
+        }
+        for (site, t) in log.sites {
+            out.entry(site).or_default().insert(t);
+        }
+    }
+    Some(out)
 }
 
 /// Run `entry` as a call from `st` that returns to `ret`, along its single
@@ -33,10 +69,29 @@ pub(crate) fn run(cx: &Ctx<'_>, entry: Loc, st: State) -> Option<State> {
 pub(crate) fn run_to(
     cx: &Ctx<'_>,
     entry: Loc,
+    st: State,
+    ret: u16,
+    steps: usize,
+    effects: Option<&FxMap<Loc, Summary>>,
+) -> Option<(State, u16)> {
+    walk(cx, entry, st, ret, steps, effects, None)
+}
+
+/// The computed transfers one walk made and the steps it took.
+#[derive(Default)]
+struct Trail {
+    sites: Vec<(Loc, u16)>,
+    used: usize,
+}
+
+fn walk(
+    cx: &Ctx<'_>,
+    entry: Loc,
     mut st: State,
     ret: u16,
     steps: usize,
     effects: Option<&FxMap<Loc, Summary>>,
+    mut log: Option<&mut Trail>,
 ) -> Option<(State, u16)> {
     let [rh, rl] = ret.to_be_bytes();
     st.push(Val::Const(rh), Val::Const(rl));
@@ -44,6 +99,9 @@ pub(crate) fn run_to(
     let mut pc = entry;
     let mut frames: Vec<i16> = Vec::new();
     for _ in 0..steps {
+        if let Some(l) = log.as_deref_mut() {
+            l.used += 1;
+        }
         let bytes = cx.image.fetch(pc)?;
         let ins = decode(bytes).ok()?;
         let op = ins.opcode;
@@ -82,6 +140,9 @@ pub(crate) fn run_to(
                 };
                 if frames.is_empty() && st.sp == Some(base + 2) {
                     return Some((st, a));
+                }
+                if let Some(l) = log.as_deref_mut() {
+                    l.sites.push((pc, a));
                 }
                 pc = to(&st, a)?;
             }
@@ -146,10 +207,16 @@ pub(crate) fn run_to(
                     frames.pop();
                 } else if frames.is_empty() && at == base {
                     return Some((st, a));
-                } else if frames.is_empty() || at > base {
+                } else if at > base {
                     return None;
                 } else {
+                    if frames.is_empty() && log.is_none() {
+                        return None;
+                    }
                     frames.retain(|f| *f > at);
+                    if let Some(l) = log.as_deref_mut() {
+                        l.sites.push((pc, a));
+                    }
                 }
                 pc = to(&st, a)?;
             }

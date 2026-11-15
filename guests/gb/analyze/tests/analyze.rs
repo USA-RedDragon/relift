@@ -783,3 +783,34 @@ fn code_walked_only_inside_a_caller_is_part_of_the_callee() {
     let f = &r.functions[&Loc::fixed(0x200)];
     assert!(f.body.contains_key(&Loc::fixed(0x203)), "{:?}", f.body);
 }
+
+#[test]
+fn a_computed_entry_into_an_unrolled_loop_is_followed_for_every_count() {
+    let mut body = Vec::new();
+    for _ in 0..4 {
+        body.extend_from_slice(&[0x2A, 0x12, 0x13]);
+    }
+    body.push(0xC9);
+    let r = Cart::new(0x19, 0x04)
+        .put(
+            0,
+            0x150,
+            &[0xFA, 0x00, 0xC0, 0x4F, 0xCD, 0x00, 0x03, 0x18, 0xFE],
+        )
+        .put(
+            0,
+            0x300,
+            &[
+                0x79, 0xE6, 0x03, 0x2F, 0x3C, 0xC6, 0x04, 0x47, 0x80, 0x80, 0x4F, 0x06, 0x04, 0xC5,
+                0xC9,
+            ],
+        )
+        .put(0, 0x400, &body)
+        .analyze();
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+    let f = &r.functions[&Loc::fixed(0x300)];
+    for a in [0x403, 0x406, 0x409, 0x40C] {
+        assert!(f.body.contains_key(&Loc::fixed(a)), "${a:04X}");
+    }
+    assert!(!f.body.contains_key(&Loc::fixed(0x400)));
+}

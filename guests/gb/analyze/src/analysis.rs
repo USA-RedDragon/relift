@@ -206,8 +206,32 @@ fn join(a: &Summary, b: &Summary) -> Summary {
         target_regs: a.target_regs.or(b.target_regs),
         pure: a.pure && b.pure,
         store_only: a.store_only && b.store_only,
+        relative: a.relative && b.relative,
+        enumerated: a.enumerated && b.enumerated,
         assumed: a.assumed && b.assumed,
     }
+}
+
+/// Whether every exit value that depends on the entry is an entry register,
+/// a byte loaded from memory, or both halves of an entry register pair plus
+/// a constant.
+fn relative(regs: &[Val; 7]) -> bool {
+    use crate::state::{B, Base, C, D, E, H, L};
+    let pair = |s: crate::state::Sym| matches!(s.base, Base::Pair(..)) && s.step == 0;
+    for (h, l) in [(B, C), (D, E), (H, L)] {
+        for (r, other) in [(h, l), (l, h)] {
+            let ok = match regs[r] {
+                Val::Hi(s) if r == h => pair(s) && regs[other] == Val::Lo(s),
+                Val::Lo(s) if r == l => pair(s) && regs[other] == Val::Hi(s),
+                v => !v.depends_on_entry() || matches!(v, Val::Entry(_) | Val::At(_)),
+            };
+            if !ok {
+                return false;
+            }
+        }
+    }
+    let a = regs[crate::state::A];
+    !a.depends_on_entry() || matches!(a, Val::Entry(_) | Val::At(_))
 }
 
 fn summarize(o: &Outcome) -> Summary {
@@ -253,6 +277,8 @@ fn summarize(o: &Outcome) -> Summary {
         pure: !o.impure && o.ram.is_empty() && o.unresolved.is_empty(),
         assumed,
         store_only: !(o.entry_dep || o.computed_dep || exit_dep || !o.escapes.is_empty()),
+        enumerated: o.enumerated,
+        relative: !(o.entry_dep || o.computed_dep || !o.escapes.is_empty()) && relative(&regs),
     }
 }
 
@@ -305,6 +331,7 @@ impl Driver<'_> {
             probes: &self.probes,
             budget: RefCell::new(STEP_BUDGET),
             inline_body: RefCell::new(FxMap::default()),
+            transfers: RefCell::new(FxMap::default()),
         };
         let alone = if self.roots.contains_key(&e) && !self.called.contains(&e) {
             Outcome::default()
