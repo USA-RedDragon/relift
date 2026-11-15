@@ -1,0 +1,71 @@
+Provenance of the high-level BIOS (runtime/guests/gba/bios)
+
+No code, table or byte of the console's BIOS image is used. Behaviour comes
+from three sources, listed per function below:
+
+  [G] GBATEK, the public hardware documentation: call numbers,
+      argument and data formats.
+  [C] The Cult-of-GBA replacement BIOS, https://github.com/Cult-of-GBA/BIOS,
+      commit a30e9a96df083628b650724b7d4d7112b4070b98, MIT license (text
+      below). Tables were adapted from it; no code was copied, the routines
+      here are new C.
+  [P] The SWI probe ROM's records of the console's BIOS (results, written
+      memory, stack frames and cycle counts of about 3,500 calls), from which
+      the side registers (r1, r3), the stack frames, the edge cases and the
+      cycle cost fits were derived.
+
+swi.c
+  dispatcher frames (SPSR, r11, r12, LR on the supervisor stack; r2 and LR on
+  the system stack), r2 and r12 restored                          [P]
+  IRQ stub at 0x18 (r0-r3, r12, LR pushed; LR = 0x138)             [G][P]
+  open-bus values after boot, IRQ and SWI                          [G]
+  GetBiosChecksum, SoftReset, Halt, Stop, CustomHalt, MultiBoot    [G][P]
+  post-boot state and I/O                                          [G]
+  cycle cost fits per call                                         [P]
+math.c
+  Div, DivArm (quotient loop, signs, r3 = |quotient|, division by
+  zero behaviour)                                                  [G][P]
+  Sqrt (r1, r3 of the last Newton step)                            [P]
+  ArcTan polynomial constants                                      [G][C]
+  ArcTan2 octants and r3                                           [G][P]
+  sine table (BgAffineSet, ObjAffineSet)                           [C]
+  BgAffineSet, ObjAffineSet                                        [G][P]
+copy.c
+  CpuSet, CpuFastSet, the source check on address bits 25-27,
+  the registers they leave                                         [G][P]
+decomp.c
+  BitUnPack, LZ77UnComp (WRAM and VRAM), HuffUnComp, RLUnComp
+  (WRAM and VRAM), Diff8bitUnFilter (WRAM and VRAM),
+  Diff16bitUnFilter: formats                                      [G]
+  r0, r1, r3 left, VRAM odd-byte handling, stack contents          [P]
+misc.c
+  RegisterRamReset areas and order                                 [G][C][P]
+  IntrWait, VBlankIntrWait                                         [G][P]
+  SoundBias                                                        [G]
+  MidiKey2Freq scale and frequency tables                          [C]
+  MidiKey2Freq arithmetic                                          [G][P]
+
+Not used: Normmatt/gba_bios (a disassembly of the console's BIOS without a
+license), and every GPL-licensed emulator.
+
+--- MIT license of the Cult-of-GBA BIOS ---
+
+Copyright 2020 - 2021 DenSinH and fleroviux
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
