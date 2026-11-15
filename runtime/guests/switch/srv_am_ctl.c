@@ -220,6 +220,13 @@ static rl_result sc_enter_fatal_section(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+static rl_result sc_exit(rl_ipc_req *r)
+{
+    (void)r;
+    rl_process_exit(0);
+    return KR_SUCCESS;
+}
+
 static rl_result sc_leave_fatal_section(rl_ipc_req *r)
 {
     sc_state *s = sc(r);
@@ -375,7 +382,7 @@ static rl_result sc_save_current_screenshot(rl_ipc_req *r)
 }
 
 static const rl_ipc_cmd sc_cmds[] = {
-    RL_SRV_STUB(0, "Exit"),
+    { 0, "Exit", sc_exit },
     RL_SRV_STUB(1, "LockExit"),
     RL_SRV_STUB(2, "UnlockExit"),
     { 3, "EnterFatalSection", sc_enter_fatal_section },

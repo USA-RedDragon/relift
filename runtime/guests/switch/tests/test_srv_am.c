@@ -443,6 +443,29 @@ TEST(am_common_state_getter_commands)
     CHECK_EQ(tc_cmd(e.c, e.csg, 7), SF_RESULT_UNKNOWN_COMMAND);
 }
 
+static uint32_t g_exit_codes[4];
+static uint32_t g_exits;
+
+static void record_exit(uint32_t code)
+{
+    if (g_exits < 4)
+        g_exit_codes[g_exits] = code;
+    g_exits++;
+}
+
+TEST(am_self_controller_exit_ends_process)
+{
+    env e;
+    libnx_init_application(&e);
+    CHECK(e.ok);
+    g_exits = 0;
+    rl_set_exit_hook(record_exit);
+    CHECK_EQ(rc_of(tc_send(e.c, e.sc, tc_new(0))), 0);
+    rl_set_exit_hook(NULL);
+    CHECK_EQ(g_exits, 1u);
+    CHECK_EQ(g_exit_codes[0], 0u);
+}
+
 TEST(am_self_controller_commands)
 {
     env e;
@@ -451,7 +474,6 @@ TEST(am_self_controller_commands)
     tc_obj sc = e.sc;
     CHECK_EQ(rc_of(tc_send(e.c, sc, tc_new(1))), 0);
     CHECK_EQ(rc_of(tc_send(e.c, sc, tc_new(2))), 0);
-    CHECK_EQ(rc_of(tc_send(e.c, sc, tc_new(0))), 0);
 
     CHECK_EQ(tc_cmd(e.c, sc, 4), AM_UNBALANCED);
     CHECK_EQ(rc_of(tc_send(e.c, sc, tc_new(3))), 0);
