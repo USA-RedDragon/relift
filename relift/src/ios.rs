@@ -594,6 +594,7 @@ pub fn package(
     exe: &Path,
     name: &str,
     home: &Home,
+    data_manifest: Option<&[u8]>,
     ui: &mut Ui,
 ) -> Result<PathBuf, BoxError> {
     let dir = exe.parent().ok_or("the program has no folder")?;
@@ -613,6 +614,9 @@ pub fn package(
         info_plist(b, exe_name, &home.label).as_bytes(),
     )?;
     relift_cache::write_if_changed(&app.join("PkgInfo"), b"APPL????")?;
+    if let Some(m) = data_manifest {
+        relift_cache::write_if_changed(&app.join(crate::datamanifest::FILE), m)?;
+    }
     for (n, png) in &home.icons {
         relift_cache::write_if_changed(&app.join(n), png)?;
     }

@@ -52,6 +52,9 @@ fn main() -> ExitCode {
         Command::Build { target, mods } => {
             relift::build::run_build(&settings, target, mods, &mut ui)
         }
+        Command::Push { target, device } => {
+            relift::push::run_push(&settings, target, device.as_deref(), &mut ui)
+        }
         Command::Run {
             target, trace_os, ..
         } => match relift::build::run_run(&settings, target.as_deref(), *trace_os, &mut ui) {

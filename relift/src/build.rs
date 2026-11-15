@@ -1906,9 +1906,17 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     } else {
         req.label
     };
+    let data_manifest = match (req.import, req.ios.is_some() || req.android.is_some()) {
+        (Some(import), true) => {
+            let work = req.exe.parent().ok_or("the program has no folder")?;
+            let e = crate::datamanifest::entries(import, work)?;
+            (!e.is_empty()).then(|| crate::datamanifest::text(&e).into_bytes())
+        }
+        _ => None,
+    };
     if let Some(i) = req.ios {
         let home = crate::ios::home(req.exe, req.name, label)?;
-        let app = crate::ios::package(i, req.exe, req.name, &home, ui)?;
+        let app = crate::ios::package(i, req.exe, req.name, &home, data_manifest.as_deref(), ui)?;
         ui.summary(&Line::new().text(format!("  app: {}", app.display())));
         if let crate::ios::Signing::Unsigned(why) = &i.signing {
             ui.summary(&Line::new().paint(
@@ -1920,7 +1928,15 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     }
     if let Some(a) = req.android {
         let l = crate::android::launcher(req.exe, req.name, label)?;
-        let apk = crate::android::package(a, req.exe, req.name, &l.label, &l.icons, ui)?;
+        let apk = crate::android::package(
+            a,
+            req.exe,
+            req.name,
+            &l.label,
+            &l.icons,
+            data_manifest.as_deref(),
+            ui,
+        )?;
         ui.summary(&Line::new().text(format!("  apk: {}", apk.display())));
         return Ok(());
     }

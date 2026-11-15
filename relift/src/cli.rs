@@ -56,6 +56,19 @@ pub enum Command {
         #[arg(long, value_delimiter = ',', value_name = "MOD")]
         mods: Vec<PathBuf>,
     },
+    /// Copy the project's game data (romfs, DLC) onto a phone for the app
+    /// `relift build --target` made, and check every file's size against
+    /// the data manifest; files that differ are copied again, and the push
+    /// fails naming the first file that still differs.
+    Push {
+        /// The app's target: ios-arm64 or android-arm64.
+        #[arg(long)]
+        target: String,
+        /// The device: an iOS identifier or name, or an adb serial.
+        /// Default: the one connected device.
+        #[arg(long)]
+        device: Option<String>,
+    },
     /// Build if needed, then run the project.
     Run {
         /// The host target to run on. Default: this host.
@@ -144,6 +157,7 @@ impl Command {
             Command::Import { .. } => "import",
             Command::Build { .. } => "build",
             Command::Run { .. } => "run",
+            Command::Push { .. } => "push",
             Command::Check { .. } => "check",
             Command::Diff { .. } => "diff",
             Command::Where { .. } => "where",

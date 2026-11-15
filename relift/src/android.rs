@@ -517,6 +517,8 @@ pub struct Apk<'a> {
     pub work: &'a Path,
     /// The signed APK to write.
     pub output: &'a Path,
+    /// The game data manifest, shipped as an asset (crate::datamanifest).
+    pub data_manifest: Option<&'a [u8]>,
 }
 
 /// How an APK is signed.
@@ -649,6 +651,7 @@ pub fn package(
     name: &str,
     label: &str,
     icons: &[(&'static str, Vec<u8>)],
+    data_manifest: Option<&[u8]>,
     ui: &mut Ui,
 ) -> Result<PathBuf, BoxError> {
     let dir = exe.parent().ok_or("the program has no folder")?;
@@ -665,6 +668,7 @@ pub fn package(
             deps: &a.deps,
             work: &dir.join("apk"),
             output: &apk,
+            data_manifest,
         },
         &a.sdk,
         &a.ndk,
@@ -891,6 +895,9 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
             std::fs::read(lib)?,
         );
     }
+    if let Some(m) = a.data_manifest {
+        z.add(&format!("assets/{}", crate::datamanifest::FILE), m.to_vec());
+    }
     for (name, text) in a.deps.adrenotools.iter().flat_map(|t| &t.licenses) {
         z.add(&format!("assets/licenses/{name}.txt"), std::fs::read(text)?);
     }
@@ -1032,6 +1039,7 @@ mod tests {
             deps: &deps,
             work: Path::new("w"),
             output: Path::new("o"),
+            data_manifest: None,
         };
         let m = manifest(&a, &sdk, true);
         assert!(m.contains("package=\"dev.relift.game.x\""));
