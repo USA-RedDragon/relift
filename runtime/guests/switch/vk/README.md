@@ -152,6 +152,9 @@ The console driver runs a secondary command buffer handed straight to
 of its own instead that runs the secondary with `vkCmdExecuteCommands`,
 recorded again whenever the guest has begun the secondary again since.
 Secondaries that continue a render pass are passed through with a warning.
+A secondary the guest begins without inheritance info, which the console
+driver accepts and Vulkan does not, reaches the host with empty inheritance
+info; Turnip reads it unchecked.
 
 ## Formats
 

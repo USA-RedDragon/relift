@@ -2075,3 +2075,72 @@ TEST(vk_set_layout_bindings_reach_the_host_in_order)
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
+
+static PFN_vkBeginCommandBuffer g_real_begin;
+static bool g_begin_inherits;
+
+static VkResult seen_begin(VkCommandBuffer cb, const VkCommandBufferBeginInfo *bi)
+{
+    g_begin_inherits = bi->pInheritanceInfo &&
+                       bi->pInheritanceInfo->sType == VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO &&
+                       !bi->pInheritanceInfo->renderPass;
+    return g_real_begin(cb, bi);
+}
+
+TEST(vk_secondary_begun_without_inheritance_info_gets_it)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t dev = make_device(pds[0], queue_family(pds[0], 0), NULL, 0);
+    CHECK(dev != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, 0, 0, gq);
+    uint64_t queue = g64(gq);
+    mapped_buf b;
+    CHECK_EQ(make_mapped(pds[0], dev, 64, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &b), 0);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    uint64_t gf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFence", dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+    uint64_t fence = g64(gf);
+    vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
+    CHECK(o != NULL);
+    g_real_begin = (PFN_vkBeginCommandBuffer)o->fns->f[VKG_vkBeginCommandBuffer];
+    o->fns->f[VKG_vkBeginCommandBuffer] = (void (*)(void))seen_begin;
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    uint64_t gbi = gput(&bi, sizeof bi);
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gbi)), VK_SUCCESS);
+    o->fns->f[VKG_vkBeginCommandBuffer] = (void (*)(void))g_real_begin;
+    CHECK(g_begin_inherits);
+    CHECK_EQ(g64(gbi + 24), 0);
+    G("vkCmdFillBuffer", cb, b.buf, 0, VK_WHOLE_SIZE, 0x33333333u);
+    VkMemoryBarrier mb = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+    };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
+      gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, false), 0x33333333u);
+    G("vkDestroyFence", dev, fence, 0);
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyBuffer", dev, b.buf, 0);
+    G("vkFreeMemory", dev, b.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}

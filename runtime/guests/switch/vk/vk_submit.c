@@ -9,6 +9,10 @@
  * it. The primary is recorded again when the guest has begun the secondary
  * again since: the guest may only do that once its earlier submits are
  * done, and so then the primary is not pending either.
+ *
+ * The console driver also begins a secondary without inheritance info, which
+ * a game does and Vulkan does not allow; such a begin reaches the host with
+ * empty inheritance info (no render pass, no queries).
  */
 #include "vkf.h"
 
@@ -24,14 +28,26 @@ typedef struct vkf_wrapper {
 
 static uint64_t g_begins;
 
-void vkf_cb_begun(vkf_call *k)
+int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
 {
-    vkf_obj *o = k->obj;
-    if (!o || !o->secondary || !k->c->x[1])
-        return;
-    uint32_t flags = vkf_g32(k, k->c->x[1] + offsetof(VkCommandBufferBeginInfo, flags));
-    o->begin_flags = flags;
-    o->gen = __atomic_add_fetch(&g_begins, 1, __ATOMIC_RELAXED);
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    VkCommandBuffer cb = vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
+    if (!cb)
+        return vkf_bad_handle(&k, VKG_vkBeginCommandBuffer, c->x[0]);
+    VkCommandBufferBeginInfo *bi = vkg_ain_VkCommandBufferBeginInfo(&k, c->x[1], 1);
+    vkf_obj *o = k.obj;
+    if (o->secondary && bi) {
+        o->begin_flags = bi->flags;
+        o->gen = __atomic_add_fetch(&g_begins, 1, __ATOMIC_RELAXED);
+        if (!bi->pInheritanceInfo) {
+            VkCommandBufferInheritanceInfo *inh = vkf_alloc(&k, sizeof *inh);
+            *inh = (VkCommandBufferInheritanceInfo){ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO };
+            bi->pInheritanceInfo = inh;
+        }
+    }
+    c->x[0] = (uint32_t)VKF_FN(k.fns, vkBeginCommandBuffer)(cb, bi);
+    return vkf_end(&k);
 }
 
 static VkCommandBuffer wrapped(vkf_call *k, VkDevice dev, vkf_dev *d, VkCommandBuffer cb)
