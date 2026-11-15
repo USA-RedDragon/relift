@@ -454,7 +454,7 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
         } else if (rlgbd_now(ref) >= next_frame) {
             next_frame += RLGBD_FRAME_DOTS;
             checked++;
-            if (rlgbd_frame_hash(ref) != rlgbd_frame_hash(m.h) || rlgbd_state_hash(ref) != rlgbd_state_hash(m.h)) {
+            if (rlgbd_present_hash(ref) != rlgbd_present_hash(m.h) || rlgbd_state_hash(ref) != rlgbd_state_hash(m.h)) {
                 printf("%s: DEVICE STATE DIFFERS at frame %llu\n", path, (unsigned long long)checked);
                 bad = 1;
             }
@@ -464,7 +464,7 @@ static int lockstep(const char *path, rl_gb_model model, uint64_t frames)
             break;
         }
     }
-    if (!bad && (rlgbd_frame_hash(ref) != rlgbd_frame_hash(m.h) || rlgbd_state_hash(ref) != rlgbd_state_hash(m.h))) {
+    if (!bad && (rlgbd_present_hash(ref) != rlgbd_present_hash(m.h) || rlgbd_state_hash(ref) != rlgbd_state_hash(m.h))) {
         printf("%s: DEVICE STATE DIFFERS at the end\n", path);
         bad = 1;
     }

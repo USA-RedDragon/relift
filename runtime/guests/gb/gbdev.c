@@ -14,8 +14,8 @@ struct rl_gbdev {
 };
 
 static const uint32_t hardware[RL_GB_MODELS] = {
-    [RL_GB_DMG] = 0, [RL_GB_DMG0] = 0, [RL_GB_MGB] = 4, [RL_GB_SGB] = 0, [RL_GB_SGB2] = 0,
-    [RL_GB_CGB0] = 5, [RL_GB_CGBB] = 5, [RL_GB_CGB] = 1, [RL_GB_CGBE] = 2, [RL_GB_AGB] = 3,
+    [RL_GB_DMG] = 0, [RL_GB_DMG0] = 6, [RL_GB_MGB] = 4, [RL_GB_SGB] = 7, [RL_GB_SGB2] = 8,
+    [RL_GB_CGB0] = 9, [RL_GB_CGBB] = 5, [RL_GB_CGB] = 1, [RL_GB_CGBE] = 2, [RL_GB_AGB] = 3,
 };
 
 static uint64_t slot_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)

@@ -15,6 +15,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "4fb82b9dbec9c913d1d10607574359aba2da01f4" }
+flate2 = "=1.1.9"
 
 [profile.release]
 opt-level = 3
