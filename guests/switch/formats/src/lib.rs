@@ -21,6 +21,7 @@ pub mod pchtxt;
 pub mod romfs;
 pub mod storage;
 pub mod synth;
+pub mod zbic;
 
 pub use bytes::{hex, sha256};
 pub use error::{Error, Result};
