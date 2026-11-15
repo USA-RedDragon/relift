@@ -48,6 +48,10 @@ pub struct StepResult {
     pub regs: Regs,
     /// T-cycles as rustyboi counts them (normal speed: four per M-cycle).
     pub cycles: u32,
+    /// T-cycles the oracle spent after the late interrupt was installed
+    /// before it began the entry: a halted CPU samples the line on its own
+    /// clock grid.
+    pub wake: u32,
     pub writes: Vec<MemWrite>,
     /// `FF00-FF7F` and `FFFF` read back after the step.
     pub io: Vec<(u16, u8)>,
@@ -123,6 +127,7 @@ impl Sequence {
 struct Run {
     regs: Regs,
     cycles: u32,
+    wake: u32,
     before: Vec<u8>,
     after: Vec<u8>,
     io: Vec<(u16, u8)>,
@@ -152,23 +157,38 @@ fn run_once(spec: &StepSpec, fill: u8, seq: Sequence) -> Result<Run, Error> {
     }
     let before = ram_snapshot(&mut gb);
     let mut cycles = 0;
-    let mut run_step = |gb: &mut GB| -> Result<(), Error> {
+    let mut wake = 0;
+    let run_step = |gb: &mut GB| -> Result<u32, Error> {
         let (stopped, c) = gb.step_instruction(false);
         if stopped {
             return err("a breakpoint stopped the step");
         }
-        cycles += c;
-        Ok(())
+        Ok(c)
     };
     for _ in 0..seq.steps {
-        run_step(&mut gb)?;
+        cycles += run_step(&mut gb)?;
     }
     if let Some((ie, iff)) = seq.late {
         gb.write_memory(0xFFFF, ie);
         gb.write_memory(0xFF0F, iff);
-        if machine::regs_of(&gb).ime && ie & iff & 0x1F != 0 {
-            run_step(&mut gb)?;
+        let mut idle = 0;
+        let mut entered = false;
+        for _ in 0..6 {
+            if machine::regs_of(&gb).ime && ie & iff & 0x1F != 0 {
+                let c = run_step(&mut gb)?;
+                cycles += c;
+                if machine::regs_of(&gb).ime {
+                    idle += c;
+                } else {
+                    entered = true;
+                    break;
+                }
+            }
         }
+        if !entered && idle > 0 {
+            return err("the late interrupt was never taken");
+        }
+        wake = idle;
     }
     let after = ram_snapshot(&mut gb);
     let io = (0..=0xFFFFu32)
@@ -178,6 +198,7 @@ fn run_once(spec: &StepSpec, fill: u8, seq: Sequence) -> Result<Run, Error> {
     Ok(Run {
         regs: machine::regs_of(&gb),
         cycles,
+        wake,
         before,
         after,
         io,
@@ -211,6 +232,7 @@ pub fn run_sequence(spec: &StepSpec, seq: Sequence) -> Result<StepResult, Error>
     Ok(StepResult {
         regs: a.regs,
         cycles: a.cycles,
+        wake: a.wake,
         writes,
         io: a.io,
     })

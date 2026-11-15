@@ -425,8 +425,10 @@ struct Machine {
     late: Option<(u8, u8)>,
     armed: bool,
     stopped: bool,
+    halted: bool,
     switched: u32,
     dispatched: bool,
+    early_dispatch: bool,
     skip: bool,
 }
 
@@ -440,7 +442,11 @@ impl Intrinsics for Hooks {
         match name {
             irq::EI | irq::RETI => m.ime = true,
             irq::DI => m.ime = false,
-            irq::HALT => return Ok(u128::from(m.ie & m.iff & 0x1F != 0)),
+            irq::HALT => {
+                let pending = m.ie & m.iff & 0x1F != 0;
+                m.halted = !pending;
+                return Ok(u128::from(pending));
+            }
             irq::STOP => {
                 if m.armed {
                     m.switched += 1;
@@ -512,10 +518,12 @@ impl Devices for Dev {
     ) -> Result<Option<u64>, interp::Error> {
         let mut m = self.m.borrow_mut();
         let last = next < 0x1_0000;
+        let mut with_late = false;
         if last && let Some((ie, iff)) = m.late {
             m.ie = ie;
             m.iff = iff;
             m.late = None;
+            with_late = true;
         }
         if !m.ime || m.stopped {
             return Ok(None);
@@ -534,6 +542,7 @@ impl Devices for Dev {
         m.ime = false;
         m.iff &= !(1 << line);
         m.dispatched = true;
+        m.early_dispatch = !with_late;
         let sp = (state.regs[r::SP.index()] as u16).wrapping_sub(2);
         state.regs[r::SP.index()] = u128::from(sp);
         let ret = next as u16;
@@ -751,7 +760,7 @@ fn compare(
         seq.late = None;
     }
     let mut deferred = false;
-    if ir.machine.dispatched && seq.late.is_none() {
+    if ir.machine.dispatched && (seq.late.is_none() || ir.machine.early_dispatch) {
         seq.steps += 1;
     }
     if let Some((ie, iff)) = seq.late
@@ -765,6 +774,7 @@ fn compare(
     }
     let oracle: StepResult =
         run_sequence(&case.spec(&case.code), seq).map_err(|e| e.to_string())?;
+    let wake = if ir.machine.halted { oracle.wake } else { 0 };
     let ours = &ir.regs;
     let theirs = &oracle.regs;
     let mut diffs = Vec::new();
@@ -780,7 +790,7 @@ fn compare(
         ("sp", u32::from(ours.sp), u32::from(theirs.sp)),
         ("pc", u32::from(ours.pc), u32::from(theirs.pc)),
         ("ime", u32::from(ours.ime), u32::from(theirs.ime)),
-        ("cycles", ir.cycles as u32, oracle.cycles),
+        ("cycles", ir.cycles as u32, oracle.cycles - wake),
     ] {
         if a != b {
             diffs.push(format!("{name}: ir {a:#x} oracle {b:#x}"));

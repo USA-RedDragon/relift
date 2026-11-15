@@ -409,3 +409,9 @@ fn ei_before_stop_leaves_the_cpu_stopped_with_an_interrupt_pending() {
 fn stop_with_an_interrupt_pending_matches_the_oracle() {
     assert!(lift_one(0x10, 400));
 }
+
+#[test]
+fn halt_bug_on_ei_and_a_late_interrupt_in_halt_match_the_oracle() {
+    assert!(lift_one(0x76, 600));
+    assert!(lift_one(0xFB, 600));
+}
