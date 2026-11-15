@@ -27,7 +27,7 @@ enum rl_gbx_redirect {
 /** @brief Why an instruction ran on the library's CPU at its boundary. */
 enum rl_gbx_native {
     RL_GBX_HALT_BUG = 0, /**< the fetch after HALT did not advance pc */
-    RL_GBX_OAM_BUG = 1,  /**< a DMG with a 16-bit register in the OAM range */
+    RL_GBX_OAM_BUG = 1,  /**< not run natively: counts lifted INC rr, DEC rr and PUSH on a DMG whose increment unit puts an OAM address on the bus */
     RL_GBX_FETCH = 2,    /**< the fetched opcode is not the ROM byte the code was lifted from */
     RL_GBX_BANK0 = 3,    /**< MBC1 maps another bank at 0x0000 */
     RL_GBX_NATIVES = 4

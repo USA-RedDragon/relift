@@ -203,14 +203,29 @@ static uint8_t rom_byte(uint32_t bank, uint16_t pc)
     return G.rom_len ? G.rom[o % G.rom_len] : 0xFF;
 }
 
+/**
+ * @brief The register the 16-bit increment unit of op works on before its
+ * internal cycle (INC rr, DEC rr, PUSH), whose value on the address bus is
+ * the DMG OAM bug; -1 for other opcodes.
+ */
+static int32_t idu_value(const rl_ctx *c, uint8_t op)
+{
+    if (op < 0x40 && ((op & 0xF) == 3 || (op & 0xF) == 0xB)) {
+        switch (op >> 4) {
+        case 0: return c->b << 8 | c->c;
+        case 1: return c->d << 8 | c->e;
+        case 2: return c->h << 8 | c->l;
+        default: return c->sp;
+        }
+    }
+    if (op >= 0xC0 && (op & 0xF) == 5)
+        return c->sp;
+    return -1;
+}
+
 static int native_reason(const rl_ctx *c, uint16_t pc, uint8_t op)
 {
-    if (G.dmg) {
-        uint16_t regs[4] = {(uint16_t)(c->b << 8 | c->c), (uint16_t)(c->d << 8 | c->e), (uint16_t)(c->h << 8 | c->l), c->sp};
-        for (int i = 0; i < 4; i++)
-            if ((regs[i] & 0xFF00u) == 0xFE00u)
-                return RL_GBX_OAM_BUG;
-    }
+    (void)c;
     if (pc < WINDOW) {
         if (G.mbc1 && rlgbd_rom_bank0(G.h) != 0)
             return RL_GBX_BANK0;
@@ -255,6 +270,14 @@ static int boundary(rl_ctx *c, uint8_t *mem, uint16_t pc, bool lifted)
                     G.st.native[why]++;
                     run_native(c);
                     return MOVED;
+                }
+                if (G.dmg) {
+                    int32_t pre = idu_value(c, (uint8_t)op);
+                    if (pre >= 0) {
+                        if ((pre & 0xFF00) == 0xFE00)
+                            G.st.native[RL_GBX_OAM_BUG]++;
+                        rlgbd_idu(G.h, (uint16_t)pre);
+                    }
                 }
             }
             return RL_OK;
