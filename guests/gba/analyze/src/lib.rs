@@ -48,10 +48,11 @@
 //!   an undefined instruction and overlaps no data and no other decoding
 //!   ([`Origin::AddressTaken`]).
 //! - Code in RAM: a `CpuSet` or `CpuFastSet` call, an immediate DMA with
-//!   constant source, destination and count, or a call whose arguments
-//!   are a ROM and a RAM address and which runs to its return on constants
-//!   alone (a copy loop, a decompressor) makes a [`RamCopy`]; code reached
-//!   in its destination is lifted from those bytes at its run address.
+//!   constant source, destination and count, or a call whose registers
+//!   (`r0`-`r12`) hold a ROM and a RAM address and which runs to its
+//!   return on constants alone (a copy loop, a decompressor) makes a
+//!   [`RamCopy`]; code reached in its destination is lifted from those
+//!   bytes at its run address.
 //!
 //! Function runs are repeated until the summaries (returns, registers
 //! kept, argument effects), the entries and the RAM facts stop changing.

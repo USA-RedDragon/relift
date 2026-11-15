@@ -3,10 +3,10 @@
 //!
 //! The run uses the same evaluator as discovery with a byte-exact memory
 //! for work RAM and a private stack: every value is a constant or unknown.
-//! It stops without a result when a branch, a condition, an address or the
-//! state depends on an unknown value (an argument the caller did not set,
-//! uninitialized RAM, an I/O register), at a SWI, or after
-//! [`MAX_STEPS`] instructions. When it returns, the written RAM bytes whose
+//! It stops without a result when a branch, a condition, an address (of a
+//! store too) or the state depends on an unknown value (a register the
+//! caller did not set, uninitialized RAM, an I/O register), at a SWI, or
+//! after [`MAX_STEPS`] instructions. When it returns, the written RAM bytes whose
 //! values are known are what the call leaves there, whatever the call is
 //! (a copy loop, a decompressor).
 
@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use relift_cpu_arm32::decode::Encoding;
 
 use crate::eval::{self, SCRATCH_STACK, Scratch};
-use crate::func::Env;
+use crate::func::{Args, Env};
 use crate::loc::{Loc, Region};
 use crate::val::{Abs, LR, SP, State};
 
@@ -35,12 +35,15 @@ fn fetch(env: &Env<'_>, m: &Scratch, loc: Loc) -> Option<u32> {
     env.image.fetch(loc)
 }
 
-/// The RAM ranges a call to `callee` with `r0`-`r3` = `args` writes, or
+/// The RAM ranges a call to `callee` with `r0`-`r12` = `args` writes, or
 /// `None` when the run cannot be completed with constants.
-pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: [Abs; 4]) -> Option<Vec<(u32, Vec<u8>)>> {
+pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Vec<(u32, Vec<u8>)>> {
     let mut st = State::entry(callee.thumb);
     for (i, r) in st.regs.iter_mut().enumerate().take(15) {
-        *r = args.get(i).copied().unwrap_or(Abs::Top);
+        *r = match args.get(i) {
+            Some(a @ Abs::K(_)) => *a,
+            _ => Abs::Top,
+        };
     }
     st.regs[usize::from(SP)] = Abs::K(u128::from(SCRATCH_STACK - 0x10));
     st.regs[usize::from(LR)] = Abs::K(u128::from(SENTINEL));
@@ -64,7 +67,7 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: [Abs; 4]) -> Option<Vec
             eval::pc_relative(*enc, word, loc.thumb),
             Some(&mut m),
         );
-        if out.may_skip && out.may_run {
+        if out.may_skip && out.may_run || out.stores.iter().any(|s| s.0.k().is_none()) {
             return None;
         }
         if !out.may_run {

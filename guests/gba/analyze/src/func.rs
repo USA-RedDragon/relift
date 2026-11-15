@@ -102,8 +102,12 @@ fn is_param(a: Abs) -> bool {
 
 pub(crate) type Lifted = Result<Rc<(Encoding, Block)>, LiftError>;
 
+/// The registers `r0`-`r12` a call passes: every register the callee can
+/// read, since code may keep to no calling convention.
+pub(crate) type Args = [Abs; 13];
+
 /// The RAM ranges a constant call wrote, by callee and arguments.
-pub(crate) type Runs = HashMap<(Loc, [Abs; 4]), Option<Rc<Vec<(u32, Vec<u8>)>>>>;
+pub(crate) type Runs = HashMap<(Loc, Args), Option<Rc<Vec<(u32, Vec<u8>)>>>>;
 
 pub(crate) struct Env<'a> {
     pub image: &'a Image<'a>,
@@ -829,10 +833,11 @@ impl Run<'_> {
         }
     }
 
-    /// A call whose arguments name both a ROM and a RAM address is run
-    /// with those constants; what it writes to RAM becomes copies.
+    /// A call whose registers name both a ROM and a RAM address is run
+    /// with the constants in `r0`-`r12`; what it writes to RAM becomes
+    /// copies.
     fn constant_call(&mut self, site: Loc, callee: Loc, st: &State) {
-        let args = [st.reg(0), st.reg(1), st.reg(2), st.reg(3)];
+        let args: Args = std::array::from_fn(|i| st.reg(i as u8));
         let ks: Vec<u32> = args.iter().filter_map(|a| a.k32()).collect();
         if !ks.iter().any(|a| Region::of(*a).is_ram())
             || !ks.iter().any(|a| self.env.image.is_source(*a))

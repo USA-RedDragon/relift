@@ -754,3 +754,44 @@ fn rom_table_ends_where_the_next_table_starts() {
         assert!(bu.contains(c) && !bt.contains(c), "{c:#x}");
     }
 }
+
+#[test]
+fn copy_loop_bounded_by_a_register_past_r3_is_run_with_it() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let copy = 0x0800_0200;
+    let src = 0x0800_0400;
+    a.arm(
+        e,
+        &[
+            a_ldr_lit(1, e, e + 0x28),
+            a_ldr_lit(2, e + 4, e + 0x2C),
+            a_ldr_lit(4, e + 8, e + 0x30),
+            0xEB00_0000 | ((copy - (e + 0xC + 8)) >> 2),
+            a_ldr_lit(0, e + 0x10, e + 0x2C),
+            A_MOV_LR_PC,
+            a_bx(0),
+            a_b(e + 0x1C, e + 0x1C),
+            0,
+            0,
+            src,
+            0x0300_0000,
+            0x0300_0008,
+        ],
+    );
+    a.arm(
+        copy,
+        &[0xE491_3004, 0xE482_3004, 0xE152_0004, 0xBAFF_FFFB, A_BX_LR],
+    );
+    a.arm(src, &[A_MOV_R0_1, A_BX_LR]);
+    let r = a.run(e);
+    assert_eq!(r.copies.len(), 1);
+    assert_eq!(r.copies[0].kind, CopyKind::Run);
+    assert_eq!((r.copies[0].dst, r.copies[0].len()), (0x0300_0000, 8));
+    let ram = Loc {
+        addr: 0x0300_0000,
+        thumb: false,
+        copy: Some(0),
+    };
+    assert_eq!(r.functions[&ram].instructions.len(), 2);
+}
