@@ -64,6 +64,17 @@ static void report(host *H, rl_ctx *c)
     rl_arm32_cpu()->describe(c, buf, sizeof buf);
     printf("frames %u hash %016llx\n", H->frames, (unsigned long long)video_hash(H->run.g));
     printf("regs %s\n", buf);
+    static const struct {
+        const char *name;
+        rl_gba_region r;
+    } rs[] = {{"ewram", RL_GBA_EWRAM}, {"iwram", RL_GBA_IWRAM}, {"palette", RL_GBA_PALETTE}, {"vram", RL_GBA_VRAM}, {"oam", RL_GBA_OAM}};
+    printf("mem");
+    for (size_t i = 0; i < sizeof rs / sizeof rs[0]; i++) {
+        size_t n = 0;
+        const uint8_t *m = rl_gba_mem(H->run.g, rs[i].r, &n);
+        printf(" %s=%016llx", rs[i].name, (unsigned long long)fnv(0xCBF29CE484222325ull, m, n));
+    }
+    printf("\n");
     fflush(stdout);
     if (H->stats)
         print_stats(H);

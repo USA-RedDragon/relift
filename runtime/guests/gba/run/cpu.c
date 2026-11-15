@@ -55,7 +55,7 @@ void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
 
 static void charge(rl_ctx *c, uint64_t cycles) { c->time.budget -= (int64_t)cycles; }
 
-/** @brief The BIOS stub's entry after the exception entry: stacks registers and gives the handler. */
+/** @brief The BIOS stub's entry after the exception entry: stacks registers and gives the handler, whose state its bit 0 sets (BX). */
 static uint32_t stub_entry(rl_ctx *c)
 {
     rl_gba *g = machine(c);
@@ -67,7 +67,8 @@ static uint32_t stub_entry(rl_ctx *c)
     c->r[14] = ic.lr;
     c->r[13] = ic.sp;
     charge(c, rl_gba_bios_of(g)->cycles);
-    return h & ~3u;
+    c->t = (uint8_t)(h & 1u);
+    return h & (c->t ? ~1u : ~3u);
 }
 
 /** @brief The stub's tail after the handler jumped to 0x138: unstacks and returns from the exception; gives where to. */
