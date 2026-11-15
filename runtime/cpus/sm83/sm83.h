@@ -40,5 +40,11 @@ RL_RUNTIME_API int rl_sm83_run(rl_ctx *c, uint8_t *mem, uint64_t pc);
 
 /** @brief Flags of f as "ZNHC" with '-' for a clear bit, into buf (at least 5 bytes). */
 RL_RUNTIME_API const char *rl_sm83_flags_str(uint8_t f, char *buf);
+/**
+ * @brief Sets the function rl_dispatch_miss runs instead of the core's miss
+ * path (a guest layer's interpreter), with the lifted signature and the
+ * target in c->pc; NULL restores the core's path.
+ */
+RL_RUNTIME_API void rl_sm83_set_miss(rl_fn fn);
 
 #endif

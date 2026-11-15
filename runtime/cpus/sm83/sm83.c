@@ -178,8 +178,14 @@ static const rl_cpu_desc g_sm83 = {
 
 const rl_cpu_desc *rl_sm83_cpu(void) { return &g_sm83; }
 
+static rl_fn g_miss;
+
+void rl_sm83_set_miss(rl_fn fn) { g_miss = fn; }
+
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
+    if (g_miss)
+        RL_MUSTTAIL return g_miss(c, mem);
     return rl_core_miss(c, mem, c->pc);
 }
 
