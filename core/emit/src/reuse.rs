@@ -24,7 +24,7 @@ pub trait Store: Sync {
     /// Keeps `output` under `key` for the function at `entry`; called once
     /// per function, in entry order. `reused` says the bytes are those
     /// [`Store::get`] gave.
-    fn keep(&self, entry: u64, key: &Key, output: &[u8], reused: bool);
+    fn keep(&self, entry: u64, key: &Key, output: Vec<u8>, reused: bool);
 }
 
 /// The direct-call targets of a module, recording every address one

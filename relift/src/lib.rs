@@ -8,6 +8,7 @@ pub mod dev;
 pub mod devsock;
 pub mod diff;
 pub mod diff_ir;
+pub mod emitstore;
 pub mod fpflags;
 pub mod game_settings;
 pub mod gb;

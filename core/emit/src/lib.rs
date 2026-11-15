@@ -255,19 +255,17 @@ pub fn emit_with(
         &mut |ks, targets| {
             ks.iter()
                 .map(|&k| {
-                    let e = func::emit_function(
+                    func::emit_function(
                         fe,
                         &fns[k],
                         &Targets::new(targets),
                         opts.piece_bytes.max(1),
                         &opts.io_map,
                         opts.test_fault == Some(fns[k].entry),
-                    );
-                    (e, None)
+                    )
                 })
                 .collect()
         },
-        None,
         &mut |f| out.files.push(f),
     );
     out
@@ -327,26 +325,37 @@ pub fn emit_streamed(
     on: &mut dyn FnMut(usize, usize),
     sink: &mut dyn FnMut(File),
 ) -> usize {
-    emit_reusing(fe, heads, lend, overrides, opts, None, on, sink)
+    let from = Stream {
+        heads,
+        lend,
+        store: None,
+    };
+    emit_reusing(fe, &from, overrides, opts, on, sink)
+}
+
+/// The functions [`emit_reusing`] emits: their heads, what lends their
+/// code ([`emit_streamed`]), and the store of earlier emits, if any.
+pub struct Stream<'a> {
+    /// The functions before their code.
+    pub heads: &'a [Head],
+    /// Lends their code.
+    pub lend: &'a Lend<'a>,
+    /// Where the C of earlier emits is kept.
+    pub store: Option<&'a dyn Store>,
 }
 
 /// As [`emit_streamed`], taking the C of each function whose input and
 /// direct-call targets are unchanged from `store` and keeping the C of
 /// every function there. The files are the same as without a store.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "emit_streamed's arguments and the store"
-)]
 pub fn emit_reusing(
     fe: &(dyn Frontend + Sync),
-    heads: &[Head],
-    lend: &Lend<'_>,
+    from: &Stream<'_>,
     overrides: &[Override],
     opts: &Options,
-    store: Option<&dyn Store>,
     on: &mut dyn FnMut(usize, usize),
     sink: &mut dyn FnMut(File),
 ) -> usize {
+    let Stream { heads, lend, store } = *from;
     let salt = reuse::salt(fe, opts.piece_bytes.max(1), &opts.io_map);
     emit_core(
         fe,
@@ -378,21 +387,26 @@ pub fn emit_reusing(
                     if let Some(bytes) = store.get(&key)
                         && let Some(e) = reuse::reuse(&bytes, targets)
                     {
-                        out.push((e, Some((key, bytes, true))));
+                        out.push((e, Some((f.entry, key, bytes, true))));
                         return;
                     }
                     let seen = Targets::new(targets);
                     let e = emit(&seen);
-                    let kept = reuse::output(&e, &seen).map(|b| (key, b, false));
+                    let kept = reuse::output(&e, &seen).map(|b| (f.entry, key, b, false));
                     out.push((e, kept));
                 });
                 out
             })
             .into_iter()
             .flatten()
+            .map(|(e, kept): (func::Emitted1, Kept)| {
+                if let (Some(s), Some((entry, key, bytes, reused))) = (store, kept) {
+                    s.keep(entry, &key, bytes, reused);
+                }
+                e
+            })
             .collect()
         },
-        store,
         sink,
     )
 }
@@ -431,13 +445,13 @@ fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R>
     out.into_iter().map(|r| r.1).collect()
 }
 
-/// One function's C as [`Store::keep`] takes it: its key, its bytes and
-/// whether they came from the store.
-type Kept = Option<(Key, Vec<u8>, bool)>;
+/// One function's C as [`Store::keep`] takes it: its entry, key, bytes
+/// and whether they came from the store.
+type Kept = Option<(u64, Key, Vec<u8>, bool)>;
 
 /// Gives the C of a run of functions, by index, with the direct-call
 /// targets of the module.
-type Compute<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<(func::Emitted1, Kept)> + 'c;
+type Compute<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<func::Emitted1> + 'c;
 
 /// Emits the functions `heads`, whose C `compute` gives for a run of
 /// indices into them, and gives each file to `sink`.
@@ -448,7 +462,6 @@ fn emit_core(
     opts: &Options,
     on: &mut dyn FnMut(usize, usize),
     compute: &mut Compute<'_>,
-    store: Option<&dyn Store>,
     sink: &mut dyn FnMut(File),
 ) -> usize {
     let mut targets: BTreeMap<u64, Target> = heads
@@ -504,12 +517,9 @@ fn emit_core(
             let end = kept.len().min(k + BATCH);
             done.extend(compute(&kept[k..end], &targets));
         }
-        let Some((e, kept)) = done.pop_front() else {
+        let Some(e) = done.pop_front() else {
             break;
         };
-        if let (Some(s), Some((key, bytes, reused))) = (store, kept) {
-            s.keep(f.entry, &key, &bytes, reused);
-        }
         let window =
             (opts.window > 0).then(|| f.entry.saturating_sub(opts.module_base) / opts.window);
         if window != w.window && !w.cur.fns.is_empty() {

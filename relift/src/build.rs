@@ -422,47 +422,60 @@ fn emit_modules(
         let dir = cdir.join(format!("{i}_{}", c_ident(&p.name)));
         std::fs::create_dir_all(&dir)?;
         let mut files: Vec<relift_emit::File> = Vec::new();
-        let mut written: Result<(), BoxError> = Ok(());
-        let undefined = relift_emit::emit_streamed(
-            &cpu,
-            &heads,
-            &lend,
-            &overrides,
-            &relift_emit::Options {
-                shard_bytes: kib(settings.emit.shard_kib),
-                piece_bytes: kib(settings.emit.piece_kib),
-                unit_name: p.name.clone(),
-                unit_symbol: unit.clone(),
-                module_base: p.base,
-                parts,
-                image_id,
-                test_fault: test_fault(),
-                ..relift_emit::Options::default()
-            },
-            &mut |d, total| {
-                ui.update(
-                    row,
-                    Metrics {
-                        done: d as u64,
-                        total: Some(total as u64),
-                        unit: "functions",
-                        ..Metrics::default()
-                    },
-                );
-            },
-            &mut |f| {
-                if written.is_ok() {
-                    written = relift_cache::write_if_changed(&dir.join(&f.name), f.text.as_bytes())
-                        .map(|_| ())
-                        .map_err(Into::into);
-                }
-                files.push(relift_emit::File {
-                    text: String::new(),
-                    ..f
-                });
-            },
-        );
+        let window = (kib(settings.emit.shard_kib) / WINDOW_RATIO).max(1) as u64;
+        let store = crate::emitstore::EmitStore::open(
+            &cdir.with_file_name("emit").join(i.to_string()),
+            stage.tool,
+            p.base,
+            window,
+        )?;
+        let from = relift_emit::Stream {
+            heads: &heads,
+            lend: &lend,
+            store: Some(&store),
+        };
+        let (undefined, written) = with_writers(&mut |write| {
+            relift_emit::emit_reusing(
+                &cpu,
+                &from,
+                &overrides,
+                &relift_emit::Options {
+                    shard_bytes: kib(settings.emit.shard_kib),
+                    piece_bytes: kib(settings.emit.piece_kib),
+                    unit_name: p.name.clone(),
+                    unit_symbol: unit.clone(),
+                    module_base: p.base,
+                    parts,
+                    image_id,
+                    test_fault: test_fault(),
+                    window,
+                    ..relift_emit::Options::default()
+                },
+                &mut |d, total| {
+                    ui.update(
+                        row,
+                        Metrics {
+                            done: d as u64,
+                            total: Some(total as u64),
+                            unit: "functions",
+                            ..Metrics::default()
+                        },
+                    );
+                },
+                &mut |f| {
+                    let relift_emit::File { name, text, fns } = f;
+                    write(dir.join(&name), text);
+                    files.push(relift_emit::File {
+                        name,
+                        text: String::new(),
+                        fns,
+                    });
+                },
+            )
+        });
         written?;
+        let counts = store.finish()?;
+        remove_stale_shards(&dir, &files)?;
         let mut summaries = summaries
             .into_inner()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -500,9 +513,11 @@ fn emit_modules(
         ui.done(
             row,
             Line::new().text(format!(
-                "{}, {}",
+                "{}, {}, {} of {} reused",
                 noun(shards as u64, "shard"),
-                noun(overrides.len() as u64, "override")
+                noun(overrides.len() as u64, "override"),
+                count(counts.reused as u64),
+                count(counts.total as u64)
             )),
         );
         done.units.push(unit);
@@ -511,7 +526,72 @@ fn emit_modules(
     Ok(done)
 }
 
-/// `n` KiB in bytes, at least one.
+/// The guest bytes of a shard window per byte of the shard budget: lifted
+/// AArch64 takes about a hundred bytes of C per guest byte, so a window
+/// of the budget over this fills most of a shard.
+const WINDOW_RATIO: usize = 64;
+
+/// Runs `emit` with a `write` that writes files on threads of their own
+/// (each only when changed); returns what `emit` gave and the first
+/// error writing.
+fn with_writers<R>(emit: &mut dyn FnMut(&mut Write<'_>) -> R) -> (R, std::io::Result<()>) {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<(PathBuf, String)>(WRITERS * 2);
+    let shared = std::sync::Mutex::new(rx);
+    let rx = &shared;
+    std::thread::scope(move |sc| {
+        let workers: Vec<_> = (0..WRITERS)
+            .map(|_| {
+                sc.spawn(move || {
+                    let mut r = Ok(());
+                    loop {
+                        let next = rx
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .recv();
+                        let Ok((path, text)) = next else { break };
+                        if r.is_ok() {
+                            r = relift_cache::write_if_changed(&path, text.as_bytes()).map(|_| ());
+                        }
+                    }
+                    r
+                })
+            })
+            .collect();
+        let out = emit(&mut |path, text| {
+            let _ = tx.send((path, text));
+        });
+        drop(tx);
+        let mut r = Ok(());
+        for w in workers {
+            let done = w
+                .join()
+                .unwrap_or_else(|_| Err(std::io::Error::other("a file writer panicked")));
+            if r.is_ok() {
+                r = done;
+            }
+        }
+        (out, r)
+    })
+}
+
+/// Writes one file: its path and its text.
+type Write<'w> = dyn FnMut(PathBuf, String) + 'w;
+
+/// How many threads write emitted files.
+const WRITERS: usize = 4;
+
+/// Removes the shards of `dir` that the emit just done did not write.
+fn remove_stale_shards(dir: &Path, files: &[relift_emit::File]) -> Result<(), BoxError> {
+    let kept: BTreeSet<&str> = files.iter().map(|f| f.name.as_str()).collect();
+    for e in std::fs::read_dir(dir)?.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with("shard") && name.ends_with(".c") && !kept.contains(name.as_str()) {
+            std::fs::remove_file(e.path())?;
+        }
+    }
+    Ok(())
+}
+
 /// The guest address in `RELIFT_EMIT_TEST_FAULT`, the emitter's test hook.
 fn test_fault() -> Option<u64> {
     let v = std::env::var("RELIFT_EMIT_TEST_FAULT").ok()?;

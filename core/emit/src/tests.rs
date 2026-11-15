@@ -945,8 +945,8 @@ impl Store for Mem {
         self.kept.lock().unwrap().get(key).cloned()
     }
 
-    fn keep(&self, entry: u64, key: &Key, output: &[u8], reused: bool) {
-        self.kept.lock().unwrap().insert(*key, output.to_vec());
+    fn keep(&self, entry: u64, key: &Key, output: Vec<u8>, reused: bool) {
+        self.kept.lock().unwrap().insert(*key, output);
         self.reused.lock().unwrap().push((entry, reused));
     }
 }
@@ -960,13 +960,16 @@ fn emit_with_store(fns: &[Function<'_>], overrides: &[Override], store: &Mem) ->
     };
     let mut files = Vec::new();
     store.reused.lock().unwrap().clear();
+    let from = Stream {
+        heads: &heads,
+        lend: &lend,
+        store: Some(store),
+    };
     emit_reusing(
         &Toy,
-        &heads,
-        &lend,
+        &from,
         overrides,
         &Options::default(),
-        Some(store),
         &mut |_, _| {},
         &mut |f| files.push(f),
     );

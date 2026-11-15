@@ -119,7 +119,7 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         "relift build: tiny (1 module, {}-{})\n\
         \x20 main discover 2 functions  <time>\n\
         \x20 main lift     2 functions, 0 unlifted  <time>\n\
-        \x20 main emit     1 shard, 0 overrides  <time>\n\
+        \x20 main emit     1 shard, 0 overrides, 0 of 2 reused  <time>\n\
         window: SDL3 not found, building headless (set RELIFT_SDL3_DIR)\n\
         \x20      compile  <n> files, clang -O2, -j4  <time>\n\
         built 2 functions, 0 instructions not lifted, <time> in all\n\
