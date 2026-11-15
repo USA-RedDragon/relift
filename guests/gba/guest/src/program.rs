@@ -3,15 +3,20 @@
 //! Every function `relift-gba-analyze` found becomes a C function at its
 //! entry address; a function holds the instructions it reaches in their
 //! state. Code in work RAM is lifted from the bytes of the copy the analysis
-//! proved put it there; code the game writes there otherwise is missed
-//! code. The runtime finds a function by address alone, so an address that
-//! is an entry twice (both states, or two copies) keeps the first one.
+//! proved put it there, and each of its instructions checks those bytes as
+//! the CPU fetches them. The runtime's dispatch finds a function by address
+//! alone, so it holds the first function at each entry (the unit
+//! [`UNIT_SYMBOL`]); the other functions in RAM go to units of their own
+//! (`_v1`, `_v2`, ..., each with one function per address), and the program
+//! lists every function in RAM by its entry and first unit, where code that
+//! found other bytes goes on (`rl_gba_cpu_variant`). Code the game writes
+//! there otherwise is missed code.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use relift_emit::{Function, Insn, Options, Output};
-use relift_gba_analyze::{EdgeKind, Loc, Report};
+use relift_gba_analyze::{CopyKind, EdgeKind, Loc, Report};
 use relift_guest::LiftFailure;
 use relift_ir::{Block, Flow, Next};
 
@@ -32,19 +37,42 @@ pub struct Unlifted {
     pub failure: LiftFailure,
 }
 
+/// A lifted function in work RAM, as the program lists it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RamEntry {
+    /// The entry, with bit 0 set in Thumb state.
+    pub at: u32,
+    /// The instruction unit at the entry it was lifted from.
+    pub unit: u32,
+    /// The host function.
+    pub name: String,
+}
+
 /// Everything a ROM lifts to.
 #[derive(Clone, Debug)]
 pub struct Lifted {
-    /// The emitted files.
+    /// The emitted files of the unit the dispatch holds.
     pub output: Output,
+    /// The emitted files of the units of the other functions in RAM, the
+    /// `k`th one named `rom_v{k + 1}`.
+    pub variants: Vec<Output>,
+    /// Every function in RAM, sorted.
+    pub ram: Vec<RamEntry>,
     /// Functions in the unit.
     pub functions: usize,
     /// Instructions lifted.
     pub instructions: usize,
     /// Instructions that did not lift.
     pub unlifted: Vec<Unlifted>,
-    /// Entries left out because another function has the address.
+    /// Entries left out because another function has the address (in RAM:
+    /// with the same first unit).
     pub shadowed: Vec<Loc>,
+}
+
+/// The C symbol of the unit of variant layer `k` (1 and up).
+#[must_use]
+pub fn variant_symbol(k: usize) -> String {
+    format!("{UNIT_SYMBOL}_v{k}")
 }
 
 /// The host name of the function at `l`.
@@ -131,16 +159,47 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
     let fe = Gba::with_calls(calls);
     let mut unlifted = Vec::new();
     let mut shadowed = Vec::new();
-    let mut seen_entry = BTreeSet::new();
-    let mut lifted: Vec<Lifting> = Vec::new();
+    let mut layers: BTreeMap<u32, usize> = BTreeMap::new();
+    let mut keys = BTreeSet::new();
+    let mut lifted: Vec<(usize, Lifting)> = Vec::new();
+    let mut ram = Vec::new();
     let mut instructions = BTreeSet::new();
-    for (entry, f) in &report.functions {
+    let rewrite = |l: Loc| {
+        l.copy
+            .and_then(|c| report.copies.get(usize::from(c)))
+            .is_some_and(|c| matches!(c.kind, CopyKind::Rewrite(_)))
+    };
+    let mut order: Vec<(&Loc, &relift_gba_analyze::Function)> = report.functions.iter().collect();
+    order.sort_by_key(|(l, _)| rewrite(**l));
+    for (entry, f) in order {
         if f.instructions.is_empty() || !matches!(entry.addr >> 24, 0x02 | 0x03 | 0x08..=0x0D) {
             continue;
         }
-        if !seen_entry.insert(entry.addr) {
+        let in_ram = crate::frontend::in_ram(entry.addr);
+        let first = if in_ram {
+            let (img, base) = image(rom, report, *entry);
+            let unit = raw(img, base, *entry) as u32;
+            if !keys.insert((entry.addr, entry.thumb, unit)) {
+                shadowed.push(*entry);
+                continue;
+            }
+            Some(unit)
+        } else {
+            None
+        };
+        let layer = layers.entry(entry.addr).or_insert(0);
+        if *layer > 0 && !in_ram {
             shadowed.push(*entry);
             continue;
+        }
+        let k = *layer;
+        *layer += 1;
+        if let Some(unit) = first {
+            ram.push(RamEntry {
+                at: entry.addr | u32::from(entry.thumb),
+                unit,
+                name: host_name(*entry),
+            });
         }
         let mut blocks: BTreeMap<u64, (Result<Block, LiftFailure>, u64)> = BTreeMap::new();
         let mut end = u64::from(entry.addr);
@@ -193,14 +252,52 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             v.dedup();
         }
         lifted.push((
-            *entry,
-            blocks.into_iter().map(|(pc, (r, w))| (pc, r, w)).collect(),
-            span,
-            tables,
+            k,
+            (
+                *entry,
+                blocks.into_iter().map(|(pc, (r, w))| (pc, r, w)).collect(),
+                span,
+                tables,
+            ),
         ));
     }
-    let fns: Vec<Function<'_>> = lifted
-        .iter()
+    ram.sort();
+    let layer_count = lifted.iter().map(|(k, _)| k + 1).max().unwrap_or(1);
+    let mut outputs = (0..layer_count).map(|k| {
+        let fns = functions(lifted.iter().filter(|(l, _)| *l == k).map(|(_, f)| f));
+        let opts = Options {
+            unit_name: if k == 0 {
+                "rom".into()
+            } else {
+                format!("rom_v{k}")
+            },
+            unit_symbol: if k == 0 {
+                UNIT_SYMBOL.into()
+            } else {
+                variant_symbol(k)
+            },
+            io_map: device_map(),
+            image_id,
+            ..Options::default()
+        };
+        (fns.len(), relift_emit::emit(&fe, &fns, &[], &opts))
+    });
+    let (functions, output) = outputs.next().unwrap_or_default();
+    let variants: Vec<(usize, Output)> = outputs.collect();
+    Lifted {
+        output,
+        functions: functions + variants.iter().map(|v| v.0).sum::<usize>(),
+        variants: variants.into_iter().map(|v| v.1).collect(),
+        ram,
+        instructions: instructions.len(),
+        unlifted,
+        shadowed,
+    }
+}
+
+/// The functions to emit for `lifted`.
+fn functions<'a>(lifted: impl Iterator<Item = &'a Lifting>) -> Vec<Function<'a>> {
+    lifted
         .map(|(entry, l, span, tables)| Function {
             entry: u64::from(entry.addr),
             name: host_name(*entry),
@@ -219,22 +316,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             tables: tables.clone(),
             pads: BTreeSet::new(),
         })
-        .collect();
-    let opts = Options {
-        unit_name: "rom".into(),
-        unit_symbol: UNIT_SYMBOL.into(),
-        io_map: device_map(),
-        image_id,
-        ..Options::default()
-    };
-    let output = relift_emit::emit(&fe, &fns, &[], &opts);
-    Lifted {
-        output,
-        functions: fns.len(),
-        instructions: instructions.len(),
-        unlifted,
-        shadowed,
-    }
+        .collect()
 }
 
 /// What the program file needs besides the unit.
@@ -244,6 +326,10 @@ pub struct Program<'a> {
     pub title: &'a str,
     /// The path of the imported ROM, which names the save; empty for none.
     pub rom_path: &'a str,
+    /// The units of the other functions in RAM ([`Lifted::variants`]).
+    pub variant_units: usize,
+    /// Every function in RAM ([`Lifted::ram`]).
+    pub ram: &'a [RamEntry],
 }
 
 fn c_string(s: &str) -> String {
@@ -271,11 +357,40 @@ pub fn rom_c() -> String {
 /// `program.c`: the unit list and `main`.
 #[must_use]
 pub fn program_c(p: &Program<'_>) -> String {
-    format!(
-        "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"gbamain.h\"\nextern const rl_unit {UNIT_SYMBOL};\nextern const uint8_t rl_gba_rom[];\nextern const size_t rl_gba_rom_len;\nstatic const rl_unit *const units[] = {{ &{UNIT_SYMBOL} }};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gba_program prog = {{ rl_gba_rom, rl_gba_rom_len, units, 1u, {}, {} }};\n    return rl_gba_main(&prog, argc, argv);\n}}\n",
+    let symbols: Vec<String> = std::iter::once(UNIT_SYMBOL.to_owned())
+        .chain((1..=p.variant_units).map(variant_symbol))
+        .collect();
+    let mut s = String::from(
+        "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"gbamain.h\"\n",
+    );
+    for u in &symbols {
+        let _ = writeln!(s, "extern const rl_unit {u};");
+    }
+    for e in p.ram {
+        let _ = writeln!(s, "extern RL_LIFTED({});", e.name);
+    }
+    let units: Vec<String> = symbols.iter().map(|u| format!("&{u}")).collect();
+    let _ = write!(
+        s,
+        "extern const uint8_t rl_gba_rom[];\nextern const size_t rl_gba_rom_len;\nstatic const rl_unit *const units[] = {{ {} }};\n",
+        units.join(", ")
+    );
+    s.push_str("static const rl_gba_variant ram[] = {\n");
+    for e in p.ram {
+        let _ = writeln!(s, "    {{ {:#x}u, {:#x}u, {} }},", e.at, e.unit, e.name);
+    }
+    if p.ram.is_empty() {
+        s.push_str("    { 0u, 0u, NULL },\n");
+    }
+    let _ = write!(
+        s,
+        "}};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gba_program prog = {{ rl_gba_rom, rl_gba_rom_len, units, {}u, {}, {}, ram, {}u }};\n    return rl_gba_main(&prog, argc, argv);\n}}\n",
+        symbols.len(),
         c_string(p.title),
-        c_string(p.rom_path)
-    )
+        c_string(p.rom_path),
+        p.ram.len()
+    );
+    s
 }
 
 #[cfg(test)]
@@ -323,8 +438,45 @@ mod tests {
         let c = program_c(&Program {
             title: "T\"",
             rom_path: "/r/a.gba",
+            variant_units: 0,
+            ram: &[],
         });
-        assert!(c.contains("&rl_unit_gba_rom"), "{c}");
-        assert!(c.contains("\"T\\\"\", \"/r/a.gba\""), "{c}");
+        assert!(c.contains("units[] = { &rl_unit_gba_rom }"), "{c}");
+        assert!(
+            c.contains("units, 1u, \"T\\\"\", \"/r/a.gba\", ram, 0u"),
+            "{c}"
+        );
+    }
+
+    #[test]
+    fn the_program_lists_the_variant_units_and_every_function_in_ram() {
+        let ram = [
+            RamEntry {
+                at: 0x0300_0000,
+                unit: 0xE3A0_0001,
+                name: "gba_a_03000000_c0".into(),
+            },
+            RamEntry {
+                at: 0x0300_0000,
+                unit: 0xE12F_FF1E,
+                name: "gba_a_03000000_c1".into(),
+            },
+        ];
+        let c = program_c(&Program {
+            title: "",
+            rom_path: "",
+            variant_units: 1,
+            ram: &ram,
+        });
+        assert!(
+            c.contains("units[] = { &rl_unit_gba_rom, &rl_unit_gba_rom_v1 }"),
+            "{c}"
+        );
+        assert!(c.contains("extern RL_LIFTED(gba_a_03000000_c1);"), "{c}");
+        assert!(
+            c.contains("    { 0x3000000u, 0xe12fff1eu, gba_a_03000000_c1 },"),
+            "{c}"
+        );
+        assert!(c.contains("units, 2u, \"\", \"\", ram, 2u"), "{c}");
     }
 }

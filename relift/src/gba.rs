@@ -189,19 +189,33 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     ui.begin(row, "lift");
     let lifted = relift_gba::program::lift(&rom, &report, relift_switch_formats::sha256(&rom));
     let mut files = Vec::new();
-    let udir = cdir.join("rom");
-    std::fs::create_dir_all(&udir)?;
-    for f in &lifted.output.files {
-        let path = udir.join(&f.name);
-        relift_cache::write_if_changed(&path, f.text.as_bytes())?;
-        if f.name.ends_with(".c") {
-            files.push(path);
+    let outputs = std::iter::once(&lifted.output).chain(&lifted.variants);
+    for (k, output) in outputs.enumerate() {
+        let udir = cdir.join(if k == 0 {
+            "rom".to_owned()
+        } else {
+            format!("rom_v{k}")
+        });
+        std::fs::create_dir_all(&udir)?;
+        for f in &output.files {
+            let path = udir.join(&f.name);
+            relift_cache::write_if_changed(&path, f.text.as_bytes())?;
+            if f.name.ends_with(".c") {
+                files.push(path);
+            }
         }
+        relift_cache::write_if_changed(
+            &udir.join(relift_emit::PRELUDE_NAME),
+            relift_emit::PRELUDE.as_bytes(),
+        )?;
     }
-    relift_cache::write_if_changed(
-        &udir.join(relift_emit::PRELUDE_NAME),
-        relift_emit::PRELUDE.as_bytes(),
-    )?;
+    for k in lifted.variants.len() + 1.. {
+        let stale = cdir.join(format!("rom_v{k}"));
+        if !stale.exists() {
+            break;
+        }
+        std::fs::remove_dir_all(&stale)?;
+    }
     let mut list = String::new();
     for u in &lifted.unlifted {
         list.push_str(&format!(
@@ -233,6 +247,8 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
             relift_gba::program::program_c(&relift_gba::program::Program {
                 title: &title,
                 rom_path: &rom_path,
+                variant_units: lifted.variants.len(),
+                ram: &lifted.ram,
             }),
         ),
     ] {

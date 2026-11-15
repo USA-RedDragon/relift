@@ -16,7 +16,15 @@
 //!   on at the next instruction;
 //! - the second half of a Thumb BL pair calls the constant its first half
 //!   puts in LR;
-//! - every block ends in a sync point, where the runtime takes interrupts.
+//! - every block ends in a sync point, where the runtime takes interrupts;
+//! - an instruction in work RAM is lifted from the bytes the analysis
+//!   predicts there, and checks them first (`rl_gba_cpu_fetch_code`): when
+//!   the CPU fetched another unit at its address (the game rewrote it, by
+//!   any store or DMA, or another copy is there), the function leaves
+//!   before any effect for the code lifted from that unit
+//!   (`rl_gba_cpu_variant`). The second half of a Thumb BL pair in RAM
+//!   calls the address its first half left in LR, since that half may have
+//!   been rewritten too.
 
 use std::collections::BTreeSet;
 
@@ -40,6 +48,12 @@ pub const RAW_THUMB: u64 = 1 << 32;
 pub const FETCH_ARM: &str = "arm32.fetch_arm";
 /// The intrinsic of the fetch of the next Thumb instruction.
 pub const FETCH_THUMB: &str = "arm32.fetch_thumb";
+/// The intrinsic of the check and fetch of an instruction in RAM: address,
+/// Thumb and the unit it was lifted from; 1 when the CPU fetched another
+/// unit there (and nothing was done).
+pub const FETCH_CODE: &str = "arm32.fetch_code";
+/// The guard code of an instruction in RAM whose bytes changed.
+pub const CODE_CHANGED: u32 = 0x434f_4445;
 /// The intrinsic of a branch's pipeline refill: target, Thumb, taken.
 pub const REFILL: &str = "arm32.refill";
 /// The intrinsic of internal cycles: their count.
@@ -152,7 +166,9 @@ impl Gba {
         let mut b = l.block;
         let len = if thumb { 2u64 } else { 4 };
         let fall = u64::from(pc) + len;
+        let ram = in_ram(pc);
         if thumb
+            && !ram
             && b.exit.flow == (Flow::Call { ret: fall })
             && let Next::Dynamic(_) = b.exit.next
             && let Some(hi) = pc.checked_sub(2).and_then(|p| unit(image, base, p, true))
@@ -181,9 +197,15 @@ impl Gba {
                 flow: Flow::Trap(number | if thumb { SWI_THUMB } else { 0 }),
             };
         }
-        reshape(&mut b, &l.bus, pc, thumb, swi);
+        reshape(&mut b, &l.bus, pc, thumb, swi, ram.then_some(word));
         Ok(b)
     }
+}
+
+/// Whether code at `pc` runs from work RAM, where the game may rewrite it.
+#[must_use]
+pub fn in_ram(pc: u32) -> bool {
+    matches!(pc >> 24, 0x02 | 0x03)
 }
 
 /// The address before alignment, when instruction `k` aligns one: the
@@ -204,10 +226,11 @@ fn unaligned(b: &Block, k: usize) -> Option<Value> {
     (z.get() == 0 && u32::from(n) == lw && b.width_of(x) == Some(Width::W32)).then_some(x)
 }
 
-/// Puts the fetch first, routes memory to the bus, turns the ticks into
+/// Puts the fetch first (for code in RAM lifted from `unit`, the checked
+/// fetch and its guard), routes memory to the bus, turns the ticks into
 /// internal cycles on the bus, adds the refill, reports writes of I and
 /// closes the block with a sync point.
-fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
+fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool, unit: Option<u32>) {
     let internal: u32 = bus
         .iter()
         .map(|e| match e {
@@ -218,8 +241,22 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
     let unaligned: Vec<Option<Value>> = (0..b.insts.len()).map(|k| unaligned(b, k)).collect();
     let old = std::mem::take(&mut b.insts);
     let at = konst(b, Width::W32, u64::from(pc));
-    let name = if thumb { FETCH_THUMB } else { FETCH_ARM };
-    let fetch = push(b, Op::intrinsic(name, vec![at]), None);
+    let fetch = match unit {
+        Some(w) => {
+            let t = konst(b, Width::W1, u64::from(thumb));
+            let w = konst(b, Width::W32, u64::from(w));
+            let changed = push(
+                b,
+                Op::intrinsic(FETCH_CODE, vec![at, t, w]),
+                Some(Width::W1),
+            );
+            push(b, Op::Guard(changed, CODE_CHANGED), None)
+        }
+        None => {
+            let name = if thumb { FETCH_THUMB } else { FETCH_ARM };
+            push(b, Op::intrinsic(name, vec![at]), None)
+        }
+    };
     let mut map: Vec<Value> = Vec::with_capacity(old.len());
     for inst in old {
         let m = |v: &Value| map[v.index()];
@@ -360,6 +397,9 @@ impl Frontend for Gba {
         Some(match (name, args) {
             (FETCH_ARM, [pc]) => format!("rl_gba_cpu_fetch(c, (uint32_t)({pc}), 0u)"),
             (FETCH_THUMB, [pc]) => format!("rl_gba_cpu_fetch(c, (uint32_t)({pc}), 1u)"),
+            (FETCH_CODE, [pc, t, w]) => format!(
+                "rl_gba_cpu_fetch_code(c, (uint32_t)({pc}), (unsigned)({t}), (uint32_t)({w}))"
+            ),
             (REFILL, [t, thumb, taken]) => format!(
                 "rl_gba_cpu_refill(c, (uint32_t)({t}), (unsigned)({thumb}), (unsigned)({taken}))"
             ),
@@ -415,6 +455,15 @@ impl Frontend for Gba {
 
     fn guard_state(&self, _code: u32) -> Option<Reg> {
         None
+    }
+
+    fn guard_exit(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        (code == CODE_CHANGED).then(|| {
+            format!(
+                "rl_gba_cpu_variant(c, (uint32_t)UINT32_C({pc:#x}), {}u)",
+                u32::from(insn & RAW_THUMB != 0)
+            )
+        })
     }
 
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
@@ -568,6 +617,52 @@ mod tests {
         );
         assert!(is_bl_prefix(0xF000));
         assert!(!is_bl_prefix(0xF800));
+    }
+
+    #[test]
+    fn code_in_ram_checks_its_unit_before_any_effect() {
+        const RAM: u32 = 0x0300_0000;
+        let img = arm(&[0xE581_0008]);
+        let b = Gba::new().lift_at(&img, RAM, RAM, false).expect("lifts");
+        assert_eq!(intrinsics(&b)[0], FETCH_CODE);
+        let guard = b
+            .insts
+            .iter()
+            .position(|i| matches!(i.op, Op::Guard(_, CODE_CHANGED)))
+            .expect("a guard");
+        let store = b
+            .insts
+            .iter()
+            .position(|i| matches!(i.op, Op::IoStore { .. }))
+            .expect("a store");
+        assert!(guard < store);
+        let Op::Intrinsic(call) = &b.insts[guard - 1].op else {
+            panic!("the checked fetch comes right before the guard");
+        };
+        assert!(is_const(&b, call.args[2], 0xE581_0008));
+        let fe = Gba::new();
+        assert_eq!(
+            fe.guard_exit(CODE_CHANGED, u64::from(RAM), RAW_THUMB | 0x4770)
+                .as_deref(),
+            Some("rl_gba_cpu_variant(c, (uint32_t)UINT32_C(0x3000000), 1u)")
+        );
+        assert_eq!(fe.guard_exit(COND_FAIL, 0, 0), None);
+        let rom = Gba::new().lift_at(&img, BASE, BASE, false).expect("lifts");
+        assert_eq!(intrinsics(&rom)[0], FETCH_ARM);
+    }
+
+    #[test]
+    fn the_second_half_of_a_bl_pair_in_ram_calls_through_lr() {
+        const RAM: u32 = 0x0300_0000;
+        let img = thumb(&[0xF000, 0xF80E]);
+        let b = Gba::new().lift_at(&img, RAM, RAM + 2, true).expect("lifts");
+        assert!(matches!(b.exit.next, Next::Dynamic(_)));
+        assert_eq!(
+            b.exit.flow,
+            Flow::Call {
+                ret: u64::from(RAM) + 4
+            }
+        );
     }
 
     #[test]
