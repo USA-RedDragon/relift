@@ -17,7 +17,8 @@ use std::fmt;
 
 use relift_ir::{Block, Builder, CmpOp, Exit, Flow, Next, Value, Width};
 
-use crate::decode::{Encoding, Features, Insn, decode, decode_for};
+use crate::cpu::{Cpu, Va};
+use crate::decode::{Encoding, Insn, decode, decode_for};
 use crate::regs::{self, C, N, SP, V, Z};
 
 /// Why a word could not be lifted.
@@ -32,6 +33,16 @@ pub enum LiftError {
     /// The field values make the instruction CONSTRAINED UNPREDICTABLE; the
     /// lifter refuses rather than pick one of the permitted behaviors.
     Unpredictable(Encoding),
+    /// The template was generated for the address layout `want` and the
+    /// CPU has `have`: the pointer authentication field sits elsewhere.
+    Layout {
+        /// The instruction.
+        encoding: Encoding,
+        /// The layout the template was generated for.
+        want: Va,
+        /// The CPU's layout.
+        have: Va,
+    },
 }
 
 impl fmt::Display for LiftError {
@@ -43,6 +54,15 @@ impl fmt::Display for LiftError {
             LiftError::Unpredictable(e) => {
                 write!(f, "{} is UNPREDICTABLE with these fields", e.name())
             }
+            LiftError::Layout {
+                encoding,
+                want,
+                have,
+            } => write!(
+                f,
+                "{} is generated for {want} only, not {have}",
+                encoding.name()
+            ),
         }
     }
 }
@@ -62,25 +82,27 @@ pub enum End {
 pub type LiftFn = fn(Insn, &mut Builder) -> Result<End, LiftError>;
 
 /// Lifts the word `word` at guest address `pc` to a one-instruction block,
-/// for a CPU with the features `f`. A word whose encoding needs a feature
-/// `f` lacks is unallocated there ([`decode_for`]), as on that hardware.
-pub fn lift(word: u32, pc: u64, f: &Features) -> Result<Block, LiftError> {
-    let insn = decode_for(word, f).ok_or(LiftError::Unallocated(word))?;
-    lift_insn(insn, pc, f)
+/// for the CPU `cpu`. A word whose encoding needs a feature the CPU lacks
+/// is unallocated there ([`decode_for`]), as on that hardware.
+pub fn lift(word: u32, pc: u64, cpu: &Cpu) -> Result<Block, LiftError> {
+    let insn = decode_for(word, &cpu.features).ok_or(LiftError::Unallocated(word))?;
+    lift_insn(insn, pc, cpu)
 }
 
-/// Lifts an already decoded instruction at `pc` for a CPU with the features
-/// `f`: with its generated template when it has one, else with its
-/// hand-written lifter. The caller decoded `insn` for the same features.
-pub fn lift_insn(insn: Insn, pc: u64, f: &Features) -> Result<Block, LiftError> {
-    if insn.encoding == Encoding::XPACLRI_HI_hints && f.has(crate::decode::Feature::PAuth) {
-        return sail::lift_insn(insn, pc, f);
+/// Lifts an already decoded instruction at `pc` for the CPU `cpu`: with
+/// its generated template when it has one, else with its hand-written
+/// lifter. The caller decoded `insn` for the same features.
+pub fn lift_insn(insn: Insn, pc: u64, cpu: &Cpu) -> Result<Block, LiftError> {
+    if insn.encoding == Encoding::XPACLRI_HI_hints
+        && cpu.features.has(crate::decode::Feature::PAuth)
+    {
+        return sail::lift_insn(insn, pc, cpu);
     }
     if let Some(l) = system::lifter(insn.encoding) {
         return run_lifter(l, insn, pc);
     }
     if sail::has_template(insn.encoding) {
-        return sail::lift_insn(insn, pc, f);
+        return sail::lift_insn(insn, pc, cpu);
     }
     hand_insn(insn, pc)
 }
@@ -90,12 +112,12 @@ pub fn lift_insn(insn: Insn, pc: u64, f: &Features) -> Result<Block, LiftError> 
 /// the runtime runs on the host's own instruction where it has one, and the
 /// FP operations whose runtime helpers give the Arm NaNs leave the NaN
 /// handling to them ([`sail::exact_host`]).
-pub fn lift_for_emit(word: u32, pc: u64, f: &Features) -> Result<Block, LiftError> {
-    let insn = decode_for(word, f).ok_or(LiftError::Unallocated(word))?;
+pub fn lift_for_emit(word: u32, pc: u64, cpu: &Cpu) -> Result<Block, LiftError> {
+    let insn = decode_for(word, &cpu.features).ok_or(LiftError::Unallocated(word))?;
     if let Some(b) = native::lift(insn, pc) {
         return Ok(b);
     }
-    sail::exact_host(|| lift_insn(insn, pc, f))
+    sail::exact_host(|| lift_insn(insn, pc, cpu))
 }
 
 /// Lifts `word` at `pc` with its hand-written lifter only.

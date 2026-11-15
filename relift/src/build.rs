@@ -228,7 +228,7 @@ fn emit_modules(
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
     let mut fpcr = crate::fpcr::Fpcr::default();
     let cpu = Arm64 {
-        features: relift_switch::CPU_FEATURES,
+        cpu: relift_switch::CPU,
     };
     for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
         let module = module_with_hints(p, hints);
@@ -1170,7 +1170,7 @@ fn lift_and_emit(
     let emitted = emit_modules(settings, &placed, &cdir, ui, &rows, &hints, &mut stage)?;
     let mut emitted = emitted;
     let cpu = Arm64 {
-        features: relift_switch::CPU_FEATURES,
+        cpu: relift_switch::CPU,
     };
     let mods_c = stage.mods_c(cpu.abi_headers());
     if let Some(text) = &mods_c {

@@ -577,8 +577,11 @@ pub fn summarize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cpu::{Cpu, Va};
     use crate::decode::Features;
     use crate::lift::lift;
+
+    const ALL: Cpu = Cpu::new(Features::ALL, Va::BITS39);
 
     fn func<'a>(
         entry: u64,
@@ -596,7 +599,7 @@ mod tests {
         words
             .iter()
             .enumerate()
-            .map(|(i, w)| lift(*w, base + 4 * i as u64, &Features::ALL).expect("lifts"))
+            .map(|(i, w)| lift(*w, base + 4 * i as u64, &ALL).expect("lifts"))
             .collect()
     }
 

@@ -65,7 +65,7 @@ pub fn host_name(what: &str) -> Result<String, BoxError> {
 /// A broken pipe or a line out of the protocol.
 pub fn serve(flip_read: u64) -> Result<(), BoxError> {
     let mut wire = Wire::stdio();
-    let mut engine = IrEngine::new(relift_switch::CPU_FEATURES).flip_read(flip_read);
+    let mut engine = IrEngine::new(relift_switch::CPU).flip_read(flip_read);
     serve_wire(&mut wire, &mut engine, &mut std::io::stderr())?;
     Ok(())
 }

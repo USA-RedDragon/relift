@@ -216,7 +216,7 @@ fn a_lifted_spin_wait_sees_another_threads_store() {
         return;
     };
     let fe = Arm64 {
-        features: Features::ALL,
+        cpu: relift_cpu_arm64::cpu::Cpu::new(Features::ALL, relift_cpu_arm64::cpu::Va::BITS39),
     };
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("emit-spin");
     let _ = std::fs::remove_dir_all(&dir);

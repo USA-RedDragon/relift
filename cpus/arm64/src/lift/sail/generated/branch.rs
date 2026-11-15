@@ -115,6 +115,7 @@ pub(super) fn BLRAAZ_64_branch_reg(
     let v8 = b.get(crate::regs::PacKey::IA.reg(true));
     let v9 = b.get(crate::regs::PacKey::IA.reg(false));
     let v10 = b.concat(v8, v9);
+    st.require_va(ENC, 39, false)?;
     let v24 = b.extract(v6, 55, Width::new(1));
     let v25 = b.concat(v24, v24);
     let v26 = b.concat(v25, v24);
@@ -265,6 +266,7 @@ pub(super) fn BLRAA_64P_branch_reg(
     let v16 = b.get(crate::regs::PacKey::IA.reg(true));
     let v17 = b.get(crate::regs::PacKey::IA.reg(false));
     let v18 = b.concat(v16, v17);
+    st.require_va(ENC, 39, false)?;
     let v32 = b.extract(v9, 55, Width::new(1));
     let v33 = b.concat(v32, v32);
     let v34 = b.concat(v33, v32);
@@ -410,6 +412,7 @@ pub(super) fn BLRABZ_64_branch_reg(
     let v8 = b.get(crate::regs::PacKey::IB.reg(true));
     let v9 = b.get(crate::regs::PacKey::IB.reg(false));
     let v10 = b.concat(v8, v9);
+    st.require_va(ENC, 39, false)?;
     let v24 = b.extract(v6, 55, Width::new(1));
     let v25 = b.concat(v24, v24);
     let v26 = b.concat(v25, v24);
@@ -560,6 +563,7 @@ pub(super) fn BLRAB_64P_branch_reg(
     let v16 = b.get(crate::regs::PacKey::IB.reg(true));
     let v17 = b.get(crate::regs::PacKey::IB.reg(false));
     let v18 = b.concat(v16, v17);
+    st.require_va(ENC, 39, false)?;
     let v32 = b.extract(v9, 55, Width::new(1));
     let v33 = b.concat(v32, v32);
     let v34 = b.concat(v33, v32);
@@ -740,6 +744,7 @@ pub(super) fn BRAAZ_64_branch_reg(
     let v8 = b.get(crate::regs::PacKey::IA.reg(true));
     let v9 = b.get(crate::regs::PacKey::IA.reg(false));
     let v10 = b.concat(v8, v9);
+    st.require_va(ENC, 39, false)?;
     let v24 = b.extract(v6, 55, Width::new(1));
     let v25 = b.concat(v24, v24);
     let v26 = b.concat(v25, v24);
@@ -885,6 +890,7 @@ pub(super) fn BRAA_64P_branch_reg(
     let v16 = b.get(crate::regs::PacKey::IA.reg(true));
     let v17 = b.get(crate::regs::PacKey::IA.reg(false));
     let v18 = b.concat(v16, v17);
+    st.require_va(ENC, 39, false)?;
     let v32 = b.extract(v9, 55, Width::new(1));
     let v33 = b.concat(v32, v32);
     let v34 = b.concat(v33, v32);
@@ -1025,6 +1031,7 @@ pub(super) fn BRABZ_64_branch_reg(
     let v8 = b.get(crate::regs::PacKey::IB.reg(true));
     let v9 = b.get(crate::regs::PacKey::IB.reg(false));
     let v10 = b.concat(v8, v9);
+    st.require_va(ENC, 39, false)?;
     let v24 = b.extract(v6, 55, Width::new(1));
     let v25 = b.concat(v24, v24);
     let v26 = b.concat(v25, v24);
@@ -1170,6 +1177,7 @@ pub(super) fn BRAB_64P_branch_reg(
     let v16 = b.get(crate::regs::PacKey::IB.reg(true));
     let v17 = b.get(crate::regs::PacKey::IB.reg(false));
     let v18 = b.concat(v16, v17);
+    st.require_va(ENC, 39, false)?;
     let v32 = b.extract(v9, 55, Width::new(1));
     let v33 = b.concat(v32, v32);
     let v34 = b.concat(v33, v32);
@@ -1492,6 +1500,7 @@ pub(super) fn RETAA_64E_branch_reg(
     let v6 = b.get(crate::regs::PacKey::IA.reg(true));
     let v7 = b.get(crate::regs::PacKey::IA.reg(false));
     let v8 = b.concat(v6, v7);
+    st.require_va(ENC, 39, false)?;
     let v22 = b.extract(v4, 55, Width::new(1));
     let v23 = b.concat(v22, v22);
     let v24 = b.concat(v23, v22);
@@ -1630,6 +1639,7 @@ pub(super) fn RETAB_64E_branch_reg(
     let v6 = b.get(crate::regs::PacKey::IB.reg(true));
     let v7 = b.get(crate::regs::PacKey::IB.reg(false));
     let v8 = b.concat(v6, v7);
+    st.require_va(ENC, 39, false)?;
     let v22 = b.extract(v4, 55, Width::new(1));
     let v23 = b.concat(v22, v22);
     let v24 = b.concat(v23, v22);

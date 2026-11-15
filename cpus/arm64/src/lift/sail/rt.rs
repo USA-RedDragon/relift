@@ -4,7 +4,9 @@
 
 use relift_ir::{BinOp, Builder, CmpOp, Exit, Flow, FpOp, FpRound, Next, Reg, UnOp, Value, Width};
 
-use crate::decode::{Feature, Features};
+use super::super::LiftError;
+use crate::cpu::{Cpu, Va};
+use crate::decode::{Encoding, Feature};
 use crate::regs;
 
 /// Where a branch goes.
@@ -39,26 +41,42 @@ pub struct St {
     fp: bool,
     flags_slow: bool,
     qc: Option<Value>,
-    features: Features,
+    cpu: Cpu,
 }
 
 impl St {
-    /// A state that has written nothing, on a CPU with `features`.
-    pub fn new(features: Features) -> St {
+    /// A state that has written nothing, on the CPU `cpu`.
+    pub fn new(cpu: Cpu) -> St {
         St {
             cur: Vec::new(),
             exit: None,
             fp: false,
             flags_slow: false,
             qc: None,
-            features,
+            cpu,
         }
     }
 
     /// Whether the CPU implements `f`; templates whose Arm semantics branch
     /// on a feature test it at lift time.
     pub fn has(&self, f: Feature) -> bool {
-        self.features.has(f)
+        self.cpu.features.has(f)
+    }
+
+    /// Refuses the instruction `encoding` unless the CPU's address layout
+    /// has `bits` address bits and the top-byte setting `tbi`: the layout
+    /// its template's Arm semantics were generated for, which it tests at
+    /// lift time.
+    pub fn require_va(&self, encoding: Encoding, bits: u8, tbi: bool) -> Result<(), LiftError> {
+        let want = Va { bits, tbi };
+        if self.cpu.va == want {
+            return Ok(());
+        }
+        Err(LiftError::Layout {
+            encoding,
+            want,
+            have: self.cpu.va,
+        })
     }
 
     /// Records that the instruction's semantics assume FPCR zero.

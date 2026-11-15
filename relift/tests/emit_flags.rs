@@ -256,7 +256,7 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
         .expect("forms.txt is readable");
     let by_name: BTreeMap<&str, Encoding> = Encoding::all().map(|e| (e.name(), e)).collect();
     let fe = Arm64 {
-        features: Features::ALL,
+        cpu: relift_cpu_arm64::cpu::Cpu::new(Features::ALL, relift_cpu_arm64::cpu::Va::BITS39),
     };
     let mut r = Rng(0xf1a6_5eed);
     let mut cases: Vec<(u64, u32, Block)> = Vec::new();

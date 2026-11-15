@@ -4,7 +4,7 @@
 use relift_guest::{Frontend, Home, LiftFailure, ReturnLink, WasmIntrinsic};
 use relift_ir::{Block, CryptoOp, FpOp, FpRound, Reg, RegFile, Width};
 
-use crate::decode::Features;
+use crate::cpu::Cpu;
 use crate::lift::{self, sail, system};
 use crate::regs;
 
@@ -17,13 +17,13 @@ const DCZID_EL0: u128 = 0x4;
 /// The `DC ZVA` block size, `RL_DC_ZVA_BYTES` in `abi.h`.
 const DC_ZVA_BYTES: u32 = 64;
 
-/// The A64 frontend for a CPU with the architecture features `features`
-/// (the guest's CPU, from its descriptor).
+/// The A64 frontend for the CPU `cpu` (the guest's CPU, which the guest
+/// picks per program).
 #[derive(Clone, Copy, Debug)]
 pub struct Arm64 {
-    /// The CPU's features: the decoder refuses words of encodings the CPU
-    /// lacks and templates take the CPU's branch of feature tests.
-    pub features: Features,
+    /// The CPU: the decoder refuses words of encodings it lacks and
+    /// templates take its branch of feature and address-layout tests.
+    pub cpu: Cpu,
 }
 
 impl Frontend for Arm64 {
@@ -59,7 +59,7 @@ impl Frontend for Arm64 {
             });
         };
         let word = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
-        lift::lift_for_emit(word, pc, &self.features).map_err(|e| LiftFailure {
+        lift::lift_for_emit(word, pc, &self.cpu).map_err(|e| LiftFailure {
             insn: u64::from(word),
             message: e.to_string(),
         })
@@ -306,9 +306,11 @@ fn rmode(r: FpRound) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cpu::Va;
+    use crate::decode::Features;
 
     const ARM64: Arm64 = Arm64 {
-        features: Features::ALL,
+        cpu: Cpu::new(Features::ALL, Va::BITS39),
     };
 
     #[test]
@@ -466,7 +468,7 @@ mod tests {
     #[test]
     fn crypto_instructions_lift_to_one_intrinsic() {
         let f = Arm64 {
-            features: Features::CORTEX_A57,
+            cpu: Cpu::new(Features::CORTEX_A57, Va::BITS39),
         };
         let aese = 0x4e28_4820u32.to_le_bytes();
         let b = f.lift(&aese, 0x1000).expect("lifts");
@@ -482,7 +484,7 @@ mod tests {
         let c = f.intrinsic("arm64.aese", &["d".into(), "n".into()]);
         assert_eq!(c.as_deref(), Some("rl_aese(d, n)"));
         let v80 = Arm64 {
-            features: Features::ARMV8_0,
+            cpu: Cpu::new(Features::ARMV8_0, Va::BITS39),
         };
         assert!(v80.lift(&aese, 0x1000).is_err());
     }

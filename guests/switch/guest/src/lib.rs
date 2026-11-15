@@ -3,12 +3,17 @@
 mod eh;
 pub mod program;
 
+use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::Features;
 
 /// The architecture features of the Switch's CPU, a Cortex-A57: Armv8.0-A
 /// with AES, PMULL, SHA1, SHA256 and CRC32. Words of newer encodings are
 /// unallocated on it and lift to an undefined-instruction exception.
 pub const CPU_FEATURES: Features = Features::CORTEX_A57;
+
+/// The Switch's CPU: [`CPU_FEATURES`] in the 39-bit address space without
+/// top-byte ignore that Horizon gives every 64-bit process.
+pub const CPU: Cpu = Cpu::new(CPU_FEATURES, Va::BITS39);
 
 #[cfg(test)]
 mod tests {

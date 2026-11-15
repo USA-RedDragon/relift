@@ -393,7 +393,11 @@ pub fn lift_plain(w: u32, pc: u64) -> Result<Block, LiftError> {
     let b = if HAND.load(Ordering::Relaxed) {
         lift::lift_hand(w, pc)?
     } else {
-        lift::lift(w, pc, &features())?
+        lift::lift(
+            w,
+            pc,
+            &relift_cpu_arm64::cpu::Cpu::new(features(), relift_cpu_arm64::cpu::Va::BITS39),
+        )?
     };
     if DCE.load(Ordering::Relaxed) {
         return Ok(relift_ir::dce(&b));

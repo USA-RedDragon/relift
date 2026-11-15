@@ -48,7 +48,7 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
         .expect("forms.txt is readable");
     let by_name: BTreeMap<&str, Encoding> = Encoding::all().map(|e| (e.name(), e)).collect();
     let fe = Arm64 {
-        features: Features::ALL,
+        cpu: relift_cpu_arm64::cpu::Cpu::new(Features::ALL, relift_cpu_arm64::cpu::Va::BITS39),
     };
     let mut r = Rng(0x5eed_0e0e);
     // Cases spaced 1 GiB apart so no branch reaches another case.
@@ -91,7 +91,7 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
                 bytes: bytes.clone(),
             };
             let mut s1 = s0.clone();
-            let reference = relift_cpu_arm64::lift::lift(*w, b.pc, &Features::ALL);
+            let reference = relift_cpu_arm64::lift::lift(*w, b.pc, &fe.cpu);
             let Ok(o) = run(
                 reference.as_ref().unwrap_or(b),
                 &mut s1,

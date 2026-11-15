@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
+use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::{Features, decode_for};
 use relift_cpu_arm64::lift::lift;
 use relift_ir::dce;
@@ -60,7 +61,8 @@ fn body(cli: Cli) -> Result<(), BoxError> {
     let mut out = Vec::new();
     for (pc, word) in words {
         let encoding = decode_for(word, &cli.features).map(|i| i.encoding.name());
-        let (ir, error) = match lift(word, pc, &cli.features) {
+        let cpu = Cpu::new(cli.features, Va::BITS39);
+        let (ir, error) = match lift(word, pc, &cpu) {
             Ok(b) => {
                 let b = if cli.dce { dce(&b) } else { b };
                 (Some(b.to_string()), None)

@@ -257,9 +257,15 @@ impl Case {
             .iter()
             .chain(&self.stub)
             .map(|(&pc, (w, b))| {
-                let r =
-                    relift_cpu_arm64::lift::lift(*w, pc, &relift_cpu_arm64::decode::Features::ALL)
-                        .unwrap_or_else(|_| b.clone());
+                let r = relift_cpu_arm64::lift::lift(
+                    *w,
+                    pc,
+                    &relift_cpu_arm64::cpu::Cpu::new(
+                        relift_cpu_arm64::decode::Features::ALL,
+                        relift_cpu_arm64::cpu::Va::BITS39,
+                    ),
+                )
+                .unwrap_or_else(|_| b.clone());
                 (pc, r)
             })
             .collect()
@@ -505,7 +511,7 @@ fn emitted_functions_match_the_interpreter() {
         .map(|n| *by_name.get(n).unwrap_or_else(|| panic!("form {n} decodes")))
         .collect();
     let fe = Arm64 {
-        features: Features::ALL,
+        cpu: relift_cpu_arm64::cpu::Cpu::new(Features::ALL, relift_cpu_arm64::cpu::Va::BITS39),
     };
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("emit-interp-seq");
     let h = Harness::new(cc, &root, &dir.join("rt"));

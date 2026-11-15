@@ -29,6 +29,7 @@ pub(super) fn AUTIA1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v4 = b.get(crate::regs::PacKey::IA.reg(true));
     let v5 = b.get(crate::regs::PacKey::IA.reg(false));
     let v6 = b.concat(v4, v5);
+    st.require_va(ENC, 39, false)?;
     let v20 = b.extract(v2, 55, Width::new(1));
     let v21 = b.concat(v20, v20);
     let v22 = b.concat(v21, v20);
@@ -160,6 +161,7 @@ pub(super) fn AUTIASP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v4 = b.get(crate::regs::PacKey::IA.reg(true));
     let v5 = b.get(crate::regs::PacKey::IA.reg(false));
     let v6 = b.concat(v4, v5);
+    st.require_va(ENC, 39, false)?;
     let v20 = b.extract(v2, 55, Width::new(1));
     let v21 = b.concat(v20, v20);
     let v22 = b.concat(v21, v20);
@@ -291,6 +293,7 @@ pub(super) fn AUTIAZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v4 = b.get(crate::regs::PacKey::IA.reg(true));
     let v5 = b.get(crate::regs::PacKey::IA.reg(false));
     let v6 = b.concat(v4, v5);
+    st.require_va(ENC, 39, false)?;
     let v20 = b.extract(v2, 55, Width::new(1));
     let v21 = b.concat(v20, v20);
     let v22 = b.concat(v21, v20);
@@ -422,6 +425,7 @@ pub(super) fn AUTIB1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v4 = b.get(crate::regs::PacKey::IB.reg(true));
     let v5 = b.get(crate::regs::PacKey::IB.reg(false));
     let v6 = b.concat(v4, v5);
+    st.require_va(ENC, 39, false)?;
     let v20 = b.extract(v2, 55, Width::new(1));
     let v21 = b.concat(v20, v20);
     let v22 = b.concat(v21, v20);
@@ -553,6 +557,7 @@ pub(super) fn AUTIBSP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let v4 = b.get(crate::regs::PacKey::IB.reg(true));
     let v5 = b.get(crate::regs::PacKey::IB.reg(false));
     let v6 = b.concat(v4, v5);
+    st.require_va(ENC, 39, false)?;
     let v20 = b.extract(v2, 55, Width::new(1));
     let v21 = b.concat(v20, v20);
     let v22 = b.concat(v21, v20);
@@ -684,6 +689,7 @@ pub(super) fn AUTIBZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     let v4 = b.get(crate::regs::PacKey::IB.reg(true));
     let v5 = b.get(crate::regs::PacKey::IB.reg(false));
     let v6 = b.concat(v4, v5);
+    st.require_va(ENC, 39, false)?;
     let v20 = b.extract(v2, 55, Width::new(1));
     let v21 = b.concat(v20, v20);
     let v22 = b.concat(v21, v20);
@@ -1065,6 +1071,7 @@ pub(super) fn PACIA1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v21 = b.concat(v19, v19);
     let v22 = b.concat(v21, v19);
     let v23 = b.concat(v22, v19);
@@ -1210,6 +1217,7 @@ pub(super) fn PACIASP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v21 = b.concat(v19, v19);
     let v22 = b.concat(v21, v19);
     let v23 = b.concat(v22, v19);
@@ -1352,6 +1360,7 @@ pub(super) fn PACIAZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v21 = b.concat(v19, v19);
     let v22 = b.concat(v21, v19);
     let v23 = b.concat(v22, v19);
@@ -1494,6 +1503,7 @@ pub(super) fn PACIB1716_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Res
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v21 = b.concat(v19, v19);
     let v22 = b.concat(v21, v19);
     let v23 = b.concat(v22, v19);
@@ -1639,6 +1649,7 @@ pub(super) fn PACIBSP_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v21 = b.concat(v19, v19);
     let v22 = b.concat(v21, v19);
     let v23 = b.concat(v22, v19);
@@ -1781,6 +1792,7 @@ pub(super) fn PACIBZ_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Result
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v21 = b.concat(v19, v19);
     let v22 = b.concat(v21, v19);
     let v23 = b.concat(v22, v19);
@@ -1968,6 +1980,7 @@ pub(super) fn XPACLRI_HI_hints(word: u32, b: &mut Builder, st: &mut St) -> Resul
     let pc = u128::from(b.pc());
     let s1: bool = st.has(Feature::PAuth);
     let v2 = st.x_read(b, 30, 64);
+    st.require_va(ENC, 39, false)?;
     let v16 = b.extract(v2, 55, Width::new(1));
     let v17 = b.concat(v16, v16);
     let v18 = b.concat(v17, v16);

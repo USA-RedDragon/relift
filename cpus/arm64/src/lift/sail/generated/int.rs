@@ -9002,6 +9002,7 @@ pub(super) fn AUTDA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v18 = b.get(crate::regs::PacKey::DA.reg(true));
     let v19 = b.get(crate::regs::PacKey::DA.reg(false));
     let v20 = b.concat(v18, v19);
+    st.require_va(ENC, 39, false)?;
     let v34 = b.extract(v16, 55, Width::new(1));
     let v35 = b.concat(v34, v34);
     let v36 = b.concat(v35, v34);
@@ -9122,6 +9123,7 @@ pub(super) fn AUTDA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v144 = b.get(crate::regs::PacKey::DA.reg(true));
     let v145 = b.get(crate::regs::PacKey::DA.reg(false));
     let v146 = b.concat(v144, v145);
+    st.require_va(ENC, 39, false)?;
     let v160 = b.extract(v142, 55, Width::new(1));
     let v161 = b.concat(v160, v160);
     let v162 = b.concat(v161, v160);
@@ -9267,6 +9269,7 @@ pub(super) fn AUTDB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v18 = b.get(crate::regs::PacKey::DB.reg(true));
     let v19 = b.get(crate::regs::PacKey::DB.reg(false));
     let v20 = b.concat(v18, v19);
+    st.require_va(ENC, 39, false)?;
     let v34 = b.extract(v16, 55, Width::new(1));
     let v35 = b.concat(v34, v34);
     let v36 = b.concat(v35, v34);
@@ -9387,6 +9390,7 @@ pub(super) fn AUTDB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v144 = b.get(crate::regs::PacKey::DB.reg(true));
     let v145 = b.get(crate::regs::PacKey::DB.reg(false));
     let v146 = b.concat(v144, v145);
+    st.require_va(ENC, 39, false)?;
     let v160 = b.extract(v142, 55, Width::new(1));
     let v161 = b.concat(v160, v160);
     let v162 = b.concat(v161, v160);
@@ -9527,6 +9531,7 @@ pub(super) fn AUTDZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v10 = b.get(crate::regs::PacKey::DA.reg(true));
     let v11 = b.get(crate::regs::PacKey::DA.reg(false));
     let v12 = b.concat(v10, v11);
+    st.require_va(ENC, 39, false)?;
     let v26 = b.extract(v8, 55, Width::new(1));
     let v27 = b.concat(v26, v26);
     let v28 = b.concat(v27, v26);
@@ -9667,6 +9672,7 @@ pub(super) fn AUTDZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v10 = b.get(crate::regs::PacKey::DB.reg(true));
     let v11 = b.get(crate::regs::PacKey::DB.reg(false));
     let v12 = b.concat(v10, v11);
+    st.require_va(ENC, 39, false)?;
     let v26 = b.extract(v8, 55, Width::new(1));
     let v27 = b.concat(v26, v26);
     let v28 = b.concat(v27, v26);
@@ -9812,6 +9818,7 @@ pub(super) fn AUTIA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v18 = b.get(crate::regs::PacKey::IA.reg(true));
     let v19 = b.get(crate::regs::PacKey::IA.reg(false));
     let v20 = b.concat(v18, v19);
+    st.require_va(ENC, 39, false)?;
     let v34 = b.extract(v16, 55, Width::new(1));
     let v35 = b.concat(v34, v34);
     let v36 = b.concat(v35, v34);
@@ -9932,6 +9939,7 @@ pub(super) fn AUTIA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v144 = b.get(crate::regs::PacKey::IA.reg(true));
     let v145 = b.get(crate::regs::PacKey::IA.reg(false));
     let v146 = b.concat(v144, v145);
+    st.require_va(ENC, 39, false)?;
     let v160 = b.extract(v142, 55, Width::new(1));
     let v161 = b.concat(v160, v160);
     let v162 = b.concat(v161, v160);
@@ -10077,6 +10085,7 @@ pub(super) fn AUTIB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v18 = b.get(crate::regs::PacKey::IB.reg(true));
     let v19 = b.get(crate::regs::PacKey::IB.reg(false));
     let v20 = b.concat(v18, v19);
+    st.require_va(ENC, 39, false)?;
     let v34 = b.extract(v16, 55, Width::new(1));
     let v35 = b.concat(v34, v34);
     let v36 = b.concat(v35, v34);
@@ -10197,6 +10206,7 @@ pub(super) fn AUTIB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v144 = b.get(crate::regs::PacKey::IB.reg(true));
     let v145 = b.get(crate::regs::PacKey::IB.reg(false));
     let v146 = b.concat(v144, v145);
+    st.require_va(ENC, 39, false)?;
     let v160 = b.extract(v142, 55, Width::new(1));
     let v161 = b.concat(v160, v160);
     let v162 = b.concat(v161, v160);
@@ -10337,6 +10347,7 @@ pub(super) fn AUTIZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v10 = b.get(crate::regs::PacKey::IA.reg(true));
     let v11 = b.get(crate::regs::PacKey::IA.reg(false));
     let v12 = b.concat(v10, v11);
+    st.require_va(ENC, 39, false)?;
     let v26 = b.extract(v8, 55, Width::new(1));
     let v27 = b.concat(v26, v26);
     let v28 = b.concat(v27, v26);
@@ -10477,6 +10488,7 @@ pub(super) fn AUTIZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v10 = b.get(crate::regs::PacKey::IB.reg(true));
     let v11 = b.get(crate::regs::PacKey::IB.reg(false));
     let v12 = b.concat(v10, v11);
+    st.require_va(ENC, 39, false)?;
     let v26 = b.extract(v8, 55, Width::new(1));
     let v27 = b.concat(v26, v26);
     let v28 = b.concat(v27, v26);
@@ -31186,6 +31198,7 @@ pub(super) fn PACDA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v33 = b.concat(v31, v31);
     let v34 = b.concat(v33, v31);
     let v35 = b.concat(v34, v31);
@@ -31317,6 +31330,7 @@ pub(super) fn PACDA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v173 = b.concat(v171, v171);
     let v174 = b.concat(v173, v171);
     let v175 = b.concat(v174, v171);
@@ -31469,6 +31483,7 @@ pub(super) fn PACDB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v33 = b.concat(v31, v31);
     let v34 = b.concat(v33, v31);
     let v35 = b.concat(v34, v31);
@@ -31600,6 +31615,7 @@ pub(super) fn PACDB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v173 = b.concat(v171, v171);
     let v174 = b.concat(v173, v171);
     let v175 = b.concat(v174, v171);
@@ -31747,6 +31763,7 @@ pub(super) fn PACDZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v25 = b.concat(v23, v23);
     let v26 = b.concat(v25, v23);
     let v27 = b.concat(v26, v23);
@@ -31894,6 +31911,7 @@ pub(super) fn PACDZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v25 = b.concat(v23, v23);
     let v26 = b.concat(v25, v23);
     let v27 = b.concat(v26, v23);
@@ -32115,6 +32133,7 @@ pub(super) fn PACIA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v35 = b.concat(v33, v33);
     let v36 = b.concat(v35, v33);
     let v37 = b.concat(v36, v33);
@@ -32246,6 +32265,7 @@ pub(super) fn PACIA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v175 = b.concat(v173, v173);
     let v176 = b.concat(v175, v173);
     let v177 = b.concat(v176, v173);
@@ -32402,6 +32422,7 @@ pub(super) fn PACIB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v35 = b.concat(v33, v33);
     let v36 = b.concat(v35, v33);
     let v37 = b.concat(v36, v33);
@@ -32533,6 +32554,7 @@ pub(super) fn PACIB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v175 = b.concat(v173, v173);
     let v176 = b.concat(v175, v173);
     let v177 = b.concat(v176, v173);
@@ -32684,6 +32706,7 @@ pub(super) fn PACIZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v27 = b.concat(v25, v25);
     let v28 = b.concat(v27, v25);
     let v29 = b.concat(v28, v25);
@@ -32835,6 +32858,7 @@ pub(super) fn PACIZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Res
     if st.has(Feature::CONSTPACFIELD) {
         return Err(LiftError::Unsupported(ENC));
     }
+    st.require_va(ENC, 39, false)?;
     let v27 = b.concat(v25, v25);
     let v28 = b.concat(v27, v25);
     let v29 = b.concat(v28, v25);
@@ -46997,6 +47021,7 @@ pub(super) fn XPACD_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s6: bool = st.has(Feature::PAuth);
     let s7: bool = s5 && s6;
     let v8 = st.x_read(b, s2 as u32, 64);
+    st.require_va(ENC, 39, false)?;
     let v22 = b.extract(v8, 55, Width::new(1));
     let v23 = b.concat(v22, v22);
     let v24 = b.concat(v23, v22);
@@ -47088,6 +47113,7 @@ pub(super) fn XPACI_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let s6: bool = st.has(Feature::PAuth);
     let s7: bool = s5 && s6;
     let v8 = st.x_read(b, s2 as u32, 64);
+    st.require_va(ENC, 39, false)?;
     let v22 = b.extract(v8, 55, Width::new(1));
     let v23 = b.concat(v22, v22);
     let v24 = b.concat(v23, v22);

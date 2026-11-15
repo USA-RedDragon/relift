@@ -1,11 +1,14 @@
 //! Lifter tests on words built from field values, run in the `relift-ir`
 //! interpreter. The differential check against Unicorn lives in `check/`.
 
+use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::{Features, decode};
 use relift_cpu_arm64::lift::{LiftError, lift, lift_hand, lifter, sail, supported};
 use relift_cpu_arm64::regs::{self, C, N, SP, V, Z};
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{Flow, Next};
+
+const ALL: Cpu = Cpu::new(Features::ALL, Va::BITS39);
 
 const PC: u64 = 0x4000;
 
@@ -21,7 +24,7 @@ fn mem() -> FlatMemory {
 }
 
 fn step(word: u32, s: &mut State, m: &mut FlatMemory) -> u64 {
-    let b = lift(word, PC, &Features::ALL).expect("lifts");
+    let b = lift(word, PC, &ALL).expect("lifts");
     interp::run(&b, s, m, &mut NoIntrinsics).expect("runs").next
 }
 
@@ -93,11 +96,11 @@ fn adrp_and_branches_compute_targets() {
     step(adrp, &mut s, &mut mem());
     assert_eq!(x(&s, 7), (PC & !0xfff) + (9 << 12));
 
-    let bl = lift(0x9400_0000 | 0x3ff_ffff, PC, &Features::ALL).expect("lifts");
+    let bl = lift(0x9400_0000 | 0x3ff_ffff, PC, &ALL).expect("lifts");
     assert_eq!(bl.exit.next, Next::Const(PC - 4));
     assert_eq!(bl.exit.flow, Flow::Call { ret: PC + 4 });
     // `bl .+8` steps over an inline literal: a jump that sets x30.
-    let lit = lift(0x9400_0002, PC, &Features::ALL).expect("lifts");
+    let lit = lift(0x9400_0002, PC, &ALL).expect("lifts");
     assert_eq!(lit.exit.next, Next::Const(PC + 8));
     assert_eq!(lit.exit.flow, Flow::Jump);
     let mut s = state();
@@ -115,7 +118,7 @@ fn adrp_and_branches_compute_targets() {
     setx(&mut s, 9, 1 << 33);
     assert_eq!(step(tbnz, &mut s, &mut mem()), PC + 8);
 
-    let ret = lift(0xd65f_03c0, PC, &Features::ALL).expect("lifts");
+    let ret = lift(0xd65f_03c0, PC, &ALL).expect("lifts");
     assert_eq!(ret.exit.flow, Flow::Return);
 }
 
@@ -168,7 +171,7 @@ fn exclusive_pair_of_64_bit_registers() {
     assert_eq!(x(&s, 5), 0);
     setx(&mut s, 1, 0x1_0008);
     setx(&mut s, 3, 7);
-    let b = lift(ldxp, PC, &Features::ALL).expect("lifts");
+    let b = lift(ldxp, PC, &ALL).expect("lifts");
     let o = interp::run(&b, &mut s, &mut m, &mut NoIntrinsics).expect("runs");
     assert_eq!(o.flow, Flow::Trap(sail::SLOW_ALIGN));
     assert_eq!(x(&s, 3), 7);
@@ -178,13 +181,13 @@ fn exclusive_pair_of_64_bit_registers() {
 fn unpredictable_and_unallocated_words_are_refused() {
     let ldr_post_same = 0xf840_0400 | (1 << 5) | 1;
     assert!(matches!(
-        lift(ldr_post_same, PC, &Features::ALL),
+        lift(ldr_post_same, PC, &ALL),
         Err(LiftError::Unpredictable(_))
     ));
     let unallocated = 0x0200_0000;
     assert!(relift_cpu_arm64::decode::decode(unallocated).is_none());
     assert!(matches!(
-        lift(unallocated, PC, &Features::ALL),
+        lift(unallocated, PC, &ALL),
         Err(LiftError::Unallocated(_))
     ));
     assert!(supported().count() > 150);
@@ -224,7 +227,7 @@ fn generated_templates_agree_with_the_hand_lifter() {
             if decode(w).map(|i| i.encoding) != Some(enc) {
                 continue;
             }
-            let (Ok(h), Ok(g)) = (lift_hand(w, PC), lift(w, PC, &Features::ALL)) else {
+            let (Ok(h), Ok(g)) = (lift_hand(w, PC), lift(w, PC, &ALL)) else {
                 continue;
             };
             let mut s = state();

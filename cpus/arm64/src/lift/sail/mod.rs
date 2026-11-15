@@ -14,7 +14,8 @@ mod rt;
 use relift_ir::{Block, Builder, CmpOp, Width};
 
 use super::LiftError;
-use crate::decode::{Encoding, Features, Insn};
+use crate::cpu::Cpu;
+use crate::decode::{Encoding, Insn};
 use crate::regs;
 use rt::St;
 pub(crate) use rt::exact_host;
@@ -40,15 +41,15 @@ pub const SLOW_FPCR: u32 = 0x4650_4352;
 /// program that produces them (`regs::FP_FLAGS` is 1).
 pub const SLOW_FLAGS: u32 = 0x4650_5352;
 
-/// Lifts `insn` at `pc` with its generated template, for a CPU with the
-/// features `features` (a template whose Arm semantics test a feature asks
-/// them).
+/// Lifts `insn` at `pc` with its generated template, for the CPU `cpu` (a
+/// template whose Arm semantics test a feature or the address layout asks
+/// it).
 ///
 /// The templates' floating-point semantics hold for FPCR zero only (see
 /// `relift_ir::FpOp`). A block whose template uses the floating-point cut
 /// (it calls `St::assume_default_fpcr`) starts with a guard
 /// that leaves it for slow path [`SLOW_FPCR`] when FPCR is not zero.
-pub fn lift_insn(insn: Insn, pc: u64, features: &Features) -> Result<Block, LiftError> {
+pub fn lift_insn(insn: Insn, pc: u64, cpu: &Cpu) -> Result<Block, LiftError> {
     let f = generated::template(insn.encoding).ok_or(LiftError::Unsupported(insn.encoding))?;
     let run = |guard: bool, flags: bool| -> Result<(Block, bool, bool), LiftError> {
         let mut b = Builder::new(regs::regs(), Width::W64, pc);
@@ -62,7 +63,7 @@ pub fn lift_insn(insn: Insn, pc: u64, features: &Features) -> Result<Block, Lift
             let on = b.get(regs::FP_FLAGS);
             b.guard(on, SLOW_FLAGS);
         }
-        let mut st = St::new(*features);
+        let mut st = St::new(*cpu);
         f(insn.word, &mut b, &mut st)?;
         let fp = st.assumes_default_fpcr();
         let slow_flags = st.flags_need_slow();

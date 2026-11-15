@@ -488,7 +488,7 @@ fn switch_site(settings: &Settings, out: &Path, site: &Place) -> Vec<String> {
         .collect();
     let addrs: std::collections::BTreeSet<u64> = slots.keys().copied().collect();
     let cpu = relift_cpu_arm64::frontend::Arm64 {
-        features: relift_switch::CPU_FEATURES,
+        cpu: relift_switch::CPU,
     };
     let preserved = relift_guest::Frontend::preserved(&cpu);
     let at = site.addr;

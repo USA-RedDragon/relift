@@ -5,10 +5,13 @@
 
 use std::collections::BTreeMap;
 
+use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::{Encoding, Features, decode};
 use relift_cpu_arm64::lift::lift;
 use relift_ir::interp::{FlatMemory, Monitor, NoIntrinsics, State, run};
 use relift_ir::{Block, dce, simplify};
+
+const ALL: Cpu = Cpu::new(Features::ALL, Va::BITS39);
 
 const BASE: u64 = 0x10_0000;
 const WINDOW: usize = 0x2000;
@@ -82,7 +85,7 @@ fn simplify_and_dce_keep_every_form_s_meaning() {
             if decode(w).map(|i| i.encoding) != Some(enc) {
                 continue;
             }
-            let Ok(b) = lift(w, 0x7100_0000, &Features::ALL) else {
+            let Ok(b) = lift(w, 0x7100_0000, &ALL) else {
                 continue;
             };
             got += 1;

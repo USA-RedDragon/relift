@@ -68,7 +68,7 @@ pub const EXCL: usize = 101;
 
 pub fn slots() -> Vec<Slot> {
     let fe = Arm64 {
-        features: Features::ALL,
+        cpu: relift_cpu_arm64::cpu::Cpu::new(Features::ALL, relift_cpu_arm64::cpu::Va::BITS39),
     };
     let regs = fe.regs();
     (0..regs.len())

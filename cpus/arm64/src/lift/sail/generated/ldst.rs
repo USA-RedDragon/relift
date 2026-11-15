@@ -1568,6 +1568,7 @@ pub(super) fn LDRAA_64W_ldst_pac(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v27 = b.get(crate::regs::PacKey::DA.reg(true));
     let v28 = b.get(crate::regs::PacKey::DA.reg(false));
     let v29 = b.concat(v27, v28);
+    st.require_va(ENC, 39, false)?;
     let v43 = b.extract(v25, 55, Width::new(1));
     let v44 = b.concat(v43, v43);
     let v45 = b.concat(v44, v43);
@@ -1731,6 +1732,7 @@ pub(super) fn LDRAA_64_ldst_pac(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v22 = b.get(crate::regs::PacKey::DA.reg(true));
     let v23 = b.get(crate::regs::PacKey::DA.reg(false));
     let v24 = b.concat(v22, v23);
+    st.require_va(ENC, 39, false)?;
     let v38 = b.extract(v20, 55, Width::new(1));
     let v39 = b.concat(v38, v38);
     let v40 = b.concat(v39, v38);
@@ -1893,6 +1895,7 @@ pub(super) fn LDRAB_64W_ldst_pac(word: u32, b: &mut Builder, st: &mut St) -> Res
     let v27 = b.get(crate::regs::PacKey::DB.reg(true));
     let v28 = b.get(crate::regs::PacKey::DB.reg(false));
     let v29 = b.concat(v27, v28);
+    st.require_va(ENC, 39, false)?;
     let v43 = b.extract(v25, 55, Width::new(1));
     let v44 = b.concat(v43, v43);
     let v45 = b.concat(v44, v43);
@@ -2056,6 +2059,7 @@ pub(super) fn LDRAB_64_ldst_pac(word: u32, b: &mut Builder, st: &mut St) -> Resu
     let v22 = b.get(crate::regs::PacKey::DB.reg(true));
     let v23 = b.get(crate::regs::PacKey::DB.reg(false));
     let v24 = b.concat(v22, v23);
+    st.require_va(ENC, 39, false)?;
     let v38 = b.extract(v20, 55, Width::new(1));
     let v39 = b.concat(v38, v38);
     let v40 = b.concat(v39, v38);

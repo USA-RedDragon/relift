@@ -250,7 +250,7 @@ impl Server {
             ));
         }
         let cpu = Arm64 {
-            features: relift_switch::CPU_FEATURES,
+            cpu: relift_switch::CPU,
         };
         let module = &self.modules[i];
         let p = &self.placed[i];

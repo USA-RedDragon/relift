@@ -10,7 +10,7 @@ use relift_diff::{Engine, Outcome, Pager, Reg, State as Case, Status};
 use relift_ir::interp::{self, Fault, GuestMemory, Intrinsics, State};
 use relift_ir::{Block, Flow};
 
-use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::cpu::Cpu;
 use relift_cpu_arm64::lift;
 use relift_cpu_arm64::lift::system::{self, TRAP_BRK};
 use relift_cpu_arm64::regs;
@@ -103,17 +103,14 @@ impl Intrinsics for Intr<'_, '_> {
 /// time, lifting each from the guest memory the pager serves.
 #[derive(Debug)]
 pub struct IrEngine {
-    features: Features,
+    cpu: Cpu,
     flip_read: u64,
 }
 
 impl IrEngine {
-    /// An engine that lifts for a CPU with `features`.
-    pub fn new(features: Features) -> IrEngine {
-        IrEngine {
-            features,
-            flip_read: 0,
-        }
+    /// An engine that lifts for the CPU `cpu`.
+    pub fn new(cpu: Cpu) -> IrEngine {
+        IrEngine { cpu, flip_read: 0 }
     }
 
     /// Flips the low bit of the first byte of the `n`th memory read, a
@@ -184,7 +181,7 @@ impl IrEngine {
             )));
         }
         let word = u32::from_le_bytes(w);
-        lift::lift(word, pc, &self.features).map_err(|e| {
+        lift::lift(word, pc, &self.cpu).map_err(|e| {
             if word == 0 {
                 Status::Left(format!(
                     "pc {pc:#x} holds no guest code: a runtime-provided function"
@@ -294,9 +291,12 @@ mod tests {
                 },
             ],
         };
-        IrEngine::new(Features::ALL)
-            .flip_read(flip)
-            .run(&state, &mut pager, 100)
+        IrEngine::new(Cpu::new(
+            relift_cpu_arm64::decode::Features::ALL,
+            relift_cpu_arm64::cpu::Va::BITS39,
+        ))
+        .flip_read(flip)
+        .run(&state, &mut pager, 100)
     }
 
     fn x(o: &Outcome, name: &str) -> u128 {

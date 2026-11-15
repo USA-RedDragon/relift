@@ -30,6 +30,7 @@
 
 use std::rc::Rc;
 
+use relift_cpu_arm64::cpu::Va;
 use relift_sail::ast::Expr;
 use relift_sail::eval::{Cpu, Gen, R, err, fail};
 use relift_sail::stage::Stage;
@@ -134,20 +135,21 @@ const HCR_EL2_PAC: u128 = (1 << 41) | (1 << 40);
 /// SCTLR_EL1.EnIA, EnIB, EnDA and EnDB: the kernel enables every key for
 /// EL0.
 const SCTLR_EL1_EN_PAC: u128 = (1 << 31) | (1 << 30) | (1 << 27) | (1 << 13);
-/// The guest's 39-bit address space: T0SZ and T1SZ 25, top-byte ignore
-/// off for both halves (TBI0, TBI1 zero), as the Switch's kernel sets it.
-const TCR_EL1: u128 = 25 | (25 << 16);
-
-/// The lowest bit of the pointer authentication field: 64 - TxSZ of the
-/// guest's address space, the same for both halves.
-fn bottom_pac_bit() -> R<V> {
-    let t0 = TCR_EL1 & 0x3f;
-    let t1 = (TCR_EL1 >> 16) & 0x3f;
-    if t0 != t1 {
-        return fail("halves of the address space differ in size");
-    }
-    Ok(V::Int(64 - t0 as i128))
-}
+/// The address layout the templates are generated for: the 39-bit address
+/// space without top-byte ignore that Horizon gives every 64-bit process
+/// (its `TCR_EL1` is `0x11B5193519`: T0SZ and T1SZ 25, TBI0 and TBI1 zero).
+///
+/// The layout cannot be a lift-time value like a feature: the evaluator
+/// needs concrete bit positions to slice the pointer authentication field
+/// out of a pointer (`CalculateBottomPACBit` sets the width of the
+/// slices), and top-byte ignore picks other slices. So the pointer
+/// authentication templates, the ones that call `CalculateBottomPACBit`,
+/// test at lift time that the CPU has this layout (`St::require_va`) and
+/// refuse any other with `LiftError::Layout`. `EffectiveTBI` reads the
+/// layout's `TCR_EL1` as a fixed register; outside pointer authentication
+/// only branches read it (`AArch64_BranchAddr`), and with top-byte ignore
+/// off they keep the target as it is.
+const TEMPLATE_VA: Va = Va::BITS39;
 
 /// The model files the A64 generator reads, in load order.
 pub const ARM64_SRC_FILES: &[&str] = &[
@@ -235,7 +237,7 @@ impl Cpu for Arm64 {
             "SCR_EL3" => 1 | (1 << 10) | SCR_EL3_PAC,
             "HCR_EL2" => (1 << 31) | HCR_EL2_PAC,
             "SCTLR_EL1" => SCTLR_EL1_EN_PAC,
-            "TCR_EL1" => TCR_EL1,
+            "TCR_EL1" => u128::from(TEMPLATE_VA.tcr_el1()),
             _ => 0,
         }
     }
@@ -1250,7 +1252,13 @@ impl Arm64Cut for Gen<'_, Arm64> {
                     format!("b.pac({}, {}, {}, {})", xs[0], xs[1], xs[2], xs[3]),
                 )
             }
-            "CalculateBottomPACBit" => bottom_pac_bit()?,
+            "CalculateBottomPACBit" => {
+                self.line(format!(
+                    "st.require_va(ENC, {}, {})?;",
+                    TEMPLATE_VA.bits, TEMPLATE_VA.tbi
+                ));
+                V::Int(i128::from(TEMPLATE_VA.bits))
+            }
             "DataMemoryBarrier" | "DataSynchronizationBarrier" => {
                 let order = match a.get(1) {
                     Some(V::Enum(t, i)) if name == "DataMemoryBarrier" => {

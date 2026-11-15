@@ -1,11 +1,14 @@
 //! Every lifted encoding prints, parses back, and survives dead-value
 //! elimination with the same interpreter result.
 
+use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::{Features, decode};
 use relift_cpu_arm64::lift::{lift, supported};
 use relift_cpu_arm64::regs;
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{Block, dce, parse};
+
+const ALL: Cpu = Cpu::new(Features::ALL, Va::BITS39);
 
 const PC: u64 = 0x4000;
 const WORDS: usize = 4;
@@ -67,7 +70,7 @@ fn print_parse_and_dce_agree_for_every_supported_encoding() {
             if decode(w).map(|i| i.encoding) != Some(enc) {
                 continue;
             }
-            let Ok(b) = lift(w, PC, &Features::ALL) else {
+            let Ok(b) = lift(w, PC, &ALL) else {
                 continue;
             };
             got += 1;

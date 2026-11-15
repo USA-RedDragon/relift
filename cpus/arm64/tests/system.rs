@@ -1,16 +1,19 @@
 //! Tests of the hand-written system lifters, run in the `relift-ir`
 //! interpreter where they have no intrinsic.
 
+use relift_cpu_arm64::cpu::{Cpu, Va};
 use relift_cpu_arm64::decode::{Feature, Features};
-use relift_cpu_arm64::lift::{lift, system};
+use relift_cpu_arm64::lift::{LiftError, lift, system};
 use relift_cpu_arm64::regs::{self, C, N, TPIDR_EL0, TPIDRRO_EL0, V, Z};
 use relift_ir::interp::{self, FlatMemory, NoIntrinsics, State};
 use relift_ir::{Flow, Next, Op};
 
+const ALL: Cpu = Cpu::new(Features::ALL, Va::BITS39);
+
 const PC: u64 = 0x4000;
 
 fn run(word: u32, s: &mut State) -> u64 {
-    let b = lift(word, PC, &Features::ALL).expect("lifts");
+    let b = lift(word, PC, &ALL).expect("lifts");
     let mut m = FlatMemory {
         base: PC,
         bytes: (0..=255u8).cycle().take(0x1000).collect(),
@@ -39,14 +42,14 @@ const NZCV_ENC: u32 = sysreg(3, 3, 4, 2, 0);
 
 #[test]
 fn svc_is_a_trap_that_resumes_after_it() {
-    let b = lift(0xd400_0001 | (0x27 << 5), PC, &Features::ALL).expect("lifts");
+    let b = lift(0xd400_0001 | (0x27 << 5), PC, &ALL).expect("lifts");
     assert_eq!(b.exit.flow, Flow::Trap(0x27));
     assert_eq!(b.exit.next, Next::Const(PC + 4));
 }
 
 #[test]
 fn brk_is_a_breakpoint_trap() {
-    let b = lift(0xd420_0000 | (1000 << 5), PC, &Features::ALL).expect("lifts");
+    let b = lift(0xd420_0000 | (1000 << 5), PC, &ALL).expect("lifts");
     assert_eq!(b.exit.flow, Flow::Trap(0x1_0000 | 1000));
     assert_eq!(b.exit.next, Next::Const(PC + 4));
 }
@@ -64,7 +67,7 @@ fn mrs_reads_the_thread_pointers() {
 
 #[test]
 fn msr_tpidrro_is_undefined() {
-    assert!(lift(msr(TPIDRRO_ENC, 0), PC, &Features::ALL).is_err());
+    assert!(lift(msr(TPIDRRO_ENC, 0), PC, &ALL).is_err());
 }
 
 #[test]
@@ -81,16 +84,63 @@ fn nzcv_round_trips_through_x() {
 fn hints_without_the_feature_are_nops() {
     let no_pac = Features::ALL.without(Feature::PAuth);
     for w in [0xd503_245f, 0xd503_251f, 0xd503_20ff] {
-        let b = lift(w, PC, &no_pac).expect("lifts");
+        let b = lift(w, PC, &Cpu::new(no_pac, Va::BITS39)).expect("lifts");
         assert!(b.insts.is_empty(), "{w:#x}");
         assert_eq!(b.exit.next, Next::Const(PC + 4));
     }
-    assert!(lift(0xd503_20ff, PC, &Features::ALL).is_err());
+    let b = lift(0xd503_20ff, PC, &ALL).expect("lifts");
+    assert!(!b.insts.is_empty());
+}
+
+#[test]
+fn pointer_authentication_lifts_only_for_the_template_address_layout() {
+    let a78c = |va| Cpu::new(Features::CORTEX_A78C, va);
+    for w in [0xd503_237f, 0xd503_23ff, 0xd65f_0fff, 0xdac1_43e0] {
+        assert!(lift(w, PC, &a78c(Va::BITS39)).is_ok(), "{w:#x}");
+        for va in [
+            Va {
+                bits: 48,
+                tbi: false,
+            },
+            Va {
+                bits: 39,
+                tbi: true,
+            },
+        ] {
+            assert!(
+                matches!(lift(w, PC, &a78c(va)), Err(LiftError::Layout { have, .. }) if have == va),
+                "{w:#x} {va:?}"
+            );
+        }
+    }
+    assert!(
+        lift(
+            0xd503_237f,
+            PC,
+            &Cpu::new(
+                Features::CORTEX_A57,
+                Va {
+                    bits: 48,
+                    tbi: true
+                }
+            )
+        )
+        .is_ok()
+    );
+    assert_eq!(Va::BITS39.tcr_el1(), 25 | (25 << 16));
+    assert_eq!(
+        Va {
+            bits: 48,
+            tbi: true
+        }
+        .tcr_el1(),
+        16 | (16 << 16) | (3 << 37)
+    );
 }
 
 #[test]
 fn counter_reads_are_intrinsics() {
-    let b = lift(mrs(sysreg(3, 3, 14, 0, 1), 0), PC, &Features::ALL).expect("lifts");
+    let b = lift(mrs(sysreg(3, 3, 14, 0, 1), 0), PC, &ALL).expect("lifts");
     assert!(
         b.insts
             .iter()
