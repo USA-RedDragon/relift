@@ -268,3 +268,17 @@ fn oam_dma_copies_code_into_oam() {
         ]
     );
 }
+
+#[test]
+fn a_jump_into_cleared_ram_stops_after_a_run_of_nops() {
+    let r = predict(&[(
+        0x150,
+        &[
+            0x21, 0x00, 0xC0, 0x01, 0x00, 0x10, 0x36, 0x00, 0x23, 0x0B, 0x78, 0xB1, 0x20, 0xF8,
+            0xC3, 0x00, 0xC0,
+        ],
+    )]);
+    assert!(!r.ops.is_empty());
+    assert!(r.ops.len() <= 257, "{}", r.ops.len());
+    assert!(r.ops.iter().all(|o| o.key == 0));
+}

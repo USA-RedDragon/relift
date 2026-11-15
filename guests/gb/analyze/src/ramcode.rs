@@ -23,7 +23,8 @@
 //! driver's next round copies its next test. A `halt` or `ei` with the
 //! interrupt master enable set and known enabled interrupts calls the
 //! handler of the first and forks into the others, and a write to `$FF46`
-//! copies the OAM DMA source.
+//! copies the OAM DMA source. A path that runs more than 256 NOPs in a row
+//! the program made, a sweep through cleared memory, ends.
 //!
 //! Every instruction a path runs in RAM is predicted, and so is the code
 //! decoded from the bytes a path holds where it jumps into RAM from ROM.
@@ -91,6 +92,11 @@ const MAX_PER_ENTRY: usize = 4096;
 /// sled. A `$00` or `$FF` among other values is taken as the fill of RAM
 /// cleared before the code was stored, and decoding does not go on past it.
 const NOP_RUN: u32 = 4;
+
+/// Most NOPs the program made that a path runs in a row in RAM before it
+/// ends: a sweep through cleared memory, such as a jump into cleared VRAM,
+/// rather than a NOP sled of a timing test.
+const RAN_NOP_RUN: u32 = 256;
 
 /// Most copied NOPs in a row decoded: ROM padding copied with a routine,
 /// past which the routine has ended.
@@ -231,6 +237,7 @@ struct Path {
     main: bool,
     free: bool,
     launch: Option<Launch>,
+    nops: u32,
 }
 
 #[derive(Clone)]
@@ -711,9 +718,19 @@ impl Machine<'_> {
                 } else {
                     RamClass::Generated
                 };
+                if key == 0 && class == RamClass::Generated {
+                    p.nops += 1;
+                    if p.nops > RAN_NOP_RUN {
+                        return None;
+                    }
+                } else {
+                    p.nops = 0;
+                }
                 let e = f.ran.entry((pc, key)).or_insert(class);
                 *e = (*e).min(class);
             }
+        } else {
+            p.nops = 0;
         }
         p.pc = pc.wrapping_add(u16::from(len));
         let next = p.pc;
@@ -1278,8 +1295,8 @@ impl Machine<'_> {
     fn image(&self, p: &Path, f: &mut Found, entry: u16) -> Vec<u16> {
         let mut out = BTreeSet::new();
         let mut done: FxSet<u16> = FxSet::default();
-        let mut todo = vec![entry];
-        while let Some(a) = todo.pop() {
+        let mut todo = vec![(entry, 0u32)];
+        while let Some((a, nops)) = todo.pop() {
             if !is_ram(a) || done.len() >= MAX_PER_ENTRY || !done.insert(a) {
                 continue;
             }
@@ -1297,6 +1314,15 @@ impl Machine<'_> {
             } else {
                 RamClass::Generated
             };
+            let run = if key == 0 { nops + 1 } else { 0 };
+            let most = if class == RamClass::Generated {
+                RAN_NOP_RUN
+            } else {
+                COPIED_NOP_RUN
+            };
+            if run > most {
+                continue;
+            }
             let e = f.ran.entry((a, key)).or_insert(class);
             *e = (*e).min(class);
             let next = a.wrapping_add(len);
@@ -1313,13 +1339,13 @@ impl Machine<'_> {
             };
             if let Some(t) = target {
                 if is_ram(t) {
-                    todo.push(t);
+                    todo.push((t, 0));
                 } else if t < 0x8000 && matches!(op, 0xC2 | 0xC3 | 0xCA | 0xD2 | 0xDA) {
                     out.insert(t);
                 }
             }
             if falls {
-                todo.push(next);
+                todo.push((next, run));
             }
         }
         out.into_iter().collect()
@@ -1356,6 +1382,7 @@ impl Machine<'_> {
             main: true,
             free: false,
             launch: None,
+            nops: 0,
         }
     }
 }
