@@ -17,6 +17,12 @@
 //! first of `RELIFT_MOLTENVK_DIR`, `<cache>/sdk/moltenvk/<arch>-<os>/` and
 //! Homebrew's `molten-vk`, each a directory with `lib/libMoltenVK.dylib`.
 //! Without one the runtime looks for a loader at run time.
+//!
+//! SDL3 also plays the game's audio. libopus, which decodes the Opus streams
+//! of games that use them, comes from `RELIFT_OPUS_DIR` (a directory with
+//! `include/opus/` and `lib/`) or `pkg-config` (`opus`). Without SDL3 the
+//! audio output is a silent one that keeps time; without libopus Opus
+//! packets decode to silence.
 
 use std::path::{Path, PathBuf};
 
@@ -37,6 +43,14 @@ pub struct LinkedVulkan {
     pub origin: String,
 }
 
+/// How to compile and link against libopus.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Opus {
+    pub cflags: Vec<String>,
+    pub libs: Vec<String>,
+    pub origin: String,
+}
+
 /// The extra runtime sources, flags and libraries of one build.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Extras {
@@ -47,6 +61,8 @@ pub struct Extras {
     /// Host backends beyond the window (sound, Android glue), compiled with
     /// SDL3's flags.
     pub host: Vec<PathBuf>,
+    pub opus_src: Option<PathBuf>,
+    pub opus: Option<Opus>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -80,23 +96,53 @@ fn from_dir(dir: &Path, origin: String) -> Option<Sdl3> {
     })
 }
 
+fn pkg_config(flag: &str, package: &str) -> Option<Vec<String>> {
+    let out = relift_proc::command("pkg-config")
+        .args([flag, package])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    Some(
+        text.split_whitespace()
+            .map(String::from)
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn from_pkg_config() -> Option<Sdl3> {
-    let query = |flag: &str| {
-        let out = relift_proc::command("pkg-config")
-            .args([flag, "sdl3"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())?;
-        let text = String::from_utf8(out.stdout).ok()?;
-        Some(
-            text.split_whitespace()
-                .map(String::from)
-                .collect::<Vec<_>>(),
-        )
-    };
     Some(Sdl3 {
-        cflags: query("--cflags")?,
-        libs: query("--libs")?,
+        cflags: pkg_config("--cflags", "sdl3")?,
+        libs: pkg_config("--libs", "sdl3")?,
+        origin: "pkg-config".into(),
+    })
+}
+
+fn opus_from_dir(dir: &Path, origin: String) -> Option<Opus> {
+    if !dir.join("include").join("opus").join("opus.h").is_file() {
+        return None;
+    }
+    let lib = dir.join("lib");
+    let lib_flag = lib.display().to_string();
+    Some(Opus {
+        cflags: vec![format!("-I{}", dir.join("include").display())],
+        libs: vec![
+            format!("-L{lib_flag}"),
+            format!("-Wl,-rpath,{lib_flag}"),
+            "-lopus".into(),
+        ],
+        origin,
+    })
+}
+
+/// libopus for the host target, or `None`.
+pub fn find_opus() -> Option<Opus> {
+    if let Some(d) = std::env::var_os("RELIFT_OPUS_DIR").filter(|v| !v.is_empty()) {
+        return opus_from_dir(Path::new(&d), "RELIFT_OPUS_DIR".into());
+    }
+    Some(Opus {
+        cflags: pkg_config("--cflags", "opus")?,
+        libs: pkg_config("--libs", "opus")?,
         origin: "pkg-config".into(),
     })
 }
@@ -151,12 +197,22 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
     vk.extend(c_files(&vk_dir.join("gen"))?);
     let window = rt.join("host").join("window_sdl3.c");
     let sdl3 = find_sdl3(cache_root).filter(|_| window.is_file());
+    let audio = rt.join("host").join("audio_sdl3.c");
+    let opus_src = rt.join("host").join("opus_libopus.c");
+    let opus = find_opus().filter(|_| opus_src.is_file());
     Ok(Extras {
         vk,
         window: sdl3.as_ref().map(|_| window),
+        host: sdl3
+            .as_ref()
+            .filter(|_| audio.is_file())
+            .map(|_| audio)
+            .into_iter()
+            .collect(),
+        opus_src: opus.as_ref().map(|_| opus_src),
+        opus,
         sdl3,
         vulkan: find_moltenvk(cache_root),
-        host: Vec::new(),
     })
 }
 
@@ -194,20 +250,37 @@ pub fn android_extras(
             .iter()
             .map(|n| host.join(n))
             .collect(),
+        opus_src: None,
+        opus: None,
     })
 }
 
 impl Extras {
-    /// What the build prints about the window backend.
+    /// What the build prints about the window, audio and Opus backends.
     pub fn note(&self) -> String {
         let window = match &self.sdl3 {
-            Some(s) => format!("window: SDL3 ({})", s.origin),
-            None => "window: SDL3 not found, building headless (set RELIFT_SDL3_DIR)".into(),
+            Some(s) => format!("window and audio: SDL3 ({})", s.origin),
+            None => {
+                "window: SDL3 not found, building headless and silent (set RELIFT_SDL3_DIR)".into()
+            }
         };
-        match &self.vulkan {
+        let window = match &self.vulkan {
             Some(v) => format!("{window}; Vulkan: MoltenVK linked ({})", v.origin),
             None => window,
+        };
+        match &self.opus {
+            Some(o) => format!("{window}; opus: libopus ({})", o.origin),
+            None if self.has_host("opus_libopus.c") => window,
+            None => format!(
+                "{window}; opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR)"
+            ),
         }
+    }
+
+    fn has_host(&self, name: &str) -> bool {
+        self.host
+            .iter()
+            .any(|h| h.file_name().is_some_and(|n| n == name))
     }
 
     /// Defines every runtime file needs.
@@ -219,8 +292,11 @@ impl Extras {
         if self.vulkan.is_some() {
             d.push("-DRL_VULKAN_LINKED".into());
         }
-        if !self.host.is_empty() {
+        if self.has_host("audio_sdl3.c") {
             d.push("-DRL_HOST_AUDIO".into());
+        }
+        if self.opus.is_some() || self.has_host("opus_libopus.c") {
+            d.push("-DRL_HOST_OPUS".into());
         }
         d
     }
@@ -236,10 +312,10 @@ impl Extras {
                 "-lMoltenVK".into(),
             ]);
         }
-        let android = self
-            .host
-            .iter()
-            .any(|h| h.file_name().is_some_and(|n| n == "android_sdl3.c"));
+        if let Some(o) = &self.opus {
+            l.extend(o.libs.iter().cloned());
+        }
+        let android = self.has_host("android_sdl3.c");
         if !l.is_empty() && !android && cfg!(target_vendor = "apple") {
             l.push("-Wl,-headerpad_max_install_names".into());
         }
@@ -282,6 +358,19 @@ impl Extras {
                 });
             }
         }
+        if let (Some(src), Some(opus)) = (&self.opus_src, &self.opus) {
+            out.push(Compile {
+                src: src.clone(),
+                obj: obj(src),
+                flags: rt_flags
+                    .iter()
+                    .cloned()
+                    .chain(opus.cflags.iter().cloned())
+                    .collect(),
+                pool: None,
+                stage: 0,
+            });
+        }
         out
     }
 }
@@ -310,6 +399,11 @@ mod tests {
     }
 
     #[test]
+    fn missing_opus_dir_is_not_found() {
+        assert_eq!(opus_from_dir(Path::new("/nonexistent"), "x".into()), None);
+    }
+
+    #[test]
     fn headless_note_says_so_and_adds_nothing() {
         let e = Extras {
             vk: Vec::new(),
@@ -317,6 +411,8 @@ mod tests {
             sdl3: None,
             vulkan: None,
             host: Vec::new(),
+            opus_src: None,
+            opus: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
@@ -339,6 +435,8 @@ mod tests {
                 origin: "t".into(),
             }),
             host: Vec::new(),
+            opus_src: None,
+            opus: None,
         };
         assert!(e.note().contains("MoltenVK linked (t)"));
         assert_eq!(e.defines(), ["-DRL_VULKAN_LINKED"]);

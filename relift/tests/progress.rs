@@ -112,9 +112,11 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
     );
     let no_sdl3 = root.join("no-sdl3").display().to_string();
     let no_moltenvk = root.join("no-moltenvk").display().to_string();
+    let no_opus = root.join("no-opus").display().to_string();
     let env = [
         ("RELIFT_SDL3_DIR", no_sdl3.as_str()),
         ("RELIFT_MOLTENVK_DIR", no_moltenvk.as_str()),
+        ("RELIFT_OPUS_DIR", no_opus.as_str()),
     ];
     let out = run(&project, &env, &["--cache-dir", &cache, "-j", "4", "build"]);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -127,7 +129,8 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
         \x20 main emit     1 shard, 0 overrides, 0 of 2 reused  <time>\n\
         \x20 main cold     1 cold shard, 0 superset functions  <time>\n\
         main: 1024 words: 2 hot entries, 8 cold entries, 1014 traps (1014 zero, 0 padding, 0 undecodable)\n\
-        window: SDL3 not found, building headless (set RELIFT_SDL3_DIR)\n\
+        window: SDL3 not found, building headless and silent (set RELIFT_SDL3_DIR); \
+        opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR)\n\
         \x20      compile  <n> files, clang -O2, -j4  <time>\n\
         built 2 functions, 0 instructions not lifted, <time> in all\n\
         \x20 output: <root>/cache/projects/tiny/build/host/game\n",

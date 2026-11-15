@@ -75,7 +75,7 @@ LDLIBS := $(if $(or $(WINDOWS),$(ANDROID)),,-lpthread)
 HOST_SRCS :=
 ifeq ($(AUDIO),real)
 HOST_SRCS += host/audio_sdl3.c host/opus_libopus.c
-CFLAGS_BASE += -DRL_HOST_AUDIO $(shell pkg-config --cflags opus sdl3)
+CFLAGS_BASE += -DRL_HOST_AUDIO -DRL_HOST_OPUS $(shell pkg-config --cflags opus sdl3)
 LDLIBS += $(shell pkg-config --libs opus sdl3)
 endif
 ifeq ($(VIDEO),sdl3)

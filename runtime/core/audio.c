@@ -230,7 +230,7 @@ const rl_opus_backend *rl_opus_backend_current(void)
 {
     if (g_opus)
         return g_opus;
-#ifdef RL_HOST_AUDIO
+#ifdef RL_HOST_OPUS
     return rl_host_opus_backend();
 #else
     return &g_stub_opus;
