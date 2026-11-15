@@ -597,6 +597,8 @@ rl_result hos_set_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, 
 rl_result hos_map_memory(uint64_t dst, uint64_t src, uint64_t size);
 rl_result hos_unmap_memory(uint64_t dst, uint64_t src, uint64_t size);
 rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_info);
+/** @brief Checks a data cache operation's range: inside the address space and mapped throughout (the host keeps guest memory coherent). Lock not held. */
+rl_result hos_cache_range(uint64_t addr, uint64_t size);
 rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32_t perm);
 rl_result hos_unmap_shared_memory(uint32_t h, uint64_t addr, uint64_t size);
 rl_result hos_create_transfer_memory(uint32_t *out, uint64_t addr, uint64_t size, uint32_t perm);

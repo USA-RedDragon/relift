@@ -2,7 +2,8 @@
  * @file test_mem.c
  * @brief Memory svcs: heap growth, permissions and faults at the right 4 KiB
  * page (also with simulated 16 KiB host pages), MapMemory copy semantics,
- * QueryMemory, shared and transfer memory, and svcGetInfo regions.
+ * QueryMemory, shared and transfer memory, svcGetInfo regions and the data
+ * cache svcs.
  */
 #include "t.h"
 
@@ -509,4 +510,22 @@ TEST(reserved_ranges_stay_out_of_the_guest_map)
     uint64_t code = hos.lay.code_start + 0x1000000;
     CHECK_EQ(rl_hos_reserve_at(code, 0x4000), 0u);
     CHECK_EQ(query(c, info, code).type, MS_INACCESSIBLE);
+}
+
+TEST(data_cache_svcs_check_their_range)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK_EQ(t_svc(c, 0x2A, 0, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, 0x2B, heap + 3, 0x1000, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, 0x2B, heap, 0x200000, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, 0x2B, heap, 0, 0, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, 0x2B, heap + 0x1FF000, 0x2000, 0, 0, 0, 0), KR_INVALID_MEM_STATE);
+    CHECK_EQ(t_svc(c, 0x2B, UINT64_MAX - 0xFFF, 0x2000, 0, 0, 0, 0), KR_INVALID_MEM_STATE);
+    for (uint32_t imm = 0x5D; imm <= 0x5F; imm++) {
+        CHECK_EQ(t_svc(c, imm, HOS_CUR_PROCESS, heap, 0x1000, 0, 0, 0), 0);
+        CHECK_EQ(t_svc(c, imm, HOS_CUR_PROCESS, heap, 0, 0, 0, 0), KR_INVALID_SIZE);
+        CHECK_EQ(t_svc(c, imm, 0x1234, heap, 0x1000, 0, 0, 0), KR_INVALID_HANDLE);
+        CHECK_EQ(t_svc(c, imm, HOS_CUR_PROCESS, heap + 0x200000, 0x1000, 0, 0, 0), KR_INVALID_MEM_STATE);
+    }
 }

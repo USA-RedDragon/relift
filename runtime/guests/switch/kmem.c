@@ -330,6 +330,23 @@ rl_result hos_set_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, 
     return rc;
 }
 
+rl_result hos_cache_range(uint64_t addr, uint64_t size)
+{
+    rl_result rc = KR_SUCCESS;
+    hos_lock();
+    if (addr + size < addr || !rl_vm_contains(&hos.vm, addr, size))
+        rc = KR_INVALID_MEM_STATE;
+    for (uint64_t at = addr; rc == KR_SUCCESS && at < addr + size;) {
+        rl_vm_block b = rl_vm_query(&hos.vm, at);
+        uint32_t s = state_of(&b);
+        if (s == MS_FREE || s == MS_INACCESSIBLE || !b.size)
+            rc = KR_INVALID_MEM_STATE;
+        at = b.addr + b.size;
+    }
+    hos_unlock();
+    return rc;
+}
+
 static rl_result map_args(uint64_t dst, uint64_t src, uint64_t size)
 {
     if (!aligned(src | dst))

@@ -56,6 +56,8 @@ static const char *const svc_names[0x80] = {
     [0x26] = "Break",
     [0x27] = "OutputDebugString",
     [0x29] = "GetInfo",
+    [0x2A] = "FlushEntireDataCache",
+    [0x2B] = "FlushDataCache",
     [0x30] = "GetResourceLimitLimitValue",
     [0x31] = "GetResourceLimitCurrentValue",
     [0x34] = "WaitForAddress",
@@ -63,6 +65,9 @@ static const char *const svc_names[0x80] = {
     [0x36] = "SynchronizePreemptionState",
     [0x37] = "GetResourceLimitPeakValue",
     [0x45] = "CreateEvent",
+    [0x5D] = "InvalidateProcessDataCache",
+    [0x5E] = "StoreProcessDataCache",
+    [0x5F] = "FlushProcessDataCache",
 };
 
 /** @brief What the Switch guest tells the core: 4 KiB pages, at most 39 address bits, the 19.2 MHz counter. */
@@ -415,6 +420,8 @@ static int dispatch(rl_ctx *c, uint32_t imm)
         x[1] = v;
         break;
     }
+    case 0x2A: rc = KR_SUCCESS; break;
+    case 0x2B: rc = x[1] ? hos_cache_range(x[0], x[1]) : KR_SUCCESS; break;
     case 0x30:
     case 0x37: {
         uint64_t v = 0;
@@ -438,6 +445,11 @@ static int dispatch(rl_ctx *c, uint32_t imm)
         x[2] = rh;
         break;
     }
+    case 0x5D:
+    case 0x5E:
+    case 0x5F:
+        rc = !x[2] ? KR_INVALID_SIZE : w0 != HOS_CUR_PROCESS ? KR_INVALID_HANDLE : hos_cache_range(x[1], x[2]);
+        break;
     default:
         return unknown_svc(c, imm);
     }
