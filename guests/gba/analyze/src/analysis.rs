@@ -107,12 +107,7 @@ fn discover(image: Image<'_>, entry: Loc) -> Report {
     for _ in 0..MAX_ROUNDS {
         let mut d = Driver::new(image.clone(), stops, cache, conc);
         d.add_root(entry, Origin::Entry);
-        loop {
-            d.solve();
-            if !d.address_taken() {
-                break;
-            }
-        }
+        d.settle();
         let found = d.found_stops();
         let cut = d
             .runs
@@ -134,12 +129,7 @@ fn discover(image: Image<'_>, entry: Loc) -> Report {
     }
     let mut d = Driver::new(image, stops, cache, conc);
     d.add_root(entry, Origin::Entry);
-    loop {
-        d.solve();
-        if !d.address_taken() {
-            break;
-        }
-    }
+    d.settle();
     d.report()
 }
 
@@ -374,6 +364,150 @@ impl<'a> Driver<'a> {
         added
     }
 
+    /// Solves until no address-taken entry and no rewritten instruction is
+    /// new.
+    fn settle(&mut self) {
+        loop {
+            self.solve();
+            if !self.address_taken() && !self.rewritten() {
+                break;
+            }
+        }
+    }
+
+    /// The code in RAM that may hold other bytes than the copy it was found
+    /// in. Every constant stored to a constant address that changes an
+    /// instruction found there in some copy makes a rewrite of that copy
+    /// (its bytes with the store) and an entry at the instruction in both,
+    /// so code that finds either unit there goes on from it. Rewrites start
+    /// from their copy, never from each other: an instruction that finds
+    /// another rewrite in place leaves for that one's entry. Where copies
+    /// at one address hold different instructions, each copy gets an entry
+    /// at the first of each run of them and at those a branch reaches.
+    fn rewritten(&mut self) -> bool {
+        let stores: BTreeSet<(u32, u8, u32, Loc)> = self
+            .runs
+            .values()
+            .flat_map(|r| r.ram_stores.iter().map(|&(s, a, n, v)| (a, n, v, s)))
+            .collect();
+        let mut code: BTreeMap<u32, BTreeSet<(bool, u16)>> = BTreeMap::new();
+        for r in self.runs.values() {
+            for l in r.body.keys() {
+                if let Some(c) = l.copy {
+                    code.entry(l.addr)
+                        .or_default()
+                        .insert((l.thumb, self.image.base(c)));
+                }
+            }
+        }
+        let mut roots = Vec::new();
+        let targets: HashSet<(u32, bool)> = self
+            .runs
+            .values()
+            .flat_map(|r| r.branches.iter().map(|(_, to)| (to.addr, to.thumb)))
+            .collect();
+        let units = |at: u32, thumb: bool, ls: &BTreeSet<(bool, u16)>| -> BTreeMap<u16, u32> {
+            ls.iter()
+                .filter(|l| l.0 == thumb)
+                .filter_map(|&(_, b)| {
+                    let w = self.image.fetch(Loc {
+                        addr: at,
+                        thumb,
+                        copy: Some(b),
+                    })?;
+                    Some((b, w))
+                })
+                .collect()
+        };
+        let differ = |u: &BTreeMap<u16, u32>| u.values().collect::<BTreeSet<_>>().len() > 1;
+        for (&at, ls) in &code {
+            for thumb in [false, true] {
+                let u = units(at, thumb, ls);
+                if !differ(&u) {
+                    continue;
+                }
+                let size = if thumb { 2 } else { 4 };
+                let before = code
+                    .get(&at.wrapping_sub(size))
+                    .map(|p| units(at.wrapping_sub(size), thumb, p))
+                    .unwrap_or_default();
+                let same_run = differ(&before) && before.keys().eq(u.keys());
+                if same_run && !targets.contains(&(at, thumb)) {
+                    continue;
+                }
+                roots.extend(u.keys().map(|&b| Loc {
+                    addr: at,
+                    thumb,
+                    copy: Some(b),
+                }));
+            }
+        }
+        for &(a, n, v, site) in &stores {
+            for (&at, ls) in code.range(a.saturating_sub(3)..a.saturating_add(u32::from(n))) {
+                for &(thumb, b) in ls {
+                    let size = if thumb { 2 } else { 4 };
+                    if at + size <= a {
+                        continue;
+                    }
+                    let Some(p) = self.rewrite(b, a, n, v, site) else {
+                        continue;
+                    };
+                    for c in [b, p] {
+                        roots.push(Loc {
+                            addr: at,
+                            thumb,
+                            copy: Some(c),
+                        });
+                    }
+                }
+            }
+        }
+        let mut added = false;
+        for l in roots {
+            if !self.roots.contains_key(&l) {
+                self.add_root(l, Origin::Rewritten);
+                added = true;
+            }
+        }
+        added
+    }
+
+    /// The copy that holds copy `b` with `v` stored at `a` (`n` bytes),
+    /// made when no copy does; `None` when the store changes no byte of
+    /// `b`.
+    fn rewrite(&mut self, b: u16, a: u32, n: u8, v: u32, site: Loc) -> Option<u16> {
+        let c = self.image.copies.get(usize::from(b))?;
+        let mut bytes = c.bytes.to_vec();
+        for i in 0..u32::from(n) {
+            let off = a.wrapping_add(i).wrapping_sub(c.dst) as usize;
+            if let Some(x) = bytes.get_mut(off) {
+                *x = (v >> (8 * i)) as u8;
+            }
+        }
+        if *bytes == *c.bytes {
+            return None;
+        }
+        let dst = c.dst;
+        if let Some(i) = self
+            .image
+            .copies
+            .iter()
+            .position(|o| o.dst == dst && *o.bytes == *bytes)
+        {
+            return u16::try_from(i).ok();
+        }
+        let i = u16::try_from(self.image.copies.len()).ok()?;
+        self.image.copies.push(RamCopy {
+            site,
+            kind: CopyKind::Rewrite(b),
+            src: None,
+            dst,
+            bytes: Rc::from(bytes),
+        });
+        self.version += 1;
+        Some(i)
+    }
+
     fn solve(&mut self) {
         while let Some(f) = self.queue.pop_first() {
             let n = self.run_count.entry(f).or_insert(0);
@@ -466,6 +600,7 @@ impl<'a> Driver<'a> {
             }
         }
         let mut new_copy = false;
+        let mut new_ranges = Vec::new();
         for c in &run.copies {
             if !self
                 .image
@@ -476,6 +611,7 @@ impl<'a> Driver<'a> {
                 self.image.copies.push(c.clone());
                 self.version += 1;
                 new_copy = true;
+                new_ranges.push((c.dst, c.len()));
                 for (i, w) in c.bytes.as_chunks::<4>().0.iter().enumerate() {
                     let a = c.dst + 4 * i as u32;
                     if a.is_multiple_of(4) {
@@ -498,6 +634,11 @@ impl<'a> Driver<'a> {
                     r.unresolved
                         .iter()
                         .any(|u| u.kind == UnresolvedKind::RamNoCopy)
+                        || r.edges.iter().any(|e| {
+                            new_ranges
+                                .iter()
+                                .any(|&(d, n)| e.target.addr.wrapping_sub(d) < n)
+                        })
                 })
                 .map(|(l, _)| *l)
                 .collect();

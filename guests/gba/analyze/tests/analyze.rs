@@ -293,6 +293,106 @@ fn cpuset_copy_to_iwram_is_lifted_at_its_run_address() {
     assert_eq!(r.swis.len(), 1);
 }
 
+/// ROM code at `e` that copies the three words at each of `srcs` to
+/// `0x03000000` with `CpuSet` and calls them there, the last after storing
+/// `store` (address, word) when given.
+fn copies_and_calls(a: &mut Asm, e: u32, srcs: &[u32], store: Option<(u32, u32)>) {
+    let pool = e + 0x100;
+    let mut code = Vec::new();
+    let mut lits: Vec<u32> = Vec::new();
+    let lit = |code: &Vec<u32>, rd: u32, v: u32, lits: &mut Vec<u32>| {
+        let at = e + 4 * code.len() as u32;
+        let k = lits.iter().position(|x| *x == v).unwrap_or_else(|| {
+            lits.push(v);
+            lits.len() - 1
+        });
+        a_ldr_lit(rd, at, pool + 4 * k as u32)
+    };
+    for (i, &src) in srcs.iter().enumerate() {
+        code.push(lit(&code, 0, src, &mut lits));
+        code.push(lit(&code, 1, 0x0300_0000, &mut lits));
+        code.push(lit(&code, 2, 3 | 1 << 26, &mut lits));
+        code.push(a_swi(0x0B));
+        if i + 1 == srcs.len()
+            && let Some((addr, word)) = store
+        {
+            code.push(lit(&code, 0, addr, &mut lits));
+            code.push(lit(&code, 1, word, &mut lits));
+            code.push(a_str(1, 0));
+        }
+        code.push(lit(&code, 0, 0x0300_0000, &mut lits));
+        code.push(A_MOV_LR_PC);
+        code.push(a_bx(0));
+    }
+    let end = e + 4 * code.len() as u32;
+    code.push(a_b(end, end));
+    a.arm(e, &code);
+    a.arm(pool, &lits);
+}
+
+#[test]
+fn a_constant_stored_into_code_in_ram_makes_a_rewrite_with_entries_in_both() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let src = 0x0800_0400;
+    a.arm(src, &[A_MOV_R0_1, A_MOV_R0_1, A_BX_LR]);
+    copies_and_calls(&mut a, e, &[src], Some((0x0300_0004, A_BX_LR)));
+    let r = a.run(e);
+    assert_eq!(r.copies.len(), 2, "{:?}", r.copies);
+    let w = &r.copies[1];
+    assert_eq!(w.kind, CopyKind::Rewrite(0));
+    assert_eq!(w.dst, 0x0300_0000);
+    assert_eq!(&w.bytes[4..8], &A_BX_LR.to_le_bytes());
+    assert_eq!(&w.bytes[..4], &r.copies[0].bytes[..4]);
+    for copy in [0, 1] {
+        let l = Loc {
+            addr: 0x0300_0004,
+            thumb: false,
+            copy: Some(copy),
+        };
+        let f = r
+            .functions
+            .get(&l)
+            .expect("an entry at the rewritten instruction");
+        assert_eq!(f.origin, Origin::Rewritten);
+        assert_eq!(f.instructions.len(), if copy == 0 { 2 } else { 1 });
+    }
+    assert!(!r.functions.contains_key(&Loc {
+        addr: 0x0300_0000,
+        thumb: false,
+        copy: Some(1),
+    }));
+}
+
+#[test]
+fn copies_with_other_code_at_one_address_get_entries_where_they_differ() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let (s1, s2) = (0x0800_0400, 0x0800_0480);
+    a.arm(s1, &[A_MOV_R0_1, A_MOV_R0_1, A_BX_LR]);
+    a.arm(s2, &[A_MOV_R0_1, 0xE3A0_0002, A_BX_LR]);
+    copies_and_calls(&mut a, e, &[s1, s2], None);
+    let r = a.run(e);
+    assert_eq!(r.copies.len(), 2, "{:?}", r.copies);
+    for copy in [0, 1] {
+        let l = Loc {
+            addr: 0x0300_0004,
+            thumb: false,
+            copy: Some(copy),
+        };
+        assert_eq!(
+            r.functions.get(&l).map(|f| f.origin),
+            Some(Origin::Rewritten),
+            "{:?}",
+            r.functions.keys().collect::<Vec<_>>()
+        );
+        assert!(!r.functions.contains_key(&Loc {
+            addr: 0x0300_0008,
+            ..l
+        }));
+    }
+}
+
 #[test]
 fn irq_vector_store_roots_the_handler() {
     let mut a = Asm::new();

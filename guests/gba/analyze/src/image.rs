@@ -65,14 +65,32 @@ impl<'a> Image<'a> {
         }
     }
 
-    /// The copies whose destination holds `addr`.
+    /// The copies whose destination holds `addr`, but for rewrites, which
+    /// code reaches only from inside them.
     pub(crate) fn copies_at(&self, addr: u32) -> Vec<u16> {
         self.copies
             .iter()
             .enumerate()
-            .filter(|(_, c)| addr.wrapping_sub(c.dst) < c.len())
+            .filter(|(_, c)| {
+                addr.wrapping_sub(c.dst) < c.len() && !matches!(c.kind, CopyKind::Rewrite(_))
+            })
             .filter_map(|(i, _)| u16::try_from(i).ok())
             .collect()
+    }
+
+    /// Whether copy `c` holds `addr`.
+    pub(crate) fn holds(&self, c: u16, addr: u32) -> bool {
+        self.copies
+            .get(usize::from(c))
+            .is_some_and(|c| addr.wrapping_sub(c.dst) < c.len())
+    }
+
+    /// The copy a rewrite `c` was made from, or `c`.
+    pub(crate) fn base(&self, c: u16) -> u16 {
+        match self.copies.get(usize::from(c)).map(|c| c.kind) {
+            Some(CopyKind::Rewrite(b)) => b,
+            _ => c,
+        }
     }
 
     /// The bytes a copy can read at `src`: the ROM image, or the multiboot

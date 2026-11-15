@@ -67,6 +67,7 @@ fn origin_name(o: Origin) -> &'static str {
         Origin::Called => "called",
         Origin::Jumped => "jumped",
         Origin::AddressTaken => "address-taken",
+        Origin::Rewritten => "rewritten",
     }
 }
 
@@ -87,6 +88,7 @@ fn copy_name(k: CopyKind) -> String {
         CopyKind::Dma(n) => format!("dma{n}"),
         CopyKind::Run => "run".to_owned(),
         CopyKind::Load => "load".to_owned(),
+        CopyKind::Rewrite(c) => format!("rewrite{c}"),
     }
 }
 

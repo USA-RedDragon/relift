@@ -18,6 +18,9 @@ pub enum CopyKind {
     Run,
     /// A multiboot image where the BIOS loads it.
     Load,
+    /// The bytes of this other copy with a constant the program stores into
+    /// its code.
+    Rewrite(u16),
 }
 
 impl fmt::Display for CopyKind {
@@ -28,6 +31,7 @@ impl fmt::Display for CopyKind {
             CopyKind::Dma(n) => write!(f, "DMA{n}"),
             CopyKind::Run => f.write_str("run"),
             CopyKind::Load => f.write_str("load"),
+            CopyKind::Rewrite(c) => write!(f, "rewrite of copy {c}"),
         }
     }
 }
@@ -78,6 +82,9 @@ pub enum Origin {
     /// A Thumb code address discovered code reads as a constant, or an
     /// entry of a table of them.
     AddressTaken,
+    /// An instruction in RAM that the program may rewrite, in each copy
+    /// that may hold it: code that finds other bytes there goes on here.
+    Rewritten,
 }
 
 /// How control reaches another function.

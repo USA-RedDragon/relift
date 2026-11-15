@@ -63,6 +63,15 @@
 //!   runs nest three deep.
 //! - RAM tables: a word loaded from a RAM address plus a scaled index
 //!   reads the pointers known at each entry.
+//! - Rewritten code: a constant stored to a constant RAM address that
+//!   changes an instruction found in a copy makes a
+//!   [`CopyKind::Rewrite`] of that copy, and the instruction becomes an
+//!   entry ([`Origin::Rewritten`]) in both; so does the first instruction
+//!   of each run where copies at one address differ, and any such
+//!   instruction a branch reaches. Lifted code in RAM checks each
+//!   instruction as it is fetched and goes on at these entries when the
+//!   bytes are not the ones it was lifted from. A new copy runs again the
+//!   functions that transfer into its range.
 //!
 //! Function runs are repeated until the summaries (returns, registers
 //! kept, argument effects), the entries and the RAM facts stop changing.

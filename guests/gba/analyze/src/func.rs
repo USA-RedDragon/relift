@@ -196,6 +196,9 @@ pub(crate) struct FnRun {
     pub data: Vec<(u32, u8)>,
     /// Constant words stored to constant RAM addresses.
     pub ptr_stores: Vec<(u32, u32)>,
+    /// Constants stored to constant RAM addresses: the store, address, size
+    /// and value.
+    pub ram_stores: Vec<(Loc, u32, u8, u32)>,
     pub irq: Vec<u32>,
     pub copies: Vec<RamCopy>,
     pub swis: Vec<Swi>,
@@ -330,7 +333,7 @@ pub(crate) fn locs(
         Region::Rom if image.in_image(addr) => Ok(vec![Loc::rom(addr, thumb)]),
         Region::Ewram | Region::Iwram => {
             if let Some(c) = from.copy
-                && image.copies_at(addr).contains(&c)
+                && image.holds(c, addr)
             {
                 return Ok(vec![Loc {
                     addr,
@@ -527,12 +530,21 @@ impl Run<'_> {
             if a.k().is_none() && a.stack_off().is_none() {
                 self.out.ptr_store = true;
             }
+            self.ram_store(loc, a, n, v);
             if n == 4 {
                 self.store(a, v);
             }
         }
         for d in &out.dma {
             self.dma(loc, d);
+        }
+    }
+
+    fn ram_store(&mut self, site: Loc, a: Abs, n: u8, v: Abs) {
+        if let (Some(a), Some(v)) = (a.k32(), v.k32())
+            && Region::of(a).is_ram()
+        {
+            self.out.ram_stores.push((site, a, n, v));
         }
     }
 
@@ -580,7 +592,11 @@ impl Run<'_> {
                     let args = args.map(|a| subst(a, st));
                     self.swi_args(site, n, args);
                 }
-                PEffect::Store(a, v) => self.store(subst(a, st), subst(v, st)),
+                PEffect::Store(a, v) => {
+                    let (a, v) = (subst(a, st), subst(v, st));
+                    self.ram_store(site, a, 4, v);
+                    self.store(a, v);
+                }
             }
         }
     }
