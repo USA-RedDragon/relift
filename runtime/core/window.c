@@ -51,7 +51,7 @@ void rl_window_emit(rl_window *w, int event)
 
 static bool display_available(void)
 {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__FreeBSD__)
     const char *w = getenv("WAYLAND_DISPLAY"), *x = getenv("DISPLAY");
     return (w && *w) || (x && *x);
 #else
