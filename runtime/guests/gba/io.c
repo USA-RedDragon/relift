@@ -186,7 +186,29 @@ static void serial_set(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
     stub_set(g, addr, v, now);
 }
 
+static void apu_set(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
+{
+    if ((addr & 0x3FFu) == 0x83) {
+        gba_fifo_control(g, v);
+        v &= 0x77u;
+    }
+    stub_set(g, addr, v, now);
+}
+
 DEVICE_RW(stub, stub_byte, stub_set)
+
+static uint64_t apu_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)
+{
+    return split_read(gba_of(d), stub_byte, addr, size, now);
+}
+
+static void apu_write(rl_device *d, uint64_t addr, uint32_t size, uint64_t value, uint64_t now)
+{
+    uint32_t off = (uint32_t)addr & 0x3FFu;
+    if (off >= 0xA0 && off <= 0xA7)
+        gba_fifo_write(gba_of(d), off, size, (uint32_t)value);
+    split_write(gba_of(d), apu_set, addr, size, value, now);
+}
 DEVICE_RW(serial, serial_byte, serial_set)
 DEVICE_RW(lcd, gba_lcd_read, gba_lcd_write)
 
@@ -352,8 +374,8 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
             d->name = slot_names[i];
             d->opaque = st;
             d->line = RL_LINE_NONE;
-            d->read = i == RL_GBA_SLOT_SERIAL ? serial_read : stub_read;
-            d->write = i == RL_GBA_SLOT_SERIAL ? serial_write : stub_write;
+            d->read = i == RL_GBA_SLOT_SERIAL ? serial_read : i == RL_GBA_SLOT_APU ? apu_read : stub_read;
+            d->write = i == RL_GBA_SLOT_SERIAL ? serial_write : i == RL_GBA_SLOT_APU ? apu_write : stub_write;
         }
         if (rl_sched_add_device(s, d) != 0)
             return -1;

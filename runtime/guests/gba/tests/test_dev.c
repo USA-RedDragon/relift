@@ -278,6 +278,31 @@ TEST(disabling_a_triggered_dma_lowers_its_line)
     mach_free(&m);
 }
 
+TEST(the_built_in_sound_fifo_requests_dma_with_three_words_or_fewer_left)
+{
+    mach m = mach_new();
+    mach_wr(&m, 10, 0x04000084u, 2, 0x0080u);
+    mach_wr(&m, 10, 0x04000082u, 2, 0x0B04u);
+    mach_wr(&m, 10, 0x040000BCu, 4, 0x03001000u);
+    mach_wr(&m, 10, 0x040000C0u, 4, 0x040000A0u);
+    mach_wr(&m, 10, 0x040000C4u, 4, 0xF6000004u);
+    mach_wr(&m, 10, 0x04000100u, 4, 0x0080FFC0u);
+    unsigned seen[8] = {0};
+    for (uint64_t t = 12; t < 10 + 64u * 9; t += 2) {
+        if (!(mach_if(&m, t) & (RL_GBA_IRQ_DMA0 << 1)))
+            continue;
+        rl_gba_write(m.g, 0x04000202u, 2, RL_GBA_IRQ_DMA0 << 1);
+        uint64_t k = (t - 11) / 64;
+        if (k >= 1 && k <= 8)
+            seen[k - 1]++;
+        t += 32;
+    }
+    static const unsigned want[8] = {1, 0, 1, 0, 0, 0, 0, 0};
+    for (unsigned k = 0; k < 8; k++)
+        CHECK_EQ(seen[k], want[k]);
+    mach_free(&m);
+}
+
 TEST(a_dma_from_the_bios_region_writes_its_last_value)
 {
     mach m = mach_new();

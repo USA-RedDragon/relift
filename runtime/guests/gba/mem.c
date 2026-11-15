@@ -237,6 +237,7 @@ rl_gba *rl_gba_create(const rl_gba_cart *cart)
     gba_waits_rebuild(g);
     gba_irq_reset(g);
     gba_timer_reset(g);
+    gba_fifo_reset(g);
     gba_dma_reset(g);
     gba_lcd_reset(g);
     gba_ppu_dev_reset(g);

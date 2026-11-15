@@ -126,6 +126,17 @@ typedef struct gba_prefetch {
     bool stopped, ahead;
 } gba_prefetch;
 
+enum { GBA_FIFO_WORDS = 7 };
+
+/** @brief A sound FIFO of the built-in sound unit stand-in (fifo.c). */
+typedef struct gba_fifo {
+    uint32_t q[GBA_FIFO_WORDS];
+    uint8_t rd, wr, count;
+    /** @brief The word being played and how many of its bytes are left. */
+    uint32_t out;
+    uint8_t out_n;
+} gba_fifo;
+
 /** @brief The built-in stand-in for a slot device. */
 typedef struct gba_stub {
     rl_device dev;
@@ -170,6 +181,7 @@ struct rl_gba {
     int dma_last;
     bool dma_running;
     gba_lcd lcd;
+    gba_fifo fifo[2];
     gba_keypad pad;
     gba_save save;
     gba_ppu ppu;
@@ -247,6 +259,13 @@ void gba_irq_attach(rl_gba *g);
 void gba_halt(rl_gba *g);
 
 void gba_timer_reset(rl_gba *g);
+void gba_fifo_reset(rl_gba *g);
+/** @brief A write of size bytes of value at FIFO register offset off (0xA0 to 0xA7) of the built-in stand-in. */
+void gba_fifo_write(rl_gba *g, uint32_t off, unsigned size, uint32_t value);
+/** @brief A write of hi to the high byte of SOUNDCNT_H: its reset bits empty the FIFOs. */
+void gba_fifo_control(rl_gba *g, uint8_t hi);
+/** @brief Timer timer overflowed: the built-in stand-in's FIFOs that it clocks give a byte and may request DMA. */
+void gba_fifo_timer(rl_gba *g, unsigned timer);
 void gba_timer_attach(rl_gba *g);
 uint8_t gba_timer_read(rl_gba *g, uint32_t addr, uint64_t now);
 void gba_timer_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now);
