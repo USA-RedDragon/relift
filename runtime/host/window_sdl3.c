@@ -87,6 +87,8 @@ static int sdl_init(void)
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+#endif
+#ifdef RL_MOBILE
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
     rl_touchpad_set_host(&g_touch_host);

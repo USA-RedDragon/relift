@@ -11,6 +11,9 @@
  * nearer screen edge on each axis (or its fraction of the screen when it sits
  * in the middle third), so the pad hugs the edges on every screen shape.
  */
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #include <relift/input_names.h>
 #include <relift/settings.h>
 #include <relift/touchpad.h>
@@ -190,7 +193,7 @@ static struct {
 } g = { .lock = PTHREAD_MUTEX_INITIALIZER,
         .resumed = PTHREAD_COND_INITIALIZER,
         .ppd = 1.0f,
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         .touch_screen = true,
 #endif
         .fade = -1.0f };
