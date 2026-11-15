@@ -15,7 +15,6 @@
 
 enum {
     RESET_SWI = 0x01,
-    HUFF_SWI = 0x13,
     WAITCNT_PROBE = 0x4317,
     ARM_RETURN = 0x030000A0,
     THUMB_RETURN = 0x030001B6
@@ -231,7 +230,6 @@ static void run_record(unsigned i, const rl_gba_bus *bus, totals *t)
     }
     uint32_t fr = SWI_FNV_INIT, fm = SWI_FNV_INIT, fs = SWI_FNV_INIT, cycles = 0;
     gbat_rec got = {{0}, 0, 0, 0, 0, 0};
-    bool unmodelled = false;
     bool reset = false;
     for (unsigned j = 0; j < calls; j++) {
         swi_case c;
@@ -255,7 +253,6 @@ static void run_record(unsigned i, const rl_gba_bus *bus, totals *t)
         if (st == RL_GBA_SWI_HANG)
             cpu.r[0] = 0xDEADDEADu;
         reset = c.swi == RESET_SWI;
-        unmodelled |= c.swi == HUFF_SWI && m.bios.events[BE_HUFF_ODD_SIZE] != 0;
         if (calls == 1) {
             for (int k = 0; k < 4; k++)
                 got.r[k] = cpu.r[k];
@@ -278,10 +275,6 @@ static void run_record(unsigned i, const rl_gba_bus *bus, totals *t)
         got.mem = fm;
         got.stk = fs;
         got.cycles = cycles;
-    }
-    if (unmodelled) {
-        t->skipped++;
-        return;
     }
     t->checked++;
     t->bad_regs += memcmp(got.r, want->r, sizeof got.r) != 0 || got.r12 != want->r12 || got.cpsr != want->cpsr;

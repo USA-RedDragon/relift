@@ -91,6 +91,20 @@ TEST(huffman_decodes_four_and_eight_bit_data)
     CHECK_EQ(c.r[3], 0x42414241u);
 }
 
+TEST(huffman_stores_size_mod_eight_plus_four_leaves_per_word)
+{
+    gbat *g = gbat_new();
+    static const uint8_t hf[] = {0x22, 0x08, 0x00, 0x00, 0x01, 0xC0, 0x01, 0x02, 0xAA, 0xAA, 0xAA, 0xAA};
+    bytes(g, 0x02000000u, hf, sizeof hf);
+    rl_gba_swi_cpu c = gbat_cpu(0x02000000u, 0x02001000u, 0, 0x1234);
+    gbat_swi(g, 0x13, &c);
+    CHECK_EQ(gbat_r32(g, 0x02001000u), 0x66600000u);
+    CHECK_EQ(gbat_r32(g, 0x02001004u), 0x66666600u);
+    CHECK_EQ(c.r[0], 0x0200000Cu);
+    CHECK_EQ(c.r[1], 0x02001008u);
+    CHECK_EQ(c.r[3], 0x66666600u);
+}
+
 TEST(bit_unpack_adds_the_offset)
 {
     gbat *g = gbat_new();

@@ -363,7 +363,7 @@ static const bios_model models[0x20] = {
     [0x11] = {true, 69, {[BE_REFUSED] = 1, [BE_ZERO] = -1, [BE_LZ_FLAG] = 9, [BE_LZ_LITERAL] = 16, [BE_LZ_REF] = 25,
                          [BE_LZ_REF_BYTE] = 7}},
     [0x12] = {true, 75, {[BE_REFUSED] = 1, [BE_LZ_FLAG] = 9, [BE_LZ_LITERAL] = 20, [BE_LZ_REF] = 28, [BE_LZ_REF_BYTE] = 21}},
-    [0x13] = {true, 94, {[BE_HUFF_WORD] = 9, [BE_HUFF_BIT] = 28, [BE_HUFF_LEAF] = 14}},
+    [0x13] = {true, 91, {[BE_HUFF_WORD] = 9, [BE_HUFF_BIT] = 25, [BE_HUFF_LEAF] = 14}},
     [0x14] = {true, 81, {[BE_ZERO] = -4, [BE_RL_COMP_RUN] = 17, [BE_RL_COMP_BYTE] = 6, [BE_RL_RAW_RUN] = 12,
                          [BE_RL_RAW_BYTE] = 9}},
     [0x15] = {true, 84, {[BE_ZERO] = -4, [BE_RL_COMP_RUN] = 27, [BE_RL_RAW_RUN] = 20, [BE_RL_ANY_RUN] = -1,

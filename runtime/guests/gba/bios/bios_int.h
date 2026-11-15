@@ -100,7 +100,6 @@ enum bios_event {
     BE_HUFF_BIT = 2,
     BE_HUFF_LEAF = 3,
     BE_HUFF_OUT = 4,
-    BE_HUFF_ODD_SIZE = 5,
     BE_RL_COMP_RUN = 2,
     BE_RL_COMP_BYTE = 3,
     BE_RL_RAW_RUN = 4,
@@ -237,6 +236,10 @@ void bios_cpu_set(bios_call *c);
 void bios_cpu_fast_set(bios_call *c);
 void bios_bit_unpack(bios_call *c);
 void bios_lz77(bios_call *c, bool vram);
+/** @brief HuffUnComp: every leaf shifts the 32-bit buffer right by the data
+ * size and puts the unmasked leaf byte in its top bits; the buffer, never
+ * cleared, is stored after every (size % 8) + 4 leaves. Each tree step reads
+ * the node and the child it selects. */
 void bios_huff(bios_call *c);
 void bios_rl(bios_call *c, bool vram);
 void bios_diff8(bios_call *c, bool vram);

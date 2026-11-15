@@ -133,12 +133,12 @@ void bios_huff(bios_call *c)
     if (!header_ok(c, src, (uint32_t)len))
         return;
     uint32_t size = hdr & 0xFu;
-    bios_ev(c, BE_HUFF_ODD_SIZE, size != 4 && size != 8);
-    uint32_t per = size ? 32u / size : 0;
+    uint32_t per = (size & 7u) + 4u;
     bios_push(c, 1, &per);
     uint32_t tree = src + 1;
     uint32_t stream = tree + bios_ld8(c, src, false) * 2 + 1;
-    uint32_t node = tree, buf = 0, bits = 0, word;
+    bios_ld8(c, tree, false);
+    uint32_t node = tree, buf = 0, leaves = 0, word;
     while (len > 0) {
         word = bios_ld32(c, stream, false);
         bios_ev(c, BE_HUFF_WORD, 1);
@@ -149,19 +149,20 @@ void bios_huff(bios_call *c)
             uint32_t next = (node & ~1u) + ((n & 0x3Fu) + 1) * 2 + bit;
             bool leaf = bit ? (n & 0x40u) : (n & 0x80u);
             node = next;
+            bios_ld8(c, node, false);
             bios_ev(c, BE_HUFF_BIT, 1);
             if (!leaf)
                 continue;
             bios_ev(c, BE_HUFF_LEAF, 1);
-            buf = (buf >> size) | (bios_ld8(c, node, false) << ((32u - size) & 31u));
+            uint32_t v = bios_ld8(c, node, false);
+            buf = (buf >> size) | (size ? v << (32u - size) : 0);
             node = tree;
-            if (++bits == per) {
-                bits = 0;
+            if (++leaves == per) {
+                leaves = 0;
                 bios_st32(c, dst, buf, false);
                 c->r[3] = buf;
                 bios_ev(c, BE_HUFF_OUT, 1);
                 dst += 4;
-                buf = 0;
                 len -= 4;
             }
         }
