@@ -577,7 +577,9 @@ fn compile(
     let mut n = 0;
     if shared {
         std::fs::create_dir_all(&rt_dir)?;
-        let lock = std::fs::File::create(rt_dir.join("lock"))?;
+        let lock_path = rt_dir.join("lock");
+        relift_cache::write_if_changed(&lock_path, b"")?;
+        let lock = std::fs::File::open(&lock_path)?;
         lock.lock()?;
         let rt_o = rt_dir.join("runtime.o");
         let pools = crate::build::memory_pools(&mut rt_plan_compiles, jobs);
