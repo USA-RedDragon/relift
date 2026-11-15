@@ -3,6 +3,10 @@
 //! A value of width `w` lives in the smallest unsigned C type that holds it
 //! and always holds its value modulo 2^w. Arithmetic runs in the wide type
 //! (`uint64_t` up to 64 bits, `rl_u128` above), never in a promoted `int`.
+//! A 128-bit register, and most 128-bit values ([`vectors`]), live in a
+//! vector of two 64-bit lanes instead, so they stay in the host's vector
+//! registers and their lanes are read and built with vector operations;
+//! the context keeps `rl_u128` fields.
 
 use relift_ir::{
     AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, IoMap, Op, Order, Reg, UnOp, Value, Width,
@@ -83,11 +87,112 @@ pub(crate) fn typed_lit(v: u128, w: Width) -> String {
     }
 }
 
+/// The vector type of 128-bit registers and of the 128-bit values that
+/// [`vectors`] gives it, two 64-bit lanes (lane 0 the low half).
+pub(crate) const VQ: &str = "rl_e_vq";
+
+/// The C type of register `r` of width `w`: a 128-bit register is a
+/// vector ([`VQ`]), the rest as [`cty`].
+pub(crate) fn reg_ty(w: Width) -> &'static str {
+    if w.bits() == 128 { VQ } else { cty(w) }
+}
+
+/// Which 128-bit values of `b` live in the vector type ([`VQ`]) instead of
+/// `rl_u128`: register reads, 16-byte loads and 64-bit lane concatenations
+/// always do; constants, zero extensions and bitwise operations do unless
+/// a use needs the integer form (an add, a shift, a compare and other
+/// operations without a vector form, which then convert). With `regs`
+/// false the registers keep `rl_u128` ([`crate::Options::regs_in_context`])
+/// and so does every value.
+pub(crate) fn vectors(b: &Block, regs: bool) -> Vec<bool> {
+    if !regs {
+        return vec![false; b.insts.len()];
+    }
+    let wv = |v: Value| b.insts[v.index()].width.unwrap_or(Width::W1).bits();
+    let zero = |v: Value| matches!(b.insts[v.index()].op, Op::Const(k) if k.get() == 0);
+    let mut vec: Vec<bool> = b
+        .insts
+        .iter()
+        .map(|i| {
+            i.width.is_some_and(|w| w.bits() == 128)
+                && match &i.op {
+                    Op::Get(_) | Op::Const(_) | Op::Select(..) => true,
+                    Op::Load { order, endian, .. } => {
+                        *order == Order::Plain && *endian == Endian::Little
+                    }
+                    Op::Concat(h, l) => (wv(*h) == 64 || zero(*h)) && wv(*l) <= 64,
+                    Op::Ext(ExtKind::Zero, x) => wv(*x) <= 64,
+                    Op::Bin(BinOp::And | BinOp::Or | BinOp::Xor, ..) | Op::Un(UnOp::Not, _) => true,
+                    _ => false,
+                }
+        })
+        .collect();
+    loop {
+        let mut changed = false;
+        for i in 0..b.insts.len() {
+            let flexible = |vec: &[bool], v: Value| match b.insts[v.index()].op {
+                Op::Get(_) | Op::Load { .. } | Op::Concat(..) => false,
+                _ => vec[v.index()],
+            };
+            let scalar_use: Vec<Value> = match &b.insts[i].op {
+                Op::Set(..) | Op::Store { .. } | Op::Extract(..) => Vec::new(),
+                Op::Bin(BinOp::And | BinOp::Or | BinOp::Xor, ..)
+                | Op::Un(UnOp::Not, _)
+                | Op::Select(..)
+                    if vec[i] =>
+                {
+                    Vec::new()
+                }
+                Op::Select(_, x, y) => vec![*x, *y],
+                op => op.operands(),
+            };
+            for v in scalar_use {
+                if flexible(&vec, v) {
+                    vec[v.index()] = false;
+                    changed = true;
+                }
+            }
+            if vec[i]
+                && match &b.insts[i].op {
+                    Op::Bin(_, x, y) | Op::Select(_, x, y) => !vec[x.index()] && !vec[y.index()],
+                    Op::Un(_, x) => !vec[x.index()],
+                    _ => false,
+                }
+            {
+                vec[i] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            return vec;
+        }
+    }
+}
+
+/// `e`, a value in the representation `from` (vector or not), in the
+/// representation `to`.
+pub(crate) fn conv(e: String, from: bool, to: bool) -> String {
+    match (from, to) {
+        (true, false) => format!("rl_e_v2u({e})"),
+        (false, true) => format!("rl_e_u2v({e})"),
+        _ => e,
+    }
+}
+
+/// A 128-bit constant as a vector literal.
+fn vlit(v: u128) -> String {
+    format!(
+        "RL_E_VQ(UINT64_C({:#x}), UINT64_C({:#x}))",
+        v as u64,
+        (v >> 64) as u64
+    )
+}
+
 /// The C expressions that stand for values of `b` in place of a local:
 /// constants, and reads of registers the block does not write (sets apply
 /// when the block exits, so such a read would otherwise see the entry
 /// value through its local anyway).
-pub(crate) fn inlined(b: &Block) -> Vec<Option<String>> {
+pub(crate) fn inlined(b: &Block, vec: &[bool]) -> Vec<Option<String>> {
     let written: Vec<Reg> = b
         .insts
         .iter()
@@ -98,7 +203,9 @@ pub(crate) fn inlined(b: &Block) -> Vec<Option<String>> {
         .collect();
     b.insts
         .iter()
-        .map(|i| match i.op {
+        .enumerate()
+        .map(|(k, i)| match i.op {
+            Op::Const(c) if vec[k] => Some(vlit(c.get())),
             Op::Const(c) => Some(typed_lit(c.get(), i.width.unwrap_or(Width::W1))),
             Op::Get(r) if !written.contains(&r) => Some(reg(r)),
             _ => None,
@@ -146,25 +253,59 @@ pub(crate) enum Emitted {
     Guard(Value, u32),
 }
 
+/// How the values of one block are written: `inl` holds the expressions
+/// that stand for some values in place of their locals ([`inlined`]),
+/// `vec` which values are vectors ([`vectors`]) and `vregs` whether the
+/// 128-bit registers are.
+pub(crate) struct Lowering<'a> {
+    pub(crate) inl: &'a [Option<String>],
+    pub(crate) vec: &'a [bool],
+    pub(crate) vregs: bool,
+}
+
 /// The C for instruction `i` of `b`, or why it cannot be expressed.
 ///
-/// `inl` holds the expressions that stand for some values in place of
-/// their locals ([`inlined`]), and `zero` the registers a guard earlier in
-/// the block has shown to be zero (a guard leaves when its
-/// [`Frontend::guard_state`] is not).
+/// `zero` holds the registers a guard earlier in the block has shown to be
+/// zero (guards leave when their [`Frontend::guard_state`] is not).
 pub(crate) fn emit_op(
     fe: &dyn Frontend,
     b: &Block,
     i: usize,
-    inl: &[Option<String>],
+    lw: &Lowering<'_>,
     zero: &[Reg],
     io: &IoMap,
 ) -> Result<Emitted, String> {
+    let Lowering { inl, vec, vregs } = *lw;
     let inst = &b.insts[i];
     let wv = |v: Value| b.insts[v.index()].width.unwrap_or(Width::W1);
     let w = inst.width.unwrap_or(Width::W1);
     let u = wide(w);
-    let val = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
+    let raw = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
+    let vv = |v: Value| conv(raw(v), vec[v.index()], true);
+    let val = |v: Value| conv(raw(v), vec[v.index()], false);
+    if vec[i] {
+        let e = match &inst.op {
+            Op::Const(c) => vlit(c.get()),
+            Op::Get(r) => reg(*r),
+            Op::Select(c, x, y) => format!("{} ? {} : {}", val(*c), vv(*x), vv(*y)),
+            Op::Bin(BinOp::And, x, y) => format!("{} & {}", vv(*x), vv(*y)),
+            Op::Bin(BinOp::Or, x, y) => format!("{} | {}", vv(*x), vv(*y)),
+            Op::Bin(BinOp::Xor, x, y) => format!("{} ^ {}", vv(*x), vv(*y)),
+            Op::Un(UnOp::Not, x) => format!("~{}", vv(*x)),
+            Op::Ext(ExtKind::Zero, x) => format!("RL_E_VQ({}, 0)", val(*x)),
+            Op::Concat(_, l) if wv(*l).bits() < 64 => format!("RL_E_VQ({}, 0)", val(*l)),
+            Op::Concat(h, l) => format!("RL_E_VQ({}, {})", val(*l), val(*h)),
+            Op::Load { addr, .. } => format!("rl_e_u2v(rl_ld128(mem, {}))", val(*addr)),
+            op => return Err(format!("no vector form of {op:?}")),
+        };
+        return Ok(Emitted::Value(e));
+    }
+    if let Op::Extract(x, lo) = inst.op
+        && vec[x.index()]
+        && let Some(e) = lane(&raw(x), lo, w)
+    {
+        return Ok(Emitted::Value(e));
+    }
     let a = |v: &Value| {
         if cty(wv(*v)) == u {
             val(*v)
@@ -175,6 +316,7 @@ pub(crate) fn emit_op(
     let e = match &inst.op {
         Op::Const(c) => fit(&lit(c.get(), w), w),
         Op::Get(r) => reg(*r),
+        Op::Set(r, v) if vregs && wv(*v).bits() == 128 => return Ok(Emitted::Set(*r, vv(*v))),
         Op::Set(r, v) => return Ok(Emitted::Set(*r, val(*v))),
         Op::Guard(c, code) => return Ok(Emitted::Guard(*c, *code)),
         Op::Un(op, x) => {
@@ -434,6 +576,24 @@ pub(crate) fn emit_op(
         }
     };
     Ok(Emitted::Value(e))
+}
+
+/// Bits `lo..lo + w` of the vector `x` (`w` at most 64) as a lane read of
+/// the narrowest lane view that holds them, or `None` when they cross a
+/// 64-bit lane.
+fn lane(x: &str, lo: u8, w: Width) -> Option<String> {
+    let (lo, n) = (u32::from(lo), w.bits());
+    for bits in [8, 16, 32, 64] {
+        if lo % bits == 0 && n <= bits {
+            return Some(fit(&format!("rl_e_lane{bits}({x}, {})", lo / bits), w));
+        }
+    }
+    (lo % 64 + n <= 64).then(|| {
+        fit(
+            &format!("(rl_e_lane64({x}, {}) >> {})", lo / 64, lo % 64),
+            w,
+        )
+    })
 }
 
 fn atomic_name(op: AtomicOp) -> &'static str {

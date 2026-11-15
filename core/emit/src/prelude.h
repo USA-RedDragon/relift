@@ -17,6 +17,52 @@ typedef __int128 rl_e_s128;
         }                                                                                                              \
     } while (0)
 
+/*
+ * rl_e_vq: the type of 128-bit registers and of most 128-bit values. On
+ * arm64 a vector of two 64-bit lanes, which keeps them in NEON registers;
+ * elsewhere rl_u128, which measured smaller on x86-64, where no vector
+ * register survives a call. RL_E_VQ builds one from its halves and
+ * rl_e_laneN reads lane i of N bits.
+ */
+#if defined(__aarch64__)
+typedef uint64_t rl_e_vq __attribute__((vector_size(16)));
+typedef uint32_t rl_e_vs __attribute__((vector_size(16)));
+typedef uint16_t rl_e_vh __attribute__((vector_size(16)));
+typedef uint8_t rl_e_vb __attribute__((vector_size(16)));
+
+#define RL_E_VQ(lo, hi) ((rl_e_vq){(uint64_t)(lo), (uint64_t)(hi)})
+#define rl_e_lane8(x, i) (((rl_e_vb)(x))[i])
+#define rl_e_lane16(x, i) (((rl_e_vh)(x))[i])
+#define rl_e_lane32(x, i) (((rl_e_vs)(x))[i])
+#define rl_e_lane64(x, i) ((x)[i])
+
+static inline rl_e_vq rl_e_u2v(rl_u128 u)
+{
+    rl_e_vq v;
+    memcpy(&v, &u, 16);
+    return v;
+}
+
+static inline rl_u128 rl_e_v2u(rl_e_vq v)
+{
+    rl_u128 u;
+    memcpy(&u, &v, 16);
+    return u;
+}
+#else
+typedef rl_u128 rl_e_vq;
+
+#define RL_E_VQ(lo, hi) (((rl_u128)(uint64_t)(hi) << 64) | (uint64_t)(lo))
+#define rl_e_lane8(x, i) ((uint8_t)((x) >> (8 * (i))))
+#define rl_e_lane16(x, i) ((uint16_t)((x) >> (16 * (i))))
+#define rl_e_lane32(x, i) ((uint32_t)((x) >> (32 * (i))))
+#define rl_e_lane64(x, i) ((uint64_t)((x) >> (64 * (i))))
+
+static inline rl_e_vq rl_e_u2v(rl_u128 u) { return u; }
+
+static inline rl_u128 rl_e_v2u(rl_e_vq v) { return v; }
+#endif
+
 static inline int64_t rl_e_sx64(uint64_t v, unsigned w)
 {
     return w >= 64 ? (int64_t)v : (int64_t)(v << (64 - w)) >> (64 - w);

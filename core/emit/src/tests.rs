@@ -1507,3 +1507,57 @@ fn entry_ranges_list_a_run_of_one_piece_once() {
     );
     assert!(!unit.contains("UINT64_C(0x108)"), "{unit}");
 }
+
+static VREGS: [relift_ir::RegDecl; 2] = [
+    relift_ir::RegDecl {
+        name: "q0",
+        width: Width::W128,
+    },
+    relift_ir::RegDecl {
+        name: "x0",
+        width: Width::W64,
+    },
+];
+
+#[test]
+fn values_of_128_bits_are_vectors_unless_a_use_needs_an_integer() {
+    use relift_ir::{BinOp, Builder, IoMap};
+    let regs = RegFile::new("vec", &VREGS);
+    let (q, x) = (Reg(0), Reg(1));
+    let mut b = Builder::new(regs, Width::W64, 0x100);
+    let v = b.get(q);
+    let lane = b.extract(v, 32, Width::W32);
+    let wide = b.zext(lane, Width::W128);
+    let sum = b.bin(BinOp::Add, wide, wide);
+    let low = b.trunc(sum, Width::W64);
+    let mask = b.konst(Width::W128, 0xff);
+    let masked = b.and(v, mask);
+    b.set(x, low);
+    b.set(q, masked);
+    let blk = b.jump(4, 0x104);
+    let vec = value::vectors(&blk, true);
+    let inl = value::inlined(&blk, &vec);
+    let c = |i: usize| match value::emit_op(
+        &Toy,
+        &blk,
+        i,
+        &value::Lowering {
+            inl: &inl,
+            vec: &vec,
+            vregs: true,
+        },
+        &[],
+        &IoMap::default(),
+    ) {
+        Ok(value::Emitted::Value(e) | value::Emitted::Set(_, e)) => e,
+        _ => panic!("value"),
+    };
+    assert!(vec[v.index()] && vec[masked.index()] && !vec[wide.index()]);
+    assert_eq!(c(lane.index()), "rl_e_lane32(v0, 1)");
+    assert_eq!(c(wide.index()), "(rl_u128)v1");
+    assert_eq!(
+        c(masked.index()),
+        "v0 & RL_E_VQ(UINT64_C(0xff), UINT64_C(0x0))"
+    );
+    assert_eq!(value::reg_ty(Width::W128), "rl_e_vq");
+}

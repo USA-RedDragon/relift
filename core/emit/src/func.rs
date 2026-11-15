@@ -19,7 +19,7 @@ use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 use crate::callee::Shape;
 use crate::state::{Plan, Regs, plan};
 use crate::time;
-use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
+use crate::value::{Emitted, Lowering, VQ, cty, emit_op, inlined, reg, reg_ty, val, vectors};
 use crate::{Function, Insn, Options, Targets};
 
 /// One C function of an emitted guest function.
@@ -126,6 +126,9 @@ impl Ctx<'_> {
             .filter(|r| !self.in_context && set.contains(**r))
         {
             match self.fe.home(r) {
+                Home::Field(lv) if self.fe.regs().width(r).bits() == 128 => {
+                    let _ = write!(t, "{lv} = rl_e_v2u({}); ", reg(r));
+                }
                 Home::Field(lv) => {
                     let _ = write!(t, "{lv} = {}; ", reg(r));
                 }
@@ -639,13 +642,20 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     let mut t = String::new();
     let _ = writeln!(t, "\nRL_TEXT RL_LIFTED({name})\n{{");
     for &r in &used {
-        let ty = cty(regs.width(r));
+        let ty = if in_context {
+            cty(regs.width(r))
+        } else {
+            reg_ty(regs.width(r))
+        };
         let _ = match (fe.home(r), in_context) {
             (Home::Field(lv), true) => writeln!(t, "#define {} ({lv})", reg(r)),
             (Home::Flag { word, bit }, true) => {
                 writeln!(t, "#define {} (({ty})(({word} >> {bit}) & 1u))", reg(r))
             }
             _ if !load.contains(r) => writeln!(t, "    {ty} {};", reg(r)),
+            (Home::Field(lv), false) if ty == VQ => {
+                writeln!(t, "    {ty} {} = rl_e_u2v({lv});", reg(r))
+            }
             (Home::Field(lv), false) => writeln!(t, "    {ty} {} = {lv};", reg(r)),
             (Home::Flag { word, bit }, false) => {
                 writeln!(t, "    {ty} {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
@@ -929,7 +939,8 @@ fn loop_has_work(cx: &Ctx<'_>, from: u64, to: u64) -> bool {
 fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)> {
     let mut s = String::new();
     let mut sets = Vec::new();
-    let inl = inlined(b);
+    let vec = vectors(b, !cx.in_context);
+    let inl = inlined(b, &vec);
     let mut zero: Vec<Reg> = Vec::new();
     let val = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
     for (i, inst) in b.insts.iter().enumerate() {
@@ -940,10 +951,26 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         if let Some(clk) = call {
             let _ = writeln!(s, "    {clk}.budget = {};", time::BUDGET);
         }
-        let emitted = emit_op(cx.fe, b, i, &inl, &zero, cx.io).map_err(|m| (raw, m))?;
+        let emitted = emit_op(
+            cx.fe,
+            b,
+            i,
+            &Lowering {
+                inl: &inl,
+                vec: &vec,
+                vregs: !cx.in_context,
+            },
+            &zero,
+            cx.io,
+        )
+        .map_err(|m| (raw, m))?;
         match emitted {
             Emitted::Value(e) => {
-                let ty = cty(inst.width.unwrap_or(relift_ir::Width::W1));
+                let ty = if vec[i] {
+                    VQ
+                } else {
+                    cty(inst.width.unwrap_or(relift_ir::Width::W1))
+                };
                 let _ = writeln!(s, "    {ty} v{i} = {e};");
             }
             Emitted::Stmt(e) => {
@@ -1132,6 +1159,9 @@ fn reload(
     for &r in used.iter().filter(|r| set.contains(**r)) {
         let ty = cty(regs.width(r));
         let _ = match fe.home(r) {
+            Home::Field(lv) if regs.width(r).bits() == 128 => {
+                write!(t, "{} = rl_e_u2v({lv}); ", reg(r))
+            }
             Home::Field(lv) => write!(t, "{} = {lv}; ", reg(r)),
             Home::Flag { word, bit } => write!(t, "{} = ({ty})(({word} >> {bit}) & 1u); ", reg(r)),
         };
