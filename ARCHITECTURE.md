@@ -127,7 +127,12 @@ subprocess. The root manifest excludes it. `--oracle rustyboi` swaps in a
 Game Boy SM83 reference built on the rustyboi-core emulator (pinned by git
 commit, `step` for one instruction, `rom` for a whole cartridge); it
 names raw opcode bytes and a plain register struct, so the lifted-IR
-comparison can plug in later.
+comparison can plug in later. `--oracle nba` is the GBA reference: the
+NanoBoyAdvance core (GPL-3.0-or-later) built by `check/oracle/nba/build.sh`
+from a pinned commit into a separate `nba-oracle` process, driven over a
+line protocol on stdin and stdout (run cycles or frames with held keys,
+single-step traces, registers, memory, I/O registers, frame and audio
+hashes; see `check/oracle/nba/README.md`).
 
 `relift-cpu-a64` lifts each encoding with its Sail-generated template when it
 has one, else with a hand-written lifter, always for a CPU feature set
