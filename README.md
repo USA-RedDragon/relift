@@ -14,8 +14,8 @@ what runs and what does not.
 
 | Guest | CPU frontend | State |
 |---|---|---|
-| Nintendo Switch | ARM64 (`cpus/a64`, generated from Arm's Sail model) | Test programs built with libnx run end to end. Commercial Switch games have reached gameplay on Linux x86-64 in manual runs; most games are untested and many will fail. Includes Vulkan forwarding, a core scheduler with preemption points, hot-load, code and data mods, input and settings. |
-| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | `relift import`, `build` and `run` work on ROMs. Test ROMs from public corpora pass in CI. Retail Game Boy Color games boot and run in manual tests. |
+| Nintendo Switch | ARM64 (`cpus/a64`, generated from Arm's Sail model) | Test programs built with libnx run end to end. Commercial Switch games have reached gameplay on Linux x86-64 in test runs; most games are untested and many will fail. Includes Vulkan forwarding, a core scheduler with preemption points, hot-load, code and data mods, input and settings. |
+| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | `relift import`, `build` and `run` work on ROMs. Test ROMs from public corpora pass in CI. Retail Game Boy Color games reach their title screens in test runs. |
 | Game Boy Advance | ARMv4T (`cpus/arm32`) | Pieces only, no `relift import` yet. The ARMv4T lifter, the machine core (bus timing, interrupts, timers, DMA, display, picture unit), the high-level BIOS, the cartridge saves and the keypad are built and tested against console records and the NanoBoyAdvance oracle. Whole-ROM discovery and the CPU runtime layer are planned. |
 
 relift ships no game code, keys or data, and never will.
