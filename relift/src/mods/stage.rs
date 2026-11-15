@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use relift_analyze::{Analysis, Function, Layout, Progress, Reuse};
+use relift_analyze::{Function, Layout, Progress, Reuse};
 use relift_guest::{Frontend, Module};
 use relift_switch_formats::nso::Nso;
 
@@ -49,6 +49,8 @@ pub struct Stage {
 pub enum Found {
     /// Discovery from scratch.
     Full,
+    /// The module is unchanged since a build that kept its outlines.
+    Cached,
     /// Only the functions a user mod changed were lifted again.
     Incremental {
         /// What was reused.
@@ -68,8 +70,6 @@ pub struct Input<'a> {
     pub module: &'a Module,
     /// The module before them, when they changed it.
     pub original: Option<&'a Module>,
-    /// The hints that name roots, as the cache key sees them.
-    pub hints: &'a str,
 }
 
 /// The analysis of one module.
@@ -78,9 +78,6 @@ pub struct Analyzed<T> {
     pub layout: Layout,
     /// `visit` of each function, in entry order.
     pub visits: Vec<T>,
-    /// Its functions lifted, when the plan or the incremental analysis made
-    /// them.
-    pub analysis: Option<Analysis>,
     /// How it was found.
     pub found: Found,
 }
@@ -139,18 +136,16 @@ impl Stage {
         Ok(s)
     }
 
-    /// Whether module `i`'s bundled mods or user mods need its lifted
-    /// analysis for [`Stage::plan`].
-    pub fn needs_analysis(&self, i: usize) -> bool {
+    /// Whether module `i`'s bundled mods or user mods need [`Stage::plan`].
+    pub fn needs_plan(&self, i: usize) -> bool {
         !self.bundled.is_empty() || !self.writes[i].is_empty()
     }
 
     /// The outlines of module `i` (`module`, at `base`) with `visit` of
-    /// each function: incremental from the cached analysis of `original`
-    /// (the module before the user mods) when a patch changed it, else from
-    /// scratch. The lifted analysis comes with them when the plan needs it
-    /// and for an incremental one; when user mods are in play, the analysis
-    /// of an unchanged module is cached for later builds.
+    /// each function: incremental from the cached outlines of `original`
+    /// (the module before the user mods) when a patch changed it, taken
+    /// from the cache when the module is unchanged since a build that kept
+    /// them, else from scratch, and then kept for later builds.
     ///
     /// # Errors
     ///
@@ -163,24 +158,17 @@ impl Stage {
         on: &mut dyn FnMut(Progress),
         visit: &(dyn Fn(&Function) -> T + Sync),
     ) -> Result<Analyzed<T>, BoxError> {
-        let Input {
-            module,
-            original,
-            hints,
-        } = *input;
-        let files = [fe.regs()];
+        let Input { module, original } = *input;
         let path = self.cache_dir.join(format!("{i}.zst"));
-        let key_path = self.cache_dir.join(format!("{i}.key"));
         if let Some(orig) = original {
-            let key = cache::key(&self.tool, &orig.image, orig.base, hints);
+            let key = cache::key(&self.tool, orig);
             let t0 = Instant::now();
-            let base = match cache::read(&path, &key, &files) {
-                Some(a) => a,
+            let base = match cache::read(&path, &key) {
+                Some(l) => l,
                 None => {
-                    let a = relift_analyze::discover(fe, orig);
-                    cache::write(&path, &key, &a, &files)?;
-                    relift_cache::write_if_changed(&key_path, key.as_bytes())?;
-                    a
+                    let l = relift_analyze::outline_with(fe, orig, &mut |_| {});
+                    cache::write(&path, &key, &l)?;
+                    l
                 }
             };
             let changed: Vec<Range<u64>> = self.writes[i]
@@ -190,32 +178,30 @@ impl Stage {
                 .collect();
             let base_ms = t0.elapsed().as_secs_f64() * 1e3;
             let t0 = Instant::now();
-            let (a, reuse) = relift_analyze::rediscover(fe, module, &base, &changed, on);
+            let (layout, visits, reuse) =
+                relift_analyze::rediscover(fe, module, orig, &base, &changed, on, visit);
             let ms = t0.elapsed().as_secs_f64() * 1e3;
-            let layout = Layout::of(&a, fe.granule());
-            let visits = a.functions.values().map(visit).collect();
             return Ok(Analyzed {
                 layout,
                 visits,
-                analysis: Some(a),
                 found: Found::Incremental { reuse, ms, base_ms },
             });
         }
-        let (layout, visits) = relift_analyze::outline_visit(fe, module, on, visit);
-        let key = cache::key(&self.tool, &module.image, module.base, hints);
-        let stale = !self.user.is_empty()
-            && !self.replaced[i]
-            && std::fs::read_to_string(&key_path).ok().as_deref() != Some(key.as_str());
-        let plan = self.needs_analysis(i);
-        let analysis = (stale || plan).then(|| layout.lift(fe, module));
-        if let (true, Some(a)) = (stale, &analysis) {
-            cache::write(&path, &key, a, &files)?;
-            relift_cache::write_if_changed(&key_path, key.as_bytes())?;
+        let key = cache::key(&self.tool, module);
+        if let Some(l) = cache::read(&path, &key) {
+            let (layout, visits, _) =
+                relift_analyze::rediscover(fe, module, module, &l, &[], on, visit);
+            return Ok(Analyzed {
+                layout,
+                visits,
+                found: Found::Cached,
+            });
         }
+        let (layout, visits) = relift_analyze::outline_visit(fe, module, on, visit);
+        cache::write(&path, &key, &layout)?;
         Ok(Analyzed {
             layout,
             visits,
-            analysis: if plan { analysis } else { None },
             found: Found::Full,
         })
     }
@@ -229,15 +215,24 @@ impl Stage {
     /// A conflict the build refuses.
     pub fn plan(
         &mut self,
+        fe: &(dyn Frontend + Sync),
         i: usize,
         module: &Module,
         build_id: &[u8; 32],
-        a: &Analysis,
-        granule: u64,
+        layout: &Layout,
         overrides: &BTreeMap<u64, String>,
     ) -> Result<(ModulePlan, Vec<String>), BoxError> {
         let name = &module.name;
+        let granule = fe.granule();
         let per_mod = bundled::per_mod(&self.bundled, build_id, &module.image)?;
+        let guest = |r: &Range<u64>| module.base + r.start..module.base + r.end;
+        let ranges: Vec<Range<u64>> = self.writes[i]
+            .iter()
+            .flat_map(|w| w.ranges.iter())
+            .chain(per_mod.iter().flatten().flat_map(|m| m.ranges.iter()))
+            .map(guest)
+            .collect();
+        let a = &relift_analyze::touching(fe, module, layout, &ranges);
         let touched = variants::touched_by_mods(a, granule, module.base, &per_mod);
         let label = |e: u64| conflicts::label(name, a.functions.get(&e), e);
         let swaps = bundled::swaps(&self.bundled, &touched, &label)?;
@@ -254,11 +249,7 @@ impl Stage {
             .iter()
             .map(|w| ModWrites {
                 name: w.name.clone(),
-                ranges: w
-                    .ranges
-                    .iter()
-                    .map(|r| module.base + r.start..module.base + r.end)
-                    .collect(),
+                ranges: w.ranges.iter().map(guest).collect(),
                 replaced: w.replaced,
             })
             .collect();
@@ -266,7 +257,7 @@ impl Stage {
         for (k, m) in per_mod.iter().enumerate() {
             let Some(m) = m else { continue };
             for r in &m.ranges {
-                let g = module.base + r.start..module.base + r.end;
+                let g = guest(r);
                 if conflicts::touched(a, granule, std::slice::from_ref(&g)).is_empty() {
                     let bytes = m.image[r.start as usize..r.end as usize].to_vec();
                     self.data[k].push((g.start, bytes));

@@ -218,18 +218,12 @@ fn emit_modules(
                 hints,
             )
         });
-        let hint_key: String = hints
-            .iter()
-            .filter(|h| h.module == p.name)
-            .map(|h| format!("{:x} ", h.offset))
-            .collect();
         let analyzed = stage.analyze(
             &cpu,
             i,
             &Input {
                 module: &module,
                 original: original.as_ref(),
-                hints: &hint_key,
             },
             &mut |event| match event {
                 Progress::Found { entries, .. } => {
@@ -270,7 +264,6 @@ fn emit_modules(
         let Analyzed {
             layout,
             visits,
-            analysis,
             found: how,
         } = analyzed;
         if let Found::Incremental { reuse, ms, base_ms } = &how {
@@ -321,16 +314,10 @@ fn emit_modules(
             .keys()
             .filter_map(|&a| Some((a, program::known(module.bytes_at(a)?)?.host_fn.to_string())))
             .collect();
-        let (plan, notes) = match &analysis {
-            Some(a) => stage.plan(
-                i,
-                &module,
-                &p.nso.build_id,
-                a,
-                cpu.granule(),
-                &known_overrides,
-            )?,
-            None => (ModulePlan::default(), Vec::new()),
+        let (plan, notes) = if stage.needs_plan(i) {
+            stage.plan(&cpu, i, &module, &p.nso.build_id, &layout, &known_overrides)?
+        } else {
+            (ModulePlan::default(), Vec::new())
         };
         for n in notes {
             ui.note(&Line::new().text(n));
@@ -354,7 +341,12 @@ fn emit_modules(
                 })
             })
             .collect();
-        if let (false, Some(analysis)) = (swapped.is_empty(), &analysis) {
+        if !swapped.is_empty() {
+            let known: BTreeMap<u64, EntryKind> = layout
+                .functions
+                .values()
+                .map(|o| (o.entry, o.kind))
+                .collect();
             let mut names: BTreeMap<u64, String> =
                 heads.iter().map(|h| (h.entry, h.name.clone())).collect();
             for &e in &swapped {
@@ -374,7 +366,7 @@ fn emit_modules(
                     fe: &cpu,
                     index: i,
                     module: &module,
-                    analysis,
+                    known: &known,
                     names: &names,
                     overrides: &overrides,
                     list: &stage.bundled.clone(),

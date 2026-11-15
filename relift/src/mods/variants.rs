@@ -82,8 +82,8 @@ pub struct Variants<'a> {
     pub index: usize,
     /// The module with the user mods applied.
     pub module: &'a Module,
-    /// Its analysis.
-    pub analysis: &'a Analysis,
+    /// The entries of its functions, by kind.
+    pub known: &'a BTreeMap<u64, EntryKind>,
     /// The host name of each function of the main emit, and the switch of
     /// each swapped one, by entry.
     pub names: &'a BTreeMap<u64, String>,
@@ -113,12 +113,6 @@ fn raw(m: &Module, pc: u64) -> u64 {
 pub fn emit(v: &Variants<'_>, dir: &Path) -> Result<(Vec<PathBuf>, Vec<SwapC>), BoxError> {
     let mut files = Vec::new();
     let mut out = Vec::new();
-    let known: BTreeMap<u64, EntryKind> = v
-        .analysis
-        .functions
-        .values()
-        .map(|f| (f.entry, f.kind))
-        .collect();
     for s in &v.plan.swaps {
         let mut variants = Vec::new();
         for mask in 0..1usize << s.mods.len() {
@@ -128,7 +122,7 @@ pub fn emit(v: &Variants<'_>, dir: &Path) -> Result<(Vec<PathBuf>, Vec<SwapC>), 
             };
             let mut m = v.module.clone();
             m.image = bundled::combine(&v.module.image, &v.plan.per_mod, &on);
-            let mut skip = known.clone();
+            let mut skip = v.known.clone();
             skip.remove(&s.entry);
             let va = relift_analyze::discover_more(v.fe, &m, &skip, &[s.entry]);
             if let Some(extra) = va.functions.keys().find(|&&e| e != s.entry) {

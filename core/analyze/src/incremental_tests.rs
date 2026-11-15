@@ -1,5 +1,5 @@
 use relift_guest::toy::{Toy, branch, word};
-use relift_guest::{Frontend, Module, Root, RootKind, Section, SectionKind};
+use relift_guest::{Module, Root, RootKind, Section, SectionKind};
 
 use super::*;
 
@@ -50,43 +50,77 @@ fn program(f_imm: u16, g_call: bool) -> Vec<[u8; 4]> {
 #[test]
 fn only_the_changed_function_is_lifted_again() {
     let old = module(&program(7, false));
-    let base = discover(&Toy, &old);
+    let base = outline_with(&Toy, &old, &mut |_| {});
     let new = module(&program(8, false));
     let changed = changed_bytes(&old.image, &new.image);
-    let (a, reuse) = rediscover(&Toy, &new, &base, &changed, &mut |_| {});
+    let (l, visits, reuse) = rediscover(&Toy, &new, &old, &base, &changed, &mut |_| {}, &size);
     assert_eq!(reuse.lifted, [BASE + 16].into());
     assert_eq!(reuse.reused, [BASE, BASE + 28].into());
-    assert_eq!(a, discover(&Toy, &new));
+    assert_eq!((l, visits), outline_visit(&Toy, &new, &mut |_| {}, &size));
 }
 
 #[test]
 fn a_new_call_in_changed_code_adds_its_callee() {
     let old = module(&program(7, false));
-    let base = discover(&Toy, &old);
+    let base = outline_with(&Toy, &old, &mut |_| {});
     let new = module(&program(7, true));
     let changed = changed_bytes(&old.image, &new.image);
-    let (a, reuse) = rediscover(&Toy, &new, &base, &changed, &mut |_| {});
+    let (l, visits, reuse) = rediscover(&Toy, &new, &old, &base, &changed, &mut |_| {}, &size);
     assert_eq!(reuse.lifted, [BASE + 28, BASE + 40].into());
-    assert_eq!(a, discover(&Toy, &new));
+    assert_eq!((l, visits), outline_visit(&Toy, &new, &mut |_| {}, &size));
 }
 
 #[test]
 fn the_binary_form_round_trips() {
     let m = module(&program(7, true));
-    let mut a = discover(&Toy, &m);
-    a.functions
-        .get_mut(&BASE)
-        .expect("main")
-        .tables
-        .insert(BASE + 4, vec![BASE + 8]);
-    let t = to_bytes(&a, "k 1", &[Toy.regs()]);
-    let (key, back) = from_bytes(&t, &[Toy.regs()]).expect("reads");
+    let mut l = outline_with(&Toy, &m, &mut |_| {});
+    let main = l.functions.get_mut(&BASE).expect("main");
+    main.tables.insert(BASE + 4, vec![BASE + 8]);
+    main.pads.insert(BASE + 8);
+    main.failed.push((
+        BASE + 12,
+        relift_guest::LiftFailure {
+            insn: 7,
+            message: "no".into(),
+        },
+    ));
+    let t = to_bytes(&l, "k 1");
+    let (key, back) = from_bytes(&t).expect("reads");
     assert_eq!(key, "k 1");
-    assert_eq!(back, a);
-    assert!(from_bytes(b"nope", &[Toy.regs()]).is_err());
+    assert_eq!(back, l);
+    assert!(from_bytes(b"nope").is_err());
     for cut in 0..t.len() {
-        assert!(from_bytes(&t[..cut], &[Toy.regs()]).is_err());
+        assert!(from_bytes(&t[..cut]).is_err());
     }
+}
+
+#[test]
+fn touching_lifts_only_the_functions_holding_a_range() {
+    let m = module(&program(7, true));
+    let l = outline_with(&Toy, &m, &mut |_| {});
+    let a = touching(&Toy, &m, &l, &[BASE + 18..BASE + 19, BASE + 44..BASE + 45]);
+    assert_eq!(
+        a.functions.keys().copied().collect::<Vec<_>>(),
+        [BASE + 16, BASE + 40]
+    );
+    assert_eq!(
+        a.functions[&(BASE + 16)],
+        l.functions[&(BASE + 16)].lift(&Toy, &m)
+    );
+    assert!(
+        touching(
+            &Toy,
+            &m,
+            &l,
+            std::slice::from_ref(&(BASE + 100..BASE + 104))
+        )
+        .functions
+        .is_empty()
+    );
+}
+
+fn size(f: &Function) -> usize {
+    f.insts.len()
 }
 
 fn changed_bytes(a: &[u8], b: &[u8]) -> Vec<std::ops::Range<u64>> {

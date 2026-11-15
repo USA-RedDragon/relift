@@ -23,7 +23,7 @@ mod tables;
 mod transfers;
 
 pub use binary::{FORMAT, from_bytes, to_bytes};
-pub use incremental::{Reuse, rediscover, stale};
+pub use incremental::{Reuse, rediscover, stale, touching};
 pub use slots::{SlotUses, slot_uses};
 pub use transfers::{Source, Transfer, TransferKind, unresolved_transfers};
 
@@ -393,6 +393,9 @@ pub struct Outline {
     pub calls: Vec<(u64, u64)>,
     /// The address after the last instruction.
     pub end: u64,
+    /// The highest address after an instruction: [`Outline::end`] unless an
+    /// earlier instruction reaches past the last one.
+    pub reach: u64,
     granule: u64,
 }
 
@@ -442,14 +445,12 @@ impl Outline {
                 Insn::Failed(_) => None,
             })
             .collect();
-        let end = insts
-            .iter()
-            .next_back()
-            .map(|(pc, i)| match i {
-                Insn::Lifted(b) => pc + u64::from(b.len),
-                Insn::Failed(_) => pc + granule,
-            })
-            .unwrap_or(entry);
+        let after = |(pc, i): (&u64, &Insn)| match i {
+            Insn::Lifted(b) => pc + u64::from(b.len),
+            Insn::Failed(_) => pc + granule,
+        };
+        let end = insts.iter().next_back().map_or(entry, after);
+        let reach = insts.iter().map(after).max().unwrap_or(entry).max(end);
         Outline {
             entry,
             name: None,
@@ -460,6 +461,7 @@ impl Outline {
             failed,
             calls,
             end,
+            reach,
             granule,
         }
     }
