@@ -237,6 +237,8 @@ struct rl_gba {
     gba_contend ct;
 
     bool halt_req, stop_req, halted, in_bios;
+    /** @brief The IRQ input rose, or came too late for the last sample: the next instruction boundary samples it. */
+    bool irq_want;
     uint64_t dma_overlap;
     uint64_t acc_start;
 

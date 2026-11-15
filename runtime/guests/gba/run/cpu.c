@@ -132,6 +132,7 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
     rl_gba *g = machine(c);
     if (r->check)
         r->check(r->check_user, c);
+    rl_gba_irq_boundary(g);
     if (c->i || !rl_gba_irq_line(g))
         return RL_NO_IRQ;
     if (!rl_gba_irq_sample(g)) {

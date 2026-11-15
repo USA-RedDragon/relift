@@ -276,6 +276,13 @@ const rl_gba_bus *rl_gba_bios_bus(rl_gba *g);
  * next instruction. Runs the events due first.
  */
 bool rl_gba_irq_sample(rl_gba *g);
+/**
+ * @brief The CPU layer is at an instruction boundary and asks for interrupts
+ * (before rl_gba_irq_line and rl_gba_irq_sample): until the IRQ input rises
+ * again or a sample finds it too late, the machine's own runs of due events
+ * inside an access no longer end the CPU's time slice for it.
+ */
+void rl_gba_irq_boundary(rl_gba *g);
 
 /** @brief Callbacks into the CPU layer. */
 typedef struct rl_gba_cpu_hooks {

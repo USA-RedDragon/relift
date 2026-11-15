@@ -230,7 +230,9 @@ TEST(gba_run_an_irq_at_a_sync_point_runs_the_stub_and_returns)
     CHECK_EQ(hs.after_sp, 0x03007F00u);
     CHECK_EQ(*rl_arm32_banked(run.c, RL_ARM32_IRQ, 13), 0x03007FA0u);
     CHECK_EQ(*rl_arm32_banked(run.c, RL_ARM32_IRQ, 14), 0x08000208u);
-    CHECK(hs.cycles_after > 160u * RL_GBA_LINE_CYCLES + RL_GBA_FRAME_CYCLES);
+    const uint64_t second_vblank = (160u - 126u) * RL_GBA_LINE_CYCLES - 841u + RL_GBA_FRAME_CYCLES;
+    CHECK(hs.cycles_after > second_vblank);
+    CHECK(hs.cycles_after < second_vblank + 200u);
 }
 
 TEST(gba_run_an_irq_rising_after_the_last_access_began_waits_an_instruction)

@@ -166,12 +166,20 @@ static void unit(rl_gba *g, unsigned i)
     }
 }
 
+static void keep_irq_break(rl_gba *g)
+{
+    if (g->irq_want && g->irq.line)
+        rl_sched_break(g->cpu);
+}
+
 void gba_dma_run(rl_gba *g)
 {
     if (g->dma_running || !g->cpu)
         return;
-    if (rl_sched_clock(g->cpu)->budget <= 0)
+    if (rl_sched_clock(g->cpu)->budget <= 0) {
         rl_sched_run(g->cpu);
+        keep_irq_break(g);
+    }
     int i = pick(g);
     if (i < 0)
         return;
@@ -191,6 +199,7 @@ void gba_dma_run(rl_gba *g)
     for (unsigned k = 0; k < 4; k++)
         if (g->dma[k].active && !rl_event_queued(&g->dma[k].ev))
             arm(g, k, g->dma[k].ready);
+    keep_irq_break(g);
 }
 
 void gba_dma_trigger(rl_gba *g, unsigned t, uint64_t now)
