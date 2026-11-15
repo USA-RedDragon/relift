@@ -884,6 +884,7 @@ dependencies = [
  "relift-gb-analyze",
  "relift-gb-formats",
  "relift-gba",
+ "relift-gba-analyze",
  "relift-gba-formats",
  "relift-guest",
  "relift-host",
@@ -1042,6 +1043,7 @@ version = "0.1.0"
 dependencies = [
  "relift-cpu-arm32",
  "relift-emit",
+ "relift-gba-analyze",
  "relift-guest",
  "relift-ir",
 ]

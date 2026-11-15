@@ -3,7 +3,7 @@
 //!
 //! The import copies the ROM into the project's import directory and writes
 //! `game.toml` with `guest = "gba"`. The build finds the code
-//! (`relift_gba::discover`), lifts it into one unit (`relift-gba`), and links
+//! (`relift-gba-analyze`), lifts it into one unit (`relift-gba`), and links
 //! it with the runtime's core, ARMv4T and GBA layers. `relift run` opens
 //! the program's window.
 
@@ -169,20 +169,21 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         std::env::consts::ARCH
     ));
     let row = ui.row("rom");
-    ui.begin(row, "discover");
-    let report = relift_gba::discover::discover(&rom);
+    ui.begin(row, "analyze");
+    let report = relift_gba_analyze::analyze(&rom).map_err(|e| format!("analyze: {e}"))?;
     ui.done(
         row,
         Line::new().text(format!(
-            "{}, {} IRQ handlers, {} unresolved",
+            "{}, {} RAM copies, {} IRQ handlers, {} unresolved",
             noun(report.functions.len() as u64, "function"),
+            report.copies.len(),
             report.irq_handlers.len(),
             report.unresolved.len()
         )),
     );
     let mut notes = String::new();
     for u in &report.unresolved {
-        notes.push_str(&format!("{}  {}\n", u.at, u.why));
+        notes.push_str(&format!("{}  {}  {}\n", u.at, u.kind.name(), u.detail));
     }
     relift_cache::write_if_changed(&out.join("unresolved.txt"), notes.as_bytes())?;
     ui.begin(row, "lift");
