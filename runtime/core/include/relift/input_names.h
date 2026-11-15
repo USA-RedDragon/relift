@@ -4,7 +4,8 @@
  * that the runtime and the tool both read. X(kind, name, value): GAMEPAD is a
  * bit number of enum rl_input_button, AXIS an index into the four stick
  * axes (left x, left y, right x, right y), KEY a USB HID keyboard usage and
- * MOUSE a bit number of enum rl_input_pointer_button.
+ * MOUSE a bit number of enum rl_input_pointer_button and TOUCH an index into
+ * rl_input_snapshot.touch_pad, the controls of the on-screen controller.
  */
 #ifndef RELIFT_INPUT_NAMES_H
 #define RELIFT_INPUT_NAMES_H
@@ -112,6 +113,32 @@
     X(MOUSE, "right", 1) \
     X(MOUSE, "middle", 2) \
     X(MOUSE, "back", 3) \
-    X(MOUSE, "forward", 4)
+    X(MOUSE, "forward", 4) \
+    X(TOUCH, "a", 0) \
+    X(TOUCH, "b", 1) \
+    X(TOUCH, "x", 2) \
+    X(TOUCH, "y", 3) \
+    X(TOUCH, "l", 4) \
+    X(TOUCH, "r", 5) \
+    X(TOUCH, "zl", 6) \
+    X(TOUCH, "zr", 7) \
+    X(TOUCH, "start", 8) \
+    X(TOUCH, "select", 9) \
+    X(TOUCH, "plus", 10) \
+    X(TOUCH, "minus", 11) \
+    X(TOUCH, "up", 12) \
+    X(TOUCH, "down", 13) \
+    X(TOUCH, "left", 14) \
+    X(TOUCH, "right", 15) \
+    X(TOUCH, "dpad_up", 16) \
+    X(TOUCH, "dpad_right", 17) \
+    X(TOUCH, "dpad_down", 18) \
+    X(TOUCH, "dpad_left", 19) \
+    X(TOUCH, "lstick", 20) \
+    X(TOUCH, "rstick", 21) \
+    X(TOUCH, "lstick_x", 22) \
+    X(TOUCH, "lstick_y", 23) \
+    X(TOUCH, "rstick_x", 24) \
+    X(TOUCH, "rstick_y", 25)
 
 #endif

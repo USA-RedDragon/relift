@@ -17,6 +17,8 @@
 #define RL_INPUT_PADS 8
 /** @brief Most simultaneous touch points. */
 #define RL_INPUT_TOUCHES 16
+/** @brief Entries of rl_input_snapshot.touch_pad (the TOUCH names of input_names.h). */
+#define RL_INPUT_TOUCH_PAD 32
 
 /** @brief Generic gamepad buttons, bit numbers in rl_input_pad.buttons. */
 enum rl_input_button {
@@ -95,6 +97,8 @@ typedef struct rl_input_snapshot {
     uint64_t keys[4];
     /** @brief Modifier bits: 1 control, 2 shift, 4 alt, 8 meta, 16 caps lock, 32 num lock, 64 scroll lock. */
     uint32_t modifiers;
+    /** @brief The on-screen controller's controls: buttons 0 or 1, stick axes -1 to 1 (up and right positive). */
+    float touch_pad[RL_INPUT_TOUCH_PAD];
 } rl_input_snapshot;
 
 /** @brief Fills a snapshot; called from whichever thread samples input. */
@@ -106,7 +110,8 @@ RL_RUNTIME_API void rl_input_set_source(rl_input_source_fn *fn, void *user);
 RL_RUNTIME_API void rl_input_publish(const rl_input_snapshot *s);
 /**
  * @brief Samples input: from the source function, else the last published
- * snapshot, else a snapshot with pad 0 connected and nothing pressed.
+ * snapshot, else a snapshot with pad 0 connected and nothing pressed. The
+ * on-screen controller's controls come from the touch pad (touchpad.h).
  */
 RL_RUNTIME_API void rl_input_sample(rl_input_snapshot *out);
 

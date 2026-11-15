@@ -3,6 +3,7 @@
  * @brief The window backend in use, the event listener and rl_window_main.
  */
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 #include <relift/window.h>
 
 #include "core.h"
@@ -36,6 +37,8 @@ bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uin
     if (!w || !w->b || !w->b->present_rgb)
         return false;
     w->b->present_rgb(w, rgb, width, height);
+    while (rl_touchpad_hold(16))
+        w->b->present_rgb(w, rgb, width, height);
     return true;
 }
 

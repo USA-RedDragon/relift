@@ -23,3 +23,21 @@ const rl_port_decl rl_gba_ports[] = {
     { "p1", "Game Boy Advance pad", 10, rl_gba_ports_0 },
 };
 const uint32_t rl_gba_ports_count = 1;
+
+static const rl_control_decl rl_gba_ports_touchpad_0[] = {
+    { "a", 0, "touch:a" },
+    { "b", 0, "touch:b" },
+    { "l", 0, "touch:l" },
+    { "r", 0, "touch:r" },
+    { "start", 0, "touch:start" },
+    { "select", 0, "touch:select" },
+    { "up", 0, "touch:up" },
+    { "down", 0, "touch:down" },
+    { "left", 0, "touch:left" },
+    { "right", 0, "touch:right" },
+};
+
+const rl_port_decl rl_gba_ports_touchpad[] = {
+    { "touchpad", "On-screen controller", 10, rl_gba_ports_touchpad_0 },
+};
+const uint32_t rl_gba_ports_touchpad_count = 1;

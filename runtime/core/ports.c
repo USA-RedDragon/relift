@@ -7,6 +7,7 @@
 
 #include <relift/input_names.h>
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 
 #include <pthread.h>
 #include <stdio.h>
@@ -15,7 +16,7 @@
 
 #define MAX_BINDINGS 8
 
-enum { DEV_PAD, DEV_AXIS, DEV_KEY, DEV_MOUSE };
+enum { DEV_PAD, DEV_AXIS, DEV_KEY, DEV_MOUSE, DEV_TOUCH };
 enum { HALF_FULL, HALF_POS, HALF_NEG };
 
 typedef struct binding {
@@ -31,6 +32,7 @@ typedef struct control {
     char *defaults;
     binding b[MAX_BINDINGS];
     uint8_t nb;
+    int32_t twin;
 } control;
 
 typedef struct port {
@@ -63,6 +65,8 @@ static bool lookup(const char *dev, size_t dlen, const char *name, size_t nlen, 
         want = "KEY";
     else if (dlen == 5 && !strncmp(dev, "mouse", 5))
         want = "MOUSE";
+    else if (dlen == 5 && !strncmp(dev, "touch", 5))
+        want = "TOUCH";
     if (!want)
         return false;
     for (size_t i = 0; i < sizeof table / sizeof table[0]; i++) {
@@ -70,7 +74,10 @@ static bool lookup(const char *dev, size_t dlen, const char *name, size_t nlen, 
         if (!match)
             continue;
         if (!strcmp(table[i].kind, want)) {
-            out->dev = !strcmp(want, "GAMEPAD") ? DEV_PAD : !strcmp(want, "KEY") ? DEV_KEY : DEV_MOUSE;
+            out->dev = !strcmp(want, "GAMEPAD") ? DEV_PAD
+                       : !strcmp(want, "KEY")   ? DEV_KEY
+                       : !strcmp(want, "TOUCH") ? DEV_TOUCH
+                                                : DEV_MOUSE;
             out->value = (uint16_t)table[i].value;
             return true;
         }
@@ -264,6 +271,16 @@ static void apply_settings(const port *p, const control *c)
     }
 }
 
+/** @brief Points each control of p1 at the touchpad control of the same id, which rl_ports_eval merges in. Lock held. */
+static void link_twins(void)
+{
+    port *p1 = find_port("p1"), *tp = find_port(RL_TOUCHPAD_PORT);
+    for (uint32_t i = 0; p1 && i < p1->n; i++) {
+        uint32_t at;
+        p1->c[i].twin = tp && find_in(tp, p1->c[i].id, &at) ? (int32_t)at : -1;
+    }
+}
+
 bool rl_ports_declare(const rl_port_decl *ports, uint32_t count)
 {
     pthread_mutex_lock(&g_lock);
@@ -297,10 +314,12 @@ bool rl_ports_declare(const rl_port_decl *ports, uint32_t count)
             c->kind = d->controls[j].kind;
             c->defaults = d->controls[j].defaults ? dup(d->controls[j].defaults) : NULL;
             parse_list(c->defaults, c->b, &c->nb);
+            c->twin = -1;
             declare_setting(p, c);
             apply_settings(p, c);
         }
     }
+    link_twins();
     pthread_mutex_unlock(&g_lock);
     return ok;
 }
@@ -423,6 +442,10 @@ static float one(const binding *b, int port_pad, const rl_input_snapshot *s)
         if (b->value < 256 && (s->keys[b->value / 64] >> (b->value % 64) & 1u))
             v = 1.0f;
         break;
+    case DEV_TOUCH:
+        if (b->value < RL_INPUT_TOUCH_PAD)
+            v = s->touch_pad[b->value];
+        break;
     default:
         if (s->pointer.buttons >> b->value & 1u)
             v = 1.0f;
@@ -479,6 +502,13 @@ float rl_ports_eval(rl_control_ref ref, const rl_input_snapshot *s)
         const port *p = &g_ports[pi];
         const control *c = &p->c[ci];
         best = strongest(c->b, c->nb, p->pad, c->kind, s);
+        port *tp = c->twin >= 0 ? find_port(RL_TOUCHPAD_PORT) : NULL;
+        if (tp) {
+            const control *t = &tp->c[c->twin];
+            float v = strongest(t->b, t->nb, tp->pad, c->kind, s);
+            if ((v < 0 ? -v : v) > (best < 0 ? -best : best))
+                best = v;
+        }
         float held;
         if (rl_ports_script_value(p->id, c->id, &held))
             best = c->kind == RL_CONTROL_BUTTON ? (held > 0.5f || held < -0.5f ? 1.0f : 0.0f)

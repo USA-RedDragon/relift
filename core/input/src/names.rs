@@ -39,6 +39,7 @@ fn parse() -> Vec<HostName> {
             "AXIS" => (Device::Gamepad, true),
             "KEY" => (Device::Key, false),
             "MOUSE" => (Device::Mouse, false),
+            "TOUCH" => (Device::Touch, false),
             _ => continue,
         };
         out.push(HostName {

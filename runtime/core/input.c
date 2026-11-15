@@ -3,6 +3,7 @@
  * @brief Host input snapshots: the source function and the published snapshot.
  */
 #include <relift/input.h>
+#include <relift/touchpad.h>
 
 #include <pthread.h>
 #include <string.h>
@@ -47,4 +48,5 @@ void rl_input_sample(rl_input_snapshot *out)
         memset(out, 0, sizeof *out);
         fn(user, out);
     }
+    rl_touchpad_fill(out->touch_pad, RL_INPUT_TOUCH_PAD);
 }

@@ -10,6 +10,11 @@
  * A bare `gamepad` means the pad of the control's port: port `pN` reads pad
  * N - 1 and every other port reads pad 0. A `+` or `-` suffix keeps the
  * positive or negative half of a range; a pressed button reads -1 with `-`.
+ * `touch:<name>` is a control of the on-screen controller.
+ *
+ * Each control of port `p1` also reads the control of the same id on port
+ * `touchpad` (RL_TOUCHPAD_PORT) when that port is declared: buttons are
+ * pressed when either is, axes take the larger magnitude.
  */
 #ifndef RELIFT_PORTS_H
 #define RELIFT_PORTS_H

@@ -52,6 +52,8 @@ pub enum Origin {
     Game,
     /// A mod, by name.
     Mod(String),
+    /// The host runtime (the on-screen controller).
+    Host,
 }
 
 impl Origin {
@@ -61,6 +63,7 @@ impl Origin {
             Origin::Native => "native".to_string(),
             Origin::Game => "game".to_string(),
             Origin::Mod(m) => format!("mod:{m}"),
+            Origin::Host => "host".to_string(),
         }
     }
 }

@@ -208,3 +208,31 @@ const rl_port_decl rl_switch_ports[] = {
     { "touch", "Touch screen", 3, rl_switch_ports_8 },
 };
 const uint32_t rl_switch_ports_count = 9;
+
+static const rl_control_decl rl_switch_ports_touchpad_0[] = {
+    { "a", 0, "touch:a" },
+    { "b", 0, "touch:b" },
+    { "x", 0, "touch:x" },
+    { "y", 0, "touch:y" },
+    { "dpad_up", 0, "touch:dpad_up" },
+    { "dpad_right", 0, "touch:dpad_right" },
+    { "dpad_down", 0, "touch:dpad_down" },
+    { "dpad_left", 0, "touch:dpad_left" },
+    { "l", 0, "touch:l" },
+    { "zl", 0, "touch:zl" },
+    { "minus", 0, "touch:minus" },
+    { "lstick", 0, "touch:lstick" },
+    { "lstick_x", 2, "touch:lstick_x" },
+    { "lstick_y", 2, "touch:lstick_y" },
+    { "r", 0, "touch:r" },
+    { "zr", 0, "touch:zr" },
+    { "plus", 0, "touch:plus" },
+    { "rstick", 0, "touch:rstick" },
+    { "rstick_x", 2, "touch:rstick_x" },
+    { "rstick_y", 2, "touch:rstick_y" },
+};
+
+const rl_port_decl rl_switch_ports_touchpad[] = {
+    { "touchpad", "On-screen controller", 20, rl_switch_ports_touchpad_0 },
+};
+const uint32_t rl_switch_ports_touchpad_count = 1;

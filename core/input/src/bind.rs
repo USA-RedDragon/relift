@@ -14,6 +14,8 @@ pub enum Device {
     Key,
     /// The mouse.
     Mouse,
+    /// A control of the on-screen controller.
+    Touch,
 }
 
 impl Device {
@@ -22,6 +24,7 @@ impl Device {
             Device::Gamepad => "gamepad",
             Device::Key => "key",
             Device::Mouse => "mouse",
+            Device::Touch => "touch",
         }
     }
 }
@@ -80,8 +83,10 @@ impl HostInput {
             (Device::Key, None)
         } else if dev == "mouse" {
             (Device::Mouse, None)
+        } else if dev == "touch" {
+            (Device::Touch, None)
         } else {
-            return Err(bad(text, "the device is gamepad, key or mouse"));
+            return Err(bad(text, "the device is gamepad, key, mouse or touch"));
         };
         let (name, half) = if let Some(n) = rest.strip_suffix('+') {
             (n, Half::Positive)

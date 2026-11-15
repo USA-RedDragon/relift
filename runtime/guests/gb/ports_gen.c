@@ -22,6 +22,22 @@ const rl_port_decl rl_gb_ports[] = {
 };
 const uint32_t rl_gb_ports_count = 1;
 
+static const rl_control_decl rl_gb_ports_touchpad_0[] = {
+    { "a", 0, "touch:a" },
+    { "b", 0, "touch:b" },
+    { "start", 0, "touch:start" },
+    { "select", 0, "touch:select" },
+    { "up", 0, "touch:up" },
+    { "down", 0, "touch:down" },
+    { "left", 0, "touch:left" },
+    { "right", 0, "touch:right" },
+};
+
+const rl_port_decl rl_gb_ports_touchpad[] = {
+    { "touchpad", "On-screen controller", 8, rl_gb_ports_touchpad_0 },
+};
+const uint32_t rl_gb_ports_touchpad_count = 1;
+
 static const rl_control_decl rl_gbc_ports_0[] = {
     { "a", 0, "gamepad:east,key:x" },
     { "b", 0, "gamepad:south,key:z" },
@@ -37,3 +53,19 @@ const rl_port_decl rl_gbc_ports[] = {
     { "p1", "Game Boy Color pad", 8, rl_gbc_ports_0 },
 };
 const uint32_t rl_gbc_ports_count = 1;
+
+static const rl_control_decl rl_gbc_ports_touchpad_0[] = {
+    { "a", 0, "touch:a" },
+    { "b", 0, "touch:b" },
+    { "start", 0, "touch:start" },
+    { "select", 0, "touch:select" },
+    { "up", 0, "touch:up" },
+    { "down", 0, "touch:down" },
+    { "left", 0, "touch:left" },
+    { "right", 0, "touch:right" },
+};
+
+const rl_port_decl rl_gbc_ports_touchpad[] = {
+    { "touchpad", "On-screen controller", 8, rl_gbc_ports_touchpad_0 },
+};
+const uint32_t rl_gbc_ports_touchpad_count = 1;

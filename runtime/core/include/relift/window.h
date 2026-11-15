@@ -98,7 +98,11 @@ RL_RUNTIME_API void rl_window_emit(rl_window *w, int event);
  */
 RL_RUNTIME_API int rl_window_main(int (*body)(void *arg), void *arg);
 
-/** @brief Shows an RGB888 frame in w through the backend's present_rgb; returns false when the backend has none. */
+/**
+ * @brief Shows an RGB888 frame in w through the backend's present_rgb; returns false when the backend has none.
+ * While the on-screen controller pauses the game (touchpad.h), it shows the frame again with each change of the
+ * overlay and returns only once the game runs again.
+ */
 RL_RUNTIME_API bool rl_window_present_rgb(rl_window *w, const uint8_t *rgb, uint32_t width, uint32_t height);
 
 /** @brief The host backend built with VIDEO=sdl3. */
