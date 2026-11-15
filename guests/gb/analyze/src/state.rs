@@ -93,7 +93,7 @@ impl Sym {
 }
 
 /// What is known about one 8-bit value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Val {
     Top,
     Const(u8),
@@ -112,6 +112,40 @@ pub(crate) enum Val {
     /// The high byte of a 16-bit value less one: the high byte of the base
     /// before the carry of an indexed low byte is added.
     HiNoCarry(Sym),
+}
+
+impl Sym {
+    fn pack(&self) -> u64 {
+        let base = match self.base {
+            Base::Ret => 0,
+            Base::Sp => 1,
+            Base::Pair(h, l) => 2 | u64::from(h) << 4 | u64::from(l) << 8,
+            Base::Rom(b) => 3 | u64::from(b) << 4,
+            Base::Abs => 4,
+        };
+        let count = self.count.map_or(0x1_0000, u64::from);
+        base ^ u64::from(self.off) << 20
+            ^ u64::from(self.step) << 36
+            ^ u64::from(self.ix) << 44
+            ^ count.rotate_left(27)
+    }
+}
+
+impl std::hash::Hash for Val {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        let v = match self {
+            Val::Top => 0,
+            Val::Const(c) => 1 | u64::from(*c) << 8,
+            Val::Entry(r) => 2 | u64::from(*r) << 8,
+            Val::Lo(s) => 3 ^ s.pack() << 3,
+            Val::Hi(s) => 4 ^ s.pack() << 3,
+            Val::At(s) => 5 ^ s.pack() << 3,
+            Val::Ix(m, n) => 6 | u64::from(*m) << 8 | n.map_or(0x1_0000, u64::from) << 16,
+            Val::Dep => 7,
+            Val::HiNoCarry(s) => 8 ^ s.pack() << 4,
+        };
+        h.write_u64(v);
+    }
 }
 
 impl Val {
@@ -252,12 +286,14 @@ impl Frame {
         FRAMES.with_borrow(|f| f.all[self.0 as usize][i])
     }
 
-    fn with(self, i: usize, v: Val) -> Frame {
-        if self.get(i) == v {
+    fn with(self, set: &[(usize, Val)]) -> Frame {
+        if set.iter().all(|(i, v)| self.get(*i) == *v) {
             return self;
         }
         let mut s = *self.slots();
-        s[i] = v;
+        for (i, v) in set {
+            s[*i] = *v;
+        }
         Frame::of(s)
     }
 
@@ -435,7 +471,7 @@ impl State {
 
     pub(crate) fn set_slot(&mut self, off: i16, v: Val) {
         if (STACK_LO..STACK_HI).contains(&off) {
-            self.stack = self.stack.with((off - STACK_LO) as usize, v);
+            self.stack = self.stack.with(&[((off - STACK_LO) as usize, v)]);
         }
     }
 
@@ -452,8 +488,13 @@ impl State {
     pub(crate) fn push(&mut self, h: Val, l: Val) {
         if let Some(sp) = self.sp {
             let sp = sp - 2;
-            self.set_slot(sp, l);
-            self.set_slot(sp + 1, h);
+            if (STACK_LO..STACK_HI - 1).contains(&sp) {
+                let i = (sp - STACK_LO) as usize;
+                self.stack = self.stack.with(&[(i, l), (i + 1, h)]);
+            } else {
+                self.set_slot(sp, l);
+                self.set_slot(sp + 1, h);
+            }
             self.sp = (sp > STACK_LO).then_some(sp);
         }
     }

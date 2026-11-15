@@ -216,7 +216,7 @@ pub(crate) struct Env<'a> {
     pub cache: RefCell<FxMap<(Loc, State), Rc<Outcome>>>,
     pub probes: &'a RefCell<Probes>,
     pub budget: RefCell<usize>,
-    pub inline_body: RefCell<FxMap<Loc, BTreeMap<Loc, u8>>>,
+    pub inline_body: RefCell<FxMap<Loc, FxMap<Loc, u8>>>,
     pub transfers: RefCell<TransferCache>,
 }
 
@@ -258,7 +258,9 @@ struct Run<'a> {
     consts_b: Vec<u8>,
     branches: Vec<(Loc, Loc)>,
     work: Vec<Key>,
-    states: FxMap<Key, State>,
+    states: FxMap<Key, usize>,
+    store: Vec<State>,
+    body: FxMap<Loc, u8>,
     sps: FxMap<Loc, u8>,
     tails: BTreeSet<Loc>,
 }
@@ -291,6 +293,7 @@ fn pin(model: &BankModel, loc: Loc, st: &mut State) {
 pub(crate) fn run_alone(env: &Env<'_>, entry: Loc, st0: State) -> Outcome {
     let mut r = Run::new(env, entry, entry, Mode::Alone, true);
     r.explore(st0);
+    r.out.body = r.body.drain().collect();
     r.find_copies();
     r.out
 }
@@ -310,6 +313,8 @@ impl<'a> Run<'a> {
             branches: Vec::new(),
             work: Vec::new(),
             states: FxMap::default(),
+            store: Vec::new(),
+            body: FxMap::default(),
             sps: FxMap::default(),
             tails: BTreeSet::new(),
         }
@@ -373,14 +378,15 @@ impl<'a> Run<'a> {
                 *n += 1;
             }
         }
-        match self.states.get_mut(&key) {
-            Some(old) => {
-                if old.merge(&st) {
+        match self.states.get(&key) {
+            Some(i) => {
+                if self.store[*i].merge(&st) {
                     self.work.push(key);
                 }
             }
             None => {
-                self.states.insert(key, st);
+                self.states.insert(key, self.store.len());
+                self.store.push(st);
                 self.work.push(key);
             }
         }
@@ -409,7 +415,7 @@ impl<'a> Run<'a> {
                 }
                 *b -= 1;
             }
-            let Some(st) = self.states.get(&key).copied() else {
+            let Some(st) = self.states.get(&key).map(|i| self.store[*i]) else {
                 continue;
             };
             self.step_at(loc, st);
@@ -436,7 +442,7 @@ impl<'a> Run<'a> {
         }
         let len = ins.length();
         if self.record_body {
-            self.out.body.insert(loc, len);
+            self.body.insert(loc, len);
         } else {
             self.env
                 .inline_body

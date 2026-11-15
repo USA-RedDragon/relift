@@ -169,7 +169,7 @@ struct Driver<'a> {
     entries: BTreeMap<Loc, Origin>,
     roots: BTreeMap<Loc, State>,
     results: FxMap<Loc, (Outcome, Option<Outcome>)>,
-    inline_bodies: FxMap<Loc, FxMap<Loc, BTreeMap<Loc, u8>>>,
+    inline_bodies: FxMap<Loc, FxMap<Loc, FxMap<Loc, u8>>>,
     summaries: FxMap<Loc, Summary>,
     cells: FxMap<u16, CellInfo>,
     known: FxSet<Loc>,
@@ -497,16 +497,18 @@ impl Driver<'_> {
             if let Some(b) = extra.get(loc) {
                 body.extend(b.iter().map(|(l, n)| (*l, *n)));
             }
-            let mut own = BTreeSet::new();
+            let mut own = Vec::new();
             for (l, len) in &body {
                 let base = offset(*l);
                 for b in base..base + usize::from(*len) {
                     if let Some(c) = covered.get_mut(b) {
                         *c = true;
                     }
-                    own.insert(b);
+                    own.push(b);
                 }
             }
+            own.sort_unstable();
+            own.dedup();
             let sum = self.summaries.get(loc);
             let trampoline = sum.filter(|s| s.ctx).and_then(|s| {
                 (s.bank_reg.is_some() || s.target_regs.is_some()).then(|| Trampoline {
