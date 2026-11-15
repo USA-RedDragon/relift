@@ -43,7 +43,13 @@ cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools -p rel
 ```
 
 Run `relift` in an empty project folder. Each project holds one `game.toml`;
-artifacts go to the cache directory.
+artifacts go to the cache directory. The cache is relocatable: copy or
+hard-link it to another path, or move the project, and the next build reuses
+every lifted file and object (Ninja runs nothing). Build commands name files
+by paths relative to the build directory, the runtime sources are copied into
+the cache, and debug info records `.` as its compilation directory, so the
+program is byte-identical. What stays absolute: a cartridge ROM's path (the
+save sits beside it) and SDL3 library search paths outside the cache.
 
 ### Nintendo Switch
 
