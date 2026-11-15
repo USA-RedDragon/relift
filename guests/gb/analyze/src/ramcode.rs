@@ -8,7 +8,11 @@
 //! runs too long without returning to it from a call of its own, or whose
 //! path ends, is left as if it had returned with the caller's registers but
 //! `a` and the flags unknown. A branch on an unknown flag goes on along
-//! the fall-through and forks the other way with a smaller budget. A path
+//! the fall-through and forks the other way with a smaller budget. When the
+//! first path ends before its budget, the newest fork taken at a branch in
+//! RAM code goes on with the rest of it, as a test driver's compare routine
+//! in RAM over memory whose bytes are not known may have guessed the
+//! failure. A path
 //! ends at an unknown transfer, at a state it has been in before, at a ROM
 //! location the analysis did not decode, or when its budget is spent. Loops
 //! with known counts therefore run to the end: a copy of a routine from a
@@ -238,6 +242,7 @@ struct Path {
     free: bool,
     launch: Option<Launch>,
     nops: u32,
+    ram_fork: bool,
 }
 
 #[derive(Clone)]
@@ -1187,6 +1192,7 @@ impl Machine<'_> {
                         }
                         if let Some(t) = t {
                             let mut q = fork(&p);
+                            q.ram_fork = is_ram(pc);
                             goto(&mut q, t, f);
                             queue(&mut work, q);
                         }
@@ -1265,6 +1271,15 @@ impl Machine<'_> {
                 };
                 if dead && !p.resume() {
                     break;
+                }
+            }
+            if p.main && p.launch.is_none() && p.steps < p.limit {
+                let next = work.iter().rposition(|q| q.ram_fork);
+                if let Some(mut q) = next.and_then(|i| work.remove(i)) {
+                    q.limit = q.steps.saturating_add(p.limit - p.steps);
+                    q.main = true;
+                    q.ram_fork = false;
+                    work.push_back(q);
                 }
             }
             if let Some(l) = p
@@ -1383,6 +1398,7 @@ impl Machine<'_> {
             free: false,
             launch: None,
             nops: 0,
+            ram_fork: false,
         }
     }
 }
