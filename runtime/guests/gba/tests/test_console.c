@@ -2,9 +2,11 @@
  * @file test_console.c
  * @brief Every record of the console SWI probe, replayed against the HLE BIOS
  * over a small memory: registers, output windows, stack frames and cycles
- * must equal what the console did.
+ * must equal what the console did, with the cycles of the data accesses
+ * from a fixed table and from the machine's wait table.
  */
 #include "bios/bios_int.h"
+#include "mach.h"
 #include "runner.h"
 #include "swicase.h"
 #include "vectors_console.h"
@@ -288,21 +290,48 @@ static void run_record(unsigned i, const rl_gba_bus *bus, totals *t)
     t->bad_cycles += got.cycles != want->cycles;
 }
 
-TEST(console_records_replay_exactly)
+static rl_gba *machine_bus;
+
+static unsigned machine_cycles(void *u, uint32_t a, unsigned size, bool seq)
+{
+    (void)u;
+    const rl_gba_bus *b = rl_gba_bios_bus(machine_bus);
+    return b->cycles(b->user, a, size, seq);
+}
+
+static totals replay(const rl_gba_bus *bus)
 {
     memset(&m, 0, sizeof m);
     rl_gba_bios_init(&m.bios);
     m.io[0x204 / 2] = WAITCNT_PROBE;
-    const rl_gba_bus bus = {NULL, bus_read, bus_write, bus_cycles};
     totals t = {0};
+    for (unsigned i = 0; i < swi_record_count(); i++)
+        run_record(i, bus, &t);
+    return t;
+}
+
+TEST(console_records_replay_exactly)
+{
     unsigned count = sizeof gbat_console / sizeof gbat_console[0];
     CHECK_EQ(count, swi_record_count());
-    for (unsigned i = 0; i < count; i++)
-        run_record(i, &bus, &t);
+    totals t = replay(&(rl_gba_bus){NULL, bus_read, bus_write, bus_cycles});
     CHECK(t.checked > 3400);
     CHECK_EQ(t.skipped + t.checked, count);
     CHECK_EQ(t.bad_regs, 0);
     CHECK_EQ(t.bad_mem, 0);
     CHECK_EQ(t.bad_stack, 0);
     CHECK_EQ(t.bad_cycles, 0);
+}
+
+TEST(console_records_keep_their_cycles_on_the_machines_wait_table)
+{
+    mach x = mach_new();
+    CHECK(x.g != NULL);
+    rl_gba_write(x.g, 0x04000204u, 2, WAITCNT_PROBE);
+    machine_bus = x.g;
+    totals t = replay(&(rl_gba_bus){NULL, bus_read, bus_write, machine_cycles});
+    CHECK(t.checked > 3400);
+    CHECK_EQ(t.bad_regs, 0);
+    CHECK_EQ(t.bad_cycles, 0);
+    mach_free(&x);
 }
