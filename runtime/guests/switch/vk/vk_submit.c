@@ -37,6 +37,7 @@ int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
         return vkf_bad_handle(&k, VKG_vkBeginCommandBuffer, c->x[0]);
     VkCommandBufferBeginInfo *bi = vkg_ain_VkCommandBufferBeginInfo(&k, c->x[1], 1);
     vkf_obj *o = k.obj;
+    vkf_decode_cb_reset(k.fns, o->parent->host, o->dev, cb, false);
     if (o->secondary && bi) {
         o->begin_flags = bi->flags;
         o->gen = __atomic_add_fetch(&g_begins, 1, __ATOMIC_RELAXED);
@@ -134,6 +135,8 @@ int vkh_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
     uint32_t n = (uint32_t)c->x[1];
     VkSubmitInfo *si = vkg_ain_VkSubmitInfo(&k, c->x[2], n);
     vkf_dev *d = k.obj->dev;
+    for (uint32_t i = 0; d->decoding && si && i < n; i++)
+        vkf_decode_uploads(&k, queue_device(&k), si[i].pCommandBuffers, si[i].commandBufferCount);
     if (__atomic_load_n(&d->secondaries, __ATOMIC_RELAXED))
         for (uint32_t i = 0; si && i < n; i++)
             si[i].pCommandBuffers =
@@ -158,6 +161,9 @@ int vkh_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
     uint32_t n = (uint32_t)c->x[1];
     VkSubmitInfo2 *si = vkg_ain_VkSubmitInfo2(&k, c->x[2], n);
     vkf_dev *d = k.obj->dev;
+    for (uint32_t i = 0; d->decoding && si && i < n; i++)
+        for (uint32_t j = 0; j < si[i].commandBufferInfoCount; j++)
+            vkf_decode_uploads(&k, queue_device(&k), &si[i].pCommandBufferInfos[j].commandBuffer, 1);
     if (__atomic_load_n(&d->secondaries, __ATOMIC_RELAXED))
         for (uint32_t i = 0; si && i < n; i++) {
             VkCommandBufferSubmitInfo *ci = (VkCommandBufferSubmitInfo *)si[i].pCommandBufferInfos;

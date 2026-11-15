@@ -166,6 +166,43 @@ without 24-bit depth reports both unsupported, yet creates images of them as
 (`vk_format.c`) answer for the format it will use, so the game creates its
 depth images in a format its D24S8 views can share.
 
+### Compressed formats the host cannot sample
+
+The console samples BC1 to BC7 (and R4G4); Apple GPUs through MoltenVK, and
+some Adreno and Mali drivers, cannot. A game that checks the format features
+then stops. The guest sees the Switch's features for those formats anyway,
+as far as the host has them for the format that stands in for each
+(`vk_decode.c`): BC1, BC2, BC3 and BC7 become `R8G8B8A8_UNORM` or `_SRGB`, BC4
+`R8_UNORM` or `_SNORM`, BC5 `R8G8_UNORM` or `_SNORM`, BC6H
+`R16G16B16A16_SFLOAT`, R4G4 `R8G8_UNORM`. Image format queries answer for the
+stand-in, with one sample; `textureCompressionBC` stays the Switch's and is
+not enabled on the host.
+
+`vk_image.c` creates an optimal-tiling image of such a format in its
+stand-in (linear images keep their format) and views of it in the stand-in
+of the view's format. The guest's memory requirements are those of the
+compressed texels; the host image gets its own allocation at bind time, freed
+with the image, so the guest's allocation goes unused. A copy from a buffer to
+such an image (`vkCmdCopyBufferToImage` and its `2` form) is recorded as a
+copy from a host-visible staging buffer the layer owns, and at each
+`vkQueueSubmit` or `vkQueueSubmit2` of the command buffer (or of a primary
+that executes it) the region is decoded with bcdec (`bcdec.c`, MIT, see
+`NOTICE`) from the guest buffer's bytes into the staging buffer: through the
+guest's mapping of its memory, or a host mapping of host-visible memory the
+guest has not mapped. A buffer in device-only memory cannot be read and its
+region is left undecoded, with a log line. Image-to-image copies between two
+such images copy the stand-in texels (the extent clipped to the mip level);
+copies from one to a buffer would need an encoder and are dropped with a log
+line, as are copies between such an image and one of another format. Clears
+and blits to compressed images are not allowed by Vulkan.
+
+The `vk.decode_bc` setting (`RELIFT_VK_DECODE_BC`) chooses: `auto` decodes the
+formats the host cannot sample (or every BC format on a host without
+`textureCompressionBC`), `on` every BC format (to run the path on any GPU),
+`off` none. With `stats.every` set, a `stats` line every that many presents
+gives the bytes decoded and the CPU time spent, and the host bytes of the
+stand-in images against the guest's.
+
 ## Attachment load and store ops
 
 The console's driver leaves an attachment's memory alone for
@@ -371,7 +408,12 @@ headless swapchain with a present and a host resize that recreates the host
 swapchain behind the guest's, bad handles and unknown structs, and the Switch's
 properties on a fake host (the real driver with the Switch's limits, then made
 smaller or larger, or with a feature taken away): which values the guest
-sees, which calls fail and when `vkCreateDevice` does. With no
+sees, which calls fail and when `vkCreateDevice` does. The decoded formats
+have decoder vectors (BC1, BC3, BC4, BC5, BC7 and R4G4 blocks against known
+texels), a BC1 and a BC7 upload with `vk.decode_bc` on whose bytes are written
+after recording and read back from the host images (also after an image copy),
+the format and image queries with `vk.decode_bc` off and on, and a fake host
+with no BC features that still shows the Switch's. With no
 host Vulkan the tests are skipped unless `RELIFT_VK_REQUIRE` is set; CI sets it
 on Linux, where it installs Mesa's lavapipe. `RELIFT_VK_DEVICE` picks the
 device they run on.

@@ -96,6 +96,9 @@ struct vkf_inst {
     void *physical;
 };
 
+/** @brief Number of formats the layer can decode: R4G4 and BC1 to BC7. */
+#define VKF_DECODE_FORMATS 17
+
 /** @brief Per-device state. */
 struct vkf_dev {
     /** @brief Host device functions. */
@@ -144,10 +147,78 @@ struct vkf_dev {
     pthread_mutex_t wrap_lock;
     /** @brief Attachment DONT_CARE load and store ops reach the host as LOAD and STORE (vk_pass.c). */
     bool keep_attachments;
+    /** @brief The host format of each format the layer can decode (vkf_decode_index), the format itself when the host takes it. */
+    VkFormat decode_host[VKF_DECODE_FORMATS];
+    /** @brief Some format is decoded: images, uploads and buffer bindings are tracked (vk_image.c). */
+    bool decoding;
+    /** @brief Images in a decoded format (vkf_image *), keyed by VkImage. */
+    struct vkf_map *images;
+    /** @brief Upload records of command buffers that copy to those images, keyed by host VkCommandBuffer. */
+    struct vkf_map *uploads;
+    /** @brief Memory and offset each buffer is bound to, keyed by VkBuffer. */
+    struct vkf_map *buffers;
+    /** @brief Protects images, uploads and buffers. */
+    pthread_mutex_t decode_lock;
 };
 
 /** @brief Choices of the vk.keep_attachments setting, as rl_setting_enum returns them. */
 enum { RL_VK_KEEP_AUTO, RL_VK_KEEP_ON, RL_VK_KEEP_OFF };
+
+/** @brief Choices of the vk.decode_bc setting, as rl_setting_enum returns them. */
+enum { RL_VK_DECODE_AUTO, RL_VK_DECODE_ON, RL_VK_DECODE_OFF };
+
+/** @brief A format whose images the host may get in another format, with uploads decoded on the CPU (vk_decode.c). */
+typedef struct vkf_decode_format {
+    /** @brief The guest's format. */
+    VkFormat format;
+    /** @brief The host format its images use instead. */
+    VkFormat host;
+    /** @brief Texels per block across and down, bytes per block, host bytes per texel. */
+    uint8_t block_w, block_h, block_bytes, texel_bytes;
+    /** @brief The decoder. */
+    uint8_t kind;
+} vkf_decode_format;
+
+/** @brief Index of a format among the decodable ones, -1 for another. */
+int vkf_decode_index(VkFormat f);
+/** @brief The decodable format f, NULL for another. */
+const vkf_decode_format *vkf_decode_format_of(VkFormat f);
+/** @brief The vk.decode_bc setting. */
+uint32_t vkf_decode_mode(void);
+/** @brief The format the host makes optimal images of guest format f in: a substitute when the layer decodes f there. */
+VkFormat vkf_decode_host_format(const vkf_fns *fns, VkPhysicalDevice pd, VkFormat f);
+/** @brief Decides for a new device which formats it decodes (decode_host, decoding). */
+void vkf_decode_device_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd);
+/** @brief The decoded format f is on the device, NULL when the host takes f itself. */
+const vkf_decode_format *vkf_decode_for(const vkf_dev *d, VkFormat f);
+/** @brief Decodes one block into texels, rows 4 * texel_bytes apart. */
+void vkf_decode_block(const vkf_decode_format *f, const uint8_t *src, uint8_t *out);
+/** @brief Decodes w x h texels of each of slices slices; dst is tightly packed. */
+void vkf_decode_region(const vkf_decode_format *f, const uint8_t *src, uint64_t row_pitch, uint64_t slice_pitch, uint32_t w,
+                       uint32_t h, uint32_t slices, uint8_t *dst);
+/** @brief Adds a decoded region to the stats. */
+void vkf_decode_note(uint64_t src_bytes, uint64_t out_bytes, uint64_t ns);
+/** @brief Adds images in a host format (negative when they go) to the stats. */
+void vkf_decode_note_image(int64_t count, int64_t host_bytes, int64_t guest_bytes);
+/** @brief Logs the decode stats every stats.every presents while something was decoded. */
+void vkf_decode_stats_frame(uint64_t frame);
+/** @brief Logs the decode stats once at the end, when anything was decoded. */
+void vkf_decode_stats_exit(void);
+
+/** @brief Turns on for the host the device features the layer stands in for (textureCompressionBC when decoding BC). */
+void vkf_decode_device_features(vkf_call *k, VkPhysicalDevice pd, VkDeviceCreateInfo *ci);
+/** @brief Destroys the upload staging and the host memory of decoded images of a device (before the host device goes). */
+void vkf_image_device_teardown(const vkf_fns *fns, void *dev, vkf_dev *d);
+/** @brief Decodes the uploads of command buffers that a submit is about to run. */
+void vkf_decode_uploads(vkf_call *k, VkDevice dev, const VkCommandBuffer *cbs, uint32_t n);
+/** @brief Releases the upload records of a command buffer that is reset or freed. */
+void vkf_decode_cb_reset(const vkf_fns *fns, void *dev, vkf_dev *d, void *cb, bool freed);
+/** @brief Bytes of guest memory at offset off of a VkDeviceMemory; *unmap set when the layer mapped it for the caller. */
+const uint8_t *vkf_mem_bytes(vkf_call *k, VkDevice dev, uint64_t memory, uint64_t off, uint64_t size, bool *unmap);
+/** @brief Ends vkf_mem_bytes. */
+void vkf_mem_bytes_done(vkf_call *k, VkDevice dev, uint64_t memory, bool unmap);
+/** @brief Fails a vkCreateImage past a host limit below the Switch's (vk_props.c). */
+VkResult vkf_check_image(vkf_call *k);
 
 /** @brief Whether a device of this PCI vendor gets DONT_CARE attachment ops as LOAD and STORE (vk.keep_attachments). */
 bool vkf_keep_attachments(uint32_t vendor);

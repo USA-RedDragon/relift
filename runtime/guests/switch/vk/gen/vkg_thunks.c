@@ -15,6 +15,7 @@ static int vkt_vkBindBufferMemory(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkBindBufferMemory);
     VkResult r = fn(a0, a1, a2, a3);
+    vkf_buffer_bound(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -32,41 +33,7 @@ static int vkt_vkBindBufferMemory2(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkBindBufferMemory2);
     VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkBindImageMemory(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkBindImageMemory, c->x[0]);
-    VkImage a1 = (VkImage)(uintptr_t)(c->x[1]);
-    VkDeviceMemory a2 = (VkDeviceMemory)(uintptr_t)(c->x[2]);
-    VkDeviceSize a3 = (VkDeviceSize)(c->x[3]);
-    PFN_vkBindImageMemory fn = (PFN_vkBindImageMemory)k.fns->f[VKG_vkBindImageMemory];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkBindImageMemory);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkBindImageMemory2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkBindImageMemory2, c->x[0]);
-    uint32_t a1 = (uint32_t)(c->x[1]);
-    const VkBindImageMemoryInfo * a2 = vkg_ain_VkBindImageMemoryInfo(&k, c->x[2], a1);
-    PFN_vkBindImageMemory2 fn = (PFN_vkBindImageMemory2)k.fns->f[VKG_vkBindImageMemory2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkBindImageMemory2);
-    VkResult r = fn(a0, a1, a2);
+    vkf_buffers_bound(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -348,109 +315,6 @@ static int vkt_vkCmdCopyBuffer2(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCmdCopyBuffer2 fn = (PFN_vkCmdCopyBuffer2)k.fns->f[VKG_vkCmdCopyBuffer2];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdCopyBuffer2);
-    fn(a0, a1);
-    return vkf_end(&k);
-}
-
-static int vkt_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdCopyBufferToImage, c->x[0]);
-    VkBuffer a1 = (VkBuffer)(uintptr_t)(c->x[1]);
-    VkImage a2 = (VkImage)(uintptr_t)(c->x[2]);
-    VkImageLayout a3 = (VkImageLayout)(uint32_t)(c->x[3]);
-    uint32_t a4 = (uint32_t)(c->x[4]);
-    const VkBufferImageCopy * a5 = (const VkBufferImageCopy *)vkf_ptr(&k, c->x[5]);
-    PFN_vkCmdCopyBufferToImage fn = (PFN_vkCmdCopyBufferToImage)k.fns->f[VKG_vkCmdCopyBufferToImage];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdCopyBufferToImage);
-    fn(a0, a1, a2, a3, a4, a5);
-    return vkf_end(&k);
-}
-
-static int vkt_vkCmdCopyBufferToImage2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdCopyBufferToImage2, c->x[0]);
-    const VkCopyBufferToImageInfo2 * a1 = vkg_ain_VkCopyBufferToImageInfo2(&k, c->x[1], 1);
-    PFN_vkCmdCopyBufferToImage2 fn = (PFN_vkCmdCopyBufferToImage2)k.fns->f[VKG_vkCmdCopyBufferToImage2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdCopyBufferToImage2);
-    fn(a0, a1);
-    return vkf_end(&k);
-}
-
-static int vkt_vkCmdCopyImage(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdCopyImage, c->x[0]);
-    VkImage a1 = (VkImage)(uintptr_t)(c->x[1]);
-    VkImageLayout a2 = (VkImageLayout)(uint32_t)(c->x[2]);
-    VkImage a3 = (VkImage)(uintptr_t)(c->x[3]);
-    VkImageLayout a4 = (VkImageLayout)(uint32_t)(c->x[4]);
-    uint32_t a5 = (uint32_t)(c->x[5]);
-    const VkImageCopy * a6 = (const VkImageCopy *)vkf_ptr(&k, c->x[6]);
-    PFN_vkCmdCopyImage fn = (PFN_vkCmdCopyImage)k.fns->f[VKG_vkCmdCopyImage];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdCopyImage);
-    fn(a0, a1, a2, a3, a4, a5, a6);
-    return vkf_end(&k);
-}
-
-static int vkt_vkCmdCopyImage2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdCopyImage2, c->x[0]);
-    const VkCopyImageInfo2 * a1 = vkg_ain_VkCopyImageInfo2(&k, c->x[1], 1);
-    PFN_vkCmdCopyImage2 fn = (PFN_vkCmdCopyImage2)k.fns->f[VKG_vkCmdCopyImage2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdCopyImage2);
-    fn(a0, a1);
-    return vkf_end(&k);
-}
-
-static int vkt_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdCopyImageToBuffer, c->x[0]);
-    VkImage a1 = (VkImage)(uintptr_t)(c->x[1]);
-    VkImageLayout a2 = (VkImageLayout)(uint32_t)(c->x[2]);
-    VkBuffer a3 = (VkBuffer)(uintptr_t)(c->x[3]);
-    uint32_t a4 = (uint32_t)(c->x[4]);
-    const VkBufferImageCopy * a5 = (const VkBufferImageCopy *)vkf_ptr(&k, c->x[5]);
-    PFN_vkCmdCopyImageToBuffer fn = (PFN_vkCmdCopyImageToBuffer)k.fns->f[VKG_vkCmdCopyImageToBuffer];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdCopyImageToBuffer);
-    fn(a0, a1, a2, a3, a4, a5);
-    return vkf_end(&k);
-}
-
-static int vkt_vkCmdCopyImageToBuffer2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdCopyImageToBuffer2, c->x[0]);
-    const VkCopyImageToBufferInfo2 * a1 = vkg_ain_VkCopyImageToBufferInfo2(&k, c->x[1], 1);
-    PFN_vkCmdCopyImageToBuffer2 fn = (PFN_vkCmdCopyImageToBuffer2)k.fns->f[VKG_vkCmdCopyImageToBuffer2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdCopyImageToBuffer2);
     fn(a0, a1);
     return vkf_end(&k);
 }
@@ -772,6 +636,7 @@ static int vkt_vkCmdExecuteCommands(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCmdExecuteCommands);
     fn(a0, a1, a2);
+    vkf_note_execute(&k);
     return vkf_end(&k);
 }
 
@@ -1763,47 +1628,6 @@ static int vkt_vkCreateGraphicsPipelines(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCreateImage, c->x[0]);
-    const VkImageCreateInfo * a1 = vkg_ain_VkImageCreateInfo(&k, c->x[1], 1);
-    const VkAllocationCallbacks * a2 = NULL;
-    VkImage * a3 = (VkImage *)vkf_ptr(&k, c->x[3]);
-    PFN_vkCreateImage fn = (PFN_vkCreateImage)k.fns->f[VKG_vkCreateImage];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCreateImage);
-    VkResult checked = vkf_check_image(&k);
-    if (checked < 0) {
-        c->x[0] = (uint32_t)checked;
-        return vkf_end(&k);
-    }
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkCreateImageView(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCreateImageView, c->x[0]);
-    const VkImageViewCreateInfo * a1 = vkg_ain_VkImageViewCreateInfo(&k, c->x[1], 1);
-    const VkAllocationCallbacks * a2 = NULL;
-    VkImageView * a3 = (VkImageView *)vkf_ptr(&k, c->x[3]);
-    PFN_vkCreateImageView fn = (PFN_vkCreateImageView)k.fns->f[VKG_vkCreateImageView];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCreateImageView);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
 static int vkt_vkCreatePipelineCache(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -2019,6 +1843,7 @@ static int vkt_vkDestroyBuffer(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDestroyBuffer);
     fn(a0, a1, a2);
+    vkf_buffer_destroyed(&k);
     return vkf_end(&k);
 }
 
@@ -2132,6 +1957,7 @@ static int vkt_vkDestroyImage(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDestroyImage);
     fn(a0, a1, a2);
+    vkf_image_destroyed(&k);
     return vkf_end(&k);
 }
 
@@ -2664,7 +2490,7 @@ static int vkt_vkGetImageMemoryRequirements(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetImageMemoryRequirements);
     fn(a0, a1, a2);
-    vkf_mem_reqs_out(&k);
+    vkf_image_reqs_out(&k);
     return vkf_end(&k);
 }
 
@@ -2686,7 +2512,7 @@ static int vkt_vkGetImageMemoryRequirements2(rl_ctx *restrict c, uint8_t *mem)
         uint64_t w2 = 1;
         vkg_aout_VkMemoryRequirements2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
     }
-    vkf_mem_reqs2_out(&k);
+    vkf_image_reqs2_out(&k);
     return vkf_end(&k);
 }
 
@@ -3142,6 +2968,7 @@ static int vkt_vkResetCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkResetCommandBuffer);
     VkResult r = fn(a0, a1);
+    vkf_cb_reset_hook(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -3159,6 +2986,7 @@ static int vkt_vkResetCommandPool(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkResetCommandPool);
     VkResult r = fn(a0, a1, a2);
+    vkf_pool_reset_hook(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -4086,8 +3914,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkh_vkBeginCommandBuffer,
     vkt_vkBindBufferMemory,
     vkt_vkBindBufferMemory2,
-    vkt_vkBindImageMemory,
-    vkt_vkBindImageMemory2,
+    vkh_vkBindImageMemory,
+    vkh_vkBindImageMemory2,
     vkt_vkCmdBeginDebugUtilsLabelEXT,
     vkt_vkCmdBeginQuery,
     vkt_vkCmdBeginRenderPass,
@@ -4105,12 +3933,12 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCmdClearDepthStencilImage,
     vkt_vkCmdCopyBuffer,
     vkt_vkCmdCopyBuffer2,
-    vkt_vkCmdCopyBufferToImage,
-    vkt_vkCmdCopyBufferToImage2,
-    vkt_vkCmdCopyImage,
-    vkt_vkCmdCopyImage2,
-    vkt_vkCmdCopyImageToBuffer,
-    vkt_vkCmdCopyImageToBuffer2,
+    vkh_vkCmdCopyBufferToImage,
+    vkh_vkCmdCopyBufferToImage2,
+    vkh_vkCmdCopyImage,
+    vkh_vkCmdCopyImage2,
+    vkh_vkCmdCopyImageToBuffer,
+    vkh_vkCmdCopyImageToBuffer2,
     vkt_vkCmdCopyQueryPoolResults,
     vkt_vkCmdDebugMarkerBeginEXT,
     vkt_vkCmdDebugMarkerEndEXT,
@@ -4196,8 +4024,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCreateFramebuffer,
     vkt_vkCreateGraphicsPipelines,
     NULL,
-    vkt_vkCreateImage,
-    vkt_vkCreateImageView,
+    vkh_vkCreateImage,
+    vkh_vkCreateImageView,
     vkh_vkCreateInstance,
     vkt_vkCreatePipelineCache,
     vkt_vkCreatePipelineLayout,

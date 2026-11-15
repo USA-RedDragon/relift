@@ -87,6 +87,16 @@ hand_commands = [
     "vkFlushMappedMemoryRanges",
     "vkInvalidateMappedMemoryRanges",
     "vkCreateBuffer",
+    "vkCreateImage",
+    "vkBindImageMemory",
+    "vkBindImageMemory2",
+    "vkCreateImageView",
+    "vkCmdCopyBufferToImage",
+    "vkCmdCopyBufferToImage2",
+    "vkCmdCopyImage",
+    "vkCmdCopyImage2",
+    "vkCmdCopyImageToBuffer",
+    "vkCmdCopyImageToBuffer2",
     "vkCreateDescriptorPool",
     "vkDestroyDescriptorPool",
     "vkResetDescriptorPool",
@@ -147,17 +157,24 @@ vkQueueWaitIdle = "vkf_queue_wait_return"
 vkDeviceWaitIdle = "vkf_queue_wait_return"
 vkWaitSemaphores = "vkf_wait_pull_return"
 vkGetBufferMemoryRequirements = "vkf_mem_reqs_out"
-vkGetImageMemoryRequirements = "vkf_mem_reqs_out"
+vkGetImageMemoryRequirements = "vkf_image_reqs_out"
 vkGetBufferMemoryRequirements2 = "vkf_mem_reqs2_out"
-vkGetImageMemoryRequirements2 = "vkf_mem_reqs2_out"
+vkGetImageMemoryRequirements2 = "vkf_image_reqs2_out"
 vkGetDeviceBufferMemoryRequirements = "vkf_mem_reqs2_out"
 vkGetDeviceImageMemoryRequirements = "vkf_mem_reqs2_out"
 vkCreateDescriptorSetLayout = "vkf_note_set_layout"
 vkDestroyDescriptorSetLayout = "vkf_forget_set_layout"
+# Images in a decoded format and the uploads to them (vk_image.c).
+vkDestroyImage = "vkf_image_destroyed"
+vkBindBufferMemory = "vkf_buffer_bound"
+vkBindBufferMemory2 = "vkf_buffers_bound"
+vkDestroyBuffer = "vkf_buffer_destroyed"
+vkCmdExecuteCommands = "vkf_note_execute"
+vkResetCommandBuffer = "vkf_cb_reset_hook"
+vkResetCommandPool = "vkf_pool_reset_hook"
 
 # Fail a call that goes past a host limit below the Switch's (vk_props.c).
 [hooks.check]
 vkCreateDescriptorSetLayout = "vkf_check_set_layout"
 vkCreatePipelineLayout = "vkf_check_pipeline_layout"
-vkCreateImage = "vkf_check_image"
 vkCreateFramebuffer = "vkf_check_framebuffer"

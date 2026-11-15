@@ -400,6 +400,8 @@ static unsigned check_features(vkf_call *k, VkPhysicalDevice pd, const VkDeviceC
 {
     VkPhysicalDeviceFeatures have;
     VKF_FN(k->fns, vkGetPhysicalDeviceFeatures)(pd, &have);
+    if (vkf_decode_mode() != RL_VK_DECODE_OFF)
+        have.textureCompressionBC = VK_TRUE;
     unsigned m = 0;
     const uint32_t nf = sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32);
     if (ci->pEnabledFeatures)
@@ -625,6 +627,8 @@ static void features_of(vkf_call *k, VkPhysicalDevice pd, guest_features *g)
         VKF_FN(k->fns, vkGetPhysicalDeviceFeatures)(pd, &h.features);
     VkPhysicalDeviceProperties hp;
     VKF_FN(k->fns, vkGetPhysicalDeviceProperties)(pd, &hp);
+    if (vkf_decode_mode() != RL_VK_DECODE_OFF)
+        h.features.textureCompressionBC = VK_TRUE;
     g->core = vkf_switch.features;
     and_bools((VkBool32 *)&g->core, (const VkBool32 *)&h.features, sizeof g->core / sizeof(VkBool32), hp.deviceName,
               feature_names, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
@@ -694,13 +698,25 @@ int vkh_vkGetPhysicalDeviceMemoryProperties2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-/** @brief The Switch's features of a format that the host also has. */
+/**
+ * @brief The Switch's features of a format that the host also has; for a
+ * format the layer decodes, the optimal-tiling ones the host has for the
+ * format its images use instead.
+ */
 static VkFormatProperties guest_format(vkf_call *k, VkPhysicalDevice pd, VkFormat format)
 {
     VkFormatProperties s = vkf_switch_format_props(format);
     VkFormatProperties h = { 0 };
-    if (s.linearTilingFeatures || s.optimalTilingFeatures || s.bufferFeatures)
-        VKF_FN(k->fns, vkGetPhysicalDeviceFormatProperties)(pd, vkf_host_format(k->fns, pd, format), &h);
+    if (s.linearTilingFeatures || s.optimalTilingFeatures || s.bufferFeatures) {
+        PFN_vkGetPhysicalDeviceFormatProperties fp = VKF_FN(k->fns, vkGetPhysicalDeviceFormatProperties);
+        VkFormat sub = vkf_decode_host_format(k->fns, pd, format);
+        fp(pd, sub == format ? vkf_host_format(k->fns, pd, format) : format, &h);
+        if (sub != format) {
+            VkFormatProperties o = { 0 };
+            fp(pd, sub, &o);
+            h.optimalTilingFeatures = o.optimalTilingFeatures;
+        }
+    }
     VkFormatProperties g = {
         .linearTilingFeatures = s.linearTilingFeatures & h.linearTilingFeatures,
         .optimalTilingFeatures = s.optimalTilingFeatures & h.optimalTilingFeatures,
@@ -737,8 +753,8 @@ int vkh_vkGetPhysicalDeviceFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-/** @brief Limits host image format properties to what the Switch allows for that image type. */
-static void clamp_image_format(VkImageFormatProperties *p, VkImageType type)
+/** @brief Limits host image format properties to what the Switch allows for that image type (one sample for a decoded format). */
+static void clamp_image_format(VkImageFormatProperties *p, VkImageType type, bool decoded)
 {
     const VkPhysicalDeviceLimits *s = &vkf_switch.props.limits;
     uint32_t dim = type == VK_IMAGE_TYPE_1D ? s->maxImageDimension1D
@@ -752,8 +768,18 @@ static void clamp_image_format(VkImageFormatProperties *p, VkImageType type)
         p->maxArrayLayers = s->maxImageArrayLayers;
     p->sampleCounts &= s->framebufferColorSampleCounts | s->framebufferDepthSampleCounts | s->sampledImageColorSampleCounts |
                        s->sampledImageDepthSampleCounts | s->storageImageSampleCounts;
-    if (!p->sampleCounts)
+    if (!p->sampleCounts || decoded)
         p->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+}
+
+/** @brief The format and flags the host is asked about for an image of the guest's. */
+static VkFormat image_host_format(vkf_call *k, VkPhysicalDevice pd, VkFormat format, VkImageTiling tiling, VkImageCreateFlags *flags)
+{
+    VkFormat sub = tiling == VK_IMAGE_TILING_OPTIMAL ? vkf_decode_host_format(k->fns, pd, format) : format;
+    if (sub == format)
+        return vkf_host_format(k->fns, pd, format);
+    *flags &= ~(VkImageCreateFlags)VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
+    return sub;
 }
 
 static bool switch_has(VkFormat format, VkImageTiling tiling)
@@ -774,11 +800,15 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *me
     VkImageTiling tiling = (VkImageTiling)(uint32_t)c->x[3];
     VkImageFormatProperties p = { 0 };
     VkResult r = VK_ERROR_FORMAT_NOT_SUPPORTED;
-    if (switch_has(format, tiling))
-        r = VKF_FN(k.fns, vkGetPhysicalDeviceImageFormatProperties)(pd, vkf_host_format(k.fns, pd, format), type, tiling,
-                                                                     (VkImageUsageFlags)c->x[4], (VkImageCreateFlags)c->x[5], &p);
+    bool decoded = false;
+    if (switch_has(format, tiling)) {
+        VkImageCreateFlags flags = (VkImageCreateFlags)c->x[5];
+        VkFormat hf = image_host_format(&k, pd, format, tiling, &flags);
+        decoded = vkf_decode_format_of(format) && hf != format;
+        r = VKF_FN(k.fns, vkGetPhysicalDeviceImageFormatProperties)(pd, hf, type, tiling, (VkImageUsageFlags)c->x[4], flags, &p);
+    }
     if (r >= 0)
-        clamp_image_format(&p, type);
+        clamp_image_format(&p, type, decoded);
     if (c->x[6])
         memcpy(mem + c->x[6], &p, sizeof p);
     c->x[0] = (uint32_t)r;
@@ -798,13 +828,19 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *m
     VkPhysicalDeviceImageFormatInfo2 *info = vkg_ain_VkPhysicalDeviceImageFormatInfo2(&k, c->x[1], 1);
     VkImageFormatProperties2 *out = vkg_ain_VkImageFormatProperties2(&k, c->x[2], 1);
     VkResult r = VK_ERROR_FORMAT_NOT_SUPPORTED;
+    bool decoded = false;
     if (info && out && switch_has(info->format, info->tiling)) {
-        info->format = vkf_host_format(k.fns, pd, info->format);
+        VkFormat guest = info->format;
+        VkImageCreateFlags flags = info->flags;
+        info->format = image_host_format(&k, pd, guest, info->tiling, &info->flags);
+        decoded = vkf_decode_format_of(guest) && info->format != guest;
         r = f(pd, info, out);
+        info->format = guest;
+        info->flags = flags;
     }
     if (out) {
         if (r >= 0)
-            clamp_image_format(&out->imageFormatProperties, info->type);
+            clamp_image_format(&out->imageFormatProperties, info->type, decoded);
         else
             memset(&out->imageFormatProperties, 0, sizeof out->imageFormatProperties);
         vkg_aout_VkImageFormatProperties2(&k, c->x[2], out, 1);

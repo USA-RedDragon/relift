@@ -503,6 +503,7 @@ void rl_vk_shutdown(void)
     }
     pthread_mutex_unlock(&vkf.lock);
     vkf_cb_release(0);
+    vkf_decode_stats_exit();
     g_ready = false;
 }
 
@@ -826,6 +827,14 @@ int vkh_vkDestroyInstance(rl_ctx *restrict c, uint8_t *mem)
 }
 
 
+static void free_decode_maps(vkf_dev *d)
+{
+    vkf_map_free(d->images);
+    vkf_map_free(d->uploads);
+    vkf_map_free(d->buffers);
+    pthread_mutex_destroy(&d->decode_lock);
+}
+
 int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -850,11 +859,16 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     d->dpools = vkf_map_new();
     pthread_mutex_init(&d->wrap_lock, NULL);
     d->wraps = vkf_map_new();
+    pthread_mutex_init(&d->decode_lock, NULL);
+    d->images = vkf_map_new();
+    d->uploads = vkf_map_new();
+    d->buffers = vkf_map_new();
     const char **extra = NULL;
     uint32_t n_extra = 0;
     void *chain = NULL;
     VkResult r = vkf_props_device_check(&k, pd, ci, d);
     if (r < 0) {
+        free_decode_maps(d);
         vkf_map_free(d->mems);
         pthread_mutex_destroy(&d->queue_lock);
         pthread_mutex_destroy(&d->lock);
@@ -864,6 +878,8 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     }
     vkf_mem_types_setup(&k, d, pd);
     vkf_mem_device_setup(&k, d, pd, &extra, &n_extra, &chain);
+    vkf_decode_device_setup(&k, d, pd);
+    vkf_decode_device_features(&k, pd, ci);
     const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_extra + 2) * sizeof *exts);
     uint32_t n = 0;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++)
@@ -891,6 +907,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     if (r >= 0)
         r = VKF_FN(k.fns, vkCreateDevice)(pd, ci, NULL, &dev);
     if (r < 0) {
+        free_decode_maps(d);
         vkf_map_free(d->wraps);
         pthread_mutex_destroy(&d->wrap_lock);
         vkf_map_free(d->dpools);
@@ -931,11 +948,13 @@ int vkh_vkDestroyDevice(rl_ctx *restrict c, uint8_t *mem)
     vkf_swap_device_teardown(o);
     vkf_desc_device_teardown(&k, d, dev);
     vkf_wrap_device_teardown(k.fns, dev, d);
+    vkf_image_device_teardown(k.fns, dev, d);
     VKF_FN(k.fns, vkDestroyDevice)(dev, NULL);
     vkf_mem_device_teardown(d);
     vkf_obj_remove_children(o);
     vkf_obj_remove(o);
     vkf_map_free(d->mems);
+    free_decode_maps(d);
     pthread_mutex_destroy(&d->wrap_lock);
     pthread_mutex_destroy(&d->dpool_lock);
     pthread_mutex_destroy(&d->queue_lock);
@@ -984,6 +1003,8 @@ int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
     VKF_FN(k.fns, vkFreeCommandBuffers)(dev, pool, n, h);
     for (uint32_t i = 0; g && i < n; i++) {
         vkf_obj *o = vkf_obj_of(vkf_g64(&k, g + 8u * i), VKG_KIND_VkCommandBuffer);
+        if (o)
+            vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->host, true);
         if (o && o->secondary)
             vkf_wrap_drop(k.fns, dev, k.obj->dev, o->host);
         vkf_obj_remove(o);
@@ -1005,6 +1026,7 @@ int vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem)
         for (uint32_t s = 0; s < g_next_slot; s++) {
             vkf_obj *o = g_slots[s / CHUNK_SLOTS] ? g_slots[s / CHUNK_SLOTS][s % CHUNK_SLOTS] : NULL;
             if (o && o->kind == VKG_KIND_VkCommandBuffer && o->pool == pool && o->parent == k.obj) {
+                vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->host, true);
                 if (o->secondary)
                     vkf_wrap_drop(k.fns, dev, k.obj->dev, o->host);
                 remove_locked(o);
