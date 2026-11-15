@@ -286,7 +286,11 @@ typedef struct open_req {
 static void do_open(void *p)
 {
     open_req *r = p;
-    SDL_Window *sw = SDL_CreateWindow(r->title, (int)r->width, (int)r->height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
+#ifdef __ANDROID__
+    flags |= SDL_WINDOW_FULLSCREEN;
+#endif
+    SDL_Window *sw = SDL_CreateWindow(r->title, (int)r->width, (int)r->height, flags);
     if (!sw) {
         rl_log(RL_LOG_ERROR, "window", "SDL could not open a window: %s", SDL_GetError());
         return;
