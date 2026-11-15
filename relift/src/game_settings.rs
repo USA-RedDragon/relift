@@ -137,6 +137,15 @@ pub fn runtime_settings() -> Vec<Setting> {
                 choices: ["auto", "on", "off"].map(String::from).into(),
             },
         ),
+        s(
+            "kernel.layout",
+            "Address space layout",
+            "compact: the regions the game uses packed at the lowest bases, so less host address space is reserved; console: the console's exact region sizes",
+            Value::String("compact".into()),
+            SettingKind::Enum {
+                choices: ["compact", "console"].map(String::from).into(),
+            },
+        ),
     ]
 }
 
@@ -807,7 +816,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 11);
+        assert_eq!(section(Vec::new()).runtime.len(), 12);
     }
 
     #[test]

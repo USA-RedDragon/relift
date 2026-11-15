@@ -6,9 +6,13 @@
  * cache svcs.
  */
 #include "t.h"
+#include "services.h"
+
+#include <relift/settings.h>
 
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 
 /** @brief svcQueryMemory output. */
 typedef struct t_meminfo {
@@ -405,12 +409,93 @@ TEST(get_info_regions)
     CHECK_EQ(t_svc(c, SVC_GET_INFO, 0, 999, 0, 0, 0, 0), KR_INVALID_ENUM_VALUE);
 }
 
-TEST(layout_36_bit)
+static rl_ctx *boot_layout(uint32_t type, const char *layout)
+{
+    rl_switch_declare_settings();
+    if (rl_settings_set("kernel.layout", layout) != RL_SETTING_OK)
+        return NULL;
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    cfg.address_space_type = type;
+    return t_boot(&cfg);
+}
+
+static uint64_t info(rl_ctx *c, uint32_t id)
+{
+    return t_svc(c, SVC_GET_INFO, 0, id, HOS_CUR_PROCESS, 0, 0, 0) == 0 ? c->x[1] : UINT64_MAX;
+}
+
+static void compact_agrees(uint32_t type, uint64_t want_end)
+{
+    rl_ctx *c = boot_layout(type, "compact");
+    CHECK(c && hos.compact);
+    uint64_t as = info(c, 12), as_size = info(c, 13);
+    CHECK_EQ(as, hos.lay.code_start);
+    CHECK_EQ(as + as_size, want_end);
+    CHECK_EQ(hos.vm.size, want_end);
+    uint64_t regions[3][2] = { { info(c, 2), info(c, 3) }, { info(c, 4), info(c, 5) }, { info(c, 14), info(c, 15) } };
+    CHECK(regions[0][1] >= regions[1][1]);
+    for (int i = 0; i < 3; i++)
+        CHECK(regions[i][0] >= as && regions[i][0] + regions[i][1] <= as + as_size);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap);
+    t_meminfo mi = query(c, heap, want_end);
+    CHECK_EQ(mi.addr, want_end);
+    CHECK_EQ(mi.type, MS_INACCESSIBLE & 0xFF);
+    mi = query(c, heap, want_end - 0x1000);
+    CHECK_EQ(mi.type, 0);
+    CHECK_EQ(mi.addr + mi.size, want_end);
+    CHECK(hos.layout_use.region_info > 0);
+    CHECK(hos.layout_use.near_end > 0);
+    uint64_t at = 0;
+    while (rl_hos_reserve(1ull << 30, 0x200000, &at) == KR_SUCCESS)
+        CHECK(at + (1ull << 30) <= want_end);
+}
+
+TEST(compact_layout_36_bit_agrees)
+{
+    compact_agrees(1, 0x380000000ull + (4ull << 30));
+}
+
+TEST(compact_layout_39_bit_agrees)
 {
     rl_hos_config cfg;
     rl_hos_default_config(&cfg);
+    uint64_t code_end = (cfg.code_start + cfg.code_size + 0x1FFFFF) & ~0x1FFFFFull;
+    compact_agrees(3, code_end + 0x180000000ull * 2 + 0x80000000ull * 2 + (16ull << 30));
+}
+
+TEST(console_layout_keeps_the_console_regions)
+{
+    rl_ctx *c = boot_layout(3, "console");
+    CHECK(c && !hos.compact);
+    CHECK_EQ(hos.vm.size, 1ull << 39);
+    CHECK_EQ(info(c, 13), 0x7ff8000000ull);
+    CHECK_EQ(info(c, 3), 0x1000000000ull);
+    CHECK_EQ(hos.layout_use.region_info, 0);
+}
+
+#if defined(__linux__)
+TEST(compact_layout_fails_at_boot_when_the_host_cannot_reserve_it)
+{
+    rl_switch_declare_settings();
+    CHECK_EQ(rl_settings_set("kernel.layout", "compact"), RL_SETTING_OK);
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
     cfg.address_space_type = 1;
-    rl_ctx *c = t_boot(&cfg);
+    struct rlimit old;
+    CHECK_EQ(getrlimit(RLIMIT_AS, &old), 0);
+    struct rlimit tight = { 8ull << 30, old.rlim_max };
+    CHECK_EQ(setrlimit(RLIMIT_AS, &tight), 0);
+    int rc = rl_hos_init(&cfg);
+    CHECK_EQ(setrlimit(RLIMIT_AS, &old), 0);
+    CHECK_EQ(rc, -1);
+}
+#endif
+
+TEST(layout_36_bit)
+{
+    rl_ctx *c = boot_layout(1, "console");
     CHECK_EQ(hos.vm.size, 1ull << 36);
     CHECK_EQ(t_svc(c, SVC_GET_INFO, 0, 4, HOS_CUR_PROCESS, 0, 0, 0), 0);
     CHECK(c->x[1] + 0x180000000ull <= 1ull << 36);

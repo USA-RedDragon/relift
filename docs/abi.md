@@ -112,8 +112,8 @@ Prototype names used in the tags:
 - **Accesses.** Plain loads and stores go through `rl_ld*`/`rl_st*`, which
   are `memcpy` of the access size, so any alignment works. [verified: slice
   prototype, 40,000 inputs including misaligned ones]
-- **Reservation.** The runtime reserves the guest space (2^39 on desktop;
-  smaller on Android) `PROT_NONE` with
+- **Reservation.** The runtime reserves the guest space up to the end of
+  the Switch layout's last region (below) `PROT_NONE` with
   `MAP_NORESERVE`, plus a 1 MiB guard below the base and a 4 GiB guard above
   it. The low guard covers null pointer plus immediate offset (imm9 and LDP
   imm7 reach -1024; LDR unsigned offsets are positive). The high guard
@@ -121,6 +121,32 @@ Prototype names used in the tags:
   beyond both guards is a wild pointer that would fault on Horizon too; here
   it may hit host memory. No masking: masking costs 1.2x to 2.5x.
   [verified cost: memory prototype; guard sizes inferred]
+- **Compact layout (`kernel.layout`, default `compact`).** relift is the
+  kernel, so it places the regions of the NPDM's address space type at the
+  lowest bases the console's kernel uses and ends the address space after
+  the last one. GetInfo 12/13 (AddressSpace), 2-5 (Alias, Heap), 14/15
+  (Stack) and QueryMemory report exactly that, and everything above the end
+  is Inaccessible, so every address a game is told it may use is backed.
+  Sizes, and why a game cannot tell them from the console's:
+  - 36-bit: code 0x8000000-0x80000000, alias and heap 6 GiB each after it
+    (the console's sizes and places), stack and TLS/IO inside the code
+    region (as on the console), AddressSpace ends 4 GiB after the heap
+    (0x480000000, 18 GiB) for the windows the runtime maps (Vulkan) and the
+    game's own maps. The console's region is 0xff8000000 long; a game learns
+    the size only from GetInfo 13 and QueryMemory, which agree.
+  - 39-bit: code where the NPDM puts it, then alias 6 GiB (the console uses
+    64 GiB; the alias region only takes MapMemory copies of heap, whose
+    region is 6 GiB, so 6 GiB covers all a game can map there), heap 6 GiB,
+    stack 2 GiB and TLS/IO 2 GiB (the console uses 64 GiB; TLS/IO holds
+    thread-local pages and IO mappings, megabytes in practice), then 16 GiB
+    of AddressSpace for maps. Base placement is the console's without ASLR;
+    the console randomizes it, so games cannot depend on exact bases.
+  The reservation for the default 39-bit layout falls from 512 GiB to about
+  36 GiB; a host that cannot reserve it fails at boot with the size it
+  needs. Boot logs the layout; at exit the `stats` line counts the region
+  GetInfo calls and the maps and queries within 1 GiB of the end, so a game
+  that depends on the region sizes shows up. `console` keeps the console's
+  sizes (2^39 or 2^36) for the check flow.
 - **Faults.** The runtime catches SIGSEGV and SIGBUS (macOS arm64 raises
   SIGBUS for `PROT_NONE`). A fault address inside the reservation is a guest
   fault at `si_addr - mem`. [verified: placement prototype]

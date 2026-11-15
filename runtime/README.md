@@ -149,7 +149,8 @@ rule must match its own sample, and the denylist must hit files there.
 Run-time settings are typed keys declared with `rl_settings_declare`
 (`core/include/relift/settings.h`): bool, int and float with a range and a
 step, enum, string and key binding. The runtime declares `video`; the Switch
-layer declares `save.dir`, `vk.device` and `vk.keep_attachments`; the Game
+layer declares `save.dir`, `vk.device`, `vk.keep_attachments` and
+`kernel.layout`; the Game
 Boy layer declares `video.gb_color_correction`; a game adds its own from the
 `[settings]` tables of game.toml. Precedence, last wins:
 
@@ -183,6 +184,7 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_GB_COLOR_CORRECTION=on\|off` | The `video.gb_color_correction` setting (Game Boy). On (default): the colours the way the console's LCD shows them. Off: the plain expansion of the 5-bit channels, which is what the reference images of the test ROMs use |
 | `RELIFT_VK_DEVICE=<name part>` | The `vk.device` setting. Host physical device the guest sees (default: the first that has graphics and compute and can present) |
 | `RELIFT_VK_KEEP_ATTACHMENTS=auto\|on\|off` | The `vk.keep_attachments` setting. Pass the guest's DONT_CARE attachment load and store ops as LOAD and STORE (default `auto`: on Apple GPUs only; see `guests/switch/vk/README.md`) |
+| `RELIFT_KERNEL_LAYOUT=compact\|console` | The `kernel.layout` setting (Switch). `compact` (default): the regions the game's address space type has, packed at the lowest bases, so the host reserves tens of GiB instead of 512 GiB (docs/abi.md section 2); `console`: the console's exact region sizes, for comparing against it |
 | `RELIFT_VK_CAPTURE=<dir>[:N]` | Debug: write every Nth presented guest swapchain image (default every one) as `<dir>/frame-<number>-<guest ms>ms.png`. Each capture waits for the GPU, so it slows the game; off when unset |
 | `RELIFT_INPUT_SCRIPT=<steps>` | Debugging only: hold port controls at guest frames so a run needs nobody at the controls. Comma separated `<frame>[+<frames>]:<port>.<control>[=<value>]`, for example `600:p1.plus,900+10:p1.a,1200+30:p1.lstick_y=-1`; a step holds the control at the value (default 1) for the frames (default 6) and replaces what its bindings read. Switch counts each buffer the guest queues to vi and each Vulkan present as a frame. `@<path>` follows a file that a driver appends steps to. See docs/input.md |
 | `RELIFT_LOG=debug\|info\|warn\|error` | Lowest log level printed |

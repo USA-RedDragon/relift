@@ -10,6 +10,7 @@
 #include <relift/touchpad.h>
 
 static const char *const g_keep[] = { "auto", "on", "off" };
+static const char *const g_layout[] = { "compact", "console" };
 
 static const rl_setting_def g_defs[] = {
     {
@@ -48,6 +49,16 @@ static const rl_setting_def g_defs[] = {
         .env = "RELIFT_VK_KEEP_ATTACHMENTS",
         .choices = g_keep,
         .nchoices = 3,
+    },
+    {
+        .key = "kernel.layout",
+        .type = RL_SETTING_ENUM,
+        .label = "Address space layout",
+        .description = "compact: the regions the game uses packed at the lowest bases, so less host address space is "
+                       "reserved; console: the console's exact region sizes",
+        .env = "RELIFT_KERNEL_LAYOUT",
+        .choices = g_layout,
+        .nchoices = 2,
     },
 };
 

@@ -8,10 +8,17 @@
  */
 #include "hos.h"
 
+#include <relift/settings.h>
+
 #include <stdlib.h>
 #include <string.h>
 
 #define REGION_ALIGN 0x200000ull
+#define COMPACT_ALIAS 0x180000000ull
+#define COMPACT_TLSIO 0x80000000ull
+#define COMPACT_ROOM_39 (16ull << 30)
+#define COMPACT_ROOM_36 (4ull << 30)
+#define COMPACT_NEAR_END (1ull << 30)
 
 static uint64_t tag_of(uint32_t state, uint32_t attr) { return state | ((uint64_t)attr << 32); }
 static uint32_t state_of(const rl_vm_block *b) { return (uint32_t)b->tag; }
@@ -109,6 +116,26 @@ static void layout_36(hos_layout *l)
     l->tlsio_end = 0x80000000;
 }
 
+static void compact(hos_layout *l)
+{
+    uint64_t end;
+    if (l->bits == 39) {
+        l->alias_start = l->code_end;
+        l->alias_end = l->alias_start + COMPACT_ALIAS;
+        l->heap_start = l->alias_end;
+        l->heap_end = l->heap_start + 0x180000000ull;
+        l->stack_start = l->heap_end;
+        l->stack_end = l->stack_start + 0x80000000ull;
+        l->tlsio_start = l->stack_end;
+        l->tlsio_end = l->tlsio_start + COMPACT_TLSIO;
+        end = l->tlsio_end + COMPACT_ROOM_39;
+    } else {
+        end = l->heap_end + COMPACT_ROOM_36;
+    }
+    l->aslr_end = end;
+    l->as_end = end;
+}
+
 int hos_mem_init(void)
 {
     unsigned want = hos.cfg.address_space_type == 1 ? 36 : 39;
@@ -118,21 +145,65 @@ int hos_mem_init(void)
     }
     if (rl_cfg()->address_bits == 36 || rl_cfg()->address_bits == 39)
         want = rl_cfg()->address_bits;
-    if (want == 39 && rl_vm_init(&hos.vm, 39, 0) != 0) {
-        rl_log(RL_LOG_INFO, "kernel", "host cannot reserve 2^39 bytes; using the 36-bit layout");
-        want = 36;
+    memset(&hos.layout_use, 0, sizeof hos.layout_use);
+    hos.compact = rl_setting_enum("kernel.layout") == RL_KERNEL_LAYOUT_COMPACT;
+    if (hos.compact) {
+        if (want == 39)
+            layout_39(&hos.lay, hos.cfg.code_start, hos.cfg.code_size);
+        else
+            layout_36(&hos.lay);
+        compact(&hos.lay);
+        if (rl_vm_init_size(&hos.vm, hos.lay.as_end, 0) != 0) {
+            rl_log(RL_LOG_ERROR, "kernel", "cannot reserve the %u-bit address space: the compact layout needs %llu MiB",
+                   want, (unsigned long long)((hos.lay.as_end + RL_VM_GUARD_LO + RL_VM_GUARD_HI) >> 20));
+            return -1;
+        }
+        rl_log(RL_LOG_INFO, "kernel", "compact %u-bit layout: address space 0x%llx-0x%llx, %llu MiB reserved with guards", want,
+               (unsigned long long)hos.lay.aslr_start, (unsigned long long)hos.lay.as_end,
+               (unsigned long long)(hos.vm.map_len >> 20));
+    } else {
+        if (want == 39 && rl_vm_init(&hos.vm, 39, 0) != 0) {
+            rl_log(RL_LOG_INFO, "kernel", "host cannot reserve 2^39 bytes; using the 36-bit layout");
+            want = 36;
+        }
+        if (want == 36 && rl_vm_init(&hos.vm, 36, 0) != 0) {
+            rl_log(RL_LOG_ERROR, "kernel", "cannot reserve the guest address space");
+            return -1;
+        }
+        if (want == 39)
+            layout_39(&hos.lay, hos.cfg.code_start, hos.cfg.code_size);
+        else
+            layout_36(&hos.lay);
     }
-    if (want == 36 && rl_vm_init(&hos.vm, 36, 0) != 0) {
-        rl_log(RL_LOG_ERROR, "kernel", "cannot reserve the guest address space");
-        return -1;
-    }
-    if (want == 39)
-        layout_39(&hos.lay, hos.cfg.code_start, hos.cfg.code_size);
-    else
-        layout_36(&hos.lay);
     rl_set_mem_base(hos.vm.base);
     rl_fault_install(&hos.vm);
     return 0;
+}
+
+void hos_note_layout_query(uint32_t id)
+{
+    if (!hos.compact)
+        return;
+    hos.layout_use.region_info++;
+    if (rl_once(0x4C41594F55540000ull | id))
+        rl_log(RL_LOG_INFO, "kernel", "the game asked svcGetInfo %u (a region of the compact layout)", id);
+}
+
+void hos_note_guest_range(uint64_t addr, uint64_t size)
+{
+    if (!hos.compact || addr + size + COMPACT_NEAR_END < hos.lay.aslr_end)
+        return;
+    hos.layout_use.near_end++;
+    if (rl_once(0x4C41594F55540100ull))
+        rl_log(RL_LOG_INFO, "kernel", "the game used 0x%llx-0x%llx, within 1 GiB of the compact address space end 0x%llx",
+               (unsigned long long)addr, (unsigned long long)(addr + size), (unsigned long long)hos.lay.aslr_end);
+}
+
+void hos_layout_report(void)
+{
+    if (hos.compact)
+        rl_log(RL_LOG_INFO, "stats", "compact layout: %llu region queries, %llu uses within 1 GiB of the address space end",
+               (unsigned long long)hos.layout_use.region_info, (unsigned long long)hos.layout_use.near_end);
 }
 
 rl_result rl_hos_map_segment(uint64_t addr, uint64_t size, uint32_t perm, uint32_t state)
@@ -366,6 +437,7 @@ static rl_result map_args(uint64_t dst, uint64_t src, uint64_t size)
 
 rl_result hos_map_memory(uint64_t dst, uint64_t src, uint64_t size)
 {
+    hos_note_guest_range(dst, size);
     rl_result rc = map_args(dst, src, size);
     if (rc)
         return rc;
@@ -429,6 +501,7 @@ rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_inf
     } mi;
     memset(&mi, 0, sizeof mi);
     *page_info = 0;
+    hos_note_guest_range(addr, 1);
     hos_lock();
     if (addr >= hos.lay.as_end) {
         mi.addr = hos.lay.as_end;
@@ -567,6 +640,7 @@ static rl_result shmem_map(hos_shmem *s, uint64_t addr, uint64_t size, uint32_t 
 
 rl_result hos_map_shared_memory(uint32_t h, uint64_t addr, uint64_t size, uint32_t perm)
 {
+    hos_note_guest_range(addr, size);
     if (!aligned(addr))
         return KR_INVALID_ADDRESS;
     if (!aligned(size) || size == 0)

@@ -413,6 +413,9 @@ typedef struct rl_hos_config {
 } rl_hos_config;
 
 /** @brief Address space layout reported through svcGetInfo. */
+/** @brief Choices of the kernel.layout setting, as rl_setting_enum returns them. */
+enum { RL_KERNEL_LAYOUT_COMPACT, RL_KERNEL_LAYOUT_CONSOLE };
+
 typedef struct hos_layout {
     /** @brief Address space width in bits. */
     unsigned bits;
@@ -447,6 +450,15 @@ typedef struct hos_process {
     rl_vm vm;
     /** @brief Region layout. */
     hos_layout lay;
+    /** @brief The layout is the compact one (kernel.layout), not the console's. */
+    bool compact;
+    /** @brief What the game did that could tell the compact layout from the console's. */
+    struct {
+        /** @brief svcGetInfo calls for a region base or size. */
+        uint64_t region_info;
+        /** @brief Maps and queries within 1 GiB of the address space end. */
+        uint64_t near_end;
+    } layout_use;
     /** @brief Current heap size. */
     uint64_t heap_size;
     /** @brief Main stack bytes, for UsedMemorySize. */
@@ -614,6 +626,12 @@ uint64_t hos_tls_alloc(void);
 void hos_tls_free(uint64_t slot);
 /** @brief Sets up the address space for the configuration. */
 int hos_mem_init(void);
+/** @brief Counts a svcGetInfo region query id under the compact layout. */
+void hos_note_layout_query(uint32_t id);
+/** @brief Counts a guest map or query of [addr, addr+size) near the end of the compact layout. */
+void hos_note_guest_range(uint64_t addr, uint64_t size);
+/** @brief Logs the compact layout counters. */
+void hos_layout_report(void);
 
 /** @brief Thread svcs. */
 rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_t stack_top, int32_t prio, int32_t core);

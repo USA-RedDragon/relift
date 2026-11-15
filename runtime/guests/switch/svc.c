@@ -139,6 +139,8 @@ static rl_result get_info(uint64_t *out, uint32_t id, uint32_t handle, uint64_t 
             return KR_INVALID_COMBINATION;
         if (handle != HOS_CUR_PROCESS)
             return KR_INVALID_HANDLE;
+        if ((id >= 2 && id <= 5) || (id >= 12 && id <= 15))
+            hos_note_layout_query(id);
         switch (id) {
         case 0: *out = hos.cfg.core_mask; break;
         case 1: *out = hos.cfg.priority_mask; break;
@@ -566,6 +568,7 @@ void rl_hos_shutdown(void)
     for (uint32_t i = 0; i < n; i++)
         hos_kobj_unref(drop[i]);
     hos_kobj_unref(&hos.reslimit->obj);
+    hos_layout_report();
     rl_set_mem_base(NULL);
     rl_vm_destroy(&hos.vm);
     pthread_mutex_destroy(&hos.lock);
