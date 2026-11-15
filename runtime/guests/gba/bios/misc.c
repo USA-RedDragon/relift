@@ -81,33 +81,78 @@ void bios_register_ram_reset(bios_call *c)
     c->r[3] = RL_GBA_BIOS_SWI_RETURN;
 }
 
-static bool take_flags(bios_call *c)
+/** @brief The flags of a logical result r: N and Z from r, C and V as they were. */
+static void logic_flags(bios_call *c, uint32_t r)
 {
-    bios_st8(c, 0x04000208u, 0, false);
-    uint32_t have = bios_ld16(c, 0x03FFFFF8u, false);
-    uint32_t got = c->r[1] & have;
-    if (got)
-        bios_st16(c, 0x03FFFFF8u, have ^ got, false);
-    bios_st8(c, 0x04000208u, 1, false);
-    bios_tick(c, 8);
-    c->r[0] = got;
-    return got != 0;
+    bios_set_flags(c, (c->psr & 0x30000000u) | (r & 0x80000000u) | (r ? 0 : 0x40000000u));
 }
 
+/**
+ * @brief IntrWait's flag check: IME off, the wanted flags taken from the
+ * BIOS flags at 0x03007FF8, IME on again. r0 is left with the flags taken,
+ * r2 with the BIOS flags as read and r12 with the I/O base; an interrupt
+ * handler that runs later in the call finds them in its stack frame (the
+ * stub stacks r0 to r3 and r12), so the values are the console's, measured
+ * there. The check's cycles pass without interrupts (IME is off for most of
+ * them on the console).
+ */
+static void check(bios_call *c)
+{
+    bios_flush(c, true);
+    bios_point(c, RL_GBA_BIOS_SLIDE);
+    c->hi[12] = 0x04000000u;
+    bios_st8(c, 0x04000208u, 0, false);
+    c->r[2] = bios_ld16(c, 0x03FFFFF8u, false);
+    c->r[0] = c->r[1] & c->r[2];
+    logic_flags(c, c->r[0]);
+    if (c->r[0]) {
+        c->r[2] ^= c->r[0];
+        bios_st16(c, 0x03FFFFF8u, c->r[2], false);
+    }
+    bios_st8(c, 0x04000208u, c->hi[4], false);
+    bios_tick(c, BIOS_CHECK_CYCLES);
+    bios_flush(c, false);
+}
+
+/**
+ * @brief IntrWait and VBlankIntrWait. The routine stacks r4 and lr on the
+ * system stack (bytes a game finds below its stack pointer after the call),
+ * checks the flags first when r0 asks to discard old ones, then halts until
+ * an interrupt; the interrupt is taken inside the call, at relift's slide,
+ * BIOS_CHECK_WAKE cycles after the wake, and its handler is expected to set
+ * the BIOS flags. Each check after a handler either returns or halts again.
+ * With r0 = 0 the first pass writes no HALTCNT: the console checks before it
+ * halts (cycles measured on NanoBoyAdvance as a black box).
+ */
 void bios_intr_wait(bios_call *c)
 {
-    bios_save(c, 4, 4, true);
-    bool discard = c->r[0] != 0;
+    uint32_t saved[2] = {c->hi[4], c->lr};
+    bios_push(c, 2, saved);
     c->r[3] = 0;
-    bios_tick(c, 6);
+    c->hi[4] = 1;
+    bios_set_flags(c, bios_nzcv_sub(c->r[0], 0));
+    bool discard = c->r[0] != 0;
+    bios_tick(c, discard ? BIOS_WAIT_ENTRY + 2 : BIOS_WAIT_ENTRY);
     if (discard)
-        take_flags(c);
-    if (!discard && take_flags(c))
-        return;
-    do {
-        bios_st8(c, 0x04000301u, 0, false);
-        bios_tick(c, 2);
-    } while (!take_flags(c));
+        check(c);
+    else
+        bios_tick(c, BIOS_WAIT_FIRST);
+    for (bool first = !discard;; first = false) {
+        if (!first) {
+            bios_tick(c, BIOS_WAIT_HALT);
+            bios_halt(c, c->r[3]);
+            bios_tick(c, BIOS_CHECK_WAKE);
+            bios_flush(c, false);
+        }
+        check(c);
+        if (c->r[0])
+            break;
+        bios_tick(c, BIOS_WAIT_AGAIN);
+    }
+    c->hi[4] = bios_ldm(c, c->sp, false);
+    c->lr = bios_ldm(c, c->sp + 4, true);
+    c->sp += 8;
+    bios_tick(c, BIOS_WAIT_EXIT);
 }
 
 void bios_sound_bias(bios_call *c)

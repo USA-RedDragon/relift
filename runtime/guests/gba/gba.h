@@ -287,6 +287,15 @@ typedef struct rl_gba_cpu_hooks {
      * when its I bit allows and returns after the handler ran.
      */
     void (*irq)(void *user);
+    /**
+     * @brief Takes the interrupt inside a BIOS call (rl_gba_bus.point, with
+     * the line asserted and spsr's I bit clear) and returns an
+     * rl_gba_point. When set, rl_gba_bios_bus is timed: the BIOS's
+     * accesses and cycles happen on the CPU's clock, and irq is not called.
+     * regs: the registers the call gives a handler (as rl_gba_bus.point
+     * gives them).
+     */
+    int (*point)(void *user, uint32_t lr, uint32_t spsr, const uint32_t *regs);
 } rl_gba_cpu_hooks;
 /** @brief Sets the hooks (NULL clears them). */
 void rl_gba_set_cpu_hooks(rl_gba *g, const rl_gba_cpu_hooks *hooks);

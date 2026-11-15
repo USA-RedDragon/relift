@@ -30,16 +30,24 @@
 /** @brief What a read of the BIOS region returns after boot. */
 #define RL_GBA_BIOS_OPEN_BOOT 0xE129F000u
 /** @brief ... while an IRQ handler runs (called from the stub). */
-#define RL_GBA_BIOS_OPEN_IRQ 0xE55EC002u
+#define RL_GBA_BIOS_OPEN_IRQ 0xE25EF004u
 /** @brief ... after the IRQ stub returned. */
-#define RL_GBA_BIOS_OPEN_IRQ_DONE 0xE25EF004u
+#define RL_GBA_BIOS_OPEN_IRQ_DONE 0xE55EC002u
 /** @brief ... after a SWI returned. */
 #define RL_GBA_BIOS_OPEN_SWI 0xE3A02004u
 
 /** @brief The IRQ stub's return address: the handler returns here (BX LR). */
 #define RL_GBA_BIOS_IRQ_RETURN 0x00000138u
-/** @brief The return address inside the SWI dispatcher (LR of a routine). */
+/** @brief The return address inside the SWI dispatcher (LR of a routine): a routine leaves it in r3 or on its stack, and a handler inside IntrWait finds it in LR_sys. */
 #define RL_GBA_BIOS_SWI_RETURN 0x00000170u
+/**
+ * @brief relift's slide: the address an interrupt taken inside a BIOS call
+ * returns to (LR_irq - 4, ARM). relift runs no BIOS code; each cycle of a
+ * call that the console spends with interrupts open is a check here, so the
+ * interrupt lands on the console's cycle while the return address a handler
+ * finds in its stack frame is relift's, not the console's.
+ */
+#define RL_GBA_BIOS_SLIDE 0x00003F00u
 
 /**
  * @brief The machine's memory as the BIOS sees it.
@@ -67,14 +75,65 @@ typedef struct rl_gba_bus {
      * charges 1 per access.
      */
     unsigned (*cycles)(void *user, uint32_t addr, unsigned size, bool sequential);
+    /**
+     * @brief A timed data read: moves the machine's clock over the access
+     * (and over a DMA transfer that is due first) and returns the value.
+     * When load, store, idle and point are all set, the BIOS runs on the
+     * machine's clock: a call's cycles, its data accesses and the cycles in
+     * which it takes interrupts pass there, so timers, DMA and interrupts
+     * land inside a call when the console's would. Otherwise read, write and cycles are used
+     * and the call's cycles are reported in rl_gba_bios.cycles.
+     */
+    uint32_t (*load)(void *user, uint32_t addr, unsigned size, bool sequential);
+    /** @brief A timed code fetch of size bytes at addr (the return's reload of the caller's code). */
+    uint32_t (*fetch)(void *user, uint32_t addr, unsigned size, bool sequential);
+    /** @brief The write twin of load (a HALTCNT write halts there). */
+    void (*store)(void *user, uint32_t addr, unsigned size, uint32_t value, bool sequential);
+    /** @brief cycles cycles without a data access: the BIOS's code fetches, which a DMA transfer stalls. */
+    void (*idle)(void *user, unsigned cycles);
+    /** @brief cycles internal cycles, which a DMA transfer may overlap; NULL uses idle. */
+    void (*internal)(void *user, unsigned cycles);
+    /**
+     * @brief A cycle of a call in which a pending interrupt may be taken
+     * (relift's slide at RL_GBA_BIOS_SLIDE, or the return to the caller):
+     * when rl_gba_irq_sample says the interrupt is taken and spsr's I bit
+     * is clear, the CPU layer takes it with LR_irq = lr and SPSR_irq =
+     * spsr, runs the handler and the stub's return, and gives an
+     * rl_gba_point. regs holds r0 to r14 as a handler finds them there:
+     * the stub stacks r0 to r3 and r12, and the handler sees the others
+     * (r13 and r14 are those of spsr's mode when it is user, system or
+     * supervisor; in other modes the CPU keeps its own), then regs[15], the
+     * supervisor stack pointer, which a SWI from the handler stacks below.
+     */
+    int (*point)(void *user, uint32_t lr, uint32_t spsr, const uint32_t *regs);
 } rl_gba_bus;
+
+/** @brief What rl_gba_bus.point did. */
+typedef enum rl_gba_point {
+    /** @brief No interrupt was taken. */
+    RL_GBA_POINT_NONE,
+    /** @brief An interrupt ran and returned to lr - 4 with CPSR = spsr. */
+    RL_GBA_POINT_TAKEN,
+    /**
+     * @brief An interrupt ran and its handler changed the return (LR_irq or
+     * SPSR_irq on its stack): the CPU holds the state the stub's return
+     * restored and continues there, outside the BIOS call.
+     */
+    RL_GBA_POINT_LEFT,
+} rl_gba_point;
 
 /** @brief BIOS state kept between calls. */
 typedef struct rl_gba_bios {
     /** @brief What a read of 0x00000000-0x00003FFF returns now (rotated per address). */
     uint32_t open_bus;
-    /** @brief Cycles of the last call or stub entry or return. */
+    /**
+     * @brief Cycles of the last call or stub entry or return that the bus
+     * did not charge: all of them on a bus without the timed callbacks, 0 on
+     * a timed bus.
+     */
     uint64_t cycles;
+    /** @brief Every cycle of the last call or stub entry or return. */
+    uint64_t total;
     /** @brief The part of cycles the bus charged for data accesses. */
     uint64_t bus_cycles;
     /** @brief What the last call counted for its cycle model. */
@@ -115,6 +174,12 @@ typedef enum rl_gba_swi_status {
     RL_GBA_SWI_RESET,
     /** @brief A number this BIOS does not implement (the sound driver calls). */
     RL_GBA_SWI_UNKNOWN,
+    /**
+     * @brief An interrupt handler that ran inside the call changed where its
+     * return goes (RL_GBA_POINT_LEFT): the call ended there, r0 to r3 are
+     * not results and the CPU continues in the state the IRQ return gave.
+     */
+    RL_GBA_SWI_LEFT,
 } rl_gba_swi_status;
 
 /** @brief The CPU state after boot or a reset. */
@@ -151,6 +216,13 @@ rl_gba_swi_status rl_gba_swi(rl_gba_bios *b, const rl_gba_bus *bus, unsigned num
 typedef struct rl_gba_irq_cpu {
     /** @brief r0 to r3, r12, LR_irq and SP_irq. */
     uint32_t r[4], r12, lr, sp;
+    /**
+     * @brief The interrupt came from running code, and the CPU layer charges
+     * the prefetch of the interrupted instruction and the return's refill of
+     * the caller's code as accesses of their own; the stub then counts the
+     * cycles of the BIOS code alone.
+     */
+    bool from_code;
 } rl_gba_irq_cpu;
 
 /**

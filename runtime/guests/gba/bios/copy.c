@@ -34,14 +34,14 @@ void bios_cpu_set(bios_call *c)
         if (fill) {
             uint32_t v = bios_ldm(c, src, false);
             src += 4;
-            for (bool seq = false; (int32_t)dst < end; seq = true, dst += 4) {
-                bios_st32(c, dst, v, seq);
+            for (; (int32_t)dst < end; dst += 4) {
+                bios_st32(c, dst, v, false);
                 bios_ev(c, BE_SET_W_FILL, 1);
             }
         } else {
-            for (bool seq = false; (int32_t)dst < end; seq = true, dst += 4, src += 4) {
-                uint32_t v = bios_ldm(c, src, seq);
-                bios_st32(c, dst, v, seq);
+            for (; (int32_t)dst < end; dst += 4, src += 4) {
+                uint32_t v = bios_ldm(c, src, false);
+                bios_st32(c, dst, v, false);
                 bios_ev(c, BE_SET_W_COPY, 1);
             }
         }
@@ -53,13 +53,13 @@ void bios_cpu_set(bios_call *c)
     if (fill) {
         uint32_t v = bios_ld16(c, src, false);
         for (int32_t i = 0; i < len; i += 2) {
-            bios_st16(c, dst + (uint32_t)i, v, i != 0);
+            bios_st16(c, dst + (uint32_t)i, v, false);
             bios_ev(c, BE_SET_H_FILL, 1);
         }
     } else {
         for (int32_t i = 0; i < len; i += 2) {
-            uint32_t v = bios_ld16(c, src + (uint32_t)i, i != 0);
-            bios_st16(c, dst + (uint32_t)i, v, i != 0);
+            uint32_t v = bios_ld16(c, src + (uint32_t)i, false);
+            bios_st16(c, dst + (uint32_t)i, v, false);
             bios_ev(c, BE_SET_H_COPY, 1);
         }
     }

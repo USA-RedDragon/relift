@@ -314,7 +314,7 @@ TEST(console_records_replay_exactly)
 {
     unsigned count = sizeof gbat_console / sizeof gbat_console[0];
     CHECK_EQ(count, swi_record_count());
-    totals t = replay(&(rl_gba_bus){NULL, bus_read, bus_write, bus_cycles});
+    totals t = replay(&(rl_gba_bus){.read = bus_read, .write = bus_write, .cycles = bus_cycles});
     CHECK(t.checked > 3400);
     CHECK_EQ(t.skipped + t.checked, count);
     CHECK_EQ(t.bad_regs, 0);
@@ -329,7 +329,7 @@ TEST(console_records_keep_their_cycles_on_the_machines_wait_table)
     CHECK(x.g != NULL);
     rl_gba_write(x.g, 0x04000204u, 2, WAITCNT_PROBE);
     machine_bus = x.g;
-    totals t = replay(&(rl_gba_bus){NULL, bus_read, bus_write, machine_cycles});
+    totals t = replay(&(rl_gba_bus){.read = bus_read, .write = bus_write, .cycles = machine_cycles});
     CHECK(t.checked > 3400);
     CHECK_EQ(t.bad_regs, 0);
     CHECK_EQ(t.bad_cycles, 0);

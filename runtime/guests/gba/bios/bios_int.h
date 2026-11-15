@@ -9,8 +9,58 @@
 
 #include "bios.h"
 
+#include <setjmp.h>
+#include <stddef.h>
+
 /** @brief The address of the BIOS's source check, which some routines leave in r3. */
 #define BIOS_CHECK_ADDR 0x00000BA4u
+
+/** @brief Cycles of the IRQ stub before it stacks the registers. */
+#define BIOS_STUB_PRE 2
+#define BIOS_STUB_MID 6
+#define BIOS_STUB_POST 3
+#define BIOS_STUB_RETURN 5
+/** @brief How many more cycles the stub takes from running code than from inside a BIOS call. */
+#define BIOS_STUB_CODE_EXTRA 1
+/** @brief The cycles of the refill after the stub's return that BIOS_STUB_RETURN counts. */
+#define BIOS_STUB_RETURN_REFILL 2
+/**
+ * @brief A SWI's cycles before its routine, besides the stack frames and
+ * the comment read, and the first part of them, in which an interrupt that
+ * rises waits (the console takes none there).
+ */
+#define BIOS_ENTRY_CYCLES 22
+#define BIOS_ENTRY_MASKED 18
+/** @brief A SWI's cycles after its routine, and the last part of them, in which an interrupt waits for the return. */
+#define BIOS_EXIT_CYCLES 16
+#define BIOS_EXIT_MASKED 10
+/**
+ * @brief Halt, Stop and CustomHalt: cycles before HALTCNT is written
+ * (CustomHalt; Halt and Stop take more), and after the wake.
+ */
+#define BIOS_HALT_CYCLES 2
+#define BIOS_HALT_WAKE 3
+/** @brief The first cycles after the wake, in which an interrupt waits (measured as the handler's entry time). */
+#define BIOS_HALT_WAKE_MASKED 3
+/**
+ * @brief The cycles the fitted bases count for the read of the SWI's comment
+ * byte and the return's reload of the caller's code at the probe's call sites
+ * in IWRAM, where each access takes one cycle; both are now accesses of
+ * their own, at the caller's wait states.
+ */
+#define BIOS_SITE_FIT 3
+/**
+ * @brief IntrWait's cycles besides its data accesses: before the first pass,
+ * the first pass when r0 = 0 (no halt), before each halt, from the wake to
+ * the interrupt, each flag check, before the next halt and at the end.
+ */
+#define BIOS_WAIT_ENTRY 5
+#define BIOS_WAIT_FIRST 5
+#define BIOS_WAIT_HALT 2
+#define BIOS_CHECK_WAKE 3
+#define BIOS_CHECK_CYCLES 11
+#define BIOS_WAIT_AGAIN 3
+#define BIOS_WAIT_EXIT 6
 
 /** @brief Event counters per call. */
 #define BIOS_EVENTS 20
@@ -84,10 +134,12 @@ typedef struct bios_call {
     uint32_t r[4];
     /** @brief r4 to r12 as the routine sees them (r11 and r12 are the dispatcher's). */
     uint32_t hi[13];
-    /** @brief The system mode stack pointer as the routine sees it. */
-    uint32_t sp;
-    /** @brief Cycles so far. */
-    uint64_t cyc;
+    /** @brief The system mode stack pointer and link register as the routine sees them. */
+    uint32_t sp, lr;
+    /** @brief The supervisor mode stack pointer meanwhile (below the dispatcher's frame inside a SWI). */
+    uint32_t sp_svc;
+    /** @brief Cycles so far, and the part of them already spent on the machine's clock. */
+    uint64_t cyc, spent;
     uint64_t bus_cyc;
     /** @brief Event counts the cycle model charges (see swi.c). */
     uint32_t ev[BIOS_EVENTS];
@@ -95,6 +147,22 @@ typedef struct bios_call {
     bool quiet;
     /** @brief The status the routine ends with. */
     rl_gba_swi_status status;
+    /** @brief The bus runs the call on the machine's clock (rl_gba_bus.load and the others are set). */
+    bool timed;
+    /**
+     * @brief The CPSR an interrupt taken now saves: system mode (the
+     * caller's I bit), the T bit of the code the console runs there and the
+     * flags its last flag-setting instruction left.
+     */
+    uint32_t psr;
+    /** @brief The fitted model of the call while its stores are kept for the slide (NULL: none). */
+    const struct bios_model *model;
+    /** @brief The data accesses noted for the machine's clock (SIZE_MAX: too many to note), and how many were made there. */
+    size_t nacc, done;
+    /** @brief Interrupts taken inside the call. */
+    unsigned irqs;
+    /** @brief Where bios_point leaves the call (RL_GBA_POINT_LEFT); NULL outside a SWI. */
+    jmp_buf *out;
 } bios_call;
 
 uint32_t bios_ld32(bios_call *c, uint32_t a, bool seq);
@@ -108,7 +176,31 @@ void bios_st8(bios_call *c, uint32_t a, uint32_t v, bool seq);
 void bios_push(bios_call *c, unsigned n, const uint32_t *v);
 void bios_save(bios_call *c, unsigned first, unsigned last, bool lr);
 
-static inline void bios_tick(bios_call *c, unsigned n) { c->cyc += n; }
+/** @brief Counts n cycles of the call (bios_flush spends them). */
+void bios_tick(bios_call *c, unsigned n);
+/**
+ * @brief On a timed bus, takes a pending interrupt before the instruction at
+ * pc unless c->psr masks it: LR_irq = pc + 4, SPSR_irq = c->psr, the
+ * registers as c holds them. A handler that changes its return leaves the
+ * call.
+ */
+void bios_point(bios_call *c, uint32_t pc);
+/**
+ * @brief Spends the cycles counted and not yet spent on the machine's clock:
+ * open, as relift's slide (one interrupt check per cycle at
+ * RL_GBA_BIOS_SLIDE), else without interrupts.
+ */
+void bios_flush(bios_call *c, bool open);
+/** @brief Flushes (open), then writes value to HALTCNT; on a timed bus the machine stops there until an interrupt. */
+void bios_halt(bios_call *c, uint32_t value);
+/** @brief Sets the N, Z, C and V bits of c->psr from bits 28-31 of nzcv. */
+void bios_set_flags(bios_call *c, uint32_t nzcv);
+/** @brief The flags of a - b (CMP, SUBS). */
+uint32_t bios_nzcv_sub(uint32_t a, uint32_t b);
+/** @brief The flags of a + b (CMN, ADDS). */
+uint32_t bios_nzcv_add(uint32_t a, uint32_t b);
+/** @brief The flags of a logical result r with carry bit 29 of carry_in (V unchanged reads as 0). */
+uint32_t bios_nzcv_logic(uint32_t r, uint32_t carry_in);
 
 static inline void bios_ev(bios_call *c, unsigned i, uint32_t n) { c->ev[i] += n; }
 

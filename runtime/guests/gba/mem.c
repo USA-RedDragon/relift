@@ -188,6 +188,8 @@ void rl_gba_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
     gba_after_write(g, addr, size);
 }
 
+static void gba_bios_bus_update(rl_gba *g);
+
 static uint32_t bios_read(void *user, uint32_t addr, unsigned size) { return rl_gba_read(user, addr, size); }
 
 static void bios_write(void *user, uint32_t addr, unsigned size, uint32_t value)
@@ -205,6 +207,56 @@ static void bios_write(void *user, uint32_t addr, unsigned size, uint32_t value)
 static unsigned bios_cycles(void *user, uint32_t addr, unsigned size, bool seq)
 {
     return rl_gba_wait(&((rl_gba *)user)->waits, addr, size, seq);
+}
+
+static uint32_t bios_load(void *user, uint32_t addr, unsigned size, bool seq) { return rl_gba_load(user, addr, size, seq); }
+
+static uint32_t bios_fetch(void *user, uint32_t addr, unsigned size, bool seq) { return rl_gba_fetch(user, addr, size, seq); }
+
+static void bios_store(void *user, uint32_t addr, unsigned size, uint32_t value, bool seq)
+{
+    rl_gba *g = user;
+    g->in_bios = true;
+    rl_gba_store(g, addr, size, value, seq);
+    g->in_bios = false;
+    if (g->halt_req || g->stop_req)
+        rl_gba_service(g);
+}
+
+static void bios_idle(void *user, unsigned cycles)
+{
+    rl_gba *g = user;
+    while (cycles) {
+        gba_dma_run(g);
+        g->dma_overlap = 0;
+        unsigned n = gba_dma_quiet(g, cycles) ? cycles : 1;
+        g->acc_start = gba_now(g) + n - 1;
+        gba_pf_step(g, n);
+        cycles -= n;
+    }
+}
+
+static void bios_internal(void *user, unsigned cycles) { rl_gba_idle(user, cycles); }
+
+static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *regs)
+{
+    rl_gba *g = user;
+    if (g->cpu)
+        rl_sched_run(g->cpu);
+    if (!g->hooks.point || !rl_gba_irq_sample(g))
+        return RL_GBA_POINT_NONE;
+    return g->hooks.point(g->hooks.user, lr, spsr, regs);
+}
+
+static void gba_bios_bus_update(rl_gba *g)
+{
+    bool timed = g->hooks.point != NULL;
+    g->bios_bus.load = timed ? bios_load : NULL;
+    g->bios_bus.fetch = timed ? bios_fetch : NULL;
+    g->bios_bus.store = timed ? bios_store : NULL;
+    g->bios_bus.idle = timed ? bios_idle : NULL;
+    g->bios_bus.internal = timed ? bios_internal : NULL;
+    g->bios_bus.point = timed ? bios_point : NULL;
 }
 
 rl_gba *rl_gba_create(const rl_gba_cart *cart)
@@ -275,7 +327,11 @@ uint8_t *rl_gba_mem(rl_gba *g, rl_gba_region r, size_t *len)
 
 rl_gba_bios *rl_gba_bios_of(rl_gba *g) { return &g->bios; }
 const rl_gba_bus *rl_gba_bios_bus(rl_gba *g) { return &g->bios_bus; }
-void rl_gba_set_cpu_hooks(rl_gba *g, const rl_gba_cpu_hooks *hooks) { g->hooks = hooks ? *hooks : (rl_gba_cpu_hooks){0}; }
+void rl_gba_set_cpu_hooks(rl_gba *g, const rl_gba_cpu_hooks *hooks)
+{
+    g->hooks = hooks ? *hooks : (rl_gba_cpu_hooks){0};
+    gba_bios_bus_update(g);
+}
 uint32_t rl_gba_open_bus(const rl_gba *g) { return g->mdr; }
 void rl_gba_set_open_bus(rl_gba *g, uint32_t value) { g->mdr = value; }
 rl_sched_cpu *rl_gba_cpu(const rl_gba *g) { return g->cpu; }
