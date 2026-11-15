@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Builds the iOS SDL3 and libopus that `relift build --target ios-*` links,
-as static libraries, into the layout relift reads:
+as static libraries, and unpacks the pinned MoltenVK release that Switch
+games link, into the layout relift reads:
 
   <cache>/sdk/sdl3/<arm64-ios|arm64-ios-sim>/{include,lib/libSDL3.a}
   <cache>/sdk/opus/<arm64-ios|arm64-ios-sim>/{include,lib/libopus.a}
+  <cache>/sdk/moltenvk/arm64-ios/{lib/libMoltenVK.a,share/licenses/LICENSE}
 
   python3 -I ios_deps.py --cache DIR [--target ios-arm64] [--work DIR]
 
@@ -22,6 +24,13 @@ import tarfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MIN_IOS = "15.0"
+MOLTENVK_VERSION = "1.4.2"
+MOLTENVK_URL = f"https://github.com/KhronosGroup/MoltenVK/releases/download/v{MOLTENVK_VERSION}/MoltenVK-ios.tar"
+MOLTENVK_SHA256 = "b5d947b1660e6e9fed40b9cd2387e160aaab9e80b775c0cef7e14059405178c1"
+MOLTENVK_MEMBERS = {
+    "MoltenVK/MoltenVK/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a": "lib/libMoltenVK.a",
+    "MoltenVK/LICENSE": "share/licenses/LICENSE",
+}
 
 TARGETS = {
     "ios-arm64": ("iphoneos", "arm64-ios"),
@@ -54,6 +63,20 @@ def cmake(src, build, prefix, sdk, extra):
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode:
             sys.exit(f"{' '.join(cmd[:2])} failed:\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
+
+
+def moltenvk(p, dl, out):
+    tar = p.fetch(MOLTENVK_URL, MOLTENVK_SHA256, dl)
+    shutil.rmtree(out, ignore_errors=True)
+    with tarfile.open(tar) as t:
+        for name, rel in MOLTENVK_MEMBERS.items():
+            m = t.getmember(name)
+            if not m.isfile():
+                sys.exit(f"{tar}: {name} is not a file")
+            dst = os.path.join(out, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with t.extractfile(m) as src, open(dst, "wb") as f:
+                shutil.copyfileobj(src, f)
 
 
 def main():
@@ -95,6 +118,12 @@ def main():
             if not os.path.exists(os.path.join(dst, k)):
                 sys.exit(f"{dst}: the install made no {k}")
     print(f"SDL3 {p.SDL_VERSION} -> {sdl_out}\nlibopus {p.OPUS_VERSION} -> {opus_out}")
+    if args.target == "ios-arm64":
+        mvk_out = os.path.join(args.cache, "sdk", "moltenvk", sdk_dir)
+        moltenvk(p, dl, mvk_out)
+        print(f"MoltenVK {MOLTENVK_VERSION} -> {mvk_out}")
+    else:
+        print("MoltenVK: no simulator build is pinned; Switch games build for ios-arm64")
 
 
 if __name__ == "__main__":

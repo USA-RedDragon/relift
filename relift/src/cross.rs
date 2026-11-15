@@ -117,7 +117,7 @@ impl Build {
     pub fn extras(&self, rt: &Path, with_vk: bool) -> std::io::Result<Extras> {
         match self {
             Self::Android(a) => crate::runtime_link::android_extras(rt, &a.deps, with_vk),
-            Self::Ios(i) => Ok(crate::runtime_link::ios_extras(rt, &i.deps)),
+            Self::Ios(i) => crate::runtime_link::ios_extras(rt, &i.deps, with_vk),
         }
     }
 

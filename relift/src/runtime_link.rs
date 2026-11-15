@@ -39,7 +39,8 @@ pub struct Sdl3 {
 /// The Vulkan implementation the program links instead of loading one.
 #[derive(Debug, PartialEq, Eq)]
 pub struct LinkedVulkan {
-    pub lib_dir: PathBuf,
+    /// The link flags that bring it in.
+    pub libs: Vec<String>,
     pub origin: String,
 }
 
@@ -174,11 +175,16 @@ pub fn find_sdl3(cache_root: &Path) -> Option<Sdl3> {
 
 fn moltenvk_in(dir: &Path, origin: &str) -> Option<LinkedVulkan> {
     let lib_dir = dir.join("lib");
+    let d = lib_dir.display();
     lib_dir
         .join("libMoltenVK.dylib")
         .is_file()
         .then(|| LinkedVulkan {
-            lib_dir,
+            libs: vec![
+                format!("-L{d}"),
+                format!("-Wl,-rpath,{d}"),
+                "-lMoltenVK".into(),
+            ],
             origin: origin.into(),
         })
 }
@@ -273,12 +279,31 @@ pub fn android_extras(
 }
 
 /// The extras of an iOS program: the window, sound and iOS glue backends
-/// against the static SDL3 and libopus in `deps`.
-#[must_use]
-pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps) -> Extras {
+/// against the static SDL3 and libopus in `deps`, and with `with_vk` the
+/// Vulkan forwarding against the static MoltenVK.
+///
+/// # Errors
+///
+/// The runtime's Vulkan sources cannot be listed, or `with_vk` without a
+/// MoltenVK in `deps`.
+pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io::Result<Extras> {
     let host = rt.join("host");
-    Extras {
-        vk: Vec::new(),
+    let vk_dir = rt.join("guests").join("switch").join("vk");
+    let mut vk = Vec::new();
+    let mut vulkan = None;
+    if with_vk {
+        let lib = deps.moltenvk.as_ref().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, deps.moltenvk_missing.clone())
+        })?;
+        vk = c_files(&vk_dir)?;
+        vk.extend(c_files(&vk_dir.join("gen"))?);
+        vulkan = Some(LinkedVulkan {
+            libs: vec![lib.display().to_string()],
+            origin: "iOS static".into(),
+        });
+    }
+    Ok(Extras {
+        vk,
         window: Some(host.join("window_sdl3.c")),
         sdl3: Some(Sdl3 {
             cflags: vec![
@@ -291,7 +316,7 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps) -> Extras {
             ],
             origin: "iOS static".into(),
         }),
-        vulkan: None,
+        vulkan,
         host: ["audio_sdl3.c", "opus_libopus.c", "ios_sdl3.c"]
             .iter()
             .map(|n| host.join(n))
@@ -299,7 +324,7 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps) -> Extras {
         opus_src: None,
         opus: None,
         adrenotools: None,
-    }
+    })
 }
 
 impl Extras {
@@ -356,12 +381,7 @@ impl Extras {
     pub fn libs(&self) -> Vec<String> {
         let mut l = self.sdl3.as_ref().map_or_else(Vec::new, |s| s.libs.clone());
         if let Some(v) = &self.vulkan {
-            let dir = v.lib_dir.display();
-            l.extend([
-                format!("-L{dir}"),
-                format!("-Wl,-rpath,{dir}"),
-                "-lMoltenVK".into(),
-            ]);
+            l.extend(v.libs.iter().cloned());
         }
         if let Some(a) = &self.adrenotools {
             l.push(a.lib.display().to_string());
@@ -511,23 +531,35 @@ mod tests {
 
     #[test]
     fn linked_moltenvk_defines_and_links_it() {
+        let m = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("relift-mvk-{}", std::process::id()));
+        std::fs::create_dir_all(m.join("lib")).unwrap();
+        relift_cache::write_if_changed(&m.join("lib").join("libMoltenVK.dylib"), b"").unwrap();
         let e = Extras {
             vk: Vec::new(),
             window: None,
             sdl3: None,
-            vulkan: Some(LinkedVulkan {
-                lib_dir: PathBuf::from("/m/lib"),
-                origin: "t".into(),
-            }),
+            vulkan: moltenvk_in(&m, "t"),
             host: Vec::new(),
             opus_src: None,
             opus: None,
             adrenotools: None,
         };
+        std::fs::remove_dir_all(&m).unwrap();
         assert!(e.note().contains("MoltenVK linked (t)"));
         assert_eq!(e.defines(), ["-DRL_VULKAN_LINKED"]);
         let libs = e.libs();
-        assert_eq!(libs[..3], ["-L/m/lib", "-Wl,-rpath,/m/lib", "-lMoltenVK"]);
+        let l = m.join("lib").display().to_string();
+        assert_eq!(
+            libs[..3],
+            [
+                format!("-L{l}"),
+                format!("-Wl,-rpath,{l}"),
+                "-lMoltenVK".into()
+            ]
+        );
         assert_eq!(
             libs.get(3).map(String::as_str),
             cfg!(target_vendor = "apple").then_some("-Wl,-headerpad_max_install_names")

@@ -107,13 +107,17 @@ impl Xcode {
     }
 }
 
-/// SDL3 and libopus built for one iOS target, as static libraries.
+/// SDL3, libopus and MoltenVK for one iOS target, as static libraries.
 #[derive(Debug)]
 pub struct Deps {
     pub sdl3_include: PathBuf,
     pub sdl3_lib: PathBuf,
     pub opus_include: PathBuf,
     pub opus_lib: PathBuf,
+    /// `libMoltenVK.a`, which only Switch games link, when present.
+    pub moltenvk: Option<PathBuf>,
+    /// What to run when a Switch game needs MoltenVK and it is missing.
+    pub moltenvk_missing: String,
 }
 
 impl Deps {
@@ -125,11 +129,25 @@ impl Deps {
     pub fn find(cache_root: &Path, t: Target) -> Result<Self, BoxError> {
         let sdl = cache_root.join("sdk").join("sdl3").join(t.sdk_dir);
         let opus = cache_root.join("sdk").join("opus").join(t.sdk_dir);
+        let mvk = cache_root
+            .join("sdk")
+            .join("moltenvk")
+            .join(t.sdk_dir)
+            .join("lib")
+            .join("libMoltenVK.a");
         let d = Self {
             sdl3_include: sdl.join("include"),
             sdl3_lib: sdl.join("lib").join("libSDL3.a"),
             opus_include: opus.join("include"),
             opus_lib: opus.join("lib").join("libopus.a"),
+            moltenvk_missing: format!(
+                "{}: not found; get MoltenVK for {} with `python3 runtime/tools/cross/ios_deps.py --cache {} --target {}`",
+                mvk.display(),
+                t.name,
+                cache_root.display(),
+                t.name
+            ),
+            moltenvk: mvk.is_file().then_some(mvk),
         };
         for p in [&d.sdl3_lib, &d.opus_lib] {
             if !p.is_file() {
@@ -269,7 +287,7 @@ impl IosBuild {
     }
 }
 
-/// What the static SDL3 needs from the system.
+/// What the static SDL3 and MoltenVK need from the system.
 const FRAMEWORKS: &[&str] = &[
     "AVFoundation",
     "AudioToolbox",
@@ -283,6 +301,7 @@ const FRAMEWORKS: &[&str] = &[
     "Foundation",
     "GameController",
     "IOKit",
+    "IOSurface",
     "Metal",
     "OpenGLES",
     "QuartzCore",

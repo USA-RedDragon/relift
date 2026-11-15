@@ -740,8 +740,13 @@ pub fn program_files(
     out
 }
 
-const ANDROID_ENTRY: &str = r#"#ifdef __ANDROID__
-#include <relift/android.h>
+/// The entry of `program.c`: `main` on desktops; on Android `SDL_main`
+/// and on iOS `rl_ios_main`, which first point the save, SD card, romfs
+/// and DLC folders into the app's own storage.
+const ENTRY: &str = r#"#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 #include <relift/settings.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -755,7 +760,11 @@ static void set_dir(const char *env, const char *base, const char *name)
     mkdir(p, 0771);
     setenv(env, p, 0);
 }
-static void set_android_dirs(void)
+#endif
+#if defined(__ANDROID__)
+#include <relift/android.h>
+#define RL_APP_FLUSH() rl_android_flush()
+static void set_app_dirs(void)
 {
     rl_android_init();
     rl_settings_set_app("relift");
@@ -765,6 +774,22 @@ static void set_android_dirs(void)
     set_dir("RELIFT_DLC", rl_android_external_dir(), "dlc");
 }
 __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+#include <relift/ios.h>
+#define RL_APP_FLUSH() rl_ios_flush()
+static void set_app_dirs(void)
+{
+    rl_ios_init();
+    rl_settings_set_app("relift");
+    const char *docs = rl_ios_documents_dir();
+    set_dir("RELIFT_SAVE", docs, "save");
+    set_dir("RELIFT_SDMC", docs, "sdmc");
+    set_dir("RELIFT_ROMFS", docs, "romfs");
+    set_dir("RELIFT_DLC", docs, "dlc");
+}
+int rl_ios_main(int argc, char **argv)
+#else
+int main(int argc, char **argv)
 #endif
 "#;
 
@@ -867,15 +892,15 @@ fn program_c(
         t.push_str("#include \"arm64.h\"\n");
     }
     t.push_str("#include <string.h>\nextern int relift_info_main(void);\n");
-    t.push_str(ANDROID_ENTRY);
+    t.push_str(ENTRY);
     t.push_str(
-        "#ifndef __ANDROID__\nint main(int argc, char **argv)\n#endif\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
+        "{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
     );
-    t.push_str("#ifdef __ANDROID__\n    set_android_dirs();\n#endif\n");
+    t.push_str("#ifdef RL_APP_FLUSH\n    set_app_dirs();\n#endif\n");
     if fp_flags {
         t.push_str("    rl_arm64_set_fp_flags(1);\n");
     }
-    t.push_str("    int status = rl_switch_main(&rl_program, argc, argv);\n#ifdef __ANDROID__\n    rl_android_flush();\n#endif\n    return status;\n}\n");
+    t.push_str("    int status = rl_switch_main(&rl_program, argc, argv);\n#ifdef RL_APP_FLUSH\n    RL_APP_FLUSH();\n#endif\n    return status;\n}\n");
     t
 }
 

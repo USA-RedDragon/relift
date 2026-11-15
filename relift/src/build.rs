@@ -1335,7 +1335,7 @@ pub(crate) struct Built {
     pub(crate) exe: PathBuf,
     pub(crate) out: PathBuf,
     pub(crate) toolchain: BuildTools,
-    pub(crate) android: Option<crate::android::AndroidBuild>,
+    pub(crate) cross: Option<crate::cross::Build>,
 }
 
 /// Builds `plans` in order, each in its own directory, showing progress
@@ -1421,27 +1421,19 @@ pub(crate) fn build_project(
     ui: &mut Ui,
 ) -> Result<Built, BoxError> {
     let (name, out) = project_out(settings)?;
-    let android = match targets {
+    let cross = match targets {
         [] => None,
         [t] => match crate::cross::target(t)? {
             None => None,
-            Some(crate::cross::Target::Android(a)) if mode == Mode::Shipped => {
-                Some(crate::android::AndroidBuild::prepare(settings, a, &name)?)
+            Some(c) if mode == Mode::Shipped => {
+                Some(crate::cross::Build::prepare(settings, c, &name)?)
             }
-            Some(crate::cross::Target::Android(_)) => {
-                return Err("relift run does not run on Android yet".into());
-            }
-            Some(crate::cross::Target::Ios(_)) => {
-                return Err(format!(
-                    "target {t}: only Game Boy projects build for iOS so far (a Switch game needs MoltenVK linked in)"
-                )
-                .into());
-            }
+            Some(_) => return Err(format!("relift run does not run on {t} yet").into()),
         },
         [t, ..] => return Err(format!("target {t}: only one target builds at a time").into()),
     };
     if let Some(rec) = std::env::var_os(EMIT_RECORD) {
-        let r = lift_and_emit(settings, &name, &out, mods, android.is_some(), ui)?;
+        let r = lift_and_emit(settings, &name, &out, mods, cross.is_some(), ui)?;
         relift_cache::write_if_changed(Path::new(&rec), r.to_text().as_bytes())?;
         std::process::exit(0);
     }
@@ -1470,25 +1462,30 @@ pub(crate) fn build_project(
         Vec::new()
     };
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = match &android {
-        Some(a) => vec![a.ndk.clang.display().to_string()],
+    let cc = match &cross {
+        Some(c) => c.cc(),
         None if dev => c_compiler(&settings.toolchain)?,
         None => release_compiler(settings)?,
     };
-    let arch: Vec<String> = if android.is_some() {
+    let arch: Vec<String> = if cross.is_some() {
         Vec::new()
     } else if cfg!(target_arch = "x86_64") {
         vec!["-mcx16".into()]
     } else {
         Vec::new()
     };
-    let zig = cc.len() > 1;
+    let zig = cross.is_none() && cc.len() > 1;
     let base: Vec<String> = ["-std=c11", "-O2", "-g", "-ffp-contract=off"]
         .iter()
         .map(|s| s.to_string())
         .chain(arch)
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
-        .chain(android.as_ref().map(|_| "-fPIC".to_string()))
+        .chain(
+            cross
+                .as_ref()
+                .filter(|c| c.pic())
+                .map(|_| "-fPIC".to_string()),
+        )
         .collect();
     // Lifted code gets line tables only: full -g makes clang track every
     // local of functions with tens of thousands of them, which made one
@@ -1511,7 +1508,7 @@ pub(crate) fn build_project(
     // which the compiler must then neither fold nor reorder.
     let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
     let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
-    let pic: Vec<String> = if cfg!(windows) && android.is_none() {
+    let pic: Vec<String> = if cfg!(windows) && cross.is_none() {
         Vec::new()
     } else {
         ["-fPIC", "-fvisibility=hidden"].map(String::from).into()
@@ -1545,15 +1542,15 @@ pub(crate) fn build_project(
         .map(String::from),
     )
     .chain(pic.iter().cloned())
-    .chain((COLD_FAR && android.is_none()).then(|| "-mcmodel=large".to_string()))
+    .chain((COLD_FAR && cross.is_none()).then(|| "-mcmodel=large".to_string()))
     .collect();
     let lifted_flags = if emitted.fp_program_wide {
         flag_flags.clone()
     } else {
         lifted_flags
     };
-    let extras = match &android {
-        Some(a) => crate::runtime_link::android_extras(&rt, &a.deps, true)?,
+    let extras = match &cross {
+        Some(c) => c.extras(&rt, true)?,
         None => crate::runtime_link::extras(&rt, &croot)?,
     };
     ui.note(&Line::new().text(extras.note()));
@@ -1580,7 +1577,7 @@ pub(crate) fn build_project(
         .chain(extras.defines())
         .chain(hotload.iter().cloned())
         .collect();
-    let lib_flags: Vec<String> = if dev || android.is_some() {
+    let lib_flags: Vec<String> = if dev || cross.as_ref().is_some_and(crate::cross::Build::pic) {
         rt_flags
             .iter()
             .cloned()
@@ -1589,8 +1586,8 @@ pub(crate) fn build_project(
     } else {
         rt_flags.clone()
     };
-    let bdir = match &android {
-        Some(a) => out.join(a.target.name),
+    let bdir = match &cross {
+        Some(c) => out.join(c.name()),
         None if dev => out.join("dev"),
         None => out.clone(),
     };
@@ -1663,29 +1660,20 @@ pub(crate) fn build_project(
         })
         .collect();
     rt_compiles.extend(extras.compiles(&rt, &lib_flags, &|s| obj(s, "rt")));
-    let exe = match &android {
-        Some(_) => bdir.join("libmain.so"),
+    let exe = match &cross {
+        Some(c) => bdir.join(c.program()),
         None => bdir.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
     };
     let ninja = tool(&settings.toolchain.ninja, "ninja");
     let jobs = relift_build::job_count(settings.jobs);
-    let mut libs: Vec<String> = if android.is_some() {
-        [
-            "-lm",
-            "-ldl",
-            "-shared",
-            "-Wl,-soname,libmain.so",
-            "-Wl,-z,max-page-size=16384",
-            "-Wl,--no-undefined",
-        ]
-        .map(String::from)
-        .into()
+    let mut libs: Vec<String> = if let Some(c) = &cross {
+        c.libs()
     } else if cfg!(windows) {
         ["-lpthread", "-lm", "-lws2_32"].map(String::from).into()
     } else {
         ["-lpthread", "-lm"].map(String::from).into()
     };
-    if COLD_FAR && android.is_none() && !emitted.cold.is_empty() {
+    if COLD_FAR && cross.is_none() && !emitted.cold.is_empty() {
         let script = out.join("cold.ld");
         relift_cache::write_if_changed(&script, COLD_SCRIPT.as_bytes())?;
         libs.push("-T".into());
@@ -1779,7 +1767,7 @@ pub(crate) fn build_project(
     Ok(Built {
         exe,
         out,
-        android,
+        cross,
         toolchain: BuildTools {
             cc,
             ninja,
@@ -1883,8 +1871,14 @@ pub fn run_build(
         label: "",
         exe: &built.exe,
         import: Some(&import),
-        android: built.android.as_ref(),
-        ios: None,
+        android: match &built.cross {
+            Some(crate::cross::Build::Android(a)) => Some(a.as_ref()),
+            _ => None,
+        },
+        ios: match &built.cross {
+            Some(crate::cross::Build::Ios(i)) => Some(i.as_ref()),
+            _ => None,
+        },
     };
     package(settings, &request, ui)
 }
