@@ -7,7 +7,7 @@ use relift_ir::{BinOp, Block, CmpOp, ExtKind, Flow, Next, Op, Value, Width};
 
 use crate::image::Image;
 use crate::loc::{Loc, Region};
-use crate::val::{Abs, Base, DMA_BASE, DMA_HALVES, SP, State, Sym};
+use crate::val::{Abs, Base, DMA_BASE, DMA_HALVES, SP, State, Sym, UNBOUNDED};
 
 /// A DMA channel enabled with the register values at that point.
 #[derive(Clone, Copy, Debug)]
@@ -44,10 +44,10 @@ enum Ev {
     A(Abs),
     /// The bits from `lo` up of a symbol.
     Hi(Sym, u8),
-    /// The bits from `lo` up of a table index.
-    HiIdx(u32, u32, u8),
-    /// The bits from `lo` up of a table word.
-    HiTab(u32, u32, u8),
+    /// The bits from `lo` up of a table index: base, stride, count.
+    HiIdx(u32, u32, u32, u8),
+    /// The bits from `lo` up of a table word: base, stride, count.
+    HiTab(u32, u32, u32, u8),
 }
 
 fn mask(w: u32) -> u128 {
@@ -128,7 +128,9 @@ fn stride_of(a: Abs) -> Option<u32> {
             let tz = (!m).trailing_zeros().min(val.trailing_zeros()).min(12);
             Some(1 << tz)
         }
-        Abs::Idx { base: 0, stride } => Some(stride),
+        Abs::Idx {
+            base: 0, stride, ..
+        } => Some(stride),
         _ => None,
     }
 }
@@ -148,15 +150,33 @@ fn index(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
         return None;
     }
     match x {
-        Abs::Idx { base, stride } => Some(Abs::Idx {
+        Abs::Idx { base, stride, n } => Some(Abs::Idx {
             base: base.wrapping_add(k),
             stride,
+            n,
         }),
         _ if Region::of(k) == Region::Rom || Region::of(k).is_ram() => {
             let stride = stride_of(x)?;
-            (stride >= 4).then_some(Abs::Idx { base: k, stride })
+            (stride >= 4).then_some(Abs::Idx {
+                base: k,
+                stride,
+                n: count(x, stride),
+            })
         }
         _ => None,
+    }
+}
+
+/// How many multiples of `stride` from zero the value `x` can be: its
+/// largest value by its known bits, over the stride, plus one.
+fn count(x: Abs, stride: u32) -> u32 {
+    match x {
+        Abs::B { mask: m, val } => match u32::try_from((val | !m) & 0xFFFF_FFFF) {
+            Ok(max) if max != u32::MAX => max / stride + 1,
+            _ => UNBOUNDED,
+        },
+        Abs::Idx { base: 0, n, .. } => n,
+        _ => UNBOUNDED,
     }
 }
 
@@ -179,7 +199,11 @@ fn scaled(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
         _ => 1,
     };
     let stride = k.checked_mul(s).filter(|s| *s <= 0x1000)?;
-    Some(Abs::Idx { base: 0, stride })
+    Some(Abs::Idx {
+        base: 0,
+        stride,
+        n: count(x, s),
+    })
 }
 
 fn bin(op: BinOp, a: Abs, b: Abs, w: u32) -> Abs {
@@ -219,8 +243,10 @@ fn bin(op: BinOp, a: Abs, b: Abs, w: u32) -> Abs {
             0xFFFF_FFFF => S(s),
             0xFFFF_FFFE => align(s, 1),
             0xFFFF_FFFC => align(s, 2),
-            _ => Abs::Top,
+            _ => bits(!m, 0, w),
         },
+        (BinOp::And, _, K(m)) | (BinOp::And, K(m), _) => bits(!m, 0, w),
+        (BinOp::Shl, _, K(k)) if k < u128::from(w) => bits((1 << k) - 1, 0, w),
         _ => Abs::Top,
     }
 }
@@ -403,6 +429,7 @@ pub(crate) fn eval(
                         let (m, v) = known(a, wx);
                         bits(m | (mask(w) & !mask(wx)), v, w)
                     }
+                    _ if *kind == ExtKind::Zero && wx < w => bits(mask(w) & !mask(wx), 0, w),
                     _ => Abs::Top,
                 })
             }
@@ -411,16 +438,16 @@ pub(crate) fn eval(
                 Abs::S(s) if *lo == 0 && w == 32 => Ev::A(Abs::S(s)),
                 a @ (Abs::Idx { .. } | Abs::Tab { .. }) if *lo == 0 && w == 32 => Ev::A(a),
                 Abs::S(s) if cx.width(*x) == 32 && w + u32::from(*lo) == 32 => Ev::Hi(s, *lo),
-                Abs::Idx { base, stride } if w + u32::from(*lo) <= stride.trailing_zeros() => {
+                Abs::Idx { base, stride, .. } if w + u32::from(*lo) <= stride.trailing_zeros() => {
                     Ev::A(Abs::K(u128::from(base >> lo) & mask(w)))
                 }
-                Abs::Tab { base, stride }
+                Abs::Tab { base, stride, n }
                     if cx.width(*x) == 32 && w + u32::from(*lo) == 32 && *lo > 0 =>
                 {
-                    Ev::HiTab(base, stride, *lo)
+                    Ev::HiTab(base, stride, n, *lo)
                 }
-                Abs::Idx { base, stride } if cx.width(*x) == 32 && w + u32::from(*lo) == 32 => {
-                    Ev::HiIdx(base, stride, *lo)
+                Abs::Idx { base, stride, n } if cx.width(*x) == 32 && w + u32::from(*lo) == 32 => {
+                    Ev::HiIdx(base, stride, n, *lo)
                 }
                 a @ Abs::B { .. } => {
                     let (m, v) = known(a, cx.width(*x));
@@ -434,13 +461,13 @@ pub(crate) fn eval(
                 Ev::A(match (hv, cx.get(*l)) {
                     (Some(Ev::A(Abs::K(x))), Abs::K(y)) if wl < 128 => Abs::K((x << wl) | y),
                     (Some(Ev::Hi(s, lo)), Abs::K(0)) if u32::from(lo) == wl => align(s, lo),
-                    (Some(Ev::HiTab(base, stride, lo)), Abs::K(0)) if u32::from(lo) == wl => {
-                        Abs::Tab { base, stride }
+                    (Some(Ev::HiTab(base, stride, n, lo)), Abs::K(0)) if u32::from(lo) == wl => {
+                        Abs::Tab { base, stride, n }
                     }
-                    (Some(Ev::HiIdx(base, stride, lo)), Abs::K(0))
+                    (Some(Ev::HiIdx(base, stride, n, lo)), Abs::K(0))
                         if u32::from(lo) == wl && (base | stride) & ((1 << lo) - 1) == 0 =>
                     {
-                        Abs::Idx { base, stride }
+                        Abs::Idx { base, stride, n }
                     }
                     (Some(Ev::A(hv)), lv) if wl < 128 => {
                         let (mh, vh) = known(hv, w - wl);
@@ -528,13 +555,21 @@ fn load(
     literal: bool,
     scratch: Option<&Scratch>,
 ) -> Abs {
-    if let Abs::Idx { base, stride } = addr
+    if let Abs::Idx {
+        base,
+        stride,
+        n: count,
+    } = addr
         && n == 4
         && base % 4 == 0
         && stride % 4 == 0
         && (image.in_image(base) || !image.copies_at(base).is_empty())
     {
-        return Abs::Tab { base, stride };
+        return Abs::Tab {
+            base,
+            stride,
+            n: count,
+        };
     }
     match addr {
         Abs::K(a) => {

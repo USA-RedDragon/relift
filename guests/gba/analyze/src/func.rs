@@ -445,10 +445,10 @@ impl Run<'_> {
 
     /// A word store of `v` at `a`.
     fn store(&mut self, a: Abs, v: Abs) {
-        if let Abs::Tab { base, stride } = v
+        if let Abs::Tab { base, stride, n } = v
             && a.stack_off().is_none()
         {
-            let es = self.table_entries(base, stride, None);
+            let es = self.table_entries(base, stride, n, None);
             self.out
                 .escaped
                 .extend(es.into_iter().filter(|e| e.1).map(|e| e.0 | 1));
@@ -623,14 +623,20 @@ impl Run<'_> {
         self.resume(site, st, s);
     }
 
-    /// The code addresses in the ROM table at `base` with `stride`: the
-    /// entries from the first while each is a code address in the image
-    /// (zero entries are skipped), with the state from bit 0 when
-    /// `thumb` is `None`. The words read are data.
-    fn table_entries(&mut self, base: u32, stride: u32, thumb: Option<bool>) -> Vec<(u32, bool)> {
+    /// The code addresses in the table at `base` with `stride`: the first
+    /// `n` entries at most, from the first while each is a code address
+    /// (zero entries are skipped), with the state from bit 0 when `thumb`
+    /// is `None`. The ROM words read are data.
+    fn table_entries(
+        &mut self,
+        base: u32,
+        stride: u32,
+        n: u32,
+        thumb: Option<bool>,
+    ) -> Vec<(u32, bool)> {
         let mut out = Vec::new();
         let ram = Region::of(base).is_ram();
-        for i in 0..MAX_TABLE {
+        for i in 0..MAX_TABLE.min(n) {
             let a = base.wrapping_add(i * stride);
             let mut vals: Vec<u32> = Vec::new();
             if ram {
@@ -682,13 +688,12 @@ impl Run<'_> {
     fn tab_transfer(
         &mut self,
         site: Loc,
-        base: u32,
-        stride: u32,
+        (base, stride, n): (u32, u32, u32),
         thumb: Option<bool>,
         st: &State,
         linked: bool,
     ) -> Summary {
-        let es = self.table_entries(base, stride, thumb);
+        let es = self.table_entries(base, stride, n, thumb);
         if es.is_empty() {
             self.unresolved(
                 site,
@@ -852,9 +857,13 @@ impl Run<'_> {
                 off: 0,
                 ..
             }) => self.pointer(site, a, (!bx).then_some(site.thumb), st, false),
-            Abs::Tab { base, stride } => {
-                self.tab_transfer(site, base, stride, (!bx).then_some(site.thumb), st, false)
-            }
+            Abs::Tab { base, stride, n } => self.tab_transfer(
+                site,
+                (base, stride, n),
+                (!bx).then_some(site.thumb),
+                st,
+                false,
+            ),
             _ => {
                 self.unresolved(
                     site,
@@ -989,13 +998,13 @@ impl Run<'_> {
                 let own = self.out.summary.get_or_insert(Summary::new(false, 0x7FFF));
                 own.via.get_or_insert((r, is_bx(enc)));
             }
-            Abs::Tab { base, stride } if link => {
+            Abs::Tab { base, stride, n } if link => {
                 let thumb = if is_bx(enc) { None } else { Some(site.thumb) };
-                self.tab_transfer(site, base, stride, thumb, st, link);
+                self.tab_transfer(site, (base, stride, n), thumb, st, link);
             }
-            Abs::Tab { base, stride } => {
+            Abs::Tab { base, stride, n } => {
                 let thumb = if is_bx(enc) { None } else { Some(site.thumb) };
-                let es = self.table_entries(base, stride, thumb);
+                let es = self.table_entries(base, stride, n, thumb);
                 if es.is_empty() {
                     self.unresolved(
                         site,

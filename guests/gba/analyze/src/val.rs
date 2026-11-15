@@ -42,13 +42,18 @@ pub(crate) enum Abs {
     S(Sym),
     /// Some bits known: the bits set in `mask` have the values in `val`.
     B { mask: u128, val: u128 },
-    /// `base + stride * i` for an unknown `i` of zero or more, 32 bits.
-    Idx { base: u32, stride: u32 },
-    /// The word loaded from `base + stride * i` in the ROM image.
-    Tab { base: u32, stride: u32 },
+    /// `base + stride * i` for an unknown `i` below `n` ([`UNBOUNDED`]:
+    /// any), 32 bits.
+    Idx { base: u32, stride: u32, n: u32 },
+    /// The word loaded from `base + stride * i`, `i` below `n`, in the ROM
+    /// image.
+    Tab { base: u32, stride: u32, n: u32 },
     /// Unknown.
     Top,
 }
+
+/// The count of an index no check bounds.
+pub(crate) const UNBOUNDED: u32 = u32::MAX;
 
 pub(crate) const SP: u8 = 13;
 pub(crate) const LR: u8 = 14;
@@ -75,20 +80,21 @@ impl Abs {
 
     /// The least value that covers both. Two addresses in one memory
     /// region, a multiple of four apart and at most 4 KiB apart, join to
-    /// a table index from the lower one.
+    /// a table index from the lower one: of the two entries for two
+    /// constants, not bounded once an index is involved (a loop).
     pub(crate) fn join(self, o: Abs) -> Abs {
         if self == o {
             return self;
         }
         let span = |x: Abs| match x {
             Abs::K(v) => u32::try_from(v).ok().map(|v| (v, 0, false)),
-            Abs::Idx { base, stride } => Some((base, stride, false)),
+            Abs::Idx { base, stride, .. } => Some((base, stride, false)),
             Abs::S(Sym {
                 base: Base::Mem(m),
                 off: 0,
                 align: 0,
             }) => Some((m, 0, true)),
-            Abs::Tab { base, stride } => Some((base, stride, true)),
+            Abs::Tab { base, stride, .. } => Some((base, stride, true)),
             _ => None,
         };
         let (Some((a, sa, la)), Some((b, sb, lb))) = (span(self), span(o)) else {
@@ -105,15 +111,22 @@ impl Abs {
         if g == 0 || !g.is_multiple_of(4) {
             return Abs::Top;
         }
+        let n = if sa == 0 && sb == 0 {
+            (hi - lo) / g + 1
+        } else {
+            UNBOUNDED
+        };
         if la {
             Abs::Tab {
                 base: lo,
                 stride: g,
+                n,
             }
         } else {
             Abs::Idx {
                 base: lo,
                 stride: g,
+                n,
             }
         }
     }

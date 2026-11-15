@@ -661,3 +661,38 @@ fn jump_to_another_functions_entry_returns_where_that_function_returns() {
             .any(|x| x.target == Loc::rom(f, true) && x.kind == EdgeKind::Tail)
     );
 }
+
+#[test]
+fn masked_index_reads_only_the_entries_it_can_reach() {
+    let mut a = Asm::new();
+    let t = 0x0800_0200;
+    a.arm(
+        0x0800_0100,
+        &[a_ldr_lit(1, 0x0800_0100, 0x0800_0108), a_bx(1), t | 1],
+    );
+    let table = 0x0800_0300;
+    a.thumb(
+        t,
+        &[
+            0x220C,
+            0x4010,
+            t_ldr_lit(1, t + 4, t + 0xC),
+            0x5808,
+            t_bx(0),
+            0,
+        ],
+    );
+    a.w32(t + 0xC, table);
+    let cases: Vec<u32> = (0..5).map(|i| 0x0800_0340 + 0x10 * i).collect();
+    for (i, c) in cases.iter().enumerate() {
+        a.w32(table + 4 * i as u32, *c);
+        a.arm(*c, &[A_MOV_R0_1, A_BX_LR]);
+    }
+    let r = a.run(0x0800_0100);
+    let found = insts(&r);
+    for c in &cases[..4] {
+        assert!(found.contains(&(*c, false)), "{c:#x} missed");
+    }
+    assert!(!found.contains(&(cases[4], false)));
+    assert!(!r.data.contains(&(table + 16, 4)));
+}
