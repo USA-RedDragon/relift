@@ -4,7 +4,7 @@ use common::{
     JR_SELF, black_screen_then_marker, detail, drive, ldh_all, plain, rom, scratch, serial_sc_edge,
     then_spin, write_new,
 };
-use relift_gb_devices::{Rlgbd, Verdict, encode_rgb_png};
+use relift_gb_devices::{FRAME_DOTS, Rlgbd, Verdict, encode_rgb_png};
 
 const STEPS: u64 = 40_000_000;
 
@@ -342,15 +342,6 @@ fn gambatte_hex_reads_the_tiles_after_the_last_frame() {
 }
 
 #[test]
-fn audio_is_not_supported_on_the_ext_path() {
-    let mut m = Rlgbd::new(0, &plain(0, &JR_SELF)).unwrap();
-    m.case_open("protocol=gambatte_audio\naudible=true\n")
-        .unwrap();
-    assert_eq!(drive(&mut m, 10), Verdict::Unsupported);
-    assert_eq!(detail(&m), "the external-CPU path generates no audio");
-}
-
-#[test]
 fn run_reports_the_frame_hash_and_the_serial_text() {
     let image = plain(0, &then_spin(&serial_sc_edge("Hi\n")));
     let mut m = Rlgbd::new(0, &image).unwrap();
@@ -481,4 +472,95 @@ fn spec_errors_are_reported() {
     );
     assert!(m.case_open("protocol=mem\n").unwrap_err().contains("addr"));
     assert!(m.case_open("protocol=png\n").unwrap_err().contains("ref"));
+}
+
+fn beep() -> Vec<u8> {
+    let writes = [
+        (0x26, 0x80),
+        (0x24, 0x77),
+        (0x25, 0xFF),
+        (0x12, 0xF0),
+        (0x13, 0x00),
+        (0x14, 0x87),
+    ];
+    let code: Vec<u8> = writes
+        .iter()
+        .flat_map(|&(reg, v)| [0x3E, v, 0xE0, reg])
+        .collect();
+    plain(0, &then_spin(&code))
+}
+
+fn audio_case(image: &[u8], audible: bool) -> (Verdict, String) {
+    let mut m = Rlgbd::new(0, image).unwrap();
+    m.case_open(&format!(
+        "protocol=gambatte_audio\naudible={audible}\nframes=3\n"
+    ))
+    .unwrap();
+    let v = drive(&mut m, STEPS);
+    (v, detail(&m))
+}
+
+#[test]
+fn audio_cases_grade_the_last_frame_for_sound() {
+    assert_eq!(audio_case(&beep(), true).0, Verdict::Pass);
+    let (v, d) = audio_case(&beep(), false);
+    assert_eq!(v, Verdict::Fail);
+    assert_eq!(d, "silence was expected but final samples changed");
+    let quiet = plain(0, &then_spin(&[0x3E, 0x00, 0xE0, 0x26]));
+    assert_eq!(audio_case(&quiet, false).0, Verdict::Pass);
+    let (v, d) = audio_case(&quiet, true);
+    assert_eq!(v, Verdict::Fail);
+    assert_eq!(
+        d,
+        "audio output was expected but final samples were identical"
+    );
+}
+
+#[test]
+fn collected_samples_come_out_of_the_handle_in_order() {
+    let mut m = Rlgbd::new(0, &beep()).unwrap();
+    let mut out = vec![0f32; 2 * 4096];
+    assert_eq!(m.audio_take(&mut out), 0);
+    m.audio_enable(true);
+    for _ in 0..20_000 {
+        if let Some(op) = m.begin() {
+            m.exec_native(op);
+        }
+    }
+    let n = m.audio_take(&mut out);
+    assert!(n > 100, "{n}");
+    assert!(out[..2 * n].iter().any(|&s| s != out[0]));
+    m.audio_enable(false);
+    assert_eq!(m.audio_take(&mut out), 0);
+}
+
+#[test]
+fn the_reference_step_and_the_external_path_collect_the_same_samples() {
+    let take = |m: &mut Rlgbd| {
+        let mut all = Vec::new();
+        let mut out = vec![0f32; 2 * 512];
+        loop {
+            let n = m.audio_take(&mut out);
+            if n == 0 {
+                return all;
+            }
+            all.extend_from_slice(&out[..2 * n]);
+        }
+    };
+    let mut ext = Rlgbd::new(0, &beep()).unwrap();
+    let mut native = Rlgbd::new(0, &beep()).unwrap();
+    ext.audio_enable(true);
+    native.audio_enable(true);
+    while ext.now() < 4 * FRAME_DOTS {
+        if let Some(op) = ext.begin() {
+            ext.exec_native(op);
+        }
+    }
+    while native.now() < ext.now() {
+        native.step_native();
+    }
+    assert_eq!(ext.now(), native.now());
+    let (a, b) = (take(&mut ext), take(&mut native));
+    assert!(a.len() > 2 * 1000);
+    assert_eq!(a, b);
 }

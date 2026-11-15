@@ -41,7 +41,7 @@ typedef struct rlgbd_regs {
 #define RLGBD_CASE_CONTINUE 0
 #define RLGBD_CASE_PASS 1
 #define RLGBD_CASE_FAIL 2
-#define RLGBD_CASE_UNSUPPORTED 3 /**< the case cannot run on the external-CPU path (audio) */
+#define RLGBD_CASE_UNSUPPORTED 3 /**< the case cannot run on the external-CPU path */
 #define RLGBD_CASE_NEED_REGS 4   /**< the verdict reads the CPU registers: rlgbd_case_regs, then poll again */
 
 /**
@@ -139,6 +139,13 @@ const char *rlgbd_case_detail(rlgbd *h);
 
 /** @brief rlgbd_begin after loading pc and sp into the CPU, keeping the interrupt enable the library tracks. */
 int32_t rlgbd_at(rlgbd *h, uint16_t pc, uint16_t sp);
+/** @brief Sample rate of rlgbd_audio_take, in Hz. */
+#define RLGBD_AUDIO_RATE 44100u
+/** @brief Starts (nonzero) or stops collecting the sound unit's samples; stopping drops the ones not taken. Off in a new machine. */
+void rlgbd_audio_enable(rlgbd *h, uint8_t on);
+/** @brief Moves up to cap collected sample frames into out as interleaved left and right floats; returns how many. */
+size_t rlgbd_audio_take(rlgbd *h, float *out, size_t cap);
+
 /** @brief The CPU's program counter. */
 uint16_t rlgbd_pc(rlgbd *h);
 /** @brief The CPU's stack pointer. */

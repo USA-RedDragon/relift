@@ -17,12 +17,14 @@
 mod case;
 mod imaging;
 
+use rustyboi_core_lib::audio::AudioOutput;
 use rustyboi_core_lib::cartridge::Cartridge;
 use rustyboi_core_lib::cpu::bus::ExtBusState;
 use rustyboi_core_lib::gb::{GB, Hardware};
 use rustyboi_core_lib::input::ButtonState;
 use std::ffi::{CStr, c_char};
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 pub use case::Verdict;
 pub use imaging::encode_rgb_png;
@@ -86,6 +88,23 @@ pub struct Rlgbd {
     frames: u32,
     case: Option<Box<case::Case>>,
     detail: Vec<u8>,
+    audio: std::collections::VecDeque<(f32, f32)>,
+    native_audio: Arc<Mutex<Vec<(f32, f32)>>>,
+    native_on: bool,
+}
+
+struct Sink(Arc<Mutex<Vec<(f32, f32)>>>);
+
+impl AudioOutput for Sink {
+    fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn add_samples(&mut self, samples: &[(f32, f32)]) {
+        if let Ok(mut v) = self.0.lock() {
+            v.extend_from_slice(samples);
+        }
+    }
 }
 
 fn hardware(model: u32) -> Hardware {
@@ -145,6 +164,9 @@ impl Rlgbd {
             frames: 0,
             case: None,
             detail: vec![0],
+            audio: std::collections::VecDeque::new(),
+            native_audio: Arc::default(),
+            native_on: false,
         })
     }
 
@@ -229,7 +251,7 @@ impl Rlgbd {
 
     /// One whole instruction on rustyboi's own CPU (the reference run).
     pub fn step_native(&mut self) -> u32 {
-        self.gb.step_instruction(false).1
+        self.gb.step_instruction(self.native_on).1
     }
 
     /// Runs the devices `dots` dots with no CPU access, between instructions.
@@ -409,6 +431,40 @@ impl Rlgbd {
             c.import_rtc(footer)?;
         }
         Ok(())
+    }
+
+    /// Starts or stops collecting the sound unit's samples.
+    pub fn audio_enable(&mut self, on: bool) {
+        self.gb.ext_set_audio(on);
+        if on && !self.native_on {
+            let sink = Sink(self.native_audio.clone());
+            self.native_on = self.gb.enable_audio(Box::new(sink)).is_ok();
+        } else if !on {
+            self.native_on = false;
+            self.audio.clear();
+            if let Ok(mut v) = self.native_audio.lock() {
+                v.clear();
+            }
+        }
+    }
+
+    /// Moves up to `out.len() / 2` collected sample frames into `out` as
+    /// interleaved left and right; returns how many.
+    pub fn audio_take(&mut self, out: &mut [f32]) -> usize {
+        self.audio.extend(self.gb.ext_take_samples());
+        if let Ok(mut v) = self.native_audio.lock() {
+            self.audio.extend(v.drain(..));
+        }
+        let (pairs, _) = out.as_chunks_mut::<2>();
+        let mut n = 0;
+        for pair in pairs {
+            let Some((l, r)) = self.audio.pop_front() else {
+                break;
+            };
+            *pair = [l, r];
+            n += 1;
+        }
+        n
     }
 
     /// Opens the test case `spec` (see the `case` module); before the first instruction.
@@ -882,6 +938,31 @@ pub unsafe extern "C" fn rlgbd_load_save(h: *mut Rlgbd, data: *const u8, len: us
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rlgbd_double_speed(h: *mut Rlgbd) -> u8 {
     u8::from(me(h).double_speed())
+}
+
+/// Starts (nonzero `on`) or stops collecting the sound unit's samples; stopping
+/// drops the ones not yet taken. Collection is off in a new machine.
+///
+/// # Safety
+/// `h` is a live handle between instructions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_audio_enable(h: *mut Rlgbd, on: u8) {
+    me(h).audio_enable(on != 0);
+}
+
+/// Moves up to `cap` collected sample frames into `out` as interleaved left and
+/// right `f32` at 44100 Hz, in order, and returns how many.
+///
+/// # Safety
+/// `h` is a live handle between instructions; `out` is writable for `2 * cap` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_audio_take(h: *mut Rlgbd, out: *mut f32, cap: usize) -> usize {
+    if out.is_null() || cap == 0 {
+        return 0;
+    }
+    // SAFETY: the caller guarantees `out` holds `2 * cap` floats.
+    let out = unsafe { std::slice::from_raw_parts_mut(out, cap * 2) };
+    me(h).audio_take(out)
 }
 
 /// Opens a test case before the first instruction. `spec` is newline-separated

@@ -94,7 +94,9 @@ enum Kind {
     GambattePng {
         path: PathBuf,
     },
-    Audio,
+    Audio {
+        audible: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -121,6 +123,7 @@ pub(crate) struct Case {
     budget: i64,
     total_budget: i64,
     last_norm: Option<Vec<u32>>,
+    last_audio: Vec<(f32, f32)>,
     out: Vec<u8>,
     prev_start: bool,
     prev_sb: u8,
@@ -265,6 +268,7 @@ impl Case {
         let mut input = String::new();
         let mut expect_hex = None;
         let mut lazy = false;
+        let mut audible = false;
         let mut mode = String::from("dmg");
         for line in spec.lines() {
             let line = line.trim();
@@ -295,7 +299,7 @@ impl Case {
                 "region" => region = Some(v.to_string()),
                 "input" => input = v.to_string(),
                 "expect_hex" => expect_hex = Some(v.to_string()),
-                "audible" => {}
+                "audible" => audible = v == "true",
                 "cart" => lazy = v == "lazy_sram_cs",
                 "mode" => mode = v.to_string(),
                 other => return Err(format!("unknown spec key {other:?}")),
@@ -364,7 +368,7 @@ impl Case {
             "gambatte_png" => Kind::GambattePng {
                 path: first_ref(&refs)?,
             },
-            "gambatte_audio" => Kind::Audio,
+            "gambatte_audio" => Kind::Audio { audible },
             other => return Err(format!("unknown protocol {other:?}")),
         };
         let cgb_mode = matches!(mode.as_str(), "cgb" | "agb");
@@ -375,6 +379,9 @@ impl Case {
             } else {
                 ColorCorrection::Lcd
             });
+        }
+        if matches!(kind, Kind::Audio { .. }) {
+            m.gb.ext_set_audio(true);
         }
         if lazy && m.flags & crate::NEW_LAZY_SRAM_CS == 0 {
             m.gb.set_cart_sram_cs_lazy(true);
@@ -414,6 +421,7 @@ impl Case {
             budget: 0,
             total_budget: 0,
             last_norm: None,
+            last_audio: Vec::new(),
             out: Vec::new(),
             prev_start: false,
             saw_running: false,
@@ -475,6 +483,11 @@ impl Case {
 
     fn take(&mut self, m: &mut Rlgbd) {
         m.take_frame();
+        if matches!(self.kind, Kind::Audio { .. }) {
+            self.last_audio = m.gb.ext_take_samples();
+            self.last_norm = Some(Vec::new());
+            return;
+        }
         self.last_norm = Some(if m.gb.frame_renders_color() {
             imaging::normalize_color(&m.frame)
         } else {
@@ -574,10 +587,6 @@ impl Case {
             self.cycles += u64::from(c);
         }
         match &self.kind {
-            Kind::Audio => self.done(
-                Verdict::Unsupported,
-                "the external-CPU path generates no audio",
-            ),
             Kind::Run => self.poll_run(m),
             Kind::Mem { addr, expect } => {
                 let (addr, expect) = (*addr, *expect);
@@ -600,7 +609,9 @@ impl Case {
                     Verdict::Continue
                 }
             }
-            Kind::Hex { .. } | Kind::GambattePng { .. } => self.poll_gambatte(m, post),
+            Kind::Hex { .. } | Kind::GambattePng { .. } | Kind::Audio { .. } => {
+                self.poll_gambatte(m, post)
+            }
         }
     }
 
@@ -912,6 +923,20 @@ impl Case {
                             mm.describe()
                         )),
                     },
+                }
+            }
+            Kind::Audio { audible } => {
+                let audible = *audible;
+                let same = self
+                    .last_audio
+                    .first()
+                    .is_none_or(|first| self.last_audio.iter().all(|s| s == first));
+                if same != audible {
+                    self.pass()
+                } else if audible {
+                    self.fail("audio output was expected but final samples were identical")
+                } else {
+                    self.fail("silence was expected but final samples changed")
                 }
             }
             _ => self.fail("not a gambatte case"),
