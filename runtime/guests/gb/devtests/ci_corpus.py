@@ -8,7 +8,8 @@ library's harness) and `--check` (lockstep against the library's own CPU).
 
 DIR for --roms holds the c-sp game-boy-test-roms v7.0 release; with
 --fetch it is downloaded there first and its sha256 checked. The ROMs are
-never part of the repository. Exit status 0 when every case passes.
+never part of the repository. A case with local = true names a ROM that gen_roms.py
+writes. Exit status 0 when every case passes.
 Standard library only.
 """
 
@@ -86,7 +87,8 @@ def one_rom(args, index, rom, cases):
     name = f"rom{index:03d}"
     proj = os.path.join(args.work, "projects", name)
     os.makedirs(proj, exist_ok=True)
-    rc, so, se = run([args.relift, "-q", "import", os.path.join(args.roms, rom)], env, proj)
+    path = os.path.join(args.local, rom) if cases[0].get("local") else os.path.join(args.roms, rom)
+    rc, so, se = run([args.relift, "-q", "import", path], env, proj)
     if rc == 0:
         rc, so, se = run([args.relift, "-q", "build"], env, proj)
     game = os.path.join(args.work, "cache", "projects", name, "build", "host", "game")
@@ -124,6 +126,8 @@ def main():
     args.work = os.path.abspath(args.work)
     if args.fetch:
         fetch(args.roms)
+    args.local = os.path.join(args.work, "local-roms")
+    subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_roms.py"), args.local], check=True)
     with open(os.path.join(HERE, "ci_cases.toml"), "rb") as f:
         cases = tomllib.load(f)["case"]
     by_rom = {}

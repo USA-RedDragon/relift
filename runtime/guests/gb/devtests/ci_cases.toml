@@ -408,3 +408,14 @@ protocol = "gambatte_audio"
 audible = true
 timeout_frames = 0xf
 timeout_cycles = 0x1012b0
+
+[[case]]
+id = "relift:cb-fetch-dma"
+rom = "cb-fetch-dma.gb"
+local = true
+mode = "dmg"
+hardware = "dmg"
+protocol = "mooneye"
+marker = 0x40
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
