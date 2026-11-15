@@ -213,6 +213,17 @@ fn run(sub: &str, rest: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
+        "game" => {
+            let (lines, ok) = super::game::run_game_check(&super::game::parse_game(rest)?)?;
+            for l in lines {
+                println!("{l}");
+            }
+            if ok {
+                Ok(())
+            } else {
+                Err("the game and the oracle differ".into())
+            }
+        }
         _ => Err(format!("unknown command {sub}")),
     }
 }
@@ -237,7 +248,7 @@ pub fn dispatch(args: &[String]) -> Option<ExitCode> {
     Some(match run(sub, rest) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}\n{USAGE}");
+            eprintln!("{e}\n{USAGE}\n{}", super::game::USAGE);
             ExitCode::FAILURE
         }
     })

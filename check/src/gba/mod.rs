@@ -3,6 +3,7 @@
 //! over the line protocol in `check/oracle/nba/README.md`.
 
 pub mod cli;
+pub mod game;
 #[cfg(test)]
 mod tests;
 
