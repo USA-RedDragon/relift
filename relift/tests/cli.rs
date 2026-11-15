@@ -253,3 +253,20 @@ fn import_refuses_encrypted_dumps_pointing_to_a_separate_tool() {
     let out = import_in(&project, &["--keys", &keys_file, "import", "x"]);
     assert!(!out.status.success(), "the keys setting is gone");
 }
+
+#[test]
+fn a_relative_cache_dir_is_taken_from_the_working_directory() {
+    let root = scratch("cli-relative-cache");
+    let project = root.join("game");
+    let rom = root.join("synth.gba");
+    let image = relift_gba_formats::synth::rom(&relift_gba_formats::synth::Spec::default());
+    relift_cache::write_if_changed(&rom, &image).expect("the ROM is writable");
+    let rom = rom.display().to_string();
+    let out = import_in(&project, &["--cache-dir", "rel-cache", "import", &rom]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let game = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
+    let import = project.join("rel-cache/projects/game/import");
+    assert!(import.join("rom.gba").is_file(), "{game}");
+    let want = format!("import_dir = {:?}", import.display().to_string());
+    assert!(game.lines().any(|l| l == want), "{game}");
+}

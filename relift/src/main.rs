@@ -27,7 +27,7 @@ fn main() -> ExitCode {
         })
         .load_with_matches();
 
-    let (settings, matches) = match loaded {
+    let (mut settings, matches) = match loaded {
         Ok(loaded) => loaded,
         Err(ConfigulatorError::CLIError(e)) => e.exit(),
         Err(e) => {
@@ -35,6 +35,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Err(e) = settings.resolve_paths() {
+        eprintln!("relift: {e}");
+        return ExitCode::FAILURE;
+    }
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
         Err(e) => e.exit(),

@@ -202,6 +202,24 @@ pub struct Toolchain {
     pub codesign_keychain: PathBuf,
 }
 
+impl Settings {
+    /// Makes the relative directory settings absolute, from the working
+    /// directory: the build steps run in other directories and must find
+    /// the same cache and runtime.
+    ///
+    /// # Errors
+    ///
+    /// No working directory.
+    pub fn resolve_paths(&mut self) -> std::io::Result<()> {
+        for p in [&mut self.cache_dir, &mut self.runtime_dir] {
+            if !p.as_os_str().is_empty() {
+                *p = std::path::absolute(&*p)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Validate for Settings {
     fn validate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         relift_progress::ColorChoice::parse(&self.color)?;
