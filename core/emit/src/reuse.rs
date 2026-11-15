@@ -122,6 +122,7 @@ fn put_target(out: &mut Vec<u8>, t: Option<&Target>) {
             out.push(1);
             put_str(out, &t.name);
             out.push(u8::from(t.lifted) | u8::from(t.resume_point) << 1 | u8::from(t.declare) << 2);
+            put_uvar(out, t.keeps);
         }
     }
 }
@@ -132,11 +133,13 @@ fn target(r: &mut Reader<'_>) -> Result<Option<Target>, BinError> {
         1 => {
             let name = r.str()?.to_string();
             let b = r.u8()?;
+            let keeps = r.uvar()?;
             Some(Target {
                 name,
                 lifted: b & 1 != 0,
                 resume_point: b & 2 != 0,
                 declare: b & 4 != 0,
+                keeps,
             })
         }
         _ => return Err(BinError("bad target")),

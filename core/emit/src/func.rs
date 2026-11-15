@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use relift_guest::{Frontend, Home};
 use relift_ir::{BinOp, Block, Flow, IoMap, Next, Op, Reg, Value};
 
+use crate::callee::Shape;
 use crate::state::{Plan, Regs, plan};
 use crate::time;
 use crate::value::{Emitted, cty, emit_op, inlined, reg, val};
@@ -434,6 +435,7 @@ pub(crate) fn emit_function(
     }
     let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
+    let shape = Shape::of(fe);
     let env = Env {
         fe,
         f,
@@ -443,6 +445,7 @@ pub(crate) fn emit_function(
         io,
         anywhere,
         in_context: opts.regs_in_context,
+        shape: &shape,
     };
     let whole = emit_piece(&env, &all, None);
     if !anywhere && (whole.text.len() <= piece_bytes || all.len() < 2) {
@@ -531,12 +534,13 @@ pub(crate) fn emit_function(
 pub(crate) struct Env<'a> {
     pub(crate) fe: &'a dyn Frontend,
     pub(crate) f: &'a Function<'a>,
-    targets: &'a Targets<'a>,
+    pub(crate) targets: &'a Targets<'a>,
     pub(crate) blocks: &'a BTreeMap<u64, Block>,
     resumes: &'a BTreeSet<u64>,
     io: &'a IoMap,
     anywhere: bool,
     in_context: bool,
+    pub(crate) shape: &'a Shape,
 }
 
 /// One emitted C function over the instructions `pcs` of `f`.
@@ -559,6 +563,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         io,
         anywhere,
         in_context,
+        ..
     } = *env;
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
     let mut used: BTreeSet<Reg> = BTreeSet::new();
@@ -1010,7 +1015,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     cx.dirty = cx.plan.dirty_out(b.pc);
     let out_store = cx.store(&cx.dirty);
     let after = |cx: &mut Ctx<'_>, s: &mut String, call: String, to: u64| {
-        let rl = cx.reload(cx.plan.live_at(to));
+        let rl = cx.reload(&cx.plan.live_at(to).without(cx.plan.kept(b.pc)));
         let _ = writeln!(
             s,
             "{}    rc = {call};\n{check}\n{}",

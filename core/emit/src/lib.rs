@@ -16,6 +16,7 @@
 //! that did not lift, or use an operation this emitter cannot express,
 //! report themselves through the frontend's undefined-instruction entry.
 
+mod callee;
 mod func;
 mod reuse;
 mod state;
@@ -255,6 +256,8 @@ pub(crate) struct Target {
     pub(crate) resume_point: bool,
     /// Whether a shard that calls it declares it.
     pub(crate) declare: bool,
+    /// The callee-saved registers it returns unchanged ([`callee`]).
+    pub(crate) keeps: callee::Keeps,
 }
 
 /// Emits the functions `fns` and the overrides `overrides` with frontend `fe`.
@@ -284,11 +287,22 @@ pub fn emit_with(
         overrides,
         opts,
         on,
-        &mut |ks, targets| {
-            ks.iter()
-                .map(|&k| func::emit_function(fe, &fns[k], &Targets::new(targets), opts))
-                .collect()
-        },
+        (
+            &mut |ks, targets| {
+                ks.iter()
+                    .map(|&k| {
+                        let f = &fns[k];
+                        let fault = opts.test_fault == Some(f.entry);
+                        (f.entry, callee::program(fe, f, targets, fault))
+                    })
+                    .collect()
+            },
+            &mut |ks, targets| {
+                ks.iter()
+                    .map(|&k| func::emit_function(fe, &fns[k], &Targets::new(targets), opts))
+                    .collect()
+            },
+        ),
         &mut |f| out.files.push(f),
     );
     out
@@ -325,7 +339,8 @@ impl Head {
 
 /// Lends functions to [`emit_streamed`]: called with indices into its
 /// heads, in order, it calls the sink with each index and that function,
-/// whose head must be the one at the index.
+/// whose head must be the one at the index. The emitter lends each
+/// function more than once (the callee analysis, then the C).
 pub type Lend<'l> = dyn Fn(&[usize], &mut dyn FnMut(usize, &Function<'_>)) + Sync + 'l;
 
 /// How many functions [`emit_streamed`] emits between two shard packings.
@@ -386,41 +401,57 @@ pub fn emit_reusing(
         overrides,
         opts,
         on,
-        &mut |ks, targets| {
-            let groups: Vec<&[usize]> = ks.chunks(GROUP).collect();
-            parallel(&groups, |g| {
-                let mut out = Vec::with_capacity(g.len());
-                lend(g, &mut |_, f| {
-                    let fault = opts.test_fault == Some(f.entry);
-                    let emit = |seen: &Targets<'_>| func::emit_function(fe, f, seen, opts);
-                    let Some(store) = store else {
-                        out.push((emit(&Targets::new(targets)), None));
-                        return;
-                    };
-                    let key = store.key(&reuse::input(fe, &salt, f, fault));
-                    if let Some(bytes) = store.get(&key)
-                        && let Some(e) = reuse::reuse(&bytes, targets)
-                    {
-                        out.push((e, Some((f.entry, key, bytes, true))));
-                        return;
+        (
+            &mut |ks, targets| {
+                let groups: Vec<&[usize]> = ks.chunks(GROUP).collect();
+                parallel(&groups, |g| {
+                    let mut out = Vec::with_capacity(g.len());
+                    lend(g, &mut |_, f| {
+                        let fault = opts.test_fault == Some(f.entry);
+                        out.push((f.entry, callee::program(fe, f, targets, fault)));
+                    });
+                    out
+                })
+                .into_iter()
+                .flatten()
+                .collect()
+            },
+            &mut |ks, targets| {
+                let groups: Vec<&[usize]> = ks.chunks(GROUP).collect();
+                parallel(&groups, |g| {
+                    let mut out = Vec::with_capacity(g.len());
+                    lend(g, &mut |_, f| {
+                        let fault = opts.test_fault == Some(f.entry);
+                        let emit = |seen: &Targets<'_>| func::emit_function(fe, f, seen, opts);
+                        let Some(store) = store else {
+                            out.push((emit(&Targets::new(targets)), None));
+                            return;
+                        };
+                        let key = store.key(&reuse::input(fe, &salt, f, fault));
+                        if let Some(bytes) = store.get(&key)
+                            && let Some(e) = reuse::reuse(&bytes, targets)
+                        {
+                            out.push((e, Some((f.entry, key, bytes, true))));
+                            return;
+                        }
+                        let seen = Targets::new(targets);
+                        let e = emit(&seen);
+                        let kept = reuse::output(&e, &seen).map(|b| (f.entry, key, b, false));
+                        out.push((e, kept));
+                    });
+                    out
+                })
+                .into_iter()
+                .flatten()
+                .map(|(e, kept): (func::Emitted1, Kept)| {
+                    if let (Some(s), Some((entry, key, bytes, reused))) = (store, kept) {
+                        s.keep(entry, &key, bytes, reused);
                     }
-                    let seen = Targets::new(targets);
-                    let e = emit(&seen);
-                    let kept = reuse::output(&e, &seen).map(|b| (f.entry, key, b, false));
-                    out.push((e, kept));
-                });
-                out
-            })
-            .into_iter()
-            .flatten()
-            .map(|(e, kept): (func::Emitted1, Kept)| {
-                if let (Some(s), Some((entry, key, bytes, reused))) = (store, kept) {
-                    s.keep(entry, &key, bytes, reused);
-                }
-                e
-            })
-            .collect()
-        },
+                    e
+                })
+                .collect()
+            },
+        ),
         sink,
     )
 }
@@ -438,17 +469,22 @@ type Kept = Option<(u64, Key, Vec<u8>, bool)>;
 /// targets of the module.
 type Compute<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<func::Emitted1> + 'c;
 
-/// Emits the functions `heads`, whose C `compute` gives for a run of
-/// indices into them, and gives each file to `sink`.
+/// Gives the [`callee::Prog`] of each of a run of functions, by index,
+/// with the direct-call targets of the module.
+type Programs<'c> = dyn FnMut(&[usize], &BTreeMap<u64, Target>) -> Vec<(u64, callee::Prog)> + 'c;
+
+/// Emits the functions `heads`, whose programs and C `code` gives for a
+/// run of indices into them, and gives each file to `sink`.
 fn emit_core(
     fe: &dyn Frontend,
     heads: &[Head],
     overrides: &[Override],
     opts: &Options,
     on: &mut dyn FnMut(usize, usize),
-    compute: &mut Compute<'_>,
+    code: (&mut Programs<'_>, &mut Compute<'_>),
     sink: &mut dyn FnMut(File),
 ) -> usize {
+    let (programs, compute) = code;
     let mut targets: BTreeMap<u64, Target> = heads
         .iter()
         .map(|f| {
@@ -459,6 +495,7 @@ fn emit_core(
                     lifted: true,
                     resume_point: false,
                     declare: true,
+                    keeps: 0,
                 },
             )
         })
@@ -471,13 +508,13 @@ fn emit_core(
                 lifted: false,
                 resume_point: o.resume_point,
                 declare: o.declare,
+                keeps: 0,
             },
         );
     }
     let kept: Vec<usize> = (0..heads.len())
         .filter(|&k| targets.get(&heads[k].entry).is_some_and(|t| t.lifted))
         .collect();
-    let fns: Vec<&Head> = kept.iter().map(|&k| &heads[k]).collect();
     for o in &opts.calls {
         if targets.get(&o.entry).is_none_or(|t| t.lifted) {
             targets.insert(
@@ -487,10 +524,21 @@ fn emit_core(
                     lifted: false,
                     resume_point: o.resume_point,
                     declare: o.declare,
+                    keeps: 0,
                 },
             );
         }
     }
+    let shape = callee::Shape::of(fe);
+    if shape.any() {
+        let progs: BTreeMap<u64, callee::Prog> = programs(&kept, &targets).into_iter().collect();
+        for (e, k) in callee::solve(&shape, &progs) {
+            if let Some(t) = targets.get_mut(&e).filter(|t| t.lifted) {
+                t.keeps = k;
+            }
+        }
+    }
+    let fns: Vec<&Head> = kept.iter().map(|&k| &heads[k]).collect();
     let mut undefined = 0;
     sink(File {
         name: PRELUDE_NAME.into(),

@@ -491,6 +491,58 @@ has a dispatch slot that is not empty, so no guest jump can miss.
   (`first entry to cold code at <address> (<module>+<offset>)`) and puts
   the cold function back.
 
+## 5.3 Registers kept across direct calls
+
+After a direct call of a lifted function of the same module, the caller
+does not reload a callee-saved register (`Frontend::callee_saved`; A64:
+x19-x29 and sp) that the emitter proves the callee returns with its entry
+value: its local already holds it. Everything else follows the boundary
+rule, and the landing-pad dispatch still reloads every register a pad
+reads. [verified: `core/emit/src/callee/tests.rs`, the libnx corpus]
+
+- **The proof** (`core/emit/src/callee.rs`) looks at registers only, never
+  at memory: per function, a forward dataflow gives each register at each
+  instruction as an entry register plus a constant, or unknown. A register
+  is kept when it holds its own entry value at every return, and at every
+  tail call by name to a function that keeps it. A direct call makes every
+  register its callee does not keep unknown. An indirect call or tail call,
+  a call of an override, a trap, a sync point and a computed jump make
+  everything unknown, and so does every landing pad and resume point,
+  which the dispatch enters with what the unwinder installed. An
+  instruction that does not lift, or that the emitter cannot express, ends
+  its path: the frontend's undefined call never returns `RL_OK`. A guard's
+  slow path counts as writing everything its block writes, and as going on
+  after the instruction.
+- **Recursion:** the module is solved as a greatest fixpoint, every
+  function starting as keeping everything. That is sound for normal
+  returns by induction on call depth: a call that does not return
+  normally takes its caller off the paths that matter.
+- **What this does not assume:** nothing about AAPCS64, memory or the
+  callee's stack discipline. A register saved on the stack and restored
+  from it is not kept, since another store could have changed the saved
+  copy; a frame popped by arithmetic keeps sp.
+- **In the C:** a kept register that is read after the call is live at the
+  call, so the caller has it in its local (loaded at entry or after an
+  earlier boundary) and stores it there if it is dirty; the callee then
+  leaves the context field as it was.
+- **Cold copy (5.2):** the proof covers functions of the emit it runs in.
+  A call or tail call that `Options::calls` sends to a function of another
+  emit (the cold copy's calls of hot functions) counts as unknown, so cold
+  code reloads after it; the proof itself is over guest code, which every
+  copy of a function shares, and dispatch into cold code at another
+  address is an indirect transfer, which keeps nothing.
+- **Reuse:** what a callee keeps is part of its `Target`, so a caller's C
+  is taken from the emit store only when every callee keeps what it kept
+  before.
+- **Cost and effect:** a second pass over the module's lifted code before
+  emission; on a 31,000-function program module it adds about 0.3 s to the
+  emit stage, a third of the functions keep something, and 17% of the
+  calls skip about 3.6 reloads each. That shrinks the lifted text of a
+  3.2-million-instruction sample by 0.1% on x86-64 and 0.24% on arm64.
+  Most functions keep nothing because they make an indirect call, jump
+  through a PLT stub or table, or have landing pads, and their callers
+  inherit that. [measured at the commit adding it]
+
 ## 6. Missed code
 
 `int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)` has the lifted signature

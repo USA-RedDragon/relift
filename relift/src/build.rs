@@ -402,6 +402,10 @@ fn emit_modules(
         }
         let flags = fpsr.begin_module(i, &module, &layout, visits, &cpu, &overrides);
         let summaries = std::sync::Mutex::new(Vec::new());
+        let summarized: Vec<std::sync::atomic::AtomicBool> = heads
+            .iter()
+            .map(|_| std::sync::atomic::AtomicBool::new(false))
+            .collect();
         let fpsr_now = &fpsr;
         let lend = |ks: &[usize], sink: &mut dyn FnMut(usize, &relift_emit::Function<'_>)| {
             let group: Vec<&Outline> = ks.iter().map(|&k| all[keep[k]]).collect();
@@ -410,7 +414,8 @@ fn emit_modules(
                 let k = ks[n];
                 n += 1;
                 let e = emit_function(f, &heads[k], &raw);
-                if let Some(s) = fpsr_now.function(&flags, &module, all[keep[k]], f) {
+                let first = !summarized[k].swap(true, std::sync::atomic::Ordering::Relaxed);
+                if first && let Some(s) = fpsr_now.function(&flags, &module, all[keep[k]], f) {
                     summaries
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)

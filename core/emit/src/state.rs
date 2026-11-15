@@ -55,7 +55,15 @@ impl Regs {
         s
     }
 
-    fn without(&self, o: &Regs) -> Regs {
+    fn and(&self, o: &Regs) -> Regs {
+        Regs(self.0.iter().zip(&o.0).map(|(a, b)| a & b).collect())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.iter().all(|w| *w == 0)
+    }
+
+    pub(crate) fn without(&self, o: &Regs) -> Regs {
         Regs(self.0.iter().zip(&o.0).map(|(a, b)| a & !b).collect())
     }
 }
@@ -81,6 +89,10 @@ pub(crate) struct Plan {
     dirty_in: Vec<Regs>,
     live_in: Vec<Regs>,
     exit_live: Vec<Regs>,
+    /// The registers each call keeps in its locals ([`crate::callee`]),
+    /// with the return address: a direct call of a lifted function that
+    /// returns them unchanged.
+    kept: Vec<Option<(u64, Regs)>>,
     lp_reg: Option<Reg>,
     empty: Regs,
     /// Whether the guards share one slow path, and what it stores and
@@ -118,6 +130,15 @@ impl Plan {
         self.at
             .get(&pc)
             .map_or(&self.empty, |&k| &self.exit_live[k])
+    }
+
+    /// The registers the call that ends `pc` keeps in its locals: they are
+    /// live across it and not reloaded after it.
+    pub(crate) fn kept(&self, pc: u64) -> &Regs {
+        self.at
+            .get(&pc)
+            .and_then(|&k| self.kept[k].as_ref())
+            .map_or(&self.empty, |k| &k.1)
     }
 
     pub(crate) fn none(&self) -> &Regs {
@@ -177,6 +198,10 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
         dirty_in: vec![empty.clone(); pcs.len()],
         live_in: vec![empty.clone(); pcs.len()],
         exit_live: vec![empty.clone(); pcs.len()],
+        kept: pcs
+            .iter()
+            .map(|pc| kept(env, env.blocks.get(pc)?))
+            .collect(),
         lp_reg,
         empty,
         shared: None,
@@ -232,6 +257,9 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
     let mut preds: Vec<Vec<usize>> = vec![Vec::new(); pcs.len()];
     for (k, js) in jumps.iter().enumerate() {
         for &j in js {
+            preds[j].push(k);
+        }
+        if let Some(j) = p.kept[k].as_ref().and_then(|(ret, _)| p.local(*ret)) {
             preds[j].push(k);
         }
     }
@@ -317,6 +345,9 @@ fn exit_live(env: &Env<'_>, p: &Plan, b: &Block, out: &Regs) -> Regs {
             if let Some(r) = p.lp_reg {
                 s.insert(r);
             }
+            if let Some((ret, k)) = p.at.get(&b.pc).and_then(|&i| p.kept[i].as_ref()) {
+                s.union(&side_kept(p, *ret, k));
+            }
             s
         }
         (Flow::Jump, Next::Const(t)) => side(t),
@@ -334,4 +365,25 @@ fn exit_live(env: &Env<'_>, p: &Plan, b: &Block, out: &Regs) -> Regs {
             s
         }
     }
+}
+
+/// The registers of `k` live at `ret`: those a call that keeps `k` needs in
+/// its locals before it.
+fn side_kept(p: &Plan, ret: u64, k: &Regs) -> Regs {
+    p.live_at(ret).and(k)
+}
+
+/// The registers the call that ends `b` keeps, with its return address:
+/// the callee-saved registers its callee, a lifted function called by name,
+/// returns unchanged; `None` when that is none.
+fn kept(env: &Env<'_>, b: &Block) -> Option<(u64, Regs)> {
+    let (Flow::Call { ret }, Next::Const(t)) = (b.exit.flow, b.exit.next) else {
+        return None;
+    };
+    let target = env.targets.get(&t)?;
+    if !target.lifted || target.keeps == 0 {
+        return None;
+    }
+    let k = env.shape.regs(target.keeps);
+    (!k.is_empty()).then_some((ret, k))
 }
