@@ -3,7 +3,9 @@
 //! functions, compiled with clang at the lifted-code flags and run on random
 //! states, and every register, the flags, guest memory, the exclusive
 //! monitor and the exit target must match the reference interpreter on the
-//! same states. Skipped with a note when clang is not on `PATH`.
+//! same states, running the reference lift (the emitter's leaves some FP NaN
+//! handling to the runtime helpers). Skipped with a note when clang is not
+//! on `PATH`.
 
 mod common;
 mod seq;
@@ -89,7 +91,13 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
                 bytes: bytes.clone(),
             };
             let mut s1 = s0.clone();
-            let Ok(o) = run(b, &mut s1, &mut mem, &mut NoIntrinsics) else {
+            let reference = relift_cpu_a64::lift::lift(*w, b.pc, &Features::ALL);
+            let Ok(o) = run(
+                reference.as_ref().unwrap_or(b),
+                &mut s1,
+                &mut mem,
+                &mut NoIntrinsics,
+            ) else {
                 continue;
             };
             input.push(k as u64);

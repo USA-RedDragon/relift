@@ -388,6 +388,25 @@ const FPSR_DZC: u128 = 0x02;
 const FPSR_OFC: u128 = 0x04;
 const FPSR_IXC: u128 = 0x10;
 
+thread_local! {
+    static EXACT_HOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` lifting for the C emitter, whose FP add, subtract, multiply,
+/// divide, square root and fused multiply-add of 32 and 64 bits give the
+/// Arm result, NaNs included (`relift/a64/abi.h`): their `FpOp`s then stand
+/// for the whole operation and are not followed by the NaN handling.
+pub fn exact_host<T>(f: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            EXACT_HOST.with(|e| e.set(self.0));
+        }
+    }
+    let _reset = Reset(EXACT_HOST.with(|e| e.replace(true)));
+    f()
+}
+
 /// The floating-point cut: arithmetic, comparisons and min/max on 16-, 32-
 /// and 64-bit values with FPCR zero (round to nearest, no flush, NaNs
 /// propagated), as Arm's `FPProcessNaNs` and `FPDefaultNaN` describe.
@@ -505,9 +524,17 @@ impl Fp {
         out
     }
 
+    /// Whether the host operation already gives the Arm result.
+    fn exact(&self) -> bool {
+        self.w.bits() != 16 && EXACT_HOST.with(|e| e.get())
+    }
+
     /// A two-operand IEEE operation with Arm NaN handling.
     pub fn bin(&self, b: &mut Builder, op: FpOp, x: Value, y: Value) -> Value {
         let r = b.fp(op, &[x, y], self.w);
+        if self.exact() {
+            return r;
+        }
         let r = self.canonical(b, r);
         self.nans(b, &[x, y], r)
     }
@@ -515,6 +542,9 @@ impl Fp {
     /// The square root with Arm NaN handling.
     pub fn sqrt(&self, b: &mut Builder, x: Value) -> Value {
         let r = b.fp(FpOp::Sqrt, &[x], self.w);
+        if self.exact() {
+            return r;
+        }
         let r = self.canonical(b, r);
         self.nans(b, &[x], r)
     }
@@ -522,6 +552,9 @@ impl Fp {
     /// `FPMulAdd(addend, x, y)`: `addend + x * y` with one rounding.
     pub fn mul_add(&self, b: &mut Builder, addend: Value, x: Value, y: Value) -> Value {
         let r = b.fp(FpOp::MulAdd, &[x, y, addend], self.w);
+        if self.exact() {
+            return r;
+        }
         let r = self.canonical(b, r);
         let r = self.nans(b, &[addend, x, y], r);
         let an = self.is_nan(b, addend);

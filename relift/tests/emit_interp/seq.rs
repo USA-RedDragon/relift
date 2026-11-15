@@ -250,11 +250,17 @@ struct Case {
 }
 
 impl Case {
-    fn blocks(&self) -> BTreeMap<u64, &Block> {
+    /// The blocks as the interpreter's reference lift gives them: the
+    /// emitter's lift leaves some FP NaN handling to the runtime helpers.
+    fn reference(&self) -> BTreeMap<u64, Block> {
         self.main
             .iter()
             .chain(&self.stub)
-            .map(|(&pc, (_, b))| (pc, b))
+            .map(|(&pc, (w, b))| {
+                let r = relift_cpu_a64::lift::lift(*w, pc, &relift_cpu_a64::decode::Features::ALL)
+                    .unwrap_or_else(|_| b.clone());
+                (pc, r)
+            })
             .collect()
     }
 
@@ -355,7 +361,8 @@ fn expectations(cases: &[Case], slots: &[Slot], r: &mut Rng) -> (Vec<u64>, Vec<E
     let mut input = Vec::new();
     let mut expect = Vec::new();
     for (k, c) in cases.iter().enumerate() {
-        let blocks = c.blocks();
+        let owned = c.reference();
+        let blocks: BTreeMap<u64, &Block> = owned.iter().map(|(&pc, b)| (pc, b)).collect();
         for _ in 0..STATES {
             let mut s0 = state(r.next() as u32, slots, r);
             for (i, slot) in slots.iter().enumerate() {

@@ -17,6 +17,7 @@ use super::LiftError;
 use crate::decode::{Encoding, Features, Insn};
 use crate::regs;
 use rt::St;
+pub(crate) use rt::exact_host;
 
 /// A generated template: emits the instruction's operations.
 pub(crate) type GenFn = fn(u32, &mut Builder, &mut St) -> Result<(), LiftError>;

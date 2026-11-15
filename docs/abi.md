@@ -1172,7 +1172,15 @@ are also call boundaries. [inferred]
     prove]
   - arm64 hosts: the runtime keeps the host FPCR equal to the guest FPCR,
     so the native instruction is the guest instruction, for every mode and
-    for NaNs; no fixup. [inferred]
+    for NaNs. A NaN result still goes to the slow path: the compiler may
+    fold an operation without keeping its NaN (x * 1.0 to x keeps a
+    signaling NaN). [inferred]
+  - Because these helpers give Arm's NaN for 32- and 64-bit add, subtract,
+    multiply, divide, square root and fused multiply-add, the emitter's lift
+    (`lift_for_emit`) leaves out the IR's NaN handling after those
+    operations; the reference lift that the interpreter and the checker run
+    keeps it, and `relift/tests/emit_interp` and `emit_flags` compare the
+    two. On a commercial game that handling was about a sixth of the lifted code.
   - Non-default modes on x86-64 go to the slow path. If Horizon's default
     FPCR turns out to set FZ or DN, x86-64 needs a fast path for that mode
     before performance work. [open]

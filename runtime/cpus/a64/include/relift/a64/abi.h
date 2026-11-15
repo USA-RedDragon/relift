@@ -760,19 +760,18 @@ static inline int rl_fp_fast(uint32_t fpcr, const uint32_t *fpsr)
 #endif
 }
 
-/** @brief True when the native NaN result must be replaced by the slow path (x86-64 NaN rules differ from Arm). */
-static inline int rl_fp_nan_fixup(void)
-{
-#if defined(__aarch64__)
-    return 0;
-#else
-    return 1;
-#endif
-}
+/**
+ * @brief True when a NaN result of the inline fast path must come from the
+ * slow path instead. On x86-64 the host NaN rules differ from Arm's; on
+ * arm64 the host gives Arm's, but the compiler may fold an operation whose
+ * NaN it does not keep (x * 1.0 to x keeps a signaling NaN). The emitter
+ * relies on these helpers for the Arm NaN (`lift_for_emit`).
+ */
+static inline int rl_fp_nan_fixup(void) { return 1; }
 
 /**
  * @brief In flag-producing programs, true when the host result u needs the
- * slow path: a NaN (x86-64 NaN rules differ from Arm), or, when tiny is set,
+ * slow path: a NaN (as rl_fp_nan_fixup), or, on x86-64 when tiny is set,
  * a result of exactly the smallest normal magnitude, which x86 (tininess
  * after rounding) may give without the UFC Arm (before rounding) raises.
  * Sums and differences pass tiny 0: every finite value is a multiple of the
@@ -782,14 +781,12 @@ static inline int rl_fp_nan_fixup(void)
  */
 static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
 {
-#if defined(__aarch64__)
-    (void)u;
-    (void)bits;
-    (void)tiny;
-    return 0;
-#else
     uint64_t mag = bits == 32 ? (u & 0x7FFFFFFFu) : (u & 0x7FFFFFFFFFFFFFFFull);
     uint64_t inf = bits == 32 ? 0x7F800000u : 0x7FF0000000000000ull;
+#if defined(__aarch64__)
+    (void)tiny;
+    return RL_UNLIKELY(mag > inf);
+#else
     uint64_t min = bits == 32 ? 0x00800000u : 0x0010000000000000ull;
     return RL_UNLIKELY(mag > inf) || (tiny && RL_UNLIKELY(mag == min));
 #endif
@@ -803,11 +800,7 @@ static inline int rl_fp_flags_fixup(uint64_t u, unsigned bits, int tiny)
  * the code of FP-heavy functions). The slow path is rare, so the copy
  * gains nothing.
  */
-#if defined(__aarch64__)
-#define RL_FP_OPAQUE(u) ((void)0)
-#else
 #define RL_FP_OPAQUE(u) __asm__("" : "+r"(u))
-#endif
 
 #if defined(RL_FP_FLAGS)
 #define RL_FP_RESULT_(slow, U, r, tiny)                                                \
