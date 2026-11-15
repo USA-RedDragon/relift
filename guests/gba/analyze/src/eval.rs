@@ -159,12 +159,37 @@ fn index(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
     }
 }
 
+/// A value not known times a constant from 4 to 4 KiB: a multiple of the
+/// constant (and of the value's own known power of two), the index of a
+/// table with that stride.
+fn scaled(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
+    if w < 32 || op != BinOp::Mul {
+        return None;
+    }
+    let (k, x) = match (a, b) {
+        (Abs::K(k), x) | (x, Abs::K(k)) => (u32::try_from(k).ok()?, x),
+        _ => return None,
+    };
+    if !(4..=0x1000).contains(&k) {
+        return None;
+    }
+    let s = match x {
+        Abs::B { .. } | Abs::Idx { base: 0, .. } => stride_of(x)?,
+        _ => 1,
+    };
+    let stride = k.checked_mul(s).filter(|s| *s <= 0x1000)?;
+    Some(Abs::Idx { base: 0, stride })
+}
+
 fn bin(op: BinOp, a: Abs, b: Abs, w: u32) -> Abs {
     use Abs::{K, S};
     if let (K(x), K(y)) = (a, b) {
         return K(eval_bin(op, x, y, wid(w)) & mask(w));
     }
     if let Some(i) = index(op, a, b, w) {
+        return i;
+    }
+    if let Some(i) = scaled(op, a, b, w) {
         return i;
     }
     let sym = |x: Abs| matches!(x, S(_) | Abs::Idx { .. } | Abs::Tab { .. });

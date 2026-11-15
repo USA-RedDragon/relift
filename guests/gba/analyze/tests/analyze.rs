@@ -494,3 +494,39 @@ fn copy_loop_called_with_constants_is_run_to_learn_ram_code() {
     };
     assert!(found.contains(&ram(0x0300_0000)) && found.contains(&ram(0x0300_0004)));
 }
+
+#[test]
+fn index_times_a_constant_reads_a_table_of_that_stride() {
+    let mut a = Asm::new();
+    let t = 0x0800_0200;
+    a.arm(
+        0x0800_0100,
+        &[a_ldr_lit(1, 0x0800_0100, 0x0800_0108), a_bx(1), t | 1],
+    );
+    let table = 0x0800_0300;
+    a.thumb(
+        t,
+        &[
+            0x210C,
+            0x4348,
+            t_ldr_lit(2, t + 4, t + 0xC),
+            0x5810,
+            t_bx(0),
+            0,
+        ],
+    );
+    a.w32(t + 0xC, table);
+    let cases = [0x0800_0340, 0x0800_0350];
+    for (i, c) in cases.iter().enumerate() {
+        a.arm(table + 12 * i as u32, &[c | 1, 0, 0]);
+        a.thumb(*c, &[T_MOVS_R0_1, T_BX_LR]);
+    }
+    a.w32(table + 24, 0x1234_5678);
+    let r = a.run(0x0800_0100);
+    let found = insts(&r);
+    for c in cases {
+        assert!(found.contains(&(c, true)), "{c:#x} missed");
+    }
+    assert!(r.data.contains(&(table, 4)) && r.data.contains(&(table + 12, 4)));
+    assert!(!found.iter().any(|(x, _)| (table..table + 0x30).contains(x)));
+}

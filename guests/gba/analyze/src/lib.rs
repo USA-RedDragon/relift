@@ -28,7 +28,8 @@
 //!   conditional branch on it is run for every index the check lets
 //!   through. A jump through a word of a ROM table with a constant base
 //!   and stride follows the entries from the base while each is a code
-//!   address.
+//!   address. A value not known times a constant is an index with that
+//!   stride (a table of structures).
 //! - Pointers: a constant word stored to a constant RAM address and later
 //!   jumped through or called gives the target; so do the words of a copy
 //!   in RAM. An odd word in the image that discovered code reads as a
