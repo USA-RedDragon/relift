@@ -161,6 +161,15 @@ static int w_sleep_then_flag(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
+static int w_ret_twice(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    if (c->x[30])
+        set(&S.flag[0], 1);
+    c->x[30] = c->x[30] ? 0 : c->pc;
+    return RL_OK;
+}
+
 static int w_host_wait(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
@@ -187,13 +196,13 @@ static int w_lock(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
-enum { F_COUNT, F_FLAG, F_WAIT_EVENT, F_PING, F_PONG, F_MIGRATE, F_YIELD, F_FLAG_SLEEP, F_HOST_WAIT, F_LOCK, F_SLEEP_FLAG, F_N };
+enum { F_COUNT, F_FLAG, F_WAIT_EVENT, F_PING, F_PONG, F_MIGRATE, F_YIELD, F_FLAG_SLEEP, F_HOST_WAIT, F_LOCK, F_SLEEP_FLAG, F_RET_TWICE, F_N };
 
 static rl_ctx *setup(uint64_t *heap)
 {
     rl_ctx *c = t_boot(NULL);
     static rl_fn const fns[F_N] = { w_count,     w_flag, w_wait_event,     w_ping,     w_pong, w_migrate,
-                                    w_yield,     w_flag_then_sleep, w_host_wait, w_lock, w_sleep_then_flag };
+                                    w_yield,     w_flag_then_sleep, w_host_wait, w_lock, w_sleep_then_flag, w_ret_twice };
     uint64_t addrs[F_N];
     for (uint32_t k = 0; k < F_N; k++)
         addrs[k] = t_code(k);
@@ -299,6 +308,16 @@ TEST(a_thread_that_wakes_preempts_a_lower_one_at_its_next_preemption_point)
     CHECK_EQ(S.cpu[0], 0);
     CHECK(!rl_time_spent(&c->time));
     CHECK_EQ(join(c, heap, h), 0);
+}
+
+TEST(a_thread_entry_that_returns_with_x30_set_goes_on_there)
+{
+    uint64_t heap;
+    rl_ctx *c = setup(&heap);
+    uint32_t h = spawn(c, heap, F_RET_TWICE, 0, 30, 0);
+    CHECK_EQ(start(c, h), 0);
+    CHECK_EQ(join(c, heap, h), 0);
+    CHECK_EQ(get(&S.flag[0]), 1);
 }
 
 TEST(cores_run_in_parallel_within_their_masks)
