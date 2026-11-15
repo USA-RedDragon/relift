@@ -86,9 +86,10 @@ void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
 
     static const uint8_t all_on[6] = {1, 1, 1, 1, 1, 1};
     const uint8_t *active = all_on;
-    if (p->win[W_IN0].enable || p->win[W_IN1].enable || p->win[W_IN2].enable) {
+    bool obj_win = p->win[W_IN2].enable && p->obj.enable[0];
+    if (p->win[W_IN0].enable || p->win[W_IN1].enable || obj_win) {
         active = p->win[W_OUT].active;
-        if (p->win[W_IN2].enable && p->win[W_IN2].output[x])
+        if (obj_win && p->win[W_IN2].output[x])
             active = p->win[W_IN2].active;
         if (p->win[W_IN1].enable && p->win[W_IN1].output[x])
             active = p->win[W_IN1].active;
