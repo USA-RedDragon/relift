@@ -25,6 +25,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "hostio.h"
+
 /** @brief Size of the buffer that moves file contents between directories. */
 #define SAVE_COPY_CHUNK 0x10000u
 
@@ -63,6 +65,10 @@ static int sync_fd(int fd)
 
 static int sync_dir(const char *path)
 {
+#if defined(_WIN32)
+    (void)path;
+    return 0;
+#else
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     int e;
     if (fd < 0)
@@ -70,6 +76,7 @@ static int sync_dir(const char *path)
     e = sync_fd(fd);
     close(fd);
     return e;
+#endif
 }
 
 static int remove_tree(const char *path)

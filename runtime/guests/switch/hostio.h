@@ -27,6 +27,11 @@
 #define lstat _stat64
 #define O_CLOEXEC _O_BINARY
 #define mkdir(path, mode) _mkdir(path)
+#define fsync(fd) _commit(fd)
+
+#ifndef NAME_MAX
+#define NAME_MAX 255
+#endif
 
 struct rl_statvfs {
     uint64_t f_blocks;
