@@ -1712,3 +1712,82 @@ TEST(vk_a_feature_the_host_lacks_is_hidden_and_refused)
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
+
+static void record_fill(uint64_t cb, uint64_t buf, uint32_t value, uint32_t flags)
+{
+    VkCommandBufferInheritanceInfo inh = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO };
+    VkCommandBufferBeginInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = flags,
+        .pInheritanceInfo = GP(gput(&inh, sizeof inh)),
+    };
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+    G("vkCmdFillBuffer", cb, buf, 0, VK_WHOLE_SIZE, value);
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+}
+
+static uint32_t submit_and_read(uint64_t dev, uint64_t queue, uint64_t cb, uint64_t fence, const mapped_buf *b, bool two)
+{
+    uint64_t gfence = gput(&fence, 8);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
+    VkCommandBufferSubmitInfo ci = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = (VkCommandBuffer)GP(cb) };
+    VkSubmitInfo2 si2 = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = GP(gput(&ci, sizeof ci)) };
+    VkResult r = two ? VKR(G("vkQueueSubmit2", queue, 1, gput(&si2, sizeof si2), fence))
+                     : VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), fence));
+    if (r != VK_SUCCESS || VKR(G("vkWaitForFences", dev, 1, gfence, VK_TRUE, UINT64_MAX)) != VK_SUCCESS ||
+        VKR(G("vkResetFences", dev, 1, gfence)) != VK_SUCCESS)
+        return 0;
+    return g32(b->ptr + 60);
+}
+
+TEST(vk_secondary_command_buffers_submit_through_a_primary)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t dev = make_device(pds[0], queue_family(pds[0], 0), NULL, 0);
+    CHECK(dev != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, 0, 0, gq);
+    uint64_t queue = g64(gq);
+    mapped_buf b;
+    CHECK_EQ(make_mapped(pds[0], dev, 64, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &b), 0);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+        .commandBufferCount = 2,
+    };
+    uint64_t gcb = galloc(16);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb), cb2 = g64(gcb + 8);
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    uint64_t gf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFence", dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+    uint64_t fence = g64(gf);
+    record_fill(cb, b.buf, 0x01020304u, VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, false), 0x01020304u);
+    memset(g_mem + b.ptr, 0, 64);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, true), 0x01020304u);
+    record_fill(cb, b.buf, 0x0A0B0C0Du, 0);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, false), 0x0A0B0C0Du);
+    record_fill(cb2, b.buf, 0x11111111u, 0);
+    CHECK_EQ(submit_and_read(dev, queue, cb2, fence, &b, true), 0x11111111u);
+    G("vkFreeCommandBuffers", dev, g64(gpool), 1, gcb);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    record_fill(g64(gcb), b.buf, 0x22222222u, 0);
+    CHECK_EQ(submit_and_read(dev, queue, g64(gcb), fence, &b, false), 0x22222222u);
+    G("vkDestroyFence", dev, fence, 0);
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyBuffer", dev, b.buf, 0);
+    G("vkFreeMemory", dev, b.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}

@@ -92,6 +92,8 @@ hand_commands = [
     "vkResetDescriptorPool",
     "vkAllocateDescriptorSets",
     "vkFreeDescriptorSets",
+    "vkQueueSubmit",
+    "vkQueueSubmit2",
     "vkAllocateCommandBuffers",
     "vkFreeCommandBuffers",
     "vkDestroyCommandPool",
@@ -120,6 +122,7 @@ drop_types = ["VkAllocationCallbacks"]
 # Shadow-mapped memory: copy guest writes to the host before work reaches the
 # GPU, and host-cached results back after the guest waits for it.
 [hooks.before]
+vkBeginCommandBuffer = "vkf_cb_begun"
 vkQueueSubmit = "vkf_queue_enter"
 vkQueueSubmit2 = "vkf_queue_enter"
 vkQueueBindSparse = "vkf_queue_enter"

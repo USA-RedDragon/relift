@@ -44,6 +44,12 @@ typedef struct vkf_obj {
     vkf_fns *fns;
     /** @brief Command buffers: the VkCommandPool they came from. */
     uint64_t pool;
+    /** @brief Command buffers: allocated at the secondary level. */
+    bool secondary;
+    /** @brief Secondary command buffers: flags of the last vkBeginCommandBuffer. */
+    uint32_t begin_flags;
+    /** @brief Secondary command buffers: a number unique to the last vkBeginCommandBuffer. */
+    uint64_t gen;
     /** @brief Instances: their state. */
     vkf_inst *inst;
     /** @brief Devices, queues and command buffers: the device state. */
@@ -128,6 +134,14 @@ struct vkf_dev {
     struct vkf_map *dpools;
     /** @brief Protects dpools. */
     pthread_mutex_t dpool_lock;
+    /** @brief Live secondary command buffers. */
+    uint32_t secondaries;
+    /** @brief Pool of the primaries that run submitted secondaries (vk_submit.c), created on first use. */
+    VkCommandPool wrap_pool;
+    /** @brief Those primaries, keyed by the secondary's host handle. */
+    struct vkf_map *wraps;
+    /** @brief Protects wrap_pool and wraps. */
+    pthread_mutex_t wrap_lock;
 };
 
 /** @brief A small hash map from nonzero 64-bit keys to pointers. */
@@ -337,6 +351,10 @@ int vkf_vm_set(uint64_t addr, uint64_t size, uint32_t perm, int content);
 void vkf_mem_device_setup(vkf_call *k, vkf_dev *d, void *phys, const char ***exts, uint32_t *n_exts, void **pnext);
 /** @brief Releases every memory record of a device (after vkDestroyDevice). */
 void vkf_mem_device_teardown(vkf_dev *d);
+/** @brief Frees the primary that runs a secondary command buffer the guest frees. */
+void vkf_wrap_drop(const vkf_fns *fns, void *dev, vkf_dev *d, void *secondary);
+/** @brief Destroys the primaries that run submitted secondaries. */
+void vkf_wrap_device_teardown(const vkf_fns *fns, void *dev, vkf_dev *d);
 /** @brief Destroys the host descriptor pools added behind guest pools and frees their records. */
 void vkf_desc_device_teardown(vkf_call *k, vkf_dev *d, void *dev);
 /** @brief Copies every shadow-mapped range of the call's device from guest to host. */

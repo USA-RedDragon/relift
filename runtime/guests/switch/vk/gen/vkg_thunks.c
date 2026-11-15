@@ -12,6 +12,7 @@ static int vkt_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkBeginCommandBuffer fn = (PFN_vkBeginCommandBuffer)k.fns->f[VKG_vkBeginCommandBuffer];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkBeginCommandBuffer);
+    vkf_cb_begun(&k);
     VkResult r = fn(a0, a1);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
@@ -3225,46 +3226,6 @@ static int vkt_vkQueueInsertDebugUtilsLabelEXT(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkQueue a0 = (VkQueue)vkf_first(&k, VKG_KIND_VkQueue, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkQueueSubmit, c->x[0]);
-    uint32_t a1 = (uint32_t)(c->x[1]);
-    const VkSubmitInfo * a2 = vkg_ain_VkSubmitInfo(&k, c->x[2], a1);
-    VkFence a3 = (VkFence)(uintptr_t)(c->x[3]);
-    PFN_vkQueueSubmit fn = (PFN_vkQueueSubmit)k.fns->f[VKG_vkQueueSubmit];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkQueueSubmit);
-    vkf_queue_enter(&k);
-    VkResult r = fn(a0, a1, a2, a3);
-    vkf_queue_unlock(&k);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkQueue a0 = (VkQueue)vkf_first(&k, VKG_KIND_VkQueue, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkQueueSubmit2, c->x[0]);
-    uint32_t a1 = (uint32_t)(c->x[1]);
-    const VkSubmitInfo2 * a2 = vkg_ain_VkSubmitInfo2(&k, c->x[2], a1);
-    VkFence a3 = (VkFence)(uintptr_t)(c->x[3]);
-    PFN_vkQueueSubmit2 fn = (PFN_vkQueueSubmit2)k.fns->f[VKG_vkQueueSubmit2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkQueueSubmit2);
-    vkf_queue_enter(&k);
-    VkResult r = fn(a0, a1, a2, a3);
-    vkf_queue_unlock(&k);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
 static int vkt_vkQueueWaitIdle(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -4472,8 +4433,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkQueueEndDebugUtilsLabelEXT,
     vkt_vkQueueInsertDebugUtilsLabelEXT,
     vkh_vkQueuePresentKHR,
-    vkt_vkQueueSubmit,
-    vkt_vkQueueSubmit2,
+    vkh_vkQueueSubmit,
+    vkh_vkQueueSubmit2,
     vkt_vkQueueWaitIdle,
     vkt_vkResetCommandBuffer,
     vkt_vkResetCommandPool,

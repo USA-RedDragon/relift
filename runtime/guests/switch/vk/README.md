@@ -139,6 +139,15 @@ hold the allocation, and allocates from it. Freeing a set goes to the host
 pool it came from; resetting or destroying the guest pool applies to all of
 them.
 
+## Secondary command buffers
+
+The console driver runs a secondary command buffer handed straight to
+`vkQueueSubmit`, and a game does that during loading; MoltenVK refuses it
+(`VK_NOT_READY`) and drops the work. `vk_submit.c` hands the host a primary
+of its own instead that runs the secondary with `vkCmdExecuteCommands`,
+recorded again whenever the guest has begun the secondary again since.
+Secondaries that continue a render pass are passed through with a warning.
+
 ## Formats
 
 The console has `VK_FORMAT_D24_UNORM_S8_UINT` and
