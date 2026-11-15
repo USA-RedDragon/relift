@@ -37,6 +37,7 @@ fn main() -> ExitCode {
             "system_resource_size": n.system_resource_size,
             "version": n.version,
             "services": services,
+            "syscalls": n.svcs.iter().collect::<Vec<_>>(),
         }))
     })
 }
