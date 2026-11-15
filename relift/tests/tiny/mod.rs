@@ -345,12 +345,68 @@ fn matches_source(name: &str, bin_want: &[u8]) -> Option<bool> {
     Some(ok && copied && std::fs::read(bin).ok()? == bin_want)
 }
 
+const PAC: &[u8] = include_bytes!("pac.bin");
+const PAC_LEAF: &[u8] = include_bytes!("pac_leaf.bin");
+
+/// As [`dump`], with the program of `pac.c` built with return-address
+/// signing (`pac_leaf.bin`, leaf functions too, with `leaf`). With
+/// `corrupt` it overwrites a signed return address. The NPDM grants the
+/// SVCs `syscalls`, which decide the console it is built for.
+pub fn dump_pac(root: &Path, leaf: bool, corrupt: bool, syscalls: &[u32]) -> PathBuf {
+    let bin = if leaf { PAC_LEAF } else { PAC };
+    let mut data = vec![0u8; 0x1000];
+    data[0x10] = u8::from(corrupt);
+    dump_nso_with(
+        root,
+        &NsoSpec {
+            text: bin[..0x1000].to_vec(),
+            rodata: bin[0x1000..].to_vec(),
+            data,
+            bss: 0x1000,
+            compress: true,
+            ..NsoSpec::default()
+        },
+        syscalls,
+    )
+}
+
+/// Whether `pac.bin` and `pac_leaf.bin` are what `pac.sh` builds from
+/// `pac.c`; `None` without clang, ld.lld or llvm-objcopy.
+pub fn pac_matches_source() -> Option<bool> {
+    for tool in ["clang", "ld.lld", "llvm-objcopy"] {
+        relift_build::find_tool(tool)?;
+    }
+    let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tiny");
+    let out = scratch("pac-source");
+    let ok = relift_proc::command("sh")
+        .arg(here.join("pac.sh"))
+        .arg(&out)
+        .env("TMPDIR", &out)
+        .status()
+        .ok()?
+        .success();
+    Some(
+        ok && std::fs::read(out.join("pac.bin")).ok()? == PAC
+            && std::fs::read(out.join("pac_leaf.bin")).ok()? == PAC_LEAF,
+    )
+}
+
 fn dump_nso(root: &Path, spec: &NsoSpec) -> PathBuf {
+    dump_nso_with(root, spec, &[])
+}
+
+fn dump_nso_with(root: &Path, spec: &NsoSpec, syscalls: &[u32]) -> PathBuf {
     let exefs = root.join("dump/exefs");
     std::fs::create_dir_all(&exefs).expect("the dump dir is creatable");
     let nso = build(spec);
     relift_cache::write_if_changed(&exefs.join("main"), &nso).expect("main writes");
-    let npdm = relift_switch_formats::npdm::build("tiny", 0x0100_0000_0000_1234, 0x10000, &[]);
+    let npdm = relift_switch_formats::npdm::build_with(
+        "tiny",
+        0x0100_0000_0000_1234,
+        0x10000,
+        &[],
+        (!syscalls.is_empty()).then_some((syscalls, syscalls)),
+    );
     relift_cache::write_if_changed(&exefs.join("main.npdm"), &npdm).expect("npdm writes");
     let project = root.join("tiny");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
