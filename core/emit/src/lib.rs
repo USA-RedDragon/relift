@@ -162,6 +162,9 @@ pub struct Options {
     /// With `enter_anywhere`, list each run of consecutive instructions of
     /// one piece as one `RL_FN_RANGE` entry instead of one entry each.
     pub entry_ranges: bool,
+    /// Name each piece of a split function in the function maps by its own
+    /// C symbol, rather than all of them by the function's.
+    pub piece_syms: bool,
 }
 
 impl Default for Options {
@@ -181,6 +184,7 @@ impl Default for Options {
             regs_in_context: false,
             calls: Vec::new(),
             entry_ranges: false,
+            piece_syms: true,
         }
     }
 }
@@ -645,7 +649,11 @@ fn emit_core(
                 entry: start,
                 span: size,
                 host: p.name.clone(),
-                sym: p.name.clone(),
+                sym: if opts.piece_syms {
+                    p.name.clone()
+                } else {
+                    f.name.clone()
+                },
                 ..entry.clone()
             });
             w.cur.defined.push(p.name);

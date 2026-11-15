@@ -370,6 +370,7 @@ fn shards_declare_their_foreign_callees() {
             regs_in_context: false,
             calls: Vec::new(),
             entry_ranges: false,
+            piece_syms: true,
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -560,6 +561,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         regs_in_context: false,
         calls: Vec::new(),
         entry_ranges: false,
+        piece_syms: true,
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
