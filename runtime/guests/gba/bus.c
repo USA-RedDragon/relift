@@ -207,6 +207,8 @@ uint32_t gba_bus_read(rl_gba *g, gba_who who, uint32_t addr, unsigned size, bool
             g->dma_rom_burst = true;
         pf_reset(g);
         v = rom_timed(g, addr, size, burst);
+        if (gba_eeprom_hit(g, addr))
+            v = gba_eeprom_read(g, size);
     } else if (addr >= 0x0E000000u && addr < 0x10000000u) {
         pf_reset(g);
         gba_charge(g, wait_cart(g, addr, false));
@@ -235,6 +237,8 @@ void gba_bus_write(rl_gba *g, gba_who who, uint32_t addr, unsigned size, uint32_
             burst = true;
         }
         g->mdr = value;
+        if (gba_eeprom_hit(g, addr))
+            gba_eeprom_write(g, size, value);
         return;
     }
     if (addr >= 0x0E000000u && addr < 0x10000000u) {

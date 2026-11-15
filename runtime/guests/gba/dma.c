@@ -259,6 +259,8 @@ void gba_dma_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
         c->src = c->sad & src_mask[i];
         c->dst = c->dad & dst_mask[i];
         c->len = c->cnt_l & len_mask[i];
+        if (i == 3)
+            gba_eeprom_hint(g, c->dst, c->len ? c->len : len_mask[i] + 1);
         if (timing(c) == 0)
             arm(g, i, now + 2);
     } else if (!enabled(c)) {

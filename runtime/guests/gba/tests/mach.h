@@ -32,13 +32,14 @@ static inline uint8_t *mach_rom(size_t len)
     return r;
 }
 
-/** @brief A fresh machine with rom (len bytes, taken over) and sram (may be NULL) at tick 0. */
-static inline mach mach_new_with(uint8_t *rom, size_t len, uint8_t *sram, size_t sram_len)
+/** @brief A fresh machine with rom (len bytes, taken over) and the backup of cart (its rom fields are replaced) at tick 0. */
+static inline mach mach_new_cart(uint8_t *rom, size_t len, rl_gba_cart cart)
 {
     mach m = {0};
     m.rom_len = len;
     m.rom = rom;
-    rl_gba_cart cart = {.rom = m.rom, .rom_len = m.rom_len, .sram = sram, .sram_len = sram_len};
+    cart.rom = m.rom;
+    cart.rom_len = m.rom_len;
     m.g = rl_gba_create(&cart);
     m.s = rl_sched_create(NULL);
     m.c = rl_sched_add_cpu(m.s, 1);
@@ -47,6 +48,12 @@ static inline mach mach_new_with(uint8_t *rom, size_t len, uint8_t *sram, size_t
         m.g = NULL;
     }
     return m;
+}
+
+/** @brief A fresh machine with rom (len bytes, taken over) and sram (may be NULL) at tick 0. */
+static inline mach mach_new_with(uint8_t *rom, size_t len, uint8_t *sram, size_t sram_len)
+{
+    return mach_new_cart(rom, len, (rl_gba_cart){.sram = sram, .sram_len = sram_len});
 }
 
 /** @brief A fresh machine with a 1 MiB ROM (mach_rom) and sram (may be NULL) at tick 0. */

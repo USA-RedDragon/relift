@@ -65,6 +65,37 @@ typedef struct gba_lcd {
     rl_event ev;
 } gba_lcd;
 
+/** @brief Flash chip state. */
+typedef struct gba_flash {
+    uint16_t id;
+    uint8_t phase, mode, busy_kind, busy_data, toggle;
+    bool ident, erase, bank;
+    uint64_t busy_until, page_deadline;
+    uint32_t page_base;
+    bool page_open;
+    uint8_t page[128];
+} gba_flash;
+
+/** @brief EEPROM chip state. */
+typedef struct gba_eeprom {
+    uint8_t state, cmd;
+    uint32_t nbits, nread, addr;
+    uint64_t shift, busy_until;
+    uint8_t block[8];
+    bool sized;
+} gba_eeprom;
+
+/** @brief The cartridge backup. */
+typedef struct gba_save {
+    rl_gba_save_kind kind;
+    uint8_t *data;
+    size_t len, cap;
+    bool owned, dirty;
+    uint64_t changed;
+    gba_flash fl;
+    gba_eeprom ee;
+} gba_save;
+
 /** @brief The keypad. */
 typedef struct gba_keypad {
     uint16_t keys, cnt;
@@ -127,6 +158,7 @@ struct rl_gba {
     bool dma_running;
     gba_lcd lcd;
     gba_keypad pad;
+    gba_save save;
 
     bool halt_req, stop_req, halted, in_bios;
 
@@ -155,6 +187,22 @@ static inline uint8_t gba_open_byte(const rl_gba *g, uint32_t addr) { return (ui
 uint8_t gba_keypad_read(rl_gba *g, uint32_t addr, uint64_t now);
 void gba_keypad_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now);
 void gba_keypad_attach(rl_gba *g);
+
+int gba_save_init(rl_gba *g, const rl_gba_cart *cart);
+void gba_save_free(rl_gba *g);
+uint8_t gba_save_read(rl_gba *g, uint32_t addr);
+void gba_save_write(rl_gba *g, uint32_t addr, uint8_t v);
+void gba_save_touch(gba_save *s, uint64_t now);
+void gba_save_put(rl_gba *g, size_t off, uint8_t v);
+void gba_save_fill(rl_gba *g, size_t off, size_t n, uint8_t v);
+bool gba_eeprom_hit(const rl_gba *g, uint32_t addr);
+uint32_t gba_eeprom_read(rl_gba *g, unsigned size);
+void gba_eeprom_write(rl_gba *g, unsigned size, uint32_t value);
+void gba_eeprom_hint(rl_gba *g, uint32_t dst, uint32_t count);
+void gba_eeprom_size(rl_gba *g, size_t len);
+bool gba_flash_valid(rl_gba_save_kind kind, uint16_t id);
+uint8_t gba_flash_read(rl_gba *g, uint32_t addr);
+void gba_flash_write(rl_gba *g, uint32_t addr, uint8_t v);
 
 void gba_waits_rebuild(rl_gba *g);
 void gba_pf_step(rl_gba *g, unsigned clocks);

@@ -62,8 +62,10 @@ static bool orc_open(orc *o, const char *bin, const char *rom, const dsetup *cfg
         dup2(out[1], 1);
         close(in[1]);
         close(out[0]);
-        if (cfg->nba_save)
+        if (cfg->nba_save && cfg->save_file)
             execl(bin, bin, "--rom", rom, "--skip-bios", "--save", cfg->nba_save, "--save-file", cfg->save_file, (char *)NULL);
+        if (cfg->nba_save)
+            execl(bin, bin, "--rom", rom, "--skip-bios", "--save", cfg->nba_save, (char *)NULL);
         execl(bin, bin, "--rom", rom, "--skip-bios", (char *)NULL);
         _exit(127);
     }
@@ -242,6 +244,8 @@ dres oracle_run_cfg(const char *name, const dop *ops, unsigned pad, uint32_t mem
     static trace tr[MAX_MARKS];
     memset(tr, 0, sizeof tr);
     orc o = {0};
+    if (cfg->save_file)
+        unlink(cfg->save_file);
     if (!write_rom(rom, sizeof rom) || !orc_open(&o, bin, rom, cfg)) {
         r.broken = true;
         orc_close(&o);
@@ -267,6 +271,8 @@ dres oracle_run_cfg(const char *name, const dop *ops, unsigned pad, uint32_t mem
     }
     orc_close(&o);
     unlink(rom);
+    if (cfg->save_file)
+        unlink(cfg->save_file);
     if (!ok) {
         r.broken = true;
         free(want);
@@ -278,7 +284,12 @@ dres oracle_run_cfg(const char *name, const dop *ops, unsigned pad, uint32_t mem
     img[1] = 0xFF;
     img[2] = 0xFF;
     img[3] = 0xEA;
-    mach m = mach_new_with(img, 0x200, NULL, 0);
+    mach m = mach_new_cart(img, 0x200, (rl_gba_cart){.save = cfg->kind, .flash_id = cfg->flash_id, .eeprom_len = cfg->eeprom_len});
+    if (!m.g) {
+        r.broken = true;
+        free(want);
+        return r;
+    }
     rl_gba_keypad_set(m.g, cfg->keys);
     rl_gba_lcd_set(m.g, (unsigned)lcd_line_at_zero, (unsigned)lcd_dot_at_zero);
     unsigned k = 0;

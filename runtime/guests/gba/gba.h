@@ -78,6 +78,36 @@ typedef enum rl_gba_slot {
     RL_GBA_SLOTS
 } rl_gba_slot;
 
+/** @brief The kinds of battery backup a cartridge has. */
+typedef enum rl_gba_save_kind {
+    /** @brief None (or the caller's SRAM buffer in rl_gba_cart.sram). */
+    RL_GBA_SAVE_NONE,
+    /** @brief 32 KiB SRAM at 0x0E000000. */
+    RL_GBA_SAVE_SRAM,
+    /** @brief 64 KiB Flash. */
+    RL_GBA_SAVE_FLASH64,
+    /** @brief 128 KiB Flash in two banks. */
+    RL_GBA_SAVE_FLASH128,
+    /** @brief Serial EEPROM, 512 bytes or 8 KiB, on the DMA3 bit stream at 0x0D000000. */
+    RL_GBA_SAVE_EEPROM
+} rl_gba_save_kind;
+
+/** @brief Flash chip ids: the device id in the high byte, the manufacturer in the low byte. */
+enum {
+    /** @brief Atmel AT29LV512, 64 KiB, 128-byte pages and no sector erase. */
+    RL_GBA_FLASH_ATMEL = 0x3D1F,
+    /** @brief Panasonic MN63F805MNP, 64 KiB, 4 KiB sectors (the default of RL_GBA_SAVE_FLASH64). */
+    RL_GBA_FLASH_PANASONIC = 0x1B32,
+    /** @brief Macronix MX29L512, 64 KiB. */
+    RL_GBA_FLASH_MACRONIX64 = 0x1CC2,
+    /** @brief SST 39VF512, 64 KiB. */
+    RL_GBA_FLASH_SST = 0xD4BF,
+    /** @brief Sanyo LE26FV10N1TS, 128 KiB. */
+    RL_GBA_FLASH_SANYO = 0x1362,
+    /** @brief Macronix MX29L010, 128 KiB (the default of RL_GBA_SAVE_FLASH128). */
+    RL_GBA_FLASH_MACRONIX128 = 0x09C2
+};
+
 /** @brief The cartridge. */
 typedef struct rl_gba_cart {
     /** @brief The ROM image (up to 32 MiB); it stays the caller's and must outlive the machine. */
@@ -86,12 +116,34 @@ typedef struct rl_gba_cart {
     size_t rom_len;
     /**
      * @brief Battery SRAM at 0x0E000000 (mirrored), or NULL: reads then
-     * return 0xFF and writes are dropped. Stays the caller's.
+     * return 0xFF and writes are dropped. Stays the caller's. Takes the
+     * place of save when set.
      */
     uint8_t *sram;
     /** @brief Length of sram (a power of two, at most 64 KiB). */
     size_t sram_len;
+    /** @brief The backup the machine keeps itself (ignored when sram is set); its contents start erased (0xFF). */
+    rl_gba_save_kind save;
+    /** @brief The Flash chip (RL_GBA_FLASH_*); 0 takes the default of the size. */
+    uint16_t flash_id;
+    /** @brief The EEPROM size in bytes: 512 or 8192; 0 decides from a loaded file, else from the first DMA3 transfer. */
+    uint32_t eeprom_len;
 } rl_gba_cart;
+
+/** @brief What the ROM says about its backup. */
+typedef struct rl_gba_save_info {
+    /** @brief The kind of the library string found, RL_GBA_SAVE_NONE when there is none. */
+    rl_gba_save_kind kind;
+    /** @brief The Flash chip to use (RL_GBA_FLASH_*) for the Flash kinds, else 0. */
+    uint16_t flash_id;
+} rl_gba_save_info;
+
+/**
+ * @brief Finds the backup library string of a ROM (EEPROM_V, SRAM_V,
+ * SRAM_F_V, FLASH_V, FLASH512_V, FLASH1M_V followed by digits; the first in
+ * the image when several differ). The EEPROM size is not in the string.
+ */
+rl_gba_save_info rl_gba_save_detect(const uint8_t *rom, size_t len);
 
 /** @brief The machine. */
 typedef struct rl_gba rl_gba;
@@ -215,6 +267,48 @@ void rl_gba_set_cpu_hooks(rl_gba *g, const rl_gba_cpu_hooks *hooks);
 bool rl_gba_irq_line(const rl_gba *g);
 /** @brief Requests the interrupts in sources now (for devices outside this layer: keypad, serial, cartridge). */
 void rl_gba_request_irq(rl_gba *g, uint16_t sources);
+/** @brief The backup kind the machine has: the cart's save, RL_GBA_SAVE_SRAM for a caller's SRAM, else none. */
+rl_gba_save_kind rl_gba_save_kind_of(const rl_gba *g);
+/** @brief Length of the backup in bytes: the raw .sav size (an EEPROM of unknown size reads 0). */
+size_t rl_gba_save_len(const rl_gba *g);
+/** @brief The backup bytes in the order of a raw .sav (Flash bank 0 first; EEPROM blocks in address order, bytes as sent); valid for the machine's life. */
+const uint8_t *rl_gba_save_data(const rl_gba *g);
+/** @brief True when the backup changed since the last load, write or rl_gba_save_clean. */
+bool rl_gba_save_dirty(const rl_gba *g);
+/** @brief Marks the backup as saved. */
+void rl_gba_save_clean(rl_gba *g);
+/**
+ * @brief Replaces the backup by a raw .sav image. Returns 0, or -1 (nothing
+ * changed) when the kind has no backup or len is not a size the kind
+ * allows (SRAM 32 KiB or the caller's buffer size, Flash 64 or 128 KiB,
+ * EEPROM 512 or 8192). An EEPROM takes its size from len.
+ */
+int rl_gba_save_load(rl_gba *g, const uint8_t *data, size_t len);
+/** @brief rl_gba_save_load of the file at path: 0, 1 when there is no file or no backup, -1 when it cannot be read or has the wrong size. */
+int rl_gba_save_read(rl_gba *g, const char *path);
+/**
+ * @brief Writes the backup to path through a temporary file and a rename
+ * (a crash leaves the old file), creating the folder. Returns 0, 1 when
+ * there is nothing to write (no backup, or an EEPROM never used), -1 on
+ * failure (the backup stays dirty).
+ */
+int rl_gba_save_write(rl_gba *g, const char *path);
+/**
+ * @brief Writes the backup like rl_gba_save_write when it is dirty and has
+ * not changed for quiet cycles of the CPU clock. Returns 1 when it wrote,
+ * 0 when it did nothing, -1 on failure.
+ */
+int rl_gba_save_poll(rl_gba *g, const char *path, uint64_t quiet);
+/**
+ * @brief Writes the path of the .sav of the ROM at rom_path: the name of
+ * the ROM with .sav, in the save.dir setting's folder; when that is empty,
+ * in <user dir>/save when the program names an app (rl_settings_set_app),
+ * else next to the ROM. Returns false when out is too small.
+ */
+bool rl_gba_save_path(char *out, size_t size, const char *rom_path);
+/** @brief Declares the runtime settings and save.dir (environment RELIFT_SAVE). */
+void rl_gba_declare_settings(void);
+
 /**
  * @brief Pins the keys to pressed (KEYINPUT bit order: A, B, Select, Start,
  * Right, Left, Up, Down, R, L, a set bit is a pressed key) instead of

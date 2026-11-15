@@ -49,8 +49,12 @@ typedef struct dsetup {
     uint16_t keys;
     /** @brief The oracle's --save type (such as "flash128"), or NULL for none. */
     const char *nba_save;
-    /** @brief The file the oracle keeps that save in (needed with nba_save). */
+    /** @brief The file the oracle keeps that save in (needed with nba_save); removed before and after the run. */
     const char *save_file;
+    /** @brief The backup of the machine here (rl_gba_cart fields). */
+    rl_gba_save_kind kind;
+    uint16_t flash_id;
+    uint32_t eeprom_len;
 } dsetup;
 
 /** @brief oracle_run with a setup. */

@@ -79,11 +79,6 @@ static uint32_t rom_read(rl_gba *g, uint32_t addr, unsigned size)
     return size == 2 ? h : (uint32_t)(uint8_t)(h >> (8 * (addr & 1)));
 }
 
-static uint8_t sram_byte(const rl_gba *g, uint32_t addr)
-{
-    return g->cart.sram ? g->cart.sram[addr & (g->cart.sram_len - 1)] : 0xFF;
-}
-
 uint32_t gba_mem_read(rl_gba *g, uint32_t addr, unsigned size)
 {
     switch (addr >> 24) {
@@ -108,11 +103,12 @@ uint32_t gba_mem_read(rl_gba *g, uint32_t addr, unsigned size)
     case 0xA:
     case 0xB:
     case 0xC:
-    case 0xD:
         return rom_read(g, addr, size);
+    case 0xD:
+        return gba_eeprom_hit(g, addr) ? gba_eeprom_read(g, size) : rom_read(g, addr, size);
     case 0xE:
     case 0xF:
-        return sram_byte(g, addr) * (0x01010101u & mask_of(size));
+        return gba_save_read(g, addr) * (0x01010101u & mask_of(size));
     default:
         return open_bus(g, addr, size);
     }
@@ -151,10 +147,13 @@ void gba_mem_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
         if (size != 1)
             st(&g->oam[addr & 0x3FFu], size, value);
         return;
+    case 0xD:
+        if (gba_eeprom_hit(g, addr))
+            gba_eeprom_write(g, size, value);
+        return;
     case 0xE:
     case 0xF:
-        if (g->cart.sram)
-            g->cart.sram[addr & (g->cart.sram_len - 1)] = (uint8_t)(value >> (8 * (addr & (size - 1))));
+        gba_save_write(g, addr, (uint8_t)(value >> (8 * (addr & (size - 1)))));
         return;
     default:
         return;
@@ -165,6 +164,8 @@ uint32_t rl_gba_peek(const rl_gba *g, uint32_t addr, unsigned size)
 {
     if ((addr >> 24) == 0x4)
         return open_bus(g, addr, size);
+    if ((addr >> 24) == 0xD)
+        return rom_read((rl_gba *)(uintptr_t)g, addr & ~(size - 1), size);
     return gba_mem_read((rl_gba *)(uintptr_t)g, addr & ~(size - 1), size);
 }
 
@@ -215,6 +216,10 @@ rl_gba *rl_gba_create(const rl_gba_cart *cart)
     g->cart = *cart;
     if (!g->cart.rom)
         g->cart.rom_len = 0;
+    if (gba_save_init(g, cart) != 0) {
+        free(g);
+        return NULL;
+    }
     g->memcnt = 0x0D000020u;
     g->dma_last = 0;
     g->bios_bus = (rl_gba_bus){.user = g, .read = bios_read, .write = bios_write, .cycles = bios_cycles};
@@ -247,6 +252,7 @@ void rl_gba_destroy(rl_gba *g)
             rl_sched_cancel(g->sched, &g->dma[i].ev);
         }
     }
+    gba_save_free(g);
     free(g);
 }
 
