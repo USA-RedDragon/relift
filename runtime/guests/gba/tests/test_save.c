@@ -17,7 +17,12 @@
 
 static mach cart_with(rl_gba_save_kind kind, uint16_t id, uint32_t eeprom_len)
 {
-    return mach_new_cart(mach_rom(0x100000), 0x100000, (rl_gba_cart){.save = kind, .flash_id = id, .eeprom_len = eeprom_len});
+    return mach_new_cart(mach_rom(0x100000), 0x100000, (rl_gba_cart){.save = kind, .flash_id = id, .eeprom_len = eeprom_len, .flash_timed = true});
+}
+
+static mach instant_cart(rl_gba_save_kind kind, uint16_t id)
+{
+    return mach_new_cart(mach_rom(0x100000), 0x100000, (rl_gba_cart){.save = kind, .flash_id = id});
 }
 
 static void bw(mach *m, uint64_t t, uint32_t addr, uint32_t v)
@@ -863,4 +868,54 @@ TEST(the_save_path_falls_back_to_the_user_folder_of_the_app)
     strcat(want, "/save/Game.sav");
     CHECK(rl_gba_save_path(out, sizeof out, "/roms/Game.gba"));
     CHECK(!strcmp(out, want));
+}
+
+TEST(untimed_flash_finishes_programs_and_erases_at_once)
+{
+    mach m = instant_cart(RL_GBA_SAVE_FLASH64, 0);
+    uint64_t t = program(&m, 10, 0x40, 0x12);
+    CHECK_EQ(br(&m, t, SAVE + 0x40), 0x12u);
+    t = sector_erase(&m, t + 1, 0x0);
+    CHECK_EQ(br(&m, t, SAVE + 0x40), 0xFFu);
+    t = program(&m, t + 1, 0x8000, 0x34);
+    t = chip_erase(&m, t);
+    CHECK_EQ(br(&m, t, SAVE + 0x8000), 0xFFu);
+    mach_free(&m);
+}
+
+TEST(untimed_atmel_writes_a_page_at_once_and_closes_it_after_the_window)
+{
+    mach m = instant_cart(RL_GBA_SAVE_FLASH64, RL_GBA_FLASH_ATMEL);
+    uint64_t t = unlock(&m, 10, 0xA0);
+    bw(&m, t, SAVE + 0x400, 0x12);
+    bw(&m, t + 1, SAVE + 0x401, 0x34);
+    CHECK_EQ(br(&m, t + 2, SAVE + 0x400), 0x12u);
+    CHECK_EQ(br(&m, t + 3, SAVE + 0x401), 0x34u);
+    CHECK_EQ(br(&m, t + 4, SAVE + 0x402), 0xFFu);
+    t = unlock(&m, t + 5000, 0x90);
+    CHECK_EQ(br(&m, t, SAVE), 0x1Fu);
+    CHECK_EQ(br(&m, t + 1, SAVE + 1), 0x3Du);
+    mach_free(&m);
+}
+
+TEST(backup_writes_keep_the_exact_address_and_take_its_byte_lane)
+{
+    mach m = cart_with(RL_GBA_SAVE_SRAM, 0, 0);
+    mach_to(&m, 1);
+    rl_gba_write(m.g, SAVE + 0xA0, 2, 0xAABB);
+    rl_gba_write(m.g, SAVE + 0xA1, 2, 0xAABB);
+    rl_gba_write(m.g, SAVE + 0xE0, 4, 0xAABBCCDD);
+    rl_gba_write(m.g, SAVE + 0xE1, 4, 0xAABBCCDD);
+    rl_gba_write(m.g, SAVE + 0xE2, 4, 0xAABBCCDD);
+    rl_gba_write(m.g, SAVE + 0xE3, 4, 0xAABBCCDD);
+    const uint8_t *d = rl_gba_save_data(m.g);
+    CHECK_EQ(d[0xA0], 0xBBu);
+    CHECK_EQ(d[0xA1], 0xAAu);
+    CHECK_EQ(d[0xE0], 0xDDu);
+    CHECK_EQ(d[0xE1], 0xCCu);
+    CHECK_EQ(d[0xE2], 0xBBu);
+    CHECK_EQ(d[0xE3], 0xAAu);
+    CHECK_EQ(rl_gba_read(m.g, SAVE + 0xA1, 1), 0xAAu);
+    CHECK_EQ(rl_gba_read(m.g, SAVE + 0xA1, 2), 0xAAAAu);
+    mach_free(&m);
 }

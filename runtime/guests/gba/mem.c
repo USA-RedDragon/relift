@@ -153,7 +153,7 @@ void gba_mem_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
         return;
     case 0xE:
     case 0xF:
-        gba_save_write(g, addr, (uint8_t)(value >> (8 * (addr & (size - 1)))));
+        gba_save_write(g, addr, (uint8_t)((size == 4 ? value : size == 2 ? (value & 0xFFFFu) * 0x10001u : (value & 0xFFu) * 0x01010101u) >> (8 * (addr & 3))));
         return;
     default:
         return;
@@ -171,7 +171,7 @@ uint32_t rl_gba_peek(const rl_gba *g, uint32_t addr, unsigned size)
 
 uint32_t rl_gba_read(rl_gba *g, uint32_t addr, unsigned size)
 {
-    addr &= ~(size - 1);
+    addr = gba_align(addr, size);
     uint32_t v = gba_mem_read(g, addr, size);
     if ((addr >> 24) >= 0x2)
         g->mdr = size == 4 ? v : size == 2 ? v * 0x10001u : v * 0x01010101u;
@@ -180,7 +180,7 @@ uint32_t rl_gba_read(rl_gba *g, uint32_t addr, unsigned size)
 
 void rl_gba_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
 {
-    addr &= ~(size - 1);
+    addr = gba_align(addr, size);
     gba_mem_write(g, addr, size, value);
     gba_after_write(g, addr, size);
 }

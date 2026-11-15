@@ -69,7 +69,7 @@ typedef struct gba_lcd {
 typedef struct gba_flash {
     uint16_t id;
     uint8_t phase, mode, busy_kind, busy_data, toggle;
-    bool ident, erase, bank;
+    bool ident, erase, bank, timed;
     uint64_t busy_until, page_deadline;
     uint32_t page_base;
     bool page_open;
@@ -181,6 +181,9 @@ static inline rl_gba *gba_of(rl_device *d) { return ((gba_dev *)d->opaque)->g; }
 uint64_t gba_now(const rl_gba *g);
 /** @brief Charges n cycles to the CPU. */
 void gba_charge(rl_gba *g, unsigned n);
+/** @brief addr aligned to size, except in the backup window where the byte lane of the exact address matters. */
+static inline uint32_t gba_align(uint32_t addr, unsigned size) { return addr >= 0x0E000000u ? addr : addr & ~(size - 1); }
+
 /** @brief The open bus byte of an I/O address. */
 static inline uint8_t gba_open_byte(const rl_gba *g, uint32_t addr) { return (uint8_t)(g->mdr >> (8 * (addr & 3))); }
 

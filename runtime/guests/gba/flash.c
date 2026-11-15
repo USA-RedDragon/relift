@@ -34,6 +34,8 @@ static bool two_banks(const gba_save *s) { return s->len > 0x10000; }
 
 static size_t index_of(const gba_save *s, uint32_t a) { return ((size_t)s->fl.bank << 16 | (a & 0xFFFFu)) & (s->len - 1); }
 
+static void settle(rl_gba *g, uint64_t now);
+
 static void commit_page(rl_gba *g, uint64_t when)
 {
     gba_save *s = &g->save;
@@ -49,8 +51,21 @@ static void commit_page(rl_gba *g, uint64_t when)
 static void settle(rl_gba *g, uint64_t now)
 {
     gba_flash *f = &g->save.fl;
-    if (f->page_open && now >= f->page_deadline)
+    if (!f->page_open || now < f->page_deadline)
+        return;
+    if (f->timed) {
         commit_page(g, f->page_deadline);
+    } else {
+        f->page_open = false;
+        f->mode = MODE_NONE;
+    }
+}
+
+static void busy_for(gba_flash *f, uint64_t now, unsigned cycles, unsigned kind)
+{
+    f->busy_kind = (uint8_t)kind;
+    if (f->timed)
+        f->busy_until = now + cycles;
 }
 
 uint8_t gba_flash_read(rl_gba *g, uint32_t addr)
@@ -59,7 +74,7 @@ uint8_t gba_flash_read(rl_gba *g, uint32_t addr)
     gba_flash *f = &s->fl;
     uint64_t now = gba_now(g);
     settle(g, now);
-    if (now < f->busy_until || f->page_open) {
+    if (f->timed && (now < f->busy_until || f->page_open)) {
         f->toggle ^= 1;
         uint8_t status = (uint8_t)(f->toggle << 6);
         if (f->busy_kind == BUSY_PROGRAM)
@@ -77,8 +92,7 @@ static void erase_range(rl_gba *g, size_t from, size_t n, uint64_t now, unsigned
     gba_save *s = &g->save;
     memset(&s->data[from], 0xFF, n);
     gba_save_touch(s, now);
-    s->fl.busy_kind = BUSY_ERASE;
-    s->fl.busy_until = now + cycles;
+    busy_for(&s->fl, now, cycles, BUSY_ERASE);
 }
 
 static void program_byte(rl_gba *g, uint32_t a, uint8_t v, uint64_t now)
@@ -87,25 +101,35 @@ static void program_byte(rl_gba *g, uint32_t a, uint8_t v, uint64_t now)
     gba_flash *f = &s->fl;
     s->data[index_of(s, a)] &= v;
     gba_save_touch(s, now);
-    f->busy_kind = BUSY_PROGRAM;
     f->busy_data = v;
-    f->busy_until = now + PROGRAM_CYCLES;
+    busy_for(f, now, PROGRAM_CYCLES, BUSY_PROGRAM);
 }
 
 static void page_byte(rl_gba *g, uint32_t a, uint8_t v, uint64_t now)
 {
     gba_flash *f = &g->save.fl;
     uint32_t base = a & ~(uint32_t)(PAGE_SIZE - 1);
-    if (f->page_open && base != f->page_base)
-        commit_page(g, now);
+    gba_save *s = &g->save;
+    if (f->page_open && base != f->page_base) {
+        if (f->timed)
+            commit_page(g, now);
+        else
+            f->page_open = false;
+    }
     if (now < f->busy_until && !f->page_open)
         return;
     if (!f->page_open) {
         f->page_open = true;
         f->page_base = base;
         memset(f->page, 0xFF, sizeof f->page);
+        if (!f->timed)
+            memset(&s->data[index_of(s, base)], 0xFF, PAGE_SIZE);
     }
     f->page[a & (PAGE_SIZE - 1)] = v;
+    if (!f->timed) {
+        s->data[index_of(s, a)] = v;
+        gba_save_touch(s, now);
+    }
     f->page_deadline = now + PAGE_WINDOW_CYCLES;
     f->busy_kind = BUSY_PROGRAM;
     f->busy_data = v;

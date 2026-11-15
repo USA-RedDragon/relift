@@ -91,6 +91,7 @@ int gba_save_init(rl_gba *g, const rl_gba_cart *cart)
     if (s->kind == RL_GBA_SAVE_FLASH64 || s->kind == RL_GBA_SAVE_FLASH128) {
         if (!gba_flash_valid(s->kind, cart->flash_id))
             return -1;
+        s->fl.timed = cart->flash_timed;
         s->fl.id = cart->flash_id ? cart->flash_id : s->kind == RL_GBA_SAVE_FLASH64 ? RL_GBA_FLASH_PANASONIC : RL_GBA_FLASH_MACRONIX128;
     }
     s->data = malloc(s->cap);

@@ -284,7 +284,7 @@ dres oracle_run_cfg(const char *name, const dop *ops, unsigned pad, uint32_t mem
     img[1] = 0xFF;
     img[2] = 0xFF;
     img[3] = 0xEA;
-    mach m = mach_new_cart(img, 0x200, (rl_gba_cart){.save = cfg->kind, .flash_id = cfg->flash_id, .eeprom_len = cfg->eeprom_len});
+    mach m = mach_new_cart(img, 0x200, (rl_gba_cart){.save = cfg->kind, .flash_id = cfg->flash_id, .eeprom_len = cfg->eeprom_len, .flash_timed = cfg->flash_timed});
     if (!m.g) {
         r.broken = true;
         free(want);

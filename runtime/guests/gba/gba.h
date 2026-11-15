@@ -126,6 +126,13 @@ typedef struct rl_gba_cart {
     rl_gba_save_kind save;
     /** @brief The Flash chip (RL_GBA_FLASH_*); 0 takes the default of the size. */
     uint16_t flash_id;
+    /**
+     * @brief Flash programs and erases take their datasheet time, during
+     * which reads return the status bits (bit 7 inverted data or 0, bit 6
+     * toggling). Off, they finish at once, as in every emulator and the
+     * jsmolka tests; a game that polls until done sees no difference.
+     */
+    bool flash_timed;
     /** @brief The EEPROM size in bytes: 512 or 8192; 0 decides from a loaded file, else from the first DMA3 transfer. */
     uint32_t eeprom_len;
 } rl_gba_cart;

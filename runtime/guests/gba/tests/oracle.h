@@ -55,6 +55,7 @@ typedef struct dsetup {
     rl_gba_save_kind kind;
     uint16_t flash_id;
     uint32_t eeprom_len;
+    bool flash_timed;
 } dsetup;
 
 /** @brief oracle_run with a setup. */

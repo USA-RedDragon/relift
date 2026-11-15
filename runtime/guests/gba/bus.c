@@ -279,7 +279,7 @@ uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 uint32_t rl_gba_load(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 {
     gba_dma_run(g);
-    addr &= ~(size - 1);
+    addr = gba_align(addr, size);
     uint32_t v = gba_bus_read(g, GBA_CPU, addr, size, seq);
     if (!is_rom(addr))
         g->rom_burst = false;
@@ -289,7 +289,7 @@ uint32_t rl_gba_load(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 void rl_gba_store(rl_gba *g, uint32_t addr, unsigned size, uint32_t value, bool seq)
 {
     gba_dma_run(g);
-    addr &= ~(size - 1);
+    addr = gba_align(addr, size);
     gba_bus_write(g, GBA_CPU, addr, size, value, seq);
     if (!is_rom(addr))
         g->rom_burst = false;
