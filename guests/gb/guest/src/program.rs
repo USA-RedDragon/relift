@@ -326,10 +326,13 @@ fn c_string(s: &str) -> String {
     o
 }
 
-/// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it).
+/// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it, `rom`).
 #[must_use]
-pub fn rom_c() -> String {
-    "#include <stddef.h>\n#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_gb_rom[];\nconst uint8_t rl_gb_rom[] = {\n#embed \"rom.bin\"\n};\nextern const size_t rl_gb_rom_len;\nconst size_t rl_gb_rom_len = sizeof rl_gb_rom;\n".into()
+pub fn rom_c(rom: &[u8]) -> String {
+    let mut t = relift_guest::blob::blob_c("rl_gb_rom", "rom.bin", rom);
+    t.push_str("#include <stddef.h>\nextern const size_t rl_gb_rom_len;\n");
+    let _ = writeln!(t, "const size_t rl_gb_rom_len = {}u;", rom.len());
+    t
 }
 
 /// `program.c`: the unit list and `main`.

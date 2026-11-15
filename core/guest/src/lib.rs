@@ -1,6 +1,7 @@
 //! The guest contract and vocabulary: the traits a guest implements and the ids
 //! every stage shares.
 
+pub mod blob;
 pub mod toy;
 
 use relift_ir::{Block, CryptoOp, FpOp, Reg, RegFile, Width};

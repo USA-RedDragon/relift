@@ -688,13 +688,10 @@ impl ProgramFile {
 }
 
 /// The C file that holds module `i`'s image: the raw bytes go in
-/// `image<i>.bin` and the C pulls them in with `#embed`, so the compiler
-/// reads them as data rather than parsing an initializer of millions of
-/// numbers.
-fn image_c(i: usize) -> String {
-    format!(
-        "#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_image{i}[];\nconst uint8_t rl_image{i}[] = {{\n#embed \"image{i}.bin\"\n}};\n"
-    )
+/// `image<i>.bin` and the C pulls them in as data rather than as an
+/// initializer of millions of numbers.
+fn image_c(i: usize, image: &[u8]) -> String {
+    relift_guest::blob::blob_c(&format!("rl_image{i}"), &format!("image{i}.bin"), image)
 }
 
 /// The files that describe the placed modules to the runtime's loader and
@@ -723,7 +720,7 @@ pub fn program_files(
         });
         out.push(ProgramFile {
             name: format!("image{i}.c"),
-            bytes: image_c(i).into_bytes(),
+            bytes: image_c(i, &p.nso.image).into_bytes(),
         });
     }
     out.push(ProgramFile {
@@ -1045,6 +1042,7 @@ mod tests {
         assert_eq!(files[0].bytes, p[0].nso.image);
         let img = String::from_utf8_lossy(&files[1].bytes);
         assert!(img.contains("#embed \"image0.bin\""), "{img}");
+        assert!(img.contains(".incbin \\\"image0.bin\\\""), "{img}");
         assert!(img.contains("const uint8_t rl_image0[] = {"), "{img}");
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("static const rl_unit *const static_units[] = { &rl_unit_main, };"));

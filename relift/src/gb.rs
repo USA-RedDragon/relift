@@ -372,7 +372,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<Built
     let mut prog = Vec::new();
     relift_cache::write_if_changed(&cdir.join("rom.bin"), &rom)?;
     for (n, text) in [
-        ("rom.c", relift_gb::program::rom_c()),
+        ("rom.c", relift_gb::program::rom_c(&rom)),
         (
             "program.c",
             relift_gb::program::program_c(
@@ -542,7 +542,11 @@ fn compile(
         compiles.push(Compile {
             src: s.clone(),
             obj: obj(s, "prog"),
-            flags: rt_flags.clone(),
+            flags: rt_flags
+                .iter()
+                .cloned()
+                .chain(crate::build::source_dir_flag(s))
+                .collect(),
             pool: None,
             stage: 0,
         });

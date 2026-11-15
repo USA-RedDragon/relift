@@ -176,6 +176,14 @@ fn unlifted_line(module: &str, pc: u64, word: u64, message: &str) -> String {
     format!("{module}\t{pc:#x}\t{word:08x}\t{message}\n")
 }
 
+/// `-I` of the directory of a generated C file, where an assembler
+/// `.incbin` in it looks for the data file next to it.
+pub(crate) fn source_dir_flag(src: &Path) -> Option<String> {
+    src.parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(|d| format!("-I{}", d.display()))
+}
+
 /// Lifts and emits `placed` into `cdir`, one directory per module; returns
 /// the emitted C files and the unit symbols.
 fn emit_modules(
@@ -1185,7 +1193,11 @@ pub(crate) fn build_project(
         compiles.push(Compile {
             src: s.clone(),
             obj: obj(s, "lifted"),
-            flags: prog_flags.clone(),
+            flags: prog_flags
+                .iter()
+                .cloned()
+                .chain(source_dir_flag(s))
+                .collect(),
             pool: None,
             stage: 0,
         });
