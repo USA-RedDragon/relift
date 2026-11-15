@@ -547,14 +547,40 @@ fn coverage_counts_distinct_bytes_per_bank() {
 }
 
 #[test]
-fn unmodelled_mappers_are_refused() {
-    let mut rom = synth::rom(&Spec {
-        cart_type: 0xFE,
-        rom_size: 0x01,
-        ..Spec::default()
-    });
+fn an_unmodelled_mapper_finds_only_the_fixed_bank() {
+    let r = Cart::new(0xFE, 0x01)
+        .put(
+            0,
+            0x150,
+            &[
+                0x3E, 0x02, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x02, 0xC3, 0x00, 0x40,
+            ],
+        )
+        .put(0, 0x200, &[0xC9])
+        .put(2, 0x4000, &[0xC9])
+        .analyze();
+    assert_eq!(r.mapper, "huc3");
+    assert!(has(&r, 0, 0x200));
+    assert!(r.lift_banks.is_empty());
+    assert_eq!(kinds(&r), vec![UnresolvedKind::UnknownBank]);
+}
+
+#[test]
+fn an_unknown_cartridge_type_is_analyzed_as_an_unmodelled_mapper() {
+    let mut rom = Cart::new(0x19, 0x01)
+        .put(0, 0x150, &[0xCD, 0x00, 0x02, 0x18, 0xFE])
+        .put(0, 0x200, &[0xC9])
+        .rom;
+    rom[0x147] = 0x30;
     synth::fix_checksums(&mut rom);
-    assert!(analyze(&rom).is_err());
+    let r = analyze(&rom).expect("analyzes");
+    assert_eq!(r.mapper, "unknown");
+    assert!(has(&r, 0, 0x200));
+}
+
+#[test]
+fn a_header_too_short_is_refused() {
+    assert!(analyze(&[0; 0x100]).is_err());
 }
 
 const JP_THROUGH_C100: [u8; 7] = [0x21, 0x00, 0xC1, 0x2A, 0x66, 0x6F, 0xE9];

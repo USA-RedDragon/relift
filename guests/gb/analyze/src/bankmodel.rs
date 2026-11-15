@@ -18,7 +18,7 @@ pub struct OutOfRange(pub u16);
 /// The ROM banking of one mapper.
 #[derive(Clone, Copy, Debug)]
 pub struct BankModel {
-    kind: MapperKind,
+    kind: Option<MapperKind>,
     banks: usize,
 }
 
@@ -33,21 +33,33 @@ impl BankModel {
             | MapperKind::Mbc1M
             | MapperKind::Mbc2
             | MapperKind::Mbc3
-            | MapperKind::Mbc5 => Some(BankModel { kind, banks }),
+            | MapperKind::Mbc5 => Some(BankModel {
+                kind: Some(kind),
+                banks,
+            }),
             _ => None,
         }
     }
 
-    /// The mapper kind.
+    /// The model of a cartridge whose ROM banking is not modelled: the
+    /// bank in the window is never known, so only the fixed bank's code is
+    /// found.
     #[must_use]
-    pub fn kind(&self) -> MapperKind {
+    pub fn opaque(banks: usize) -> BankModel {
+        BankModel { kind: None, banks }
+    }
+
+    /// The mapper kind, or `None` when its banking is not modelled.
+    #[must_use]
+    pub fn kind(&self) -> Option<MapperKind> {
         self.kind
     }
 
     /// The register a write to `addr` selects, if any.
     #[must_use]
     pub fn classify(&self, addr: u16) -> Option<BankReg> {
-        match self.kind {
+        let kind = self.kind?;
+        match kind {
             MapperKind::None => None,
             MapperKind::Mbc1 | MapperKind::Mbc1M => match addr {
                 0x2000..=0x3FFF => Some(BankReg::Lo),
@@ -69,7 +81,10 @@ impl BankModel {
     #[must_use]
     pub fn register_value(&self, reg: BankReg, value: u8) -> u16 {
         let v = u16::from(value);
-        match (self.kind, reg) {
+        let Some(kind) = self.kind else {
+            return 0;
+        };
+        match (kind, reg) {
             (MapperKind::Mbc1, BankReg::Lo) => v & 0x1F,
             (MapperKind::Mbc1M | MapperKind::Mbc2, BankReg::Lo) => v & 0x0F,
             (MapperKind::Mbc3, BankReg::Lo) => v & 0x7F,
@@ -85,9 +100,9 @@ impl BankModel {
     #[must_use]
     pub fn hi_matters(&self) -> bool {
         match self.kind {
-            MapperKind::Mbc1 => self.banks > 32,
-            MapperKind::Mbc1M => self.banks > 16,
-            MapperKind::Mbc5 => self.banks > 256,
+            Some(MapperKind::Mbc1) => self.banks > 32,
+            Some(MapperKind::Mbc1M) => self.banks > 16,
+            Some(MapperKind::Mbc5) => self.banks > 256,
             _ => false,
         }
     }
@@ -99,7 +114,7 @@ impl BankModel {
     ///
     /// The bank is not in the image.
     pub fn resolve(&self, lo: Option<u16>, hi: Option<u8>) -> Option<Result<u16, OutOfRange>> {
-        if self.kind == MapperKind::None {
+        if self.kind? == MapperKind::None {
             return Some(Ok(1));
         }
         let lo = lo?;
@@ -121,9 +136,9 @@ impl BankModel {
     pub fn split(&self, bank: u16) -> (u16, u8) {
         let hi = |shift: u32| u8::try_from(bank >> shift).unwrap_or(0);
         match self.kind {
-            MapperKind::Mbc1 => (bank & 0x1F, hi(5)),
-            MapperKind::Mbc1M => (bank & 0x0F, hi(4)),
-            MapperKind::Mbc5 => (bank & 0xFF, hi(8)),
+            Some(MapperKind::Mbc1) => (bank & 0x1F, hi(5)),
+            Some(MapperKind::Mbc1M) => (bank & 0x0F, hi(4)),
+            Some(MapperKind::Mbc5) => (bank & 0xFF, hi(8)),
             _ => (bank, 0),
         }
     }
@@ -136,19 +151,22 @@ impl BankModel {
     ///
     /// The bank is not in the image.
     pub fn effective(&self, lo: u16, hi: u8) -> Result<u16, OutOfRange> {
-        let low = match self.kind {
+        let Some(kind) = self.kind else {
+            return Err(OutOfRange(lo));
+        };
+        let low = match kind {
             MapperKind::Mbc5 => lo,
             _ if lo == 0 => 1,
             _ => lo,
         };
         let h = u16::from(hi);
-        let raw = match self.kind {
+        let raw = match kind {
             MapperKind::None | MapperKind::Mbc2 | MapperKind::Mbc3 => low,
             MapperKind::Mbc1 => (h << 5) | low,
             MapperKind::Mbc1M => (h << 4) | low,
             _ => (h << 8) | low,
         };
-        if self.kind == MapperKind::None {
+        if kind == MapperKind::None {
             return Ok(1);
         }
         let mask = self.banks.next_power_of_two().saturating_sub(1);
@@ -208,5 +226,13 @@ mod tests {
     #[test]
     fn unmodelled_mappers_are_refused() {
         assert!(BankModel::new(MapperKind::Huc3, 64).is_none());
+    }
+
+    #[test]
+    fn an_opaque_model_never_knows_the_window_bank() {
+        let m = BankModel::opaque(64);
+        assert_eq!(m.resolve(Some(1), Some(0)), None);
+        assert!(m.effective(1, 0).is_err());
+        assert_eq!(m.classify(0x2000), None);
     }
 }

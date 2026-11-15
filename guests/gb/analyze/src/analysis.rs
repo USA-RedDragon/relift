@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use relift_gb_formats::banks::ROM_BANK_SIZE;
-use relift_gb_formats::{Cartridge, Error as FormatError, MapperKind};
+use relift_gb_formats::{Cartridge, Error as FormatError};
 
 use crate::bankmodel::BankModel;
 use crate::func::{self, CellInfo, CopyLoop, Dep, Env, Outcome, Store, Summary};
@@ -24,15 +24,12 @@ use crate::state::{Bv, State, Val};
 pub enum AnalyzeError {
     /// The header does not parse.
     Format(FormatError),
-    /// The mapper's ROM banking is not modelled.
-    Mapper(&'static str),
 }
 
 impl fmt::Display for AnalyzeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AnalyzeError::Format(e) => write!(f, "{e}"),
-            AnalyzeError::Mapper(m) => write!(f, "the {m} mapper's ROM banking is not modelled"),
         }
     }
 }
@@ -67,24 +64,28 @@ pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
 ///
 /// As [`analyze`].
 pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
-    let cart = Cartridge::parse(rom).map_err(AnalyzeError::Format)?;
-    crate::state::reset_pools();
-    let kind = cart.mapper();
     let banks = rom.len().div_ceil(ROM_BANK_SIZE).max(1);
-    let model = BankModel::new(kind, banks).ok_or(AnalyzeError::Mapper(kind.name()))?;
+    let (name, model) = match Cartridge::parse(rom) {
+        Ok(cart) => {
+            let kind = cart.mapper();
+            (
+                kind.name(),
+                BankModel::new(kind, banks).unwrap_or_else(|| BankModel::opaque(banks)),
+            )
+        }
+        Err(FormatError::UnknownCartridgeType(_)) => ("unknown", BankModel::opaque(banks)),
+        Err(e) => return Err(AnalyzeError::Format(e)),
+    };
+    crate::state::reset_pools();
     let mut limits: FxMap<Loc, usize> = FxMap::default();
     for _ in 0..MAX_RESTARTS {
-        let mut d = Driver::new(
-            BankModel::new(kind, banks).ok_or(AnalyzeError::Mapper(kind.name()))?,
-            Image::new(rom),
-            &limits,
-        );
+        let mut d = Driver::new(model, Image::new(rom), &limits);
         d.seed(rom, seen);
         d.solve();
         d.switch_roots();
         let fences = d.fences();
         if fences.is_empty() {
-            return Ok(d.report(rom, kind, banks));
+            return Ok(d.report(rom, name, banks));
         }
         for (t, n) in fences {
             let m = limits.entry(t).or_insert(n);
@@ -95,7 +96,7 @@ pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
     d.seed(rom, seen);
     d.solve();
     d.switch_roots();
-    Ok(d.report(rom, kind, banks))
+    Ok(d.report(rom, name, banks))
 }
 
 impl<'a> Driver<'a> {
@@ -546,7 +547,7 @@ impl Driver<'_> {
         }
     }
 
-    fn report(self, rom: &[u8], kind: MapperKind, banks: usize) -> Report {
+    fn report(self, rom: &[u8], mapper: &'static str, banks: usize) -> Report {
         let offset = |l: Loc| {
             if l.addr < 0x4000 {
                 usize::from(l.addr)
@@ -757,7 +758,7 @@ impl Driver<'_> {
         let ram_ops = crate::ramcode::predict(rom, &self.model, &roots, &code, &targets);
         Report {
             unreached_pointers,
-            mapper: kind.name(),
+            mapper,
             banks,
             functions,
             edges,

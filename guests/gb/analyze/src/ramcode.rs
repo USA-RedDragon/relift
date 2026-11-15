@@ -1404,7 +1404,7 @@ pub(crate) fn predict(
         rom,
         model,
         cgb: rom.get(0x143).is_some_and(|c| c & 0x80 != 0),
-        nibbles: model.kind() == relift_gb_formats::MapperKind::Mbc2,
+        nibbles: model.kind() == Some(relift_gb_formats::MapperKind::Mbc2),
         code,
     };
     let jobs = std::thread::available_parallelism()

@@ -637,7 +637,7 @@ impl State {
             Bv::Known(v) => Some(v),
             _ => None,
         };
-        if model.kind() == relift_gb_formats::MapperKind::None {
+        if model.kind() == Some(relift_gb_formats::MapperKind::None) {
             return WindowBank::Known(1);
         }
         match (self.lo, self.hi) {
