@@ -37,6 +37,13 @@ make -C runtime -j2 CC="zig cc" AR="zig ar" TARGET=x86_64-windows-gnu BUILD=buil
 
 `relift build` links `guests/switch/vk` into every game. It also links `host/window_sdl3.c` when it finds SDL3: `RELIFT_SDL3_DIR` (a directory with `include/` and `lib/`), else `<cache>/sdk/sdl3/<arch>-<os>/` (where the pinned prebuilt is unpacked), else `pkg-config sdl3`. Without SDL3 it prints one line and builds headless. On macOS it links MoltenVK directly (`-DRL_VULKAN_LINKED`, no Vulkan loader): `RELIFT_MOLTENVK_DIR` (a directory with `lib/libMoltenVK.dylib`), else `<cache>/sdk/moltenvk/<arch>-<os>/`, else Homebrew's `molten-vk`; `make` does the same with `MOLTENVK_DIR`.
 
+Android builds need API level 30 or newer (`memfd_create`; the build stops with a message below that) and no `-lpthread`, which bionic does not have:
+
+```sh
+NDK=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+make -C runtime -j2 CC=$NDK/aarch64-linux-android30-clang AR=$NDK/llvm-ar BUILD=build/android all
+```
+
 `portable` builds only `crash_test`, `fiber_tests` and `sched_bench`,
 which link the host-portable part of the core (crash handler, fibers,
 scheduler), so they build for Windows (x86-64 and arm64), where the rest

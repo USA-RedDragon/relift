@@ -53,6 +53,9 @@ ifneq ($(findstring windows,$(MACHINE))$(findstring mingw,$(MACHINE)),)
 WINDOWS := 1
 EXE := .exe
 endif
+ifneq ($(findstring android,$(MACHINE)),)
+ANDROID := 1
+endif
 ifneq ($(or $(findstring macos,$(MACHINE)),$(findstring darwin,$(MACHINE)),$(findstring apple,$(MACHINE))),)
 APPLE := 1
 SHLIB_EXT := dylib
@@ -68,7 +71,7 @@ endif
 WARN := -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 CFLAGS_BASE := -std=c11 $(OPT) -g $(WARN) $(TARGET_FLAGS) $(ARCH_FLAGS) $(if $(WINDOWS),-DRL_STATIC_RUNTIME,-fPIC) \
 	-fvisibility=hidden -fno-omit-frame-pointer -D_GNU_SOURCE -D_DARWIN_C_SOURCE -DRL_BUILDING_RUNTIME -DRL_CHECKS
-LDLIBS := $(if $(WINDOWS),,-lpthread)
+LDLIBS := $(if $(or $(WINDOWS),$(ANDROID)),,-lpthread)
 HOST_SRCS :=
 ifeq ($(AUDIO),real)
 HOST_SRCS += host/audio_sdl3.c host/opus_libopus.c
@@ -302,7 +305,7 @@ $(GB_TESTS): $(GB_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GB_OBJS)
 $(GBA_TESTS): $(GBA_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GBA_OBJS)
 $(GBDEV_LOCKSTEP): $(GBDEV_OBJS) $(CORE_OBJS) $(GB_OBJS)
 	$(if $(GBDEV_LIB),,$(error set GBDEV_LIB to librelift_gb_devices.a))
-	$(CC) $(TARGET_FLAGS) $^ $(GBDEV_LIB) -o $@ $(LDLIBS) -lm -ldl -lpthread
+	$(CC) $(TARGET_FLAGS) $^ $(GBDEV_LIB) -o $@ $(LDLIBS) -lm -ldl
 
 gbdev-lockstep: $(GBDEV_LOCKSTEP)
 	$(GBDEV_LOCKSTEP) --frames $(GBDEV_FRAMES) $(GBDEV_ROMS)
