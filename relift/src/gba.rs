@@ -4,8 +4,8 @@
 //! The import copies the ROM into the project's import directory and writes
 //! `game.toml` with `guest = "gba"`. The build finds the code
 //! (`relift_gba::discover`), lifts it into one unit (`relift-gba`), and links
-//! it with the runtime's core, ARMv4T and GBA layers. The program runs
-//! headless until the picture unit lands.
+//! it with the runtime's core, ARMv4T and GBA layers. `relift run` opens
+//! the program's window.
 
 use std::path::{Path, PathBuf};
 
@@ -472,7 +472,7 @@ fn compile(
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
     let exe = build(settings, &[], ui)?;
-    let status = relift_proc::command(&exe).arg("--headless").status()?;
+    let status = relift_proc::command(&exe).status()?;
     Ok(status.code().unwrap_or(128))
 }
 
