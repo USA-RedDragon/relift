@@ -14,7 +14,7 @@ frontend under `cpus/` and a guest layer under `guests/` and
 | Guest | CPU frontend | State |
 |---|---|---|
 | Nintendo Switch | ARM64 (`cpus/a64`, generated from Arm's Sail model) | libnx test programs build and run end to end on Linux x86-64; commercial games are not running yet |
-| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | decoder, cartridge reader and test oracle; lifting and runtime in progress |
+| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | test ROMs import, build and run as native programs on Linux, graded by the corpus manifest; commercial games boot (see below) |
 
 **Status: early development.** Nothing is ready for players.
 
@@ -59,7 +59,27 @@ computed jump left to the dispatcher with its reason (`slot`, `table` or
 
 ### Game Boy and Game Boy Color
 
-Import is not available yet. `relift-gbrom` reads and checks a ROM header, and `relift-gbrom functions` lists the functions of a ROM per mapper bank.
+```sh
+relift import "Some Game (USA).gbc"
+relift build
+```
+
+`relift import` takes a cartridge ROM (`.gb`, `.gbc`) as it is and writes
+`game.toml` with `guest = "gb"`. `relift build --mods hack.ips` applies IPS,
+UPS or BPS ROM-hack patches in order before discovery. The program runs in a
+window (SDL3) or with `--headless`; its battery save is a raw `.sav` next to
+the imported ROM, the format other emulators read. Options of the program:
+`--model dmg|mgb|sgb|cgb|agb|...`, `--frames N` (stop after N frames and
+print the frame hash and the serial output), `--input` (a scripted joypad,
+`frame:buttons,...`), `--png FILE`, `--png-dir DIR --png-every N`,
+`--case FILE` (grade a test ROM by a corpus case spec), `--stats` and
+`--check` (lockstep against the device library's own CPU).
+
+The devices come from rustyboi-core (`guests/gb/devices`), driven at every
+instruction boundary; lifted code runs the instruction bodies. Code with no
+lifted function (code copied to RAM, or missed by discovery) runs on the
+device library's CPU one instruction at a time until it returns or reaches
+lifted code.
 
 ### Game Boy Advance
 
@@ -84,7 +104,7 @@ next `relift build` lifts it with the rest (docs/abi.md section 6).
 
 | Binary | Guest | Does |
 |---|---|---|
-| `relift` | all | the recompiler: `import`, `build`, `run`, `coverage`, `check`, `where` |
+| `relift` | all | the recompiler: `import`, `build`, `run`, `coverage`, `check`, `where`; Game Boy ROMs: `import`, `build`, `run` |
 | `relift-nup` | Switch | list and extract `.nup` containers |
 | `relift-romfs` | Switch | list, extract and print files of a romfs image |
 | `relift-nso` | Switch | show, list symbols of and decompress NSO modules |

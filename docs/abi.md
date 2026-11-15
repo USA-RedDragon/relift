@@ -1537,7 +1537,50 @@ control; the WebAssembly emitter follows the same rules, checked by
   plain guest addresses; the dispatch lookup of a banked region uses the
   bank mapped there at run time, and an analysis that tracks bank-switch
   writes may resolve a direct call to one bank at build time.
-  [open: the dispatch table shape for banked regions]
+- The Game Boy guest (`guests/gb/guest`, `runtime/guests/gb/exact`) gives
+  every switchable bank a unit of its own and keeps a table per bank of
+  the window's entries; the dispatch table holds a forwarder at every window
+  address that picks the function of the bank mapped now. A direct transfer
+  that may reach lifted window code of its own bank carries `RL_GB_SYNC_CHECK`
+  in its sync info, and its sync point unwinds to the run loop when another
+  bank is mapped.
+
+### The exact Game Boy mode
+
+The device library (`guests/gb/devices`, rustyboi-core behind
+`gbdev_abi.h`) owns the bus and the instruction boundary; lifted code runs
+only the instruction bodies, which keeps every access, interrupt and DMA
+stall where rustyboi places it.
+
+- The frontend sends every access to the device hook (`IoMap` default
+  `Device`) and names its own calls through `Frontend::io_calls`
+  (`rl_gb_io_read`, `rl_gb_io_write`) and `Frontend::sync_call`
+  (`rl_gb_sync(c, mem, next, info)`). Every instruction ends in a sync point;
+  the budget is 0 when an instruction opens, so the sync always runs. The
+  cycle of an access is minus the budget at the call: the runtime first makes
+  the operand fetches and internal M-cycles before it, then the access.
+- `rl_gb_sync` makes the operand fetches still due, ends the instruction
+  (`rlgbd_end` with its T-cycles) and opens the next (`rlgbd_at` with pc and
+  sp), entering interrupts there: an interrupt entry calls the handler's
+  function on the host stack. `info` holds the block's kind (jump, call with
+  its return address, return), the block's bank plus one and
+  `RL_GB_SYNC_CHECK`.
+- A shadow stack holds the return address of every open host frame. A
+  return to another address, a return into a window bank that is no longer
+  mapped, or a checked direct transfer under another bank leaves through
+  `RL_PEND_REDIRECT` to the run loop, which opens the instruction at the
+  guest pc and dispatches.
+- `EI`, `DI`, `HALT` and `STOP` lift to a trap that runs them on the
+  library's CPU (`rl_gb_trap`); so does an instruction whose fetched opcode
+  is not the ROM byte the code was lifted from (OAM DMA), whose fetch did not
+  advance pc (the HALT bug), or that may trigger the DMG OAM bug (a 16-bit
+  register in `$FE00-$FEFF`).
+- Code with no lifted function runs on the library's CPU through the SM83
+  dispatch miss (`rl_sm83_set_miss`) until the frame returns or it reaches
+  the entry of a lifted function. `--stats` counts its entries and
+  instructions apart for ROM and RAM.
+- [open: block-level syncing through the scheduler, which needs the library
+  to report the next cycle anything can change]
 ## 14. Fibers
 
 The device scheduler (`relift/sched.h`) runs every guest CPU of a machine on
