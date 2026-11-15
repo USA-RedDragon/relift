@@ -188,7 +188,7 @@ workspace is laid out and which tests hold it in shape.
 | `docs/input.md` | input ports, controls and bindings |
 | `runtime/README.md` | the C runtime: layers, build, tests, settings, environment |
 | `runtime/guests/switch/vk/README.md` | Vulkan forwarding |
-| `core/README.md`, `cpus/README.md`, `guests/README.md`, `check/README.md` | one page per folder |
+| `core/README.md`, `cpus/*/README.md`, `guests/*/README.md`, `check/README.md` | one page per folder; the generator folders (`cpus/*/gen`) and `check/oracle` have their own |
 
 ## Configuration
 
