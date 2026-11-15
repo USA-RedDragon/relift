@@ -57,6 +57,7 @@ TEST(arm64_descriptor_matches_the_context)
     CHECK_EQ(d->ctx_size, sizeof(rl_ctx));
     CHECK_EQ(d->ctx_size, 960);
     CHECK_EQ(d->time_offset, offsetof(rl_ctx, time));
+    CHECK_EQ(offsetof(rl_ctx, ra), 912);
     CHECK_EQ(d->ctx_align, 64);
     CHECK_EQ(d->common_offset, offsetof(rl_ctx, pend));
     CHECK_EQ(d->code_shift, 2);
@@ -276,4 +277,139 @@ TEST(arm64_dispatch_through_lookup)
     CHECK(strstr(out, "guest backtrace: lifted frames, innermost first; tail calls leave no frame\n  #0 0x10008 test+0x8 "
                       "calls_missing (nearest)\n") != NULL);
     c->pend.kind = RL_PEND_NONE;
+}
+
+static int ret_rewritten(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[30] = 0x20100;
+    return rl_arm64_ret_far(c, 0x20100, 0x2000c);
+}
+
+static int ret_moved_here(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    uint64_t ra = c->x[30];
+    c->x[0] = 0xBEEF;
+    c->x[30] = 0;
+    if (c->x[30] == ra)
+        return RL_OK;
+    return rl_arm64_ret_far(c, c->x[30], 0x20108);
+}
+
+static int leaf_ok(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[1] = 7;
+    return RL_OK;
+}
+
+static int tail_with_new_x30(rl_ctx *c, uint8_t *mem)
+{
+    c->x[30] = 0x20300;
+    return rl_arm64_jump_far(c, mem, leaf_ok);
+}
+
+static int after_tail(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->x[2] = c->x[1] + 1;
+    return rl_arm64_ret_far(c, 0, 0x20304);
+}
+
+static int ret_wild(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    return rl_arm64_ret_far(c, c->x[30] ^ (1ull << 53), 0x20404);
+}
+
+static rl_ctx *boot_ret(void)
+{
+    rl_ctx *c = boot();
+    if (!c)
+        return NULL;
+    static const rl_fn_entry e[] = {
+        { 0x20000, 16, 0, ret_rewritten },
+        { 0x20100, 16, 0, ret_moved_here },
+        { 0x20200, 16, 0, tail_with_new_x30 },
+        { 0x20300, 16, 0, after_tail },
+        { 0x20400, 16, 0, ret_wild },
+    };
+    static rl_unit u;
+    memset(&u, 0, sizeof u);
+    u.abi_version = RL_ABI_VERSION;
+    u.ctx_size = sizeof(rl_ctx);
+    u.fn_count = 5;
+    u.fns = e;
+    u.name = "arm64-ret";
+    const rl_unit *list[] = { &u };
+    if (rl_units_register(list, 1) != 0)
+        return NULL;
+    rl_dispatch_view(c);
+    return c;
+}
+
+TEST(arm64_a_return_elsewhere_continues_at_its_target)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    c->x[30] = 0;
+    CHECK_EQ(rl_call_guest(c, rl_mem_base(), 0x20000), RL_OK);
+    CHECK_EQ(c->x[0], 0xBEEF);
+    CHECK_EQ(c->x[30], 0);
+    CHECK_EQ(c->pend.kind, RL_PEND_NONE);
+}
+
+TEST(arm64_a_tail_transfer_with_another_x30_returns_to_that_x30)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    c->x[30] = 0;
+    CHECK_EQ(rl_call_guest(c, rl_mem_base(), 0x20200), RL_OK);
+    CHECK_EQ(c->x[1], 7);
+    CHECK_EQ(c->x[2], 8);
+}
+
+TEST(arm64_a_return_records_a_redirect_that_passes_every_frame)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    CHECK_EQ(rl_arm64_ret_far(c, 0x20100, 0x2000c), RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_REDIRECT);
+    CHECK_EQ(c->pend.pc, 0x20100);
+    CHECK_EQ(c->pend.sp, RL_SP_NONE);
+}
+
+TEST(arm64_a_return_to_a_non_canonical_address_is_an_instruction_abort)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    c->x[30] = 0x20008;
+    int fds[2];
+    char out[1024];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_call_guest(c, rl_mem_base(), 0x20400);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK(strstr(out, "instruction abort: return at guest pc 0x20404 to 0x20000000020008, outside the 39-bit address space") != NULL);
+    CHECK(strstr(out, "failed pointer authentication") != NULL);
+}
+
+TEST(arm64_a_fetch_from_a_non_canonical_address_is_an_instruction_abort)
+{
+    rl_ctx *c = boot_ret();
+    CHECK(c != NULL);
+    rl_arm64_set_va_bits(36);
+    int fds[2];
+    char out[1024];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    int rc = rl_call_guest(c, rl_mem_base(), 0x1000000000ull);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
+    CHECK(strstr(out, "instruction abort: fetch from guest pc 0x1000000000, outside the 36-bit address space") != NULL);
+    CHECK(strstr(out, "missed code") == NULL);
 }

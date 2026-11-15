@@ -145,21 +145,12 @@ static int finish_guest(rl_ctx *c, int rc)
 }
 
 /**
- * @brief Runs a thread entry the way the CPU would: a lifted return goes back
- * to the host caller, but the guest's ret jumps to x30, which the entry may
- * have set (libnx's crt0 tail-branches to main with x30 = exit). Each return
- * with x30 nonzero continues there; x30 = 0, the value the thread starts
- * with, ends the thread.
+ * @brief Runs a thread entry the way the CPU would: every ret goes to its
+ * target (libnx's crt0 tail-branches to main with x30 = exit, so main
+ * returns into exit), and a return to 0, the x30 the thread starts with,
+ * ends the thread (rl_call_guest).
  */
-static int run_entry(rl_ctx *c, uint64_t entry)
-{
-    int rc = rl_call_guest(c, rl_mem_base(), entry);
-    while (rc == RL_OK && c->x[30]) {
-        uint64_t to = c->x[30];
-        rc = rl_call_guest(c, rl_mem_base(), to);
-    }
-    return rc;
-}
+static int run_entry(rl_ctx *c, uint64_t entry) { return rl_call_guest(c, rl_mem_base(), entry); }
 
 static void thread_body(struct rl_thread *rt)
 {

@@ -21,6 +21,8 @@
  */
 #include "vkf.h"
 
+#include "arm64.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -128,7 +130,7 @@ uint64_t vkf_guest_call(vkf_call *k, uint64_t fn, const uint64_t *args, unsigned
         c->x[i] = args[i];
     c->sp = sp & ~(uint64_t)15;
     c->x[30] = 0;
-    int rc = rl_indirect(c, fn)(c, k->mem);
+    int rc = rl_call_guest(c, k->mem, fn);
     uint64_t ret = c->x[0];
     memcpy(c, saved, sizeof saved);
     if (rc != RL_OK)

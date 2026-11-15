@@ -162,10 +162,11 @@ static int w_sleep_then_flag(rl_ctx *c, uint8_t *mem)
 static int w_ret_twice(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    if (c->x[30])
+    uint64_t ra = c->x[30];
+    if (ra)
         set(&S.flag[0], 1);
-    c->x[30] = c->x[30] ? 0 : c->pc;
-    return RL_OK;
+    c->x[30] = ra ? 0 : c->pc;
+    return rl_arm64_ret_far(c, c->x[30], c->pc);
 }
 
 static int w_host_wait(rl_ctx *c, uint8_t *mem)

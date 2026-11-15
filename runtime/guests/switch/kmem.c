@@ -175,6 +175,7 @@ int hos_mem_init(void)
         else
             layout_36(&hos.lay);
     }
+    rl_arm64_set_va_bits(hos.lay.bits);
     rl_set_mem_base(hos.vm.base);
     rl_fault_install(&hos.vm);
     return 0;

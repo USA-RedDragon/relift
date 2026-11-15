@@ -60,10 +60,21 @@ RL_RUNTIME_API uint32_t rl_host_get_fpcr(void);
 
 /**
  * @brief Calls guest code at entry from the host, as the runtime does for a
- * thread entry: sets c->pc and calls through the dispatch table. Returns the
- * lifted return code.
+ * thread entry, until it returns to x30 as it was at the call. A return
+ * elsewhere (RL_PEND_REDIRECT, docs/abi.md section 5.2) continues at its
+ * target in a fresh host frame, and a function so entered that returns
+ * normally continues at the x30 it was entered with. Returns RL_OK, or
+ * RL_PENDING with any other record set.
  */
 RL_RUNTIME_API int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry);
+
+/**
+ * @brief Sets the number of guest virtual address bits (39 by default): a
+ * code address with any bit set at or above it is not canonical, and a fetch
+ * from it is an instruction abort. The guest layer calls this when it lays
+ * out the address space.
+ */
+RL_RUNTIME_API void rl_arm64_set_va_bits(unsigned bits);
 
 /**
  * @brief Names the kind of an instruction word that reached rl_undefined: "UDF

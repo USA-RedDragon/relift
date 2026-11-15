@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 7u
+#define RL_ABI_VERSION 8u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0
@@ -231,6 +231,8 @@ RL_RUNTIME_API void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t
         }                                                                                               \
         RL_MUSTTAIL return rl_j_(c, mem);                                                               \
     } while (0)
+/** @brief Marks the likely branch of a return check. */
+#define RL_LIKELY(x) __builtin_expect(!!(x), 1)
 /** @brief Compiler-only barrier at the back edge of a loop whose exit depends on a guest load. */
 #define RL_LOOP_FENCE() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 

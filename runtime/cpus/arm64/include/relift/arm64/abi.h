@@ -160,6 +160,8 @@ struct rl_ctx {
     uint64_t disp_count;
     /** @brief Preemption clock: its budget stays positive while the thread may run on; the guest layer ends it to preempt the thread. */
     rl_time time;
+    /** @brief Expected return address of a split function: x30 at its entry, written by its stub and before each transfer between its pieces (docs/abi.md section 5.2). */
+    uint64_t ra;
 } __attribute__((aligned(64)));
 
 _Static_assert(sizeof(rl_v128) == 16, "rl_v128 size");
@@ -181,6 +183,7 @@ _Static_assert(offsetof(rl_ctx, disp_table) == 872, "disp_table");
 _Static_assert(offsetof(rl_ctx, disp_lo) == 880, "disp_lo");
 _Static_assert(offsetof(rl_ctx, disp_count) == 888, "disp_count");
 _Static_assert(offsetof(rl_ctx, time) == 896, "time");
+_Static_assert(offsetof(rl_ctx, ra) == 912, "ra");
 _Static_assert(sizeof(rl_ctx) == 960, "rl_ctx size");
 _Static_assert(_Alignof(rl_ctx) == 64, "rl_ctx alignment");
 
@@ -499,6 +502,25 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
  * signature so the miss stays a tail call.
  */
 RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
+
+/**
+ * @brief A return to target, which is not the address the function's caller
+ * expects (x30 at the function's entry), from the return instruction at pc,
+ * with the context stored (docs/abi.md section 5.2). A target outside the
+ * guest's virtual address range (rl_arm64_set_va_bits) reports an instruction
+ * abort; else records {RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}, so
+ * every host frame returns and the runtime entry (rl_call_guest) continues
+ * at target. Returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_arm64_ret_far(rl_ctx *c, uint64_t target, uint64_t pc);
+
+/**
+ * @brief A tail transfer to fn while x30 is not the address the function's
+ * caller expects, with the context stored: calls fn, whose return goes to the
+ * current x30, and then continues there like rl_arm64_ret_far. Returns
+ * RL_PENDING.
+ */
+RL_RUNTIME_API int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn);
 
 /** @brief Register values installed by an unwinder or longjmp: the guest unwinder's install step converts its own layout to this. */
 typedef struct rl_resume_regs {
