@@ -210,7 +210,7 @@ TEST(gba_run_vblankintrwait_takes_the_interrupt_inside_the_bios)
     CHECK_EQ(hs.after_r1, 1);
     CHECK_EQ(hs.after_sp, 0x03007F00u);
     CHECK_EQ(run.stats.bios_irqs, 3);
-    uint64_t first = 160u * RL_GBA_LINE_CYCLES;
+    uint64_t first = (160u - 126u) * RL_GBA_LINE_CYCLES - 841u;
     CHECK(hs.cycles_after > first + 2u * RL_GBA_FRAME_CYCLES);
     CHECK(hs.cycles_after < first + 2u * RL_GBA_FRAME_CYCLES + 2000u);
     CHECK_EQ(run.c->depth, 0);

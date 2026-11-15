@@ -27,6 +27,14 @@
 
 #define BIOS_WAIT_LR (RL_GBA_BIOS_SWI_RETURN + 4u)
 
+/**
+ * @brief Where the display is when the console's boot hands over to the
+ * cartridge: line 126, dot 841, measured on the NanoBoyAdvance oracle running
+ * the BIOS as a black box (the boot takes the same time on every power on).
+ */
+#define BOOT_LINE 126u
+#define BOOT_DOT 841u
+
 static rl_gba_run *g_run;
 
 rl_gba_run *rl_gba_run_current(void) { return g_run; }
@@ -231,6 +239,7 @@ static void boot(rl_gba_run *r)
     r->entry = b.pc;
     rl_gba_bios_boot_io(rl_gba_bios_of(r->g), rl_gba_bios_bus(r->g));
     rl_gba_fetched(r->g, b.pc + 4u, 4);
+    rl_gba_lcd_set(r->g, BOOT_LINE, BOOT_DOT);
 }
 
 int rl_gba_run_init(rl_gba_run *r, rl_gba *g)
