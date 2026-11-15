@@ -467,8 +467,11 @@ it]:
   hold it. `rl_unit_add` refuses entries outside it.
 - The image id is a SHA-256 over the modules in load order (name, load
   address, SHA-256 of the image) and of `game.lock` when there is one. The
-  emitter writes it into every unit table; the runtime takes it from the
-  first static unit that carries one and sends it in the hello.
+  Switch program names it in `rl_switch_program.image_id` (defined in
+  `relift_info.c`), so the lifted unit tables do not change with the mod
+  set; the runtime sets it before it registers the static units
+  (`rl_dispatch_set_image`), or else takes it from the first static unit
+  that carries one, and sends it in the hello. Hot-loaded units carry it.
 - relift keeps the entries of the build (`entries.txt` in the build
   directory, written by the lifting step) and, per request, discovers from
   the target past those entries only (`relift_analyze::discover_more`): a
