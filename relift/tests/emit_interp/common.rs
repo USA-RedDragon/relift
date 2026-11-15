@@ -14,7 +14,7 @@ pub const WORDS: usize = 2;
 /// Random states per word.
 pub const STATES: usize = 12;
 /// `u64`s of the context block in the harness records.
-pub const CTX: usize = 105;
+pub const CTX: usize = 115;
 /// Bytes of C per emitted shard.
 pub const SHARD: usize = 256 << 10;
 
@@ -65,6 +65,7 @@ pub enum Slot {
 
 pub const NZCV: usize = 96;
 pub const EXCL: usize = 101;
+pub const PAC_KEYS: usize = 105;
 
 pub fn slots() -> Vec<Slot> {
     let fe = Arm64 {
@@ -92,6 +93,7 @@ pub fn slots() -> Vec<Slot> {
                         "RL_FP_FLAGS_ON" => Slot::Zero,
                         s if s.starts_with("c->x[") => Slot::Word(idx(s)),
                         s if s.starts_with("c->v[") => Slot::Wide(32 + 2 * idx(s)),
+                        s if s.starts_with("rl_pac_keys[") => Slot::Word(PAC_KEYS + idx(s)),
                         s => panic!("a home the harness does not know: {s}"),
                     }
                 }
@@ -231,6 +233,7 @@ pub const HARNESS: &str = r#"
 #include <setjmp.h>
 #include <relift/arm64/abi.h>
 #include <relift/arm64/fp_slow.h>
+#include <relift/arm64/pac.h>
 
 extern const rl_fn cases[];
 extern const unsigned case_count;
@@ -294,6 +297,7 @@ static void load(rl_ctx *c, const uint64_t *r)
     c->excl.size = (uint32_t)r[102];
     c->excl.lo = r[103];
     c->excl.hi = r[104];
+    memcpy(rl_pac_keys, &r[105], sizeof rl_pac_keys);
 }
 
 static void save(const rl_ctx *c, uint64_t *r)
@@ -313,6 +317,7 @@ static void save(const rl_ctx *c, uint64_t *r)
     r[102] = c->excl.size;
     r[103] = c->excl.lo;
     r[104] = c->excl.hi;
+    memcpy(&r[105], rl_pac_keys, sizeof rl_pac_keys);
 }
 
 int main(int argc, char **argv)
@@ -329,6 +334,7 @@ int main(int argc, char **argv)
     sa.sa_flags = SA_NODEFER;
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
+    rl_pac_mode = RL_PAC_QARMA5;
     static rl_ctx ctx;
     uint64_t rec[2 + CTX];
     uint8_t *mem = (uint8_t *)((uintptr_t)buf - (uintptr_t)BASE);
@@ -446,10 +452,10 @@ impl Harness {
         .collect();
         let harness = dir.join("harness.c");
         write(&harness, HARNESS.as_bytes());
-        // The FP exact layer, the binary16 helpers and the cipher steps the
-        // emitted code calls.
+        // The FP exact layer, the binary16 helpers, the cipher steps and the
+        // pointer authentication keys and cipher the emitted code calls.
         let mut jobs = vec![(harness, dir.join("harness.o"))];
-        for c in ["fp.c", "fp16.c", "crypto.c"] {
+        for c in ["fp.c", "fp16.c", "crypto.c", "pac.c"] {
             jobs.push((rt.join("cpus/arm64").join(c), dir.join(format!("{c}.o"))));
         }
         compile_all(&cc, &flags, &jobs);
