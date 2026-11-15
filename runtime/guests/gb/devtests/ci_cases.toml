@@ -14,6 +14,16 @@ timeout_frames = 0xf
 timeout_cycles = 0x1012b0
 
 [[case]]
+id = "acid2:cgb-acid2/cgb-acid2:cgb:cgb-acid2"
+rom = "cgb-acid2/cgb-acid2.gbc"
+mode = "cgb"
+hardware = "cgb"
+protocol = "png"
+refs = ["cgb-acid2/cgb-acid2.png"]
+timeout_frames = 0xf
+timeout_cycles = 0x1012b0
+
+[[case]]
 id = "age:age-test-roms/halt/ei-halt-dmgC-cgbBCE:dmg"
 rom = "age-test-roms/halt/ei-halt-dmgC-cgbBCE.gb"
 mode = "dmg"
