@@ -246,13 +246,42 @@ pub fn dump_eh(root: &Path, llvm: bool) -> PathBuf {
 
 /// The bytes of `eh.bin` and whether `eh.s` still assembles to them.
 pub fn eh_matches_source() -> Option<bool> {
+    matches_source("eh", EH)
+}
+
+const SPIN: &[u8] = include_bytes!("spin.bin");
+
+/// As [`dump`], with the program of `spin.s`: the main thread spins on a
+/// word a higher-priority thread of its core stores after a sleep.
+pub fn dump_spin(root: &Path) -> PathBuf {
+    dump_nso(
+        root,
+        &NsoSpec {
+            text: SPIN[..0x1000].to_vec(),
+            rodata: SPIN[0x1000..].to_vec(),
+            data: vec![0u8; 0x1000],
+            bss: 0x1000,
+            compress: true,
+            ..NsoSpec::default()
+        },
+    )
+}
+
+/// Whether `spin.bin` is what `spin.s` assembles to; `None` without llvm-mc
+/// or llvm-objcopy.
+pub fn spin_matches_source() -> Option<bool> {
+    matches_source("spin", SPIN)
+}
+
+/// Whether `<name>.bin` here is `bin`, the text of `<name>.s` assembled.
+fn matches_source(name: &str, bin_want: &[u8]) -> Option<bool> {
     let tool = relift_build::find_tool("llvm-mc")?;
     let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tiny");
-    let out = scratch("eh-source").join("eh.o");
+    let out = scratch(&format!("{name}-source")).join(format!("{name}.o"));
     let ok = relift_proc::command(tool)
         .args(["-triple=aarch64", "-filetype=obj", "-o"])
         .arg(&out)
-        .arg(here.join("eh.s"))
+        .arg(here.join(format!("{name}.s")))
         .status()
         .ok()?
         .success();
@@ -265,7 +294,7 @@ pub fn eh_matches_source() -> Option<bool> {
         .status()
         .ok()?
         .success();
-    Some(ok && copied && std::fs::read(bin).ok()? == EH)
+    Some(ok && copied && std::fs::read(bin).ok()? == bin_want)
 }
 
 fn dump_nso(root: &Path, spec: &NsoSpec) -> PathBuf {
