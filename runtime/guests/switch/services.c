@@ -23,6 +23,7 @@ void rl_srv_install_all(void)
     rl_srv_install_set();
     rl_srv_install_am();
     rl_srv_install_apm();
+    rl_srv_install_pctl();
     rl_srv_install_aoc();
     rl_srv_install_lm();
     rl_srv_install_hid();

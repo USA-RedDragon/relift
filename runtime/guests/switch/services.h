@@ -31,6 +31,8 @@ void rl_srv_install_set(void);
 void rl_srv_install_am(void);
 /** @brief Installs apm, apm:sys, apm:p and psm. */
 void rl_srv_install_apm(void);
+/** @brief Installs pctl, pctl:a, pctl:r and pctl:s, the parental control services. */
+void rl_srv_install_pctl(void);
 /** @brief Installs aoc:u, the add-on content manager. */
 void rl_srv_install_aoc(void);
 /** @brief Installs lm, the log manager. */
