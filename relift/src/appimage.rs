@@ -535,7 +535,8 @@ pub fn package(
     let scratch = out
         .join("appimage")
         .join(format!("build-{}", crate::appimage_runtime::unique()));
-    let result = assemble(&tool, &runtime, req, &info, out, &scratch);
+    let processors = relift_build::job_count(settings.jobs).clamp(1, 8);
+    let result = assemble(&tool, &runtime, req, &info, out, &scratch, processors);
     let _ = std::fs::remove_dir_all(&scratch);
     Ok(Some(result?))
 }
@@ -543,6 +544,9 @@ pub fn package(
 /// Lays out and packs one AppImage inside `scratch`, a folder no other build
 /// uses (the AppDir, the tool's `TMPDIR` and the unfinished image), then
 /// renames the finished image over `<project>.AppImage` in one step.
+/// `mksquashfs` gets as many threads as the build has jobs: left alone it
+/// starts one set per CPU, and builds running at once exhaust the system's
+/// threads (`FATAL ERROR: Failed to create thread`).
 fn assemble(
     tool: &Path,
     runtime: &Path,
@@ -550,6 +554,7 @@ fn assemble(
     info: &Info,
     out: &Path,
     scratch: &Path,
+    processors: u32,
 ) -> Result<Packaged, BoxError> {
     let dir = scratch.join("AppDir");
     let tmp = scratch.join("tmp");
@@ -560,6 +565,8 @@ fn assemble(
     let output = relift_proc::command(tool)
         .args(["--no-appstream", "--comp", "zstd", "--runtime-file"])
         .arg(runtime)
+        .args(["--mksquashfs-opt", "-processors", "--mksquashfs-opt"])
+        .arg(processors.to_string())
         .arg(&dir)
         .arg(&image)
         .env("ARCH", arch())
