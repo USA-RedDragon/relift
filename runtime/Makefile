@@ -340,14 +340,22 @@ test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
 
-TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(A64_TESTS) $(SM83_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS)
+TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(A64_TESTS) $(SM83_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS)
 
 test: export RELIFT_VIDEO := headless
 test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
 	@for t in $(abspath $(TEST_RUN)); do \
 		echo "$$t"; "$$t" || { rc=$$?; echo "test binary failed: $$t (exit $$rc)"; exit $$rc; }; \
 	done
-	$(MAKE) --no-print-directory vk-present
+	$(MAKE) --no-print-directory vk-tests vk-present
+
+# The forwarding layer tests on each host Vulkan device (RELIFT_VK_DEVICE set: that one only).
+vk-tests: $(VK_TESTS)
+	@if [ -n "$$RELIFT_VK_DEVICE" ]; then echo "$(VK_TESTS) on $$RELIFT_VK_DEVICE"; $(abspath $(VK_TESTS)); \
+	else devs=$$(RELIFT_VK_LIST_DEVICES=1 $(abspath $(VK_TESTS)) 2>/dev/null); \
+		if [ -z "$$devs" ]; then $(abspath $(VK_TESTS)); \
+		else printf '%s\n' "$$devs" | sort -u | while IFS= read -r d; do \
+			echo "$(VK_TESTS) on $$d"; RELIFT_VK_DEVICE="$$d" $(abspath $(VK_TESTS)) || exit $$?; done; fi; fi
 
 # The synthetic Vulkan program: a window with VIDEO=sdl3 and a display,
 # headless surfaces otherwise (make test always runs headless, RELIFT_VIDEO=headless).
