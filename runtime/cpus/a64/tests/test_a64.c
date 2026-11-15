@@ -95,11 +95,13 @@ TEST(a64_cntpct_counts_guest_ticks)
 {
     rl_ctx *c = boot();
     CHECK(c != NULL);
+    uint64_t t0 = rl_clock_ns();
     uint64_t a = rl_mrs_cntpct(c);
     rl_sleep_ns(10000000);
     uint64_t d = rl_mrs_cntpct(c) - a;
+    uint64_t t1 = rl_clock_ns();
     CHECK(d >= 10000);
-    CHECK(d < 1000000);
+    CHECK(d <= rl_ns_to_ticks(t1 - t0) + 1);
 }
 
 TEST(a64_undefined_names_the_instruction)
