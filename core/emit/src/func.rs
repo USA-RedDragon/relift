@@ -142,8 +142,8 @@ fn prepare(b: &Block) -> Block {
 /// dataflow over the function's instructions.
 ///
 /// Every register counts as live wherever the C stores the context: at
-/// calls, traps, returns, tail calls, indirect jumps, guards and
-/// instructions that do not lift. So a register is dead after an
+/// calls, traps, returns, tail calls, indirect jumps, guards, sync points
+/// and instructions that do not lift. So a register is dead after an
 /// instruction only when every path redefines it before it is read or
 /// stored, and dropping its write there changes nothing observable.
 fn live_out(
@@ -169,6 +169,7 @@ fn live_out(
     let mut uses = vec![0u64; n * words];
     let mut defs = vec![0u64; n * words];
     let mut succs: Vec<Option<Vec<usize>>> = Vec::with_capacity(n);
+    let mut synced = vec![false; n];
     for (k, pc) in pcs.iter().enumerate() {
         let u = &mut uses[k * words..(k + 1) * words];
         let Some(b) = blocks.get(pc) else {
@@ -183,6 +184,7 @@ fn live_out(
                 Op::Get(r) => set(u, r.index()),
                 Op::Set(r, _) => set(d, r.index()),
                 Op::Guard(..) => stores = true,
+                Op::Sync => synced[k] = true,
                 _ => {}
             }
         }
@@ -215,6 +217,7 @@ fn live_out(
         queued[k] = false;
         let mut o = vec![0u64; words];
         match &succs[k] {
+            _ if synced[k] => o.copy_from_slice(&all),
             None => o.copy_from_slice(&all),
             Some(ts) => {
                 for &t in ts {
@@ -850,7 +853,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
             ),
             Next::Dynamic(v) => format!("(uint64_t){}", val(v)),
         };
-        s.push_str(&time::sync(&next));
+        s.push_str(&time::sync(cx.fe, b, &next));
     }
     if let Some(clk) = cx.fe.preempt_clock().filter(|_| preempts(cx, b)) {
         s.push_str(&time::preempt(clk));
