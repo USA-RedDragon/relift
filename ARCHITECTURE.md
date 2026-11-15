@@ -93,10 +93,12 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
 | 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
-| 2 | `relift-cpu-arm32` | `cpus/arm32` | ARMv4T (Game Boy Advance ARM7TDMI) decoder and lifter to `relift-ir`, with templates generated from sail-arm AArch32 and an ARMv4T overlay; no guest uses it yet |
+| 2 | `relift-cpu-arm32` | `cpus/arm32` | ARMv4T (Game Boy Advance ARM7TDMI) decoder and lifter to `relift-ir`, with templates generated from sail-arm AArch32 and an ARMv4T overlay, checked against console records; no guest links it yet |
 | 3 | `relift-cpu-arm32-gen` | `cpus/arm32/gen` | Generates the ARMv4T decode tables and lifting templates from sail-arm and `cpus/arm32/gen/armv4t.sail`: the ARMv4T cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
-| 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder and opcode table: length, M-cycles taken and not taken, flags, bus access per cycle; no IR yet, no dependencies |
+| 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder, opcode table (length, M-cycles taken and not taken, flags, bus access per cycle) and lifter to `relift-ir`, with templates generated from the SM83 Sail model |
+| 0 | `relift-info` | `core/info` | The self-description of a built binary: the `--relift-info` JSON document in sections (identity, needs, settings, input, mods, save), its embedding in the binary and its reader; read by `relift info` and by launchers |
+| 0 | `relift-patch` | `core/patch` | Binary patch formats IPS, IPS32, UPS and BPS applied to a byte image, with the ranges each patch wrote |
 | 2 | `relift-gb-formats` | `guests/gb/formats` | Game Boy and Game Boy Color cartridge format: header, mapper kinds, ROM and RAM size codes, both checksums, bank layout; no dependencies |
 | 2 | `relift-gb-analyze` | `guests/gb/analyze` | Function discovery across mapper banks: code locations are (bank, address), bank-register writes are tracked along paths, bank-switch trampolines are found and resolved at their call sites, pointers stored in RAM and jump tables in ROM are followed along proven load and store paths, a computed jump that depends on one entry register is resolved by running the function for each of its 256 values, jumps into RAM are reported; decode and control flow only |
 | 2 | `relift-gb` | `guests/gb/guest` | The Game Boy guest: the exact-mode SM83 frontend (every access through the device library, a sync point after every instruction, `EI`, `DI`, `HALT` and `STOP` on the library's CPU) and a ROM lifted into one unit per bank, with `program.c` |
@@ -113,6 +115,11 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | apart 0 | `relift-override-macros` | `override/macros` | Override attribute macros for game repos |
 | apart 1 | `relift-override` | `override/api` | The Rust override API for game repos |
 
+`guests/gb/devices` (`relift-gb-devices`) is also a separate Cargo workspace:
+rustyboi-core's devices behind a C ABI, built as a static library by
+`relift build` for Game Boy projects and linked into the program. The root
+manifest excludes it and CI tests it on its own.
+
 `check/` is a separate Cargo workspace holding `relift-check`, the
 differential runner: it lifts A64 words, runs them in the `relift-ir`
 interpreter and on an oracle on random states, and compares the
@@ -128,9 +135,8 @@ trap and fault there.
 Nothing in the main workspace may link it; `relift check` runs it as a
 subprocess. The root manifest excludes it. `--oracle rustyboi` swaps in a
 Game Boy SM83 reference built on the rustyboi-core emulator (pinned by git
-commit, `step` for one instruction, `rom` for a whole cartridge); it
-names raw opcode bytes and a plain register struct, so the lifted-IR
-comparison can plug in later. `--oracle nba` is the GBA reference: the
+commit): `step` runs one instruction, `rom` a whole cartridge, and `lift`
+compares lifted SM83 IR with it on random states (with a mutation control). `--oracle nba` is the GBA reference: the
 NanoBoyAdvance core (GPL-3.0-or-later) built by `check/oracle/nba/build.sh`
 from a pinned commit into a separate `nba-oracle` process, driven over a
 line protocol on stdin and stdout (run cycles or frames with held keys,
@@ -177,7 +183,10 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 |---|---|---|
 | core | `runtime/core` | Guest memory with its own permission flags, faults at guest addresses, host threads with an opaque CPU context, the clock, dispatch, logging and configuration; knows no guest OS and no guest CPU |
 | CPU | `runtime/cpus/a64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
-| guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:`, the NPDM layout, Horizon's page, clock and permission encodings |
+| guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:` and the services, the scheduler, the NPDM layout, Horizon's page, clock and permission encodings; `switch/vk` forwards Vulkan to the host |
+| CPU | `runtime/cpus/sm83` | The SM83 lifted-code ABI and `rl_ctx`, interrupts, HALT and STOP, over a callback table |
+| guest | `runtime/guests/gb` | The Game Boy memory map, mappers and I/O routed to scheduler device slots; `gb/exact` is the program that runs lifted code with the device library |
+| guest | `runtime/guests/gba` | The Game Boy Advance machine, picture unit and high-level BIOS; no CPU layer yet |
 
 The layers above tell the core their page size, address width, tick rate,
 context layout, code granule and byte order through two descriptor structs
@@ -271,9 +280,17 @@ sped up, never given more time.
 
 - **checks** (ubuntu-latest, the pinned toolchain through rustup): fmt,
   clippy `--all-targets --all-features -D warnings` (main and `check/`
-  workspaces), the structural tests, all tests, the generated config docs,
-  `cargo deny check`.
+  workspaces), the structural tests, all tests, the generated config docs, the
+  generated Vulkan forwarding (from the pinned `vk.xml`), `cargo deny check`.
+- **gb-corpus**: builds `relift` and runs the cases of
+  `runtime/guests/gb/devtests/ci_cases.toml` through `relift import`,
+  `build` and the built program (`ci_corpus.py`; the ROMs are fetched from a
+  pinned public release and are never in the repository).
+- **generated**: fetches the pinned Sail sources, reruns the A64, SM83 and
+  ARMv4T template generators and fails on any difference.
 - **macos** (macos-latest): all tests.
+- **Runtime** (`runtime.yaml`): the charter check, the generated Vulkan
+  types on six host targets, and the C runtime tests on Linux and macOS.
 - **cross**: `relift` built for `x86_64-unknown-linux-gnu`,
   `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-gnullvm`,
   `aarch64-pc-windows-gnullvm`, `aarch64-apple-darwin` and
