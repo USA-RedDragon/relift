@@ -10,8 +10,8 @@
 
 #include <stdlib.h>
 
-/** @brief Silence queued when playback starts on an empty stream (20 ms at 48 kHz), so scheduling jitter of the producer does not reach the device as a gap. */
-#define PRIME_FRAMES 960u
+/** @brief Silence queued when playback starts on an empty stream (60 ms at 48 kHz), so scheduling jitter of the producer does not reach the device as a gap. */
+#define PRIME_FRAMES 2880u
 
 typedef struct sdl_out {
     rl_audio_out head;

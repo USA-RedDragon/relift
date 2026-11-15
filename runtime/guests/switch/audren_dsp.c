@@ -17,6 +17,9 @@
 #include <string.h>
 
 /** @brief Longest source run of one frame: pitch is limited to 4x. */
+/** @brief Queue depth (250 ms at 48 kHz) above which a rendered frame is dropped; a late timer tick can leave a backlog that the output drains within a few ticks, and dropping sooner loses sound. */
+#define AR_QUEUE_MAX_FRAMES 12000u
+
 #define MAX_PITCH 4.0f
 
 static int16_t clamp16(float v)
@@ -411,7 +414,7 @@ static void sink_device(audren *ar, const ar_sink *s)
         pcm[2 * j] = clamp16(l);
         pcm[2 * j + 1] = clamp16(r);
     }
-    if (rl_audio_queued(ar->host) < 8 * n)
+    if (rl_audio_queued(ar->host) < AR_QUEUE_MAX_FRAMES)
         rl_audio_write(ar->host, pcm, n);
     else
         rl_audio_count_drop(ar->host, n);
