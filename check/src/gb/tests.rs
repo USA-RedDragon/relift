@@ -415,3 +415,16 @@ fn halt_bug_on_ei_and_a_late_interrupt_in_halt_match_the_oracle() {
     assert!(lift_one(0x76, 600));
     assert!(lift_one(0xFB, 600));
 }
+
+#[test]
+fn a_stack_push_into_the_hdma_registers_is_skipped() {
+    use super::lift::{Mutation, Options, run_lift};
+    assert!(
+        run_lift(&Options {
+            cases: 64,
+            seed: 3,
+            ..lift_options((false, 0xDF), Mutation::None)
+        })
+        .unwrap()
+    );
+}

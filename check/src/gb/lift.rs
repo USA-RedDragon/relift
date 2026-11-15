@@ -25,8 +25,10 @@
 //! the register after a NOP from the same state, and the case is skipped as
 //! volatile when that differs from the register after the instruction. A
 //! device write is compared with the oracle's read back of the register for
-//! the registers that hold what is written. Writes to the cartridge range
-//! (bank controller) are not compared: the oracle cartridge has none.
+//! the registers that hold what is written. A case that writes the HDMA
+//! registers is skipped: it can start a copy into video memory that the lift
+//! model does not run. Writes to the cartridge range (bank controller) are
+//! not compared: the oracle cartridge has none.
 //!
 //! RAM writes: the oracle's are found by diffing memory around the step (see
 //! `step.rs`), which misses a write of the byte already there. The
@@ -848,6 +850,9 @@ fn compare(
         }
     }
     let written: Vec<u16> = ir.device_writes.iter().map(|w| w.0).collect();
+    if written.iter().any(|a| (0xFF51..=0xFF55).contains(a)) {
+        return Ok((Verdict::Skip, mutated));
+    }
     for (a, v) in &ir.device_writes {
         if PLAIN_IO.contains(a) && io_after.get(a) != Some(v) {
             diffs.push(format!(
