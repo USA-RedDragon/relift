@@ -368,6 +368,7 @@ fn shards_declare_their_foreign_callees() {
             window: 0,
             enter_anywhere: None,
             regs_in_context: false,
+            calls: Vec::new(),
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -556,6 +557,7 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         window: 0,
         enter_anywhere: None,
         regs_in_context: false,
+        calls: Vec::new(),
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -1199,4 +1201,38 @@ fn a_landing_pad_entered_anywhere_keeps_its_resume_entry() {
         unit.contains("{ UINT64_C(0x104), 0u, RL_FN_MAY_UNWIND | RL_FN_FRAGMENT, F_100_part1 },"),
         "{unit}"
     );
+}
+
+#[test]
+fn calls_go_to_the_named_functions_of_another_emit() {
+    let code = [branch(0x02, 0, 2), word(0x03, 0, 0), word(0x03, 0, 0)];
+    let blocks = lift_all(&code, 0x100);
+    let mut f = function(0x100, &blocks[0..2]);
+    f.name = "C_100".into();
+    let mut g = function(0x108, &blocks[2..3]);
+    g.name = "C_108".into();
+    let hot = Override {
+        entry: 0x108,
+        host_fn: "F_108".into(),
+        may_unwind: true,
+        resume_point: false,
+        declare: true,
+    };
+    let out = emit(
+        &Toy,
+        &[f, g],
+        &[],
+        &Options {
+            calls: vec![hot],
+            ..Options::default()
+        },
+    );
+    let s = shard(&out);
+    assert!(s.contains("RL_LIFTED(F_108);"), "{s}");
+    assert!(s.contains("rc = F_108(c, mem);"), "{s}");
+    assert!(s.contains("RL_LIFTED(C_108)\n{"), "{s}");
+    let unit = &out.files.last().expect("unit").text;
+    assert!(unit.contains("{ UINT64_C(0x108), "), "{unit}");
+    assert!(unit.contains(", C_108 },"), "{unit}");
+    assert!(!unit.contains("F_108"), "{unit}");
 }

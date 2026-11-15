@@ -154,6 +154,11 @@ pub struct Options {
     /// local is a stack slot anyway: it halves the machine code of an
     /// instruction that ends in a runtime call.
     pub regs_in_context: bool,
+    /// Functions outside this emit that direct transfers to their entries
+    /// call by name in place of a function of this emit at the same entry,
+    /// such as the functions of another emit of the same module. They are
+    /// not listed in the unit table.
+    pub calls: Vec<Override>,
 }
 
 impl Default for Options {
@@ -171,6 +176,7 @@ impl Default for Options {
             window: 0,
             enter_anywhere: None,
             regs_in_context: false,
+            calls: Vec::new(),
         }
     }
 }
@@ -492,6 +498,19 @@ fn emit_core(
         .filter(|&k| targets.get(&heads[k].entry).is_some_and(|t| t.lifted))
         .collect();
     let fns: Vec<&Head> = kept.iter().map(|&k| &heads[k]).collect();
+    for o in &opts.calls {
+        if targets.get(&o.entry).is_none_or(|t| t.lifted) {
+            targets.insert(
+                o.entry,
+                Target {
+                    name: o.host_fn.clone(),
+                    lifted: false,
+                    resume_point: o.resume_point,
+                    declare: o.declare,
+                },
+            );
+        }
+    }
     let mut undefined = 0;
     sink(File {
         name: PRELUDE_NAME.into(),
