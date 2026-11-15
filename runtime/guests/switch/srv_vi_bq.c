@@ -374,15 +374,30 @@ int vi_bq_attach(vi_core *c, int *slot, const vi_gfx *gb)
     return flags;
 }
 
+void vi_guest_frame(void)
+{
+    pthread_mutex_lock(&cb_lock);
+    uint64_t frame = ++frames_queued;
+    pthread_mutex_unlock(&cb_lock);
+    rl_ports_script_frame(frame);
+    rl_hos_mods_frame();
+}
+
+uint64_t vi_guest_frames(void)
+{
+    pthread_mutex_lock(&cb_lock);
+    uint64_t n = frames_queued;
+    pthread_mutex_unlock(&cb_lock);
+    return n;
+}
+
 void vi_frame_queued(vi_core *c)
 {
     pthread_mutex_lock(&cb_lock);
     void (*fn)(uint64_t, void *) = frame_cb;
     void *user = frame_cb_user;
-    uint64_t frame = ++frames_queued;
     pthread_mutex_unlock(&cb_lock);
-    rl_ports_script_frame(frame);
-    rl_hos_mods_frame();
+    vi_guest_frame();
     if (fn)
         fn(c->layer_id, user);
 }

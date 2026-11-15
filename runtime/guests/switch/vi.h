@@ -342,6 +342,13 @@ int vi_bq_release(vi_core *c, int slot, uint64_t frame_number);
 
 /** @brief Notifies the host frame callback. */
 void vi_frame_queued(vi_core *c);
+/**
+ * @brief Counts one guest frame, from a buffer queued to vi or a Vulkan
+ * present: advances the input script and runs the per-frame cheats.
+ */
+void vi_guest_frame(void);
+/** @brief The number of guest frames vi_guest_frame counted. */
+uint64_t vi_guest_frames(void);
 
 /** @brief Binder driver (IHOSBinderDriver) object. */
 rl_ipc_object *vi_binder_new(void);

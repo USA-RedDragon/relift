@@ -913,6 +913,8 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     }
 out:
     pthread_mutex_unlock(&s->lock);
+    if (r == VK_SUCCESS)
+        vi_guest_frame();
     return r;
 }
 

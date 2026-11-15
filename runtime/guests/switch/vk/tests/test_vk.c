@@ -995,7 +995,9 @@ TEST(vk_vi_surface_presents_headless)
         CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
         pi.pImageIndices = GP(gput(&idx, 4));
         int64_t before = mono_ns();
+        uint64_t frames = vi_guest_frames();
         CHECK_EQ(VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi))), VK_SUCCESS);
+        CHECK_EQ(vi_guest_frames(), frames + 1);
         CHECK_EQ(VKR(G("vkResetFences", dev, 1, gput(&fence, 8))), VK_SUCCESS);
         CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, 0, 0, fence, gidx)), VK_NOT_READY);
         CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, UINT64_MAX, 0, fence, gidx)), VK_SUCCESS);

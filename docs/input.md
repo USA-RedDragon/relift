@@ -76,7 +76,7 @@ A step holds the control at the value (default 1; -1 to 1 for an axis) from
 guest frame `frame` for `frames` frames (default 6). While a step holds a
 control, its value replaces what the control's bindings read; other controls
 keep reading the host. The guest layer counts frames: on Switch, each buffer
-the guest queues to vi is one frame. The runtime logs each step as it starts.
+the guest queues to vi and each Vulkan present is one frame. The runtime logs each step as it starts.
 
 ```sh
 RELIFT_INPUT_SCRIPT='3600:p1.a,3900:p1.a,4200+60:p1.lstick_y=1' ./game
