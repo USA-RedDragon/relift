@@ -96,7 +96,11 @@ fn the_runtime_schema_in_c_equals_the_list_in_rust() {
         "settings-schema",
         "rl_switch_declare_settings",
         &["cpus/arm64/include", "cpus/arm64", "guests/switch"],
-        &["guests/switch/settings.c", "guests/switch/touchpad.c"],
+        &[
+            "guests/switch/settings.c",
+            "guests/switch/touchpad.c",
+            "cpus/arm64/pac.c",
+        ],
     ) else {
         return;
     };
