@@ -14,6 +14,13 @@ fn the_section_and_the_flag_give_the_same_document() {
     }
     let root = tiny::scratch("info-e2e");
     let project = tiny::dump(&root);
+    let mut nacp = vec![0u8; 0x4000];
+    for (slot, name) in [(0usize, "Tiny Game"), (3, "Petit Jeu")] {
+        nacp[slot * 0x300..slot * 0x300 + name.len()].copy_from_slice(name.as_bytes());
+    }
+    relift_cache::write_if_changed(&root.join("dump/control.nacp"), &nacp).unwrap();
+    relift_cache::write_if_changed(&root.join("dump/icon.jpg"), include_bytes!("icon.jpg"))
+        .unwrap();
     let cache = root.join("cache").display().to_string();
     let out = tiny::relift(&project, &["--cache-dir", &cache, "import", "../dump"]);
     assert!(
@@ -45,6 +52,19 @@ fn the_section_and_the_flag_give_the_same_document() {
     assert_eq!(info.identity.platform, "switch");
     assert_eq!(info.identity.title_id.as_deref(), Some("0100000000001234"));
     assert_eq!(info.identity.modules.len(), 1);
+    assert_eq!(info.identity.title(&["French"]), Some("Petit Jeu"));
+    assert_eq!(info.identity.title(&[]), Some("Tiny Game"));
+    let icon = info.identity.icon.as_ref().expect("the control icon");
+    assert_eq!(
+        (icon.format.as_str(), icon.width, icon.height),
+        ("png", 16, 8)
+    );
+    let at = |hay: &[u8]| {
+        hay.windows(icon.data.len())
+            .filter(|w| *w == icon.data.as_bytes())
+            .count()
+    };
+    assert_eq!(at(&image), 1, "the icon is stored once in the program");
     assert_eq!(info.mods.accepts, relift_info::Mods::switch_accepts());
     let cli = tiny::relift(&project, &["--cache-dir", &cache, "info"]);
     assert!(
