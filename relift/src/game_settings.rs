@@ -103,6 +103,17 @@ pub fn runtime_settings() -> Vec<Setting> {
             Value::String(String::new()),
             SettingKind::String,
         ),
+        s(
+            "stats.every",
+            "Frame stats",
+            "Every this many guest frames, log the frames per second, the process CPU and the CPU the presenting thread spent per frame over them. 0: off",
+            Value::from(0),
+            SettingKind::Int {
+                min: 0,
+                max: 1_000_000,
+                step: 0,
+            },
+        ),
     ]
 }
 
@@ -716,7 +727,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 3);
+        assert_eq!(section(Vec::new()).runtime.len(), 4);
     }
 
     #[test]

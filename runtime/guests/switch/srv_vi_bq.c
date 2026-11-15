@@ -11,6 +11,7 @@
 #include "vi.h"
 
 #include <relift/ports.h>
+#include <relift/settings.h>
 
 #include <stdlib.h>
 #include <time.h>
@@ -374,10 +375,45 @@ int vi_bq_attach(vi_core *c, int *slot, const vi_gfx *gb)
     return flags;
 }
 
+static uint64_t cpu_ns(clockid_t id)
+{
+    struct timespec ts;
+    clock_gettime(id, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+/* The stats.every line: frames per second, process cores and this thread's CPU per frame since the last one. */
+static void frame_stats(uint64_t frame)
+{
+    static uint64_t every, t0, p0, h0, f0;
+    static bool read;
+    if (!read) {
+        int64_t n = rl_setting_int("stats.every");
+        every = n > 0 ? (uint64_t)n : 0;
+        read = true;
+    }
+    if (!every)
+        return;
+    uint64_t t = rl_clock_ns(), p = cpu_ns(CLOCK_PROCESS_CPUTIME_ID), h = cpu_ns(CLOCK_THREAD_CPUTIME_ID);
+    if (f0 && frame - f0 >= every && t > t0) {
+        double s = (double)(t - t0) / 1e9, n = (double)(frame - f0);
+        rl_log(RL_LOG_INFO, "stats", "frames %llu-%llu: %.2f frames/s, process %.2f cores, presenting thread %.3f ms per frame",
+               (unsigned long long)f0, (unsigned long long)frame, n / s, (double)(p - p0) / 1e9 / s,
+               (double)(h - h0) / 1e6 / n);
+    }
+    if (!f0 || frame - f0 >= every) {
+        t0 = t;
+        p0 = p;
+        h0 = h;
+        f0 = frame;
+    }
+}
+
 void vi_guest_frame(void)
 {
     pthread_mutex_lock(&cb_lock);
     uint64_t frame = ++frames_queued;
+    frame_stats(frame);
     pthread_mutex_unlock(&cb_lock);
     rl_ports_script_frame(frame);
     rl_hos_mods_frame();

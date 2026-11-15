@@ -24,6 +24,17 @@ static const rl_setting_def g_defs[] = {
                        "can present",
         .env = "RELIFT_VK_DEVICE",
     },
+    {
+        .key = "stats.every",
+        .type = RL_SETTING_INT,
+        .label = "Frame stats",
+        .description = "Every this many guest frames, log the frames per second, the process CPU and the CPU the "
+                       "presenting thread spent per frame over them. 0: off",
+        .env = "RELIFT_STATS",
+        .def_int = 0,
+        .min_int = 0,
+        .max_int = 1000000,
+    },
 };
 
 void rl_switch_declare_settings(void)
