@@ -368,7 +368,7 @@ pub fn package(
     ui: &mut Ui,
 ) -> Result<Option<Packaged>, BoxError> {
     let (signing, notary) = plan(settings)?;
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_os = "macos") || settings.package.appimage == "never" {
         return Ok(None);
     }
     let image = std::fs::read(req.exe)?;
@@ -437,12 +437,14 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
             "install_name_tool -delete_rpath",
         )?;
     }
-    run(
-        relift_proc::command("install_name_tool")
-            .args(["-add_rpath", "@executable_path/../Frameworks"])
-            .arg(&real),
-        "install_name_tool -add_rpath",
-    )?;
+    if !done.is_empty() {
+        run(
+            relift_proc::command("install_name_tool")
+                .args(["-add_rpath", "@executable_path/../Frameworks"])
+                .arg(&real),
+            "install_name_tool -add_rpath",
+        )?;
+    }
     let romfs = req.import.map(|i| i.join("romfs")).filter(|p| p.is_dir());
     let dlc = req.import.map(|i| i.join("dlc")).filter(|p| p.is_dir());
     for (src, dest) in [(&romfs, "romfs"), (&dlc, "dlc")] {

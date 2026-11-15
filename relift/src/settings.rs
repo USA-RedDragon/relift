@@ -54,7 +54,7 @@ pub struct Package {
     #[configulator(
         name = "appimage",
         default = "auto",
-        description = "the Linux release output: auto (an AppImage when appimagetool is found), always (a build without appimagetool fails) or never"
+        description = "the desktop release output: an AppImage on Linux, a signed .app on macOS. auto (an AppImage when appimagetool is found), always (a Linux build without appimagetool fails) or never (no desktop package; the Android APK is always built)"
     )]
     pub appimage: String,
 

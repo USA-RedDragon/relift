@@ -236,6 +236,13 @@ impl Extras {
                 "-lMoltenVK".into(),
             ]);
         }
+        let android = self
+            .host
+            .iter()
+            .any(|h| h.file_name().is_some_and(|n| n == "android_sdl3.c"));
+        if !l.is_empty() && !android && cfg!(target_vendor = "apple") {
+            l.push("-Wl,-headerpad_max_install_names".into());
+        }
         l
     }
 
@@ -335,6 +342,11 @@ mod tests {
         };
         assert!(e.note().contains("MoltenVK linked (t)"));
         assert_eq!(e.defines(), ["-DRL_VULKAN_LINKED"]);
-        assert_eq!(e.libs(), ["-L/m/lib", "-Wl,-rpath,/m/lib", "-lMoltenVK"]);
+        let libs = e.libs();
+        assert_eq!(libs[..3], ["-L/m/lib", "-Wl,-rpath,/m/lib", "-lMoltenVK"]);
+        assert_eq!(
+            libs.get(3).map(String::as_str),
+            cfg!(target_vendor = "apple").then_some("-Wl,-headerpad_max_install_names")
+        );
     }
 }
