@@ -45,6 +45,12 @@ RL_RUNTIME_API void rl_gb_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint3
  * code continues. Returns as rl_gb_sync.
  */
 RL_RUNTIME_API int rl_gb_trap(rl_ctx *c, uint8_t *mem, uint32_t code);
+/**
+ * @brief Makes the fetch of the open instruction's operand byte i (0 or 1),
+ * and of those before it, now if not yet made, and gives the byte: the
+ * immediate of code lifted from RAM, read as it runs.
+ */
+RL_RUNTIME_API uint8_t rl_gb_operand(rl_ctx *c, uint32_t i);
 /** @brief RETI's interrupt enable, set in the library's CPU. */
 RL_RUNTIME_API void rl_gb_reti(rl_ctx *c);
 

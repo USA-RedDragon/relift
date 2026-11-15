@@ -60,6 +60,8 @@ typedef struct host {
     uint8_t *saved;
     size_t saved_len;
     bool stats;
+    const char *interp_log;
+    const char *learn;
     bool live;
     bool audio;
     rl_audio_out *out;
@@ -335,12 +337,13 @@ static void print_stats(void)
 {
     const rl_gbx_stats *s = rl_gbx_stats_get();
     fprintf(stderr,
-            "relift-gb stats: lifted %llu, traps %llu, steps %llu, irqs %llu, native halt-bug %llu oam-bug %llu fetch %llu "
-            "bank0 %llu, redirects ret %llu bank %llu trap %llu native %llu depth %llu, interpreter rom %llu entries %llu "
+            "relift-gb stats: lifted %llu (nop sleds %llu), traps %llu, steps %llu, irqs %llu, native halt-bug %llu oam-bug %llu fetch %llu "
+            "bank0 %llu dma %llu, redirects ret %llu bank %llu trap %llu native %llu depth %llu, interpreter rom %llu entries %llu "
             "instructions, ram %llu entries %llu instructions, max depth %llu\n",
-            (unsigned long long)s->lifted, (unsigned long long)s->traps, (unsigned long long)s->steps, (unsigned long long)s->irqs,
+            (unsigned long long)s->lifted, (unsigned long long)s->sled, (unsigned long long)s->traps, (unsigned long long)s->steps, (unsigned long long)s->irqs,
             (unsigned long long)s->native[RL_GBX_HALT_BUG], (unsigned long long)s->native[RL_GBX_OAM_BUG],
             (unsigned long long)s->native[RL_GBX_FETCH], (unsigned long long)s->native[RL_GBX_BANK0],
+            (unsigned long long)s->native[RL_GBX_DMA],
             (unsigned long long)s->redirects[RL_GBX_RET], (unsigned long long)s->redirects[RL_GBX_BANK],
             (unsigned long long)s->redirects[RL_GBX_TRAP], (unsigned long long)s->redirects[RL_GBX_NATIVE],
             (unsigned long long)s->redirects[RL_GBX_DEPTH], (unsigned long long)s->interp_entries[RL_GBX_ROM],
@@ -372,6 +375,125 @@ static void hold_frame(host *H)
         struct timespec d = {0, 50000000L};
         nanosleep(&d, NULL);
     }
+}
+
+static int write_interp_log(const char *path)
+{
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return -1;
+    size_t n = 0;
+    const rl_gbx_seen *s = rl_gbx_seen_get(&n);
+    for (size_t i = 0; i < n; i++) {
+        if (!s[i].count)
+            continue;
+        unsigned kind = (unsigned)(s[i].key >> 32), bank = (unsigned)(s[i].key >> 16 & 0xFFFF), pc = (unsigned)(s[i].key & 0xFFFF);
+        if (kind == RL_GBX_SEEN_RAMOP)
+            fprintf(f, "ramop %04x %03x %llu\n", pc, bank, (unsigned long long)s[i].count);
+        else if (kind == RL_GBX_SEEN_TARGET)
+            fprintf(f, "target %03x:%04x %llu\n", bank, pc, (unsigned long long)s[i].count);
+        else if (kind == RL_GBX_SEEN_INSN)
+            fprintf(f, "insn %03x:%04x %llu %02x%02x%02x %u\n", bank, pc, (unsigned long long)s[i].count, s[i].bytes[0],
+                    s[i].bytes[1], s[i].bytes[2], s[i].varied);
+        else
+            fprintf(f, "entry %03x:%04x %llu %u %llu\n", bank, pc, (unsigned long long)s[i].count, kind,
+                    (unsigned long long)s[i].insns);
+    }
+    return fclose(f) == 0 ? 0 : -1;
+}
+
+static int line_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+static bool add_line(char ***v, size_t *n, size_t *cap, const char *line)
+{
+    if (*n == *cap) {
+        size_t nc = *cap ? *cap * 2 : 1024;
+        char **t = realloc(*v, nc * sizeof *t);
+        if (!t)
+            return false;
+        *v = t;
+        *cap = nc;
+    }
+    char *d = strdup(line);
+    if (!d)
+        return false;
+    (*v)[(*n)++] = d;
+    return true;
+}
+
+/**
+ * @brief Adds what the interpreter ran to the learned file at path, keeping
+ * the lines it holds: ROM locations where it was entered or went to
+ * (BBB:AAAA, bank and address in hex) and RAM instructions (ram AAAA KKK,
+ * the address and the RAM table key in hex). Rewrites it only when a line
+ * was added.
+ */
+static int write_learned(const char *path)
+{
+    size_t n = 0, cap = 0, have;
+    char **v = NULL;
+    size_t len = 0;
+    char *old = (char *)read_file(path, &len);
+    bool ok = true;
+    for (char *s = old; ok && s && *s;) {
+        char *nl = strchr(s, '\n');
+        if (nl)
+            *nl = 0;
+        unsigned b, a, k;
+        char buf[32];
+        if (sscanf(s, "%x:%x", &b, &a) == 2 && a < 0x8000 && b < 0x10000)
+            snprintf(buf, sizeof buf, "%03x:%04x", b, a);
+        else if (sscanf(s, "ram %x %x", &a, &k) == 2 && a >= 0x8000 && a < 0x10000 && k < 0x200)
+            snprintf(buf, sizeof buf, "ram %04x %03x", a, k);
+        else
+            buf[0] = 0;
+        if (buf[0])
+            ok = add_line(&v, &n, &cap, buf);
+        s = nl ? nl + 1 : NULL;
+    }
+    free(old);
+    have = n;
+    size_t slots = 0;
+    const rl_gbx_seen *seen = rl_gbx_seen_get(&slots);
+    for (size_t i = 0; ok && i < slots; i++) {
+        unsigned kind = (unsigned)(seen[i].key >> 32), mid = (unsigned)(seen[i].key >> 16 & 0xFFFF),
+                 pc = (unsigned)(seen[i].key & 0xFFFF);
+        char buf[32];
+        if (!seen[i].count || kind == RL_GBX_SEEN_INSN)
+            continue;
+        if (kind == RL_GBX_SEEN_RAMOP)
+            snprintf(buf, sizeof buf, "ram %04x %03x", pc, mid);
+        else if (pc < 0x8000)
+            snprintf(buf, sizeof buf, "%03x:%04x", mid, pc);
+        else
+            continue;
+        ok = add_line(&v, &n, &cap, buf);
+    }
+    if (n)
+        qsort(v, n, sizeof *v, line_cmp);
+    size_t u = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (u && !strcmp(v[u - 1], v[i]))
+            free(v[i]);
+        else
+            v[u++] = v[i];
+    }
+    if (ok && u != have) {
+        size_t plen = strlen(path) + 8;
+        char *tmp = malloc(plen);
+        FILE *f = tmp ? (snprintf(tmp, plen, "%s.tmp", path), fopen(tmp, "w")) : NULL;
+        ok = f != NULL;
+        for (size_t i = 0; ok && i < u; i++)
+            ok = fprintf(f, "%s\n", v[i]) > 0;
+        if (f && fclose(f) != 0)
+            ok = false;
+        ok = ok && rename(tmp, path) == 0;
+        free(tmp);
+    }
+    for (size_t i = 0; i < u; i++)
+        free(v[i]);
+    free(v);
+    return ok ? 0 : -1;
 }
 
 typedef struct run_args {
@@ -472,6 +594,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     memset(&H, 0, sizeof H);
     H.p = p;
     H.save = p->save;
+    H.learn = p->learn && *p->learn ? p->learn : NULL;
     const char *model = p->model, *case_file = NULL, *input = NULL;
     bool headless = false, check = false, no_audio = false;
     rl_settings_declare_runtime();
@@ -506,6 +629,12 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
             H.save = NULL;
         else if (!strcmp(a, "--stats"))
             H.stats = true;
+        else if (!strcmp(a, "--interp-log"))
+            H.interp_log = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--learn"))
+            H.learn = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--no-learn"))
+            H.learn = NULL;
         else if (!strcmp(a, "--check"))
             check = true;
         else if (!strncmp(a, "--relift-", 9))
@@ -581,9 +710,21 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     bool mbc1 = p->rom_len > 0x147 && p->rom[0x147] >= 1 && p->rom[0x147] <= 3;
     if (rl_gbx_init(H.h, p->rom, p->rom_len, dmg, mbc1) != 0)
         return 1;
+    rl_gbx_log_interpreted(H.interp_log != NULL);
+    rl_gbx_log_entries(H.learn != NULL);
     for (uint32_t i = 0; i < p->unit_count; i++)
         if (rl_gbx_add_unit(p->units[i].unit, p->units[i].bank) != 0) {
             fprintf(stderr, "relift-gb: a lifted unit was refused\n");
+            return 1;
+        }
+    for (uint32_t i = 0; i < p->ram_count; i++)
+        if (rl_gbx_add_ram(p->ram[i].pc, p->ram[i].op, p->ram[i].fn) != 0) {
+            fprintf(stderr, "relift-gb: a RAM instruction was refused\n");
+            return 1;
+        }
+    for (uint32_t i = 0; i < p->sled_count; i++)
+        if (rl_gbx_add_sled(p->sleds[i].bank, p->sleds[i].start, p->sleds[i].end) != 0) {
+            fprintf(stderr, "relift-gb: a nop sled was refused\n");
             return 1;
         }
     if (!H.in_case)
@@ -621,6 +762,12 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     save_now(&H);
     if (H.stats)
         print_stats();
+    if (H.interp_log && write_interp_log(H.interp_log) != 0) {
+        fprintf(stderr, "relift-gb: could not write %s\n", H.interp_log);
+        ret = ret ? ret : 1;
+    }
+    if (H.learn && write_learned(H.learn) != 0)
+        fprintf(stderr, "relift-gb: could not write %s\n", H.learn);
     fflush(stdout);
     free(spec);
     free(H.wav_pcm);
