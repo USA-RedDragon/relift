@@ -12,7 +12,7 @@
  * which this follows until a console probe decides. With the
  * master enable (SOUNDCNT_X bit 7) on, an overflow of the timer SOUNDCNT_H
  * selects for a FIFO (bit 10 for A, bit 14 for B) first requests its sound
- * DMA (rl_gba_dma_fifo) when 3 words or fewer are queued, then moves the
+ * DMA (as rl_gba_dma_fifo) when 3 words or fewer are queued, then moves the
  * next word to the output when the 4 bytes of the last one are used, and
  * uses one byte. Bits 11 and 15 of SOUNDCNT_H empty FIFO A and B.
  */
@@ -58,7 +58,7 @@ void gba_fifo_control(rl_gba *g, uint8_t hi)
             fifo_clear(&g->fifo[i]);
 }
 
-void gba_fifo_timer(rl_gba *g, unsigned timer)
+void gba_fifo_timer(rl_gba *g, unsigned timer, uint64_t when)
 {
     if (g->slot[RL_GBA_SLOT_APU] != &g->stub[RL_GBA_SLOT_APU].dev || !(g->regs[0x84] & 0x80))
         return;
@@ -67,7 +67,7 @@ void gba_fifo_timer(rl_gba *g, unsigned timer)
             continue;
         gba_fifo *f = &g->fifo[i];
         if (f->count <= 3)
-            rl_gba_dma_fifo(g, i);
+            gba_dma_fifo_at(g, i, when);
         if (!f->out_n && f->count) {
             f->out = f->q[f->rd];
             f->rd = (uint8_t)((f->rd + 1) % GBA_FIFO_WORDS);

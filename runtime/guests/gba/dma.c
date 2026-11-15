@@ -207,7 +207,7 @@ void gba_dma_hdma(rl_gba *g, uint64_t now)
         arm(g, 3, now);
 }
 
-void rl_gba_dma_fifo(rl_gba *g, unsigned fifo)
+void gba_dma_fifo_at(rl_gba *g, unsigned fifo, uint64_t when)
 {
     if (fifo > 1)
         return;
@@ -217,8 +217,10 @@ void rl_gba_dma_fifo(rl_gba *g, unsigned fifo)
         return;
     c->cnt_h = (uint16_t)((c->cnt_h & ~0x0060u) | 0x0040u | 0x0400u);
     c->len = 4;
-    arm(g, i, gba_now(g) + 2);
+    arm(g, i, when + 2);
 }
+
+void rl_gba_dma_fifo(rl_gba *g, unsigned fifo) { gba_dma_fifo_at(g, fifo, gba_now(g)); }
 
 uint8_t gba_dma_read(rl_gba *g, uint32_t addr)
 {

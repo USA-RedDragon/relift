@@ -264,8 +264,8 @@ void gba_fifo_reset(rl_gba *g);
 void gba_fifo_write(rl_gba *g, uint32_t off, unsigned size, uint32_t value);
 /** @brief A write of hi to the high byte of SOUNDCNT_H: its reset bits empty the FIFOs. */
 void gba_fifo_control(rl_gba *g, uint8_t hi);
-/** @brief Timer timer overflowed: the built-in stand-in's FIFOs that it clocks give a byte and may request DMA. */
-void gba_fifo_timer(rl_gba *g, unsigned timer);
+/** @brief Timer timer overflowed, reloading at tick when: the built-in stand-in's FIFOs that it clocks give a byte and may request DMA. */
+void gba_fifo_timer(rl_gba *g, unsigned timer, uint64_t when);
 void gba_timer_attach(rl_gba *g);
 uint8_t gba_timer_read(rl_gba *g, uint32_t addr, uint64_t now);
 void gba_timer_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now);
@@ -276,6 +276,8 @@ uint8_t gba_dma_read(rl_gba *g, uint32_t addr);
 void gba_dma_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now);
 void gba_dma_trigger(rl_gba *g, unsigned timing, uint64_t now);
 void gba_dma_hdma(rl_gba *g, uint64_t now);
+/** @brief rl_gba_dma_fifo for a request made at tick when. */
+void gba_dma_fifo_at(rl_gba *g, unsigned fifo, uint64_t when);
 void gba_dma_run(rl_gba *g);
 bool gba_dma_due(const rl_gba *g);
 /** @brief True when no DMA channel is armed and no event falls due in the next cycles. */

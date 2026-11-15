@@ -125,7 +125,7 @@ static void overflow(rl_gba *g, unsigned n, uint64_t c)
         t->load = GBA_NONE;
     if (t->ctl & 0x40)
         gba_irq_set(g, (uint16_t)(RL_GBA_IRQ_TIMER0 << n), c + 1);
-    gba_fifo_timer(g, n);
+    gba_fifo_timer(g, n, c + 1);
     if (g->timer_fn)
         g->timer_fn(g->timer_user, n, c + 1);
     if (n < 3)
