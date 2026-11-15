@@ -5,6 +5,7 @@
 . "$(dirname "$0")/lib.sh"
 
 src="$CI_WORK/generated-src"
+rm -rf "$src"
 mkdir -p "$src"
 git ls-files -z | rsync -a --delete --from0 --files-from=- "$ROOT/" "$src/"
 cd "$src"
