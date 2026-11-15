@@ -515,11 +515,29 @@ pub fn package(
     Ok(apk)
 }
 
-/// The launcher icons of a game with no icon of its own: the generated one
-/// for `seed`, at one density.
-#[must_use]
-pub fn default_icons(seed: &str) -> Vec<(&'static str, Vec<u8>)> {
-    vec![("mipmap-xxhdpi", crate::icon::png(None, seed))]
+/// What the launcher shows for a game.
+pub struct Launcher {
+    /// The name under the icon.
+    pub label: String,
+    /// A density folder and the PNG bytes for each size.
+    pub icons: Vec<(&'static str, Vec<u8>)>,
+}
+
+/// The launcher of the program `exe`, from the identity it embeds: its
+/// title (else `label`) and its icon at each density (else the generated
+/// one for `seed`).
+///
+/// # Errors
+///
+/// The program cannot be read or carries no self-description.
+pub fn launcher(exe: &Path, seed: &str, label: &str) -> Result<Launcher, BoxError> {
+    let image = std::fs::read(exe)?;
+    let doc = relift_info::section::read(&image).map_err(|e| format!("{}: {e}", exe.display()))?;
+    let info = relift_info::Info::from_bytes(doc)?;
+    Ok(Launcher {
+        label: crate::appimage::display_name(&info, label),
+        icons: crate::icon::launcher_pngs(info.identity.icon.as_ref(), seed),
+    })
 }
 
 /// Links the manifest and the resources of the APK into `res/` of its work

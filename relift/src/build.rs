@@ -1883,8 +1883,8 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
         } else {
             req.label
         };
-        let icons = crate::android::default_icons(req.name);
-        let apk = crate::android::package(a, req.exe, req.name, label, &icons, ui)?;
+        let l = crate::android::launcher(req.exe, req.name, label)?;
+        let apk = crate::android::package(a, req.exe, req.name, &l.label, &l.icons, ui)?;
         ui.summary(&Line::new().text(format!("  apk: {}", apk.display())));
         return Ok(());
     }
