@@ -366,7 +366,7 @@ fn make_case(rng: &mut Rng, hw: Hardware, prefix: bool, code: u8) -> Case {
             if pending {
                 let (p, c) = rng.pick(FOLLOWERS);
                 append_op(rng, &mut regs, &mut bytes, &mut windows, p, c);
-                seq.steps = 2;
+                seq.steps = if (p, c) == (false, 0xFB) { 3 } else { 2 };
             }
         }
         (false, relift_cpu_sm83::Mnemonic::Stop) => {
