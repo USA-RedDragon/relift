@@ -1827,7 +1827,7 @@ pub fn run_build(
         };
         let built = crate::gb::build(settings, mods, true, android, ui)?;
         let (name, _) = project_out(settings)?;
-        let request = Package {
+        let request = PackageRequest {
             name: &name,
             label: &built.title,
             exe: &built.exe,
@@ -1839,7 +1839,7 @@ pub fn run_build(
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
     let (name, _) = project_out(settings)?;
     let import = import_dir(settings)?;
-    let request = Package {
+    let request = PackageRequest {
         name: &name,
         label: "",
         exe: &built.exe,
@@ -1850,7 +1850,7 @@ pub fn run_build(
 }
 
 /// What the packaging step of a release build works from.
-struct Package<'a> {
+struct PackageRequest<'a> {
     name: &'a str,
     /// The title the game goes by; empty to use `name`.
     label: &'a str,
@@ -1864,7 +1864,7 @@ struct Package<'a> {
 
 /// The release output of the target: an APK for Android, a signed `.app` on
 /// macOS, on Linux an AppImage of the program.
-fn package(settings: &Settings, req: &Package<'_>, ui: &mut Ui) -> Result<(), BoxError> {
+fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result<(), BoxError> {
     if let Some(a) = req.android {
         let label = if req.label.is_empty() {
             req.name
