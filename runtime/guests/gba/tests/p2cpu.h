@@ -35,6 +35,7 @@ struct p2cpu {
     p2cpu_hooks hooks;
     uint64_t steps;
     unsigned depth;
+    bool msr_masked;
     uint64_t last;
 };
 

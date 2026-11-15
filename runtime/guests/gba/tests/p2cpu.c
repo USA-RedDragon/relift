@@ -159,7 +159,9 @@ bool p2cpu_poll(p2cpu *c)
 {
     rl_sched_run(c->sc);
     rl_gba_service(c->g);
-    if ((c->cpsr & I_BIT) || !rl_gba_irq_sample(c->g))
+    bool masked = (c->cpsr & I_BIT) && !c->msr_masked;
+    c->msr_masked = false;
+    if (masked || !rl_gba_irq_sample(c->g))
         return false;
     if (getenv("RL_TRACE_O"))
         fprintf(stderr, "    cpu irq at %08x cpsr %08x t %llu\n", c->r[15], c->cpsr, (unsigned long long)rl_sched_now(c->sc));
@@ -370,7 +372,9 @@ static void arm_step(p2cpu *c, uint32_t op)
             if (sp)
                 *sp = (*sp & ~mask) | (v & mask);
         } else {
+            uint32_t was = c->cpsr;
             p2cpu_set_cpsr(c, (c->cpsr & ~mask) | (v & mask));
+            c->msr_masked = !(was & I_BIT) && (c->cpsr & I_BIT);
         }
         c->r[15] += 4;
         return;
