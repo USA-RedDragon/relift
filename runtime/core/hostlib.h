@@ -21,9 +21,11 @@ RL_RUNTIME_API void *rl_hostlib_sym(void *lib, const char *name);
 
 /**
  * @brief The host Vulkan loader's vkGetInstanceProcAddr, or NULL when no
- * loader is installed. Tries RELIFT_VULKAN_LIBRARY, then the host's default
- * names (libvulkan.so.1 on Linux, libvulkan.1.dylib and libMoltenVK.dylib on
- * macOS, vulkan-1.dll on Windows). The library stays loaded.
+ * loader is installed. Tries RELIFT_VULKAN_LIBRARY, then, in a build linked
+ * against a Vulkan implementation (RL_VULKAN_LINKED, MoltenVK on Apple
+ * hosts), the linked one, then the host's default names (libvulkan.so.1 on
+ * Linux, libvulkan.1.dylib and libMoltenVK.dylib on macOS, vulkan-1.dll on
+ * Windows). The library stays loaded.
  */
 RL_RUNTIME_API void *rl_hostlib_vulkan_gipa(void);
 

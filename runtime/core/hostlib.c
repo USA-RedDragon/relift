@@ -41,10 +41,18 @@ void *rl_hostlib_open(const char *const *names)
 
 void *rl_hostlib_sym(void *lib, const char *name) { return lib ? sym_one(lib, name) : NULL; }
 
+#if defined(RL_VULKAN_LINKED)
+void *vkGetInstanceProcAddr(void *instance, const char *name);
+#endif
+
 void *rl_hostlib_vulkan_gipa(void)
 {
     const char *env = getenv(RL_VULKAN_LIBRARY_ENV);
     const char *const one[] = { env, NULL };
+#if defined(RL_VULKAN_LINKED)
+    if (!env || !*env)
+        return (void *)(uintptr_t)vkGetInstanceProcAddr;
+#endif
     void *lib = rl_hostlib_open(env && *env ? one : vulkan_names);
     if (!lib) {
         rl_log(RL_LOG_WARN, "hostlib", "no Vulkan loader found%s%s", env ? " at " : "", env ? env : "");

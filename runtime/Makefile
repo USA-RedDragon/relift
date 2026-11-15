@@ -25,6 +25,11 @@
 #                              (TARGET=x86_64-windows-gnu or aarch64-windows-gnu)
 #   make CC="zig cc" AR="zig ar" TARGET=aarch64-macos BUILD=build/mac
 #
+# Apple targets link MoltenVK directly (no Vulkan loader, so nothing is
+# loaded at run time and iOS stays possible): MOLTENVK_DIR is a directory
+# with lib/libMoltenVK.dylib, by default Homebrew's molten-vk. Without one
+# the runtime looks for a loader at run time, as on other hosts.
+#
 # TARGET is passed as -target; leave it empty for the compiler's default.
 
 ifeq ($(origin CC),default)
@@ -49,6 +54,7 @@ WINDOWS := 1
 EXE := .exe
 endif
 ifneq ($(or $(findstring macos,$(MACHINE)),$(findstring darwin,$(MACHINE)),$(findstring apple,$(MACHINE))),)
+APPLE := 1
 SHLIB_EXT := dylib
 SHLIB_LDFLAGS := -dynamiclib -Wl,-install_name,@rpath/librelift_rt.dylib
 else
@@ -75,6 +81,13 @@ CFLAGS_BASE += -DRL_HOST_VIDEO $(shell pkg-config --cflags sdl3)
 LDLIBS += $(shell pkg-config --libs sdl3)
 else ifneq ($(VIDEO),none)
 $(error VIDEO must be none or sdl3)
+endif
+ifneq ($(APPLE),)
+MOLTENVK_DIR ?= $(firstword $(patsubst %/lib/libMoltenVK.dylib,%,$(wildcard /opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib /usr/local/opt/molten-vk/lib/libMoltenVK.dylib)))
+ifneq ($(MOLTENVK_DIR),)
+CFLAGS_BASE += -DRL_VULKAN_LINKED
+LDLIBS += -L$(MOLTENVK_DIR)/lib -Wl,-rpath,$(MOLTENVK_DIR)/lib -lMoltenVK
+endif
 endif
 
 # Include paths per layer: a layer sees itself and the layers below it.
