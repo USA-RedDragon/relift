@@ -1,0 +1,59 @@
+diff --git a/src/nba/src/bus/bus.hh b/src/nba/src/bus/bus.hh
+index 2486709..5703bea 100644
+--- a/src/nba/src/bus/bus.hh
++++ b/src/nba/src/bus/bus.hh
+@@ -106,6 +106,7 @@ struct Bus {
+ 
+   struct Prefetch {
+     bool active = false;
++    bool filled = false;
+     u32 head_address;
+     u32 last_address;
+     int count = 0;
+diff --git a/src/nba/src/bus/timing.cc b/src/nba/src/bus/timing.cc
+index 34ece92..7d5e0a5 100644
+--- a/src/nba/src/bus/timing.cc
++++ b/src/nba/src/bus/timing.cc
+@@ -46,6 +46,12 @@ void Bus::Prefetch(u32 address, bool code, int cycles) {
+       return;
+     }
+ 
++    if(prefetch.filled && prefetch.count == 0 && address == prefetch.head_address) {
++      const int page = address >> 24;
++      cycles = prefetch.thumb ? wait16[int(Access::Nonsequential)][page]
++                              : wait32[int(Access::Nonsequential)][page];
++    }
++
+     // Case #2: requested address is currently being prefetched.
+     if(prefetch.countdown > 0 && address == prefetch.last_address) {
+       Step(prefetch.countdown);
+@@ -74,6 +80,7 @@ void Bus::Prefetch(u32 address, bool code, int cycles) {
+ 
+     // The prefetch unit will be engaged and keeps the burst transfer alive.
+     prefetch.active = true;
++    prefetch.filled = false;
+     prefetch.count = 0;
+     prefetch.thumb = thumb;
+     if(thumb) {
+@@ -115,13 +122,19 @@ void Bus::StopPrefetch() {
+ void Bus::Step(int cycles) {
+   scheduler.AddCycles(cycles);
+ 
+-  if(prefetch.active) {
++  if(prefetch.active && !prefetch.filled) {
+     prefetch.countdown -= cycles;
+ 
+     while(prefetch.countdown <= 0) {
+       prefetch.count++;
+ 
+-      if(hw.waitcnt.prefetch && prefetch.count < prefetch.capacity) {
++      if(prefetch.count == prefetch.capacity) {
++        prefetch.filled = true;
++        prefetch.countdown = 0;
++        break;
++      }
++
++      if(hw.waitcnt.prefetch) {
+         prefetch.last_address += prefetch.opcode_width;
+         prefetch.countdown += prefetch.duty;
+       } else {

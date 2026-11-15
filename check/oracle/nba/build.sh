@@ -4,8 +4,8 @@
 # GPL-3.0-or-later: the binary stays outside relift and runs as a separate
 # process. Usage: build.sh [cache dir] [build dir]
 # The cache dir (default ~/.cache/relift/gba-oracle) gets src/nba and
-# bin/nba-oracle; patches in RELIFT_NBA_PATCHES (a directory of *.patch,
-# applied in name order) are applied to the checkout first.
+# bin/nba-oracle. The patches in patches/ (or RELIFT_NBA_PATCHES, a
+# directory of *.patch; empty for stock NBA) are applied in name order.
 set -eu
 repo=https://codeberg.org/nba-emu/NanoBoyAdvance
 commit=e8482c1efc6cde3f553e8170a51abea71cee426e
@@ -26,8 +26,9 @@ git -C "$src" fetch -q --depth 1 origin "$commit"
 git -C "$src" -c advice.detachedHead=false checkout -q FETCH_HEAD
 test "$(git -C "$src" rev-parse HEAD)" = "$commit"
 
-if [ -n "${RELIFT_NBA_PATCHES:-}" ]; then
-    for p in "$RELIFT_NBA_PATCHES"/*.patch; do
+patches=${RELIFT_NBA_PATCHES-$here/patches}
+if [ -n "$patches" ]; then
+    for p in "$patches"/*.patch; do
         [ -e "$p" ] || continue
         git -C "$src" apply --whitespace=nowarn "$p"
         echo "applied $(basename "$p")"

@@ -1,0 +1,56 @@
+diff --git a/src/nba/src/arm/handlers/handler16.inl b/src/nba/src/arm/handlers/handler16.inl
+index 04e8ecd..2be1944 100644
+--- a/src/nba/src/arm/handlers/handler16.inl
++++ b/src/nba/src/arm/handlers/handler16.inl
+@@ -234,7 +234,17 @@ void Thumb_HighRegisterOps_BX(u16 instruction) {
+     }
+   } else if (op == 1) {
+     // Compare (CMP)
+-    SUB(state.reg[dst], operand, true);
++    if (dst == 15) {
++      if (p_spsr != &state.cpsr) {
++        auto spsr = GetSPSR();
++
++        SwitchMode(spsr.f.mode);
++        state.cpsr.v = spsr.v;
++        state.cpsr.f.thumb = 1;
++      }
++    } else {
++      SUB(state.reg[dst], operand, true);
++    }
+     pipe.access = Access::Code | Access::Sequential;
+     state.r15 += 2;
+   } else {
+diff --git a/src/nba/src/arm/handlers/handler32.inl b/src/nba/src/arm/handlers/handler32.inl
+index 25ffdbf..09b9d40 100644
+--- a/src/nba/src/arm/handlers/handler32.inl
++++ b/src/nba/src/arm/handlers/handler32.inl
+@@ -30,6 +30,7 @@ void ARM_DataProcessing(u32 instruction) {
+   int reg_op2 = (instruction >>  0) & 0xF;
+ 
+   int carry = state.cpsr.f.c;
++  const u32 cpsr_before = state.cpsr.v;
+   u32 op1;
+   u32 op2;
+ 
+@@ -153,10 +154,17 @@ void ARM_DataProcessing(u32 instruction) {
+ 
+   if (reg_dst == 15) {
+     if constexpr (set_flags) {
+-      auto spsr = GetSPSR();
++      constexpr bool test_op = opcode == DataOp::TST || opcode == DataOp::TEQ ||
++                               opcode == DataOp::CMP || opcode == DataOp::CMN;
+ 
+-      SwitchMode(spsr.f.mode);
+-      state.cpsr.v = spsr.v;
++      if (test_op && p_spsr == &state.cpsr) {
++        state.cpsr.v = cpsr_before;
++      } else {
++        auto spsr = GetSPSR();
++
++        SwitchMode(spsr.f.mode);
++        state.cpsr.v = spsr.v;
++      }
+     }
+ 
+     if constexpr (opcode != DataOp::TST &&

@@ -1,0 +1,13 @@
+diff --git a/src/nba/src/arm/handlers/handler32.inl b/src/nba/src/arm/handlers/handler32.inl
+index 09b9d40..860a46c 100644
+--- a/src/nba/src/arm/handlers/handler32.inl
++++ b/src/nba/src/arm/handlers/handler32.inl
+@@ -196,6 +196,8 @@ void ARM_StatusTransfer(u32 instruction) {
+     if (instruction & (1 << 18)) mask |= 0x00FF0000;
+     if (instruction & (1 << 19)) mask |= 0xFF000000;
+ 
++    mask &= 0xF00000FF;
++
+     // Decode source operand.
+     if (immediate) {
+       int value = instruction & 0xFF;
