@@ -333,6 +333,7 @@ struct Machine<'a> {
     rom: &'a [u8],
     model: &'a BankModel,
     cgb: bool,
+    nibbles: bool,
     code: &'a FxSet<Loc>,
 }
 
@@ -407,7 +408,7 @@ impl Machine<'_> {
                 s: Src::Rom,
             };
         }
-        if !is_ram(a) {
+        if !is_ram(a) || (self.nibbles && (0xA000..0xC000).contains(&a)) {
             return U;
         }
         p.mem.get(self.key(p, a))
@@ -1368,6 +1369,7 @@ pub(crate) fn predict(
         rom,
         model,
         cgb: rom.get(0x143).is_some_and(|c| c & 0x80 != 0),
+        nibbles: model.kind() == relift_gb_formats::MapperKind::Mbc2,
         code,
     };
     let jobs = std::thread::available_parallelism()
