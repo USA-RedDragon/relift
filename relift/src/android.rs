@@ -339,6 +339,9 @@ fn run(cmd: &mut std::process::Command, what: &str) -> Result<String, BoxError> 
 pub struct Apk<'a> {
     pub package: &'a str,
     pub label: &'a str,
+    /// The launcher icon: a density folder (`mipmap-xxhdpi`) and PNG bytes
+    /// for each size. Empty: the system's default icon.
+    pub icons: &'a [(&'static str, Vec<u8>)],
     pub target: Target,
     /// The program's shared library, installed as `libmain.so`.
     pub program: &'a Path,
@@ -414,7 +417,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
   <uses-feature android:glEsVersion="0x00020000"/>
   <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
   <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
-  <application android:label="{label}" android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+  <application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
     <activity android:name="{ACTIVITY}" android:exported="true" android:launchMode="singleInstance" android:screenOrientation="sensorLandscape" android:configChanges="layoutDirection|locale|fontScale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
@@ -426,6 +429,11 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
 "#,
         package = a.package,
         target = sdk.target_sdk,
+        icon = if a.icons.is_empty() {
+            ""
+        } else {
+            " android:icon=\"@mipmap/ic_launcher\""
+        },
     )
 }
 
@@ -473,6 +481,7 @@ pub fn package(
     exe: &Path,
     name: &str,
     label: &str,
+    icons: &[(&'static str, Vec<u8>)],
     ui: &mut Ui,
 ) -> Result<PathBuf, BoxError> {
     let dir = exe.parent().ok_or("the program has no folder")?;
@@ -483,6 +492,7 @@ pub fn package(
         &Apk {
             package: &a.package,
             label,
+            icons,
             target: a.target,
             program: exe,
             deps: &a.deps,
@@ -505,17 +515,42 @@ pub fn package(
     Ok(apk)
 }
 
+/// The launcher icons of a game with no icon of its own: the generated one
+/// for `seed`, at one density.
+#[must_use]
+pub fn default_icons(seed: &str) -> Vec<(&'static str, Vec<u8>)> {
+    vec![("mipmap-xxhdpi", crate::icon::png(None, seed))]
+}
+
 /// Links the manifest and the resources of the APK into `res/` of its work
-/// folder. The launcher icon and the application label's resources join the
-/// link here.
+/// folder, with the launcher icon compiled in.
 fn link_resources(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> Result<(), BoxError> {
     let manifest_path = a.work.join("AndroidManifest.xml");
     relift_cache::write_if_changed(&manifest_path, manifest(a, sdk, debuggable).as_bytes())?;
+    let flat = a.work.join("flat");
+    std::fs::create_dir_all(&flat)?;
+    let mut compiled = Vec::new();
+    for (dir, png) in a.icons {
+        let src = a.work.join("icons").join(dir);
+        std::fs::create_dir_all(&src)?;
+        let file = src.join("ic_launcher.png");
+        relift_cache::write_if_changed(&file, png)?;
+        run(
+            relift_proc::command(&sdk.aapt2)
+                .arg("compile")
+                .arg(&file)
+                .arg("-o")
+                .arg(&flat),
+            "aapt2 compile",
+        )?;
+        compiled.push(flat.join(format!("{dir}_ic_launcher.png.flat")));
+    }
     run(
         relift_proc::command(&sdk.aapt2)
             .arg("link")
             .arg("--manifest")
             .arg(&manifest_path)
+            .args(&compiled)
             .arg("-I")
             .arg(&sdk.android_jar)
             .args(["--output-to-dir", "-o"])
@@ -685,6 +720,7 @@ mod tests {
         let a = Apk {
             package: "dev.relift.game.x",
             label: "A & \"B\"",
+            icons: &[],
             target: target("android-arm64").unwrap(),
             program: Path::new("p"),
             deps: &deps,
