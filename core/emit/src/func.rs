@@ -88,6 +88,9 @@ struct Ctx<'a> {
     written: &'a BTreeSet<Reg>,
     /// The registers the piece has locals for.
     used: &'a BTreeSet<Reg>,
+    /// The slow calls of the guards that share the slow path, with the
+    /// address each continues at.
+    slow: Vec<(String, u64)>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -655,6 +658,9 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         let _ = writeln!(t, "    int64_t {} = {clk}.budget;", time::BUDGET);
     }
     t.push_str("    int rc;\n    (void)rc;\n");
+    if plan.shared().is_some() {
+        t.push_str("    unsigned rl_k = 0;\n");
+    }
     match split {
         None => {
             let _ = writeln!(t, "    goto {};", label(f.entry));
@@ -686,6 +692,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         plan: &plan,
         written: &written,
         used: &used,
+        slow: Vec::new(),
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -719,6 +726,29 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         }
         t.push_str("}\n");
         sizes.insert(pc, t.len() - start);
+    }
+    if let Some((store, reload)) = plan.shared() {
+        let slow = std::mem::take(&mut cx.slow);
+        let st = cx.store(store);
+        let rl = cx.reload(reload);
+        let _ = writeln!(
+            t,
+            "rl_slow:\n{}    switch (rl_k) {{",
+            Ctx::line(&st, "    ")
+        );
+        for (k, (call, _)) in slow.iter().enumerate() {
+            let _ = writeln!(t, "    case {k}: rc = {call}; break;");
+        }
+        let _ = writeln!(
+            t,
+            "    default: __builtin_unreachable();\n    }}\n    if (RL_UNLIKELY(rc))\n        return RL_PENDING;\n{}    switch (rl_k) {{",
+            Ctx::line(&rl, "    ")
+        );
+        cx.dirty = Regs::new(regs.len());
+        for (k, (_, to)) in slow.iter().enumerate() {
+            let _ = writeln!(t, "    case {k}: {}", cx.jump(*to));
+        }
+        t.push_str("    default: __builtin_unreachable();\n    }\n");
     }
     if lp_reg.is_some() {
         t.push_str("lp_dispatch:\n    switch (c->pend.pc) {\n");
@@ -924,6 +954,15 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     .guard_slow(code, b.pc, raw)
                     .unwrap_or_else(|| cx.fe.undefined(b.pc, raw));
                 let to = b.pc + u64::from(b.len);
+                if cx.plan.shared().is_some() {
+                    let k = cx.slow.len();
+                    cx.slow.push((slow, to));
+                    let _ = writeln!(
+                        s,
+                        "    if (RL_UNLIKELY({cond})) {{ rl_k = {k}; goto rl_slow; }}"
+                    );
+                    continue;
+                }
                 let st = cx.store(cx.plan.dirty_in(b.pc));
                 let rl = cx.reload(cx.plan.live_at(to));
                 let saved = std::mem::replace(&mut cx.dirty, cx.plan.none().clone());

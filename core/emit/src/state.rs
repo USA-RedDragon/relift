@@ -83,6 +83,9 @@ pub(crate) struct Plan {
     exit_live: Vec<Regs>,
     lp_reg: Option<Reg>,
     empty: Regs,
+    /// Whether the guards share one slow path, and what it stores and
+    /// reloads.
+    shared: Option<(Regs, Regs)>,
 }
 
 impl Plan {
@@ -119,6 +122,12 @@ impl Plan {
 
     pub(crate) fn none(&self) -> &Regs {
         &self.empty
+    }
+
+    /// The stores and reloads of the slow path the piece's guards share,
+    /// when they share one.
+    pub(crate) fn shared(&self) -> Option<&(Regs, Regs)> {
+        self.shared.as_ref()
     }
 }
 
@@ -170,6 +179,7 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
         exit_live: vec![empty.clone(); pcs.len()],
         lp_reg,
         empty,
+        shared: None,
     };
     let blocks: Vec<Option<&Block>> = pcs.iter().map(|pc| env.blocks.get(pc)).collect();
     // The in-piece successors an instruction reaches with its locals as
@@ -197,6 +207,28 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
             }
         }
     }
+    // With more than one guard, the guards jump to one slow path that
+    // stores what any of them may find dirty; each guard then reads all of
+    // it, so those locals hold their values wherever a guard runs.
+    let guards: usize = blocks
+        .iter()
+        .flatten()
+        .map(|b| {
+            b.insts
+                .iter()
+                .filter(|i| matches!(i.op, Op::Guard(..)))
+                .count()
+        })
+        .sum();
+    let shared_store = (guards > 1).then(|| {
+        let mut u = p.empty.clone();
+        for (k, s) in p.shapes.iter().enumerate() {
+            if s.guard {
+                u.union(&p.dirty_in[k]);
+            }
+        }
+        u
+    });
     let mut preds: Vec<Vec<usize>> = vec![Vec::new(); pcs.len()];
     for (k, js) in jumps.iter().enumerate() {
         for &j in js {
@@ -220,7 +252,7 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
             };
             let mut live = s.gets.with(&end.without(&s.sets));
             if s.guard {
-                live.union(&p.dirty_in[k]);
+                live.union(shared_store.as_ref().unwrap_or(&p.dirty_in[k]));
             }
             (live, exit)
         };
@@ -235,6 +267,17 @@ pub(crate) fn plan(env: &Env<'_>, pcs: &[u64], clock: bool, lp_reg: Option<Reg>)
             }
         }
     }
+    p.shared = shared_store.map(|u| {
+        let mut r = p.empty.clone();
+        for (k, b) in blocks.iter().enumerate() {
+            if let Some(b) = b
+                && p.shapes[k].guard
+            {
+                r.union(p.live_at(b.pc + u64::from(b.len)));
+            }
+        }
+        (u, r)
+    });
     p
 }
 

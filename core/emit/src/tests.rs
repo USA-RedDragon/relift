@@ -453,6 +453,71 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
 }
 
 #[test]
+fn guards_share_one_slow_path_that_continues_after_each() {
+    let guarded = |pc: u64, r: u16, w: u16| {
+        let mut b = relift_ir::Builder::new(Toy.regs(), relift_ir::Width::W64, pc);
+        let x = b.get(relift_ir::Reg(r));
+        let z = b.konst(relift_ir::Width::W64, 0);
+        let ne = b.cmp(relift_ir::CmpOp::Ne, x, z);
+        b.guard(ne, 7);
+        let one = b.konst(relift_ir::Width::W64, 1);
+        b.set(relift_ir::Reg(w), one);
+        b.jump(4, pc + 4)
+    };
+    let (g0, g1) = (guarded(0x200, 1, 2), guarded(0x204, 1, 3));
+    let ret = Toy.lift(&word(0x03, 0, 0), 0x208).expect("lifts");
+    let f = Function {
+        entry: 0x200,
+        name: "F_200".into(),
+        guest_name: None,
+        span: 12,
+        insts: BTreeMap::from([
+            (
+                0x200,
+                Insn::Lifted {
+                    block: &g0,
+                    raw: 0x55,
+                },
+            ),
+            (
+                0x204,
+                Insn::Lifted {
+                    block: &g1,
+                    raw: 0x66,
+                },
+            ),
+            (
+                0x208,
+                Insn::Lifted {
+                    block: &ret,
+                    raw: 0,
+                },
+            ),
+        ]),
+        tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
+    };
+    let out = emit(&Toy, &[f], &[], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("if (RL_UNLIKELY(v2)) { rl_k = 0; goto rl_slow; }"),
+        "{s}"
+    );
+    assert!(
+        s.contains("if (RL_UNLIKELY(v2)) { rl_k = 1; goto rl_slow; }"),
+        "{s}"
+    );
+    assert!(
+        s.contains("rl_slow:\n    c->x[2] = r2;\n    switch (rl_k) {\n    case 0: rc = toy_slow(c, mem, UINT64_C(0x200), 0x55u); break;\n    case 1: rc = toy_slow(c, mem, UINT64_C(0x204), 0x66u); break;"),
+        "{s}"
+    );
+    assert!(
+        s.contains("    case 0: goto L_204;\n    case 1: goto L_208;"),
+        "{s}"
+    );
+}
+
+#[test]
 fn jump_tables_branch_to_their_targets_inside_the_function() {
     let code = [word(0x06, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
     let blocks = lift_all(&code, 0x100);
