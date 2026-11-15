@@ -212,13 +212,16 @@ static uint32_t g_left;
  */
 static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bios_regs)
 {
-    (void)bios_regs;
     rl_gba_run *r = user;
     rl_ctx *c = r->c;
     uint32_t saved = rl_arm32_cpsr(c);
     uint32_t regs[15];
     memcpy(regs, c->r, sizeof regs);
     rl_arm32_set_cpsr(c, spsr);
+    uint32_t sp = c->r[13], lr_mode = c->r[14];
+    unsigned mode = spsr & 0x1Fu;
+    bool banked = mode == RL_ARM32_USR || mode == RL_ARM32_SYS || mode == RL_ARM32_SVC;
+    memcpy(c->r, bios_regs, (banked ? 15 : 13) * sizeof c->r[0]);
     r->stats.bios_irqs++;
     rl_gba_fetch(machine(c), lr & ~3u, 4, true);
     rl_arm32_exception(c, RL_ARM32_IRQ, lr);
@@ -233,6 +236,8 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
         g_left = to;
         return RL_GBA_POINT_LEFT;
     }
+    c->r[13] = sp;
+    c->r[14] = lr_mode;
     rl_arm32_set_cpsr(c, saved);
     memcpy(c->r, regs, sizeof regs);
     return RL_GBA_POINT_TAKEN;
