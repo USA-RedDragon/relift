@@ -49,6 +49,14 @@ const FORKS_STEPS: u32 = 1 << 16;
 /// after it.
 const CALL_STEPS: u32 = 1 << 12;
 
+/// Most forked paths of one function waiting to run; the oldest is
+/// dropped for a new one.
+const MAX_PENDING: usize = 64;
+
+/// Most states one function's paths remember having been in; the
+/// memory starts again when it is full.
+const MAX_SEEN: usize = 1 << 16;
+
 /// Most calls a path follows inside each other.
 const MAX_FRAMES: usize = 32;
 
@@ -151,6 +159,29 @@ struct Frame {
     resumable: bool,
 }
 
+/// The memory a path stored, in pages shared between the paths forked
+/// from each other until one of them stores into the page.
+#[derive(Clone, Default)]
+struct Mem {
+    pages: FxMap<u32, std::rc::Rc<[B; 256]>>,
+}
+
+impl Mem {
+    fn get(&self, k: u32) -> B {
+        self.pages
+            .get(&(k >> 8))
+            .map_or(U, |pg| pg[(k & 0xFF) as usize])
+    }
+
+    fn insert(&mut self, k: u32, b: B) -> B {
+        let pg = self
+            .pages
+            .entry(k >> 8)
+            .or_insert_with(|| std::rc::Rc::new([U; 256]));
+        std::mem::replace(&mut std::rc::Rc::make_mut(pg)[(k & 0xFF) as usize], b)
+    }
+}
+
 #[derive(Clone)]
 struct Path {
     r: [B; 8],
@@ -163,7 +194,7 @@ struct Path {
     lo: Option<u16>,
     hi: Option<u8>,
     svbk: Option<u8>,
-    mem: FxMap<u32, B>,
+    mem: Mem,
     memh: u64,
     steps: u32,
     limit: u32,
@@ -343,16 +374,18 @@ impl Machine<'_> {
         if !is_ram(a) {
             return U;
         }
-        p.mem.get(&self.key(p, a)).copied().unwrap_or(U)
+        p.mem.get(self.key(p, a))
     }
 
     fn put(p: &mut Path, k: u32, b: B) {
         let old = p.mem.insert(k, b);
         let kh = u64::from(k) << 20;
-        if let Some(o) = old {
-            p.memh ^= mix(kh ^ bhash(o));
+        if old != U {
+            p.memh ^= mix(kh ^ bhash(old));
         }
-        p.memh ^= mix(kh ^ bhash(b));
+        if b != U {
+            p.memh ^= mix(kh ^ bhash(b));
+        }
     }
 
     fn write(&self, p: &mut Path, f: &mut Found, a: Option<u16>, b: B) {
@@ -410,7 +443,7 @@ impl Machine<'_> {
             }
             Sp::Rel(s) => {
                 p.sp = Sp::Rel(s.wrapping_add(2));
-                let g = |o: u16| p.mem.get(&(STACK_KEY | u32::from(o))).copied().unwrap_or(U);
+                let g = |o: u16| p.mem.get(STACK_KEY | u32::from(o));
                 (g(s.wrapping_add(1)), g(s))
             }
             Sp::Unknown => (U, U),
@@ -913,7 +946,7 @@ impl Machine<'_> {
 
     fn run_root(&self, start: Path, f: &mut Found) {
         let mut seen: FxSet<u64> = FxSet::default();
-        let mut work = vec![start];
+        let mut work = std::collections::VecDeque::from([start]);
         let mut forks = 0u32;
         let fork = |p: &Path| {
             let mut q = p.clone();
@@ -921,7 +954,19 @@ impl Machine<'_> {
             q
         };
         let mut first = true;
-        while let Some(mut p) = work.pop() {
+        let again = |seen: &mut FxSet<u64>, p: &Path| {
+            if seen.len() >= MAX_SEEN {
+                seen.clear();
+            }
+            !seen.insert(state_hash(p))
+        };
+        let queue = |work: &mut std::collections::VecDeque<Path>, q: Path| {
+            if work.len() >= MAX_PENDING {
+                work.pop_front();
+            }
+            work.push_back(q);
+        };
+        while let Some(mut p) = work.pop_back() {
             loop {
                 if p.steps >= p.limit || (!first && forks >= FORKS_STEPS) {
                     break;
@@ -960,28 +1005,28 @@ impl Machine<'_> {
                     Flow::Stop | Flow::Jump(None) | Flow::Branch(Some(true), None) => true,
                     Flow::Jump(Some(t)) | Flow::Branch(Some(true), Some(t)) => {
                         goto(&mut p, t, f);
-                        if t <= pc && !seen.insert(state_hash(&p)) {
+                        if t <= pc && again(&mut seen, &p) {
                             break;
                         }
                         false
                     }
                     Flow::Branch(None, t) => {
-                        if !seen.insert(state_hash(&p)) {
+                        if again(&mut seen, &p) {
                             break;
                         }
                         if let Some(t) = t {
                             let mut q = fork(&p);
                             goto(&mut q, t, f);
-                            work.push(q);
+                            queue(&mut work, q);
                         }
                         false
                     }
                     Flow::Call(c, t) => {
                         if c.is_none() {
-                            if !seen.insert(state_hash(&p)) {
+                            if again(&mut seen, &p) {
                                 break;
                             }
-                            work.push(fork(&p));
+                            queue(&mut work, fork(&p));
                         }
                         if c == Some(false) {
                             continue;
@@ -1015,10 +1060,10 @@ impl Machine<'_> {
                             continue;
                         }
                         if c.is_none() {
-                            if !seen.insert(state_hash(&p)) {
+                            if again(&mut seen, &p) {
                                 break;
                             }
-                            work.push(fork(&p));
+                            queue(&mut work, fork(&p));
                         }
                         let (h, l) = self.pop(&mut p);
                         match h.v.zip(l.v).map(|(h, l)| u16::from_be_bytes([h, l])) {
@@ -1080,7 +1125,7 @@ impl Machine<'_> {
             lo,
             hi,
             svbk: None,
-            mem: FxMap::default(),
+            mem: Mem::default(),
             memh: 0,
             steps: 0,
             limit: ROOT_STEPS,
