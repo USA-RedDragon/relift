@@ -116,6 +116,14 @@ struct vkf_dev {
     uint32_t queue_families[16], queue_counts[16];
     /** @brief Number of entries in queue_families. */
     uint32_t nqueue_families;
+    /** @brief The host physical device the device was made on. */
+    VkPhysicalDevice physical;
+    /** @brief Its limits, which the use-site checks compare against. */
+    VkPhysicalDeviceLimits host_limits;
+    /** @brief Its name, for log lines. */
+    char host_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+    /** @brief The host memory type behind each Switch memory type. */
+    uint8_t host_type[VK_MAX_MEMORY_TYPES];
 };
 
 /** @brief A small hash map from nonzero 64-bit keys to pointers. */
@@ -231,6 +239,62 @@ void vkf_load_device(vkf_fns *fns, const vkf_fns *inst, void *host_device);
     (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT)
 #define VKF_SWITCH_QUEUE_COUNT 16u
 #define VKF_SWITCH_TIMESTAMP_BITS 64u
+
+/** @brief A pNext struct the Switch's driver fills: its sType, size and contents (sType set, pNext NULL). */
+typedef struct vkf_switch_struct {
+    VkStructureType stype;
+    uint32_t size;
+    const void *data;
+} vkf_switch_struct;
+
+/** @brief The features of one format on the Switch. */
+typedef struct vkf_switch_format {
+    VkFormat format;
+    VkFormatProperties props;
+} vkf_switch_format;
+
+/** @brief What the Switch's own Vulkan driver reports (vk_switch.c). */
+typedef struct vkf_switch_profile {
+    /** @brief vkEnumerateInstanceVersion. */
+    uint32_t instance_version;
+    /** @brief vkGetPhysicalDeviceProperties; pipelineCacheUUID and limits.timestampPeriod are the host's. */
+    VkPhysicalDeviceProperties props;
+    /** @brief vkGetPhysicalDeviceFeatures. */
+    VkPhysicalDeviceFeatures features;
+    /** @brief vkGetPhysicalDeviceMemoryProperties. */
+    VkPhysicalDeviceMemoryProperties memory;
+    /** @brief Property structs the driver fills in a vkGetPhysicalDeviceProperties2 chain. */
+    const vkf_switch_struct *props_ext;
+    uint32_t props_ext_count;
+    /** @brief Feature structs the driver fills in a vkGetPhysicalDeviceFeatures2 chain. */
+    const vkf_switch_struct *features_ext;
+    uint32_t features_ext_count;
+    /** @brief Instance extensions of the loader, its layers and the driver. */
+    const VkExtensionProperties *instance_exts;
+    uint32_t instance_ext_count;
+    /** @brief Device extensions of the driver and the swapchain layer. */
+    const VkExtensionProperties *device_exts;
+    uint32_t device_ext_count;
+    /** @brief Formats with any feature, in increasing format order. */
+    const vkf_switch_format *formats;
+    uint32_t format_count;
+} vkf_switch_profile;
+
+/** @brief The Switch's values. */
+extern const vkf_switch_profile vkf_switch;
+
+/** @brief The Switch's properties of a format; all zero for one it does not list. */
+VkFormatProperties vkf_switch_format_props(VkFormat format);
+/** @brief The Switch's extension entry of that name, NULL when it has none. */
+const VkExtensionProperties *vkf_switch_ext(const VkExtensionProperties *list, uint32_t n, const char *name);
+
+/** @brief Checks that the host can stand in for the Switch on a device the guest creates; logs and fails otherwise. */
+VkResult vkf_props_device_check(vkf_call *k, VkPhysicalDevice pd, const VkDeviceCreateInfo *ci, vkf_dev *d);
+
+/** @brief Picks the host memory type behind each of the Switch's for a new device. */
+void vkf_mem_types_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd);
+/** @brief The Switch memory types whose host types are in host_bits. */
+uint32_t vkf_guest_type_bits(const vkf_dev *d, uint32_t host_bits);
 
 /** @brief Points ci at host family 0 queues for the guest's Switch family ones and records the counts in d. */
 VkResult vkf_queue_create_infos(vkf_call *k, VkPhysicalDevice pd, VkDeviceCreateInfo *ci, vkf_dev *d);
