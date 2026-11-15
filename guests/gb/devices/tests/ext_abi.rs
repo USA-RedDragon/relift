@@ -118,6 +118,28 @@ fn frame_polling_takes_each_completed_frame_once() {
 }
 
 #[test]
+fn colour_correction_can_be_left_out_of_the_frames() {
+    let rom = image(0, 0, 0, 0x80, &SPIN);
+    let take = |on: Option<bool>| {
+        let mut m = Rlgbd::new(1, &rom).unwrap();
+        if let Some(on) = on {
+            m.set_color_correction(on);
+        }
+        let start = m.now();
+        while m.now() < start + 3 * FRAME_DOTS {
+            run(&mut m, 1);
+            m.frame_poll();
+        }
+        m.frame_rgb().to_vec()
+    };
+    let default = take(None);
+    assert_eq!(default, take(Some(true)));
+    let raw = take(Some(false));
+    assert_ne!(raw, default);
+    assert!(raw.contains(&0xFF));
+}
+
+#[test]
 fn buttons_reach_the_joypad_register() {
     let rom = image(
         0,

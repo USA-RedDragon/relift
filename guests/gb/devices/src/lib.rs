@@ -22,6 +22,7 @@ use rustyboi_core_lib::cartridge::Cartridge;
 use rustyboi_core_lib::cpu::bus::ExtBusState;
 use rustyboi_core_lib::gb::{GB, Hardware};
 use rustyboi_core_lib::input::ButtonState;
+use rustyboi_core_lib::ppu::ColorCorrection;
 use std::ffi::{CStr, c_char};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -431,6 +432,17 @@ impl Rlgbd {
             c.import_rtc(footer)?;
         }
         Ok(())
+    }
+
+    /// Chooses how the picture unit turns a colour palette entry into RGB888:
+    /// with the colour correction of the LCD (`true`, the default of a new
+    /// machine) or by plain expansion of the 5-bit channels (`false`).
+    pub fn set_color_correction(&mut self, on: bool) {
+        self.gb.set_cgb_color_conversion(if on {
+            ColorCorrection::Lcd
+        } else {
+            ColorCorrection::Linear
+        });
     }
 
     /// Starts or stops collecting the sound unit's samples.
@@ -938,6 +950,17 @@ pub unsafe extern "C" fn rlgbd_load_save(h: *mut Rlgbd, data: *const u8, len: us
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rlgbd_double_speed(h: *mut Rlgbd) -> u8 {
     u8::from(me(h).double_speed())
+}
+
+/// Applies (nonzero `on`, the default of a new machine) or leaves out the LCD
+/// colour correction of the picture unit's RGB888 output. A corpus case in
+/// progress grades with the conversion its reference needs, whatever this says.
+///
+/// # Safety
+/// `h` is a live handle between instructions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_set_color_correction(h: *mut Rlgbd, on: u8) {
+    me(h).set_color_correction(on != 0);
 }
 
 /// Starts (nonzero `on`) or stops collecting the sound unit's samples; stopping

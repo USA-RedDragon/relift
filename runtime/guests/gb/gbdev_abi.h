@@ -139,6 +139,8 @@ const char *rlgbd_case_detail(rlgbd *h);
 
 /** @brief rlgbd_begin after loading pc and sp into the CPU, keeping the interrupt enable the library tracks. */
 int32_t rlgbd_at(rlgbd *h, uint16_t pc, uint16_t sp);
+/** @brief Applies (nonzero, the default) or leaves out the LCD colour correction of the RGB888 frames. A case that grades the screen against a reference sets the conversion the reference needs. */
+void rlgbd_set_color_correction(rlgbd *h, uint8_t on);
 /** @brief Sample rate of rlgbd_audio_take, in Hz. */
 #define RLGBD_AUDIO_RATE 44100u
 /** @brief Starts (nonzero) or stops collecting the sound unit's samples; stopping drops the ones not taken. Off in a new machine. */
