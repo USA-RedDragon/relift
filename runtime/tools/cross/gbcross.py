@@ -169,6 +169,8 @@ def host_build(args, env):
 
 
 def device_library(args, tool, env):
+    if args.device_library:
+        return os.path.abspath(args.device_library)
     manifest = os.path.join(ROOT, "guests", "gb", "devices", "Cargo.toml")
     target_dir = os.path.join(args.work, "devlib")
     cmd = ["cargo", "build", "--release", "--locked", "--quiet", "--manifest-path", manifest, "--target", tool.target["rust"]]
@@ -319,6 +321,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--serial")
+    ap.add_argument("--device-library", help="a prebuilt librelift_gb_devices.a for the target, instead of cargo build")
     ap.add_argument("--rust-toolchain")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     args = ap.parse_args()
