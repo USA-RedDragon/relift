@@ -5,6 +5,7 @@
  * the frame hash.
  */
 #include "mach.h"
+#include "ppu/ppu.h"
 
 typedef struct frames {
     unsigned n;
@@ -136,4 +137,22 @@ TEST(moving_the_display_moves_the_frame_event)
     mach_to(&m, 1000 + 60u * RL_GBA_LINE_CYCLES);
     CHECK_EQ(f.n, 1u);
     mach_free(&m);
+}
+
+TEST(frames_expand_to_rgb_by_repeating_the_top_bits)
+{
+    uint16_t px[GBA_PPU_W * GBA_PPU_H] = {0x7FFF, 0x001F, 0x03E0, 0x7C00, 0x0421};
+    static uint8_t rgb[GBA_PPU_W * GBA_PPU_H * 3];
+    rl_gba_frame_rgb(px, rgb);
+    CHECK_EQ(rgb[0] | rgb[1] << 8 | rgb[2] << 16, 0xFFFFFFu);
+    CHECK_EQ(rgb[3] | rgb[4] << 8 | rgb[5] << 16, 0x0000FFu);
+    CHECK_EQ(rgb[6] | rgb[7] << 8 | rgb[8] << 16, 0x00FF00u);
+    CHECK_EQ(rgb[9] | rgb[10] << 8 | rgb[11] << 16, 0xFF0000u);
+    CHECK_EQ(rgb[12] | rgb[13] << 8 | rgb[14] << 16, 0x080808u);
+}
+
+TEST(presenting_without_a_backend_reports_false)
+{
+    uint16_t px[GBA_PPU_W * GBA_PPU_H] = {0};
+    CHECK_EQ(rl_gba_present(NULL, px), 0u);
 }

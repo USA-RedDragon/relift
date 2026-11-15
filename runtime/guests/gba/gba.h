@@ -28,6 +28,7 @@
 
 #include <relift/ports.h>
 #include <relift/sched.h>
+#include <relift/window.h>
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -368,6 +369,10 @@ uint64_t rl_gba_frames(rl_gba *g);
 uint64_t rl_gba_frame_hash(rl_gba *g);
 /** @brief The last finished frame (240 by 160 BGR555 halfwords), or NULL before the first. */
 const uint16_t *rl_gba_frame(rl_gba *g);
+/** @brief Expands a frame (240 by 160 BGR555 halfwords) to RGB888 rows, 5 bits to 8 by repeating the top bits. */
+void rl_gba_frame_rgb(const uint16_t *pixels, uint8_t *rgb);
+/** @brief Shows a frame in a host window through the window layer; false when the backend cannot present pixels (headless). One caller at a time. */
+bool rl_gba_present(rl_window *w, const uint16_t *pixels);
 /**
  * @brief Sets the cycle of a line at which the picture unit draws it (default
  * 24: NanoBoyAdvance, which follows the console, takes the first tile of a

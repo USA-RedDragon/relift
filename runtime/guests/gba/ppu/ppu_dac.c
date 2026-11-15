@@ -83,15 +83,16 @@ void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
         return;
     }
 
-    uint8_t active[6] = {1, 1, 1, 1, 1, 1};
+    static const uint8_t all_on[6] = {1, 1, 1, 1, 1, 1};
+    const uint8_t *active = all_on;
     if (p->win[W_IN0].enable || p->win[W_IN1].enable || p->win[W_IN2].enable) {
-        memcpy(active, p->win[W_OUT].active, sizeof active);
+        active = p->win[W_OUT].active;
         if (p->win[W_IN2].enable && p->win[W_IN2].output[x])
-            memcpy(active, p->win[W_IN2].active, sizeof active);
+            active = p->win[W_IN2].active;
         if (p->win[W_IN1].enable && p->win[W_IN1].output[x])
-            memcpy(active, p->win[W_IN1].active, sizeof active);
+            active = p->win[W_IN1].active;
         if (p->win[W_IN0].enable && p->win[W_IN0].output[x])
-            memcpy(active, p->win[W_IN0].active, sizeof active);
+            active = p->win[W_IN0].active;
     }
 
     gba_pixel *layers = p->dac.layers;
@@ -100,13 +101,21 @@ void gba_ppu_dac_upper(gba_ppu *p, unsigned x)
         layers[L_BG0 + i] = p->bg[i].mosaic_latch;
     layers[L_SFX] = (gba_pixel){.flags = PX_ON, .priority = 3, .color = 0};
 
-    unsigned above_layer = 5, below_layer = 5;
-    for (int priority = 3; priority >= 0; priority--)
-        for (int layer = 5; layer >= 0; layer--)
-            if ((layers[layer].flags & PX_ON) && layers[layer].priority == priority && active[layer]) {
-                below_layer = above_layer;
-                above_layer = (unsigned)layer;
-            }
+    unsigned above_layer = 5, below_layer = 5, key_above = 3u * 8 + 5, key_below = 3u * 8 + 5;
+    for (unsigned layer = 0; layer < 5; layer++) {
+        if (!(layers[layer].flags & PX_ON) || !active[layer])
+            continue;
+        unsigned key = layers[layer].priority * 8u + layer;
+        if (key < key_above) {
+            key_below = key_above;
+            below_layer = above_layer;
+            key_above = key;
+            above_layer = layer;
+        } else if (key < key_below) {
+            key_below = key;
+            below_layer = layer;
+        }
+    }
     p->dac.above_layer = above_layer;
     p->dac.below_layer = below_layer;
 

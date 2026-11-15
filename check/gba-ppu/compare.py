@@ -17,7 +17,7 @@ RUNTIME = os.path.join(HERE, "..", "..", "runtime", "guests", "gba")
 def build(work):
     exe = os.path.join(work, "ppu_scene")
     srcs = [os.path.join(HERE, "ppu_scene.c")] + [
-        os.path.join(RUNTIME, "ppu", f) for f in sorted(os.listdir(os.path.join(RUNTIME, "ppu"))) if f.endswith(".c") and f != "ppu_dev.c"
+        os.path.join(RUNTIME, "ppu", f) for f in sorted(os.listdir(os.path.join(RUNTIME, "ppu"))) if f.endswith(".c") and f not in ("ppu_dev.c", "ppu_present.c")
     ]
     subprocess.run(["clang", "-std=c11", "-O2", "-D_GNU_SOURCE", "-I" + RUNTIME, *srcs, "-o", exe], check=True)
     return exe

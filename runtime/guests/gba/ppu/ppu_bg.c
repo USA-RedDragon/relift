@@ -89,71 +89,54 @@ void gba_ppu_bg_output(gba_ppu *p, gba_ppu_bg *b, unsigned x)
     b->mosaic_offset--;
 }
 
-static void linear_fetch_map(gba_ppu *p, gba_ppu_bg *b, int x)
+static void linear_map(gba_ppu *p, gba_ppu_bg *b, int x)
 {
-    b->fx = ppu_s28(x + (int32_t)b->hoff);
-    b->fy = ppu_s28((int32_t)b->vmosaic + (int32_t)b->voff);
-    if ((b->fx & 7) == 0) {
-        uint32_t tx = (uint32_t)(b->fx >> 3) & 63u;
-        uint32_t ty = (uint32_t)(b->fy >> 3) & 63u;
-        uint32_t offset = (ty & 31) << 5 | (tx & 31);
-        if ((b->screen_size & 1) && (tx & 32))
-            offset += 32u << 5;
-        if ((b->screen_size & 2) && (ty & 32))
-            offset += 32u << (5 + (b->screen_size & 1));
-        offset = ((uint32_t)b->screen_base << 11) + (offset << 1);
-        uint32_t t = gba_ppu_vram_bg(p, RD_HALF, offset);
-        b->latch.character = t & 0x3FF;
-        b->latch.hflip = (t >> 10) & 1;
-        b->latch.vflip = (t >> 11) & 1;
-        b->latch.palette = (t >> 12) & 15;
-        b->latch.active = 1;
-        b->latch.px = 0;
-    }
+    uint32_t tx = (uint32_t)((x + (int32_t)b->hoff) >> 3) & 63u;
+    uint32_t ty = (uint32_t)(((int32_t)b->vmosaic + (int32_t)b->voff) >> 3) & 63u;
+    uint32_t offset = (ty & 31) << 5 | (tx & 31);
+    if ((b->screen_size & 1) && (tx & 32))
+        offset += 32u << 5;
+    if ((b->screen_size & 2) && (ty & 32))
+        offset += 32u << (5 + (b->screen_size & 1));
+    offset = ((uint32_t)b->screen_base << 11) + (offset << 1);
+    uint32_t t = gba_ppu_vram_bg(p, RD_HALF, offset);
+    b->latch.character = t & 0x3FF;
+    b->latch.hflip = (t >> 10) & 1;
+    b->latch.vflip = (t >> 11) & 1;
+    b->latch.palette = (t >> 12) & 15;
 }
 
-static void linear_fetch_data(gba_ppu *p, gba_ppu_bg *b)
+static void linear_tile(gba_ppu *p, gba_ppu_bg *b, int x0)
 {
-    unsigned px = b->latch.px & 7;
-    unsigned py = (unsigned)b->fy & 7;
-    if (b->latch.hflip)
-        px = ~px & 7;
+    unsigned py = ((unsigned)b->vmosaic + b->voff) & 7;
     if (b->latch.vflip)
         py = ~py & 7;
-    uint32_t tile = (((uint32_t)b->latch.character << 5) + (py << 2)) << b->color_mode;
-    uint32_t pixel = px >> (1 - b->color_mode);
-    uint32_t offset = ((uint32_t)b->char_base << 14) + tile + pixel;
-    b->latch.data = (uint16_t)gba_ppu_vram_bg(p, RD_HALF, offset);
-}
-
-static void linear_render(gba_ppu *p, gba_ppu_bg *b, int x)
-{
-    if (!b->latch.active)
-        return;
-    unsigned px = b->latch.px & 7;
-    if ((((px << b->color_mode) & 3)) == 0)
-        linear_fetch_data(p, b);
-    if (b->latch.hflip)
-        px = ~px & 7;
-    uint32_t color = b->latch.data;
-    if (b->color_mode == 0) {
-        color >>= (px & 3) * 4;
-        color &= 15;
-    } else {
-        color >>= (px & 1) * 8;
-        color &= 255;
+    uint32_t base = ((uint32_t)b->char_base << 14) + ((((uint32_t)b->latch.character << 5) + (py << 2)) << b->color_mode);
+    unsigned cm = b->color_mode;
+    for (unsigned i = 0; i < 8; i++) {
+        int x = x0 + (int)i;
+        if (x >= 240)
+            return;
+        unsigned sub = b->latch.hflip ? 7 - i : i;
+        if (((i << cm) & 3) == 0)
+            b->latch.data = (uint16_t)gba_ppu_vram_bg(p, RD_HALF, base + (sub >> (1 - cm)));
+        uint32_t color = b->latch.data;
+        if (cm == 0) {
+            color >>= (sub & 3) * 4;
+            color &= 15;
+        } else {
+            color >>= (sub & 1) * 8;
+            color &= 255;
+        }
+        if (color && x >= 0) {
+            if (cm == 0)
+                color |= (uint32_t)b->latch.palette << 4;
+            gba_pixel *o = &b->output[x];
+            o->flags |= PX_ON;
+            o->priority = b->priority;
+            o->color = (uint16_t)color;
+        }
     }
-    if (color && x >= 0 && x < 240) {
-        if (b->color_mode == 0)
-            color |= (uint32_t)b->latch.palette << 4;
-        gba_pixel *o = &b->output[x];
-        o->flags |= PX_ON;
-        o->priority = b->priority;
-        o->color = (uint16_t)color;
-    }
-    b->latch.px = (b->latch.px + 1) & 7;
-    if (b->latch.px == 0)
-        b->latch.active = 0;
 }
 
 static void affine_run(gba_ppu *p, gba_ppu_bg *b)
@@ -235,8 +218,8 @@ void gba_ppu_bg_run_line(gba_ppu *p, gba_ppu_bg *b)
             return;
         break;
     }
-    for (int x = -7; x < 240; x++) {
-        linear_fetch_map(p, b, x);
-        linear_render(p, b, x);
+    for (int x = -(int)(b->hoff & 7); x < 240; x += 8) {
+        linear_map(p, b, x);
+        linear_tile(p, b, x);
     }
 }
