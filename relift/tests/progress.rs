@@ -111,7 +111,11 @@ fn build_prints_plain_lines_that_match_the_snapshot() {
             .success()
     );
     let no_sdl3 = root.join("no-sdl3").display().to_string();
-    let env = [("RELIFT_SDL3_DIR", no_sdl3.as_str())];
+    let no_moltenvk = root.join("no-moltenvk").display().to_string();
+    let env = [
+        ("RELIFT_SDL3_DIR", no_sdl3.as_str()),
+        ("RELIFT_MOLTENVK_DIR", no_moltenvk.as_str()),
+    ];
     let out = run(&project, &env, &["--cache-dir", &cache, "-j", "4", "build"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let err = stderr(&out);
