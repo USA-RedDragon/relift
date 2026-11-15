@@ -19,6 +19,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -60,6 +61,13 @@ void rl_ios_flush(void)
     fflush(stderr);
 }
 
-int main(int argc, char **argv) { return SDL_RunApp(argc, argv, rl_ios_main, NULL); }
+static int run(int argc, char **argv)
+{
+    int status = rl_ios_main(argc, argv);
+    rl_ios_flush();
+    exit(status);
+}
+
+int main(int argc, char **argv) { return SDL_RunApp(argc, argv, run, NULL); }
 
 #endif

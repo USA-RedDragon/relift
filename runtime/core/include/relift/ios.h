@@ -16,7 +16,7 @@
 
 /**
  * @brief The program's entry. The glue's main hands it to SDL, which calls it once UIKit has launched the app;
- * the app exits with its status.
+ * the app exits with its status when it returns.
  */
 int rl_ios_main(int argc, char **argv);
 
