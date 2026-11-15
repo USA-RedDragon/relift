@@ -300,7 +300,7 @@ impl AndroidBuild {
     ///
     /// A missing tool or dependency, or a bad package name.
     pub fn prepare(settings: &Settings, target: Target, name: &str) -> Result<Self, BoxError> {
-        let cache = cache_root(settings)?;
+        let cache = crate::paths::canonical(cache_root(settings)?)?;
         let sdk = Sdk::find(settings)?;
         let package = if settings.package.android_id.is_empty() {
             default_package(name)
@@ -615,6 +615,13 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         "resources.arsc",
         std::fs::read(w.join("res/resources.arsc"))?,
     );
+    for (dir, _) in a.icons {
+        let name = format!("{dir}-v4/ic_launcher.png");
+        z.add(
+            &format!("res/{name}"),
+            std::fs::read(w.join("res/res").join(&name))?,
+        );
+    }
     z.add("classes.dex", std::fs::read(w.join("dex/classes.dex"))?);
     z.add(
         &format!("lib/{}/libmain.so", a.target.abi),

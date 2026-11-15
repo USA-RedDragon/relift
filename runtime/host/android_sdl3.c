@@ -4,6 +4,8 @@
  */
 #ifdef __ANDROID__
 
+#include "core.h"
+
 #include <relift/android.h>
 
 #include <SDL3/SDL.h>
@@ -14,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #define LOG_TAG "relift"
@@ -39,6 +42,27 @@ static void *pump(void *arg)
     return NULL;
 }
 
+static void drain(void)
+{
+    fflush(stdout);
+    fflush(stderr);
+    for (int i = 0; i < 100; i++) {
+        int pending = 0;
+        if (ioctl(g_pipe[0], FIONREAD, &pending) != 0 || pending == 0)
+            break;
+        usleep(2000);
+    }
+    usleep(5000);
+}
+
+void rl_android_flush(void) { drain(); }
+
+static void leave(uint32_t code)
+{
+    drain();
+    _exit((int)code);
+}
+
 static void init_once(void)
 {
     const char *dir = rl_android_files_dir();
@@ -51,8 +75,11 @@ static void init_once(void)
     dup2(g_pipe[1], STDOUT_FILENO);
     dup2(g_pipe[1], STDERR_FILENO);
     pthread_t t;
-    if (pthread_create(&t, NULL, pump, NULL) == 0)
+    if (pthread_create(&t, NULL, pump, NULL) == 0) {
         pthread_detach(t);
+        atexit(drain);
+        rl_set_exit_hook(leave);
+    }
 }
 
 void rl_android_init(void)

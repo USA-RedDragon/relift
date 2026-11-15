@@ -846,7 +846,7 @@ fn program_c(
     if fp_flags {
         t.push_str("    rl_a64_set_fp_flags(1);\n");
     }
-    t.push_str("    return rl_switch_main(&rl_program, argc, argv);\n}\n");
+    t.push_str("    int status = rl_switch_main(&rl_program, argc, argv);\n#ifdef __ANDROID__\n    rl_android_flush();\n#endif\n    return status;\n}\n");
     t
 }
 

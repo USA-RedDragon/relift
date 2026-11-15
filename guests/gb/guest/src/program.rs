@@ -366,7 +366,7 @@ pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
     }
     let _ = write!(
         t,
-        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {} }};\n    return rl_gb_main(&prog, argc, argv);\n}}\n",
+        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {} }};\n    int status = rl_gb_main(&prog, argc, argv);\n{}    return status;\n}}\n",
         units.len(),
         c_string(p.title),
         c_string(p.model),
@@ -374,6 +374,11 @@ pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
             "save".into()
         } else {
             c_string(p.save)
+        },
+        if p.android {
+            "    rl_android_flush();\n"
+        } else {
+            ""
         }
     );
     t

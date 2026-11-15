@@ -16,6 +16,9 @@
  */
 RL_RUNTIME_API void rl_android_init(void);
 
+/** @brief Waits until everything the program printed has reached logcat. Call before SDL_main returns: the app dies with it. */
+RL_RUNTIME_API void rl_android_flush(void);
+
 /** @brief The app's private files directory (no trailing slash), or NULL when SDL cannot tell. */
 RL_RUNTIME_API const char *rl_android_files_dir(void);
 

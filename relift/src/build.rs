@@ -1177,6 +1177,7 @@ pub(crate) fn build_project(
         .map(|s| s.to_string())
         .chain(arch)
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
+        .chain(android.as_ref().map(|_| "-fPIC".to_string()))
         .collect();
     // Lifted code gets line tables only: full -g makes clang track every
     // local of functions with tens of thousands of them, which made one
