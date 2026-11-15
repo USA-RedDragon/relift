@@ -209,6 +209,9 @@ pub(crate) struct State {
     pub zword: Option<(u16, u16)>,
     /// The word at this RAM address is known not to be zero.
     pub nonzero: Option<u16>,
+    /// The stack pointer was loaded with a constant since entry, so the
+    /// stack no longer holds the caller's frame.
+    pub switched: bool,
 }
 
 impl State {
@@ -229,6 +232,7 @@ impl State {
             carry: None,
             zword: None,
             nonzero: None,
+            switched: false,
         }
     }
 
@@ -311,6 +315,7 @@ impl State {
         if self.nonzero != other.nonzero {
             self.nonzero = None;
         }
+        self.switched |= other.switched;
         *self != before
     }
 
@@ -1314,6 +1319,7 @@ fn step_ld(cx: &Ctx<'_>, st: &mut State, ins: &Instruction, events: &mut Vec<Wri
         (Operand::R16(Reg16::Sp), Operand::Imm16, _) => {
             st.sp = Some(STACK_HI - 2);
             st.stack = [Val::Top; SLOTS];
+            st.switched = true;
         }
         (Operand::R16(Reg16::Sp), _, _) => st.sp = None,
         (Operand::R16(p), _, _) => st.set_word(p, Word::Other),

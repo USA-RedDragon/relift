@@ -449,7 +449,8 @@ impl<'a> Run<'a> {
             _ => {
                 let mut events = Vec::new();
                 state::step(&self.cx(), &mut st, &ins, &mut events);
-                if mn == Mnemonic::Pop && st.sp.is_some_and(|s| s > self.entry_sp()) {
+                if mn == Mnemonic::Pop && !st.switched && st.sp.is_some_and(|s| s > self.entry_sp())
+                {
                     self.out.popped_ret = true;
                 }
                 for w in events {
@@ -736,6 +737,7 @@ impl<'a> Run<'a> {
             return;
         }
         let mut cs = st;
+        cs.switched = false;
         let [rh, rl] = ret.to_be_bytes();
         cs.push(Val::Const(rh), Val::Const(rl));
         let Some(e) = cs.sp else {
