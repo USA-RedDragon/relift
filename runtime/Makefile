@@ -324,17 +324,13 @@ test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
 
+TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(A64_TESTS) $(SM83_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS)
+
 test: export RELIFT_VIDEO := headless
 test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
-	$(abspath $(CRASH_TEST))
-	$(abspath $(FIBER_TESTS))
-	$(abspath $(CORE_TESTS))
-	$(abspath $(A64_TESTS))
-	$(abspath $(SM83_TESTS))
-	$(abspath $(SWITCH_TESTS))
-	$(abspath $(VK_TESTS))
-	$(abspath $(GB_TESTS))
-	$(abspath $(GBA_TESTS))
+	@for t in $(abspath $(TEST_RUN)); do \
+		echo "$$t"; "$$t" || { rc=$$?; echo "test binary failed: $$t (exit $$rc)"; exit $$rc; }; \
+	done
 	$(MAKE) --no-print-directory vk-present
 
 # The synthetic Vulkan program: a window with VIDEO=sdl3 and a display,
