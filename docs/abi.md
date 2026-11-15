@@ -1270,6 +1270,19 @@ units may call `rl_fn_maps_register` itself.
   walk sees leaf frames; Windows x64 uses the unwind tables, which every
   function has. [verified: `crash_test`]
 
+`relift build` packs a module's functions into shards by guest address
+window, a sixty-fourth of `emit.shard-kib` of guest code each (64 KiB by
+default): `shard<n>` holds the functions whose entries lie in window `n`
+from the module base, and `shard<n>_<k>` the rest of a window whose C
+exceeds the shard budget. The
+build keeps each module's outlines (`analysis/` in the build directory) and
+the C of each function (`emit/`, zstd frames per window) for later builds:
+an unchanged module is not discovered again, a module changed by code mods
+is rediscovered only where its bytes differ, and a function whose code and
+direct-call targets are unchanged takes its C from the store. Shards are
+written only when their text changes, so a build that changes one function
+recompiles its shard and the unit tables.
+
 ### The crash handler
 
 `runtime/core/crash.c` with `crash_posix.c` (Linux, macOS) and
