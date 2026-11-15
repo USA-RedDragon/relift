@@ -25,6 +25,7 @@
 
 #include "bios/bios.h"
 
+#include <relift/ports.h>
 #include <relift/sched.h>
 
 #include <stdbool.h>
@@ -71,7 +72,7 @@ typedef enum rl_gba_slot {
     RL_GBA_SLOT_APU,
     /** @brief The serial port, 0x04000120-0x0400012F and 0x04000134-0x0400015B. */
     RL_GBA_SLOT_SERIAL,
-    /** @brief The keypad, 0x04000130-0x04000133 (the stub reads no key pressed). */
+    /** @brief The keypad, 0x04000130-0x04000133 (the machine's own keypad, from the p1 port, unless a device is supplied). */
     RL_GBA_SLOT_KEYPAD,
     /** @brief Number of slots. */
     RL_GBA_SLOTS
@@ -214,6 +215,21 @@ void rl_gba_set_cpu_hooks(rl_gba *g, const rl_gba_cpu_hooks *hooks);
 bool rl_gba_irq_line(const rl_gba *g);
 /** @brief Requests the interrupts in sources now (for devices outside this layer: keypad, serial, cartridge). */
 void rl_gba_request_irq(rl_gba *g, uint16_t sources);
+/**
+ * @brief Pins the keys to pressed (KEYINPUT bit order: A, B, Select, Start,
+ * Right, Left, Up, Down, R, L, a set bit is a pressed key) instead of
+ * reading the p1 port, and raises the KEYCNT interrupt when it now holds.
+ */
+void rl_gba_keypad_set(rl_gba *g, uint16_t pressed);
+/** @brief Reads the keys from the p1 port of rl_gba_ports again (the default). */
+void rl_gba_keypad_use_ports(rl_gba *g);
+/** @brief The keys as the keypad last saw them, one bit per key as in rl_gba_keypad_set. */
+uint16_t rl_gba_keypad_pressed(const rl_gba *g);
+/** @brief The native ports of the GBA (generated from relift-input): declare them with rl_ports_declare. */
+extern const rl_port_decl rl_gba_ports[];
+/** @brief Number of entries of rl_gba_ports. */
+extern const uint32_t rl_gba_ports_count;
+
 /** @brief True while the CPU is halted (by HALTCNT; only seen from callbacks that run during the halt). */
 bool rl_gba_halted(const rl_gba *g);
 

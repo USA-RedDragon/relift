@@ -49,7 +49,7 @@ static bool write_rom(char *path, size_t len)
     return fclose(f) == 0 && ok;
 }
 
-static bool orc_open(orc *o, const char *bin, const char *rom)
+static bool orc_open(orc *o, const char *bin, const char *rom, const dsetup *cfg)
 {
     int in[2], out[2];
     if (pipe(in) != 0 || pipe(out) != 0)
@@ -62,6 +62,8 @@ static bool orc_open(orc *o, const char *bin, const char *rom)
         dup2(out[1], 1);
         close(in[1]);
         close(out[0]);
+        if (cfg->nba_save)
+            execl(bin, bin, "--rom", rom, "--skip-bios", "--save", cfg->nba_save, "--save-file", cfg->save_file, (char *)NULL);
         execl(bin, bin, "--rom", rom, "--skip-bios", (char *)NULL);
         _exit(127);
     }
@@ -223,6 +225,12 @@ static uint64_t lcd_line_at_zero = 225, lcd_dot_at_zero = 1006;
 
 dres oracle_run(const char *name, const dop *ops, unsigned pad, uint32_t mem_addr, uint32_t mem_len)
 {
+    dsetup none = {0};
+    return oracle_run_cfg(name, ops, pad, mem_addr, mem_len, &none);
+}
+
+dres oracle_run_cfg(const char *name, const dop *ops, unsigned pad, uint32_t mem_addr, uint32_t mem_len, const dsetup *cfg)
+{
     dres r = {0};
     char bin[1024], rom[1024];
     if (!find_oracle(bin, sizeof bin)) {
@@ -234,7 +242,7 @@ dres oracle_run(const char *name, const dop *ops, unsigned pad, uint32_t mem_add
     static trace tr[MAX_MARKS];
     memset(tr, 0, sizeof tr);
     orc o = {0};
-    if (!write_rom(rom, sizeof rom) || !orc_open(&o, bin, rom)) {
+    if (!write_rom(rom, sizeof rom) || !orc_open(&o, bin, rom, cfg)) {
         r.broken = true;
         orc_close(&o);
         return r;
@@ -243,7 +251,8 @@ dres oracle_run(const char *name, const dop *ops, unsigned pad, uint32_t mem_add
     for (unsigned i = 0; i < p.n; i++)
         for (unsigned b = 0; b < 4; b++)
             snprintf(&hex[i * 8 + b * 2], 3, "%02x", (p.code[i] >> (8 * b)) & 0xFF);
-    bool ok = orc_cmd(&o, NULL, NULL, "POKE %x %s", CODE_BASE, hex) && orc_cmd(&o, NULL, NULL, "JUMP %x 0", CODE_BASE);
+    bool ok = orc_cmd(&o, NULL, NULL, "POKE %x %s", CODE_BASE, hex) && orc_cmd(&o, NULL, NULL, "JUMP %x 0", CODE_BASE) &&
+              orc_cmd(&o, NULL, NULL, "KEYS %x", cfg->keys);
     for (unsigned i = 0; ok && i < p.nmark; i++) {
         uint32_t at = CODE_BASE + 4 * p.mark[i];
         ok = orc_cmd(&o, NULL, NULL, "RUN until 100000000 %x", at) && orc_cmd(&o, on_line, &tr[i], "STEP 1");
@@ -270,6 +279,7 @@ dres oracle_run(const char *name, const dop *ops, unsigned pad, uint32_t mem_add
     img[2] = 0xFF;
     img[3] = 0xEA;
     mach m = mach_new_with(img, 0x200, NULL, 0);
+    rl_gba_keypad_set(m.g, cfg->keys);
     rl_gba_lcd_set(m.g, (unsigned)lcd_line_at_zero, (unsigned)lcd_dot_at_zero);
     unsigned k = 0;
     uint64_t prev_end = 0, halt_charge = 0;

@@ -137,6 +137,10 @@ DEVICE_RW(lcd, gba_lcd_read, gba_lcd_write)
 DEVICE_RW(timer, gba_timer_read, gba_timer_write)
 DEVICE_RW(sys, gba_sys_read, gba_sys_write)
 
+static uint8_t pad_byte(rl_gba *g, uint32_t addr, uint64_t now) { return gba_keypad_read(g, addr, now); }
+
+DEVICE_RW(pad, pad_byte, gba_keypad_write)
+
 static uint8_t dma_byte(rl_gba *g, uint32_t addr, uint64_t now)
 {
     (void)now;
@@ -262,6 +266,12 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
         return -1;
     for (unsigned i = 0; i < RL_GBA_SLOTS; i++) {
         rl_device *d = devs ? devs[i] : NULL;
+        if (!d && i == RL_GBA_SLOT_KEYPAD) {
+            if (add_dev(g, &g->d_pad, "gba keypad", pad_read, pad_write))
+                return -1;
+            g->slot[i] = &g->d_pad.dev;
+            continue;
+        }
         if (!d) {
             gba_stub *st = &g->stub[i];
             st->g = g;
@@ -292,6 +302,7 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
     gba_timer_attach(g);
     gba_dma_attach(g);
     gba_lcd_attach(g);
+    gba_keypad_attach(g);
     return 0;
 }
 

@@ -65,6 +65,15 @@ typedef struct gba_lcd {
     rl_event ev;
 } gba_lcd;
 
+/** @brief The keypad. */
+typedef struct gba_keypad {
+    uint16_t keys, cnt;
+    bool manual, resolved, sampled_once;
+    uint64_t sampled;
+    uint32_t ref[10];
+    rl_event ev;
+} gba_keypad;
+
 /** @brief The Game Pak prefetch buffer. */
 typedef struct gba_prefetch {
     uint16_t slot[8];
@@ -117,6 +126,7 @@ struct rl_gba {
     int dma_last;
     bool dma_running;
     gba_lcd lcd;
+    gba_keypad pad;
 
     bool halt_req, stop_req, halted, in_bios;
 
@@ -128,7 +138,7 @@ struct rl_gba {
     rl_gba_line_fn *vblank_fn;
     void *vblank_user;
 
-    gba_dev d_lcd, d_timer, d_dma, d_sys;
+    gba_dev d_lcd, d_timer, d_dma, d_sys, d_pad;
     gba_stub stub[RL_GBA_SLOTS];
     rl_device *slot[RL_GBA_SLOTS];
 };
@@ -141,6 +151,10 @@ uint64_t gba_now(const rl_gba *g);
 void gba_charge(rl_gba *g, unsigned n);
 /** @brief The open bus byte of an I/O address. */
 static inline uint8_t gba_open_byte(const rl_gba *g, uint32_t addr) { return (uint8_t)(g->mdr >> (8 * (addr & 3))); }
+
+uint8_t gba_keypad_read(rl_gba *g, uint32_t addr, uint64_t now);
+void gba_keypad_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now);
+void gba_keypad_attach(rl_gba *g);
 
 void gba_waits_rebuild(rl_gba *g);
 void gba_pf_step(rl_gba *g, unsigned clocks);

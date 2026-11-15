@@ -241,6 +241,7 @@ void rl_gba_destroy(rl_gba *g)
     if (g->sched) {
         rl_sched_cancel(g->sched, &g->irq.ev);
         rl_sched_cancel(g->sched, &g->lcd.ev);
+        rl_sched_cancel(g->sched, &g->pad.ev);
         for (unsigned i = 0; i < 4; i++) {
             rl_sched_cancel(g->sched, &g->tm[i].ev);
             rl_sched_cancel(g->sched, &g->dma[i].ev);

@@ -43,6 +43,19 @@ typedef struct dres {
     bool broken;
 } dres;
 
+/** @brief What the scenario's machine and the oracle start with besides the program. */
+typedef struct dsetup {
+    /** @brief Keys held from the start, in KEYINPUT order (set bit = pressed). */
+    uint16_t keys;
+    /** @brief The oracle's --save type (such as "flash128"), or NULL for none. */
+    const char *nba_save;
+    /** @brief The file the oracle keeps that save in (needed with nba_save). */
+    const char *save_file;
+} dsetup;
+
+/** @brief oracle_run with a setup. */
+dres oracle_run_cfg(const char *name, const dop *ops, unsigned pad, uint32_t mem_addr, uint32_t mem_len, const dsetup *cfg);
+
 /**
  * @brief Runs ops on the oracle and replays them on a fresh machine; with
  * pad no-ops first, to move every access by pad cycles. Prints each
