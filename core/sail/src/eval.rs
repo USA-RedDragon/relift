@@ -487,6 +487,9 @@ impl<'m, C: Cpu> Gen<'m, C> {
             {
                 return Ok(V::Bits(w, cfg));
             }
+            if let Some((n, w)) = vector_of_bits(&ty) {
+                return Ok(V::tuple(vec![V::Undef(Some(w)); n]));
+            }
         }
         fail(format!("unconfigured register {name}"))
     }
@@ -875,8 +878,13 @@ impl<'m, C: Cpu> Gen<'m, C> {
                     return self.extract(&bits, &V::Int(i128::from(lo)), hi - lo + 1);
                 }
                 let iv = self.eval(i, None)?;
-                if let V::Tuple(_) = bv {
-                    return fail("vector index");
+                if let V::Tuple(xs) = &bv {
+                    return match iv {
+                        V::Int(k) if (0..xs.len() as i128).contains(&k) => {
+                            Ok(xs[k as usize].clone())
+                        }
+                        _ => fail("vector index"),
+                    };
                 }
                 self.bit(&bv, &iv)
             }
@@ -1279,6 +1287,15 @@ impl<'m, C: Cpu> Gen<'m, C> {
                     return self.assign(b, V::Bf(t.clone(), Box::new(nb)));
                 }
                 let iv = self.eval(i, None)?;
+                if let V::Tuple(xs) = &base {
+                    let k = self.cint(&iv)?;
+                    if !(0..xs.len() as i128).contains(&k) {
+                        return fail("vector index");
+                    }
+                    let mut xs = xs.to_vec();
+                    xs[k as usize] = v;
+                    return self.assign(b, V::tuple(xs));
+                }
                 let i = self.cint(&iv)? as u32;
                 let nb = self.set_slice(&base, i, i, &v)?;
                 self.assign(b, nb)
@@ -1981,6 +1998,14 @@ pub fn lit(l: &Lit) -> V {
         Lit::Real(r) => V::Str(r.as_str().into()),
         Lit::Str(s) => V::Str(s.as_str().into()),
     }
+}
+
+/// The length and element width of a register type `vector(N, bits(W))`.
+fn vector_of_bits(ty: &str) -> Option<(usize, u32)> {
+    let inner = ty.strip_prefix("vector(")?.strip_suffix(')')?;
+    let (n, el) = inner.split_once(',')?;
+    let w = el.trim().strip_prefix("bits(")?.strip_suffix(')')?;
+    Some((n.trim().parse().ok()?, w.trim().parse().ok()?))
 }
 
 /// The builtin names an extern declaration names.
