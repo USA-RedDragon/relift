@@ -268,10 +268,15 @@ pub fn android_extras(
             origin: "Android prebuilt".into(),
         }),
         vulkan: None,
-        host: ["audio_sdl3.c", "opus_libopus.c", "android_sdl3.c"]
-            .iter()
-            .map(|n| host.join(n))
-            .collect(),
+        host: [
+            "audio_sdl3.c",
+            "opus_libopus.c",
+            "android_sdl3.c",
+            "data_sdl3.c",
+        ]
+        .iter()
+        .map(|n| host.join(n))
+        .collect(),
         opus_src: None,
         opus: None,
         adrenotools: deps.adrenotools.clone(),
@@ -317,10 +322,15 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
             origin: "iOS static".into(),
         }),
         vulkan,
-        host: ["audio_sdl3.c", "opus_libopus.c", "ios_sdl3.c"]
-            .iter()
-            .map(|n| host.join(n))
-            .collect(),
+        host: [
+            "audio_sdl3.c",
+            "opus_libopus.c",
+            "ios_sdl3.c",
+            "data_sdl3.c",
+        ]
+        .iter()
+        .map(|n| host.join(n))
+        .collect(),
         opus_src: None,
         opus: None,
         adrenotools: None,

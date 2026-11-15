@@ -747,6 +747,7 @@ const ENTRY: &str = r#"#if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+#include <relift/datacheck.h>
 #include <relift/settings.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -896,7 +897,7 @@ fn program_c(
     t.push_str(
         "{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
     );
-    t.push_str("#ifdef RL_APP_FLUSH\n    set_app_dirs();\n#endif\n");
+    t.push_str("#ifdef RL_APP_FLUSH\n    set_app_dirs();\n    if (rl_app_check_data() != 0) {\n        RL_APP_FLUSH();\n        return 1;\n    }\n#endif\n");
     if fp_flags {
         t.push_str("    rl_arm64_set_fp_flags(1);\n");
     }
