@@ -341,6 +341,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-cpu-arm32-gen",
+        band: 3,
+        why: "the ARMv4T decode table and template generator over the lifter's register file and the Sail frontend, run by hand; nothing links it",
+        normal: &["relift-cpu-arm32", "relift-sail"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-cpu-sm83-gen",
         band: 3,
         why: "the SM83 template generator over the opcode table and the Sail frontend, run by hand; nothing links it",

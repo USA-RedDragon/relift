@@ -50,7 +50,12 @@ list of hard rules; read it before changing anything.
   `generated templates are current` job fetches the pinned Sail files,
   reruns both generators and fails on any difference. A form joins
   `cpus/a64/gen/forms.txt` only after `relift-check forms` passes it and its
-  mutation control on an oracle that implements its features.
+  mutation control on an oracle that implements its features. The ARMv4T
+  tables and templates (`cpus/arm32/src/decode/generated.rs`,
+  `cpus/arm32/src/lift/generated/{a32,t16}.rs`) come the same way from
+  sail-arm's AArch32 part and the overlay `cpus/arm32/gen/armv4t.sail`
+  (`cpus/arm32/gen/README.md`), which carries the ARM7TDMI rules where the
+  Armv8 model differs, and the same CI job checks them.
 - **`unsafe` is forbidden** outside the roster in
   `relift/tests/unsafe_roster.rs`. Ceilings only fall.
 - **The CI gate** is `cargo clippy --workspace --all-targets --all-features
@@ -89,6 +94,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
 | 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 2 | `relift-cpu-arm32` | `cpus/arm32` | ARMv4T (Game Boy Advance ARM7TDMI) decoder and lifter to `relift-ir`, with templates generated from sail-arm AArch32 and an ARMv4T overlay; no guest uses it yet |
+| 3 | `relift-cpu-arm32-gen` | `cpus/arm32/gen` | Generates the ARMv4T decode tables and lifting templates from sail-arm and `cpus/arm32/gen/armv4t.sail`: the ARMv4T cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder and opcode table: length, M-cycles taken and not taken, flags, bus access per cycle; no IR yet, no dependencies |
 | 2 | `relift-gb-formats` | `guests/gb/formats` | Game Boy and Game Boy Color cartridge format: header, mapper kinds, ROM and RAM size codes, both checksums, bank layout; no dependencies |

@@ -940,6 +940,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-arm32-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-arm32",
+ "relift-sail",
+]
+
+[[package]]
 name = "relift-cpu-sm83"
 version = "0.1.0"
 dependencies = [
