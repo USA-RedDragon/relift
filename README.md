@@ -119,10 +119,10 @@ yet) runs on the device library's CPU one instruction at a time until it
 reaches lifted code. The program adds what it had to run that way to
 `learned.txt` in the project's import directory, and the next `relift build`
 lifts it; `--interp-log FILE` lists every such instruction and why it ran
-there. `RELIFT_GB_SUPERSET=code` (the banks discovery found code in) or `all`
-makes `relift build` also lift every address that starts a decodable
-instruction in those banks, so code discovery missed runs lifted on the
-first build, at several times the C and build time.
+there. `relift build` also lifts every address that starts a decodable
+instruction in the fixed window and in each bank discovery found code in, so
+code discovery missed runs lifted on the first build;
+`RELIFT_GB_SUPERSET=none` turns that off and `all` takes every bank.
 CI builds and runs 38 corpus cases through this path
 (`runtime/guests/gb/devtests/ci_cases.toml`).
 

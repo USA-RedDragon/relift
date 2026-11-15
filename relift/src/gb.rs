@@ -401,7 +401,8 @@ pub fn build(
                 Ok("all") => std::iter::once(u32::MAX)
                     .chain(1..u32::try_from(rom.len() / 0x4000).unwrap_or(0))
                     .collect(),
-                Ok("code") => std::iter::once(u32::MAX)
+                Ok("none") => Vec::new(),
+                _ => std::iter::once(u32::MAX)
                     .chain(
                         r.functions
                             .keys()
@@ -411,7 +412,6 @@ pub fn build(
                     .collect::<std::collections::BTreeSet<_>>()
                     .into_iter()
                     .collect(),
-                _ => Vec::new(),
             };
             relift_gb::program::lift_superset(&rom, r, &learned.ram, image_id, &keys)
         }
