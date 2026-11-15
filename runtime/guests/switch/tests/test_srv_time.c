@@ -3,10 +3,12 @@
  * @brief The time services driven through IPC the way libnx's timeInitialize
  * and its time readers use them: the five static services, the clocks, the
  * shared memory page read with libnx's lockless reader, and the time zone
- * service with the UTC rule and with TZif data a program supplies.
+ * service with the UTC rule, the host's zone and TZif data a program supplies.
  */
 #include "tc.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 #define TIME_RC(desc) (116u | ((desc) << 9))
@@ -38,13 +40,25 @@ typedef struct cal {
 
 _Static_assert(sizeof(cal) == 0x20, "libnx TimeCalendarTime + TimeCalendarAdditionalInfo");
 
-static env boot(void)
+static void set_tz(const char *tz)
 {
+#ifdef _WIN32
+    _putenv_s("TZ", tz);
+#else
+    setenv("TZ", tz, 1);
+#endif
+}
+
+static env boot_in(const char *tz)
+{
+    set_tz(tz);
     env e;
     e.c = t_boot(NULL);
     e.heap = t_heap(e.c, 0x200000);
     return e;
 }
+
+static env boot(void) { return boot_in("UTC"); }
 
 static uint32_t rc_of(tc_res r) { return r.svc_rc ? r.svc_rc : r.result; }
 
@@ -616,6 +630,56 @@ static bool cal_is(const cal *c, uint32_t y, uint32_t mo, uint32_t d, uint32_t h
 {
     return c->year == y && c->month == mo && c->day == d && c->hour == h && c->minute == mi && c->second == s &&
            c->wday == wd && c->yday == yd && strcmp(c->name, name) == 0 && c->dst == dst && c->gmt_offset == off;
+}
+
+TEST(time_zone_follows_the_host_zone)
+{
+#ifndef _WIN32
+    FILE *f = fopen("/usr/share/zoneinfo/America/Chicago", "rb");
+    if (!f)
+        return;
+    fclose(f);
+    env e = boot_in("America/Chicago");
+    libnx_time u;
+    CHECK(time_initialize(&e, "time:u", &u));
+    tc_res r = call(&e, u.zone, 0, NULL, 0);
+    CHECK_EQ(rc_of(r), 0);
+    CHECK(strcmp((const char *)res_raw(e.c), "America/Chicago") == 0);
+    r = call(&e, u.zone, 2, NULL, 0);
+    CHECK_EQ(tc_u32(&r, 0), 3);
+    uint32_t index = 2;
+    uint64_t buf = e.heap + 0x4000;
+    r = call_buf(&e, u.zone, 3, &index, 4, 'b', buf, 0x24 * 4);
+    CHECK_EQ(tc_u32(&r, 0), 1);
+    CHECK(strcmp((const char *)t_mem() + buf, "America/Chicago") == 0);
+
+    char name[0x24] = "America/Chicago";
+    uint64_t rule = e.heap + 0x10000;
+    CHECK_EQ(rc_of(call_buf(&e, u.zone, 4, name, sizeof name, 'b', rule, RULE_SIZE)), 0);
+    bool ok;
+    cal c = calendar_of(&e, u.zone, 100, 1768478400, rule, &ok);
+    CHECK(ok);
+    CHECK(cal_is(&c, 2026, 1, 15, 6, 0, 0, 4, 14, "CST", 0, -21600));
+    c = calendar_of(&e, u.zone, 101, 1784116800, 0, &ok);
+    CHECK(ok);
+    CHECK(cal_is(&c, 2026, 7, 15, 7, 0, 0, 3, 195, "CDT", 1, -18000));
+
+    memcpy(name, "UTC", 4);
+    CHECK_EQ(rc_of(call_buf(&e, u.zone, 4, name, sizeof name, 'b', rule, RULE_SIZE)), 0);
+    c = calendar_of(&e, u.zone, 100, 1768478400, rule, &ok);
+    CHECK(cal_is(&c, 2026, 1, 15, 12, 0, 0, 4, 14, "UTC", 0, 0));
+#endif
+}
+
+TEST(time_zone_ignores_a_bad_host_zone_name)
+{
+    env e = boot_in("../../etc/passwd");
+    libnx_time u;
+    CHECK(time_initialize(&e, "time:u", &u));
+    tc_res r = call(&e, u.zone, 0, NULL, 0);
+    CHECK(strcmp((const char *)res_raw(e.c), "UTC") == 0);
+    r = call(&e, u.zone, 2, NULL, 0);
+    CHECK_EQ(tc_u32(&r, 0), 2);
 }
 
 TEST(time_zone_utc_calendar_conversions)

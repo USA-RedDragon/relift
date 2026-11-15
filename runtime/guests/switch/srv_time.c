@@ -8,14 +8,19 @@
  * Ryujinx (MIT) Services/Time; the shared memory layout is the one libnx
  * (ISC) time.c reads. The user, local and network clocks follow the host's
  * wall clock until a program sets them; the steady clock is the host's
- * monotonic clock. Only the UTC time zone exists.
+ * monotonic clock. The time zones are UTC and the host's own zone, read
+ * from TZ or /etc/localtime and the host's zoneinfo where the host has them.
  */
 #include "services.h"
 #include "srv_time_zone.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #define TIME_RESULT(desc) RL_MAKE_RESULT(116, desc)
 #define TIME_PERMISSION_DENIED TIME_RESULT(1)
@@ -156,6 +161,89 @@ static void clock_follow_host(uint32_t clock)
     shm_put_clock(clock);
 }
 
+#define HOST_ZONE_MAX_BYTES 0x10000u
+
+static struct {
+    bool ok;
+    char name[LOCATION_NAME_SIZE];
+    tz_rule rule;
+} g_host_zone;
+
+static bool zone_name_ok(const char *n)
+{
+    size_t len = strlen(n);
+    if (!len || len >= LOCATION_NAME_SIZE || n[0] == '/' || strstr(n, ".."))
+        return false;
+    for (size_t i = 0; i < len; i++) {
+        char c = n[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '/' || c == '_' ||
+              c == '-' || c == '+'))
+            return false;
+    }
+    return true;
+}
+
+static bool load_zone_file(const char *path, tz_rule *rule)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return false;
+    uint8_t *data = malloc(HOST_ZONE_MAX_BYTES);
+    size_t n = data ? fread(data, 1, HOST_ZONE_MAX_BYTES, f) : 0;
+    fclose(f);
+    bool ok = n && n < HOST_ZONE_MAX_BYTES && tz_parse(rule, data, n);
+    free(data);
+    return ok;
+}
+
+static void host_zone_load(void)
+{
+    memset(&g_host_zone, 0, sizeof g_host_zone);
+#ifndef _WIN32
+    char path[512];
+    const char *name = NULL;
+    const char *tz = getenv("TZ");
+    if (tz && *tz) {
+        if (*tz == ':')
+            tz++;
+        if (!zone_name_ok(tz))
+            return;
+        name = tz;
+        snprintf(path, sizeof path, "/usr/share/zoneinfo/%s", tz);
+    } else {
+        char link[512];
+        ssize_t len = readlink("/etc/localtime", link, sizeof link - 1);
+        if (len <= 0)
+            return;
+        link[len] = 0;
+        const char *z = strstr(link, "zoneinfo/");
+        if (!z)
+            return;
+        name = z + strlen("zoneinfo/");
+        if (!zone_name_ok(name))
+            return;
+        snprintf(path, sizeof path, "/etc/localtime");
+    }
+    if (!strcmp(name, "UTC") || !strcmp(name, "Etc/UTC") || !load_zone_file(path, &g_host_zone.rule))
+        return;
+    strncpy(g_host_zone.name, name, LOCATION_NAME_SIZE - 1);
+    g_host_zone.ok = true;
+#endif
+}
+
+static bool host_zone_is(const char *name)
+{
+    return g_host_zone.ok && strncmp(g_host_zone.name, name, LOCATION_NAME_SIZE) == 0;
+}
+
+static void zone_rule_of(const char *name, tz_rule *rule)
+{
+    if (host_zone_is(name))
+        *rule = g_host_zone.rule;
+    else
+        tz_utc(rule);
+}
+
 static void time_reset(void)
 {
     if (g_time.shm)
@@ -169,8 +257,14 @@ static void time_reset(void)
     for (uint32_t i = 0; i < CLOCKS; i++)
         g_time.clocks[i].tracks_host = true;
     g_time.auto_correction = true;
-    tz_utc(&g_time.rule);
-    memcpy(g_time.location, "UTC", 4);
+    host_zone_load();
+    if (g_host_zone.ok) {
+        g_time.rule = g_host_zone.rule;
+        memcpy(g_time.location, g_host_zone.name, LOCATION_NAME_SIZE);
+    } else {
+        tz_utc(&g_time.rule);
+        memcpy(g_time.location, "UTC", 4);
+    }
     memcpy(g_time.rule_version, "relift-tz-utc-00", 16);
     memcpy(g_time.location_updated.source, g_time.source, 16);
     memcpy(g_time.auto_correction_updated.source, g_time.source, 16);
@@ -396,8 +490,14 @@ static const rl_ipc_class steady_clock_class = { "time::ISteadyClock", steady_cl
 static const char *const k_location_names[] = { "Etc/UTC", "UTC" };
 #define N_LOCATIONS ((uint32_t)(sizeof k_location_names / sizeof k_location_names[0]))
 
+static uint32_t location_count(void) { return N_LOCATIONS + (g_host_zone.ok ? 1u : 0u); }
+
+static const char *location_at(uint32_t i) { return i < N_LOCATIONS ? k_location_names[i] : g_host_zone.name; }
+
 static bool location_known(const char *name)
 {
+    if (host_zone_is(name))
+        return true;
     for (uint32_t i = 0; i < N_LOCATIONS; i++)
         if (strncmp(k_location_names[i], name, LOCATION_NAME_SIZE) == 0)
             return true;
@@ -433,7 +533,7 @@ static rl_result zone_set_device_location_name(rl_ipc_req *r)
     if (!location_known(name))
         return TIME_ZONE_NOT_FOUND;
     hos_lock();
-    tz_utc(&g_time.rule);
+    zone_rule_of(name, &g_time.rule);
     memcpy(g_time.location, name, LOCATION_NAME_SIZE);
     g_time.location_updated.base_time = steady_seconds();
     hos_unlock();
@@ -442,7 +542,7 @@ static rl_result zone_set_device_location_name(rl_ipc_req *r)
 
 static rl_result zone_get_total_location_name_count(rl_ipc_req *r)
 {
-    *(uint32_t *)rl_ipc_out(r, 4) = N_LOCATIONS;
+    *(uint32_t *)rl_ipc_out(r, 4) = location_count();
     return KR_SUCCESS;
 }
 
@@ -456,10 +556,10 @@ static rl_result zone_load_location_name_list(rl_ipc_req *r)
         return SF_RESULT_INVALID_HEADER;
     rl_ipc_buf b = rl_ipc_auto_out(r, 0);
     uint32_t room = (uint32_t)(b.size / LOCATION_NAME_SIZE), n = 0;
-    uint8_t names[N_LOCATIONS][LOCATION_NAME_SIZE];
+    uint8_t names[N_LOCATIONS + 1][LOCATION_NAME_SIZE];
     memset(names, 0, sizeof names);
-    for (uint32_t i = index; i < N_LOCATIONS && n < room; i++, n++)
-        strncpy((char *)names[n], k_location_names[i], LOCATION_NAME_SIZE - 1);
+    for (uint32_t i = index; i < location_count() && n < room; i++, n++)
+        strncpy((char *)names[n], location_at(i), LOCATION_NAME_SIZE - 1);
     if (n && !rl_ipc_buf_write(&b, names, (uint64_t)n * LOCATION_NAME_SIZE))
         return KR_INVALID_MEM_STATE;
     *(uint32_t *)rl_ipc_out(r, 4) = n;
@@ -487,7 +587,7 @@ static rl_result zone_load_time_zone_rule(rl_ipc_req *r)
     tz_rule *rule = malloc(sizeof *rule);
     if (!rule)
         return KR_OUT_OF_RESOURCE;
-    tz_utc(rule);
+    zone_rule_of(name, rule);
     rl_result rc = write_rule(r, rule);
     free(rule);
     return rc;
