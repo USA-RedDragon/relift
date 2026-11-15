@@ -161,6 +161,23 @@ pub trait Frontend {
         None
     }
 
+    /// The C functions a device read and a device write call, with the
+    /// signatures of `rl_io_read` and `rl_io_write` (docs/abi.md section
+    /// 13), which are the default. A CPU layer that drives its devices
+    /// itself names its own.
+    fn io_calls(&self) -> (&'static str, &'static str) {
+        ("rl_io_read", "rl_io_write")
+    }
+
+    /// The `int` C call of the sync point of `b`, whose exit goes to the
+    /// guest address `next` (a C expression); `None` keeps
+    /// `rl_sync(c, mem, next)`. The call returns `RL_OK` or `RL_PENDING`
+    /// like `rl_sync`.
+    fn sync_call(&self, b: &Block, next: &str) -> Option<String> {
+        let _ = (b, next);
+        None
+    }
+
     /// The registers [`Frontend::fp`] expressions read or write (the FP
     /// control and status registers).
     fn fp_state(&self) -> Vec<Reg>;

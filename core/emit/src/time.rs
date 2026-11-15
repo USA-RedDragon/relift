@@ -112,6 +112,7 @@ pub(crate) fn emit(
         _ => "an I/O access",
     };
     let clk = fe.clock().ok_or_else(|| what.to_string())?;
+    let (read_call, write_call) = fe.io_calls();
     let bits = b.addr_width.bits().min(64);
     let wv = |v: Value| b.insts[v.index()].width.unwrap_or(Width::W1);
     Ok(match &inst.op {
@@ -136,7 +137,7 @@ pub(crate) fn emit(
                     ));
                     for (off, size) in pieces(n) {
                         let call =
-                            format!("rl_io_read(c, mem, a_ + {off}, {size}) & {}", mask(size));
+                            format!("{read_call}(c, mem, a_ + {off}, {size}) & {}", mask(size));
                         s.push_str(&format!(" r_ |= (({t})({call})) << {};", 8 * off));
                     }
                     s.push_str(&format!(
@@ -180,7 +181,7 @@ pub(crate) fn emit(
                     s.push_str(&format!(" if ({cond}) {{ {clk}.{BUDGET} = {BUDGET};"));
                     for (off, size) in pieces(n) {
                         s.push_str(&format!(
-                            " rl_io_write(c, mem, a_ + {off}, {size}, (uint64_t)((d_ >> {}) & {}));",
+                            " {write_call}(c, mem, a_ + {off}, {size}, (uint64_t)((d_ >> {}) & {}));",
                             8 * off,
                             mask(size)
                         ));
@@ -206,9 +207,13 @@ pub(crate) fn preempt(clk: &str) -> String {
 }
 
 /// The statements of a sync point: when the budget is spent, store the
-/// context, call `rl_sync` with the exit target `next` and reload.
-pub(crate) fn sync(next: &str) -> String {
+/// context, call `rl_sync` (or the frontend's [`Frontend::sync_call`]) with
+/// the exit target `next` and reload.
+pub(crate) fn sync(fe: &dyn Frontend, b: &Block, next: &str) -> String {
+    let call = fe
+        .sync_call(b, next)
+        .unwrap_or_else(|| format!("rl_sync(c, mem, {next})"));
     format!(
-        "    if (RL_UNLIKELY({BUDGET} <= 0)) {{\n        RL_STORE();\n        rc = rl_sync(c, mem, {next});\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n        RL_RELOAD();\n    }}\n"
+        "    if (RL_UNLIKELY({BUDGET} <= 0)) {{\n        RL_STORE();\n        rc = {call};\n        if (RL_UNLIKELY(rc))\n            return RL_PENDING;\n        RL_RELOAD();\n    }}\n"
     )
 }
