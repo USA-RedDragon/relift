@@ -13,8 +13,11 @@
 #include "a64.h"
 #include "hostlib.h"
 #include "runner.h"
+#include "services.h"
 #include "vi.h"
 #include "vkf.h"
+
+#include <relift/settings.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -1686,31 +1689,6 @@ TEST(vk_a_feature_the_host_lacks_is_hidden_and_refused)
     uint64_t dev;
     CHECK_EQ(create_device(pd, gput(&want, sizeof want), &dev), VK_ERROR_FEATURE_NOT_PRESENT);
     finish(0);
-    uint64_t gl = galloc(8);
-    CHECK_EQ(VKR(G("vkCreateDescriptorSetLayout", dev, gput(&lci, sizeof lci), 0, gl)), VK_SUCCESS);
-    uint64_t layout = g64(gl);
-    uint64_t pool = ubo_pool(dev, 0);
-    CHECK(pool != 0);
-    CHECK(ubo_sets(dev, pool, layout, 3) != 0);
-    CHECK(ubo_sets(dev, pool, layout, 64) != 0);
-    CHECK(ubo_sets(dev, pool, layout, 2) != 0);
-    CHECK_EQ(VKR(G("vkResetDescriptorPool", dev, pool, 0)), VK_SUCCESS);
-    CHECK(ubo_sets(dev, pool, layout, 40) != 0);
-    G("vkDestroyDescriptorPool", dev, pool, 0);
-    uint64_t fpool = ubo_pool(dev, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
-    CHECK(fpool != 0);
-    uint64_t sets = ubo_sets(dev, fpool, layout, 20);
-    CHECK(sets != 0);
-    CHECK_EQ(VKR(G("vkFreeDescriptorSets", dev, fpool, 20, sets)), VK_SUCCESS);
-    sets = ubo_sets(dev, fpool, layout, 20);
-    CHECK(sets != 0);
-    CHECK_EQ(VKR(G("vkFreeDescriptorSets", dev, fpool, 1, sets + 8u * 19)), VK_SUCCESS);
-    G("vkDestroyDescriptorPool", dev, fpool, 0);
-    CHECK(ubo_sets(dev, ubo_pool(dev, 0), layout, 9) != 0);
-    G("vkDestroyDescriptorSetLayout", dev, layout, 0);
-    G("vkDestroyDevice", dev, 0);
-    G("vkDestroyInstance", g_inst, 0);
-    CHECK_EQ(rl_vk_live_handles(), 0);
 }
 
 static void record_fill(uint64_t cb, uint64_t buf, uint32_t value, uint32_t flags)
@@ -1790,4 +1768,223 @@ TEST(vk_secondary_command_buffers_submit_through_a_primary)
     G("vkDestroyDevice", dev, 0);
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+static void keep_render_pass(uint64_t dev, bool two, uint64_t *pass)
+{
+    uint64_t out = galloc(8);
+    *pass = 0;
+    VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription sub = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = GP(gput(&ref, sizeof ref)),
+    };
+    VkAttachmentDescription a = {
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    };
+    if (!two) {
+        VkRenderPassCreateInfo ci = {
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+            .attachmentCount = 1,
+            .pAttachments = GP(gput(&a, sizeof a)),
+            .subpassCount = 1,
+            .pSubpasses = GP(gput(&sub, sizeof sub)),
+        };
+        uint64_t gci = gput(&ci, sizeof ci);
+        uint64_t gatt = (uint64_t)(uintptr_t)ci.pAttachments;
+        CHECK_EQ(VKR(G("vkCreateRenderPass", dev, gci, 0, out)), VK_SUCCESS);
+        CHECK_EQ(g32(gatt + offsetof(VkAttachmentDescription, loadOp)), VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+        *pass = g64(out);
+        return;
+    }
+    VkAttachmentReference2 ref2 = {
+        .sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2,
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+    };
+    VkSubpassDescription2 sub2 = {
+        .sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2,
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = GP(gput(&ref2, sizeof ref2)),
+    };
+    VkAttachmentDescription2 a2 = {
+        .sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2,
+        .format = a.format,
+        .samples = a.samples,
+        .loadOp = a.loadOp,
+        .storeOp = a.storeOp,
+        .stencilLoadOp = a.stencilLoadOp,
+        .stencilStoreOp = a.stencilStoreOp,
+        .initialLayout = a.initialLayout,
+        .finalLayout = a.finalLayout,
+    };
+    VkRenderPassCreateInfo2 ci2 = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
+        .attachmentCount = 1,
+        .pAttachments = GP(gput(&a2, sizeof a2)),
+        .subpassCount = 1,
+        .pSubpasses = GP(gput(&sub2, sizeof sub2)),
+    };
+    CHECK_EQ(VKR(G("vkCreateRenderPass2", dev, gput(&ci2, sizeof ci2), 0, out)), VK_SUCCESS);
+    *pass = g64(out);
+}
+
+/** @brief Draws half of a known image in a DONT_CARE render pass; *kept is the pixels of the other half that kept their contents. */
+static void dont_care_scene(const char *keep, bool two, char *name, uint32_t *kept)
+{
+    *kept = 0;
+    CHECK_EQ(rl_settings_set("vk.keep_attachments", keep), RL_SETTING_OK);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t pd = pds[0];
+    device_name(pd, name);
+    uint32_t qf = queue_family(pd, VK_QUEUE_GRAPHICS_BIT);
+    uint64_t dev = make_device(pd, qf, NULL, 0);
+    CHECK(dev != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, qf, 0, gq);
+    uint64_t queue = g64(gq);
+    mapped_buf rb;
+    CHECK_EQ(make_mapped(pd, dev, W * H * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rb), 0);
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = { W, H, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    uint64_t gi = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)), VK_SUCCESS);
+    uint64_t image = g64(gi);
+    uint64_t greq = galloc(sizeof(VkMemoryRequirements));
+    G("vkGetImageMemoryRequirements", dev, image, greq);
+    VkMemoryRequirements req;
+    memcpy(&req, g_mem + greq, sizeof req);
+    uint32_t t = memory_type(pd, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = req.size, .memoryTypeIndex = t };
+    uint64_t gim = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateMemory", dev, gput(&mai, sizeof mai), 0, gim)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkBindImageMemory", dev, image, g64(gim), 0)), VK_SUCCESS);
+    VkImageViewCreateInfo vci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = (VkImage)GP(image),
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    uint64_t gv = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gv)), VK_SUCCESS);
+    uint64_t view = g64(gv);
+    uint64_t pass;
+    keep_render_pass(dev, two, &pass);
+    CHECK(pass != 0);
+    VkFramebufferCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = (VkRenderPass)GP(pass),
+        .attachmentCount = 1,
+        .pAttachments = GP(gput(&view, 8)),
+        .width = W,
+        .height = H,
+        .layers = 1,
+    };
+    uint64_t gfb = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFramebuffer", dev, gput(&fci, sizeof fci), 0, gfb)), VK_SUCCESS);
+    uint64_t fb = g64(gfb);
+
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+    barrier(cb, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkClearColorValue green = { .float32 = { 0.0f, 1.0f, 0.0f, 1.0f } };
+    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    G("vkCmdClearColorImage", cb, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, gput(&green, sizeof green), 1, gput(&range, sizeof range));
+    barrier(cb, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderPassBeginInfo rbi = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = (VkRenderPass)GP(pass),
+        .framebuffer = (VkFramebuffer)GP(fb),
+        .renderArea = { { 0, 0 }, { W, H } },
+    };
+    G("vkCmdBeginRenderPass", cb, gput(&rbi, sizeof rbi), VK_SUBPASS_CONTENTS_INLINE);
+    VkClearAttachment ca = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .clearValue.color.float32 = { 1.0f, 0.0f, 0.0f, 1.0f } };
+    VkClearRect rect = { .rect = { { 0, 0 }, { W / 2, H } }, .layerCount = 1 };
+    G("vkCmdClearAttachments", cb, 1, gput(&ca, sizeof ca), 1, gput(&rect, sizeof rect));
+    G("vkCmdEndRenderPass", cb);
+    VkBufferImageCopy bic = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { W, H, 1 } };
+    G("vkCmdCopyImageToBuffer", cb, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb.buf, 1, gput(&bic, sizeof bic));
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", queue)), VK_SUCCESS);
+
+    uint32_t drawn = 0, left = 0;
+    for (uint32_t y = 0; y < H; y++)
+        for (uint32_t x = 0; x < W; x++) {
+            uint32_t v = g32(rb.ptr + 4 * (y * W + x));
+            if (x < W / 2)
+                drawn += v == 0xFF0000FFu;
+            else
+                left += v == 0xFF00FF00u;
+        }
+    CHECK_EQ(drawn, W * H / 2);
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyFramebuffer", dev, fb, 0);
+    G("vkDestroyRenderPass", dev, pass, 0);
+    G("vkDestroyImageView", dev, view, 0);
+    G("vkDestroyImage", dev, image, 0);
+    G("vkFreeMemory", dev, g64(gim), 0);
+    G("vkDestroyBuffer", dev, rb.buf, 0);
+    G("vkFreeMemory", dev, rb.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+    *kept = left;
+}
+
+TEST(vk_dont_care_attachments_keep_contents)
+{
+    CHECK_EQ(boot(NULL), 0);
+    rl_switch_declare_settings();
+    char name[256];
+    for (int two = 0; two < 2; two++) {
+        uint32_t kept;
+        dont_care_scene("off", two, name, &kept);
+        fprintf(stderr, "  %s: render pass%s with the guest's DONT_CARE ops kept %u of %u pixels\n", name, two ? "2" : "", kept,
+                W * H / 2);
+        dont_care_scene("on", two, name, &kept);
+        CHECK_EQ(kept, W * H / 2);
+        dont_care_scene("auto", two, name, &kept);
+        CHECK_EQ(kept, W * H / 2);
+    }
+    rl_settings_reset();
 }
