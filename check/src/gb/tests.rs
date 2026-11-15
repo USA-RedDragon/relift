@@ -417,7 +417,7 @@ fn halt_bug_on_ei_and_a_late_interrupt_in_halt_match_the_oracle() {
 }
 
 #[test]
-fn a_stack_push_into_the_hdma_registers_is_skipped() {
+fn a_write_to_a_dma_register_is_skipped() {
     use super::lift::{Mutation, Options, run_lift};
     assert!(
         run_lift(&Options {
