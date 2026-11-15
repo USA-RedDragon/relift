@@ -53,6 +53,8 @@ void rl_switch_declare_settings(void);
 void rl_switch_declare_ports(void);
 /** @brief Declares the on-screen controller port once it is wanted; call again after reading arguments, which can ask for it. */
 void rl_switch_declare_touchpad_port(void);
+/** @brief Sets the process's pointer authentication keys and cipher from the cpu.pac settings. */
+void rl_switch_apply_pac_settings(void);
 /** @brief Registers acc:u0 with one local user, the applet manager's preselected user. */
 void rl_srv_install_acc(void);
 /** @brief Registers mm:u, the multimedia clock request service. */

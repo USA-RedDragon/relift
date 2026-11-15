@@ -71,6 +71,7 @@ impl Frontend for Arm64 {
             "relift/arm64/fp_slow.h",
             "relift/arm64/fp16.h",
             "relift/arm64/crypto.h",
+            "relift/arm64/pac.h",
         ]
     }
 
@@ -88,6 +89,7 @@ impl Frontend for Arm64 {
             _ if reg == regs::FPSR => Home::Field("c->fpsr".into()),
             _ if reg == regs::TPIDR_EL0 => Home::Field("c->tpidr_el0".into()),
             _ if reg == regs::FP_FLAGS => Home::Field("RL_FP_FLAGS_ON".into()),
+            73..=82 => Home::Field(format!("rl_pac_keys[{}]", i - 73)),
             _ => Home::Field("c->tpidrro_el0".into()),
         }
     }
@@ -206,6 +208,11 @@ impl Frontend for Arm64 {
         })
     }
 
+    fn pac(&self, args: [&str; 4]) -> Option<String> {
+        let [d, m, k0, k1] = args;
+        Some(format!("rl_pac({d}, {m}, {k0}, {k1})"))
+    }
+
     fn crypto(&self, op: CryptoOp, arg: &str) -> Option<String> {
         Some(match op {
             CryptoOp::AesSubBytes => format!("rl_aes_subbytes({arg})"),
@@ -312,7 +319,11 @@ mod tests {
             f.home(regs::TPIDRRO_EL0),
             Home::Field("c->tpidrro_el0".into())
         );
-        assert_eq!(f.regs().len(), 73);
+        assert_eq!(
+            f.home(regs::PacKey::GA.reg(false)),
+            Home::Field("rl_pac_keys[9]".into())
+        );
+        assert_eq!(f.regs().len(), 83);
     }
 
     #[test]

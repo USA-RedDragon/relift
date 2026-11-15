@@ -8,11 +8,14 @@
 #include "hid_priv.h"
 #include "services.h"
 
+#include <relift/arm64/pac.h>
 #include <relift/settings.h>
 #include <relift/touchpad.h>
 
 static const char *const g_keep[] = { "auto", "on", "off" };
 static const char *const g_layout[] = { "compact", "console" };
+
+static const char *const g_pac_choices[] = { "fast", "qarma5" };
 
 static const rl_setting_def g_defs[] = {
     {
@@ -98,7 +101,32 @@ static const rl_setting_def g_defs[] = {
         .env = "RELIFT_FIXED_STEP",
         .def_int = 0,
     },
+    {
+        .key = "cpu.pac",
+        .type = RL_SETTING_ENUM,
+        .label = "Pointer authentication cipher",
+        .description = "fast is a keyed hash; qarma5 is the console's QARMA5. A game sees the same behavior with "
+                       "either, since it cannot learn the keys",
+        .env = "RELIFT_PAC",
+        .choices = g_pac_choices,
+        .nchoices = 2,
+    },
+    {
+        .key = "cpu.pac_seed",
+        .type = RL_SETTING_INT,
+        .label = "Pointer authentication key seed",
+        .description = "The seed of the process's pointer authentication keys, which the console picks at random",
+        .env = "RELIFT_PAC_SEED",
+        .min_int = 0,
+        .max_int = INT64_MAX,
+    },
 };
+
+void rl_switch_apply_pac_settings(void)
+{
+    rl_pac_seed((uint64_t)rl_setting_int("cpu.pac_seed"));
+    rl_pac_mode = rl_setting_enum("cpu.pac") == 1 ? RL_PAC_QARMA5 : RL_PAC_FAST;
+}
 
 void rl_switch_declare_settings(void)
 {
