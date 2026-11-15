@@ -1,10 +1,12 @@
 //! The ZBIC and Zstandard decoder: interpolative table descriptions made by
-//! the reference encoder, a ZBIC frame of synthetic data and plain zstd
-//! frames of the `zstd` crate through the same
+//! the reference encoder, a ZBIC frame of synthetic data, ZBIC NSO
+//! segments, and plain zstd frames of the `zstd` crate through the same
 //! block decoder.
 
 use std::io::Write;
 
+use relift_switch_formats::nso::{self, FLAG_ZBIC, Nso, NsoSpec};
+use relift_switch_formats::sha256;
 use relift_switch_formats::zbic::{Flavor, ZBIC_MAGIC, decompress, read_counts_interpolative};
 
 const MIXED: &[u8] = include_bytes!("zbic/mixed.zbic");
@@ -121,6 +123,79 @@ fn zbic_frame_of_synthetic_data() {
             assert_eq!(out.len(), MIXED_SIZE);
         }
     }
+}
+
+fn stored_frame(data: &[u8]) -> Vec<u8> {
+    let mut f = ZBIC_MAGIC.to_vec();
+    f.push(0xA0);
+    f.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+    let chunks: Vec<&[u8]> = data.chunks(100_000).collect();
+    for (i, c) in chunks.iter().enumerate() {
+        let rle = c.iter().all(|&x| x == c[0]);
+        let last = u32::from(i + 1 == chunks.len());
+        let h = u32::try_from(c.len()).unwrap() << 3 | u32::from(rle) << 1 | last;
+        f.extend_from_slice(&h.to_le_bytes()[..3]);
+        f.extend_from_slice(if rle { &c[..1] } else { c });
+    }
+    f
+}
+
+fn zbic_nso(text: &[u8], text_frame: &[u8], rodata: &[u8], data: &[u8]) -> Vec<u8> {
+    let plain = nso::build(&NsoSpec {
+        text: text.to_vec(),
+        rodata: rodata.to_vec(),
+        data: data.to_vec(),
+        bss: 0x40,
+        build_id: [7; 32],
+        ..NsoSpec::default()
+    });
+    let mut h = plain[..nso::HEADER_SIZE].to_vec();
+    let flags = u32::from_le_bytes(h[0xC..0x10].try_into().unwrap()) | 7 | 0x40 | FLAG_ZBIC;
+    h[0xC..0x10].copy_from_slice(&flags.to_le_bytes());
+    let frames = [
+        text_frame.to_vec(),
+        stored_frame(rodata),
+        stored_frame(data),
+    ];
+    let mut body = Vec::new();
+    for (i, f) in frames.iter().enumerate() {
+        let off = u32::try_from(nso::HEADER_SIZE + body.len()).unwrap();
+        h[0x10 + i * 0x10..0x14 + i * 0x10].copy_from_slice(&off.to_le_bytes());
+        h[0x60 + i * 4..0x64 + i * 4]
+            .copy_from_slice(&u32::try_from(f.len()).unwrap().to_le_bytes());
+        body.extend_from_slice(f);
+    }
+    h.extend_from_slice(&body);
+    h
+}
+
+#[test]
+fn zbic_nso_segments() {
+    let text = mixed(MIXED_SIZE, 1);
+    let rodata: Vec<u8> = (0..150_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let data = vec![0x55u8; 4096];
+    let b = zbic_nso(&text, MIXED, &rodata, &data);
+    let n = Nso::parse(&b).expect("ZBIC NSO parses");
+    let ro = n.segments[1].memory_offset as usize;
+    let da = n.segments[2].memory_offset as usize;
+    assert_eq!(&n.image[..text.len()], text.as_slice());
+    assert_eq!(&n.image[ro..ro + rodata.len()], rodata.as_slice());
+    assert_eq!(&n.image[da..da + data.len()], data.as_slice());
+    let flat = n.to_uncompressed();
+    let flags = u32::from_le_bytes(flat[0xC..0x10].try_into().unwrap());
+    assert_eq!(
+        flags, 0x78,
+        "compression and ZBIC flags cleared, the others kept"
+    );
+    assert_eq!(Nso::parse(&flat).unwrap().image, n.image);
+    let mut lz4 = b.clone();
+    lz4[0xC] &= 0x7F;
+    assert!(Nso::parse(&lz4).is_err());
+    let mut bad = b;
+    let at = nso::HEADER_SIZE + MIXED.len() / 2;
+    bad[at] ^= 0x10;
+    assert!(Nso::parse(&bad).is_err());
+    assert_eq!(sha256(&text), sha256(&n.image[..text.len()]));
 }
 
 fn zstd_frame(data: &[u8], level: i32, checksum: bool) -> Vec<u8> {

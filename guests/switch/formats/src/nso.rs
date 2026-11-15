@@ -1,9 +1,18 @@
-//! NSO executables: LZ4-compressed segments, the module path in .rodata,
-//! MOD0 and the dynamic symbol table.
+//! NSO executables: LZ4- or ZBIC-compressed segments, the module path in
+//! .rodata, MOD0 and the dynamic symbol table.
+//!
+//! Header flag bits 0..3 mark compressed segments and bits 3..6 segments
+//! whose SHA-256 is checked; bit 6 asks for execute-only text and bit 7
+//! selects ZBIC ([`crate::zbic`]) instead of LZ4 for every compressed
+//! segment.
 
 use crate::bytes::sha256;
 use crate::bytes::{array, hex, i32_at, slice, to_usize, u8_at, u16_at, u32_at, u64_at};
 use crate::error::{Error, Result, malformed};
+use crate::zbic;
+
+/// Header flag: compressed segments use ZBIC rather than LZ4.
+pub const FLAG_ZBIC: u32 = 0x80;
 
 /// The size of an NSO header.
 pub const HEADER_SIZE: usize = 0x100;
@@ -79,8 +88,8 @@ impl Nso {
     ///
     /// # Errors
     ///
-    /// Bad magic, overlapping or out-of-range segments, an LZ4 error or a
-    /// segment hash mismatch.
+    /// Bad magic, overlapping or out-of-range segments, an LZ4 or ZBIC
+    /// error or a segment hash mismatch.
     pub fn parse(b: &[u8]) -> Result<Nso> {
         if b.get(..4) != Some(b"NSO0") {
             return malformed("NSO: bad magic");
@@ -104,7 +113,10 @@ impl Nso {
             let name = ["text", "rodata", "data"][i];
             let raw = slice(b, file_off, file_size, name)?;
             let size_us = size as usize;
-            let data = if flags & (1 << i) != 0 {
+            let data = if flags & (1 << i) != 0 && flags & FLAG_ZBIC != 0 {
+                zbic::decompress(zbic::Flavor::Zbic, raw, size_us)
+                    .map_err(|e| Error::Format(format!("NSO {name}: {e}")))?
+            } else if flags & (1 << i) != 0 {
                 let mut out = vec![0u8; size_us];
                 let n = lz4_flex::block::decompress_into(raw, &mut out)
                     .map_err(|e| Error::Format(format!("NSO {name}: LZ4: {e}")))?;
@@ -212,13 +224,13 @@ impl Nso {
     }
 
     /// An uncompressed NSO: the original header with the compression flags
-    /// cleared, the module-name size zeroed, each segment's file offset at
+    /// (and the ZBIC flag) cleared, the module-name size zeroed, each segment's file offset at
     /// `0x100 + memory offset` and its file size the decompressed size,
     /// followed by the image. This is the layout of hactool's uncompressed
     /// NSO output; the segment hashes stay valid.
     pub fn to_uncompressed(&self) -> Vec<u8> {
         let mut h = self.header;
-        let flags = u32::from_le_bytes([h[0xC], h[0xD], h[0xE], h[0xF]]) & !7;
+        let flags = u32::from_le_bytes([h[0xC], h[0xD], h[0xE], h[0xF]]) & !(7 | FLAG_ZBIC);
         h[0xC..0x10].copy_from_slice(&flags.to_le_bytes());
         h[0x2C..0x30].copy_from_slice(&0u32.to_le_bytes());
         for (i, s) in self.segments.iter().enumerate() {

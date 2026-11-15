@@ -1,5 +1,5 @@
-//! Readers for decrypted Switch files: romfs, NSO, NRO, NPDM, NUP and
-//! IPSwitch `.pchtxt` patches, and
+//! Readers for decrypted Switch files: romfs, NSO (LZ4 and ZBIC segments),
+//! NRO, NPDM, NUP and IPSwitch `.pchtxt` patches, and
 //! the import of a decrypted dump (a `.nup`, or an extracted
 //! `exefs`/`romfs` tree) into a project.
 //!
