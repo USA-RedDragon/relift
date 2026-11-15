@@ -37,6 +37,10 @@
 #endif
 #endif
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 static void *os_reserve(uint64_t len)
 {
 #if defined(_WIN32)
@@ -107,10 +111,20 @@ static int prot_of(uint32_t perm)
 
 int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
 {
+    const rl_guest_desc *g = rl_core_guest();
+    if (!g || bits > g->address_bits || bits >= 64) {
+        memset(vm, 0, sizeof *vm);
+        return -1;
+    }
+    return rl_vm_init_size(vm, 1ull << bits, host_page);
+}
+
+int rl_vm_init_size(rl_vm *vm, uint64_t size, uint64_t host_page)
+{
     uint64_t real = rl_os_page_size();
     const rl_guest_desc *g = rl_core_guest();
     memset(vm, 0, sizeof *vm);
-    if (!g || bits > g->address_bits)
+    if (!g || size == 0 || (g->address_bits < 64 && size > 1ull << g->address_bits))
         return -1;
     if (host_page == 0)
         host_page = rl_cfg()->host_page;
@@ -122,7 +136,9 @@ int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page)
         return -1;
     vm->host_page = host_page;
     vm->guest_page = g->page_size;
-    vm->size = 1ull << bits;
+    if (size & (host_page - 1))
+        return -1;
+    vm->size = size;
     vm->map_len = RL_VM_GUARD_LO + vm->size + RL_VM_GUARD_HI + host_page;
     void *p = os_reserve(vm->map_len);
     if (!p) {
@@ -409,6 +425,52 @@ int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
     (void)size;
     (void)s;
     return -1;
+}
+#elif defined(__APPLE__)
+int rl_shm_create(rl_shm *s, uint64_t size)
+{
+    uint64_t page = rl_os_page_size();
+    memset(s, 0, sizeof *s);
+    s->fd = -1;
+    size = align_up(size ? size : 1, page < 0x4000 ? 0x4000 : page);
+    vm_address_t at = 0;
+    if (vm_allocate(mach_task_self(), &at, (vm_size_t)size, VM_FLAGS_ANYWHERE) != KERN_SUCCESS)
+        return -1;
+    memory_object_size_t got = size;
+    mach_port_t entry = MACH_PORT_NULL;
+    kern_return_t kr = mach_make_memory_entry_64(mach_task_self(), &got, (memory_object_offset_t)at,
+                                                 VM_PROT_READ | VM_PROT_WRITE | MAP_MEM_VM_SHARE, &entry, MACH_PORT_NULL);
+    if (kr != KERN_SUCCESS || got < size) {
+        if (kr == KERN_SUCCESS)
+            mach_port_deallocate(mach_task_self(), entry);
+        vm_deallocate(mach_task_self(), at, (vm_size_t)size);
+        return -1;
+    }
+    s->handle = (void *)(uintptr_t)entry;
+    s->host = (uint8_t *)(uintptr_t)at;
+    s->size = size;
+    return 0;
+}
+
+void rl_shm_destroy(rl_shm *s)
+{
+    if (s->host)
+        vm_deallocate(mach_task_self(), (vm_address_t)(uintptr_t)s->host, (vm_size_t)s->size);
+    if (s->handle)
+        mach_port_deallocate(mach_task_self(), (mach_port_t)(uintptr_t)s->handle);
+    memset(s, 0, sizeof *s);
+    s->fd = -1;
+}
+
+int rl_vm_map_shm(rl_vm *vm, uint64_t addr, uint64_t size, const rl_shm *s)
+{
+    if (((addr | size) & (vm->host_page - 1)) || size > s->size || !rl_vm_contains(vm, addr, size))
+        return -1;
+    vm_address_t at = (vm_address_t)(uintptr_t)(vm->base + addr);
+    kern_return_t kr = vm_map(mach_task_self(), &at, (vm_size_t)size, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+                              (mach_port_t)(uintptr_t)s->handle, 0, FALSE, VM_PROT_NONE, VM_PROT_READ | VM_PROT_WRITE,
+                              VM_INHERIT_NONE);
+    return kr == KERN_SUCCESS ? 0 : -1;
 }
 #else
 int rl_shm_create(rl_shm *s, uint64_t size)

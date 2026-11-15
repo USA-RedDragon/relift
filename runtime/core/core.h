@@ -252,6 +252,12 @@ typedef struct rl_vm {
  * host_page 0 means the configured or real page size.
  */
 RL_RUNTIME_API int rl_vm_init(rl_vm *vm, unsigned bits, uint64_t host_page);
+/**
+ * @brief Like rl_vm_init with a guest space of size bytes, a multiple of the
+ * host page, for hosts that cannot reserve a whole layout (iOS caps an app's
+ * address space near 64 GiB, guards included).
+ */
+RL_RUNTIME_API int rl_vm_init_size(rl_vm *vm, uint64_t size, uint64_t host_page);
 /** @brief Releases the reservation and the map. */
 RL_RUNTIME_API void rl_vm_destroy(rl_vm *vm);
 /** @brief Sets [addr, addr+size) to perm and tag. Both page aligned. Returns 0 or -1 (host failure). */
