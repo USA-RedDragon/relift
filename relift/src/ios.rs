@@ -508,6 +508,7 @@ pub fn info_plist(b: &IosBuild, exe: &str, label: &str) -> String {
   <key>LSRequiresIPhoneOS</key><true/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
   <key>MinimumOSVersion</key><string>{MIN_IOS}</string>
+  <key>UIApplicationSupportsIndirectInputEvents</key><true/>
   <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
   <key>UIFileSharingEnabled</key><true/>
   <key>UILaunchScreen</key><dict/>
