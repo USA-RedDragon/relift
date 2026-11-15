@@ -157,6 +157,21 @@ pub enum PacKey {
     GA,
 }
 
+/// The keys differential checks run with, in slot order (each key's high
+/// then low half): splitmix64 from the seed `0x5041_432d_4b45_5953`.
+pub const CHECK_PAC_KEYS: [u64; 10] = [
+    0x2eb2_b0d2_211b_2edf,
+    0x4c78_4dc6_d2cf_feba,
+    0x38ea_6ed4_fec1_3473,
+    0xaec0_a835_17b1_49ad,
+    0xfd9c_03e5_0d7d_bd1b,
+    0xbf4f_9867_2ac7_2be8,
+    0x5403_f122_8efd_5e06,
+    0x0ed7_a156_a4b6_fb36,
+    0x0b90_a9ee_150d_85bf,
+    0x0874_0121_ed50_65d6,
+];
+
 impl PacKey {
     /// Every key, in slot order.
     pub const ALL: [PacKey; 5] = [PacKey::IA, PacKey::IB, PacKey::DA, PacKey::DB, PacKey::GA];
