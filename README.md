@@ -150,13 +150,13 @@ build its settings and input screens (docs/input.md).
 | `relift-gbrom` | Game Boy | show a ROM header and validate its checksums; `functions` lists functions per bank, unresolved transfers and code run from RAM |
 | `relift-gbarom` | Game Boy Advance | show a ROM header, validate logo hash, complement and size, list save library strings |
 
-`relift coverage` (`--json` for a machine-readable form, `--module <name>`
+`relift coverage` (Switch projects; `--json` for a machine-readable form, `--module <name>`
 for one module) lists, per module, the functions found, the instructions that
 do not lift, each indirect call or computed jump left to the dispatcher with
 its reason (`slot`, `table` or `pointer`), and the hint addresses earlier dev
 runs recorded in `game.toml`.
 
-`relift diff <function>` builds a dev build, runs it under gdb and, at each
+`relift diff <function>` (Switch projects) builds a dev build, runs it under gdb and, at each
 call of the function, runs the same function in the reference interpreter from
 the same registers and live guest memory. It compares the registers and every
 page the interpreter touched (`--count`, `--skip`, `--engine`). It needs gdb
