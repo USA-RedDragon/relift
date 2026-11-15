@@ -478,6 +478,11 @@ pub(crate) fn eval(
                     let (m, v) = known(a, cx.width(*x));
                     Ev::A(bits(m >> lo, v >> lo, w))
                 }
+                Abs::S(s)
+                    if s.base == Base::Entry(SP) && s.align == 0 && w + u32::from(*lo) <= 2 =>
+                {
+                    Ev::A(Abs::K(u128::from(s.off >> lo) & mask(w)))
+                }
                 _ => Ev::A(Abs::Top),
             },
             Op::Concat(h, l) => {
@@ -649,6 +654,16 @@ fn load(
     }
 }
 
+/// Whether word accesses at `a` and `b` reach different words: offsets
+/// from one base that differ by a nonzero multiple of four.
+fn other_word(a: Sym, b: Sym) -> bool {
+    a.base == b.base
+        && a.align <= 2
+        && b.align <= 2
+        && a.off != b.off
+        && a.off.wrapping_sub(b.off).is_multiple_of(4)
+}
+
 fn store(out: &mut Out, addr: Abs, n: u8, v: Abs, scratch: Option<&mut Scratch>) {
     if addr.stack_off().is_none() {
         out.stores.push((addr, n, v));
@@ -660,6 +675,7 @@ fn store(out: &mut Out, addr: Abs, n: u8, v: Abs, scratch: Option<&mut Scratch>)
                         || (h.0.align == 0
                             && sym.align == 0
                             && (h.0.off.wrapping_add(4) <= sym.off || h.0.off >= end))
+                        || (n == 4 && other_word(h.0, sym))
                 });
                 if n == 4 {
                     out.st.held.push((sym, v));

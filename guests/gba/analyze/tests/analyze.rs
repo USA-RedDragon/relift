@@ -1101,3 +1101,37 @@ fn a_table_copied_through_a_wrapper_and_moved_in_ram_resolves_a_jump() {
     );
     assert!(insts(&r).contains(&(cb, true)), "{:?}", r.unresolved);
 }
+
+#[test]
+fn ldm_loading_the_pc_reads_back_words_stored_through_one_base() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let lab = e + 0x20;
+    a.arm(
+        e,
+        &[
+            0xE28F_0000 | (lab - (e + 8)),
+            0xE586_0000,
+            0xE586_0004,
+            0xE1A0_0006,
+            0xE8B0_0000,
+        ],
+    );
+    a.arm(lab, &[A_MOV_R0_1, a_b(lab + 4, lab + 4)]);
+    let r = a.run(e);
+    assert!(insts(&r).contains(&(lab, false)), "{:?}", r.unresolved);
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+#[test]
+fn an_arm_return_popped_with_a_post_indexed_load_returns() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let f = 0x0800_0200;
+    a.arm(e, &[a_b(e, f) | 0x0100_0000, a_b(e + 4, e + 4)]);
+    a.arm(f, &[0xE52D_E004, A_MOV_R0_1, 0xE49D_E004, A_BX_LR]);
+    let r = a.run(e);
+    let callee = r.functions.get(&Loc::rom(f, false)).expect("callee");
+    assert!(callee.returns);
+    assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
