@@ -146,7 +146,7 @@ def ninja_builds(path):
         m = re.match(r"build (\S+): cc (\S+)", line)
         if m:
             flags = shlex.split(lines[i + 1].split("=", 1)[1]) if i + 1 < len(lines) and lines[i + 1].strip().startswith("flags =") else []
-            yield m.group(2), flags
+            yield m.group(2), flags, os.path.dirname(os.path.abspath(path))
 
 
 def host_build(args, env):
@@ -206,21 +206,21 @@ def adjust(flags, tool):
 
 
 def compile_all(args, tool, ninjas):
-    out = os.path.join(args.work, "obj", args.target)
+    out = os.path.abspath(os.path.join(args.work, "obj", args.target))
     jobs = []
     for kind, path in ninjas:
-        for src, flags in ninja_builds(path):
+        for src, flags, cwd in ninja_builds(path):
             if src.endswith("window_sdl3.c"):
                 continue
             o = os.path.join(out, kind, re.sub(r"[^A-Za-z0-9_.]", "_", src[-100:]) + ".o")
-            jobs.append((src, adjust(flags, tool), o))
+            jobs.append((src, adjust(flags, tool), o, cwd))
     os.makedirs(os.path.join(out, "game"), exist_ok=True)
     os.makedirs(os.path.join(out, "rt"), exist_ok=True)
     failures = []
 
     def one(j):
-        src, flags, o = j
-        r = run(tool.cc + flags + ["-MD", "-MF", o + ".d", "-c", src, "-o", o])
+        src, flags, o, cwd = j
+        r = run(tool.cc + flags + ["-MD", "-MF", o + ".d", "-c", src, "-o", o], cwd=cwd)
         return j, r
 
     with cf.ThreadPoolExecutor(args.jobs) as ex:
