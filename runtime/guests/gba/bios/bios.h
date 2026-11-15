@@ -8,9 +8,10 @@
  * BIOS leaves behind, bit for bit where it is known: r0, r1 and r3 (r2 and
  * r12 are restored by its dispatcher), the memory it writes, the frames its
  * dispatcher and routines push on the supervisor and system stacks, and the
- * I/O writes it makes. Cycle costs are approximate: code fetches from the
- * BIOS at one cycle each, plus the wait cycles the bus reports for every data
- * access.
+ * I/O writes it makes. Cycle costs: a fixed cost per call plus a cost per event
+ * (loop iterations, runs, multiplier cycles) fitted exactly to the console's
+ * measured counts under WAITCNT 0x4317, plus the cycles the bus reports for
+ * every data access, so the costs follow the machine's wait states.
  *
  * The caller is the ARM32 CPU layer at a SWI exit (or, for the IRQ stub, at
  * IRQ entry and at the stub's return address). It performs the exception
@@ -74,6 +75,10 @@ typedef struct rl_gba_bios {
     uint32_t open_bus;
     /** @brief Cycles of the last call or stub entry or return. */
     uint64_t cycles;
+    /** @brief The part of cycles the bus charged for data accesses. */
+    uint64_t bus_cycles;
+    /** @brief What the last call counted for its cycle model. */
+    uint32_t events[20];
 } rl_gba_bios;
 
 /** @brief The CPU state a SWI sees and changes. */

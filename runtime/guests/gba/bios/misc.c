@@ -11,7 +11,8 @@ static void reset_region(bios_call *c, uint32_t dst, uint32_t words)
 {
     for (uint32_t i = 0; i < words; i++)
         bios_st32(c, dst + 4 * i, 0, i != 0);
-    bios_tick(c, 30 + words * 2);
+    if (!c->quiet)
+        bios_ev(c, BE_RESET_BLOCK, words / 8);
 }
 
 void bios_register_ram_reset(bios_call *c)
@@ -24,13 +25,14 @@ void bios_register_ram_reset(bios_call *c)
     uint32_t zero = 0;
     bios_push(c, 1, &zero);
     uint32_t zero_at = c->sp;
-    bios_tick(c, 20);
     int last = -1;
     for (unsigned k = 0; k < 8; k++) {
         unsigned bit = order[k];
         if (!(flags & (1u << bit)))
             continue;
         last = (int)bit;
+        bios_ev(c, bit, bit < 5 || !(flags & 0x80u) || bit == 7);
+        c->quiet = bit >= 5;
         switch (bit) {
         case 7:
             bios_st16(c, 0x04000000u, 0x0080u, false);
@@ -44,7 +46,6 @@ void bios_register_ram_reset(bios_call *c)
             bios_st16(c, 0x04000202u, 0, false);
             for (uint32_t a = 0x04000206u; a < 0x04000220u; a += 2)
                 bios_st16(c, a, 0, a != 0x04000206u);
-            bios_tick(c, 60);
             break;
         case 6: {
             reset_region(c, 0x04000060u, 0x8);
@@ -69,6 +70,7 @@ void bios_register_ram_reset(bios_call *c)
             break;
         }
     }
+    c->quiet = false;
     if (last >= 0) {
         uint32_t inner[8] = {0x04000000u, 0x85000000u, 1u << last, flags, c->hi[8], c->hi[9], c->hi[10], reset_lr[last]};
         bios_push(c, 8, inner);
@@ -148,7 +150,9 @@ void bios_midi_key2freq(bios_call *c)
     uint32_t f1 = freq[s1 & 0xFu] >> (s1 >> 4), f2 = freq[s2 & 0xFu] >> (s2 >> 4);
     uint32_t r1 = (uint32_t)(((uint64_t)(f2 - f1) * fp) >> 32) + f1;
     uint32_t wf = bios_ld32(c, wave + 4, false);
-    bios_tick(c, 100);
+    bios_ev(c, BE_MIDI_CLAMP, mk == 0xB2);
+    bios_ev(c, BE_MIDI_MUL_FP, bios_mulu_m(fp));
+    bios_ev(c, BE_MIDI_MUL_R1, bios_mulu_m(r1));
     c->r[0] = (uint32_t)(((uint64_t)wf * r1) >> 32);
     c->r[1] = r1;
     c->r[3] = RL_GBA_BIOS_SWI_RETURN;

@@ -7,7 +7,11 @@
 
 static unsigned access_cycles(bios_call *c, uint32_t a, unsigned size, bool seq)
 {
-    return c->bus->cycles ? c->bus->cycles(c->bus->user, a, size, seq) : 1u;
+    if (c->quiet)
+        return 0;
+    unsigned n = c->bus->cycles ? c->bus->cycles(c->bus->user, a, size, seq) : 1u;
+    c->bus_cyc += n;
+    return n;
 }
 
 static uint32_t rd(bios_call *c, uint32_t a, unsigned size, bool seq)
@@ -111,7 +115,6 @@ static void checksum(bios_call *c)
     c->r[0] = 0xBAAE187Fu;
     c->r[1] = 1;
     c->r[3] = 0x4000;
-    bios_tick(c, 41010 - 40);
 }
 
 static void soft_reset(bios_call *c, rl_gba_swi_cpu *cpu)
@@ -134,47 +137,52 @@ static void multiboot(bios_call *c)
     bios_tick(c, 20);
 }
 
-static const int32_t cost_fit[0x20][2] = {
-    {0, 1024},
-    {194, 672},
-    {0, 1024},
-    {0, 1024},
-    {0, 1024},
-    {0, 1024},
-    {-34, 1666},
-    {-35, 1666},
-    {-34, 1609},
-    {15, 1024},
-    {-22, 1739},
-    {19, 1266},
-    {24, 1060},
-    {-6, 1024},
-    {0, 1124},
-    {9, 951},
-    {106, 2248},
-    {28, 1170},
-    {-90, 2584},
-    {4, 2346},
-    {36, 1093},
-    {42, 2118},
-    {5, 1243},
-    {-42, 1914},
-    {5, 1243},
-    {0, 1024},
-    {0, 1024},
-    {0, 1024},
-    {0, 1024},
-    {0, 1024},
-    {0, 1024},
-    {-10, 1024},
+typedef struct bios_model {
+    bool fitted;
+    int32_t base;
+    int32_t k[BIOS_EVENTS];
+} bios_model;
+
+static const bios_model models[0x20] = {
+    [0x01] = {true, 165, {[BE_RESET_PALETTE] = 64, [BE_RESET_VRAM] = 64, [BE_RESET_OAM] = 64, [BE_RESET_SIO] = 154,
+                          [BE_RESET_SOUND] = 203, [BE_RESET_IO] = 238, [BE_RESET_BLOCK] = 5}},
+    [0x06] = {true, 50, {[BE_SHIFT_STEP] = 5, [BE_SUB_STEP] = 8}},
+    [0x07] = {true, 53, {[BE_SHIFT_STEP] = 5, [BE_SUB_STEP] = 8}},
+    [0x08] = {true, 53, {[BE_SQRT_SHIFT] = 6, [BE_SQRT_ROUND] = 6, [BE_SHIFT_STEP] = 5, [BE_SUB_STEP] = 8}},
+    [0x09] = {true, 77, {[BE_MUL] = 1}},
+    [0x0A] = {true, 0, {62, 65, 67, 69, 143, 145, 147, 146, 148, 150, 146, 146, [BE_SHIFT_STEP] = 5, [BE_SUB_STEP] = 8,
+                        [BE_MUL] = 1}},
+    [0x0B] = {true, 0, {[BE_REFUSED] = 75, [BE_ZERO] = 73, [BE_SET_W_CALL] = 85, [BE_SET_H_CALL] = 87, [BE_SET_H_FILL] = 7,
+                        [BE_SET_W_COPY] = 8, [BE_SET_W_FILL] = 6, [BE_SET_H_COPY] = 9}},
+    [0x0C] = {true, 0, {[BE_REFUSED] = 72, [BE_ZERO] = 70, [BE_FAST_CALL] = 79, [BE_FAST_COPY] = 7, [BE_FAST_FILL] = 5,
+                        [BE_FAST_FILL_START] = 9}},
+    [0x0D] = {true, 41004, {0}},
+    [0x0E] = {true, 59, {[BE_AFFINE_ITER] = 56, [BE_MUL] = 1}},
+    [0x0F] = {true, 55, {[BE_AFFINE_ITER] = 37, [BE_MUL] = 1}},
+    [0x10] = {true, 99, {[BE_BIT_BYTE] = 12, [BE_BIT_UNIT] = 22, [BE_BIT_OFFSET] = 2, [BE_BIT_WORD] = 1, [BE_ZERO] = -37}},
+    [0x11] = {true, 69, {[BE_REFUSED] = 1, [BE_ZERO] = -1, [BE_LZ_FLAG] = 9, [BE_LZ_LITERAL] = 16, [BE_LZ_REF] = 25,
+                         [BE_LZ_REF_BYTE] = 7}},
+    [0x12] = {true, 75, {[BE_REFUSED] = 1, [BE_LZ_FLAG] = 9, [BE_LZ_LITERAL] = 20, [BE_LZ_REF] = 28, [BE_LZ_REF_BYTE] = 21}},
+    [0x13] = {true, 94, {[BE_HUFF_WORD] = 9, [BE_HUFF_BIT] = 28, [BE_HUFF_LEAF] = 14}},
+    [0x14] = {true, 81, {[BE_ZERO] = -4, [BE_RL_COMP_RUN] = 17, [BE_RL_COMP_BYTE] = 6, [BE_RL_RAW_RUN] = 12,
+                         [BE_RL_RAW_BYTE] = 9}},
+    [0x15] = {true, 84, {[BE_ZERO] = -4, [BE_RL_COMP_RUN] = 27, [BE_RL_RAW_RUN] = 20, [BE_RL_ANY_RUN] = -1,
+                         [BE_PUT_EVEN] = 15, [BE_PUT_ODD] = 16}},
+    [0x16] = {true, 71, {[BE_DIFF_ITEM] = 11}},
+    [0x17] = {true, 70, {[BE_PUT_EVEN] = 16, [BE_PUT_ODD] = 20}},
+    [0x18] = {true, 71, {[BE_ZERO] = 2, [BE_DIFF_ITEM] = 11}},
+    [0x1F] = {true, 123, {[BE_MIDI_CLAMP] = 2, [BE_MIDI_MUL_FP] = 1, [BE_MIDI_MUL_R1] = 1}},
 };
 
-static uint64_t calibrated(unsigned number, uint64_t raw)
+static uint64_t charged(unsigned number, const bios_call *c)
 {
-    if (number >= 0x20)
-        return raw;
-    int64_t v = cost_fit[number][0] + (int64_t)((raw * (uint64_t)cost_fit[number][1]) >> 10);
-    return v > 0 ? (uint64_t)v : 0;
+    if (number >= 0x20 || !models[number].fitted)
+        return c->cyc;
+    const bios_model *m = &models[number];
+    int64_t v = m->base;
+    for (unsigned i = 0; i < BIOS_EVENTS; i++)
+        v += (int64_t)m->k[i] * c->ev[i];
+    return c->bus_cyc + (uint64_t)v;
 }
 
 rl_gba_swi_status rl_gba_swi(rl_gba_bios *b, const rl_gba_bus *bus, unsigned number, rl_gba_swi_cpu *cpu)
@@ -296,7 +304,10 @@ rl_gba_swi_status rl_gba_swi(rl_gba_bios *b, const rl_gba_bus *bus, unsigned num
     cpu->r[2] = r2;
     cpu->r[3] = c.r[3];
     b->open_bus = RL_GBA_BIOS_OPEN_SWI;
-    b->cycles = calibrated(number & 0xFFu, c.cyc);
+    b->bus_cycles = c.bus_cyc;
+    for (unsigned i = 0; i < BIOS_EVENTS; i++)
+        b->events[i] = c.ev[i];
+    b->cycles = charged(number & 0xFFu, &c);
     return c.status;
 }
 
