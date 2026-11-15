@@ -323,10 +323,10 @@ fn a_caller_keeps_the_registers_the_callee_keeps_in_its_locals() {
             .unwrap_or_else(|| panic!("{s}"));
         &s[from..from + s[from..].find("\n}\n").expect("end")]
     };
-    assert!(!after(0x200).contains("r1 = c->x[1]"), "{s}");
-    assert!(!after(0x200).contains("r2 = c->x[2]"), "{s}");
-    assert!(after(0x300).contains("r1 = c->x[1];"), "{s}");
-    assert!(!after(0x300).contains("r2 = c->x[2]"), "{s}");
+    assert!(!after(0x200).contains("r1 = rl_e_ld64(&c->x[1])"), "{s}");
+    assert!(!after(0x200).contains("r2 = rl_e_ld64(&c->x[2])"), "{s}");
+    assert!(after(0x300).contains("r1 = rl_e_ld64(&c->x[1]);"), "{s}");
+    assert!(!after(0x300).contains("r2 = rl_e_ld64(&c->x[2])"), "{s}");
 }
 
 #[test]
@@ -338,9 +338,9 @@ fn a_register_kept_across_a_call_is_loaded_before_it() {
     ]);
     let out = emit(&Saved, &code.functions(), &[], &Options::default());
     let s = &out.files[1].text;
-    assert!(s.contains("uint64_t r1 = c->x[1];"), "{s}");
+    assert!(s.contains("uint64_t r1 = rl_e_ld64(&c->x[1]);"), "{s}");
     let from = s.find("rc = F_200(c, mem);").expect("call");
-    assert!(!s[from..].contains("r1 = c->x[1]"), "{s}");
+    assert!(!s[from..].contains("r1 = rl_e_ld64(&c->x[1])"), "{s}");
 }
 
 #[test]

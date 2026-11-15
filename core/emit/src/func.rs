@@ -656,6 +656,9 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             (Home::Field(lv), false) if ty == VQ => {
                 writeln!(t, "    {ty} {} = rl_e_u2v({lv});", reg(r))
             }
+            (Home::Field(lv), false) if regs.width(r).bits() == 64 => {
+                writeln!(t, "    {ty} {} = rl_e_ld64(&{lv});", reg(r))
+            }
             (Home::Field(lv), false) => writeln!(t, "    {ty} {} = {lv};", reg(r)),
             (Home::Flag { word, bit }, false) => {
                 writeln!(t, "    {ty} {} = ({ty})(({word} >> {bit}) & 1u);", reg(r))
@@ -1161,6 +1164,9 @@ fn reload(
         let _ = match fe.home(r) {
             Home::Field(lv) if regs.width(r).bits() == 128 => {
                 write!(t, "{} = rl_e_u2v({lv}); ", reg(r))
+            }
+            Home::Field(lv) if regs.width(r).bits() == 64 => {
+                write!(t, "{} = rl_e_ld64(&{lv}); ", reg(r))
             }
             Home::Field(lv) => write!(t, "{} = {lv}; ", reg(r)),
             Home::Flag { word, bit } => write!(t, "{} = ({ty})(({word} >> {bit}) & 1u); ", reg(r)),

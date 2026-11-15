@@ -18,6 +18,20 @@ typedef __int128 rl_e_s128;
     } while (0)
 
 /*
+ * A 64-bit register's context slot, read into a general register on its
+ * own. The caller wrote the slots one by one; a plain read lets clang merge
+ * two adjacent slots that feed a paired guest store into one 16-byte load,
+ * which the host cannot forward from the two 8-byte stores still in flight
+ * and stalls on.
+ */
+static inline uint64_t rl_e_ld64(const uint64_t *p)
+{
+    uint64_t v = *p;
+    __asm__("" : "+r"(v));
+    return v;
+}
+
+/*
  * rl_e_vq: the type of 128-bit registers and of most 128-bit values. On
  * arm64 a vector of two 64-bit lanes, which keeps them in NEON registers;
  * elsewhere rl_u128, which measured smaller on x86-64, where no vector

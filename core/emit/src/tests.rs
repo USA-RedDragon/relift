@@ -48,7 +48,7 @@ fn locals_labels_and_exits() {
     let s = shard(&out);
     assert!(s.contains("RL_TEXT RL_LIFTED(F_100)\n{"), "{s}");
     assert!(
-        s.contains("uint64_t r0;\n    uint64_t r1 = c->x[1];"),
+        s.contains("uint64_t r0;\n    uint64_t r1 = rl_e_ld64(&c->x[1]);"),
         "{s}"
     );
     assert!(s.contains("goto L_100;"), "{s}");
@@ -447,7 +447,7 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
         "{s}"
     );
     assert!(
-        s.contains("        r3 = c->x[3];\n        goto L_204;\n    }"),
+        s.contains("        r3 = rl_e_ld64(&c->x[3]);\n        goto L_204;\n    }"),
         "{s}"
     );
 }
@@ -731,7 +731,7 @@ fn calls_to_a_resume_point_override_go_through_the_landing_pad_dispatch() {
         "{s}"
     );
     assert!(
-        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x104):\n        c->pend.kind = RL_PEND_NONE;\n        r3 = c->x[3];\n        goto L_104;"),
+        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x104):\n        c->pend.kind = RL_PEND_NONE;\n        r3 = rl_e_ld64(&c->x[3]);\n        goto L_104;"),
         "{s}"
     );
     assert!(s.contains("rl_bad_resume(c, mem, UINT64_C(0x100));"), "{s}");
@@ -1098,7 +1098,7 @@ fn landing_pads_are_resume_points_with_a_table_entry_of_their_own() {
         "{s}"
     );
     assert!(
-        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x108):\n        c->pend.kind = RL_PEND_NONE;\n        r3 = c->x[3];\n        goto L_108;"),
+        s.contains("lp_dispatch:\n    switch (c->pend.pc) {\n    case UINT64_C(0x108):\n        c->pend.kind = RL_PEND_NONE;\n        r3 = rl_e_ld64(&c->x[3]);\n        goto L_108;"),
         "{s}"
     );
     assert!(
