@@ -184,6 +184,7 @@ void gba_dma_run(rl_gba *g)
     }
     gba_pf_step(g, 1);
     g->dma_rom_burst = false;
+    g->rom_burst = false;
     g->dma_last = 0;
     g->dma_running = false;
     rl_sched_lower(g->sched, RL_GBA_LINE_DMA);

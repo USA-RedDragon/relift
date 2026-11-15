@@ -208,6 +208,21 @@ TEST(an_immediate_dma_waits_two_cycles_and_stalls_the_cpu)
     mach_free(&m);
 }
 
+TEST(the_cpu_fetch_after_a_dma_is_nonsequential)
+{
+    mach m = mach_new();
+    rl_gba_fetch(m.g, 0x08000000u, 2, false);
+    rl_gba_fetch(m.g, 0x08000002u, 2, true);
+    mach_wr(&m, mach_now(&m), 0x040000D4u, 4, 0x03001000u);
+    mach_wr(&m, mach_now(&m), 0x040000D8u, 4, 0x02000000u);
+    mach_wr(&m, mach_now(&m), 0x040000DCu, 4, 0x84000001u);
+    mach_to(&m, mach_now(&m) + 2);
+    uint64_t t = mach_now(&m);
+    rl_gba_fetch(m.g, 0x08000004u, 2, true);
+    CHECK_EQ(mach_now(&m) - t, 5u);
+    mach_free(&m);
+}
+
 TEST(a_dma_runs_alongside_the_cpus_internal_cycles)
 {
     mach m = mach_new();
