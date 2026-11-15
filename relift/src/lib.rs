@@ -18,6 +18,7 @@ pub mod emitstore;
 pub mod fpflags;
 pub mod game_settings;
 pub mod gb;
+pub mod gba;
 pub mod hints;
 pub mod icon;
 pub mod identity;

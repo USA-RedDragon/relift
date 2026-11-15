@@ -88,6 +88,12 @@ pub fn run(
         }
         return crate::gb::import(settings, dump, ui);
     }
+    if crate::gba::is_rom(dump) {
+        if update.is_some() {
+            return Err("--update is for Switch dumps; a cartridge ROM has no updates".into());
+        }
+        return crate::gba::import(settings, dump, ui);
+    }
     let opts = Options {
         update: match update {
             Some(u) => UpdateSelect::parse(u)?,
