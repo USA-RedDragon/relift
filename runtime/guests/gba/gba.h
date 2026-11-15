@@ -149,8 +149,9 @@ typedef struct rl_gba_save_info {
 
 /**
  * @brief Finds the backup library string of a ROM (EEPROM_V, SRAM_V,
- * SRAM_F_V, FLASH_V, FLASH512_V, FLASH1M_V followed by digits; the first in
- * the image when several differ). The EEPROM size is not in the string.
+ * SRAM_F_V, FLASH_V, FLASH512_V, FLASH1M_V, with or without the version
+ * digits after it, as NanoBoyAdvance matches them; the first in the image
+ * when several differ). The EEPROM size is not in the string.
  */
 rl_gba_save_info rl_gba_save_detect(const uint8_t *rom, size_t len);
 

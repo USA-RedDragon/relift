@@ -44,7 +44,7 @@ rl_gba_save_info rl_gba_save_detect(const uint8_t *rom, size_t len)
             continue;
         for (unsigned k = 0; k < sizeof strings / sizeof strings[0]; k++) {
             size_t n = strlen(strings[k].text);
-            if (len - i > n && memcmp(rom + i, strings[k].text, n) == 0 && rom[i + n] >= '0' && rom[i + n] <= '9')
+            if (len - i >= n && memcmp(rom + i, strings[k].text, n) == 0)
                 return (rl_gba_save_info){strings[k].kind, strings[k].id};
         }
     }

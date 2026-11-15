@@ -94,13 +94,36 @@ TEST(library_strings_name_the_backup)
 
 TEST(a_rom_without_a_library_string_has_no_backup)
 {
-    uint8_t rom[80] = "SRAM_V and FLASH_V without digits, EEPROM_Vx";
+    uint8_t rom[80] = "SRAM_ and FLASH_X, EEPROM, FLASH1M";
     CHECK_EQ(rl_gba_save_detect(rom, sizeof rom).kind, RL_GBA_SAVE_NONE);
     CHECK_EQ(rl_gba_save_detect(NULL, 0).kind, RL_GBA_SAVE_NONE);
     memcpy(rom + 60, "SRAM_V10", 8);
     CHECK_EQ(rl_gba_save_detect(rom, 64).kind, RL_GBA_SAVE_NONE);
-    CHECK_EQ(rl_gba_save_detect(rom, 66).kind, RL_GBA_SAVE_NONE);
-    CHECK_EQ(rl_gba_save_detect(rom, 67).kind, RL_GBA_SAVE_SRAM);
+    CHECK_EQ(rl_gba_save_detect(rom, 65).kind, RL_GBA_SAVE_NONE);
+    CHECK_EQ(rl_gba_save_detect(rom, 66).kind, RL_GBA_SAVE_SRAM);
+}
+
+TEST(a_library_string_needs_no_version_digits)
+{
+    static const struct {
+        const char *s;
+        rl_gba_save_kind kind;
+        uint16_t id;
+    } cases[] = {
+        {"SRAM_V  ", RL_GBA_SAVE_SRAM, 0},
+        {"SRAM_F_V", RL_GBA_SAVE_SRAM, 0},
+        {"EEPROM_V", RL_GBA_SAVE_EEPROM, 0},
+        {"FLASH_Vxx", RL_GBA_SAVE_FLASH64, RL_GBA_FLASH_PANASONIC},
+        {"FLASH512_V ", RL_GBA_SAVE_FLASH64, RL_GBA_FLASH_PANASONIC},
+        {"FLASH1M_V\0", RL_GBA_SAVE_FLASH128, RL_GBA_FLASH_MACRONIX128},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        uint8_t rom[64] = {0};
+        memcpy(rom + 8, cases[i].s, strlen(cases[i].s));
+        rl_gba_save_info in = rl_gba_save_detect(rom, sizeof rom);
+        CHECK_EQ(in.kind, cases[i].kind);
+        CHECK_EQ(in.flash_id, cases[i].id);
+    }
 }
 
 TEST(the_first_string_in_the_image_wins)
