@@ -6,6 +6,7 @@
  * default. The PNG uses stored (uncompressed) deflate blocks.
  */
 #include "vkf.h"
+#include "hostio.h"
 
 #include <errno.h>
 #include <limits.h>
