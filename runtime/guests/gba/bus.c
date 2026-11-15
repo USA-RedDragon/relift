@@ -278,6 +278,12 @@ uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq)
     return v;
 }
 
+void rl_gba_fetched(rl_gba *g, uint32_t addr, unsigned size)
+{
+    g->rom_burst = is_rom(addr);
+    g->page_addr = (uint16_t)((addr + size) >> 1);
+}
+
 uint32_t rl_gba_load(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 {
     gba_dma_run(g);

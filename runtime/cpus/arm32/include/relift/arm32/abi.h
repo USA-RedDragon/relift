@@ -92,8 +92,10 @@ struct rl_ctx {
     uint32_t data_next;
     /** @brief 1 after a data access of the current instruction (the next one may be sequential). */
     uint8_t data_open;
+    /** @brief 1 when the next code fetch is nonsequential (after a data access or an internal cycle). */
+    uint8_t code_ns;
     /** @brief Reserved, zero. */
-    uint8_t reserved0[3];
+    uint8_t reserved0[2];
     /** @brief Pending record, valid while lifted frames return RL_PENDING. First field of the core's block (rl_ctx_common). */
     rl_pending pend;
     /** @brief Runtime thread object. */

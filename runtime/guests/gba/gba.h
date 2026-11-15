@@ -242,6 +242,13 @@ static inline unsigned rl_gba_wait(const rl_gba_waits *t, uint32_t addr, unsigne
     return addr >= 0x10000000u ? 1u : t->c[addr >> 24][size >> 1][seq];
 }
 
+/**
+ * @brief The CPU's last code fetch was the size bytes at addr, without
+ * cycles: the boot's jump to the cartridge left the pipeline full, so the
+ * Game Pak goes on sequentially after addr.
+ */
+void rl_gba_fetched(rl_gba *g, uint32_t addr, unsigned size);
+
 /** @brief The value the bus holds now (what an unmapped address reads). */
 uint32_t rl_gba_open_bus(const rl_gba *g);
 /** @brief Sets the bus value, for a CPU layer that fetches opcodes without rl_gba_fetch. */

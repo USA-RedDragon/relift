@@ -5,10 +5,11 @@
 //!
 //! - every load and store goes to the machine's bus (`rl_gba_cpu_read`,
 //!   `rl_gba_cpu_write`), which charges the access's wait states;
-//! - the block's tick keeps only the internal cycles; the code fetch of the
-//!   next instruction and, after a taken branch, the refill cost what the
-//!   machine's wait table says for their regions (`rl_arm32_fetch`,
-//!   `rl_arm32_refill`);
+//! - the instruction's bus cycles reach the machine in the ARM7TDMI's order:
+//!   the fetch two instructions ahead first (`rl_gba_cpu_fetch`, before the
+//!   condition check, since a failed instruction fetches too), then the data
+//!   accesses, then the internal cycles (`rl_gba_cpu_idle` in place of the
+//!   block's ticks), then a taken branch's refill (`rl_gba_cpu_refill`);
 //! - a write of the I bit tells the runtime (`rl_arm32_set_i`), so the IRQ
 //!   line is masked exactly while I is set;
 //! - SWI is a trap into the high-level BIOS (`rl_gba_swi_trap`), which goes
@@ -41,6 +42,10 @@ pub const FETCH_ARM: &str = "arm32.fetch_arm";
 pub const FETCH_THUMB: &str = "arm32.fetch_thumb";
 /// The intrinsic of a branch's pipeline refill: target, Thumb, taken.
 pub const REFILL: &str = "arm32.refill";
+/// The intrinsic of internal cycles: their count.
+pub const IDLE: &str = "arm32.idle";
+/// The intrinsic of internal cycles taken at run time: one bit and the count.
+pub const IDLE_IF: &str = "arm32.idle_if";
 /// The intrinsic of a write of the I bit.
 pub const SET_I: &str = "arm32.set_i";
 /// The intrinsic of a call's host frame: the return address.
@@ -199,8 +204,9 @@ fn unaligned(b: &Block, k: usize) -> Option<Value> {
     (z.get() == 0 && u32::from(n) == lw && b.width_of(x) == Some(Width::W32)).then_some(x)
 }
 
-/// Routes memory to the bus, splits the cost into internal cycles, fetch
-/// and refill, reports writes of I and closes the block with a sync point.
+/// Puts the fetch first, routes memory to the bus, turns the ticks into
+/// internal cycles on the bus, adds the refill, reports writes of I and
+/// closes the block with a sync point.
 fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
     let internal: u32 = bus
         .iter()
@@ -210,9 +216,15 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
         })
         .sum();
     let unaligned: Vec<Option<Value>> = (0..b.insts.len()).map(|k| unaligned(b, k)).collect();
-    let addr_of = |a: Value| unaligned[a.index()].unwrap_or(a);
-    for i in &mut b.insts {
-        i.op = match std::mem::replace(&mut i.op, Op::Sync) {
+    let old = std::mem::take(&mut b.insts);
+    let at = konst(b, Width::W32, u64::from(pc));
+    let name = if thumb { FETCH_THUMB } else { FETCH_ARM };
+    let fetch = push(b, Op::intrinsic(name, vec![at]), None);
+    let mut map: Vec<Value> = Vec::with_capacity(old.len());
+    for inst in old {
+        let m = |v: &Value| map[v.index()];
+        let addr_of = |a: Value| m(&unaligned[a.index()].unwrap_or(a));
+        let op = match inst.op {
             Op::Load { addr, endian, .. } => Op::IoLoad {
                 addr: addr_of(addr),
                 endian,
@@ -225,17 +237,40 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool) {
                 ..
             } => Op::IoStore {
                 addr: addr_of(addr),
-                value,
+                value: m(&value),
                 endian,
                 kind: IoKind::Device,
             },
-            Op::Tick(_) => Op::Tick(internal),
-            op => op,
+            Op::Tick(_) if internal == 0 => {
+                map.push(fetch);
+                continue;
+            }
+            Op::Tick(_) => {
+                let n = konst(b, Width::W32, u64::from(internal));
+                Op::intrinsic(IDLE, vec![n])
+            }
+            Op::TickIf(cond, n) => {
+                let n = konst(b, Width::W32, u64::from(n));
+                Op::intrinsic(IDLE_IF, vec![m(&cond), n])
+            }
+            op => op.map_values(&m),
         };
+        let v = push(b, op, inst.width);
+        map.push(v);
     }
-    let at = konst(b, Width::W32, u64::from(pc));
-    let name = if thumb { FETCH_THUMB } else { FETCH_ARM };
-    push(b, Op::intrinsic(name, vec![at]), None);
+    b.exit.next = match b.exit.next {
+        Next::Dynamic(v) => Next::Dynamic(map[v.index()]),
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => Next::Select {
+            cond: map[cond.index()],
+            taken,
+            not_taken,
+        },
+        next => next,
+    };
     let refills = bus.iter().any(|e| matches!(e, Bus::Code(false, _)));
     if refills && !swi {
         let fall = u64::from(pc) + if thumb { 2 } else { 4 };
@@ -323,11 +358,13 @@ impl Frontend for Gba {
 
     fn intrinsic(&self, name: &str, args: &[String]) -> Option<String> {
         Some(match (name, args) {
-            (FETCH_ARM, [pc]) => format!("rl_arm32_fetch(c, (uint32_t)({pc}), 0u)"),
-            (FETCH_THUMB, [pc]) => format!("rl_arm32_fetch(c, (uint32_t)({pc}), 1u)"),
+            (FETCH_ARM, [pc]) => format!("rl_gba_cpu_fetch(c, (uint32_t)({pc}), 0u)"),
+            (FETCH_THUMB, [pc]) => format!("rl_gba_cpu_fetch(c, (uint32_t)({pc}), 1u)"),
             (REFILL, [t, thumb, taken]) => format!(
-                "rl_arm32_refill(c, (uint32_t)({t}), (unsigned)({thumb}), (unsigned)({taken}))"
+                "rl_gba_cpu_refill(c, (uint32_t)({t}), (unsigned)({thumb}), (unsigned)({taken}))"
             ),
+            (IDLE, [n]) => format!("rl_gba_cpu_idle(c, (uint32_t)({n}))"),
+            (IDLE_IF, [on, n]) => format!("rl_gba_cpu_idle(c, (uint32_t)({on}) * (uint32_t)({n}))"),
             (SET_I, [i]) => format!("rl_arm32_set_i(c, (uint32_t)({i}))"),
             (CALL, [r]) => format!("rl_arm32_call(c, (uint32_t)({r}))"),
             _ => return None,
@@ -383,8 +420,8 @@ impl Frontend for Gba {
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
         (code == COND_FAIL).then(|| {
             format!(
-                "rl_arm32_cond_fail(c, mem, UINT64_C({pc:#x}), {}u)",
-                u32::from(insn & RAW_THUMB != 0)
+                "rl_gba_cpu_cond_fail(c, mem, UINT64_C({:#x}))",
+                pc + if insn & RAW_THUMB != 0 { 2 } else { 4 }
             )
         })
     }
@@ -436,7 +473,7 @@ mod tests {
                     .any(|i| matches!(i.op, Op::Load { .. } | Op::Store { .. }))
             );
             assert!(matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)));
-            assert_eq!(intrinsics(&b), [FETCH_ARM]);
+            assert_eq!(intrinsics(&b)[0], FETCH_ARM);
         }
     }
 
@@ -456,18 +493,25 @@ mod tests {
     }
 
     #[test]
-    fn the_tick_keeps_only_the_internal_cycles() {
+    fn the_fetch_comes_first_and_the_internal_cycles_after_the_data() {
         let img = arm(&[0xE591_0004]);
         let b = Gba::new().lift_at(&img, BASE, BASE, false).expect("lifts");
-        let ticks: Vec<u32> = b
+        assert!(!b.insts.iter().any(|i| matches!(i.op, Op::Tick(_))));
+        assert_eq!(intrinsics(&b), [FETCH_ARM, IDLE]);
+        let at = |f: &dyn Fn(&Op) -> bool| b.insts.iter().position(|i| f(&i.op)).expect("found");
+        let load = at(&|o| matches!(o, Op::IoLoad { .. }));
+        let idle = at(&|o| matches!(o, Op::Intrinsic(c) if c.name == IDLE));
+        assert!(load < idle);
+        let guarded = arm(&[0x0591_0004]);
+        let b = Gba::new()
+            .lift_at(&guarded, BASE, BASE, false)
+            .expect("lifts");
+        let fetch = b
             .insts
             .iter()
-            .filter_map(|i| match i.op {
-                Op::Tick(n) => Some(n),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(ticks, [1]);
+            .position(|i| matches!(&i.op, Op::Intrinsic(c) if c.name == FETCH_ARM));
+        let guard = b.insts.iter().position(|i| matches!(i.op, Op::Guard(..)));
+        assert!(fetch < guard);
     }
 
     #[test]

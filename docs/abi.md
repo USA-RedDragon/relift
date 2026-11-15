@@ -1726,10 +1726,12 @@ CPU layer `runtime/cpus/arm32` and the glue in `runtime/guests/gba/run`.
   `rl_gba_cpu_write`, from `Frontend::io_calls`), which charges the region's
   wait states to the clock. The bus gets the address as the CPU puts it out
   (before the lifter's alignment): the machine aligns it except for the
-  8-bit backup. The block's tick keeps only the internal cycles; the fetch of
-  the next instruction (`rl_arm32_fetch`) and the refill after a taken branch
-  (`rl_arm32_refill`) cost the code region's wait states, a sequential Game
-  Pak fetch one cycle while WAITCNT's prefetch bit is set.
+  8-bit backup. Each instruction's bus cycles reach the machine in the
+  ARM7TDMI's order: the fetch two instructions ahead (`rl_gba_cpu_fetch`,
+  through the machine's prefetch buffer, nonsequential after a data access
+  or an internal cycle), the data accesses, the internal cycles
+  (`rl_gba_cpu_idle`, which leave the bus to the prefetch buffer and DMA) and
+  the refill after a taken branch (`rl_gba_cpu_refill`).
 - Every instruction ends in a sync point (`rl_sync`). The IRQ line is a
   scheduler line masked while the I bit is set: lifted code reports writes of
   I (`rl_arm32_set_i`). An IRQ taken at a sync point enters IRQ mode, runs

@@ -5,16 +5,18 @@
  * Lifted code makes every data access through the machine's bus
  * (rl_gba_load, rl_gba_store, given the address as the CPU puts it out: the
  * machine aligns it except for the 8-bit backup), which charges its wait
- * states to the CPU's
- * clock; code fetches cost what the machine's wait table says, with a
- * sequential Game Pak fetch at one cycle while the prefetch buffer is on.
+ * states to the CPU's clock. Each instruction's bus cycles go to the machine
+ * in the ARM7TDMI's order: first the fetch two instructions ahead
+ * (rl_gba_fetch, through the prefetch buffer; nonsequential after a data
+ * access or an internal cycle), then the data accesses, then the internal
+ * cycles (rl_gba_idle), then a taken branch's refill.
  *
  * SWI runs the high-level BIOS (bios/bios.h) after the lifted exception
  * entry and returns from the exception. An IRQ is taken at a sync point
  * when the machine's IRQ line is up and the I bit clear: the exception
- * entry, the BIOS stub (which stacks registers and calls the handler at
- * 0x03FFFFFC with LR 0x138) and, when the handler jumps to 0x138, the stub's
- * return. Inside a BIOS call that waits (IntrWait, Halt), the machine calls
+ * entry, the BIOS stub (which stacks registers and calls the
+ * handler at 0x03FFFFFC with LR 0x138) and, when the handler jumps to 0x138,
+ * the stub's return. Inside a BIOS call that waits (IntrWait, Halt), the machine calls
  * back where the console takes the interrupt; the handler then runs from
  * system mode as under the console's BIOS.
  */
@@ -22,7 +24,6 @@
 
 #include <stdlib.h>
 
-#define FAST_FETCH 0x3F00u
 #define BIOS_WAIT_LR (RL_GBA_BIOS_SWI_RETURN + 4u)
 
 static rl_gba_run *g_run;
@@ -31,30 +32,57 @@ rl_gba_run *rl_gba_run_current(void) { return g_run; }
 
 static rl_gba *machine(rl_ctx *c) { return c->machine; }
 
-static void update_prefetch(rl_ctx *c)
-{
-    uint32_t waitcnt = rl_gba_read(machine(c), 0x04000204u, 2);
-    c->fast_fetch = (waitcnt & 0x4000u) ? FAST_FETCH : 0u;
-}
-
 uint64_t rl_gba_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
 {
     (void)mem;
     unsigned seq = rl_arm32_data_seq(c, (uint32_t)addr & ~(size - 1u), size);
+    c->code_ns = 1;
     return rl_gba_load(machine(c), (uint32_t)addr, size, seq);
 }
 
 void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value)
 {
     (void)mem;
-    uint32_t a = (uint32_t)addr & ~(size - 1u);
-    unsigned seq = rl_arm32_data_seq(c, a, size);
+    unsigned seq = rl_arm32_data_seq(c, (uint32_t)addr & ~(size - 1u), size);
+    c->code_ns = 1;
     rl_gba_store(machine(c), (uint32_t)addr, size, (uint32_t)value, seq);
-    if (a < 0x04000208u && a + size > 0x04000204u)
-        update_prefetch(c);
 }
 
 static void charge(rl_ctx *c, uint64_t cycles) { c->time.budget -= (int64_t)cycles; }
+
+void rl_gba_cpu_fetch(rl_ctx *c, uint32_t pc, unsigned thumb)
+{
+    unsigned size = thumb ? 2u : 4u;
+    rl_gba_fetch(machine(c), pc + 2u * size, size, !c->code_ns);
+    c->code_ns = 0;
+    c->data_open = 0;
+}
+
+void rl_gba_cpu_idle(rl_ctx *c, uint32_t n)
+{
+    if (!n)
+        return;
+    rl_gba_idle(machine(c), n);
+    c->code_ns = 1;
+}
+
+void rl_gba_cpu_refill(rl_ctx *c, uint32_t target, unsigned thumb, unsigned taken)
+{
+    if (!taken)
+        return;
+    unsigned size = thumb ? 2u : 4u;
+    uint32_t t = target & ~(size - 1u);
+    rl_gba_fetch(machine(c), t, size, false);
+    rl_gba_fetch(machine(c), t + size, size, true);
+    c->code_ns = 0;
+}
+
+int rl_gba_cpu_cond_fail(rl_ctx *c, uint8_t *mem, uint64_t next)
+{
+    if (c->time.budget > 0)
+        return RL_OK;
+    return rl_sync(c, mem, next);
+}
 
 /** @brief The BIOS stub's entry after the exception entry: stacks registers and gives the handler, whose state its bit 0 sets (BX). */
 static uint32_t stub_entry(rl_ctx *c)
@@ -68,6 +96,7 @@ static uint32_t stub_entry(rl_ctx *c)
     c->r[14] = ic.lr;
     c->r[13] = ic.sp;
     charge(c, rl_gba_bios_of(g)->cycles);
+    c->code_ns = 0;
     c->t = (uint8_t)(h & 1u);
     return h & (c->t ? ~1u : ~3u);
 }
@@ -84,6 +113,7 @@ static uint32_t stub_return(rl_ctx *c)
     c->r[14] = ic.lr;
     c->r[13] = ic.sp;
     charge(c, rl_gba_bios_of(g)->cycles);
+    c->code_ns = 0;
     rl_arm32_restore(c);
     return to;
 }
@@ -95,7 +125,6 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
     rl_gba *g = machine(c);
     if (r->check)
         r->check(r->check_user, c);
-    rl_gba_service(g);
     if (c->i || !rl_gba_irq_line(g))
         return RL_NO_IRQ;
     r->stats.irqs++;
@@ -159,6 +188,7 @@ int rl_gba_swi_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
     for (unsigned i = 0; i < 4; i++)
         c->r[i] = s.r[i];
     charge(c, rl_gba_bios_of(g)->cycles);
+    c->code_ns = 0;
     switch (st) {
     case RL_GBA_SWI_OK:
         rl_arm32_restore(c);
@@ -195,6 +225,7 @@ static void boot(rl_gba_run *r)
     c->r[13] = b.sp_sys;
     r->entry = b.pc;
     rl_gba_bios_boot_io(rl_gba_bios_of(r->g), rl_gba_bios_bus(r->g));
+    rl_gba_fetched(r->g, b.pc + 4u, 4);
 }
 
 int rl_gba_run_init(rl_gba_run *r, rl_gba *g)
@@ -211,7 +242,6 @@ int rl_gba_run_init(rl_gba_run *r, rl_gba *g)
     rl_thread_bind(r->t);
     r->c = r->t->ctx;
     r->c->machine = g;
-    r->c->waits = &rl_gba_wait_table(g)->c[0][0][0];
     g_run = r;
     rl_sched_set_irq(r->k, irq_enter);
     rl_sched_set_irq_return(r->k, irq_return);
@@ -219,7 +249,6 @@ int rl_gba_run_init(rl_gba_run *r, rl_gba *g)
     rl_gba_set_cpu_hooks(g, &hooks);
     boot(r);
     rl_arm32_set_lines(r->c, 1ull << RL_GBA_LINE_IRQ, 1ull << RL_GBA_LINE_DMA);
-    update_prefetch(r->c);
     return 0;
 }
 

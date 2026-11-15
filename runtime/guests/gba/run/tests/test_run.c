@@ -4,7 +4,8 @@
  * lifted functions: the post-boot registers, data accesses through the
  * bus with their wait states, SWI through the high-level BIOS (a
  * VBlankIntrWait whose interrupt runs inside the BIOS call), IRQ entry at
- * a sync point through the BIOS stub and back, and the prefetch flag.
+ * a sync point through the BIOS stub and back, and the order of the code
+ * fetches.
  */
 #include "cpu.h"
 #include "runner.h"
@@ -90,7 +91,7 @@ static int spin_main(rl_ctx *c, uint8_t *mem)
     c->r[1] = 0;
     while (hs.handler_runs < 2) {
         hs.spins++;
-        c->time.budget -= 3;
+        rl_gba_cpu_fetch(c, 0x08000200u, 0);
         if (c->time.budget <= 0) {
             int rc = rl_sync(c, mem, 0x08000204u);
             if (rc)
@@ -153,7 +154,6 @@ TEST(gba_run_boots_in_system_mode_at_the_cartridge)
     CHECK_EQ(c->r[13], 0x03007F00u);
     CHECK_EQ(*rl_arm32_banked(c, RL_ARM32_IRQ, 13), 0x03007FA0u);
     CHECK_EQ(*rl_arm32_banked(c, RL_ARM32_SVC, 13), 0x03007FE0u);
-    CHECK(c->waits != NULL);
 }
 
 TEST(gba_run_data_accesses_charge_the_bus)
@@ -164,7 +164,7 @@ TEST(gba_run_data_accesses_charge_the_bus)
     uint64_t t0 = rl_sched_cycles(run.k);
     rl_gba_cpu_write(c, NULL, 0x02000000u, 4, 0x12345678u);
     CHECK_EQ(rl_sched_cycles(run.k) - t0, 6);
-    rl_arm32_fetch(c, 0x08000000u, 0);
+    rl_gba_cpu_fetch(c, 0x03000000u, 0);
     t0 = rl_sched_cycles(run.k);
     CHECK_EQ(rl_gba_cpu_read(c, NULL, 0x02000000u, 4), 0x12345678u);
     CHECK_EQ(rl_gba_cpu_read(c, NULL, 0x02000004u, 4), 0);
@@ -172,15 +172,27 @@ TEST(gba_run_data_accesses_charge_the_bus)
     CHECK_EQ(rl_gba_cpu_read(c, NULL, 0x03000002u, 2), 0);
 }
 
-TEST(gba_run_waitcnt_turns_the_fast_fetch_on)
+TEST(gba_run_fetches_follow_the_arm7_bus_order)
 {
     CHECK(boot(swi_main) == 0);
     rl_ctx *c = run.c;
-    CHECK_EQ(c->fast_fetch, 0);
-    rl_gba_cpu_write(c, NULL, 0x04000204u, 2, 0x4317u);
-    CHECK_EQ(c->fast_fetch, 0x3F00u);
-    rl_gba_cpu_write(c, NULL, 0x04000205u, 1, 0x03u);
-    CHECK_EQ(c->fast_fetch, 0);
+    rl_sched_run(run.k);
+    rl_gba_cpu_write(c, NULL, 0x04000204u, 2, 0x0014u);
+    rl_gba_cpu_fetch(c, 0x08000010u, 0);
+    uint64_t t0 = rl_sched_cycles(run.k);
+    rl_gba_cpu_fetch(c, 0x08000014u, 0);
+    CHECK_EQ(rl_sched_cycles(run.k) - t0, 4);
+    rl_gba_cpu_fetch(c, 0x08000018u, 0);
+    rl_gba_cpu_read(c, NULL, 0x03000000u, 4);
+    rl_gba_cpu_idle(c, 1);
+    t0 = rl_sched_cycles(run.k);
+    rl_gba_cpu_fetch(c, 0x0800001Cu, 0);
+    CHECK_EQ(rl_sched_cycles(run.k) - t0, 6);
+    t0 = rl_sched_cycles(run.k);
+    rl_gba_cpu_refill(c, 0x08000101u, 1, 0);
+    CHECK_EQ(rl_sched_cycles(run.k), t0);
+    rl_gba_cpu_refill(c, 0x08000101u, 1, 1);
+    CHECK_EQ(rl_sched_cycles(run.k) - t0, 6);
 }
 
 TEST(gba_run_vblankintrwait_takes_the_interrupt_inside_the_bios)

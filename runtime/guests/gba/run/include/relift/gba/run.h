@@ -15,6 +15,24 @@ RL_RUNTIME_API uint64_t rl_gba_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, 
 /** @brief A data write of size bytes of value at addr through the machine's bus, at the CPU's cycle. */
 RL_RUNTIME_API void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value);
 
+/**
+ * @brief The first cycle of the instruction at pc: the fetch two
+ * instructions ahead (4 bytes ahead in Thumb state, 8 in ARM state) through
+ * the machine's bus, nonsequential after a data access, an internal cycle or
+ * an exception return. Ends the previous instruction's data accesses.
+ */
+RL_RUNTIME_API void rl_gba_cpu_fetch(rl_ctx *c, uint32_t pc, unsigned thumb);
+/** @brief n internal cycles of the CPU, which leave the bus to the prefetch buffer. */
+RL_RUNTIME_API void rl_gba_cpu_idle(rl_ctx *c, uint32_t n);
+/** @brief A taken branch to target refills the pipeline: a nonsequential and a sequential fetch there. */
+RL_RUNTIME_API void rl_gba_cpu_refill(rl_ctx *c, uint32_t target, unsigned thumb, unsigned taken);
+/**
+ * @brief An instruction whose condition failed, after its fetch: takes
+ * interrupts as the sync point after it would, with next the instruction
+ * after it. Returns RL_OK or RL_PENDING as rl_sync does.
+ */
+RL_RUNTIME_API int rl_gba_cpu_cond_fail(rl_ctx *c, uint8_t *mem, uint64_t next);
+
 /** @brief Bit of a SWI trap code set for a SWI in Thumb state; bits 0 to 7 are the comment byte. */
 #define RL_GBA_SWI_THUMB 0x100u
 
