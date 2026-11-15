@@ -496,7 +496,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         std::fs::read(&a.deps.sdl3_lib)?,
     );
     let unaligned = w.join("unaligned.apk");
-    std::fs::write(&unaligned, z.finish()?)?;
+    relift_cache::write_if_changed(&unaligned, &z.finish()?)?;
     let aligned = w.join("aligned.apk");
     run(
         relift_proc::command(&sdk.zipalign)
@@ -559,7 +559,7 @@ mod tests {
 
     #[test]
     fn versions_sort_numerically_newest_first() {
-        let mut v = vec![
+        let mut v = [
             PathBuf::from("34.0.0"),
             PathBuf::from("5.1"),
             PathBuf::from("36.0.0"),
