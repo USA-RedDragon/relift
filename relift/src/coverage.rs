@@ -34,7 +34,7 @@ use relift_analyze::{
     Analysis, Insn, Progress, Source, Transfer, TransferKind, discover_with, slot_uses,
     unresolved_transfers,
 };
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::frontend::Arm64;
 use relift_guest::Frontend;
 use relift_progress::{Line, Metrics, noun};
 use relift_switch::program::{self, Placed};
@@ -398,7 +398,7 @@ pub fn run(
         .iter()
         .flat_map(|l| l.exports.iter().map(|(n, _)| n.clone()))
         .collect();
-    let cpu = A64 {
+    let cpu = Arm64 {
         features: relift_switch::CPU_FEATURES,
     };
     let preserved = cpu.preserved();

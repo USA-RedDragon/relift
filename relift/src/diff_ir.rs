@@ -10,10 +10,10 @@ use relift_diff::{Engine, Outcome, Pager, Reg, State as Case, Status};
 use relift_ir::interp::{self, Fault, GuestMemory, Intrinsics, State};
 use relift_ir::{Block, Flow};
 
-use relift_cpu_a64::decode::Features;
-use relift_cpu_a64::lift;
-use relift_cpu_a64::lift::system::{self, TRAP_BRK};
-use relift_cpu_a64::regs;
+use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::lift;
+use relift_cpu_arm64::lift::system::{self, TRAP_BRK};
+use relift_cpu_arm64::regs;
 
 /// The registers a state carries, in report order: `x0` to `x30`, `sp`,
 /// `nzcv` (the MRS layout), `fpcr`, `tpidr_el0`, `tpidrro_el0`, then `v0`

@@ -91,7 +91,7 @@ pub trait Frontend {
     /// The bytes are not an instruction the frontend can lift.
     fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure>;
 
-    /// The runtime headers lifted C includes, such as `relift/a64/abi.h`.
+    /// The runtime headers lifted C includes, such as `relift/arm64/abi.h`.
     fn abi_headers(&self) -> &'static [&'static str];
 
     /// Where `reg` lives in the context.

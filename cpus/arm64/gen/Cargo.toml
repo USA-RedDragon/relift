@@ -1,0 +1,15 @@
+[package]
+name = "relift-cpu-arm64-gen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-cpu-arm64 = { workspace = true }
+relift-ir = { workspace = true }
+relift-sail = { workspace = true }
+
+[lints]
+workspace = true

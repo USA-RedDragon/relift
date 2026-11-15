@@ -15,9 +15,9 @@ blocks of a conditional CALL or RET, the HALT bug view, sync points) is the
 frontend's, shared with the hand-written lifter.
 
 Regenerate from the repository root, with the Sail library that
-`cpus/a64/gen/fetch-sail.sh` downloads:
+`cpus/arm64/gen/fetch-sail.sh` downloads:
 
-    cpus/a64/gen/fetch-sail.sh "$DIR"
+    cpus/arm64/gen/fetch-sail.sh "$DIR"
     cpus/sm83/gen/regen.sh "$DIR/lib"
 
 `try` prints the templates of named opcodes (`3c`, `cb7e`) or why one

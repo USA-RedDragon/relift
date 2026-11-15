@@ -9,7 +9,7 @@ publish = false
 [workspace]
 
 [dependencies]
-relift-cpu-a64 = { path = "../cpus/a64" }
+relift-cpu-arm64 = { path = "../cpus/arm64" }
 relift-cpu-sm83 = { path = "../cpus/sm83" }
 relift-cache = { path = "../core/cache" }
 relift-diff = { path = "../core/diff" }

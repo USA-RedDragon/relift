@@ -206,14 +206,14 @@ pub enum FpRound {
 /// x86 `cvttsd2si`, which gives the integer indefinite value).
 ///
 /// Guest semantics are built by the frontend around these primitives, from
-/// ordinary IR operations. For A64 (`cpus/a64/src/lift/sail/rt.rs`) that is
+/// ordinary IR operations. For A64 (`cpus/arm64/src/lift/sail/rt.rs`) that is
 /// NaN propagation and quieting, the default NaN, FMAX/FMIN/FMAXNM/FMINNM
 /// with signed zeros, the FMA invalid case and FCVT NaN payloads.
 ///
 /// The A64 templates are generated for FPCR zero (round to nearest, no FZ,
 /// FZ16, DN, AH or AHP). Every block whose semantics assume that starts with
 /// an [`Op::Guard`] on `FPCR != 0`, so with any other FPCR it leaves before
-/// any effect for the runtime's slow path (`runtime/cpus/a64/fp.c`); an
+/// any effect for the runtime's slow path (`runtime/cpus/arm64/fp.c`); an
 /// emitter may hoist that check to function entry and after each write of
 /// FPCR. Exception flags are not values in the IR: a frontend that needs
 /// them maps each operation to a host operation that raises the host's

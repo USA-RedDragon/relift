@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 clap = { workspace = true }
 relift-cache = { workspace = true }
-relift-cpu-a64 = { workspace = true }
+relift-cpu-arm64 = { workspace = true }
 relift-ir = { workspace = true }
 relift-switch-formats = { workspace = true }
 serde_json = { workspace = true }

@@ -9,7 +9,7 @@
 #ifndef RELIFT_HOS_H
 #define RELIFT_HOS_H
 
-#include "a64.h"
+#include "arm64.h"
 
 #include <pthread.h>
 

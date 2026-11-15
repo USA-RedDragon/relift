@@ -4,11 +4,11 @@ This is the contract between relift-emitted C and the relift C runtime. It
 lives in two headers: `runtime/core/include/relift/abi_core.h`, the
 CPU-neutral half (export macros, return codes, the pending record, the
 context block the core owns, unit registration, the dev protocol), and
-`runtime/cpus/a64/include/relift/a64/abi.h`, the ARM64 half (`rl_ctx`,
+`runtime/cpus/arm64/include/relift/arm64/abi.h`, the ARM64 half (`rl_ctx`,
 memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
--Iruntime/cpus/a64/include`. This file gives the reason for each choice.
+-Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
 Contract version: `RL_ABI_VERSION` 5.
 
 ## 0. Runtime layers
@@ -18,7 +18,7 @@ The runtime is three C layers, mirroring the Rust folders:
 | Layer | Folder | Owns |
 |---|---|---|
 | core | `runtime/core` | No guest OS and no guest CPU. Guest memory (reservation, the exact map at the guest page size, the core's own permission flags, an opaque per-block guest tag), faults at guest addresses, host threads holding an opaque context, the clock at the guest tick rate, unit registration and the dispatch table, pending records, logging, configuration and the unknown-call reporter |
-| CPU | `runtime/cpus/a64` | `rl_ctx` and everything of sections 3 to 10 that names an ARM64 register or instruction: FPCR, WFE, CNTPCT and CNTFRQ, exclusives, `rl_undefined`, `rl_resume`, the miss entry, register summaries for reports |
+| CPU | `runtime/cpus/arm64` | `rl_ctx` and everything of sections 3 to 10 that names an ARM64 register or instruction: FPCR, WFE, CNTPCT and CNTFRQ, exclusives, `rl_undefined`, `rl_resume`, the miss entry, register summaries for reports |
 | guest | `runtime/guests/switch` | Horizon: the kernel, `rl_svc`, IPC, `sm:`, the NPDM-driven layout, the 4 KiB page, the 19.2 MHz counter, and the translation between Horizon's permission bits and the core's |
 
 The layers above describe themselves to the core at start-up with two small
@@ -669,7 +669,7 @@ Mac unless marked]:
     lifted code, not a jump, so this shape needs an override:
     `program::known` recognizes the routine by its code (all 36
     instructions, so a different build of the library is not mistaken for
-    it) and replaces it with `rl_a64_unw_jumpto` (`RL_FN_OVERRIDE |
+    it) and replaces it with `rl_arm64_unw_jumpto` (`RL_FN_OVERRIDE |
     RL_FN_MAY_UNWIND`), which reads the block at x0, sets d0-d31, and calls
     `rl_resume` with the block's x0-x29, sp and pc (x30 is the pc, as on
     hardware). The jump to the pad is then the same table entry as in the
@@ -725,26 +725,26 @@ Mac unless marked]:
 
 Guest `setjmp` and `longjmp` use the same primitive as exceptions: the
 host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
-[verified: `a64_tests jmp` on x86-64 Linux and an Apple M2 Mac]
+[verified: `arm64_tests jmp` on x86-64 Linux and an Apple M2 Mac]
 
-- **Overrides.** `rl_a64_setjmp` and `rl_a64_longjmp` (`a64/abi.h`) have
+- **Overrides.** `rl_arm64_setjmp` and `rl_arm64_longjmp` (`arm64/abi.h`) have
   the lifted signature and replace the guest's `setjmp` and `longjmp`
   (`_setjmp`, `__builtin_setjmp` and `sigsetjmp` with a zero mask take the
   same overrides). The build registers them as `RL_FN_OVERRIDE` entries at
   the guest symbols' addresses; `longjmp` also carries `RL_FN_MAY_UNWIND`.
-  - `rl_a64_setjmp` stores x19 to x30, sp and d8 to d15 (`v[8..15].d[0]`)
+  - `rl_arm64_setjmp` stores x19 to x30, sp and d8 to d15 (`v[8..15].d[0]`)
     into the jmp_buf at guest address x0 and returns `RL_OK` with x0 = 0.
     The buffer is guest memory, so guest code that reads or copies it sees
     what the guest's own `setjmp` would have written.
-  - `rl_a64_longjmp` reads that buffer, sets x0 to w1 (1 when w1 is 0,
+  - `rl_arm64_longjmp` reads that buffer, sets x0 to w1 (1 when w1 is 0,
     zero-extended, as the guest's `cinc w0, w1, eq` does), and calls
     `rl_resume` with pc = the saved x30 and the saved sp. It returns
     `RL_PENDING` with `pend = {saved x30, saved sp, RL_PEND_UNWIND}`.
-- **Layout.** `rl_a64_jmp_layout` gives the offsets of x19, sp and d8 in
-  the guest libc's jmp_buf. The default `rl_a64_jmp_newlib` is x19 at 0,
+- **Layout.** `rl_arm64_jmp_layout` gives the offsets of x19, sp and d8 in
+  the guest libc's jmp_buf. The default `rl_arm64_jmp_newlib` is x19 at 0,
   sp at 96, d8 at 112, 176 bytes [verified: disassembly of devkitA64
   newlib's `setjmp` and `longjmp`]. A guest layer whose libc differs calls
-  `rl_a64_set_jmp_layout` at start-up; relift reads the offsets from the
+  `rl_arm64_set_jmp_layout` at start-up; relift reads the offsets from the
   guest's `setjmp` (a run of `stp`/`str` from x0) and refuses to build when
   they do not fit the struct, or when the guest mangles the saved values
   (none of the libcs seen do). [inferred: the read from the guest's setjmp]
@@ -777,8 +777,8 @@ move 16 to 64 bytes per instruction. In a perf profile of a title's render
 thread the SDK's `__memcpy_device` alone was 7.6% of the samples and
 `memset` 0.7%. [verified: perf profile]
 
-- **Overrides.** `rl_a64_memmove` (x0 = dst, x1 = src, x2 = n) and
-  `rl_a64_memset` (x0 = dst, x1 = value, x2 = n) have the lifted signature,
+- **Overrides.** `rl_arm64_memmove` (x0 = dst, x1 = src, x2 = n) and
+  `rl_arm64_memset` (x0 = dst, x1 = value, x2 = n) have the lifted signature,
   return `RL_OK`, leave every register but the ones a call may change as
   they were, and do `memmove` and `memset` on `mem + x`. The build registers
   them as `RL_FN_OVERRIDE` entries (not `RL_FN_MAY_UNWIND`) at the guest
@@ -903,7 +903,7 @@ undefined one, where hardware raises an alignment fault (SIGBUS).
 ## 8.1 LSE atomics
 
 Switch code does not use them, but other A64 guests may, so the helpers are
-in `a64/abi.h` (static inline, no runtime call):
+in `arm64/abi.h` (static inline, no runtime call):
 
 - `rl_atomic(mem, a, size, op, v, ord)`: LDADD, LDCLR, LDEOR, LDSET,
   LDSMAX, LDSMIN, LDUMAX, LDUMIN and SWP (`op` is `RL_AT_*`) at size 1, 2, 4
@@ -1013,7 +1013,7 @@ are also call boundaries. [inferred]
   FPCR]
 - **FPSR cumulative flags** (IOC, DZC, OFC, UFC, IXC, IDC, QC) are produced
   only for a program that can observe them. The build's FPSR census
-  (`cpus/a64/src/flags.rs`) looks at every reachable `MRS Xt, FPSR`: it
+  (`cpus/arm64/src/flags.rs`) looks at every reachable `MRS Xt, FPSR`: it
   counts when some path uses `Xt` before overwriting it, a call uses
   `x0` to `x7`, a computed jump uses everything, and a value returned in
   `x0` counts when a caller uses `x0` after the call. libgcc's soft-float
@@ -1023,7 +1023,7 @@ are also call boundaries. [inferred]
 - With one, flags are produced per function, not per program. FPSR's
   flags are sticky, so a read sees every flag raised on its thread since
   the last FPSR write. The flags-live analysis
-  (`cpus/a64/src/flags/region.rs`, driven by `relift/src/fpflags.rs`)
+  (`cpus/arm64/src/flags/region.rs`, driven by `relift/src/fpflags.rs`)
   walks back from each live read to the writes that bound it: an `MSR
   FPSR`, a callee that writes FPSR on every path, or the start of a thread
   (the program entry, where `bind` has cleared the host flags). A call on
@@ -1080,7 +1080,7 @@ are also call boundaries. [inferred]
   [inferred: the runtime enters the start once, for the main thread, and
   does not implement `svcReturnFromException`]
 - `program.c` of a program with a live read calls
-  `rl_a64_set_fp_flags(1)`, and `MSR FPSR` clears the host flags in every
+  `rl_arm64_set_fp_flags(1)`, and `MSR FPSR` clears the host flags in every
   function, so a write in flag-free code still starts a region cleanly. In
   flag-producing code the flags live in two places: the FPSR
   slot (`c->fpsr`: QC, MSR values, the FPCR slow paths) and the host's
@@ -1092,7 +1092,7 @@ are also call boundaries. [inferred]
   the slot and clears the host flags. Threads are host threads, so the
   host flags follow the guest thread; `bind` clears them, and `rl_svc`
   saves and restores them around the runtime's own FP work
-  (`rl_a64_flags_enter`, `rl_a64_flags_leave`).
+  (`rl_arm64_flags_enter`, `rl_arm64_flags_leave`).
 - Where x86-64 and Arm differ at FPCR zero, and what covers it:
   - Tininess: Arm detects underflow before rounding, x86 after. They differ
     only for a product or quotient that rounds up to the smallest normal
@@ -1189,7 +1189,7 @@ are also call boundaries. [inferred]
 
 ## 10.2 Crypto instructions
 
-`a64/crypto.h` has one function per guest instruction of FEAT_AES,
+`arm64/crypto.h` has one function per guest instruction of FEAT_AES,
 FEAT_PMULL, FEAT_SHA1, FEAT_SHA256, FEAT_SHA512, FEAT_SM3 and FEAT_SM4:
 `rl_aese`, `rl_aesd`, `rl_aesmc`, `rl_aesimc`, `rl_pmull64` (PMULL and
 PMULL2 1Q), `rl_sha1{c,p,m,h,su0,su1}`,
@@ -1273,7 +1273,7 @@ SM4 host paths are unexercised, as neither host has them]
 
 ## 10.3 Half precision
 
-`a64/fp16.h` is IEEE binary16 on `uint16_t` bit patterns, for the IR's
+`arm64/fp16.h` is IEEE binary16 on `uint16_t` bit patterns, for the IR's
 half-precision operations: `rl_fp16_add`, `_sub`, `_mul`, `_div`, `_sqrt`,
 `_muladd` (a * b + c, one rounding), `_round_int` (an `RL_RM_*` mode),
 `_to_f32`, `_to_f64` (exact), `_from_f32`, `_from_f64` (one rounding from
@@ -1437,7 +1437,7 @@ only on the C library and the host OS.
 
 - `RL_ABI_VERSION` changes with any change to a type, layout, signature,
   constant or emitted call shape in this contract. Splitting the header into
-  `abi_core.h` and `a64/abi.h` moved declarations and changed no layout,
+  `abi_core.h` and `arm64/abi.h` moved declarations and changed no layout,
   signature, constant or call shape (the one renamed field,
   `rl_dev_lift_req.fpcr` to `fp_mode`, keeps its offset and size), so the
   version stayed 1.
@@ -2063,9 +2063,9 @@ Every module imports these from `rt`, in this order (`RUNTIME_IMPORTS`):
   per operand up to 64 bits and two above, returning nothing, one `i64` or
   two; `Nop`, `Const` and `ZeroBlock` are inline. A64 carries `CNTPCT` and
   `WFE` as imports, `CNTFRQ`, `CTR_EL0` and `DCZID_EL0` as the constants
-  of `a64/abi.h`, `DC ZVA` as a 64-byte zeroing, and cache maintenance and
+  of `arm64/abi.h`, `DC ZVA` as a 64-byte zeroing, and cache maintenance and
   `SEV` as no-ops (one thread per memory, no instruction cache to keep
-  coherent); `cpus/a64` checks the constants against the header.
+  coherent); `cpus/arm64` checks the constants against the header.
 - **Exclusives** use the monitor fields of the context: a load-exclusive
   arms it with address and size, a store-exclusive succeeds when it is
   armed for the same address and size, and a store-exclusive, a clear,
@@ -2140,7 +2140,7 @@ The command exits 0 when every compared call matched, 1 after any mismatch
 and 2 when no call was compared. `--count` and `--skip` choose calls.
 
 Engines: the default is `relift diff --serve`, the `relift-ir` interpreter
-over the A64 lifter (`relift-cpu-a64`), so it needs no GPL code. `--engine
+over the A64 lifter (`relift-cpu-arm64`), so it needs no GPL code. `--engine
 COMMAND` runs another program that speaks the same protocol; `check/` builds
 one on Unicorn (`relift-diff-unicorn`), which is GPL and so is not linked by
 anything else. `--flip-read N` flips a bit of the Nth memory read of the
@@ -2167,7 +2167,7 @@ committed.
 
 | check | result |
 |---|---|
-| `clang -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c-header` on `a64/abi.h` (with `abi_core.h`), default target, `--target=aarch64-linux-gnu`, `--target=x86_64-pc-windows-gnu` | clean |
+| `clang -std=c11 -Wall -Wextra -Werror -fsyntax-only -x c-header` on `arm64/abi.h` (with `abi_core.h`), default target, `--target=aarch64-linux-gnu`, `--target=x86_64-pc-windows-gnu` | clean |
 | a TU that includes the header, same three targets, plus `-Wpedantic` | clean |
 | same header check with Apple clang 21 on an Apple M2 Mac; gcc 16 `-fsyntax-only` | clean |
 | a lifted-style function using every call shape (direct call with the LSDA check, indirect call, musttail, landing-pad switch, FP fast paths) at `-O2 -Wpedantic -Werror`: x86-64 Linux, x86-64 Windows gnu, arm64 Linux, Apple clang arm64 | compiles |

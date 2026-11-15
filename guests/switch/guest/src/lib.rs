@@ -1,9 +1,9 @@
-//! The Switch guest, over `relift-switch-formats` and `relift-cpu-a64`.
+//! The Switch guest, over `relift-switch-formats` and `relift-cpu-arm64`.
 
 mod eh;
 pub mod program;
 
-use relift_cpu_a64::decode::Features;
+use relift_cpu_arm64::decode::Features;
 
 /// The architecture features of the Switch's CPU, a Cortex-A57: Armv8.0-A
 /// with AES, PMULL, SHA1, SHA256 and CRC32. Words of newer encodings are
@@ -12,7 +12,7 @@ pub const CPU_FEATURES: Features = Features::CORTEX_A57;
 
 #[cfg(test)]
 mod tests {
-    use relift_cpu_a64::decode::Feature;
+    use relift_cpu_arm64::decode::Feature;
 
     use super::CPU_FEATURES;
 

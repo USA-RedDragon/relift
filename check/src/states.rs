@@ -2,7 +2,7 @@
 //! states with register patterns, flag sweeps and mapped memory windows.
 
 use crate::emu::lift;
-use relift_cpu_a64::decode::{Encoding, Features, Insn, decode_for};
+use relift_cpu_arm64::decode::{Encoding, Features, Insn, decode_for};
 
 use crate::emu::{CODE, CODE_MAP, CODE_SIZE, DATA, Guest};
 use crate::oracle::fill_window;

@@ -464,10 +464,10 @@ int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
     (void)mem;
     rl_clrex(&c->excl);
     /* The guest's FP flags stay out of the runtime's own FP work. */
-    uint32_t flags = rl_a64_flags_enter();
+    uint32_t flags = rl_arm64_flags_enter();
     int r = rl_cfg()->trace_os ? svc_traced(c, imm) : dispatch(c, imm);
     hos_sched_point();
-    rl_a64_flags_leave(flags);
+    rl_arm64_flags_leave(flags);
     return r;
 }
 
@@ -519,7 +519,7 @@ int rl_hos_init(const rl_hos_config *cfg)
         return -1;
     if (!rl_cfg()->loaded)
         rl_config_load();
-    if (rl_core_init(&hos_guest, rl_a64_cpu()) != 0)
+    if (rl_core_init(&hos_guest, rl_arm64_cpu()) != 0)
         return -1;
     memset(&hos, 0, sizeof hos);
     pthread_mutexattr_init(&ma);

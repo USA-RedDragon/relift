@@ -3,7 +3,7 @@
 #define RELIFT_VKG_H
 
 #include "vkg_types.h"
-#include <relift/a64/abi.h>
+#include <relift/arm64/abi.h>
 
 typedef struct vkf_call vkf_call;
 

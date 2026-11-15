@@ -876,7 +876,7 @@ dependencies = [
  "relift-analyze",
  "relift-build",
  "relift-cache",
- "relift-cpu-a64",
+ "relift-cpu-arm64",
  "relift-cpu-sm83",
  "relift-diff",
  "relift-emit",
@@ -925,23 +925,6 @@ name = "relift-cache"
 version = "0.1.0"
 
 [[package]]
-name = "relift-cpu-a64"
-version = "0.1.0"
-dependencies = [
- "relift-guest",
- "relift-ir",
-]
-
-[[package]]
-name = "relift-cpu-a64-gen"
-version = "0.1.0"
-dependencies = [
- "relift-cpu-a64",
- "relift-ir",
- "relift-sail",
-]
-
-[[package]]
 name = "relift-cpu-arm32"
 version = "0.1.0"
 dependencies = [
@@ -953,6 +936,23 @@ name = "relift-cpu-arm32-gen"
 version = "0.1.0"
 dependencies = [
  "relift-cpu-arm32",
+ "relift-sail",
+]
+
+[[package]]
+name = "relift-cpu-arm64"
+version = "0.1.0"
+dependencies = [
+ "relift-guest",
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-arm64-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-arm64",
+ "relift-ir",
  "relift-sail",
 ]
 
@@ -1129,7 +1129,7 @@ version = "0.1.0"
 name = "relift-switch"
 version = "0.1.0"
 dependencies = [
- "relift-cpu-a64",
+ "relift-cpu-arm64",
  "relift-guest",
  "relift-ir",
  "relift-switch-formats",
@@ -1160,7 +1160,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
- "relift-cpu-a64",
+ "relift-cpu-arm64",
  "relift-ir",
  "relift-proc",
  "relift-switch-formats",

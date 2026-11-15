@@ -10,7 +10,7 @@
  * on each. With no host Vulkan the tests are skipped, unless
  * RELIFT_VK_REQUIRE is set (CI sets it where lavapipe is installed).
  */
-#include "a64.h"
+#include "arm64.h"
 #include "hostlib.h"
 #include "runner.h"
 #include "services.h"
@@ -183,7 +183,7 @@ static uint64_t gcall(const char *name, const uint64_t *args, unsigned n)
 
 static int boot_with(const rl_vk_surface_provider *surfaces, void *gipa)
 {
-    if (rl_core_init(&vk_guest, rl_a64_cpu()) != 0)
+    if (rl_core_init(&vk_guest, rl_arm64_cpu()) != 0)
         return -1;
     if (rl_vm_init(&g_vm, 36, 0) != 0)
         return -1;

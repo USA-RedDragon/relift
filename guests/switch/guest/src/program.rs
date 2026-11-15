@@ -484,7 +484,7 @@ pub fn c_module(name: &str) -> String {
 /// A guest libc routine a host override replaces, recognized by its code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Known {
-    /// The host function (`relift/a64/abi.h`).
+    /// The host function (`relift/arm64/abi.h`).
     pub host_fn: &'static str,
     /// Whether it may return `RL_PENDING`.
     pub may_unwind: bool,
@@ -495,7 +495,7 @@ pub struct Known {
 const BTI_C: u32 = 0xd503_245f;
 
 /// newlib's AArch64 `setjmp`: x19 to x30, sp and d8 to d15 into the buffer
-/// at x0 (the layout `rl_a64_jmp_newlib` reads), then 0.
+/// at x0 (the layout `rl_arm64_jmp_newlib` reads), then 0.
 const NEWLIB_SETJMP: [u32; 15] = [
     0x9100_03f0,
     0xa900_5013,
@@ -578,7 +578,7 @@ const LLVM_JUMPTO: [u32; 36] = [
 
 /// A libc memory routine of the Nintendo SDK, recognized by its first word
 /// and an FNV-1a hash of its whole code, and the host routine that replaces
-/// it (`relift/a64/abi.h`). Each takes (dst or buffer, src or value, n) in
+/// it (`relift/arm64/abi.h`). Each takes (dst or buffer, src or value, n) in
 /// x0 to x2, touches only that memory and returns x0 unchanged.
 struct MemRoutine {
     lead: u32,
@@ -592,25 +592,25 @@ const MEM_ROUTINES: [MemRoutine; 4] = [
         lead: 0xcb01_03e8,
         len: 772,
         hash: 0x24ad_a13a_d6ca_df79,
-        host_fn: "rl_a64_memmove",
+        host_fn: "rl_arm64_memmove",
     },
     MemRoutine {
         lead: 0xf81e_0ff3,
         len: 176,
         hash: 0xe6d2_e331_2405_bd73,
-        host_fn: "rl_a64_memmove",
+        host_fn: "rl_arm64_memmove",
     },
     MemRoutine {
         lead: 0xf81e_0ff3,
         len: 408,
         hash: 0xfa1a_d1d6_c9f9_1b87,
-        host_fn: "rl_a64_memmove",
+        host_fn: "rl_arm64_memmove",
     },
     MemRoutine {
         lead: 0xb400_0662,
         len: 208,
         hash: 0x6540_092c_afff_acf9,
-        host_fn: "rl_a64_memset",
+        host_fn: "rl_arm64_memset",
     },
 ];
 
@@ -648,21 +648,21 @@ pub fn known(bytes: &[u8]) -> Option<Known> {
     let is = |pat: &[u32], n: usize| body.len() >= n && body[..n] == pat[..n];
     if is(&LLVM_JUMPTO, LLVM_JUMPTO.len()) {
         return Some(Known {
-            host_fn: "rl_a64_unw_jumpto",
+            host_fn: "rl_arm64_unw_jumpto",
             may_unwind: true,
             resume_point: false,
         });
     }
     if is(&NEWLIB_SETJMP, NEWLIB_SETJMP.len() - 1) {
         return Some(Known {
-            host_fn: "rl_a64_setjmp",
+            host_fn: "rl_arm64_setjmp",
             may_unwind: false,
             resume_point: true,
         });
     }
     if is(&NEWLIB_LONGJMP, NEWLIB_LONGJMP.len() - 1) {
         return Some(Known {
-            host_fn: "rl_a64_longjmp",
+            host_fn: "rl_arm64_longjmp",
             may_unwind: true,
             resume_point: false,
         });
@@ -864,7 +864,7 @@ fn program_c(
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp_flags {
-        t.push_str("#include \"a64.h\"\n");
+        t.push_str("#include \"arm64.h\"\n");
     }
     t.push_str("#include <string.h>\nextern int relift_info_main(void);\n");
     t.push_str(ANDROID_ENTRY);
@@ -873,7 +873,7 @@ fn program_c(
     );
     t.push_str("#ifdef __ANDROID__\n    set_android_dirs();\n#endif\n");
     if fp_flags {
-        t.push_str("    rl_a64_set_fp_flags(1);\n");
+        t.push_str("    rl_arm64_set_fp_flags(1);\n");
     }
     t.push_str("    int status = rl_switch_main(&rl_program, argc, argv);\n#ifdef __ANDROID__\n    rl_android_flush();\n#endif\n    return status;\n}\n");
     t
@@ -1023,7 +1023,10 @@ mod tests {
         let bytes = |w: &[u32]| w.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let mut sj = vec![BTI_C];
         sj.extend_from_slice(&NEWLIB_SETJMP);
-        assert_eq!(known(&bytes(&sj)).map(|k| k.host_fn), Some("rl_a64_setjmp"));
+        assert_eq!(
+            known(&bytes(&sj)).map(|k| k.host_fn),
+            Some("rl_arm64_setjmp")
+        );
         let lj = known(&bytes(&NEWLIB_LONGJMP)).expect("longjmp");
         assert!(lj.may_unwind && !lj.resume_point);
         sj[3] ^= 1;
@@ -1036,7 +1039,7 @@ mod tests {
         let mut j = LLVM_JUMPTO.to_vec();
         j.push(0xa900_0000);
         let k = known(&bytes(&j)).expect("jumpto");
-        assert_eq!(k.host_fn, "rl_a64_unw_jumpto");
+        assert_eq!(k.host_fn, "rl_arm64_unw_jumpto");
         assert!(k.may_unwind && !k.resume_point);
         let mut with_bti = vec![BTI_C];
         with_bti.extend_from_slice(&LLVM_JUMPTO);
@@ -1052,10 +1055,10 @@ mod tests {
             lead: u32::from_le_bytes([0, 1, 2, 3]),
             len: 40,
             hash: fnv1a(&code[..40]),
-            host_fn: "rl_a64_memmove",
+            host_fn: "rl_arm64_memmove",
         }];
         let k = mem_routine(&code, &table).expect("matches");
-        assert_eq!(k.host_fn, "rl_a64_memmove");
+        assert_eq!(k.host_fn, "rl_arm64_memmove");
         assert!(!k.may_unwind && !k.resume_point);
         assert_eq!(mem_routine(&code[..39], &table), None);
         let mut other = code.clone();

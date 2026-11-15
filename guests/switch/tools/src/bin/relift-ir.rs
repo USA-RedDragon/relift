@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use relift_cpu_a64::decode::{Features, decode_for};
-use relift_cpu_a64::lift::lift;
+use relift_cpu_arm64::decode::{Features, decode_for};
+use relift_cpu_arm64::lift::lift;
 use relift_ir::dce;
 use relift_switch_formats::nso::Nso;
 use relift_switch_formats::storage::read_all;

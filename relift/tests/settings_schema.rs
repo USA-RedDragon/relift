@@ -95,7 +95,7 @@ fn the_runtime_schema_in_c_equals_the_list_in_rust() {
     let Some(mut c) = declared(
         "settings-schema",
         "rl_switch_declare_settings",
-        &["cpus/a64/include", "cpus/a64", "guests/switch"],
+        &["cpus/arm64/include", "cpus/arm64", "guests/switch"],
         &["guests/switch/settings.c", "guests/switch/touchpad.c"],
     ) else {
         return;

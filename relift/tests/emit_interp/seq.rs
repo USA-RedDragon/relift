@@ -12,8 +12,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::decode::{Encoding, Features, decode};
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::decode::{Encoding, Features, decode};
+use relift_cpu_arm64::frontend::Arm64;
 use relift_emit::{Function, Insn, Options, emit};
 use relift_guest::{Frontend, Home};
 use relift_ir::interp::{FlatMemory, NoIntrinsics, run};
@@ -145,7 +145,7 @@ fn branch(kind: Kind, at: usize, to: usize) -> u32 {
 
 /// The registers the random instructions leave alone: the loop counter and
 /// the link register.
-fn reserved(fe: &A64) -> Vec<Reg> {
+fn reserved(fe: &Arm64) -> Vec<Reg> {
     let regs = fe.regs();
     (0..regs.len())
         .map(|i| Reg(i as u16))
@@ -154,7 +154,7 @@ fn reserved(fe: &A64) -> Vec<Reg> {
 }
 
 struct Gen<'a> {
-    fe: &'a A64,
+    fe: &'a Arm64,
     encs: Vec<Encoding>,
     reserved: Vec<Reg>,
     r: Rng,
@@ -257,8 +257,9 @@ impl Case {
             .iter()
             .chain(&self.stub)
             .map(|(&pc, (w, b))| {
-                let r = relift_cpu_a64::lift::lift(*w, pc, &relift_cpu_a64::decode::Features::ALL)
-                    .unwrap_or_else(|_| b.clone());
+                let r =
+                    relift_cpu_arm64::lift::lift(*w, pc, &relift_cpu_arm64::decode::Features::ALL)
+                        .unwrap_or_else(|_| b.clone());
                 (pc, r)
             })
             .collect()
@@ -413,7 +414,7 @@ struct Tally {
 }
 
 fn check(
-    fe: &A64,
+    fe: &Arm64,
     h: &Harness,
     dir: &Path,
     cases: &[Case],
@@ -494,7 +495,7 @@ fn emitted_functions_match_the_interpreter() {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(16);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let forms = std::fs::read_to_string(root.join("cpus/a64/gen/forms.txt"))
+    let forms = std::fs::read_to_string(root.join("cpus/arm64/gen/forms.txt"))
         .expect("forms.txt is readable");
     let by_name: BTreeMap<&str, Encoding> = Encoding::all().map(|e| (e.name(), e)).collect();
     let encs: Vec<Encoding> = forms
@@ -503,7 +504,7 @@ fn emitted_functions_match_the_interpreter() {
         .filter(|l| !l.is_empty())
         .map(|n| *by_name.get(n).unwrap_or_else(|| panic!("form {n} decodes")))
         .collect();
-    let fe = A64 {
+    let fe = Arm64 {
         features: Features::ALL,
     };
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("emit-interp-seq");

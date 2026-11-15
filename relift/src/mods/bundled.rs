@@ -447,7 +447,7 @@ mod tests {
     fn mods_c_lists_slots_variants_and_data() {
         let list = [b("a", &["b"], &[]), b("b", &[], &[])];
         let c = mods_c(
-            &["relift/a64/abi.h"],
+            &["relift/arm64/abi.h"],
             &list,
             &[SwapC {
                 entry: 0x10,

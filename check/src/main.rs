@@ -1,7 +1,7 @@
 //! The reference interpreter runner. A separate workspace, so nothing in the
 //! main one links it; `relift check` runs it as a subprocess.
 //!
-//! It lifts A64 instruction words with `relift-cpu-a64`, runs them in the
+//! It lifts A64 instruction words with `relift-cpu-arm64`, runs them in the
 //! `relift-ir` interpreter and on an oracle (Unicorn, or the native harness
 //! on real hardware or QEMU, see `oracle.rs`) on generated states, and
 //! compares every general and vector register, SP, NZCV, the next PC, the
@@ -49,9 +49,9 @@ mod states;
 
 use std::process::ExitCode;
 
-use relift_cpu_a64::decode::{Encoding, Insn};
-use relift_cpu_a64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
-use relift_cpu_a64::lift::{lifter, supported};
+use relift_cpu_arm64::decode::{Encoding, Insn};
+use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
+use relift_cpu_arm64::lift::{lifter, supported};
 
 use emu::{Guest, compare, interpret, lift_all};
 use oracle::{Case, Oracle};

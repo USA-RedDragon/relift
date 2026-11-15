@@ -11,8 +11,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::decode::Features;
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::frontend::Arm64;
 use relift_emit::{Function, Insn, Options, emit};
 use relift_guest::{Frontend, Home, LiftFailure};
 use relift_ir::{Block, FpOp, Reg, RegFile, Width};
@@ -20,7 +20,7 @@ use relift_ir::{Block, FpOp, Reg, RegFile, Width};
 /// The spin loop and a return, at guest address 0x1000.
 const CODE: [u32; 4] = [0xb940_0020, 0x7100_041f, 0x54ff_ffc1, 0xd65f_03c0];
 
-const HARNESS: &str = r#"#include <relift/a64/abi.h>
+const HARNESS: &str = r#"#include <relift/arm64/abi.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,15 +70,15 @@ int main(void)
     rl_ctx *c = aligned_alloc(64, sizeof(rl_ctx));
     memset(c, 0, sizeof *c);
     int plain = spin(F_plain, c);
-    int a64 = spin(F_spin, c);
-    printf("plain %d a64 %d preempts %d\n", plain, a64, g_preempts);
-    return !plain && !a64 ? 0 : 1;
+    int arm64 = spin(F_spin, c);
+    printf("plain %d arm64 %d preempts %d\n", plain, arm64, g_preempts);
+    return !plain && !arm64 ? 0 : 1;
 }
 "#;
 
 /// A64 without a preemption clock, so only the loop fence keeps the load
 /// in the loop.
-struct Plain(A64);
+struct Plain(Arm64);
 
 impl Frontend for Plain {
     fn granule(&self) -> u64 {
@@ -212,7 +212,7 @@ fn a_lifted_spin_wait_sees_another_threads_store() {
         eprintln!("skipped: no clang on PATH");
         return;
     };
-    let fe = A64 {
+    let fe = Arm64 {
         features: Features::ALL,
     };
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("emit-spin");
@@ -238,7 +238,7 @@ fn a_lifted_spin_wait_sees_another_threads_store() {
         "-D_GNU_SOURCE",
         "-pthread",
         &format!("-I{}", rt.join("core/include").display()),
-        &format!("-I{}", rt.join("cpus/a64/include").display()),
+        &format!("-I{}", rt.join("cpus/arm64/include").display()),
     ]
     .iter()
     .map(|s| s.to_string())

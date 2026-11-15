@@ -16,7 +16,7 @@ zstd = { workspace = true }
 relift-analyze = { workspace = true }
 relift-build = { workspace = true }
 relift-cache = { workspace = true }
-relift-cpu-a64 = { workspace = true }
+relift-cpu-arm64 = { workspace = true }
 relift-cpu-sm83 = { workspace = true }
 relift-diff = { workspace = true }
 relift-emit = { workspace = true }

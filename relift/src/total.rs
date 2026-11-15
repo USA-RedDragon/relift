@@ -355,7 +355,7 @@ pub(crate) fn code_map_c(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use relift_cpu_a64::frontend::A64;
+    use relift_cpu_arm64::frontend::Arm64;
     use relift_guest::{Root, RootKind, Section};
 
     const BASE: u64 = 0x8000_0000;
@@ -383,8 +383,8 @@ mod tests {
         }
     }
 
-    fn cpu() -> A64 {
-        A64 {
+    fn cpu() -> Arm64 {
+        Arm64 {
             features: relift_switch::CPU_FEATURES,
         }
     }
@@ -428,7 +428,7 @@ mod tests {
             bits: vec![0xAA; 3 * 256],
             census: Census::default(),
         };
-        let c = code_map_c(&["relift/a64/abi.h"], &map, "rl_code_0", "h", "c", "main");
+        let c = code_map_c(&["relift/arm64/abi.h"], &map, "rl_code_0", "h", "c", "main");
         assert!(c.contains("static const uint8_t patterns[256] = {"), "{c}");
         assert!(c.contains(" 0u, 0u, 0u,"), "{c}");
         assert!(c.contains("{ RL_CODE_MAP_VERSION, 3u, 1u, UINT64_C(0x80000000), pages, patterns, &h, &c, \"main\" };"), "{c}");

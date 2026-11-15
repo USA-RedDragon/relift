@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use relift_analyze::{EntryKind, Insn, discover_more};
 use relift_build::{Compile, Plan};
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::frontend::Arm64;
 use relift_guest::Module;
 use relift_switch::program::{self, Placed};
 
@@ -249,7 +249,7 @@ impl Server {
                 format!("{target:#x} is already a lifted entry"),
             ));
         }
-        let cpu = A64 {
+        let cpu = Arm64 {
             features: relift_switch::CPU_FEATURES,
         };
         let module = &self.modules[i];

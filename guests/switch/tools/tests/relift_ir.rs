@@ -17,8 +17,8 @@ fn hex_words_print_one_block_each() {
         text.contains("; 0x4000 d2800540 MOVZ_64_movewide"),
         "{text}"
     );
-    assert!(text.contains("block 0x4000 len 4 regs a64"), "{text}");
-    assert!(text.contains("block 0x4004 len 4 regs a64"), "{text}");
+    assert!(text.contains("block 0x4000 len 4 regs arm64"), "{text}");
+    assert!(text.contains("block 0x4004 len 4 regs arm64"), "{text}");
     assert!(text.contains("set x0, "), "{text}");
     assert_eq!(text.matches("exit jump 0x").count(), 2, "{text}");
 }

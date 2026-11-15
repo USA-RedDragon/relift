@@ -9,7 +9,7 @@
 #include "core.h"
 #include "vk.h"
 
-#include <relift/a64/abi.h>
+#include <relift/arm64/abi.h>
 
 #include "vkg.h"
 

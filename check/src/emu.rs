@@ -3,11 +3,11 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use relift_cpu_a64::decode::Features;
-use relift_cpu_a64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
-use relift_cpu_a64::lift::system;
-use relift_cpu_a64::lift::{self, LiftError};
-use relift_cpu_a64::regs;
+use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
+use relift_cpu_arm64::lift::system;
+use relift_cpu_arm64::lift::{self, LiftError};
+use relift_cpu_arm64::regs;
 use relift_ir::interp::{self, Fault, FlatMemory, GuestMemory, Intrinsics, State};
 use relift_ir::{Block, Flow};
 use unicorn_engine::RegisterARM64 as R;
@@ -211,11 +211,11 @@ pub static FP_FLAGS: AtomicBool = AtomicBool::new(false);
 /// The A64 intrinsics the interpreter can run: the FPSR flag ones (the
 /// host's sticky flags modeled as `host`) and those of
 /// [`system::InterpIntrinsics`] (event hints, cache maintenance).
-struct A64Intrinsics {
+struct Arm64Intrinsics {
     host: u32,
 }
 
-impl Intrinsics for A64Intrinsics {
+impl Intrinsics for Arm64Intrinsics {
     fn call(&mut self, name: &'static str, args: &[u128]) -> Result<u128, interp::Error> {
         match name {
             system::FP_RAISE => {
@@ -371,7 +371,7 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
     st.regs[regs::FPCR.index()] = u128::from(input.fpcr);
     st.regs[regs::FPSR.index()] = u128::from(input.fpsr);
     st.regs[regs::FP_FLAGS.index()] = u128::from(FP_FLAGS.load(Ordering::Relaxed));
-    let mut intr = A64Intrinsics { host: 0 };
+    let mut intr = Arm64Intrinsics { host: 0 };
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
     }
@@ -394,7 +394,7 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
                 {
                     return Outcome::Slow(code);
                 }
-                if let Flow::Trap(relift_cpu_a64::lift::sail::SLOW_ALIGN) = o.flow {
+                if let Flow::Trap(relift_cpu_arm64::lift::sail::SLOW_ALIGN) = o.flow {
                     return Outcome::Fault("alignment fault".to_string());
                 }
                 if let Flow::Trap(UNDEF_TRAP) = o.flow {

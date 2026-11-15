@@ -1,7 +1,7 @@
 //! Which lifted functions produce exact FPSR flags.
 //!
 //! While the build lifts each module it keeps a small summary of every
-//! function for the flags-live region analysis (`relift_cpu_a64::flags::
+//! function for the flags-live region analysis (`relift_cpu_arm64::flags::
 //! region`): its blocks with FP use and FPSR writes, its calls, its live
 //! FPSR reads, and the computed transfers that go through a loader-filled
 //! slot. The module's analysis is then dropped and its shards emitted in
@@ -36,7 +36,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use relift_analyze::{Function, Insn, Layout, Outline};
-use relift_cpu_a64::flags::{self, region};
+use relift_cpu_arm64::flags::{self, region};
 use relift_guest::{Frontend, Module, RootKind};
 use relift_switch::program::{self, Placed, SlotKind};
 
@@ -320,7 +320,7 @@ impl Fpsr {
         let resume_point = |a: u64| m.resume.contains(&a);
         let regs: Vec<(relift_ir::Reg, u128)> = program::START_REGS
             .iter()
-            .map(|&(n, v)| (relift_cpu_a64::regs::x(n), u128::from(v)))
+            .map(|&(n, v)| (relift_cpu_arm64::regs::x(n), u128::from(v)))
             .collect();
         let cx = flags::Context {
             is_entry: &is_entry,

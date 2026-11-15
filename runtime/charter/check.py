@@ -17,7 +17,7 @@ Each absence rule has a presence control, so an empty walk or a broken
 pattern cannot pass: the walk must find the core's sources, headers and
 tests; the include rule must reject at least one include of the CPU and
 guest layers; every rule must match its own sample; and the denylist must hit
-at least one file under runtime/guests/switch or runtime/cpus/a64.
+at least one file under runtime/guests/switch or runtime/cpus/arm64.
 
 Run from anywhere: python3 runtime/charter/check.py. Exit status 1 on any
 failure. Standard library only.
@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUNTIME = os.path.dirname(HERE)
 CORE = os.path.join(RUNTIME, "core")
 ABOVE = [os.path.join(RUNTIME, "cpus"), os.path.join(RUNTIME, "guests")]
-CONTROLS = [os.path.join(RUNTIME, "guests", "switch"), os.path.join(RUNTIME, "cpus", "a64")]
+CONTROLS = [os.path.join(RUNTIME, "guests", "switch"), os.path.join(RUNTIME, "cpus", "arm64")]
 ALLOW = os.path.join(HERE, "allow.txt")
 
 # (rule, pattern, sample the pattern must match, what it guards against)
@@ -172,7 +172,7 @@ def main():
             if rel.endswith((".c", ".h")):
                 rejected += len(bad_includes(rel, read(rel), above_names, above_paths, search)[0])
     if rejected == 0:
-        inc_problems.append("presence control: the include rule rejects nothing in guests/switch or cpus/a64")
+        inc_problems.append("presence control: the include rule rejects nothing in guests/switch or cpus/arm64")
     check("core_includes_nothing_above_it", inc_problems)
 
     rule_problems = []
@@ -196,7 +196,7 @@ def main():
             if hits(rel, read(rel), DENYLIST):
                 control_hits += 1
     if control_hits == 0:
-        word_problems.append("presence control: the denylist hits no file under guests/switch or cpus/a64")
+        word_problems.append("presence control: the denylist hits no file under guests/switch or cpus/arm64")
     check("core_spells_no_guest_word", word_problems)
 
     stale = [f"allow.txt: `{p} {r}` matches nothing any more; remove it" for (p, r) in allow if (p, r) not in used]

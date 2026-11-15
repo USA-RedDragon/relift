@@ -201,7 +201,7 @@ fn a_program_that_reads_fpsr_gets_host_flags_without_a_setting() {
         stderr.contains("1 live reads, every region is bounded"),
         "{stderr}"
     );
-    assert!(prog.contains("rl_a64_set_fp_flags(1)"));
+    assert!(prog.contains("rl_arm64_set_fp_flags(1)"));
     assert_eq!(stdout, "divide by zero seen\n", "{stderr}");
 }
 
@@ -213,7 +213,7 @@ fn a_program_that_never_reads_fpsr_stays_flag_free() {
     }
     let (stdout, stderr, prog) = build_and_run("e2e-fpsr-none", false);
     assert!(!stderr.contains("FPSR flags"), "{stderr}");
-    assert!(!prog.contains("rl_a64_set_fp_flags"));
+    assert!(!prog.contains("rl_arm64_set_fp_flags"));
     assert_eq!(stdout, "divide by zero seen\n", "{stderr}");
 }
 
@@ -227,7 +227,7 @@ fn only_the_function_whose_fp_reaches_a_read_produces_flags() {
     rodata.resize(0x20, 0);
     rodata.extend_from_slice(MSG2);
     let (stdout, stderr, prog) = build_and_run_text("e2e-fpsr-two", two_functions(), rodata);
-    assert!(prog.contains("rl_a64_set_fp_flags(1)"));
+    assert!(prog.contains("rl_arm64_set_fp_flags(1)"));
     assert!(
         stderr.contains("FPSR flags: 1 of 3 functions, 1 live reads"),
         "{stderr}"
@@ -322,7 +322,7 @@ fn flags_raised_through_a_function_pointer_reach_the_read() {
     }
     let (stdout, stderr, prog) =
         build_and_run_text("e2e-fpsr-pointer", through_a_pointer(), MSG.to_vec());
-    assert!(prog.contains("rl_a64_set_fp_flags(1)"));
+    assert!(prog.contains("rl_arm64_set_fp_flags(1)"));
     assert!(
         stderr.contains("a region is unbounded: every function produces flags"),
         "{stderr}"

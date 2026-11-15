@@ -515,7 +515,11 @@ pub fn emit(m: &mut Model) -> Result<CFiles, Error> {
     }
     let mut h = String::new();
     writeln!(h, "{HEAD}\n#ifndef RELIFT_VKG_H\n#define RELIFT_VKG_H\n").ok();
-    writeln!(h, "#include \"vkg_types.h\"\n#include <relift/a64/abi.h>\n").ok();
+    writeln!(
+        h,
+        "#include \"vkg_types.h\"\n#include <relift/arm64/abi.h>\n"
+    )
+    .ok();
     writeln!(h, "typedef struct vkf_call vkf_call;\n").ok();
     writeln!(h, "enum vkg_cmd {{").ok();
     for (i, (_, n, _)) in cmds.iter().enumerate() {

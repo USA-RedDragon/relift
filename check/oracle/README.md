@@ -29,7 +29,7 @@ form, not once per state.
 
 `slow.c` is the slow-path engine: it speaks the same protocol on the host
 and runs one FP instruction through the runtime's `rl_fp_slow`
-(`runtime/cpus/a64/fp_slow.c`, `fp.c`). Build it with
+(`runtime/cpus/arm64/fp_slow.c`, `fp.c`). Build it with
 `check/oracle/build-slow.sh <out dir> [cc]` and pass `--slow
 cmd:<out>/slow`: every block that leaves through its FPCR guard then runs
 there and is compared with the oracle, so the slow paths are checked

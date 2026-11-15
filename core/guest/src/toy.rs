@@ -199,7 +199,7 @@ impl Frontend for Toy {
     }
 
     fn abi_headers(&self) -> &'static [&'static str] {
-        &["relift/a64/abi.h"]
+        &["relift/arm64/abi.h"]
     }
 
     fn home(&self, reg: Reg) -> Home {

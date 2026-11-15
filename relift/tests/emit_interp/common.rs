@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::decode::Features;
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::decode::Features;
+use relift_cpu_arm64::frontend::Arm64;
 use relift_guest::{Frontend, Home};
 use relift_ir::interp::{Monitor, State};
 
@@ -67,7 +67,7 @@ pub const NZCV: usize = 96;
 pub const EXCL: usize = 101;
 
 pub fn slots() -> Vec<Slot> {
-    let fe = A64 {
+    let fe = Arm64 {
         features: Features::ALL,
     };
     let regs = fe.regs();
@@ -229,8 +229,8 @@ pub const HARNESS: &str = r#"
 #include <string.h>
 #include <signal.h>
 #include <setjmp.h>
-#include <relift/a64/abi.h>
-#include <relift/a64/fp_slow.h>
+#include <relift/arm64/abi.h>
+#include <relift/arm64/fp_slow.h>
 
 extern const rl_fn cases[];
 extern const unsigned case_count;
@@ -251,8 +251,8 @@ uint64_t rl_mrs_cntpct(rl_ctx *c) { (void)c; events |= 8; return 0; }
 void rl_msr_fpcr(rl_ctx *c, uint64_t v) { events |= 8; c->fpcr = (uint32_t)v; }
 void rl_wfe(rl_ctx *c) { (void)c; events |= 8; }
 void rl_preempt(rl_ctx *c) { c->time.budget = INT64_MAX; }
-int rl_a64_fp_flags(void) { return 0; }
-int rl_a64_fp_flags_on;
+int rl_arm64_fp_flags(void) { return 0; }
+int rl_arm64_fp_flags_on;
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn) { (void)c; (void)mem; (void)fn; abort(); }
 
 static void fill(uint64_t seed)
@@ -433,8 +433,8 @@ impl Harness {
             &format!("-DBASE=UINT64_C({BASE:#x})"),
             &format!("-DCTX={CTX}"),
             &format!("-I{}", rt.join("core/include").display()),
-            &format!("-I{}", rt.join("cpus/a64/include").display()),
-            &format!("-I{}", rt.join("cpus/a64").display()),
+            &format!("-I{}", rt.join("cpus/arm64/include").display()),
+            &format!("-I{}", rt.join("cpus/arm64").display()),
             &format!("-I{}", rt.join("core").display()),
         ]
         .iter()
@@ -447,7 +447,7 @@ impl Harness {
         // emitted code calls.
         let mut jobs = vec![(harness, dir.join("harness.o"))];
         for c in ["fp.c", "fp16.c", "crypto.c"] {
-            jobs.push((rt.join("cpus/a64").join(c), dir.join(format!("{c}.o"))));
+            jobs.push((rt.join("cpus/arm64").join(c), dir.join(format!("{c}.o"))));
         }
         compile_all(&cc, &flags, &jobs);
         Harness {
@@ -469,7 +469,7 @@ impl Harness {
     ) -> Vec<u64> {
         let _ = std::fs::remove_dir_all(dir);
         std::fs::create_dir_all(dir).expect("the scratch dir is creatable");
-        let mut table = String::from("#include <relift/a64/abi.h>\n");
+        let mut table = String::from("#include <relift/arm64/abi.h>\n");
         for n in names {
             table.push_str(&format!("RL_LIFTED({n});\n"));
         }
@@ -517,7 +517,7 @@ impl Harness {
 }
 
 /// How the harness's record for one run differs from the interpreter's.
-pub fn diffs(fe: &A64, slots: &[Slot], e: &Expect, rec: &[u64]) -> Vec<String> {
+pub fn diffs(fe: &Arm64, slots: &[Slot], e: &Expect, rec: &[u64]) -> Vec<String> {
     let ctx = &rec[4..];
     let mut diffs = Vec::new();
     if rec[2] & FAULT != 0 {

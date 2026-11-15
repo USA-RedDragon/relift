@@ -1,5 +1,5 @@
 //! FPSR flags on host hardware match the exact layer: random words of every
-//! floating-point form in `cpus/a64/gen/forms.txt` are lifted as for a
+//! floating-point form in `cpus/arm64/gen/forms.txt` are lifted as for a
 //! program that produces FPSR flags, emitted as one-instruction functions,
 //! compiled at the flagged lifted-code flags (`-DRL_FP_FLAGS
 //! -ffp-exception-behavior=strict`) and run on states full of FP special
@@ -16,9 +16,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::decode::{Encoding, Features, decode};
-use relift_cpu_a64::frontend::A64;
-use relift_cpu_a64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
+use relift_cpu_arm64::decode::{Encoding, Features, decode};
+use relift_cpu_arm64::frontend::Arm64;
+use relift_cpu_arm64::lift::sail::{SLOW_FLAGS, SLOW_FPCR};
 use relift_emit::{Function, Insn, Options, emit};
 use relift_guest::Frontend;
 use relift_ir::{Block, Flow, Op};
@@ -116,9 +116,9 @@ const HARNESS: &str = r#"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <relift/a64/abi.h>
-#include <relift/a64/fp_slow.h>
-#include "a64.h"
+#include <relift/arm64/abi.h>
+#include <relift/arm64/fp_slow.h>
+#include "arm64.h"
 
 extern const rl_fn cases[];
 extern const unsigned case_count;
@@ -134,8 +134,8 @@ uint64_t rl_mrs_cntpct(rl_ctx *c) { (void)c; return 0; }
 void rl_msr_fpcr(rl_ctx *c, uint64_t v) { c->fpcr = (uint32_t)v; }
 void rl_wfe(rl_ctx *c) { (void)c; }
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn) { (void)c; (void)mem; (void)fn; abort(); }
-int rl_a64_fp_flags_on;
-int rl_a64_fp_flags(void) { return rl_a64_fp_flags_on; }
+int rl_arm64_fp_flags_on;
+int rl_arm64_fp_flags(void) { return rl_arm64_fp_flags_on; }
 
 static void load(rl_ctx *c, const uint64_t *r)
 {
@@ -164,14 +164,14 @@ int main(int argc, char **argv)
             return 3;
         load(&b, rec + 3);
         fatal = 0;
-        rl_a64_fp_flags_on = 0;
+        rl_arm64_fp_flags_on = 0;
         int rb = rl_fp_slow(&b, mem, rec[1], (uint32_t)rec[2]);
         if (rb != RL_OK || fatal) {
             unsupported++;
             continue;
         }
         load(&a, rec + 3);
-        rl_a64_fp_flags_on = 1;
+        rl_arm64_fp_flags_on = 1;
         rl_fp_host_clear();
         int ra = cases[rec[0]](&a, mem);
         uint32_t fa = (a.fpsr | rl_fp_host_flags()) & 0x9Fu;
@@ -228,7 +228,7 @@ fn clang(cc: &Path, args: &[String]) {
 fn has_fp(b: &Block) -> bool {
     b.insts.iter().any(|i| match &i.op {
         Op::Fp(..) | Op::Guard(_, SLOW_FPCR | SLOW_FLAGS) => true,
-        Op::Intrinsic(c) => c.name == relift_cpu_a64::lift::system::FP_RAISE,
+        Op::Intrinsic(c) => c.name == relift_cpu_arm64::lift::system::FP_RAISE,
         _ => false,
     })
 }
@@ -236,7 +236,7 @@ fn has_fp(b: &Block) -> bool {
 /// Whether the block has an intrinsic other than the flag ones.
 fn other_intrinsic(b: &Block) -> bool {
     b.insts.iter().any(|i| match &i.op {
-        Op::Intrinsic(c) => c.name != relift_cpu_a64::lift::system::FP_RAISE,
+        Op::Intrinsic(c) => c.name != relift_cpu_arm64::lift::system::FP_RAISE,
         _ => false,
     })
 }
@@ -248,10 +248,10 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
         return;
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let forms = std::fs::read_to_string(root.join("cpus/a64/gen/forms.txt"))
+    let forms = std::fs::read_to_string(root.join("cpus/arm64/gen/forms.txt"))
         .expect("forms.txt is readable");
     let by_name: BTreeMap<&str, Encoding> = Encoding::all().map(|e| (e.name(), e)).collect();
-    let fe = A64 {
+    let fe = Arm64 {
         features: Features::ALL,
     };
     let mut r = Rng(0xf1a6_5eed);
@@ -331,7 +331,7 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("emit-flags"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
-    let mut table = String::from("#include <relift/a64/abi.h>\n");
+    let mut table = String::from("#include <relift/arm64/abi.h>\n");
     for f in &fns {
         table.push_str(&format!("RL_LIFTED({});\n", f.name));
     }
@@ -364,8 +364,8 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
         &format!("-DBASE=UINT64_C({BASE:#x})"),
         &format!("-DREGS={REGS}"),
         &format!("-I{}", rt.join("core/include").display()),
-        &format!("-I{}", rt.join("cpus/a64/include").display()),
-        &format!("-I{}", rt.join("cpus/a64").display()),
+        &format!("-I{}", rt.join("cpus/arm64/include").display()),
+        &format!("-I{}", rt.join("cpus/arm64").display()),
         &format!("-I{}", rt.join("core").display()),
     ]
     .iter()
@@ -386,7 +386,7 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
         lifted.iter().map(|s| (s.clone(), &flagged[..])).collect();
     jobs.push((dir.join("harness.c"), &runtime[..]));
     for c in ["fp.c", "fp_slow.c", "fp16.c", "crypto.c"] {
-        jobs.push((rt.join("cpus/a64").join(c), &runtime[..]));
+        jobs.push((rt.join("cpus/arm64").join(c), &runtime[..]));
     }
     let objs: Vec<PathBuf> = (0..jobs.len())
         .map(|i| dir.join(format!("o{i}.o")))

@@ -9,7 +9,7 @@
 //! ```
 //!
 //! `SAIL_LIB` is the `lib` directory of the Sail compiler sources (the
-//! operators and builtins the model uses), as `cpus/a64/gen/fetch-sail.sh`
+//! operators and builtins the model uses), as `cpus/arm64/gen/fetch-sail.sh`
 //! downloads it; `MODEL` is `cpus/sm83/sail/sm83.sail`.
 //!
 //! `OPCODE` is a hex byte, or `cb` and a hex byte for the CB page.

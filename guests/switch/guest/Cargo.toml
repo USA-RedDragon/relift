@@ -7,7 +7,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-relift-cpu-a64 = { workspace = true }
+relift-cpu-arm64 = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }
 relift-switch-formats = { workspace = true }

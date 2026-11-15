@@ -1,6 +1,6 @@
 /*
  * The slow-path engine: runs one A64 FP instruction through the runtime's
- * FPCR slow path (rl_fp_slow, runtime/cpus/a64/fp_slow.c and fp.c) and
+ * FPCR slow path (rl_fp_slow, runtime/cpus/arm64/fp_slow.c and fp.c) and
  * reports the state after it, in the oracle protocol (proto.h). The checker
  * runs a block that left through its FPCR guard here and compares the
  * result with the oracle, so the slow paths are checked against hardware
@@ -10,10 +10,10 @@
 
 #include <stdarg.h>
 
-#include <relift/a64/abi.h>
-#include <relift/a64/fp_slow.h>
+#include <relift/arm64/abi.h>
+#include <relift/arm64/fp_slow.h>
 
-int rl_a64_fp_flags(void);
+int rl_arm64_fp_flags(void);
 
 static int g_fatal;
 
@@ -28,8 +28,8 @@ int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...)
 }
 
 /* Flags go to the context here, never to the host. */
-int rl_a64_fp_flags(void) { return 0; }
-int rl_a64_fp_flags_on;
+int rl_arm64_fp_flags(void) { return 0; }
+int rl_arm64_fp_flags_on;
 
 static uint8_t g_window[DATA_SIZE], g_mem[DATA_SIZE];
 

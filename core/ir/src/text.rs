@@ -2,7 +2,7 @@
 //! ([`parse`]) that round-trip exactly.
 //!
 //! ```text
-//! block 0x1000 len 4 regs a64
+//! block 0x1000 len 4 regs arm64
 //!   v0:i64 = get x1
 //!   v1:i64 = const 0x10
 //!   v2:i64 = add v0, v1

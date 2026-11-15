@@ -401,7 +401,7 @@ name = "relift-check"
 version = "0.1.0"
 dependencies = [
  "relift-cache",
- "relift-cpu-a64",
+ "relift-cpu-arm64",
  "relift-cpu-sm83",
  "relift-diff",
  "relift-guest",
@@ -412,7 +412,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relift-cpu-a64"
+name = "relift-cpu-arm64"
 version = "0.1.0"
 dependencies = [
  "relift-guest",

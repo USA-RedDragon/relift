@@ -1,5 +1,5 @@
 //! The emitted C means what the IR means: random words of every form in
-//! `cpus/a64/gen/forms.txt` are lifted, emitted as one-instruction
+//! `cpus/arm64/gen/forms.txt` are lifted, emitted as one-instruction
 //! functions, compiled with clang at the lifted-code flags and run on random
 //! states, and every register, the flags, guest memory, the exclusive
 //! monitor and the exit target must match the reference interpreter on the
@@ -13,8 +13,8 @@ mod seq;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use relift_cpu_a64::decode::{Encoding, Features, decode};
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::decode::{Encoding, Features, decode};
+use relift_cpu_arm64::frontend::Arm64;
 use relift_emit::{Function, Insn, Options, emit};
 use relift_guest::Frontend;
 use relift_ir::interp::{FlatMemory, NoIntrinsics, run};
@@ -44,10 +44,10 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
         return;
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let forms = std::fs::read_to_string(root.join("cpus/a64/gen/forms.txt"))
+    let forms = std::fs::read_to_string(root.join("cpus/arm64/gen/forms.txt"))
         .expect("forms.txt is readable");
     let by_name: BTreeMap<&str, Encoding> = Encoding::all().map(|e| (e.name(), e)).collect();
-    let fe = A64 {
+    let fe = Arm64 {
         features: Features::ALL,
     };
     let mut r = Rng(0x5eed_0e0e);
@@ -91,7 +91,7 @@ fn emitted_c_matches_the_interpreter_on_every_form() {
                 bytes: bytes.clone(),
             };
             let mut s1 = s0.clone();
-            let reference = relift_cpu_a64::lift::lift(*w, b.pc, &Features::ALL);
+            let reference = relift_cpu_arm64::lift::lift(*w, b.pc, &Features::ALL);
             let Ok(o) = run(
                 reference.as_ref().unwrap_or(b),
                 &mut s1,

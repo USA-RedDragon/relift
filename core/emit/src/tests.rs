@@ -563,7 +563,7 @@ fn calls_to_a_resume_point_override_go_through_the_landing_pad_dispatch() {
     ];
     let o = Override {
         entry: 0x108,
-        host_fn: "rl_a64_setjmp".into(),
+        host_fn: "rl_arm64_setjmp".into(),
         may_unwind: false,
         resume_point: true,
         declare: false,
@@ -572,7 +572,7 @@ fn calls_to_a_resume_point_override_go_through_the_landing_pad_dispatch() {
     let s = shard(&out);
     assert!(!s.contains("RL_LIFTED(F_108)"), "{s}");
     assert!(
-        s.contains("rc = rl_a64_setjmp(c, mem);\n    if (RL_UNLIKELY(rc)) {\n        if (c->pend.sp == r2)\n            goto lp_dispatch;\n        return RL_PENDING;\n    }"),
+        s.contains("rc = rl_arm64_setjmp(c, mem);\n    if (RL_UNLIKELY(rc)) {\n        if (c->pend.sp == r2)\n            goto lp_dispatch;\n        return RL_PENDING;\n    }"),
         "{s}"
     );
     assert!(
@@ -586,7 +586,7 @@ fn calls_to_a_resume_point_override_go_through_the_landing_pad_dispatch() {
     );
     let unit = &out.files.last().expect("unit").text;
     assert!(
-        unit.contains("{ UINT64_C(0x108), 0u, RL_FN_OVERRIDE, rl_a64_setjmp },"),
+        unit.contains("{ UINT64_C(0x108), 0u, RL_FN_OVERRIDE, rl_arm64_setjmp },"),
         "{unit}"
     );
 }

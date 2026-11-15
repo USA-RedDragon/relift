@@ -9,5 +9,5 @@ rt=$here/../../runtime
 mkdir -p "$out"
 case $("$cc" -dumpmachine) in x86_64*) arch=-mcx16 ;; *) arch= ;; esac
 "$cc" -std=c11 -O2 -Wall -Wextra -Werror -D_GNU_SOURCE -DRL_BUILDING_RUNTIME $arch \
-    -I"$rt/core/include" -I"$rt/core" -I"$rt/cpus/a64/include" -I"$rt/cpus/a64" \
-    -o "$out/slow" "$here/slow.c" "$rt/cpus/a64/fp.c" "$rt/cpus/a64/fp_slow.c" -lm
+    -I"$rt/core/include" -I"$rt/core" -I"$rt/cpus/arm64/include" -I"$rt/cpus/arm64" \
+    -o "$out/slow" "$here/slow.c" "$rt/cpus/arm64/fp.c" "$rt/cpus/arm64/fp_slow.c" -lm

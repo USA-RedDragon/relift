@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use relift_analyze::{EntryKind, Insn, Outline, Progress};
 use relift_build::{Compile, Event, Plan};
-use relift_cpu_a64::frontend::A64;
+use relift_cpu_arm64::frontend::Arm64;
 use relift_guest::{Frontend, Root, RootKind};
 use relift_progress::{Line, Metrics, Paint, Verbosity, count, duration, noun};
 use relift_switch::program::{self, Placed};
@@ -223,7 +223,7 @@ fn emit_modules(
     };
     let mut census = crate::total::Census::default();
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
-    let cpu = A64 {
+    let cpu = Arm64 {
         features: relift_switch::CPU_FEATURES,
     };
     for (i, (p, &row)) in placed.iter().zip(rows).enumerate() {
@@ -601,7 +601,7 @@ const COLD_SCRIPT: &str = "SECTIONS { . = ALIGN(CONSTANT(MAXPAGESIZE)); relift_c
 
 /// What [`emit_cold`] takes of one module.
 struct ColdModule<'a> {
-    cpu: &'a A64,
+    cpu: &'a Arm64,
     index: usize,
     p: &'a Placed,
     module: &'a relift_guest::Module,
@@ -914,7 +914,7 @@ pub(crate) fn memory_pools(compiles: &mut [Compile], jobs: u32) -> Vec<(String, 
 
 fn runtime_sources(rt: &Path) -> Result<Vec<PathBuf>, BoxError> {
     let mut out = Vec::new();
-    for layer in ["core", "cpus/a64", "guests/switch"] {
+    for layer in ["core", "cpus/arm64", "guests/switch"] {
         let dir = rt.join(layer);
         let mut v: Vec<PathBuf> = std::fs::read_dir(&dir)
             .map_err(|e| format!("{}: {e}", dir.display()))?
@@ -1140,7 +1140,7 @@ fn lift_and_emit(
     crate::game_settings::check_dir(Path::new("overrides"), &game_settings)?;
     let emitted = emit_modules(settings, &placed, &cdir, ui, &rows, &hints, &mut stage)?;
     let mut emitted = emitted;
-    let cpu = A64 {
+    let cpu = Arm64 {
         features: relift_switch::CPU_FEATURES,
     };
     let mods_c = stage.mods_c(cpu.abi_headers());
@@ -1451,7 +1451,7 @@ pub(crate) fn build_project(
     let rt = mirror_runtime(
         &runtime_dir(settings),
         &out.join("runtime"),
-        &["core", "cpus/a64", "guests/switch", "host"],
+        &["core", "cpus/arm64", "guests/switch", "host"],
     )?;
     let dev = mode == Mode::Dev;
     let hotload: Vec<String> = if dev {
@@ -1496,7 +1496,7 @@ pub(crate) fn build_project(
             }
         })
         .chain(["-fno-omit-frame-pointer", "-mno-omit-leaf-frame-pointer"].map(String::from))
-        .chain([inc("core/include"), inc("cpus/a64/include")])
+        .chain([inc("core/include"), inc("cpus/arm64/include")])
         .chain(hotload.iter().cloned())
         .collect();
     // Code that produces FPSR flags gets them from host FP operations,
@@ -1565,8 +1565,8 @@ pub(crate) fn build_project(
         .chain([
             inc("core/include"),
             inc("core"),
-            inc("cpus/a64/include"),
-            inc("cpus/a64"),
+            inc("cpus/arm64/include"),
+            inc("cpus/arm64"),
             inc("guests/switch"),
         ])
         .chain(extras.defines())

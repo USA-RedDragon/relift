@@ -41,15 +41,15 @@ list of hard rules; read it before changing anything.
   edit. The core never reaches a CPU or a guest, CPUs reach only `core/ir`
   and `core/guest`, guests never reach each other, `override/` reaches
   nothing in the tool, and nothing reaches `check/` or a generator.
-- **Generated code is committed.** `cpus/a64/src/decode/generated.rs`
-  (from AARCHMRS) and `cpus/a64/src/lift/sail/generated/*.rs` (from sail-arm,
+- **Generated code is committed.** `cpus/arm64/src/decode/generated.rs`
+  (from AARCHMRS) and `cpus/arm64/src/lift/sail/generated/*.rs` (from sail-arm,
   one file per instruction class, `linguist-generated` in `.gitattributes`)
   and `cpus/sm83/src/lift/sail/generated.rs` (from our SM83 Sail model) are
-  never edited by hand; `cpus/a64/gen/README.md` and
+  never edited by hand; `cpus/arm64/gen/README.md` and
   `cpus/sm83/gen/README.md` say how to regenerate them, and their notices sit next to the crate manifest. CI's
   `generated templates are current` job fetches the pinned Sail files,
   reruns both generators and fails on any difference. A form joins
-  `cpus/a64/gen/forms.txt` only after `relift-check forms` passes it and its
+  `cpus/arm64/gen/forms.txt` only after `relift-check forms` passes it and its
   mutation control on an oracle that implements its features. The ARMv4T
   tables and templates (`cpus/arm32/src/decode/generated.rs`,
   `cpus/arm32/src/lift/generated/{a32,t16}.rs`) come the same way from
@@ -91,8 +91,8 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-build` | `core/build` | Toolchain discovery and the Ninja writer |
 | 2 | `relift-input` | `core/input` | The input model: ports, controls, `bind.<port>.<control>` bindings, extra ports from `game.toml` or a mod, the self-description `input` section and the C port declarations |
 | 2 | `relift-manifest` | `core/manifest` | `game.toml` types: core keys plus a guest-owned section |
-| 2 | `relift-cpu-a64` | `cpus/a64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
-| 3 | `relift-cpu-a64-gen` | `cpus/a64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
+| 2 | `relift-cpu-arm64` | `cpus/arm64` | ARM64 decoder and lifter to `relift-ir`; not tied to one guest |
+| 3 | `relift-cpu-arm64-gen` | `cpus/arm64/gen` | Generates the A64 lifting templates from the sail-arm model: the A64 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 2 | `relift-cpu-arm32` | `cpus/arm32` | ARMv4T (Game Boy Advance ARM7TDMI) decoder and lifter to `relift-ir`, with templates generated from sail-arm AArch32 and an ARMv4T overlay, checked against console records; no guest links it yet |
 | 3 | `relift-cpu-arm32-gen` | `cpus/arm32/gen` | Generates the ARMv4T decode tables and lifting templates from sail-arm and `cpus/arm32/gen/armv4t.sail`: the ARMv4T cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
@@ -110,7 +110,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-switch-tools` | `guests/switch/tools` | `relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate; `relift-ir` prints the IR of A64 words or NSO symbols |
 | 2 | `relift-switch-vkgen` | `guests/switch/vkgen` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; standalone (nothing depends on it) |
 | 2 | `relift-switch-names` | `guests/switch/names` | Switch symbol names as host names: Itanium names remangled into `guest::<module>`, the address fallback, and the reverse map |
-| 2 | `relift-switch` | `guests/switch/guest` | The Switch guest, over its formats and `relift-cpu-a64` |
+| 2 | `relift-switch` | `guests/switch/guest` | The Switch guest, over its formats and `relift-cpu-arm64` |
 | 2 | `relift-testguest` | `testguest` | Tiny synthetic guest the core is tested against |
 | 3 | `relift` | `relift` | The binary: settings, command dispatch, guest registry |
 | apart 0 | `relift-override-macros` | `override/macros` | Override attribute macros for game repos |
@@ -144,7 +144,7 @@ line protocol on stdin and stdout (run cycles or frames with held keys,
 single-step traces, registers, memory, I/O registers, frame and audio
 hashes; see `check/oracle/nba/README.md`).
 
-`relift-cpu-a64` lifts each encoding with its Sail-generated template when it
+`relift-cpu-arm64` lifts each encoding with its Sail-generated template when it
 has one, else with a hand-written lifter, always for a CPU feature set
 (`decode::Features`, from the guest descriptor: `relift_switch::CPU_FEATURES`
 is the Cortex-A57, Armv8.0-A plus AES, PMULL, SHA1, SHA256 and CRC32). The
@@ -152,14 +152,14 @@ decoder refuses encodings whose AARCHMRS feature condition fails, so they
 lift to UNDEFINED as on that CPU; where the Sail semantics test a feature
 the template tests `St::has` at lift time (one template for every level),
 and a template that assumed a feature absent refuses CPUs that have it.
-For the emitter, the cryptographic instructions lift to one `a64.*`
+For the emitter, the cryptographic instructions lift to one `arm64.*`
 intrinsic each (`lift/native.rs`), which the runtime runs on the host's own
 AES, SHA and PMULL instructions when it has them (docs/abi.md 10.2). Templates that use the
 floating-point cut assume FPCR zero and start with an `Op::Guard` that sends
 any other FPCR to the runtime's slow path; `relift-check --fpcr` checks that
 the guard trips (see `relift_ir::FpOp` for the contract). The hand-written lifters cover only
 the forms the checker was brought up on, kept as a cross-check:
-`cpus/a64/tests/lift.rs` (`generated_templates_agree_with_the_hand_lifter`)
+`cpus/arm64/tests/lift.rs` (`generated_templates_agree_with_the_hand_lifter`)
 runs both in the interpreter.
 
 `relift-emit-wasm` is the second emitter, for WebAssembly hosts. Like
@@ -183,7 +183,7 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 | Layer | Folder | Owns |
 |---|---|---|
 | core | `runtime/core` | Guest memory with its own permission flags, faults at guest addresses, host threads with an opaque CPU context, the clock, dispatch, logging and configuration; knows no guest OS and no guest CPU |
-| CPU | `runtime/cpus/a64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
+| CPU | `runtime/cpus/arm64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
 | guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:` and the services, the scheduler, the NPDM layout, Horizon's page, clock and permission encodings; `switch/vk` forwards Vulkan to the host |
 | CPU | `runtime/cpus/sm83` | The SM83 lifted-code ABI and `rl_ctx`, interrupts, HALT and STOP, over a callback table |
 | guest | `runtime/guests/gb` | The Game Boy memory map, mappers and I/O routed to scheduler device slots; `gb/exact` is the program that runs lifted code with the device library |
@@ -196,7 +196,7 @@ below it, and each layer's tests link nothing above it. The public override
 header (`include/relift/override.h`) does not exist yet.
 
 The contract between emitted C and that runtime is
-`runtime/cpus/a64/include/relift/a64/abi.h`, over the CPU-neutral
+`runtime/cpus/arm64/include/relift/arm64/abi.h`, over the CPU-neutral
 `runtime/core/include/relift/abi_core.h`; `docs/abi.md` gives the reason for
 each choice.
 
@@ -238,7 +238,7 @@ walk cannot pass.
 Negative control: adding `relift-switch` as a dev-dependency of `relift-ir`
 fails `every_declared_ceiling_holds`, `the_band_order_holds`,
 `core_reaches_no_cpu_and_no_guest` (with the route
-`relift-ir -> (dev) relift-switch -> (normal) relift-cpu-a64`) and
+`relift-ir -> (dev) relift-switch -> (normal) relift-cpu-arm64`) and
 `the_reader_reads_this_workspace`. As a normal dependency Cargo refuses it
 outright as a cycle.
 
