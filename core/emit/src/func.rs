@@ -949,6 +949,13 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     Some(r) if cx.hoisted.contains(&r) => flag(r),
                     _ => val(c),
                 };
+                if let Some(to) = cx.fe.guard_exit(code, b.pc, raw) {
+                    let _ = writeln!(
+                        s,
+                        "    if (RL_UNLIKELY({cond})) {{\n        RL_STORE();\n        RL_MUSTTAIL return {to}(c, mem);\n    }}"
+                    );
+                    continue;
+                }
                 let slow = cx
                     .fe
                     .guard_slow(code, b.pc, raw)

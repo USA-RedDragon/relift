@@ -194,6 +194,16 @@ pub trait Frontend {
     /// returns `RL_PENDING` when it could not; `None` when the frontend has
     /// no such path (the emitter then reports the instruction as undefined).
     fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String>;
+
+    /// An `rl_fn` C expression for guards with slow-path `code` that leave
+    /// the function instead: with the context fully stored, the lifted
+    /// function tail-calls the function it gives, which runs the guest from
+    /// the instruction `insn` at `pc` on in the same host frame. `None`
+    /// keeps [`Frontend::guard_slow`].
+    fn guard_exit(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        let _ = (code, pc, insn);
+        None
+    }
 }
 
 /// What a module section holds.

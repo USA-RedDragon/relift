@@ -517,6 +517,107 @@ fn guards_share_one_slow_path_that_continues_after_each() {
     );
 }
 
+struct Leaving;
+
+impl Frontend for Leaving {
+    fn granule(&self) -> u64 {
+        Toy.granule()
+    }
+    fn regs(&self) -> RegFile {
+        Toy.regs()
+    }
+    fn stack_pointer(&self) -> Option<Reg> {
+        Toy.stack_pointer()
+    }
+    fn preserved(&self) -> Vec<Reg> {
+        Toy.preserved()
+    }
+    fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure> {
+        Toy.lift(bytes, pc)
+    }
+    fn abi_headers(&self) -> &'static [&'static str] {
+        Toy.abi_headers()
+    }
+    fn home(&self, reg: Reg) -> Home {
+        Toy.home(reg)
+    }
+    fn intrinsic(&self, name: &str, args: &[String]) -> Option<String> {
+        Toy.intrinsic(name, args)
+    }
+    fn trap(&self, code: u32) -> String {
+        Toy.trap(code)
+    }
+    fn undefined(&self, pc: u64, insn: u64) -> String {
+        Toy.undefined(pc, insn)
+    }
+    fn monitor(&self) -> &'static str {
+        Toy.monitor()
+    }
+    fn fp(
+        &self,
+        op: FpOp,
+        from: Width,
+        to: Width,
+        args: &[String],
+        reg: &dyn Fn(Reg) -> String,
+    ) -> Option<String> {
+        Toy.fp(op, from, to, args, reg)
+    }
+    fn fp_state(&self) -> Vec<Reg> {
+        Toy.fp_state()
+    }
+    fn guard_state(&self, code: u32) -> Option<Reg> {
+        Toy.guard_state(code)
+    }
+    fn guard_slow(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        Toy.guard_slow(code, pc, insn)
+    }
+    fn guard_exit(&self, code: u32, pc: u64, insn: u64) -> Option<String> {
+        (code == 9).then(|| format!("toy_other(c, UINT64_C({pc:#x}), {insn:#x}u)"))
+    }
+}
+
+#[test]
+fn guards_that_leave_tail_call_the_function_the_frontend_gives() {
+    let mut b = relift_ir::Builder::new(Toy.regs(), relift_ir::Width::W64, 0x200);
+    let x = b.get(relift_ir::Reg(1));
+    let z = b.konst(relift_ir::Width::W64, 0);
+    let ne = b.cmp(relift_ir::CmpOp::Ne, x, z);
+    b.guard(ne, 9);
+    let blk = b.jump(4, 0x204);
+    let ret = Toy.lift(&word(0x03, 0, 0), 0x204).expect("lifts");
+    let f = Function {
+        entry: 0x200,
+        name: "F_200".into(),
+        guest_name: None,
+        span: 8,
+        insts: BTreeMap::from([
+            (
+                0x200,
+                Insn::Lifted {
+                    block: &blk,
+                    raw: 0x55,
+                },
+            ),
+            (
+                0x204,
+                Insn::Lifted {
+                    block: &ret,
+                    raw: 0,
+                },
+            ),
+        ]),
+        tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
+    };
+    let out = emit(&Leaving, &[f], &[], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("if (RL_UNLIKELY(v2)) {\n        RL_STORE();\n        RL_MUSTTAIL return toy_other(c, UINT64_C(0x200), 0x55u)(c, mem);\n    }"),
+        "{s}"
+    );
+}
+
 #[test]
 fn jump_tables_branch_to_their_targets_inside_the_function() {
     let code = [word(0x06, 0, 0), word(0x03, 0, 0), word(0x03, 0, 0)];
