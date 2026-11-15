@@ -7,11 +7,15 @@
 #include "gbamain.h"
 #include "cpu.h"
 
+#include <relift/ports.h>
 #include <relift/settings.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+extern const rl_port_decl rl_gba_ports[];
+extern const uint32_t rl_gba_ports_count;
 
 typedef struct host {
     const rl_gba_program *p;
@@ -20,7 +24,14 @@ typedef struct host {
     uint32_t stop_frames;
     bool stop;
     bool stats;
+    char save[4096];
 } host;
+
+static void save_now(host *H)
+{
+    if (H->save[0] && rl_gba_save_write(H->run.g, H->save) < 0)
+        rl_log(RL_LOG_WARN, "gba", "could not write the save %s", H->save);
+}
 
 static uint64_t fnv(uint64_t h, const uint8_t *b, size_t n)
 {
@@ -86,6 +97,8 @@ static void on_vblank(void *user, unsigned line, uint64_t when)
     (void)when;
     host *H = user;
     H->frames++;
+    if (H->save[0] && rl_gba_save_poll(H->run.g, H->save, RL_GBA_HZ) < 0)
+        rl_log(RL_LOG_WARN, "gba", "could not write the save %s", H->save);
     if (H->stop_frames && H->frames >= H->stop_frames) {
         H->stop = true;
         rl_sched_break(H->run.k);
@@ -98,6 +111,7 @@ static void on_check(void *user, rl_ctx *c)
     if (!H->stop)
         return;
     report(H, c);
+    save_now(H);
     rl_process_exit(0);
 }
 
@@ -115,7 +129,9 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
     static host H;
     memset(&H, 0, sizeof H);
     H.p = p;
-    rl_settings_declare_runtime();
+    const char *save = NULL;
+    bool no_save = false;
+    rl_gba_declare_settings();
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -123,6 +139,10 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
             continue;
         if (!strcmp(a, "--frames"))
             H.stop_frames = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
+        else if (!strcmp(a, "--save"))
+            save = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--no-save"))
+            no_save = true;
         else if (!strcmp(a, "--stats"))
             H.stats = true;
         else if (!strncmp(a, "--relift-", 9))
@@ -139,16 +159,27 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
         fprintf(stderr, "relift-gba: the lifted units do not match this runtime\n");
         return 1;
     }
-    rl_gba_cart cart = {.rom = p->rom, .rom_len = p->rom_len};
+    rl_ports_declare(rl_gba_ports, rl_gba_ports_count);
+    rl_gba_save_info si = rl_gba_save_detect(p->rom, p->rom_len);
+    rl_gba_cart cart = {.rom = p->rom, .rom_len = p->rom_len, .save = si.kind, .flash_id = si.flash_id};
     rl_gba *g = rl_gba_create(&cart);
     if (!g || rl_gba_run_init(&H.run, g) != 0) {
         fprintf(stderr, "relift-gba: cannot create the machine\n");
         return 1;
     }
+    if (!no_save && si.kind != RL_GBA_SAVE_NONE) {
+        if (save)
+            snprintf(H.save, sizeof H.save, "%s", save);
+        else if (p->rom_path && *p->rom_path && !rl_gba_save_path(H.save, sizeof H.save, p->rom_path))
+            H.save[0] = 0;
+    }
+    if (H.save[0] && rl_gba_save_read(g, H.save) < 0)
+        rl_log(RL_LOG_WARN, "gba", "the save %s does not fit this cartridge; starting without it", H.save);
     rl_gba_set_vblank_hook(g, on_vblank, &H);
     H.run.check = on_check;
     H.run.check_user = &H;
     int r = rl_gba_run_start(&H.run);
+    save_now(&H);
     if (H.stats)
         print_stats(&H);
     rl_gba_run_free(&H.run);

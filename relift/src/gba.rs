@@ -119,7 +119,7 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
     Ok(())
 }
 
-fn project_rom() -> Result<(Vec<u8>, String), BoxError> {
+fn project_rom() -> Result<(Vec<u8>, String, String), BoxError> {
     let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
     let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
     let g = t.get("game").ok_or("game.toml has no [game]")?;
@@ -128,7 +128,11 @@ fn project_rom() -> Result<(Vec<u8>, String), BoxError> {
     let path = dir.join(ROM_FILE);
     let rom = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
-    Ok((rom, s("title").unwrap_or_default()))
+    Ok((
+        rom,
+        s("title").unwrap_or_default(),
+        s("rom").unwrap_or_default(),
+    ))
 }
 
 fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
@@ -151,7 +155,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     if !mods.is_empty() {
         return Err("mods are not supported for Game Boy Advance ROMs yet".into());
     }
-    let (rom, project_title) = project_rom()?;
+    let (rom, project_title, rom_path) = project_rom()?;
     let (name, out) = crate::build::project_out(settings)?;
     let cdir = out.join("c");
     std::fs::create_dir_all(&cdir)?;
@@ -223,7 +227,10 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         ("rom.c", relift_gba::program::rom_c()),
         (
             "program.c",
-            relift_gba::program::program_c(&relift_gba::program::Program { title: &title }),
+            relift_gba::program::program_c(&relift_gba::program::Program {
+                title: &title,
+                rom_path: &rom_path,
+            }),
         ),
     ] {
         let path = cdir.join(n);

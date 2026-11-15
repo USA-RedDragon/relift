@@ -161,6 +161,8 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
 pub struct Program<'a> {
     /// The title, for reports.
     pub title: &'a str,
+    /// The path of the imported ROM, which names the save; empty for none.
+    pub rom_path: &'a str,
 }
 
 fn c_string(s: &str) -> String {
@@ -189,8 +191,9 @@ pub fn rom_c() -> String {
 #[must_use]
 pub fn program_c(p: &Program<'_>) -> String {
     format!(
-        "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"gbamain.h\"\nextern const rl_unit {UNIT_SYMBOL};\nextern const uint8_t rl_gba_rom[];\nextern const size_t rl_gba_rom_len;\nstatic const rl_unit *const units[] = {{ &{UNIT_SYMBOL} }};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gba_program prog = {{ rl_gba_rom, rl_gba_rom_len, units, 1u, {} }};\n    return rl_gba_main(&prog, argc, argv);\n}}\n",
-        c_string(p.title)
+        "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"gbamain.h\"\nextern const rl_unit {UNIT_SYMBOL};\nextern const uint8_t rl_gba_rom[];\nextern const size_t rl_gba_rom_len;\nstatic const rl_unit *const units[] = {{ &{UNIT_SYMBOL} }};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gba_program prog = {{ rl_gba_rom, rl_gba_rom_len, units, 1u, {}, {} }};\n    return rl_gba_main(&prog, argc, argv);\n}}\n",
+        c_string(p.title),
+        c_string(p.rom_path)
     )
 }
 
@@ -229,8 +232,11 @@ mod tests {
 
     #[test]
     fn the_program_lists_the_unit() {
-        let c = program_c(&Program { title: "T\"" });
+        let c = program_c(&Program {
+            title: "T\"",
+            rom_path: "/r/a.gba",
+        });
         assert!(c.contains("&rl_unit_gba_rom"), "{c}");
-        assert!(c.contains("\"T\\\"\""), "{c}");
+        assert!(c.contains("\"T\\\"\", \"/r/a.gba\""), "{c}");
     }
 }
