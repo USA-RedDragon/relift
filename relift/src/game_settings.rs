@@ -114,6 +114,15 @@ pub fn runtime_settings() -> Vec<Setting> {
                 step: 0,
             },
         ),
+        s(
+            "vk.keep_attachments",
+            "Keep attachment contents",
+            "Pass the game's DONT_CARE attachment load and store ops as LOAD and STORE, as the console keeps the contents. auto: only on host GPUs known to lose them (Apple)",
+            Value::String("auto".into()),
+            SettingKind::Enum {
+                choices: ["auto", "on", "off"].map(String::from).into(),
+            },
+        ),
     ]
 }
 
@@ -727,7 +736,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 4);
+        assert_eq!(section(Vec::new()).runtime.len(), 5);
     }
 
     #[test]

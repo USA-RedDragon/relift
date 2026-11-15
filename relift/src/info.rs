@@ -519,7 +519,7 @@ mod tests {
             .unwrap();
         let info = handheld_document(&rom, true, game, &ports, Mods::default(), None).unwrap();
         assert_eq!(info.identity.platform, "gba");
-        assert_eq!(info.settings.runtime.len(), 4);
+        assert_eq!(info.settings.runtime.len(), 5);
         assert_eq!(info.settings.game.len(), 1);
         let ids: Vec<&str> = info.input.ports.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p1", "dial"]);

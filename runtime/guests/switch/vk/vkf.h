@@ -142,7 +142,15 @@ struct vkf_dev {
     struct vkf_map *wraps;
     /** @brief Protects wrap_pool and wraps. */
     pthread_mutex_t wrap_lock;
+    /** @brief Attachment DONT_CARE load and store ops reach the host as LOAD and STORE (vk_pass.c). */
+    bool keep_attachments;
 };
+
+/** @brief Choices of the vk.keep_attachments setting, as rl_setting_enum returns them. */
+enum { RL_VK_KEEP_AUTO, RL_VK_KEEP_ON, RL_VK_KEEP_OFF };
+
+/** @brief Whether a device of this PCI vendor gets DONT_CARE attachment ops as LOAD and STORE (vk.keep_attachments). */
+bool vkf_keep_attachments(uint32_t vendor);
 
 /** @brief A small hash map from nonzero 64-bit keys to pointers. */
 typedef struct vkf_map vkf_map;

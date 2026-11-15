@@ -158,6 +158,22 @@ without 24-bit depth reports both unsupported, yet creates images of them as
 (`vk_format.c`) answer for the format it will use, so the game creates its
 depth images in a format its D24S8 views can share.
 
+## Attachment load and store ops
+
+The console's driver leaves an attachment's memory alone for
+`VK_ATTACHMENT_LOAD_OP_DONT_CARE` and `VK_ATTACHMENT_STORE_OP_DONT_CARE`, and
+games draw over contents they told it not to keep. MoltenVK on Apple GPUs
+passes DONT_CARE to Metal, which starts each tile of the pass with whatever the
+tile memory held last, so the picture comes out as a mosaic of tiles from
+earlier passes. `vk_pass.c` passes those ops to the host as `LOAD` and `STORE`
+in `vkCreateRenderPass`, `vkCreateRenderPass2` and `vkCmdBeginRendering`
+(color, depth and stencil). The `vk.keep_attachments` setting
+(`RELIFT_VK_KEEP_ATTACHMENTS`) chooses: `auto` does it for the hosts measured
+to need it (Apple, PCI vendor 0x106B), `on` and `off` force it for any device.
+The test `vk_dont_care_attachments_keep_contents` measures a new GPU: it logs
+how many pixels a DONT_CARE pass kept with the guest's ops untouched, and
+checks that `on` and `auto` keep them all.
+
 ## Handles
 
 Dispatchable handles (instance, physical device, device, queue, command

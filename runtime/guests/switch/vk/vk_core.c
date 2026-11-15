@@ -903,6 +903,9 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
+    VkPhysicalDeviceProperties props = { 0 };
+    VKF_FN(k.fns, vkGetPhysicalDeviceProperties)(pd, &props);
+    d->keep_attachments = vkf_keep_attachments(props.vendorID);
     for (uint32_t i = 0; i < ci->queueCreateInfoCount && d->nqueue_families < 16; i++) {
         d->queue_families[d->nqueue_families] = ci->pQueueCreateInfos[i].queueFamilyIndex;
         d->queue_counts[d->nqueue_families++] = ci->pQueueCreateInfos[i].queueCount;

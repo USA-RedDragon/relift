@@ -1,11 +1,13 @@
 /**
  * @file settings.c
- * @brief The settings of the Switch layer: where saves go and which host
- * Vulkan device the guest sees.
+ * @brief The settings of the Switch layer: where saves go, which host
+ * Vulkan device the guest sees and whether attachments keep their contents.
  */
 #include "services.h"
 
 #include <relift/settings.h>
+
+static const char *const g_keep[] = { "auto", "on", "off" };
 
 static const rl_setting_def g_defs[] = {
     {
@@ -34,6 +36,16 @@ static const rl_setting_def g_defs[] = {
         .def_int = 0,
         .min_int = 0,
         .max_int = 1000000,
+    },
+    {
+        .key = "vk.keep_attachments",
+        .type = RL_SETTING_ENUM,
+        .label = "Keep attachment contents",
+        .description = "Pass the game's DONT_CARE attachment load and store ops as LOAD and STORE, as the console keeps "
+                       "the contents. auto: only on host GPUs known to lose them (Apple)",
+        .env = "RELIFT_VK_KEEP_ATTACHMENTS",
+        .choices = g_keep,
+        .nchoices = 3,
     },
 };
 

@@ -152,21 +152,6 @@ static int vkt_vkCmdBeginRenderPass2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkCmdBeginRendering(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkCommandBuffer a0 = (VkCommandBuffer)vkf_first(&k, VKG_KIND_VkCommandBuffer, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCmdBeginRendering, c->x[0]);
-    const VkRenderingInfo * a1 = vkg_ain_VkRenderingInfo(&k, c->x[1], 1);
-    PFN_vkCmdBeginRendering fn = (PFN_vkCmdBeginRendering)k.fns->f[VKG_vkCmdBeginRendering];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCmdBeginRendering);
-    fn(a0, a1);
-    return vkf_end(&k);
-}
-
 static int vkt_vkCmdBindDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -1932,42 +1917,6 @@ static int vkt_vkCreateQueryPool(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCreateQueryPool fn = (PFN_vkCreateQueryPool)k.fns->f[VKG_vkCreateQueryPool];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateQueryPool);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCreateRenderPass, c->x[0]);
-    const VkRenderPassCreateInfo * a1 = vkg_ain_VkRenderPassCreateInfo(&k, c->x[1], 1);
-    const VkAllocationCallbacks * a2 = NULL;
-    VkRenderPass * a3 = (VkRenderPass *)vkf_ptr(&k, c->x[3]);
-    PFN_vkCreateRenderPass fn = (PFN_vkCreateRenderPass)k.fns->f[VKG_vkCreateRenderPass];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCreateRenderPass);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCreateRenderPass2, c->x[0]);
-    const VkRenderPassCreateInfo2 * a1 = vkg_ain_VkRenderPassCreateInfo2(&k, c->x[1], 1);
-    const VkAllocationCallbacks * a2 = NULL;
-    VkRenderPass * a3 = (VkRenderPass *)vkf_ptr(&k, c->x[3]);
-    PFN_vkCreateRenderPass2 fn = (PFN_vkCreateRenderPass2)k.fns->f[VKG_vkCreateRenderPass2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCreateRenderPass2);
     VkResult r = fn(a0, a1, a2, a3);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
@@ -4205,7 +4154,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCmdBeginQuery,
     vkt_vkCmdBeginRenderPass,
     vkt_vkCmdBeginRenderPass2,
-    vkt_vkCmdBeginRendering,
+    vkh_vkCmdBeginRendering,
     vkt_vkCmdBindDescriptorSets,
     vkt_vkCmdBindIndexBuffer,
     vkt_vkCmdBindPipeline,
@@ -4316,8 +4265,8 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkCreatePipelineLayout,
     vkt_vkCreatePrivateDataSlot,
     vkt_vkCreateQueryPool,
-    vkt_vkCreateRenderPass,
-    vkt_vkCreateRenderPass2,
+    vkh_vkCreateRenderPass,
+    vkh_vkCreateRenderPass2,
     vkt_vkCreateSampler,
     vkt_vkCreateSamplerYcbcrConversion,
     vkt_vkCreateSemaphore,
