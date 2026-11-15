@@ -160,10 +160,13 @@ fn known_routines(img: &[u8], start: usize, len: usize) -> Vec<u64> {
     let Some(text) = img.get(start..start.saturating_add(len)) else {
         return Vec::new();
     };
-    let lead = LLVM_JUMPTO[0].to_le_bytes();
+    let leads: Vec<[u8; 4]> = std::iter::once(LLVM_JUMPTO[0])
+        .chain(MEM_ROUTINES.iter().map(|r| r.lead))
+        .map(u32::to_le_bytes)
+        .collect();
     (0..text.len().saturating_sub(3))
         .step_by(4)
-        .filter(|&o| text[o..o + 4] == lead && known(&text[o..]).is_some())
+        .filter(|&o| leads.iter().any(|l| l[..] == text[o..o + 4]) && known(&text[o..]).is_some())
         .map(|o| (start + o) as u64)
         .collect()
 }
@@ -573,6 +576,62 @@ const LLVM_JUMPTO: [u32; 36] = [
     0xd65f_03c0,
 ];
 
+/// A libc memory routine of the Nintendo SDK, recognized by its first word
+/// and an FNV-1a hash of its whole code, and the host routine that replaces
+/// it (`relift/a64/abi.h`). Each takes (dst or buffer, src or value, n) in
+/// x0 to x2, touches only that memory and returns x0 unchanged.
+struct MemRoutine {
+    lead: u32,
+    len: usize,
+    hash: u64,
+    host_fn: &'static str,
+}
+
+const MEM_ROUTINES: [MemRoutine; 4] = [
+    MemRoutine {
+        lead: 0xcb01_03e8,
+        len: 772,
+        hash: 0x24ad_a13a_d6ca_df79,
+        host_fn: "rl_a64_memmove",
+    },
+    MemRoutine {
+        lead: 0xf81e_0ff3,
+        len: 176,
+        hash: 0xe6d2_e331_2405_bd73,
+        host_fn: "rl_a64_memmove",
+    },
+    MemRoutine {
+        lead: 0xf81e_0ff3,
+        len: 408,
+        hash: 0xfa1a_d1d6_c9f9_1b87,
+        host_fn: "rl_a64_memmove",
+    },
+    MemRoutine {
+        lead: 0xb400_0662,
+        len: 208,
+        hash: 0x6540_092c_afff_acf9,
+        host_fn: "rl_a64_memset",
+    },
+];
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+fn mem_routine(bytes: &[u8], table: &[MemRoutine]) -> Option<Known> {
+    let lead = u32::from_le_bytes(*bytes.first_chunk::<4>()?);
+    let r = table
+        .iter()
+        .find(|r| r.lead == lead && bytes.get(..r.len).is_some_and(|b| fnv1a(b) == r.hash))?;
+    Some(Known {
+        host_fn: r.host_fn,
+        may_unwind: false,
+        resume_point: false,
+    })
+}
+
 /// The override for the code at `bytes`, if it is a routine this knows.
 pub fn known(bytes: &[u8]) -> Option<Known> {
     let words: Vec<u32> = bytes
@@ -608,7 +667,7 @@ pub fn known(bytes: &[u8]) -> Option<Known> {
             resume_point: false,
         });
     }
-    None
+    mem_routine(bytes, &MEM_ROUTINES)
 }
 
 /// One file of the program description: its name in the C directory and
@@ -921,6 +980,27 @@ mod tests {
         assert_eq!(known(&bytes(&with_bti)), Some(k));
         j[20] ^= 1;
         assert_eq!(known(&bytes(&j)), None);
+    }
+
+    #[test]
+    fn memory_routines_match_by_lead_length_and_hash() {
+        let code: Vec<u8> = (0u8..64).collect();
+        let table = [MemRoutine {
+            lead: u32::from_le_bytes([0, 1, 2, 3]),
+            len: 40,
+            hash: fnv1a(&code[..40]),
+            host_fn: "rl_a64_memmove",
+        }];
+        let k = mem_routine(&code, &table).expect("matches");
+        assert_eq!(k.host_fn, "rl_a64_memmove");
+        assert!(!k.may_unwind && !k.resume_point);
+        assert_eq!(mem_routine(&code[..39], &table), None);
+        let mut other = code.clone();
+        other[39] ^= 1;
+        assert_eq!(mem_routine(&other, &table), None);
+        assert_eq!(known(&code), None);
+        assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
     }
 
     #[test]

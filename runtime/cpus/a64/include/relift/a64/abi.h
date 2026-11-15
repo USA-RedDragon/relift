@@ -528,6 +528,18 @@ RL_RUNTIME_API int rl_a64_setjmp(rl_ctx *c, uint8_t *mem);
  * the saved sp and x0 = w1, or 1 when w1 is 0. Returns RL_PENDING.
  */
 RL_RUNTIME_API int rl_a64_longjmp(rl_ctx *c, uint8_t *mem);
+/**
+ * @brief Override of a guest libc memcpy or memmove (`RL_FN_OVERRIDE`): copies
+ * x2 bytes from guest address x1 to x0 as memmove does and returns with x0
+ * unchanged (section 7.2).
+ */
+RL_RUNTIME_API int rl_a64_memmove(rl_ctx *c, uint8_t *mem);
+/**
+ * @brief Override of a guest libc memset (`RL_FN_OVERRIDE`): fills x2 bytes at
+ * guest address x0 with the low byte of x1 and returns with x0 unchanged
+ * (section 7.2).
+ */
+RL_RUNTIME_API int rl_a64_memset(rl_ctx *c, uint8_t *mem);
 /** @brief rl_a64_setjmp with an explicit layout and jmp_buf address. */
 RL_RUNTIME_API int rl_a64_setjmp_at(rl_ctx *c, uint8_t *mem, const rl_a64_jmp_layout *l, uint64_t buf);
 /** @brief rl_a64_longjmp with an explicit layout, jmp_buf address and value. */

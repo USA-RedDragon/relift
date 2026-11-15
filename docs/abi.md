@@ -696,6 +696,42 @@ host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
   no frame matches and `RL_PENDING` with `RL_PEND_UNWIND` reaches the thread
   entry, which reports it as an escaped unwind.
 
+## 7.2 Memory routine overrides
+
+Lifted `memcpy`, `memmove` and `memset` of the guest's libc run the guest's
+byte, word and pair loads and stores one after another; the host's versions
+move 16 to 64 bytes per instruction. In a game's render thread the Nintendo
+SDK's `__memcpy_device` alone was 7.6% of the samples and `memset` 0.7%.
+[verified: perf of the render thread]
+
+- **Overrides.** `rl_a64_memmove` (x0 = dst, x1 = src, x2 = n) and
+  `rl_a64_memset` (x0 = dst, x1 = value, x2 = n) have the lifted signature,
+  return `RL_OK`, leave every register but the ones a call may change as
+  they were, and do `memmove` and `memset` on `mem + x`. The build registers
+  them as `RL_FN_OVERRIDE` entries (not `RL_FN_MAY_UNWIND`) at the guest
+  routine's address.
+- **Recognition.** The code is matched by its first word, its length and an
+  FNV-1a hash of all its bytes (`program::known`), so only routines whose
+  whole code was read and checked to be a plain copy or fill are replaced:
+  the SDK's `__memcpy_device` (772 bytes), `__memcpy_fast` (176),
+  `__memmove_device` (408) and `memset` (208). Any other routine stays
+  lifted. [verified: disassembly of the four routines in a game's `nnSdk`]
+- **Why `memmove` for `memcpy`.** Overlap is undefined for `memcpy`, so any
+  behavior is allowed; `memmove` is the one that is always defined. The
+  guest routines only touch the destination and source ranges and never
+  read memory the copy does not.
+- **Faults.** The guard pages and the fault handler (section 2) apply to the
+  host routine as to lifted code: a copy that runs into a protected page
+  faults at `si_addr - mem`, and a fault hook that maps the page lets the
+  host instruction run again. The partial copy before the fault is not
+  specified, as on hardware. The faulting host pc is in libc, so the guest
+  backtrace starts at the caller of the routine.
+- **Not covered.** The routine's own loads and stores on device memory with
+  access-size rules (a guest that relies on 4-byte accesses to MMIO) would
+  need the original routine; none of the four is used that way in a
+  Switch title, whose "device" memory is ordinary mapped memory.
+  [inferred]
+
 ## 8. Exclusives
 
 **Decision:** monitor emulation in `rl_ctx.excl`, with the store done as a
