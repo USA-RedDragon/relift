@@ -29,3 +29,4 @@ pub mod runtime_link;
 pub mod settings;
 pub mod total;
 pub mod ui;
+pub mod winres;

@@ -1190,6 +1190,11 @@ fn lift_and_emit(
         (crate::info::c_file(&doc) + &crate::info::image_id_c(&image_id(&placed))).as_bytes(),
     )?;
     prog.push(info_c);
+    prog.extend(crate::winres::write(
+        &cdir,
+        doc.identity.title(&[]).unwrap_or(name),
+        doc.identity.icon.as_ref(),
+    )?);
     let settings_c = cdir.join("game_settings.c");
     relift_cache::write_if_changed(
         &settings_c,
@@ -1617,6 +1622,7 @@ pub(crate) fn build_project(
         .filter(|f| !dev || *f != "-DRL_BUILDING_RUNTIME")
         .cloned()
         .collect();
+    let (prog, resources) = crate::winres::split(&prog);
     for s in &prog {
         compiles.push(Compile {
             src: s.clone(),
@@ -1700,6 +1706,7 @@ pub(crate) fn build_project(
                 output: exe.clone(),
                 link_flags: [rt_lib.display().to_string()]
                     .into_iter()
+                    .chain(resources.iter().cloned())
                     .chain(rpath_here("rt"))
                     .chain(libs.iter().cloned())
                     .collect(),
@@ -1716,7 +1723,12 @@ pub(crate) fn build_project(
                 cc: cc.clone(),
                 compiles,
                 output: exe.clone(),
-                link_flags: libs.iter().cloned().chain(extras.libs()).collect(),
+                link_flags: resources
+                    .iter()
+                    .cloned()
+                    .chain(libs.iter().cloned())
+                    .chain(extras.libs())
+                    .collect(),
                 pools,
                 root: Some(croot.clone()),
             },

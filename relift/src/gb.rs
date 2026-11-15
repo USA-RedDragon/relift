@@ -526,6 +526,11 @@ pub fn build(
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
+    prog.extend(crate::winres::write(
+        &cdir,
+        doc.identity.title(&[]).unwrap_or(&name),
+        doc.identity.icon.as_ref(),
+    )?);
     let settings_c = cdir.join("game_settings.c");
     relift_cache::write_if_changed(
         &settings_c,
@@ -672,7 +677,8 @@ fn compile(
         rt_compiles.extend(c_files(&rt.join(layer))?);
     }
     rt_compiles.push(rt.join("guests/gb/ports_gen.c"));
-    for s in prog {
+    let (prog, resources) = crate::winres::split(prog);
+    for s in &prog {
         compiles.push(Compile {
             src: s.clone(),
             obj: obj(s, "prog"),
@@ -802,6 +808,7 @@ fn compile(
         output,
         link_flags: link
             .into_iter()
+            .chain(resources)
             .chain(std::iter::once(devices.display().to_string()))
             .chain(libs)
             .chain(extras.libs())
