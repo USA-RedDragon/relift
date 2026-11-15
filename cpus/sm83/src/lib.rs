@@ -29,8 +29,8 @@ mod types;
 pub use decode::{DecodeError, Immediate, Instruction, decode};
 pub use frontend::Sm83;
 pub use lift::{
-    BUG, HALF, LiftError, Options, SyncPolicy, lift_bytes, lift_bytes_sail, lift_instruction,
-    lift_with,
+    BUG, HALF, LiftError, OPERAND, Options, SyncPolicy, lift_bytes, lift_bytes_sail,
+    lift_instruction, lift_with,
 };
 pub use table::{BASE, CB};
 pub use types::{

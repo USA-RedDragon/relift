@@ -50,6 +50,7 @@ impl Frontend for Sm83 {
         let opts = Options {
             map: self.map.clone(),
             sync: self.sync,
+            live_operands: false,
         };
         lift_bytes(bytes, pc, &opts).map_err(|e| LiftFailure {
             insn: bytes

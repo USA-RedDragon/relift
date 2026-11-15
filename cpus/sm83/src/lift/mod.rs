@@ -72,7 +72,17 @@ pub struct Options {
     pub map: IoMap,
     /// Where sync points go.
     pub sync: SyncPolicy,
+    /// Whether immediate operands are read when the instruction runs, by
+    /// the intrinsic [`OPERAND`] (argument: the operand byte's index), rather
+    /// than taken from the bytes lifted: for code in RAM, whose operands may
+    /// change. Jump and call targets taken from an operand are then computed.
+    pub live_operands: bool,
 }
+
+/// The intrinsic that makes the fetch of the instruction's operand byte
+/// given by its argument (0 or 1) and gives the byte, with
+/// [`Options::live_operands`].
+pub const OPERAND: &str = "sm83_operand";
 
 impl Options {
     /// The default policy over `map`.
@@ -80,6 +90,7 @@ impl Options {
         Options {
             map,
             sync: SyncPolicy::default(),
+            live_operands: false,
         }
     }
 }
@@ -153,6 +164,8 @@ pub(crate) struct Cx {
     taken: bool,
     /// The address of the instruction being lifted.
     pub(crate) pc: u16,
+    /// [`Options::live_operands`].
+    pub(crate) live: bool,
     /// [`BUG`] while lifting the bug view, else 0; added to the addresses of
     /// continuations.
     pub(crate) view: u64,
@@ -170,6 +183,7 @@ impl Cx {
             taken,
             pc,
             view,
+            live: false,
         };
         cx.begin(ins, taken);
         cx
@@ -265,7 +279,28 @@ impl Cx {
         self.b.get(r)
     }
 
+    /// Operand byte `i` of the instruction, read when it runs.
+    fn operand(&mut self, i: u8) -> Value {
+        let k = self.k8(i);
+        self.b.intrinsic(OPERAND, &[k], Some(Width::W8))
+    }
+
+    /// The 16-bit immediate as a value: read when the instruction runs
+    /// with live operands, else a constant.
+    pub(crate) fn imm16v(&mut self) -> Lifted<Value> {
+        let v = self.imm16()?;
+        if !self.live {
+            return Ok(self.k16(v));
+        }
+        let lo = self.operand(0);
+        let hi = self.operand(1);
+        Ok(self.b.concat(hi, lo))
+    }
+
     pub(crate) fn imm8(&mut self) -> Lifted<Value> {
+        if self.live && matches!(self.imm, Immediate::U8(_) | Immediate::I8(_)) {
+            return Ok(self.operand(0));
+        }
         match self.imm {
             Immediate::U8(v) => Ok(self.k8(v)),
             Immediate::I8(v) => Ok(self.k8(v as u8)),
@@ -373,14 +408,16 @@ impl Cx {
                 let high = self.k8(0xFF);
                 self.b.concat(high, c)
             }
+            Operand::HighImm8 if self.live => {
+                let n = self.imm8()?;
+                let high = self.k8(0xFF);
+                self.b.concat(high, n)
+            }
             Operand::HighImm8 => match self.imm {
                 Immediate::U8(n) => self.k16(0xFF00 | u16::from(n)),
                 _ => return Err(LiftError::Table("HighImm8 without an 8-bit immediate")),
             },
-            Operand::IndirectImm16 => {
-                let a = self.imm16()?;
-                self.k16(a)
-            }
+            Operand::IndirectImm16 => self.imm16v()?,
             _ => return Ok(None),
         }))
     }
@@ -526,7 +563,13 @@ struct Plan<'a> {
 
 fn lift_plan(plan: &Plan, opts: &Options) -> Lifted<Block> {
     let ins = plan.ins;
+    if opts.live_operands && matches!(plan.engine, Engine::Sail) {
+        return Err(LiftError::Unsupported(
+            "live operands from the Sail templates",
+        ));
+    }
     let mut cx = Cx::new(ins, plan.pc, plan.view, plan.half);
+    cx.live = opts.live_operands;
     let mut done = plan.engine.one(&mut cx, ins)?;
     let mut len = u32::from(ins.length());
     if ins.opcode.mnemonic == Mnemonic::Ei && !plan.half {

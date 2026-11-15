@@ -109,3 +109,30 @@ fn the_frontend_lifts_and_reports_failures() {
     assert!(fe.lift(&[0xC5], 0x1_0000).is_err());
     assert!(fe.lift(&[0xEA, 0x00], 0x100).is_err());
 }
+
+#[test]
+fn live_operands_are_read_as_the_instruction_runs() {
+    let opts = Options {
+        live_operands: true,
+        ..Options::new(devices())
+    };
+    let operands = |b: &Block| {
+        b.insts
+            .iter()
+            .filter(|i| matches!(&i.op, Op::Intrinsic(c) if c.name == OPERAND))
+            .count()
+    };
+    let ld = lift_bytes(&[0x3E, 0x12], 0xC000, &opts).expect("ld a,n");
+    assert_eq!(operands(&ld), 1);
+    let jp = lift_bytes(&[0xC3, 0x34, 0x12], 0xC000, &opts).expect("jp nn");
+    assert_eq!(operands(&jp), 2);
+    assert!(matches!(jp.exit.next, Next::Dynamic(_)));
+    let jr = lift_bytes(&[0x20, 0x05], 0xC000, &opts).expect("jr nz");
+    assert!(matches!(jr.exit.next, Next::Dynamic(_)));
+    let call = lift_bytes(&[0xCD, 0x00, 0x40], 0xC000, &opts).expect("call nn");
+    assert!(matches!(call.exit.next, Next::Dynamic(_)));
+    assert_eq!(call.exit.flow, Flow::Call { ret: 0xC003 });
+    let fixed = lift_bytes(&[0xC3, 0x34, 0x12], 0x150, &Options::new(devices())).expect("jp nn");
+    assert_eq!(operands(&fixed), 0);
+    assert_eq!(fixed.exit.next, Next::Const(0x1234));
+}

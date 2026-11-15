@@ -903,6 +903,7 @@ pub fn run_lift(opts: &Options) -> Result<bool, String> {
     let lift_opts = LiftOptions {
         map: gb_map(),
         sync: SyncPolicy::Every,
+        live_operands: false,
     };
     let mut ok = true;
     let (mut lifted, mut passed, mut skipped, mut deferred, mut failed) = (0u32, 0, 0, 0, 0);

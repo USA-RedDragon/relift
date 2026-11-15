@@ -22,8 +22,7 @@ fn ld(cx: &mut Cx, op: &Opcode) -> Lifted<()> {
     match (op.dst, op.src) {
         (Operand::R16(Reg16::Hl), Operand::SpPlusSigned8) => ld_hl_sp_offset(cx),
         (Operand::R16(d), Operand::Imm16) => {
-            let v = cx.imm16()?;
-            let k = cx.k16(v);
+            let k = cx.imm16v()?;
             cx.set_pair(d, k);
             Ok(())
         }
@@ -33,12 +32,12 @@ fn ld(cx: &mut Cx, op: &Opcode) -> Lifted<()> {
             Ok(())
         }
         (Operand::IndirectImm16, Operand::R16(Reg16::Sp)) => {
-            let at = cx.imm16()?;
+            let a0 = cx.imm16v()?;
             let sp = cx.pair(Reg16::Sp);
             let lo = cx.b.trunc(sp, Width::W8);
             let hi = cx.b.extract(sp, 8, Width::W8);
-            let a0 = cx.k16(at);
-            let a1 = cx.k16(at.wrapping_add(1));
+            let one = cx.k16(1);
+            let a1 = cx.b.add(a0, one);
             cx.store(a0, lo)?;
             cx.store(a1, hi)
         }

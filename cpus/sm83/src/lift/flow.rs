@@ -140,6 +140,14 @@ pub(super) fn lift(cx: &mut Cx, op: &Opcode) -> Lifted<Done> {
                 Kind::Control,
             )
         }
+        Mnemonic::Jr if cx.live => {
+            let e = cx.imm8()?;
+            let wide = cx.b.sext(e, Width::W16);
+            let base = cx.k16(after as u16);
+            let target = cx.b.add(base, wide);
+            cx.finish_insn()?;
+            computed(cx, op, target, after)
+        }
         Mnemonic::Jr => {
             let Some(rel) = (match cx.imm {
                 crate::Immediate::I8(e) => Some(e),
@@ -155,6 +163,11 @@ pub(super) fn lift(cx: &mut Cx, op: &Opcode) -> Lifted<Done> {
             let hl = cx.pair(Reg16::Hl);
             cx.finish_insn()?;
             done(Next::Dynamic(hl), Flow::Jump, Kind::Control)
+        }
+        Mnemonic::Jp if cx.live => {
+            let target = cx.imm16v()?;
+            cx.finish_insn()?;
+            computed(cx, op, target, after)
         }
         Mnemonic::Jp => {
             let target = u64::from(cx.imm16()?);
@@ -177,14 +190,14 @@ pub(super) fn lift(cx: &mut Cx, op: &Opcode) -> Lifted<Done> {
                     Kind::Half,
                 );
             }
-            let target = u64::from(cx.imm16()?);
+            let next = if cx.live {
+                Next::Dynamic(cx.imm16v()?)
+            } else {
+                Next::Const(u64::from(cx.imm16()?))
+            };
             push_return(cx, after as u16)?;
             cx.finish_insn()?;
-            done(
-                Next::Const(target),
-                Flow::Call { ret: after },
-                Kind::Control,
-            )
+            done(next, Flow::Call { ret: after }, Kind::Control)
         }
         Mnemonic::Rst => {
             let Operand::Vector(v) = op.dst else {
@@ -223,6 +236,21 @@ pub(super) fn lift(cx: &mut Cx, op: &Opcode) -> Lifted<Done> {
         }
         _ => Err(LiftError::Table("not a control instruction")),
     }
+}
+
+/// A jump to a computed `target`, conditional when `op` is.
+fn computed(cx: &mut Cx, op: &Opcode, target: Value, after: u64) -> Lifted<Done> {
+    let target = match cond_of(op) {
+        None => target,
+        Some(c) => {
+            let cond = condition(cx, c);
+            let extra = 4 * u32::from(op.cycles.taken - op.cycles.not_taken);
+            cx.b.tick_if(cond, extra);
+            let not_taken = cx.k16(after as u16);
+            cx.b.select(cond, target, not_taken)
+        }
+    };
+    done(Next::Dynamic(target), Flow::Jump, Kind::Control)
 }
 
 fn branch(cx: &mut Cx, op: &Opcode, target: u64, after: u64) -> Lifted<Done> {
