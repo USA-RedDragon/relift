@@ -684,6 +684,113 @@ impl Op {
         Op::Intrinsic(Box::new(Call { name, args }))
     }
 
+    /// The operation with every operand `v` replaced by `r(v)`.
+    pub fn map_values(&self, r: &dyn Fn(&Value) -> Value) -> Op {
+        match self {
+            Op::Const(c) => Op::Const(*c),
+            Op::Get(g) => Op::Get(*g),
+            Op::Set(g, v) => Op::Set(*g, r(v)),
+            Op::Un(u, v) => Op::Un(*u, r(v)),
+            Op::Bin(b, x, y) => Op::Bin(*b, r(x), r(y)),
+            Op::Cmp(c, x, y) => Op::Cmp(*c, r(x), r(y)),
+            Op::Select(c, x, y) => Op::Select(r(c), r(x), r(y)),
+            Op::Ext(k, v) => Op::Ext(*k, r(v)),
+            Op::Extract(v, lo) => Op::Extract(r(v), *lo),
+            Op::Concat(h, l) => Op::Concat(r(h), r(l)),
+            Op::Load {
+                addr,
+                endian,
+                order,
+            } => Op::Load {
+                addr: r(addr),
+                endian: *endian,
+                order: *order,
+            },
+            Op::Store {
+                addr,
+                value,
+                endian,
+                order,
+            } => Op::Store {
+                addr: r(addr),
+                value: r(value),
+                endian: *endian,
+                order: *order,
+            },
+            Op::LoadExclusive {
+                addr,
+                endian,
+                order,
+            } => Op::LoadExclusive {
+                addr: r(addr),
+                endian: *endian,
+                order: *order,
+            },
+            Op::StoreExclusive {
+                addr,
+                value,
+                endian,
+                order,
+            } => Op::StoreExclusive {
+                addr: r(addr),
+                value: r(value),
+                endian: *endian,
+                order: *order,
+            },
+            Op::ClearExclusive => Op::ClearExclusive,
+            Op::Guard(v, code) => Op::Guard(r(v), *code),
+            Op::Fence(o) => Op::Fence(*o),
+            Op::Fp(f, args) => Op::Fp(*f, args.map(r)),
+            Op::Intrinsic(call) => Op::intrinsic(call.name, call.args.iter().map(r).collect()),
+            Op::Tick(n) => Op::Tick(*n),
+            Op::Sync => Op::Sync,
+            Op::TickIf(v, n) => Op::TickIf(r(v), *n),
+            Op::IoLoad { addr, endian, kind } => Op::IoLoad {
+                addr: r(addr),
+                endian: *endian,
+                kind: *kind,
+            },
+            Op::IoStore {
+                addr,
+                value,
+                endian,
+                kind,
+            } => Op::IoStore {
+                addr: r(addr),
+                value: r(value),
+                endian: *endian,
+                kind: *kind,
+            },
+            Op::Crypto(c, v) => Op::Crypto(*c, r(v)),
+            Op::AtomicRmw {
+                op,
+                addr,
+                value,
+                endian,
+                order,
+            } => Op::AtomicRmw {
+                op: *op,
+                addr: r(addr),
+                value: r(value),
+                endian: *endian,
+                order: *order,
+            },
+            Op::CompareSwap {
+                addr,
+                expected,
+                value,
+                endian,
+                order,
+            } => Op::CompareSwap {
+                addr: r(addr),
+                expected: r(expected),
+                value: r(value),
+                endian: *endian,
+                order: *order,
+            },
+        }
+    }
+
     /// The operands, in order.
     pub fn operands(&self) -> Vec<Value> {
         match self {

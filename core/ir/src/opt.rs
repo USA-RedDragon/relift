@@ -107,7 +107,7 @@ pub fn simplify(block: &Block) -> Block {
     let mut known: Vec<Option<u128>> = vec![None; n];
     let mut insts: Vec<Inst> = Vec::with_capacity(n);
     for (i, inst) in block.insts.iter().enumerate() {
-        let mut op = remap_with(&inst.op, &|v: &Value| alias[v.index()]);
+        let mut op = inst.op.map_values(&|v: &Value| alias[v.index()]);
         let w = inst.width.unwrap_or(Width::W1);
         let wid = |v: &Value| insts[v.index()].width.unwrap_or(Width::W1);
         let k = |v: &Value| known[v.index()];
@@ -381,111 +381,5 @@ pub fn constants(block: &Block) -> Vec<Option<u128>> {
 }
 
 fn remap(op: &Op, map: &[u32]) -> Op {
-    remap_with(op, &|v: &Value| Value(map[v.index()]))
-}
-
-fn remap_with(op: &Op, r: &dyn Fn(&Value) -> Value) -> Op {
-    match op {
-        Op::Const(c) => Op::Const(*c),
-        Op::Get(g) => Op::Get(*g),
-        Op::Set(g, v) => Op::Set(*g, r(v)),
-        Op::Un(u, v) => Op::Un(*u, r(v)),
-        Op::Bin(b, x, y) => Op::Bin(*b, r(x), r(y)),
-        Op::Cmp(c, x, y) => Op::Cmp(*c, r(x), r(y)),
-        Op::Select(c, x, y) => Op::Select(r(c), r(x), r(y)),
-        Op::Ext(k, v) => Op::Ext(*k, r(v)),
-        Op::Extract(v, lo) => Op::Extract(r(v), *lo),
-        Op::Concat(h, l) => Op::Concat(r(h), r(l)),
-        Op::Load {
-            addr,
-            endian,
-            order,
-        } => Op::Load {
-            addr: r(addr),
-            endian: *endian,
-            order: *order,
-        },
-        Op::Store {
-            addr,
-            value,
-            endian,
-            order,
-        } => Op::Store {
-            addr: r(addr),
-            value: r(value),
-            endian: *endian,
-            order: *order,
-        },
-        Op::LoadExclusive {
-            addr,
-            endian,
-            order,
-        } => Op::LoadExclusive {
-            addr: r(addr),
-            endian: *endian,
-            order: *order,
-        },
-        Op::StoreExclusive {
-            addr,
-            value,
-            endian,
-            order,
-        } => Op::StoreExclusive {
-            addr: r(addr),
-            value: r(value),
-            endian: *endian,
-            order: *order,
-        },
-        Op::ClearExclusive => Op::ClearExclusive,
-        Op::Guard(v, code) => Op::Guard(r(v), *code),
-        Op::Fence(o) => Op::Fence(*o),
-        Op::Fp(f, args) => Op::Fp(*f, args.map(r)),
-        Op::Intrinsic(call) => Op::intrinsic(call.name, call.args.iter().map(r).collect()),
-        Op::Tick(n) => Op::Tick(*n),
-        Op::Sync => Op::Sync,
-        Op::TickIf(v, n) => Op::TickIf(r(v), *n),
-        Op::IoLoad { addr, endian, kind } => Op::IoLoad {
-            addr: r(addr),
-            endian: *endian,
-            kind: *kind,
-        },
-        Op::IoStore {
-            addr,
-            value,
-            endian,
-            kind,
-        } => Op::IoStore {
-            addr: r(addr),
-            value: r(value),
-            endian: *endian,
-            kind: *kind,
-        },
-        Op::Crypto(c, v) => Op::Crypto(*c, r(v)),
-        Op::AtomicRmw {
-            op,
-            addr,
-            value,
-            endian,
-            order,
-        } => Op::AtomicRmw {
-            op: *op,
-            addr: r(addr),
-            value: r(value),
-            endian: *endian,
-            order: *order,
-        },
-        Op::CompareSwap {
-            addr,
-            expected,
-            value,
-            endian,
-            order,
-        } => Op::CompareSwap {
-            addr: r(addr),
-            expected: r(expected),
-            value: r(value),
-            endian: *endian,
-            order: *order,
-        },
-    }
+    op.map_values(&|v: &Value| Value(map[v.index()]))
 }
