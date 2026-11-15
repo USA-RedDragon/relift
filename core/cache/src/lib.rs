@@ -11,8 +11,8 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-/// Open `path` for writing, creating or truncating it. The one function that
-/// opts out of the clippy funnel.
+/// Open `path` for writing, creating or truncating it. Callers pass a path
+/// no other name shares. The one function that opts out of the clippy funnel.
 #[expect(
     clippy::disallowed_methods,
     reason = "the funnel clippy.toml points every other writer at"
@@ -35,10 +35,34 @@ pub fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<bool> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    let mut file = create(path)?;
+    let tmp = temp_beside(path)?;
+    let mut file = create_fresh(&tmp)?;
     file.write_all(bytes)?;
     file.flush()?;
+    drop(file);
+    std::fs::rename(&tmp, path)?;
     Ok(true)
+}
+
+fn temp_beside(path: &Path) -> io::Result<PathBuf> {
+    let mut name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
+        .to_os_string();
+    name.push(".relift-tmp");
+    Ok(path.with_file_name(name))
+}
+
+/// Opens a new file at `path`, first removing what is there, so a stale
+/// temporary file that another copy of a hard-linked cache shares is never
+/// written through.
+fn create_fresh(path: &Path) -> io::Result<File> {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    create(path)
 }
 
 /// Makes the tree `to` hold the files of `from` that `keep` accepts (by
@@ -120,12 +144,7 @@ impl StreamWriter {
     /// Opening the old file failed for a reason other than it not existing,
     /// or the temporary file could not be created.
     pub fn new(path: &Path) -> io::Result<StreamWriter> {
-        let mut name = path
-            .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
-            .to_os_string();
-        name.push(".relift-tmp");
-        let tmp_path = path.with_file_name(name);
+        let tmp_path = temp_beside(path)?;
         let state = match File::open(path) {
             Ok(old) if old.metadata()?.is_file() => State::Matching { old, matched: 0 },
             Ok(_) => {
@@ -135,7 +154,7 @@ impl StreamWriter {
                 ));
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => State::Writing {
-                tmp: create(&tmp_path)?,
+                tmp: create_fresh(&tmp_path)?,
             },
             Err(e) => return Err(e),
         };
@@ -151,7 +170,7 @@ impl StreamWriter {
     /// new temporary file.
     fn diverge(&mut self) -> io::Result<()> {
         if let State::Matching { old, matched } = &mut self.state {
-            let mut tmp = create(&self.tmp_path)?;
+            let mut tmp = create_fresh(&self.tmp_path)?;
             old.seek(SeekFrom::Start(0))?;
             let mut left = *matched;
             let mut buf = vec![0u8; 1 << 20];

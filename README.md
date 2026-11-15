@@ -50,6 +50,9 @@ by paths relative to the build directory, the runtime sources are copied into
 the cache, and debug info records `.` as its compilation directory, so the
 program is byte-identical. What stays absolute: a cartridge ROM's path (the
 save sits beside it) and SDL3 library search paths outside the cache.
+relift writes every cache file as a new file renamed over the old one, so
+hard-linked copies stay independent; Ninja rewrites `.ninja_log` and
+`.ninja_deps` in place, so a hard-linked cache must copy those two.
 
 ### Nintendo Switch
 

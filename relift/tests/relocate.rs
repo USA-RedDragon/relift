@@ -141,3 +141,69 @@ fn another_copy_of_the_runtime_sources_is_the_same_build() {
         "a changed header rebuilds: {changed}"
     );
 }
+
+fn files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).expect("the dir reads").flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            files(&p, out);
+        } else {
+            out.push(p);
+        }
+    }
+}
+
+fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut all = Vec::new();
+    files(dir, &mut all);
+    all.sort();
+    all.into_iter()
+        .filter(|p| {
+            !p.file_name()
+                .is_some_and(|n| n == ".ninja_log" || n == ".ninja_deps")
+        })
+        .map(|p| {
+            let bytes = std::fs::read(&p).expect("the file reads");
+            (p.strip_prefix(dir).expect("under dir").to_path_buf(), bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn rebuilding_one_hard_linked_copy_leaves_the_other_untouched() {
+    if !tools() {
+        return;
+    }
+    let root = tiny::scratch("relocate-linked");
+    let project = tiny::dump(&root);
+    run(&project, &root.join("cache"), &["import", "../dump"]);
+    run(&project, &root.join("cache"), &["build"]);
+
+    link_tree(&root.join("cache"), &root.join("linked"));
+    let before = snapshot(&root.join("linked"));
+
+    let rt: PathBuf = root.join("other relift/runtime");
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime"),
+        &rt,
+    );
+    let header = rt.join("core/include/relift/abi_core.h");
+    let mut text = std::fs::read(&header).expect("the header reads");
+    text.extend_from_slice(b"\n#define RL_RELOCATE_TEST 1\n");
+    relift_cache::write_if_changed(&header, &text).expect("the header writes");
+    let rt = rt.display().to_string();
+    let changed = run(
+        &project,
+        &root.join("cache"),
+        &["--runtime-dir", &rt, "build"],
+    );
+    assert!(
+        !up_to_date(&changed),
+        "a changed header rebuilds: {changed}"
+    );
+
+    assert!(
+        snapshot(&root.join("linked")) == before,
+        "the rebuild changed a file of the linked copy"
+    );
+}
