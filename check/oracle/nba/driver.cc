@@ -366,18 +366,19 @@ struct Server {
     }
     auto& s = m.cpu.state;
     bool irq = m.cpu.IRQLine() && !(m.cpu.*member(LatchIrq{}));
-    if(irq) {
-      o << "I " << m.Now() << " " << Hex(m.Pc()) << "\n";
-    }
+    u64 at = m.Now();
+    u32 at_pc = m.Pc();
     bool thumb = s.cpsr.f.thumb;
     u32 pc = m.Pc();
     u32 op = m.cpu.GetFetchedOpcode(0);
-    if(irq) {
+    u32 mode = s.cpsr.v & 0x1F;
+    m.Step(limit);
+    if(irq && (s.cpsr.v & 0x1F) == 0x12 && mode != 0x12) {
+      o << "I " << at << " " << Hex(at_pc) << "\n";
       thumb = false;
       pc = 0x18;
       op = u32(m.Peek(0x18)) | u32(m.Peek(0x19)) << 8 | u32(m.Peek(0x1A)) << 16 | u32(m.Peek(0x1B)) << 24;
     }
-    m.Step(limit);
     Trace(o, pc, op, thumb);
   }
 
