@@ -30,7 +30,7 @@ enum { E_VBLANK = 1, E_VCOUNT = 2, E_CAPTURE = 5, E_HBLANK = 1008, E_HDMA = 1009
 
 static const unsigned edges[] = {E_VBLANK, E_VCOUNT, E_CAPTURE, E_HBLANK, E_HDMA};
 
-static uint64_t pos(const rl_gba *g, uint64_t t)
+uint64_t gba_lcd_pos(const rl_gba *g, uint64_t t)
 {
     uint64_t o = g->lcd.origin % RL_GBA_FRAME_CYCLES;
     return (t + RL_GBA_FRAME_CYCLES - o) % RL_GBA_FRAME_CYCLES;
@@ -75,7 +75,7 @@ static void repost_from(rl_gba *g, uint64_t now)
 {
     if (!g->sched)
         return;
-    uint64_t p = pos(g, now);
+    uint64_t p = gba_lcd_pos(g, now);
     unsigned line = (unsigned)(p / RL_GBA_LINE_CYCLES), dot = (unsigned)(p % RL_GBA_LINE_CYCLES);
     for (unsigned k = 0; k <= RL_GBA_LINES; k++) {
         unsigned ln = (line + k) % RL_GBA_LINES;
@@ -100,7 +100,7 @@ static void fire(rl_sched *s, rl_event *e, uint64_t when)
     (void)s;
     rl_gba *g = e->opaque;
     gba_lcd *l = &g->lcd;
-    uint64_t p = pos(g, when);
+    uint64_t p = gba_lcd_pos(g, when);
     unsigned line = (unsigned)(p / RL_GBA_LINE_CYCLES), dot = (unsigned)(p % RL_GBA_LINE_CYCLES);
     switch (dot) {
     case E_VBLANK:
@@ -151,13 +151,14 @@ void rl_gba_lcd_set(rl_gba *g, unsigned line, unsigned dot)
     uint64_t p = ((uint64_t)(line % RL_GBA_LINES) * RL_GBA_LINE_CYCLES + dot % RL_GBA_LINE_CYCLES);
     g->lcd.origin = (now + RL_GBA_FRAME_CYCLES - p % RL_GBA_FRAME_CYCLES) % RL_GBA_FRAME_CYCLES;
     gba_lcd_repost(g);
+    gba_ppu_dev_resync(g);
 }
 
-unsigned rl_gba_vcount(const rl_gba *g) { return (unsigned)(pos(g, gba_now(g)) / RL_GBA_LINE_CYCLES); }
+unsigned rl_gba_vcount(const rl_gba *g) { return (unsigned)(gba_lcd_pos(g, gba_now(g)) / RL_GBA_LINE_CYCLES); }
 
 uint8_t gba_lcd_read(rl_gba *g, uint32_t addr, uint64_t now)
 {
-    uint64_t p = pos(g, now);
+    uint64_t p = gba_lcd_pos(g, now);
     unsigned line = (unsigned)(p / RL_GBA_LINE_CYCLES), dot = (unsigned)(p % RL_GBA_LINE_CYCLES);
     switch (addr & 3) {
     case 0: {

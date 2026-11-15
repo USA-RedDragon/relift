@@ -6,6 +6,7 @@
 #define RELIFT_GBA_INT_H
 
 #include "gba.h"
+#include "ppu/ppu.h"
 
 /** @brief No pending timer reload. */
 #define GBA_NONE UINT64_MAX
@@ -104,6 +105,17 @@ typedef struct gba_keypad {
     uint32_t ref[10];
     rl_event ev;
 } gba_keypad;
+/** @brief The picture unit's place in the frame and its outputs. */
+typedef struct gba_ppu_sched {
+    uint64_t t0, due;
+    unsigned line, stage, dot;
+    uint64_t frames, hash;
+    bool have;
+    uint16_t last[GBA_PPU_W * GBA_PPU_H];
+    rl_gba_frame_fn *frame_fn;
+    void *frame_user;
+    rl_event ev;
+} gba_ppu_sched;
 
 /** @brief The Game Pak prefetch buffer. */
 typedef struct gba_prefetch {
@@ -159,6 +171,8 @@ struct rl_gba {
     gba_lcd lcd;
     gba_keypad pad;
     gba_save save;
+    gba_ppu ppu;
+    gba_ppu_sched ps;
 
     bool halt_req, stop_req, halted, in_bios;
 
@@ -170,7 +184,7 @@ struct rl_gba {
     rl_gba_line_fn *vblank_fn;
     void *vblank_user;
 
-    gba_dev d_lcd, d_timer, d_dma, d_sys, d_pad;
+    gba_dev d_lcd, d_timer, d_dma, d_sys, d_pad, d_ppu;
     gba_stub stub[RL_GBA_SLOTS];
     rl_device *slot[RL_GBA_SLOTS];
 };
@@ -242,6 +256,20 @@ void gba_dma_trigger(rl_gba *g, unsigned timing, uint64_t now);
 void gba_dma_hdma(rl_gba *g, uint64_t now);
 void gba_dma_run(rl_gba *g);
 bool gba_dma_due(const rl_gba *g);
+
+uint64_t gba_lcd_pos(const rl_gba *g, uint64_t t);
+
+void gba_ppu_dev_reset(rl_gba *g);
+void gba_ppu_dev_attach(rl_gba *g);
+void gba_ppu_dev_resync(rl_gba *g);
+void gba_ppu_dev_catch_up(rl_gba *g, uint64_t to);
+uint8_t gba_ppu_dev_read(rl_gba *g, uint32_t addr);
+void gba_ppu_dev_write(rl_gba *g, uint32_t addr, uint8_t v);
+static inline void gba_ppu_sync(rl_gba *g, uint64_t now)
+{
+    if (g->ps.due <= now && g->sched)
+        rl_sched_sync(g->sched, rl_device_bit(&g->d_ppu.dev), now);
+}
 
 void gba_lcd_reset(rl_gba *g);
 void gba_lcd_attach(rl_gba *g);

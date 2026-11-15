@@ -141,8 +141,8 @@ TEST(system_registers_read_back_their_bits)
     mach_wr(&m, 43, 0x04000130u, 2, 0u);
     CHECK_EQ(mach_rd(&m, 44, 0x04000130u, 2), 0x03FFu);
     CHECK_EQ(mach_rd(&m, 45, 0x04000088u, 2), 0x0200u);
-    mach_wr(&m, 46, 0x04000010u, 2, 0x0123u);
-    CHECK_EQ(mach_rd(&m, 47, 0x04000010u, 2), 0x0123u);
+    mach_wr(&m, 46, 0x04000008u, 2, 0x0123u);
+    CHECK_EQ(mach_rd(&m, 47, 0x04000008u, 2), 0x0123u);
     mach_free(&m);
 }
 

@@ -4,8 +4,9 @@
  * (core/include/relift/sched.h): the memory map with its mirrors and open
  * bus, the wait states of every region with the Game Pak prefetch buffer,
  * the interrupt controller, the four timers, the four DMA channels, HALTCNT
- * and the display timing (VCOUNT, DISPSTAT and the HBlank, VBlank and VCOUNT
- * match events).
+ * the display timing (VCOUNT, DISPSTAT and the HBlank, VBlank and VCOUNT
+ * match events) and the picture unit (ppu/), which draws each line lazily
+ * and hands finished frames to a hook and to a frame hash.
  *
  * One scheduler tick is one CPU cycle (16,777,216 Hz). This layer knows the
  * machine, not the CPU: the ARM32 CPU layer reports its bus traffic through
@@ -349,6 +350,33 @@ void rl_gba_set_timer_hook(rl_gba *g, rl_gba_timer_fn *fn, void *user);
 typedef void rl_gba_line_fn(void *user, unsigned line, uint64_t when);
 /** @brief Sets the callback run at the start of VBlank (line 160), for presenting a frame (fn NULL clears it). */
 void rl_gba_set_vblank_hook(rl_gba *g, rl_gba_line_fn *fn, void *user);
+/**
+ * @brief Called when the picture unit has finished a frame, at the start of
+ * VBlank (tick when): pixels are the 240 by 160 BGR555 halfwords, valid
+ * until the callback returns.
+ */
+typedef void rl_gba_frame_fn(void *user, const uint16_t *pixels, uint64_t when);
+/**
+ * @brief Sets the callback run at the end of each frame (fn NULL clears it).
+ * While one is set the end of every frame is a scheduler event, so it runs
+ * on time; without one the picture unit catches up when something reads it.
+ */
+void rl_gba_set_frame_hook(rl_gba *g, rl_gba_frame_fn *fn, void *user);
+/** @brief Frames finished so far, up to the CPU's tick (the picture unit is brought up to date first). */
+uint64_t rl_gba_frames(rl_gba *g);
+/** @brief FNV-1a 64 of the last finished frame's pixels as little-endian halfwords (0 before the first). */
+uint64_t rl_gba_frame_hash(rl_gba *g);
+/** @brief The last finished frame (240 by 160 BGR555 halfwords), or NULL before the first. */
+const uint16_t *rl_gba_frame(rl_gba *g);
+/**
+ * @brief Sets the cycle of a line at which the picture unit draws it (default
+ * 42, where ares' scanline renderer draws; register writes before it show in
+ * the line, writes after it in the next). Takes effect from the next line.
+ */
+void rl_gba_set_render_dot(rl_gba *g, unsigned dot);
+/** @brief Sets whether the CPU is in STOP (the picture unit shows white). */
+void rl_gba_set_stopped(rl_gba *g, bool stopped);
+
 /** @brief Moves the display so that the current tick is dot of line (both wrapped into the frame). */
 void rl_gba_lcd_set(rl_gba *g, unsigned line, unsigned dot);
 /** @brief VCOUNT at the CPU's current tick. */

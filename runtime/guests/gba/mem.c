@@ -125,12 +125,14 @@ void gba_mem_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
         gba_io_write(g, addr, size, value);
         return;
     case 0x5:
+        gba_ppu_sync(g, gba_now(g));
         if (size == 1)
             st(&g->pal[addr & 0x3FEu], 2, (value & 0xFFu) * 0x0101u);
         else
             st(&g->pal[addr & 0x3FFu], size, value);
         return;
     case 0x6: {
+        gba_ppu_sync(g, gba_now(g));
         int o = vram_off(g, addr);
         if (o < 0)
             return;
@@ -144,6 +146,7 @@ void gba_mem_write(rl_gba *g, uint32_t addr, unsigned size, uint32_t value)
         return;
     }
     case 0x7:
+        gba_ppu_sync(g, gba_now(g));
         if (size != 1)
             st(&g->oam[addr & 0x3FFu], size, value);
         return;
@@ -236,6 +239,7 @@ rl_gba *rl_gba_create(const rl_gba_cart *cart)
     gba_timer_reset(g);
     gba_dma_reset(g);
     gba_lcd_reset(g);
+    gba_ppu_dev_reset(g);
     return g;
 }
 
@@ -247,6 +251,7 @@ void rl_gba_destroy(rl_gba *g)
         rl_sched_cancel(g->sched, &g->irq.ev);
         rl_sched_cancel(g->sched, &g->lcd.ev);
         rl_sched_cancel(g->sched, &g->pad.ev);
+        rl_sched_cancel(g->sched, &g->ps.ev);
         for (unsigned i = 0; i < 4; i++) {
             rl_sched_cancel(g->sched, &g->tm[i].ev);
             rl_sched_cancel(g->sched, &g->dma[i].ev);

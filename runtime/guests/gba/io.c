@@ -134,6 +134,20 @@ static void stub_set(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
 
 DEVICE_RW(stub, stub_byte, stub_set)
 DEVICE_RW(lcd, gba_lcd_read, gba_lcd_write)
+
+static uint8_t ppu_byte(rl_gba *g, uint32_t addr, uint64_t now)
+{
+    (void)now;
+    return gba_ppu_dev_read(g, addr);
+}
+
+static void ppu_set(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
+{
+    (void)now;
+    gba_ppu_dev_write(g, addr, v);
+}
+
+DEVICE_RW(ppu, ppu_byte, ppu_set)
 DEVICE_RW(timer, gba_timer_read, gba_timer_write)
 DEVICE_RW(sys, gba_sys_read, gba_sys_write)
 
@@ -262,7 +276,7 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
         return -1;
     g->sched = s;
     if (add_dev(g, &g->d_lcd, "gba lcd", lcd_read, lcd_write) || add_dev(g, &g->d_timer, "gba timers", timer_read, timer_write) ||
-        add_dev(g, &g->d_dma, "gba dma", dma_read, dma_write) || add_dev(g, &g->d_sys, "gba system", sys_read, sys_write))
+        add_dev(g, &g->d_dma, "gba dma", dma_read, dma_write) || add_dev(g, &g->d_ppu, "gba ppu", ppu_read, ppu_write) || add_dev(g, &g->d_sys, "gba system", sys_read, sys_write))
         return -1;
     for (unsigned i = 0; i < RL_GBA_SLOTS; i++) {
         rl_device *d = devs ? devs[i] : NULL;
@@ -270,6 +284,10 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
             if (add_dev(g, &g->d_pad, "gba keypad", pad_read, pad_write))
                 return -1;
             g->slot[i] = &g->d_pad.dev;
+            continue;
+        }
+        if (!d && i == RL_GBA_SLOT_PPU) {
+            g->slot[i] = &g->d_ppu.dev;
             continue;
         }
         if (!d) {
@@ -303,6 +321,8 @@ int rl_gba_attach(rl_gba *g, rl_sched *s, rl_sched_cpu *cpu, rl_device *const de
     gba_dma_attach(g);
     gba_lcd_attach(g);
     gba_keypad_attach(g);
+    if (g->slot[RL_GBA_SLOT_PPU] == &g->d_ppu.dev)
+        gba_ppu_dev_attach(g);
     return 0;
 }
 
