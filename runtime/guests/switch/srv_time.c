@@ -169,6 +169,7 @@ static struct {
     tz_rule rule;
 } g_host_zone;
 
+#ifndef _WIN32
 static bool zone_name_ok(const char *n)
 {
     size_t len = strlen(n);
@@ -195,6 +196,7 @@ static bool load_zone_file(const char *path, tz_rule *rule)
     free(data);
     return ok;
 }
+#endif
 
 static void host_zone_load(void)
 {
