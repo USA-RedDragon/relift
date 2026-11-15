@@ -466,7 +466,8 @@ TEST(audren_update_frames_and_mixing)
     CHECK(elapsed >= 30);
     CHECK(elapsed <= (t_update - t_start) / AUDIO_FRAME_NS + 2);
     uint32_t wrote = le32(o + sinks_at);
-    CHECK(wrote >= 480 * 20);
+    CHECK_EQ(wrote % 480, 0);
+    CHECK(wrote < sink_size);
     const int16_t *s = (const int16_t *)(const void *)(t_mem() + sink);
     for (int i = 0; i < 480; i++)
         CHECK_EQ(s[i], 1000);
