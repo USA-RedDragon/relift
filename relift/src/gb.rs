@@ -211,11 +211,15 @@ fn device_library_path(settings: &Settings) -> Result<PathBuf, BoxError> {
     Ok(cache_root(settings)?
         .join("gb-devices")
         .join("release")
-        .join(if cfg!(windows) {
-            "relift_gb_devices.lib"
-        } else {
-            "librelift_gb_devices.a"
-        }))
+        .join(device_library_name(cfg!(all(windows, target_env = "msvc")))))
+}
+
+fn device_library_name(msvc: bool) -> &'static str {
+    if msvc {
+        "relift_gb_devices.lib"
+    } else {
+        "librelift_gb_devices.a"
+    }
 }
 
 /// The device library, built with cargo from `guests/gb/devices` into the
@@ -669,6 +673,12 @@ pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_device_library_is_a_lib_only_for_the_msvc_abi() {
+        assert_eq!(device_library_name(true), "relift_gb_devices.lib");
+        assert_eq!(device_library_name(false), "librelift_gb_devices.a");
+    }
 
     #[test]
     fn the_save_sits_next_to_the_rom() {
