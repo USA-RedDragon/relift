@@ -1,6 +1,6 @@
 # Builds the relift C runtime per layer and links the layers: core (no guest
 # OS, no guest CPU), cpus/arm64 (the ARM64 lifted-code ABI), cpus/sm83 (the
-# SM83 lifted-code ABI), guests/switch (Horizon), guests/gb (the Game Boy
+# SM83 lifted-code ABI), cpus/arm32 (the ARMv4T lifted-code ABI), guests/switch (Horizon), guests/gb (the Game Boy
 # memory map, over the core only) and guests/gba (the Game Boy Advance BIOS, over the core only). Each layer compiles with only its own include paths and those of
 # the layers below it, so core cannot include a CPU or guest header. relift
 # drives real builds later; this is for development and CI.
@@ -107,6 +107,7 @@ SWITCH_INC := $(ARM64_INC) -Iguests/switch
 GB_INC := $(CORE_INC) -Iguests/gb
 GBA_INC := $(CORE_INC) -Iguests/gba
 SM83_INC := $(CORE_INC) -Icpus/sm83/include -Icpus/sm83
+ARM32_INC := $(CORE_INC) -Icpus/arm32/include -Icpus/arm32
 VK_INC := $(SWITCH_INC) -Iguests/switch/vk -Iguests/switch/vk/gen
 RUNNER_INC := -Icore/tests
 
@@ -117,6 +118,8 @@ ARM64_SRCS := $(wildcard cpus/arm64/*.c)
 ARM64_HDRS := $(CORE_HDRS) $(wildcard cpus/arm64/include/relift/arm64/*.h cpus/arm64/*.h)
 SM83_SRCS := $(wildcard cpus/sm83/*.c)
 SM83_HDRS := $(CORE_HDRS) $(wildcard cpus/sm83/include/relift/sm83/*.h cpus/sm83/*.h)
+ARM32_SRCS := $(wildcard cpus/arm32/*.c)
+ARM32_HDRS := $(CORE_HDRS) $(wildcard cpus/arm32/include/relift/arm32/*.h cpus/arm32/*.h)
 SWITCH_SRCS := $(wildcard guests/switch/*.c)
 SWITCH_HDRS := $(ARM64_HDRS) $(wildcard guests/switch/*.h)
 GB_SRCS := $(filter-out guests/gb/gbdev.c,$(wildcard guests/gb/*.c))
@@ -139,6 +142,7 @@ RUNNER_HDRS := core/tests/runner.h
 CORE_TEST_SRCS := $(filter-out $(RUNNER_SRCS),$(wildcard core/tests/*.c))
 ARM64_TEST_SRCS := $(wildcard cpus/arm64/tests/*.c)
 SM83_TEST_SRCS := $(wildcard cpus/sm83/tests/*.c)
+ARM32_TEST_SRCS := $(wildcard cpus/arm32/tests/*.c)
 SWITCH_TEST_SRCS := $(wildcard guests/switch/tests/*.c)
 SWITCH_TEST_HDRS := $(wildcard guests/switch/tests/*.h)
 GB_TEST_SRCS := $(wildcard guests/gb/tests/*.c)
@@ -155,6 +159,7 @@ FIBER_OBJS := $(call obj,$(FIBER_SRCS) $(FIBER_ASM))
 SCHED_OBJS := $(call obj,$(SCHED_SRCS)) $(FIBER_OBJS)
 ARM64_OBJS := $(call obj,$(ARM64_SRCS))
 SM83_OBJS := $(call obj,$(SM83_SRCS))
+ARM32_OBJS := $(call obj,$(ARM32_SRCS))
 SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
 VK_OBJS := $(call obj,$(VK_SRCS))
 GB_OBJS := $(call obj,$(GB_SRCS))
@@ -167,6 +172,7 @@ RUNNER_OBJS := $(call obj,$(RUNNER_SRCS))
 CORE_TEST_OBJS := $(call obj,$(CORE_TEST_SRCS))
 ARM64_TEST_OBJS := $(call obj,$(ARM64_TEST_SRCS))
 SM83_TEST_OBJS := $(call obj,$(SM83_TEST_SRCS))
+ARM32_TEST_OBJS := $(call obj,$(ARM32_TEST_SRCS))
 SWITCH_TEST_OBJS := $(call obj,$(SWITCH_TEST_SRCS))
 VK_TEST_OBJS := $(call obj,$(VK_TEST_SRCS))
 VK_DEMO_OBJS := $(call obj,$(VK_DEMO_SRCS))
@@ -176,6 +182,7 @@ RT_OBJS := $(CORE_OBJS) $(ARM64_OBJS) $(SWITCH_OBJS) $(VK_OBJS)
 CORE_LIB := $(BUILD)/librelift_core.a
 ARM64_LIB := $(BUILD)/librelift_arm64.a
 SM83_LIB := $(BUILD)/librelift_sm83.a
+ARM32_LIB := $(BUILD)/librelift_arm32.a
 SWITCH_LIB := $(BUILD)/librelift_switch.a
 VK_LIB := $(BUILD)/librelift_switch_vk.a
 GB_LIB := $(BUILD)/librelift_gb.a
@@ -186,12 +193,13 @@ SHARED := $(BUILD)/librelift_rt.$(SHLIB_EXT)
 CORE_TESTS := $(BUILD)/core_tests
 ARM64_TESTS := $(BUILD)/arm64_tests
 SM83_TESTS := $(BUILD)/sm83_tests
+ARM32_TESTS := $(BUILD)/arm32_tests
 SWITCH_TESTS := $(BUILD)/switch_tests
 VK_TESTS := $(BUILD)/switch_vk_tests
 GB_TESTS := $(BUILD)/gb_tests
 GBA_TESTS := $(BUILD)/gba_tests
 VK_PRESENT := $(BUILD)/vk_present
-TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(VK_PRESENT)
+TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(ARM32_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(VK_PRESENT)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
 CRASH_TEST := $(BUILD)/crash_test$(EXE)
@@ -210,8 +218,8 @@ GBDEV_FRAMES ?= 60
 GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
 
 .PHONY: all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
-all: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
-libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC) $(SHARED)
+all: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(ARM32_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
+libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(ARM32_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC) $(SHARED)
 portable: $(PORTABLE)
 
 $(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -233,6 +241,14 @@ $(SM83_OBJS): $(BUILD)/obj/%.o: %.c $(SM83_HDRS)
 $(SM83_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(SM83_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(SM83_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
+
+$(ARM32_OBJS): $(BUILD)/obj/%.o: %.c $(ARM32_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(ARM32_INC) $(CFLAGS) -c $< -o $@
+
+$(ARM32_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(ARM32_HDRS) $(RUNNER_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(ARM32_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
 $(SWITCH_OBJS): $(BUILD)/obj/%.o: %.c $(SWITCH_HDRS)
 	@mkdir -p $(dir $@)
@@ -289,13 +305,14 @@ $(SWITCH_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(SWITCH_HDRS) $(RUNNER_HDRS) $(SWITC
 $(CORE_LIB): $(CORE_OBJS)
 $(ARM64_LIB): $(ARM64_OBJS)
 $(SM83_LIB): $(SM83_OBJS)
+$(ARM32_LIB): $(ARM32_OBJS)
 $(SWITCH_LIB): $(SWITCH_OBJS)
 $(VK_LIB): $(VK_OBJS)
 $(GB_LIB): $(GB_OBJS)
 $(GBA_LIB): $(GBA_OBJS)
 $(GBX_LIB): $(GBX_OBJS)
 $(STATIC): $(RT_OBJS)
-$(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC):
+$(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(ARM32_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC):
 	@rm -f $@
 	$(AR) rcs $@ $^
 
@@ -306,6 +323,7 @@ $(SHARED): $(RT_OBJS)
 $(CORE_TESTS): $(CORE_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS)
 $(ARM64_TESTS): $(ARM64_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(ARM64_OBJS)
 $(SM83_TESTS): $(SM83_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(SM83_OBJS)
+$(ARM32_TESTS): $(ARM32_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(ARM32_OBJS)
 $(SWITCH_TESTS): $(SWITCH_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(VK_TESTS): $(VK_TEST_OBJS) $(RUNNER_OBJS) $(RT_OBJS)
 $(GB_TESTS): $(GB_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GB_OBJS)
@@ -347,7 +365,7 @@ test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
 
-TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS)
+TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(ARM32_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS)
 
 test: export RELIFT_VIDEO := headless
 test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
