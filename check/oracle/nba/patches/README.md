@@ -56,6 +56,25 @@ the console 0x90000074 / 0x000000ff / 0x00000051. Patched: batch 1 1000 of 1000 
 console (stock 990). The single-boot runs mask these bits (the model calls them unknown), so they
 do not see this.
 
+## 0007-serial-registers-and-memcnt-read-back.patch
+
+Hardware (no link cable attached): SIOMULTI0-3 (0x04000120-27) read 0 whatever the BIOS stored
+there; SIOCNT bit 2 (the SI terminal) reads 1; SIODATA8 (0x0400012A), JOY_RECV and JOY_TRANS
+(0x04000150-57) are plain registers that read 0 until written; RCNT reads 0x0005 in normal mode and,
+in general purpose mode (bit 15), the pin levels in bits 0-3 (an input pin reads 1, an output pin
+the written level, bits 4-7 the written directions); JOYCNT (0x04000140) reads 0 after the BIOS
+wrote 7 (the status flags clear on write); JOYSTAT (0x04000158) reads 0x0008 with bits 4-5 as
+written; the word at 0x04000800 (memory control) reads 0x0D000020 after boot. Stock NBA returns
+open bus for all of these.
+
+Evidence: console RegisterRamReset dumps (probe part B, 15 dumps of 0x04000000-0x040003FE plus the
+word at 0x04000800). Stock NBA differs in 0x120-0x126, 0x128 (0x4003 where the console has 0x4007),
+0x12A (open bus 0xE1A0 where the console keeps 0xBEEF until the SIO reset), 0x134, 0x140, 0x150-0x156,
+0x158 and 0x800 in every dump. Patched: the only remaining difference outside DISPSTAT flags,
+VCOUNT and IF (time since boot) is the Timer 0 counter, 0xFF8A against the console's 0xFF8B, a
+one-cycle boot timing difference. Ten dumps (those without the SIO reset flag) show the BIOS writing
+7 to 0x04000120 by byte; the console reads 0 afterwards, hence the SIOMULTI registers ignore writes.
+
 ## Open
 
 - Thumb kernels at ws0 3/1 with prefetch on, code in ROM (cfg 6: t_empty, t_nop, t_add, t_b,

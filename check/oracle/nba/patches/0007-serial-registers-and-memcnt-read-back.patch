@@ -1,0 +1,88 @@
+diff --git a/src/nba/src/bus/bus.cc b/src/nba/src/bus/bus.cc
+index 3631ef8..ee5394c 100644
+--- a/src/nba/src/bus/bus.cc
++++ b/src/nba/src/bus/bus.cc
+@@ -32,6 +32,8 @@ void Bus::Reset() {
+   hw.siocnt = 0;
+   hw.rcnt[0] = 0;
+   hw.rcnt[1] = 0;
++  std::fill(std::begin(hw.sio_plain), std::end(hw.sio_plain), 0);
++  hw.memcnt = 0x0D000020;
+   hw.postflg = 0;
+   hw.prefetch_buffer_was_disabled = false;
+   hw.mgba_log = {};
+diff --git a/src/nba/src/bus/bus.hh b/src/nba/src/bus/bus.hh
+index 5703bea..0c6e05f 100644
+--- a/src/nba/src/bus/bus.hh
++++ b/src/nba/src/bus/bus.hh
+@@ -88,6 +88,8 @@ struct Bus {
+ 
+     u16 siocnt = 0;
+     u8 rcnt[2] { 0, 0 };
++    u8 sio_plain[0x40] {};
++    u32 memcnt = 0x0D000020;
+     u8 postflg = 0;
+ 
+     struct MGBALog {
+diff --git a/src/nba/src/bus/io.cc b/src/nba/src/bus/io.cc
+index 4d83cc5..4a83ec2 100644
+--- a/src/nba/src/bus/io.cc
++++ b/src/nba/src/bus/io.cc
+@@ -142,12 +142,27 @@ auto Bus::Hardware::ReadByte(u32 address) ->  u8 {
+ 
+     // Serial communication
+     // @todo: implement sensible read/write behaviour for the remaining registers.
+-    case SIOCNT+0: return (u8)(siocnt >> 0);
++    case SIOCNT+0: return (u8)(siocnt >> 0) | 0x04;
+     case SIOCNT+1: return (u8)(siocnt >> 8);
+-    case RCNT+0: return rcnt[0];
+-    case RCNT+1: return rcnt[1];
++    case RCNT+0: {
++      if(!(rcnt[1] & 0x80)) return 0x05;
++      const u8 dir = rcnt[0] >> 4;
++      return (rcnt[0] & 0xF0) | (rcnt[0] & dir) | (0x0F & ~dir);
++    }
++    case RCNT+1: return rcnt[1] & 0xC0;
+     case RCNT+2:
+     case RCNT+3: return 0;
++    case JOYCNT+0: return 0;
++    case JOYCNT+1: return 0;
++    case JOYSTAT+0: return sio_plain[JOYSTAT & 0x3F] | 0x08;
++    case JOYSTAT+1: return 0;
++    case MEMCNT+0: return (u8)(memcnt >> 0);
++    case MEMCNT+1: return (u8)(memcnt >> 8);
++    case MEMCNT+2: return (u8)(memcnt >> 16);
++    case MEMCNT+3: return (u8)(memcnt >> 24);
++    case SIOMULTI0 ... SIOMULTI3+1: return 0;
++    case SIODATA8 ... SIODATA8+1:
++    case JOY_RECV ... JOY_TRANS+3: return sio_plain[address & 0x3F];
+     case 0x04000142:
+     case 0x04000143: return 0;
+     case 0x0400015A:
+@@ -509,6 +524,14 @@ void Bus::Hardware::WriteByte(u32 address,  u8 value) {
+     case SIOCNT+1: WriteHalf(SIOCNT, (siocnt & 0x00FF) | (value << 8)); break;
+     case RCNT+0: rcnt[0] = value; break;
+     case RCNT+1: rcnt[1] = value; break;
++    case SIOMULTI0 ... SIOMULTI3+1: break;
++    case SIODATA8 ... SIODATA8+1:
++    case JOY_RECV ... JOY_TRANS+3: sio_plain[address & 0x3F] = value; break;
++    case JOYSTAT+0: sio_plain[JOYSTAT & 0x3F] = value & 0x30; break;
++    case MEMCNT+0: memcnt = (memcnt & 0xFFFFFF00u) | (u32(value) << 0); break;
++    case MEMCNT+1: memcnt = (memcnt & 0xFFFF00FFu) | (u32(value) << 8); break;
++    case MEMCNT+2: memcnt = (memcnt & 0xFF00FFFFu) | (u32(value) << 16); break;
++    case MEMCNT+3: memcnt = (memcnt & 0x00FFFFFFu) | (u32(value) << 24); break;
+ 
+     // Keypad
+     case KEYCNT:   keypad.control.WriteByte(0, value); break;
+diff --git a/src/nba/src/bus/io.hh b/src/nba/src/bus/io.hh
+index 1fd71f2..2ebf922 100644
+--- a/src/nba/src/bus/io.hh
++++ b/src/nba/src/bus/io.hh
+@@ -100,6 +100,7 @@ constexpr u32 JOYCNT = 0x04000140;
+ constexpr u32 JOY_RECV = 0x04000150;
+ constexpr u32 JOY_TRANS = 0x04000154;
+ constexpr u32 JOYSTAT = 0x04000158;
++constexpr u32 MEMCNT = 0x04000800;
+ constexpr u32 IE = 0x04000200;
+ constexpr u32 IF = 0x04000202;
+ constexpr u32 WAITCNT = 0x04000204;
