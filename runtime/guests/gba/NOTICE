@@ -20,6 +20,10 @@ lcd.c     VCOUNT, DISPSTAT and the line edges
                                    gba/display/display.cpp, io.cpp
 io.c      system register values, byte-wise register access
                                    gba/cpu/io.cpp, gba/memory/memory.cpp
+ppu/      the picture unit: registers, backgrounds, sprites, windows, blending,
+          the render order of the fast path
+                                   gba/ppu/io.cpp, background.cpp, object.cpp,
+                                   window.cpp, dac.cpp, ppu.cpp, memory.cpp
 mem.c     VRAM mirror and bitmap-mode rules, byte writes to palette, VRAM
           and OAM, the memory control register
                                    gba/ppu/memory.cpp, gba/cpu/memory.cpp
