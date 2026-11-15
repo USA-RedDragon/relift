@@ -124,7 +124,7 @@ fn the_game_boy_schema_in_c_equals_the_lists_in_rust() {
         return;
     };
     let mut rust = runtime_settings();
-    rust.retain(|s| s.key == "video" || s.key == "language");
+    rust.retain(|s| matches!(s.key.as_str(), "video" | "language" | "video.gpu_driver"));
     rust.extend(gb_settings());
     assert_eq!(c, as_json(&rust));
 }

@@ -97,6 +97,13 @@ pub fn runtime_settings() -> Vec<Setting> {
             SettingKind::String,
         ),
         s(
+            "video.gpu_driver",
+            "GPU driver",
+            "Android: system uses the device's Vulkan driver; the name of an installed driver package (a meta.json and its library under the app's gpu_drivers folder) loads that driver instead",
+            Value::String("system".into()),
+            SettingKind::String,
+        ),
+        s(
             "save.dir",
             "Save folder",
             "Where the game's save data is kept. Empty: <user folder>/save when the program names an app, else ./save",
@@ -800,7 +807,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 10);
+        assert_eq!(section(Vec::new()).runtime.len(), 11);
     }
 
     #[test]

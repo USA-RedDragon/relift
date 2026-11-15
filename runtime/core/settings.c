@@ -61,6 +61,15 @@ static const rl_setting_def g_runtime_defs[] = {
                        "or a locale such as ja or fr_CA. Empty follows the host's language",
         .env = "RELIFT_LANGUAGE",
     },
+    {
+        .key = "video.gpu_driver",
+        .type = RL_SETTING_STRING,
+        .label = "GPU driver",
+        .description = "Android: system uses the device's Vulkan driver; the name of an installed driver package "
+                       "(a meta.json and its library under the app's gpu_drivers folder) loads that driver instead",
+        .env = "RELIFT_GPU_DRIVER",
+        .def_str = "system",
+    },
 };
 
 static char *g_mods[RL_SETTINGS_MODS_MAX];
