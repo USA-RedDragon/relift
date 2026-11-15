@@ -263,10 +263,11 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     vkf_dev *d = k.obj->dev;
     VkMemoryAllocateInfo *ai = vkg_ain_VkMemoryAllocateInfo(&k, c->x[1], 1);
     uint64_t gout = c->x[3];
-    if (!ai || !gout || ai->memoryTypeIndex >= d->type_count) {
+    if (!ai || !gout || ai->memoryTypeIndex >= vkf_switch.memory.memoryTypeCount) {
         c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
         return vkf_end(&k);
     }
+    ai->memoryTypeIndex = d->host_type[ai->memoryTypeIndex];
     vkf_mem *r = calloc(1, sizeof *r);
     if (!r)
         abort();

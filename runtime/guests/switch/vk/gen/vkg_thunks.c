@@ -1745,7 +1745,13 @@ static int vkt_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCreateDescriptorSetLayout fn = (PFN_vkCreateDescriptorSetLayout)k.fns->f[VKG_vkCreateDescriptorSetLayout];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateDescriptorSetLayout);
+    VkResult checked = vkf_check_set_layout(&k);
+    if (checked < 0) {
+        c->x[0] = (uint32_t)checked;
+        return vkf_end(&k);
+    }
     VkResult r = fn(a0, a1, a2, a3);
+    vkf_note_set_layout(&k);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
 }
@@ -1817,6 +1823,11 @@ static int vkt_vkCreateFramebuffer(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCreateFramebuffer fn = (PFN_vkCreateFramebuffer)k.fns->f[VKG_vkCreateFramebuffer];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateFramebuffer);
+    VkResult checked = vkf_check_framebuffer(&k);
+    if (checked < 0) {
+        c->x[0] = (uint32_t)checked;
+        return vkf_end(&k);
+    }
     VkResult r = fn(a0, a1, a2, a3);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
@@ -1855,6 +1866,11 @@ static int vkt_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCreateImage fn = (PFN_vkCreateImage)k.fns->f[VKG_vkCreateImage];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateImage);
+    VkResult checked = vkf_check_image(&k);
+    if (checked < 0) {
+        c->x[0] = (uint32_t)checked;
+        return vkf_end(&k);
+    }
     VkResult r = fn(a0, a1, a2, a3);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
@@ -1909,6 +1925,11 @@ static int vkt_vkCreatePipelineLayout(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkCreatePipelineLayout fn = (PFN_vkCreatePipelineLayout)k.fns->f[VKG_vkCreatePipelineLayout];
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreatePipelineLayout);
+    VkResult checked = vkf_check_pipeline_layout(&k);
+    if (checked < 0) {
+        c->x[0] = (uint32_t)checked;
+        return vkf_end(&k);
+    }
     VkResult r = fn(a0, a1, a2, a3);
     c->x[0] = (uint32_t)r;
     return vkf_end(&k);
@@ -2172,6 +2193,7 @@ static int vkt_vkDestroyDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDestroyDescriptorSetLayout);
     fn(a0, a1, a2);
+    vkf_forget_set_layout(&k);
     return vkf_end(&k);
 }
 
@@ -2511,20 +2533,6 @@ static int vkt_vkEnumerateInstanceLayerProperties(rl_ctx *restrict c, uint8_t *m
     return vkf_end(&k);
 }
 
-static int vkt_vkEnumerateInstanceVersion(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    uint32_t * a0 = (uint32_t *)vkf_ptr(&k, c->x[0]);
-    vkf_global(&k);
-    PFN_vkEnumerateInstanceVersion fn = (PFN_vkEnumerateInstanceVersion)k.fns->f[VKG_vkEnumerateInstanceVersion];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkEnumerateInstanceVersion);
-    VkResult r = fn(a0);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
 static int vkt_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -2572,6 +2580,7 @@ static int vkt_vkGetBufferMemoryRequirements(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetBufferMemoryRequirements);
     fn(a0, a1, a2);
+    vkf_mem_reqs_out(&k);
     return vkf_end(&k);
 }
 
@@ -2593,6 +2602,7 @@ static int vkt_vkGetBufferMemoryRequirements2(rl_ctx *restrict c, uint8_t *mem)
         uint64_t w2 = 1;
         vkg_aout_VkMemoryRequirements2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
     }
+    vkf_mem_reqs2_out(&k);
     return vkf_end(&k);
 }
 
@@ -2651,6 +2661,7 @@ static int vkt_vkGetDeviceBufferMemoryRequirements(rl_ctx *restrict c, uint8_t *
         uint64_t w2 = 1;
         vkg_aout_VkMemoryRequirements2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
     }
+    vkf_mem_reqs2_out(&k);
     return vkf_end(&k);
 }
 
@@ -2730,6 +2741,7 @@ static int vkt_vkGetDeviceImageMemoryRequirements(rl_ctx *restrict c, uint8_t *m
         uint64_t w2 = 1;
         vkg_aout_VkMemoryRequirements2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
     }
+    vkf_mem_reqs2_out(&k);
     return vkf_end(&k);
 }
 
@@ -2833,6 +2845,7 @@ static int vkt_vkGetImageMemoryRequirements(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetImageMemoryRequirements);
     fn(a0, a1, a2);
+    vkf_mem_reqs_out(&k);
     return vkf_end(&k);
 }
 
@@ -2854,6 +2867,7 @@ static int vkt_vkGetImageMemoryRequirements2(rl_ctx *restrict c, uint8_t *mem)
         uint64_t w2 = 1;
         vkg_aout_VkMemoryRequirements2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
     }
+    vkf_mem_reqs2_out(&k);
     return vkf_end(&k);
 }
 
@@ -2976,158 +2990,6 @@ static int vkt_vkGetPhysicalDeviceExternalSemaphoreProperties(rl_ctx *restrict c
     return vkf_end(&k);
 }
 
-static int vkt_vkGetPhysicalDeviceFeatures(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceFeatures, c->x[0]);
-    VkPhysicalDeviceFeatures * a1 = (VkPhysicalDeviceFeatures *)vkf_ptr(&k, c->x[1]);
-    PFN_vkGetPhysicalDeviceFeatures fn = (PFN_vkGetPhysicalDeviceFeatures)k.fns->f[VKG_vkGetPhysicalDeviceFeatures];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceFeatures);
-    fn(a0, a1);
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceFeatures2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceFeatures2, c->x[0]);
-    uint64_t n1 = 1;
-    VkPhysicalDeviceFeatures2 *a1 = vkg_ain_VkPhysicalDeviceFeatures2(&k, c->x[1], n1);
-    PFN_vkGetPhysicalDeviceFeatures2 fn = (PFN_vkGetPhysicalDeviceFeatures2)k.fns->f[VKG_vkGetPhysicalDeviceFeatures2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceFeatures2);
-    fn(a0, a1);
-    {
-        uint64_t w1 = 1;
-        vkg_aout_VkPhysicalDeviceFeatures2(&k, c->x[1], a1, w1 < n1 ? w1 : n1);
-    }
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceFormatProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceFormatProperties, c->x[0]);
-    VkFormat a1 = (VkFormat)(uint32_t)(c->x[1]);
-    VkFormatProperties * a2 = (VkFormatProperties *)vkf_ptr(&k, c->x[2]);
-    PFN_vkGetPhysicalDeviceFormatProperties fn = (PFN_vkGetPhysicalDeviceFormatProperties)k.fns->f[VKG_vkGetPhysicalDeviceFormatProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceFormatProperties);
-    fn(a0, a1, a2);
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceFormatProperties2, c->x[0]);
-    VkFormat a1 = (VkFormat)(uint32_t)(c->x[1]);
-    uint64_t n2 = 1;
-    VkFormatProperties2 *a2 = vkg_ain_VkFormatProperties2(&k, c->x[2], n2);
-    PFN_vkGetPhysicalDeviceFormatProperties2 fn = (PFN_vkGetPhysicalDeviceFormatProperties2)k.fns->f[VKG_vkGetPhysicalDeviceFormatProperties2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceFormatProperties2);
-    fn(a0, a1, a2);
-    {
-        uint64_t w2 = 1;
-        vkg_aout_VkFormatProperties2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
-    }
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceImageFormatProperties, c->x[0]);
-    VkFormat a1 = (VkFormat)(uint32_t)(c->x[1]);
-    VkImageType a2 = (VkImageType)(uint32_t)(c->x[2]);
-    VkImageTiling a3 = (VkImageTiling)(uint32_t)(c->x[3]);
-    VkImageUsageFlags a4 = (VkImageUsageFlags)(uint32_t)(c->x[4]);
-    VkImageCreateFlags a5 = (VkImageCreateFlags)(uint32_t)(c->x[5]);
-    VkImageFormatProperties * a6 = (VkImageFormatProperties *)vkf_ptr(&k, c->x[6]);
-    PFN_vkGetPhysicalDeviceImageFormatProperties fn = (PFN_vkGetPhysicalDeviceImageFormatProperties)k.fns->f[VKG_vkGetPhysicalDeviceImageFormatProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceImageFormatProperties);
-    VkResult r = fn(a0, a1, a2, a3, a4, a5, a6);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceImageFormatProperties2, c->x[0]);
-    const VkPhysicalDeviceImageFormatInfo2 * a1 = vkg_ain_VkPhysicalDeviceImageFormatInfo2(&k, c->x[1], 1);
-    uint64_t n2 = 1;
-    VkImageFormatProperties2 *a2 = vkg_ain_VkImageFormatProperties2(&k, c->x[2], n2);
-    PFN_vkGetPhysicalDeviceImageFormatProperties2 fn = (PFN_vkGetPhysicalDeviceImageFormatProperties2)k.fns->f[VKG_vkGetPhysicalDeviceImageFormatProperties2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceImageFormatProperties2);
-    VkResult r = fn(a0, a1, a2);
-    if (r >= 0) {
-        {
-            uint64_t w2 = 1;
-            vkg_aout_VkImageFormatProperties2(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
-        }
-    }
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceMemoryProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceMemoryProperties, c->x[0]);
-    VkPhysicalDeviceMemoryProperties * a1 = (VkPhysicalDeviceMemoryProperties *)vkf_ptr(&k, c->x[1]);
-    PFN_vkGetPhysicalDeviceMemoryProperties fn = (PFN_vkGetPhysicalDeviceMemoryProperties)k.fns->f[VKG_vkGetPhysicalDeviceMemoryProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceMemoryProperties);
-    fn(a0, a1);
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceMemoryProperties2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceMemoryProperties2, c->x[0]);
-    uint64_t n1 = 1;
-    VkPhysicalDeviceMemoryProperties2 *a1 = vkg_ain_VkPhysicalDeviceMemoryProperties2(&k, c->x[1], n1);
-    PFN_vkGetPhysicalDeviceMemoryProperties2 fn = (PFN_vkGetPhysicalDeviceMemoryProperties2)k.fns->f[VKG_vkGetPhysicalDeviceMemoryProperties2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceMemoryProperties2);
-    fn(a0, a1);
-    {
-        uint64_t w1 = 1;
-        vkg_aout_VkPhysicalDeviceMemoryProperties2(&k, c->x[1], a1, w1 < n1 ? w1 : n1);
-    }
-    return vkf_end(&k);
-}
-
 static int vkt_vkGetPhysicalDeviceMultisamplePropertiesEXT(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -3164,46 +3026,6 @@ static int vkt_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8
         return vkf_no_fn(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR);
     VkResult r = fn(a0, a1, a2, a3);
     c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceProperties(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceProperties, c->x[0]);
-    uint64_t n1 = 1;
-    VkPhysicalDeviceProperties *a1 = vkg_ain_VkPhysicalDeviceProperties(&k, c->x[1], n1);
-    PFN_vkGetPhysicalDeviceProperties fn = (PFN_vkGetPhysicalDeviceProperties)k.fns->f[VKG_vkGetPhysicalDeviceProperties];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceProperties);
-    fn(a0, a1);
-    {
-        uint64_t w1 = 1;
-        vkg_aout_VkPhysicalDeviceProperties(&k, c->x[1], a1, w1 < n1 ? w1 : n1);
-    }
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceProperties2(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceProperties2, c->x[0]);
-    uint64_t n1 = 1;
-    VkPhysicalDeviceProperties2 *a1 = vkg_ain_VkPhysicalDeviceProperties2(&k, c->x[1], n1);
-    PFN_vkGetPhysicalDeviceProperties2 fn = (PFN_vkGetPhysicalDeviceProperties2)k.fns->f[VKG_vkGetPhysicalDeviceProperties2];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceProperties2);
-    fn(a0, a1);
-    {
-        uint64_t w1 = 1;
-        vkg_aout_VkPhysicalDeviceProperties2(&k, c->x[1], a1, w1 < n1 ? w1 : n1);
-    }
     return vkf_end(&k);
 }
 
@@ -4663,7 +4485,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkEnumerateDeviceLayerProperties,
     vkh_vkEnumerateInstanceExtensionProperties,
     vkt_vkEnumerateInstanceLayerProperties,
-    vkt_vkEnumerateInstanceVersion,
+    vkh_vkEnumerateInstanceVersion,
     vkh_vkEnumeratePhysicalDeviceGroups,
     vkh_vkEnumeratePhysicalDevices,
     vkh_vkFlushMappedMemoryRanges,
@@ -4698,18 +4520,18 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetPhysicalDeviceExternalBufferProperties,
     vkt_vkGetPhysicalDeviceExternalFenceProperties,
     vkt_vkGetPhysicalDeviceExternalSemaphoreProperties,
-    vkt_vkGetPhysicalDeviceFeatures,
-    vkt_vkGetPhysicalDeviceFeatures2,
-    vkt_vkGetPhysicalDeviceFormatProperties,
-    vkt_vkGetPhysicalDeviceFormatProperties2,
-    vkt_vkGetPhysicalDeviceImageFormatProperties,
-    vkt_vkGetPhysicalDeviceImageFormatProperties2,
-    vkt_vkGetPhysicalDeviceMemoryProperties,
-    vkt_vkGetPhysicalDeviceMemoryProperties2,
+    vkh_vkGetPhysicalDeviceFeatures,
+    vkh_vkGetPhysicalDeviceFeatures2,
+    vkh_vkGetPhysicalDeviceFormatProperties,
+    vkh_vkGetPhysicalDeviceFormatProperties2,
+    vkh_vkGetPhysicalDeviceImageFormatProperties,
+    vkh_vkGetPhysicalDeviceImageFormatProperties2,
+    vkh_vkGetPhysicalDeviceMemoryProperties,
+    vkh_vkGetPhysicalDeviceMemoryProperties2,
     vkt_vkGetPhysicalDeviceMultisamplePropertiesEXT,
     vkt_vkGetPhysicalDevicePresentRectanglesKHR,
-    vkt_vkGetPhysicalDeviceProperties,
-    vkt_vkGetPhysicalDeviceProperties2,
+    vkh_vkGetPhysicalDeviceProperties,
+    vkh_vkGetPhysicalDeviceProperties2,
     vkh_vkGetPhysicalDeviceQueueFamilyProperties,
     vkh_vkGetPhysicalDeviceQueueFamilyProperties2,
     vkt_vkGetPhysicalDeviceSparseImageFormatProperties,

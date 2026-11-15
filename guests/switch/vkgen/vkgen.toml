@@ -67,6 +67,17 @@ hand_commands = [
     "vkGetDeviceQueue2",
     "vkEnumeratePhysicalDevices",
     "vkEnumeratePhysicalDeviceGroups",
+    "vkEnumerateInstanceVersion",
+    "vkGetPhysicalDeviceProperties",
+    "vkGetPhysicalDeviceProperties2",
+    "vkGetPhysicalDeviceFeatures",
+    "vkGetPhysicalDeviceFeatures2",
+    "vkGetPhysicalDeviceMemoryProperties",
+    "vkGetPhysicalDeviceMemoryProperties2",
+    "vkGetPhysicalDeviceFormatProperties",
+    "vkGetPhysicalDeviceFormatProperties2",
+    "vkGetPhysicalDeviceImageFormatProperties",
+    "vkGetPhysicalDeviceImageFormatProperties2",
     "vkCreateDevice",
     "vkDestroyDevice",
     "vkAllocateMemory",
@@ -122,3 +133,18 @@ vkGetFenceStatus = "vkf_shadow_pull"
 vkQueueWaitIdle = "vkf_queue_wait_return"
 vkDeviceWaitIdle = "vkf_queue_wait_return"
 vkWaitSemaphores = "vkf_wait_pull_return"
+vkGetBufferMemoryRequirements = "vkf_mem_reqs_out"
+vkGetImageMemoryRequirements = "vkf_mem_reqs_out"
+vkGetBufferMemoryRequirements2 = "vkf_mem_reqs2_out"
+vkGetImageMemoryRequirements2 = "vkf_mem_reqs2_out"
+vkGetDeviceBufferMemoryRequirements = "vkf_mem_reqs2_out"
+vkGetDeviceImageMemoryRequirements = "vkf_mem_reqs2_out"
+vkCreateDescriptorSetLayout = "vkf_note_set_layout"
+vkDestroyDescriptorSetLayout = "vkf_forget_set_layout"
+
+# Fail a call that goes past a host limit below the Switch's (vk_props.c).
+[hooks.check]
+vkCreateDescriptorSetLayout = "vkf_check_set_layout"
+vkCreatePipelineLayout = "vkf_check_pipeline_layout"
+vkCreateImage = "vkf_check_image"
+vkCreateFramebuffer = "vkf_check_framebuffer"

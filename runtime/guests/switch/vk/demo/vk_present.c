@@ -226,14 +226,11 @@ static int pick_device(gpu *g)
     rl_st32(g_mem, gn, n);
     uint64_t arr = galloc(8ull * n);
     G("vkEnumeratePhysicalDevices", g_inst, gn, arr);
-    const char *want = getenv(RL_VK_DEVICE_ENV);
     for (uint32_t i = 0; i < g32(gn); i++) {
         uint64_t pd = g64(arr + 8ull * i);
         uint64_t gp = galloc(sizeof(VkPhysicalDeviceProperties));
         G("vkGetPhysicalDeviceProperties", pd, gp);
         const char *name = (const char *)g_mem + gp + offsetof(VkPhysicalDeviceProperties, deviceName);
-        if (want && !strstr(name, want))
-            continue;
         uint64_t gq = galloc(4);
         G("vkGetPhysicalDeviceQueueFamilyProperties", pd, gq, 0);
         uint64_t qa = galloc(g32(gq) * sizeof(VkQueueFamilyProperties));
@@ -250,7 +247,7 @@ static int pick_device(gpu *g)
             return 0;
         }
     }
-    EXPECT(0, "no physical device can present to the vi surface%s%s", want ? " and matches " : "", want ? want : "");
+    EXPECT(0, "no physical device can present to the vi surface");
     return -1;
 }
 

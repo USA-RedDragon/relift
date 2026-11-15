@@ -176,7 +176,7 @@ static uint64_t gcall(const char *name, const uint64_t *args, unsigned n)
 
 #define VKR(x) ((int32_t)(uint32_t)(x))
 
-static int boot(const rl_vk_surface_provider *surfaces)
+static int boot_with(const rl_vk_surface_provider *surfaces, void *gipa)
 {
     if (rl_core_init(&vk_guest, rl_a64_cpu()) != 0)
         return -1;
@@ -200,6 +200,7 @@ static int boot(const rl_vk_surface_provider *surfaces)
         .map_size = MAPWIN_SIZE,
         .map_tag = 3,
         .surfaces = surfaces,
+        .gipa = gipa,
     };
     if (rl_vk_init(&cfg) != 0) {
         fprintf(stderr, "no host Vulkan: install a Vulkan loader and driver (mesa lavapipe works headless)\n");
@@ -211,6 +212,8 @@ static int boot(const rl_vk_surface_provider *surfaces)
     rl_dispatch_view(g_c);
     return 0;
 }
+
+static int boot(const rl_vk_surface_provider *surfaces) { return boot_with(surfaces, NULL); }
 
 static uint64_t make_instance(const char *const *exts, unsigned n_exts, uint64_t pnext)
 {
@@ -258,13 +261,11 @@ static uint32_t physical_devices(uint64_t *out, uint32_t cap)
     return n;
 }
 
-static bool device_wanted(uint64_t pd, char *name)
+static void device_name(uint64_t pd, char *name)
 {
     uint64_t gp = galloc(sizeof(VkPhysicalDeviceProperties));
     G("vkGetPhysicalDeviceProperties", pd, gp);
     memcpy(name, g_mem + gp + offsetof(VkPhysicalDeviceProperties, deviceName), 256);
-    const char *want = getenv(RL_VK_DEVICE_ENV);
-    return !want || strstr(name, want);
 }
 
 static uint32_t queue_family(uint64_t pd, uint32_t flags)
@@ -354,23 +355,27 @@ TEST(vk_instance_and_physical_devices)
     CHECK_EQ(again[0], pds[0]);
     for (uint32_t i = 0; i < n; i++) {
         char name[256];
-        device_wanted(pds[i], name);
+        device_name(pds[i], name);
         CHECK(name[0] != 0);
         VkPhysicalDeviceVulkan12Properties v12 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
         uint64_t g12 = gput(&v12, sizeof v12);
-        VkPhysicalDeviceIDProperties idp = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = GP(g12) };
+        VkPhysicalDeviceDriverProperties drv = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES, .pNext = GP(g12) };
+        uint64_t gdrv = gput(&drv, sizeof drv);
+        VkPhysicalDeviceIDProperties idp = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = GP(gdrv) };
         uint64_t gid = gput(&idp, sizeof idp);
         VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = GP(gid) };
         uint64_t gp2 = gput(&p2, sizeof p2);
         G("vkGetPhysicalDeviceProperties2KHR", pds[i], gp2);
         CHECK_EQ(g64(gp2 + 8), gid);
-        CHECK_EQ(g64(gid + 8), g12);
+        CHECK_EQ(g64(gid + 8), gdrv);
+        CHECK_EQ(g64(gdrv + 8), g12);
         CHECK(!strcmp((const char *)g_mem + gp2 + 16 + offsetof(VkPhysicalDeviceProperties, deviceName), name));
-        CHECK(g32(g12 + offsetof(VkPhysicalDeviceVulkan12Properties, driverID)) != 0);
-        CHECK(g_mem[g12 + offsetof(VkPhysicalDeviceVulkan12Properties, driverName)] != 0);
+        CHECK_EQ(g32(gdrv + offsetof(VkPhysicalDeviceDriverProperties, driverID)), VK_DRIVER_ID_NVIDIA_PROPRIETARY);
+        CHECK(!strcmp((const char *)g_mem + gdrv + offsetof(VkPhysicalDeviceDriverProperties, driverName), "NVIDIA"));
+        CHECK_EQ(g32(g12 + offsetof(VkPhysicalDeviceVulkan12Properties, driverID)), 0);
         uint8_t zero[VK_UUID_SIZE] = { 0 };
         CHECK(memcmp(g_mem + gid + offsetof(VkPhysicalDeviceIDProperties, deviceUUID), zero, VK_UUID_SIZE) != 0);
-        fprintf(stderr, "  device %u: %s, driver %s\n", i, name, (const char *)g_mem + g12 + offsetof(VkPhysicalDeviceVulkan12Properties, driverName));
+        fprintf(stderr, "  device %u: %s\n", i, name);
         uint64_t en = galloc(4);
         CHECK_EQ(VKR(G("vkEnumerateDeviceExtensionProperties", pds[i], 0, en, 0)), VK_SUCCESS);
         CHECK(g32(en) <= vkg_device_ext_count);
@@ -450,8 +455,7 @@ static void clear_and_read_back(int expect_mode)
     unsigned ran = 0;
     for (uint32_t i = 0; i < n; i++) {
         char name[256];
-        if (!device_wanted(pds[i], name))
-            continue;
+        device_name(pds[i], name);
         uint64_t pd = pds[i];
         uint32_t qf = queue_family(pd, VK_QUEUE_GRAPHICS_BIT);
         CHECK(qf != UINT32_MAX);
@@ -911,8 +915,7 @@ TEST(vk_vi_surface_presents_headless)
     unsigned presented = 0;
     for (uint32_t i = 0; i < np && !presented; i++) {
         char name[256];
-        if (!device_wanted(pds[i], name))
-            continue;
+        device_name(pds[i], name);
         uint32_t qf = queue_family(pds[i], VK_QUEUE_GRAPHICS_BIT);
         uint64_t gsup = galloc(4);
         if (qf == UINT32_MAX || VKR(G("vkGetPhysicalDeviceSurfaceSupportKHR", pds[i], qf, surface, gsup)) != VK_SUCCESS || !g32(gsup))
@@ -1114,9 +1117,6 @@ TEST(vk_queue_families_are_the_switch_layout)
     uint32_t n = physical_devices(pds, 8);
     CHECK(n > 0);
     for (uint32_t d = 0; d < n; d++) {
-        char name[256];
-        if (!device_wanted(pds[d], name))
-            continue;
         uint64_t gn = galloc(4);
         G("vkGetPhysicalDeviceQueueFamilyProperties", pds[d], gn, 0);
         CHECK_EQ(g32(gn), 1);
@@ -1212,4 +1212,397 @@ TEST(vk_one_physical_device_that_presents_headless)
     G("vkDestroySurfaceKHR", g_inst, g64(gs), 0);
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+/* A fake host driver: the real one, with the Switch's limits changed as a test sets. */
+static void *(*g_real_gipa)(void *, const char *);
+static PFN_vkGetPhysicalDeviceProperties g_real_props;
+static PFN_vkGetPhysicalDeviceProperties2 g_real_props2;
+static PFN_vkGetPhysicalDeviceFeatures g_real_feats;
+static PFN_vkGetPhysicalDeviceFeatures2 g_real_feats2;
+static void (*g_tweak)(VkPhysicalDeviceLimits *);
+static int g_drop_feature = -1;
+
+static void fake_limits(VkPhysicalDeviceLimits *l)
+{
+    float period = l->timestampPeriod;
+    *l = vkf_switch.props.limits;
+    l->timestampPeriod = period;
+    if (g_tweak)
+        g_tweak(l);
+}
+
+static void fake_props(VkPhysicalDevice pd, VkPhysicalDeviceProperties *p)
+{
+    g_real_props(pd, p);
+    fake_limits(&p->limits);
+}
+
+static void fake_props2(VkPhysicalDevice pd, VkPhysicalDeviceProperties2 *p)
+{
+    g_real_props2(pd, p);
+    fake_limits(&p->properties.limits);
+}
+
+static void drop(VkPhysicalDeviceFeatures *f)
+{
+    if (g_drop_feature >= 0)
+        ((VkBool32 *)f)[g_drop_feature] = VK_FALSE;
+}
+
+static void fake_feats(VkPhysicalDevice pd, VkPhysicalDeviceFeatures *f)
+{
+    g_real_feats(pd, f);
+    drop(f);
+}
+
+static void fake_feats2(VkPhysicalDevice pd, VkPhysicalDeviceFeatures2 *f)
+{
+    g_real_feats2(pd, f);
+    drop(&f->features);
+}
+
+static void *fake_gipa(void *inst, const char *name)
+{
+    void *r = g_real_gipa(inst, name);
+    if (!r || !inst)
+        return r;
+    void (*f)(void) = NULL;
+    if (!strcmp(name, "vkGetPhysicalDeviceProperties"))
+        memcpy(&g_real_props, &r, sizeof r), f = (void (*)(void))fake_props;
+    else if (!strcmp(name, "vkGetPhysicalDeviceProperties2") || !strcmp(name, "vkGetPhysicalDeviceProperties2KHR"))
+        memcpy(&g_real_props2, &r, sizeof r), f = (void (*)(void))fake_props2;
+    else if (!strcmp(name, "vkGetPhysicalDeviceFeatures"))
+        memcpy(&g_real_feats, &r, sizeof r), f = (void (*)(void))fake_feats;
+    else if (!strcmp(name, "vkGetPhysicalDeviceFeatures2") || !strcmp(name, "vkGetPhysicalDeviceFeatures2KHR"))
+        memcpy(&g_real_feats2, &r, sizeof r), f = (void (*)(void))fake_feats2;
+    if (f)
+        memcpy(&r, &f, sizeof r);
+    return r;
+}
+
+static uint64_t boot_fake(void (*tweak)(VkPhysicalDeviceLimits *), int drop_feature)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    g_tweak = tweak;
+    g_drop_feature = drop_feature;
+    void *(*fg)(void *, const char *) = fake_gipa;
+    void *gipa;
+    memcpy(&gipa, &fg, sizeof gipa);
+    if (boot_with(NULL, gipa) != 0 || !make_instance(NULL, 0, 0))
+        return 0;
+    uint64_t pd = 0;
+    return physical_devices(&pd, 1) ? pd : 0;
+}
+
+static int32_t create_device(uint64_t pd, uint64_t features, uint64_t *dev)
+{
+    float prio = 1.0f;
+    VkDeviceQueueCreateInfo qci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueCount = 1,
+        .pQueuePriorities = GP(gput(&prio, 4)),
+    };
+    VkDeviceCreateInfo dci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = GP(gput(&qci, sizeof qci)),
+        .pEnabledFeatures = GP(features),
+    };
+    uint64_t out = galloc(8);
+    rl_st64(g_mem, out, 0);
+    int32_t r = VKR(G("vkCreateDevice", pd, gput(&dci, sizeof dci), 0, out));
+    *dev = g64(out);
+    return r;
+}
+
+static void finish(uint64_t dev)
+{
+    if (dev)
+        G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+    g_tweak = NULL;
+    g_drop_feature = -1;
+}
+
+static VkPhysicalDeviceLimits guest_limits(uint64_t pd)
+{
+    uint64_t gp = galloc(sizeof(VkPhysicalDeviceProperties));
+    G("vkGetPhysicalDeviceProperties", pd, gp);
+    VkPhysicalDeviceLimits l;
+    memcpy(&l, g_mem + gp + offsetof(VkPhysicalDeviceProperties, limits), sizeof l);
+    return l;
+}
+
+static bool limits_are_the_switch(const VkPhysicalDeviceLimits *l)
+{
+    VkPhysicalDeviceLimits a = *l, b = vkf_switch.props.limits;
+    a.timestampPeriod = b.timestampPeriod = 0;
+    return !memcmp(&a, &b, sizeof a);
+}
+
+TEST(vk_guest_sees_the_switch_driver)
+{
+    uint64_t pd = boot_fake(NULL, -1);
+    CHECK(pd != 0);
+    uint64_t gp = galloc(sizeof(VkPhysicalDeviceProperties));
+    G("vkGetPhysicalDeviceProperties", pd, gp);
+    VkPhysicalDeviceProperties p;
+    memcpy(&p, g_mem + gp, sizeof p);
+    CHECK(!strcmp(p.deviceName, vkf_switch.props.deviceName));
+    CHECK_EQ(p.apiVersion, vkf_switch.props.apiVersion);
+    CHECK_EQ(p.driverVersion, vkf_switch.props.driverVersion);
+    CHECK_EQ(p.vendorID, vkf_switch.props.vendorID);
+    CHECK_EQ(p.deviceID, vkf_switch.props.deviceID);
+    CHECK(limits_are_the_switch(&p.limits));
+    uint64_t chain = 0;
+    for (uint32_t i = vkf_switch.props_ext_count; i-- > 0;) {
+        uint64_t g = galloc(vkf_switch.props_ext[i].size);
+        rl_st32(g_mem, g, (uint32_t)vkf_switch.props_ext[i].stype);
+        rl_st64(g_mem, g + 8, chain);
+        chain = g;
+    }
+    VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = GP(chain) };
+    uint64_t g2 = gput(&p2, sizeof p2);
+    G("vkGetPhysicalDeviceProperties2", pd, g2);
+    CHECK(!memcmp(g_mem + g2 + offsetof(VkPhysicalDeviceProperties2, properties), &p, sizeof p));
+    uint64_t g = chain;
+    for (uint32_t i = 0; i < vkf_switch.props_ext_count; i++, g = g64(g + 8)) {
+        const vkf_switch_struct *s = &vkf_switch.props_ext[i];
+        CHECK(!memcmp(g_mem + g + 16, (const uint8_t *)s->data + 16, s->size - 16));
+    }
+    uint64_t gm = galloc(sizeof(VkPhysicalDeviceMemoryProperties));
+    G("vkGetPhysicalDeviceMemoryProperties", pd, gm);
+    CHECK(!memcmp(g_mem + gm, &vkf_switch.memory, sizeof vkf_switch.memory));
+    uint64_t gf = galloc(sizeof(VkPhysicalDeviceFeatures));
+    G("vkGetPhysicalDeviceFeatures", pd, gf);
+    const VkBool32 *gb = (const VkBool32 *)(g_mem + gf), *sb = (const VkBool32 *)&vkf_switch.features;
+    for (unsigned i = 0; i < sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32); i++)
+        CHECK(!gb[i] || sb[i]);
+    uint64_t gn = galloc(4);
+    CHECK_EQ(VKR(G("vkEnumerateDeviceExtensionProperties", pd, 0, gn, 0)), VK_SUCCESS);
+    uint32_t n = g32(gn);
+    uint64_t ge = galloc(n * sizeof(VkExtensionProperties));
+    CHECK_EQ(VKR(G("vkEnumerateDeviceExtensionProperties", pd, 0, gn, ge)), VK_SUCCESS);
+    for (uint32_t i = 0; i < n; i++) {
+        const VkExtensionProperties *e = (const VkExtensionProperties *)(g_mem + ge) + i;
+        const VkExtensionProperties *s = vkf_switch_ext(vkf_switch.device_exts, vkf_switch.device_ext_count, e->extensionName);
+        CHECK(s != NULL);
+        CHECK_EQ(e->specVersion, s->specVersion);
+    }
+    uint64_t gfp = galloc(sizeof(VkFormatProperties));
+    for (uint32_t f = 0; f <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK; f++) {
+        G("vkGetPhysicalDeviceFormatProperties", pd, f, gfp);
+        VkFormatProperties s = vkf_switch_format_props((VkFormat)f);
+        CHECK_EQ(g32(gfp) & ~s.linearTilingFeatures, 0);
+        CHECK_EQ(g32(gfp + 4) & ~s.optimalTilingFeatures, 0);
+        CHECK_EQ(g32(gfp + 8) & ~s.bufferFeatures, 0);
+    }
+    uint64_t gv = galloc(4);
+    CHECK_EQ(VKR(G("vkEnumerateInstanceVersion", gv)), VK_SUCCESS);
+    CHECK_EQ(g32(gv), vkf_switch.instance_version);
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    VkBufferCreateInfo bci = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 4096,
+        .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    };
+    uint64_t gbuf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateBuffer", dev, gput(&bci, sizeof bci), 0, gbuf)), VK_SUCCESS);
+    uint64_t greq = galloc(sizeof(VkMemoryRequirements));
+    G("vkGetBufferMemoryRequirements", dev, g64(gbuf), greq);
+    uint32_t bits = g32(greq + offsetof(VkMemoryRequirements, memoryTypeBits));
+    CHECK(bits != 0);
+    CHECK_EQ(bits >> vkf_switch.memory.memoryTypeCount, 0);
+    uint32_t type = memory_type(pd, bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    CHECK(type != UINT32_MAX);
+    VkMemoryAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = 4096, .memoryTypeIndex = type };
+    uint64_t gmem = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateMemory", dev, gput(&ai, sizeof ai), 0, gmem)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkBindBufferMemory", dev, g64(gbuf), g64(gmem), 0)), VK_SUCCESS);
+    G("vkDestroyBuffer", dev, g64(gbuf), 0);
+    G("vkFreeMemory", dev, g64(gmem), 0);
+    finish(dev);
+}
+
+static void large_host(VkPhysicalDeviceLimits *l)
+{
+    l->maxBoundDescriptorSets = 64;
+    l->maxPerStageDescriptorSamplers = 1u << 20;
+    l->maxPushConstantsSize = 1024;
+    l->maxImageDimension2D = 1u << 16;
+    l->maxVertexInputAttributes = 64;
+    l->minUniformBufferOffsetAlignment = 1;
+}
+
+TEST(vk_a_larger_host_shows_the_switch_limits)
+{
+    uint64_t pd = boot_fake(large_host, -1);
+    CHECK(pd != 0);
+    VkPhysicalDeviceLimits l = guest_limits(pd);
+    CHECK(limits_are_the_switch(&l));
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    finish(dev);
+}
+
+static void small_descriptors(VkPhysicalDeviceLimits *l)
+{
+    l->maxBoundDescriptorSets = 2;
+    l->maxPerStageDescriptorSamplers = 3;
+    l->maxPushConstantsSize = 64;
+}
+
+static int32_t set_layout(uint64_t dev, uint32_t samplers, uint64_t *out)
+{
+    VkDescriptorSetLayoutBinding b = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = samplers,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+    VkDescriptorSetLayoutCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = GP(gput(&b, sizeof b)),
+    };
+    uint64_t g = galloc(8);
+    rl_st64(g_mem, g, 0);
+    int32_t r = VKR(G("vkCreateDescriptorSetLayout", dev, gput(&ci, sizeof ci), 0, g));
+    *out = g64(g);
+    return r;
+}
+
+static int32_t pipeline_layout(uint64_t dev, const uint64_t *sets, uint32_t n, uint32_t push)
+{
+    VkPushConstantRange pr = { .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = push };
+    VkPipelineLayoutCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = n,
+        .pSetLayouts = GP(gput(sets, 8ull * n)),
+        .pushConstantRangeCount = push ? 1 : 0,
+        .pPushConstantRanges = GP(gput(&pr, sizeof pr)),
+    };
+    uint64_t g = galloc(8);
+    rl_st64(g_mem, g, 0);
+    int32_t r = VKR(G("vkCreatePipelineLayout", dev, gput(&ci, sizeof ci), 0, g));
+    if (r == VK_SUCCESS)
+        G("vkDestroyPipelineLayout", dev, g64(g), 0);
+    return r;
+}
+
+TEST(vk_a_smaller_host_fails_only_the_calls_past_its_limits)
+{
+    const VkPhysicalDeviceLimits *s = &vkf_switch.props.limits;
+    CHECK(s->maxBoundDescriptorSets > 2 && s->maxPushConstantsSize > 64);
+    uint64_t pd = boot_fake(small_descriptors, -1);
+    CHECK(pd != 0);
+    VkPhysicalDeviceLimits l = guest_limits(pd);
+    CHECK(limits_are_the_switch(&l));
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    uint64_t small;
+    CHECK_EQ(set_layout(dev, 2, &small), VK_SUCCESS);
+    uint64_t sets[3] = { small, small, small };
+    CHECK_EQ(pipeline_layout(dev, sets, 1, 64), VK_SUCCESS);
+    CHECK_EQ(pipeline_layout(dev, sets, 1, 128), VK_ERROR_INITIALIZATION_FAILED);
+    CHECK_EQ(pipeline_layout(dev, sets, 3, 0), VK_ERROR_INITIALIZATION_FAILED);
+    G("vkDestroyDescriptorSetLayout", dev, small, 0);
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = { l.maxImageDimension2D * 2, 1, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+    };
+    uint64_t gi = galloc(8);
+    CHECK(VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)) < 0);
+    VkFramebufferCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .width = l.maxFramebufferWidth * 2,
+        .height = 1,
+        .layers = 1,
+    };
+    uint64_t gf = galloc(8);
+    CHECK(VKR(G("vkCreateFramebuffer", dev, gput(&fci, sizeof fci), 0, gf)) < 0);
+    finish(dev);
+}
+
+TEST(vk_a_smaller_host_forwards_descriptor_counts_past_its_limits)
+{
+    CHECK(vkf_switch.props.limits.maxPerStageDescriptorSamplers > 3);
+    uint64_t pd = boot_fake(small_descriptors, -1);
+    CHECK(pd != 0);
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    uint64_t big, small;
+    CHECK_EQ(set_layout(dev, 4, &big), VK_SUCCESS);
+    CHECK(big != 0);
+    CHECK_EQ(set_layout(dev, 2, &small), VK_SUCCESS);
+    uint64_t two[2] = { small, small };
+    CHECK_EQ(pipeline_layout(dev, two, 2, 0), VK_SUCCESS);
+    rl_cfg()->strict = true;
+    uint64_t refused;
+    CHECK_EQ(set_layout(dev, 4, &refused), VK_ERROR_INITIALIZATION_FAILED);
+    CHECK_EQ(refused, 0);
+    CHECK_EQ(pipeline_layout(dev, two, 2, 0), VK_ERROR_INITIALIZATION_FAILED);
+    uint64_t one;
+    CHECK_EQ(set_layout(dev, 1, &one), VK_SUCCESS);
+    uint64_t fits[2] = { one, small };
+    CHECK_EQ(pipeline_layout(dev, fits, 2, 0), VK_SUCCESS);
+    rl_cfg()->strict = false;
+    G("vkDestroyDescriptorSetLayout", dev, one, 0);
+    G("vkDestroyDescriptorSetLayout", dev, small, 0);
+    G("vkDestroyDescriptorSetLayout", dev, big, 0);
+    finish(dev);
+}
+
+static void few_attributes(VkPhysicalDeviceLimits *l) { l->maxVertexInputAttributes = vkf_switch.props.limits.maxVertexInputAttributes - 1; }
+
+TEST(vk_a_host_short_of_an_unchecked_limit_shows_its_own)
+{
+    uint64_t pd = boot_fake(few_attributes, -1);
+    CHECK(pd != 0);
+    VkPhysicalDeviceLimits l = guest_limits(pd);
+    CHECK_EQ(l.maxVertexInputAttributes, vkf_switch.props.limits.maxVertexInputAttributes - 1);
+    l.maxVertexInputAttributes = vkf_switch.props.limits.maxVertexInputAttributes;
+    CHECK(limits_are_the_switch(&l));
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_SUCCESS);
+    G("vkDestroyDevice", dev, 0);
+    rl_cfg()->strict = true;
+    CHECK_EQ(create_device(pd, 0, &dev), VK_ERROR_INITIALIZATION_FAILED);
+    rl_cfg()->strict = false;
+    CHECK_EQ(dev, 0);
+    finish(0);
+}
+
+TEST(vk_a_feature_the_host_lacks_is_hidden_and_refused)
+{
+    const VkBool32 *sb = (const VkBool32 *)&vkf_switch.features;
+    int pick = -1;
+    for (int i = 0; i < (int)(sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32)) && pick < 0; i++)
+        if (sb[i])
+            pick = i;
+    CHECK(pick >= 0);
+    uint64_t pd = boot_fake(NULL, pick);
+    CHECK(pd != 0);
+    uint64_t gf = galloc(sizeof(VkPhysicalDeviceFeatures));
+    G("vkGetPhysicalDeviceFeatures", pd, gf);
+    CHECK_EQ(g32(gf + 4ull * (uint64_t)pick), VK_FALSE);
+    VkPhysicalDeviceFeatures2 f2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    uint64_t g2 = gput(&f2, sizeof f2);
+    G("vkGetPhysicalDeviceFeatures2", pd, g2);
+    CHECK_EQ(g32(g2 + offsetof(VkPhysicalDeviceFeatures2, features) + 4ull * (uint64_t)pick), VK_FALSE);
+    VkPhysicalDeviceFeatures want = { 0 };
+    ((VkBool32 *)&want)[pick] = VK_TRUE;
+    uint64_t dev;
+    CHECK_EQ(create_device(pd, gput(&want, sizeof want), &dev), VK_ERROR_FEATURE_NOT_PRESENT);
+    finish(0);
 }

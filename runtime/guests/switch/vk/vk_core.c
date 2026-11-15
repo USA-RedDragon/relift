@@ -674,15 +674,13 @@ int vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
     }
     uint32_t n;
     const VkExtensionProperties *host = host_instance_exts(&k, &n);
-    VkExtensionProperties *out = vkf_alloc(&k, (vkg_instance_ext_count + 1) * sizeof *out);
+    VkExtensionProperties *out = vkf_alloc(&k, (vkf_switch.instance_ext_count + 1) * sizeof *out);
     uint32_t m = 0;
-    for (uint32_t i = 0; i < n; i++)
-        if (in_list(vkg_instance_exts, host[i].extensionName))
-            out[m++] = host[i];
-    if (provider_ok(host, n)) {
-        memset(&out[m], 0, sizeof out[m]);
-        strcpy(out[m].extensionName, VK_NN_VI_SURFACE_EXTENSION_NAME);
-        out[m++].specVersion = VK_NN_VI_SURFACE_SPEC_VERSION;
+    for (uint32_t i = 0; i < vkf_switch.instance_ext_count; i++) {
+        const VkExtensionProperties *e = &vkf_switch.instance_exts[i];
+        bool vi = !strcmp(e->extensionName, VK_NN_VI_SURFACE_EXTENSION_NAME);
+        if (vi ? provider_ok(host, n) : in_list(vkg_instance_exts, e->extensionName) && host_has(host, n, e->extensionName))
+            out[m++] = *e;
     }
     c->x[0] = (uint32_t)answer_exts(&k, out, m, c->x[1], c->x[2]);
     return vkf_end(&k);
@@ -703,12 +701,20 @@ int vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     VkExtensionProperties *host = vkf_alloc(&k, (n + 1) * sizeof *host);
-    f(pd, NULL, &n, host);
+    if (f(pd, NULL, &n, host) < 0)
+        n = 0;
+    VkExtensionProperties *out = vkf_alloc(&k, (vkf_switch.device_ext_count + 1) * sizeof *out);
     uint32_t m = 0;
-    for (uint32_t i = 0; i < n; i++)
-        if (in_list(vkg_device_exts, host[i].extensionName))
-            host[m++] = host[i];
-    c->x[0] = (uint32_t)answer_exts(&k, host, m, c->x[2], c->x[3]);
+    for (uint32_t i = 0; i < vkf_switch.device_ext_count; i++) {
+        const VkExtensionProperties *e = &vkf_switch.device_exts[i];
+        if (!in_list(vkg_device_exts, e->extensionName))
+            continue;
+        if (host_has(host, n, e->extensionName))
+            out[m++] = *e;
+        else if (rl_once(0x766b657800000000ull | i))
+            rl_log(RL_LOG_WARN, "vk", "the host device lacks %s, which the Switch has; the guest does not see it", e->extensionName);
+    }
+    c->x[0] = (uint32_t)answer_exts(&k, out, m, c->x[2], c->x[3]);
     return vkf_end(&k);
 }
 
@@ -843,6 +849,16 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     const char **extra = NULL;
     uint32_t n_extra = 0;
     void *chain = NULL;
+    VkResult r = vkf_props_device_check(&k, pd, ci, d);
+    if (r < 0) {
+        vkf_map_free(d->mems);
+        pthread_mutex_destroy(&d->queue_lock);
+        pthread_mutex_destroy(&d->lock);
+        free(d);
+        c->x[0] = (uint32_t)r;
+        return vkf_end(&k);
+    }
+    vkf_mem_types_setup(&k, d, pd);
     vkf_mem_device_setup(&k, d, pd, &extra, &n_extra, &chain);
     const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_extra + 2) * sizeof *exts);
     uint32_t n = 0;
@@ -867,7 +883,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         ci->pNext = chain;
     }
     VkDevice dev = NULL;
-    VkResult r = vkf_queue_create_infos(&k, pd, ci, d);
+    r = vkf_queue_create_infos(&k, pd, ci, d);
     if (r >= 0)
         r = VKF_FN(k.fns, vkCreateDevice)(pd, ci, NULL, &dev);
     if (r < 0) {

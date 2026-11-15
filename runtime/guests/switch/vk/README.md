@@ -61,6 +61,51 @@ enabled `VK_NN_vi_surface`, that can present through the surface provider
 (`rl_vk_surface_provider.presents`; the headless provider has none, every
 device takes it).
 
+## Device properties
+
+The guest sees what the console's NVIDIA driver reports, on every host
+(`vk_props.c`, values in `vk_switch.c`, read by running the console's driver
+in a lifted program with forwarding off): `vkGetPhysicalDeviceProperties` and
+the property structs it fills in a `vkGetPhysicalDeviceProperties2` chain
+(name "NVIDIA Tegra/Nintendo Switch (nvgpu)", Vulkan 1.1.92, NVIDIA's vendor
+and driver ids), the limits, the features, the memory types and heap (one
+2000 MiB device-local heap; two device-local types, one host-visible coherent,
+one host-visible cached), the format features, the extensions with the
+console's spec versions and `vkEnumerateInstanceVersion`. A struct the
+console's driver does not know (`VkPhysicalDeviceVulkan12Properties`, for one)
+comes back as the guest passed it. Three things are the host's: the pipeline
+cache UUID, the device and driver UUIDs, and `timestampPeriod`, since they
+describe the host's own caches, memory and timestamps.
+
+Where the host can do more than the Switch, the guest sees the Switch's value
+and takes the paths it takes on the console. Where it can do less:
+
+- Limits a call checks: `maxBoundDescriptorSets`, `maxPushConstantsSize`,
+  image dimensions and array layers, framebuffer size. The guest sees the
+  Switch's value; a `vkCreatePipelineLayout`, `vkCreateImage` or
+  `vkCreateFramebuffer` that goes past the host's limit fails, with a log line
+  naming the limit, the host and both values.
+- Descriptor counts per stage and per set: the guest sees the Switch's value.
+  A `vkCreateDescriptorSetLayout` or `vkCreatePipelineLayout` that goes past
+  the host's limit is logged once per limit, naming the host and both values,
+  and forwarded, since drivers such as MoltenVK report lower counts than they
+  accept. `RELIFT_STRICT` makes the call fail instead.
+- Any other limit (compute workgroup size on NVIDIA, sample counts and compute
+  shared memory on lavapipe, line width range on both): the guest sees the
+  host's value, with a warning naming it. `RELIFT_STRICT` makes
+  `vkCreateDevice` fail instead.
+- Features, extensions and format features are the Switch's that the host also
+  has, each missing one logged once, so a game that checks one takes its
+  fallback. Enabling a feature or extension the host lacks fails
+  `vkCreateDevice` with a log line naming it.
+
+Each Switch memory type stands for one host type: the host-access bits it
+needs, then a heap at least as large as the Switch's, then device-local memory
+for the device-only types and system memory for the mapped ones (they are
+mapped into guest memory, which placed and imported memory needs).
+`memoryTypeBits` in memory requirements are rewritten to Switch type indices
+and `vkAllocateMemory` takes them back to the host's.
+
 ## Queue families
 
 The guest sees the Switch's layout on every host (`vk_queue.c`): one family,
@@ -268,7 +313,10 @@ clear of an image copied into a mapped buffer and read back through guest
 memory in each map mode, guest-written mapped memory copied by the GPU, faults on
 unmapped ranges, a debug messenger calling guest code, `VK_NN_vi_surface` to a
 headless swapchain with a present and a host resize that recreates the host
-swapchain behind the guest's, and bad handles and unknown structs. With no
+swapchain behind the guest's, bad handles and unknown structs, and the Switch's
+properties on a fake host (the real driver with the Switch's limits, then made
+smaller or larger, or with a feature taken away): which values the guest
+sees, which calls fail and when `vkCreateDevice` does. With no
 host Vulkan the tests are skipped unless `RELIFT_VK_REQUIRE` is set; CI sets it
 on Linux, where it installs Mesa's lavapipe. `RELIFT_VK_DEVICE` picks the
 device they run on.
