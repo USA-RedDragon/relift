@@ -32,30 +32,55 @@ const B: ControlKind = ControlKind::Button;
 const X: ControlKind = ControlKind::Axis;
 
 const SWITCH_FACE: &[Row] = &[
-    ("a", B, "A", "gamepad:east"),
-    ("b", B, "B", "gamepad:south"),
-    ("x", B, "X", "gamepad:north"),
-    ("y", B, "Y", "gamepad:west"),
+    ("a", B, "A", "gamepad:east,key:l,key:space"),
+    ("b", B, "B", "gamepad:south,key:k,key:escape"),
+    ("x", B, "X", "gamepad:north,key:i"),
+    ("y", B, "Y", "gamepad:west,key:j"),
 ];
 const SWITCH_DPAD: &[Row] = &[
-    ("dpad_up", B, "D-pad up", "gamepad:dpad_up"),
-    ("dpad_right", B, "D-pad right", "gamepad:dpad_right"),
-    ("dpad_down", B, "D-pad down", "gamepad:dpad_down"),
-    ("dpad_left", B, "D-pad left", "gamepad:dpad_left"),
+    ("dpad_up", B, "D-pad up", "gamepad:dpad_up,key:up"),
+    (
+        "dpad_right",
+        B,
+        "D-pad right",
+        "gamepad:dpad_right,key:right",
+    ),
+    ("dpad_down", B, "D-pad down", "gamepad:dpad_down,key:down"),
+    ("dpad_left", B, "D-pad left", "gamepad:dpad_left,key:left"),
 ];
 const SWITCH_LEFT: &[Row] = &[
-    ("l", B, "L", "gamepad:left_shoulder"),
-    ("zl", B, "ZL", "gamepad:left_trigger"),
-    ("minus", B, "Minus", "gamepad:back"),
-    ("lstick", B, "Left stick press", "gamepad:left_stick"),
-    ("lstick_x", X, "Left stick horizontal", "gamepad:left_x"),
-    ("lstick_y", X, "Left stick vertical", "gamepad:left_y"),
+    ("l", B, "L", "gamepad:left_shoulder,key:q"),
+    ("zl", B, "ZL", "gamepad:left_trigger,key:z"),
+    ("minus", B, "Minus", "gamepad:back,key:backspace"),
+    (
+        "lstick",
+        B,
+        "Left stick press",
+        "gamepad:left_stick,key:left_shift",
+    ),
+    (
+        "lstick_x",
+        X,
+        "Left stick horizontal",
+        "gamepad:left_x,key:d+,key:a-",
+    ),
+    (
+        "lstick_y",
+        X,
+        "Left stick vertical",
+        "gamepad:left_y,key:w+,key:s-",
+    ),
 ];
 const SWITCH_RIGHT: &[Row] = &[
-    ("r", B, "R", "gamepad:right_shoulder"),
-    ("zr", B, "ZR", "gamepad:right_trigger"),
-    ("plus", B, "Plus", "gamepad:start"),
-    ("rstick", B, "Right stick press", "gamepad:right_stick"),
+    ("r", B, "R", "gamepad:right_shoulder,key:e"),
+    ("zr", B, "ZR", "gamepad:right_trigger,key:c"),
+    ("plus", B, "Plus", "gamepad:start,key:enter"),
+    (
+        "rstick",
+        B,
+        "Right stick press",
+        "gamepad:right_stick,key:right_shift",
+    ),
     ("rstick_x", X, "Right stick horizontal", "gamepad:right_x"),
     ("rstick_y", X, "Right stick vertical", "gamepad:right_y"),
 ];
