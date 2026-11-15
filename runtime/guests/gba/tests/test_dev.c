@@ -208,6 +208,20 @@ TEST(an_immediate_dma_waits_two_cycles_and_stalls_the_cpu)
     mach_free(&m);
 }
 
+TEST(a_fetch_of_the_halfword_the_prefetch_loads_next_is_sequential)
+{
+    mach m = mach_new();
+    rl_gba_write(m.g, 0x04000204u, 2, 0x4314u);
+    rl_gba_fetch(m.g, 0x08000010u, 2, false);
+    uint64_t t = mach_now(&m);
+    rl_gba_fetch(m.g, 0x08000012u, 2, false);
+    CHECK_EQ(mach_now(&m) - t, 2u);
+    t = mach_now(&m);
+    rl_gba_fetch(m.g, 0x08000040u, 2, false);
+    CHECK_EQ(mach_now(&m) - t, 4u);
+    mach_free(&m);
+}
+
 TEST(the_cpu_fetch_after_a_dma_is_nonsequential)
 {
     mach m = mach_new();

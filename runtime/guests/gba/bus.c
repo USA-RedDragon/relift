@@ -265,7 +265,7 @@ uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq)
     bool burst = g->rom_burst && seq;
     gba_prefetch *p = &g->pf;
     uint32_t v;
-    if ((addr & 0x1FFFEu) && pf_on(g) && addr == p->addr && (!pf_empty(p) || p->ahead)) {
+    if ((addr & 0x1FFFEu) && pf_on(g) && addr == p->addr && (!pf_empty(p) || p->ahead || !p->stopped)) {
         gba_pf_step(g, 1);
         v = pf_read(g);
         v |= size == 4 ? (uint32_t)pf_read(g) << 16 : v << 16;
