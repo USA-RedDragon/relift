@@ -114,6 +114,13 @@ pub struct Package {
     pub ios_identity: String,
 
     #[configulator(
+        name = "ios-data",
+        default = "bundle",
+        description = "where an iOS app finds the game data: bundle (copied into the app, sealed by its signature) or documents (added later to the app's Documents, for example with relift push)"
+    )]
+    pub ios_data: String,
+
+    #[configulator(
         name = "ios-profile",
         description = "the provisioning profile of the iOS app (empty: one from Xcode's profile folders that covers the bundle identifier)"
     )]

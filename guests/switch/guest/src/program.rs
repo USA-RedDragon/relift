@@ -778,10 +778,21 @@ __attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
 #include <relift/ios.h>
 #define RL_APP_FLUSH() rl_ios_flush()
+static void set_bundled(const char *env, const char *base, const char *name)
+{
+    char p[4096];
+    struct stat st;
+    if (!base || getenv(env) || snprintf(p, sizeof p, "%s/%s", base, name) >= (int)sizeof p || stat(p, &st) != 0 ||
+        !S_ISDIR(st.st_mode))
+        return;
+    setenv(env, p, 0);
+}
 static void set_app_dirs(void)
 {
     rl_ios_init();
     rl_settings_set_app("relift");
+    set_bundled("RELIFT_ROMFS", rl_ios_bundle_dir(), "romfs");
+    set_bundled("RELIFT_DLC", rl_ios_bundle_dir(), "dlc");
     const char *docs = rl_ios_documents_dir();
     set_dir("RELIFT_SAVE", docs, "save");
     set_dir("RELIFT_SDMC", docs, "sdmc");

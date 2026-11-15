@@ -244,6 +244,13 @@ impl IosBuild {
         } else {
             settings.package.ios_id.clone()
         };
+        if !matches!(settings.package.ios_data.as_str(), "bundle" | "documents") {
+            return Err(format!(
+                "package.ios-data {}: bundle or documents",
+                settings.package.ios_data
+            )
+            .into());
+        }
         if !valid_bundle_id(&bundle_id) {
             return Err(format!("package.ios-id {bundle_id}: not a bundle identifier").into());
         }
@@ -583,20 +590,36 @@ fn plist(bundle_id: &str, target: Target, exe: &str, label: &str) -> String {
     )
 }
 
+/// What goes into the app besides its signature.
+#[derive(Clone, Copy)]
+pub struct Contents<'a> {
+    /// The linked program.
+    pub exe: &'a Path,
+    /// The bundle's file name, without `.app`.
+    pub name: &'a str,
+    /// The name under the icon and the icons.
+    pub home: &'a Home,
+    /// The game data manifest (crate::datamanifest), when there is data.
+    pub data_manifest: Option<&'a [u8]>,
+    /// The import folder whose romfs and dlc go into the bundle, cloned
+    /// (APFS), or `None` when the data goes to Documents later.
+    pub data: Option<&'a Path>,
+}
+
 /// The packaging step of an iOS build: `<name>.app` beside the program
 /// `exe`, signed as [`IosBuild::signing`] says.
 ///
 /// # Errors
 ///
 /// Writing the bundle fails, or `codesign` does.
-pub fn package(
-    b: &IosBuild,
-    exe: &Path,
-    name: &str,
-    home: &Home,
-    data_manifest: Option<&[u8]>,
-    ui: &mut Ui,
-) -> Result<PathBuf, BoxError> {
+pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, BoxError> {
+    let Contents {
+        exe,
+        name,
+        home,
+        data_manifest,
+        data,
+    } = *c;
     let dir = exe.parent().ok_or("the program has no folder")?;
     let row = ui.row("");
     ui.begin(row, "package");
@@ -616,6 +639,17 @@ pub fn package(
     relift_cache::write_if_changed(&app.join("PkgInfo"), b"APPL????")?;
     if let Some(m) = data_manifest {
         relift_cache::write_if_changed(&app.join(crate::datamanifest::FILE), m)?;
+    }
+    for root in ["romfs", "dlc"] {
+        if let Some(src) = data.map(|d| d.join(root)).filter(|d| d.is_dir()) {
+            run(
+                relift_proc::command("cp")
+                    .arg("-cR")
+                    .arg(&src)
+                    .arg(app.join(root)),
+                "cp -c (APFS clone of the game data)",
+            )?;
+        }
     }
     for (n, png) in &home.icons {
         relift_cache::write_if_changed(&app.join(n), png)?;

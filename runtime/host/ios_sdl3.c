@@ -58,6 +58,29 @@ void rl_ios_init(void)
         rl_log(RL_LOG_WARN, "ios", "cannot enter %s", d);
 }
 
+static char g_bundle[PATH_MAX];
+
+static void find_bundle(void)
+{
+    const char *d = SDL_GetBasePath();
+    if (!d || !*d)
+        return;
+    size_t n = strlen(d);
+    while (n > 1 && d[n - 1] == '/')
+        n--;
+    if (n < sizeof g_bundle) {
+        memcpy(g_bundle, d, n);
+        g_bundle[n] = 0;
+    }
+}
+
+const char *rl_ios_bundle_dir(void)
+{
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, find_bundle);
+    return g_bundle[0] ? g_bundle : NULL;
+}
+
 static id msg(id o, const char *sel) { return o ? ((id(*)(id, SEL))objc_msgSend)(o, sel_registerName(sel)) : NULL; }
 
 static const char *text(id s)

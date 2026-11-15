@@ -1916,7 +1916,18 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     };
     if let Some(i) = req.ios {
         let home = crate::ios::home(req.exe, req.name, label)?;
-        let app = crate::ios::package(i, req.exe, req.name, &home, data_manifest.as_deref(), ui)?;
+        let data = req.import.filter(|_| settings.package.ios_data == "bundle");
+        let app = crate::ios::package(
+            i,
+            &crate::ios::Contents {
+                exe: req.exe,
+                name: req.name,
+                home: &home,
+                data_manifest: data_manifest.as_deref(),
+                data,
+            },
+            ui,
+        )?;
         ui.summary(&Line::new().text(format!("  app: {}", app.display())));
         if let crate::ios::Signing::Unsigned(why) = &i.signing {
             ui.summary(&Line::new().paint(
