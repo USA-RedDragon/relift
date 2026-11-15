@@ -84,6 +84,16 @@ pub trait Frontend {
     /// analysis may assume unchanged after one.
     fn preserved(&self) -> Vec<Reg>;
 
+    /// The registers a caller may keep in its C locals across a direct
+    /// call to a lifted function the emitter proves returns them with
+    /// their entry values (`docs/abi.md` section 5.2). Empty by default.
+    /// A frontend that names registers here promises that its
+    /// [`Frontend::undefined`] call never returns `RL_OK` and that a
+    /// guard's slow path writes no register its block does not write.
+    fn callee_saved(&self) -> Vec<Reg> {
+        Vec::new()
+    }
+
     /// Lifts the instruction at `pc`, whose bytes start `bytes`.
     ///
     /// # Errors
