@@ -698,6 +698,8 @@ static rl_result m_open(rl_ipc_req *r)
         return AUDIO_OPERATION_FAILED;
     if (work_buffer_size(&c) > wb_size)
         return AUDIO_WORK_BUFFER_TOO_SMALL;
+    rl_log(RL_LOG_INFO, "audren", "open: %u Hz, %u samples per frame, %u voices, %u mix buffers, %u submixes, %u sinks, %u effects, revision %d",
+           c.rate, c.sample_count, c.voices, c.mix_bufs, c.submix, c.sinks, c.effects, rev_number(c.revision));
     audren *ar = renderer_alloc(&c);
     if (!ar)
         return AUDIO_OPERATION_FAILED;

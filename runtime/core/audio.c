@@ -8,6 +8,7 @@
 #include "core.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -109,15 +110,193 @@ const rl_audio_backend *rl_audio_backend_current(void)
     return &g_null_audio;
 }
 
+typedef struct tap_out {
+    rl_audio_out head;
+    rl_audio_out *in;
+    uint32_t rate, channels, index;
+    FILE *wav;
+    uint64_t frames, dropped, underruns, writes, wav_frames, opened_ns, resumed_ns, active_ns, last_report_ns;
+    uint32_t min_queued, max_queued;
+    uint64_t period_frames, period_underruns, period_dropped;
+    bool paused, started, report;
+} tap_out;
+
+static const rl_audio_backend g_tap;
+static uint32_t g_streams;
+
+static void put_le32(uint8_t *p, uint32_t v)
+{
+    for (int i = 0; i < 4; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static void wav_header(tap_out *t)
+{
+    uint8_t h[44];
+    uint32_t bytes = (uint32_t)(t->wav_frames * t->channels * 2);
+    memcpy(h, "RIFF", 4);
+    put_le32(h + 4, 36 + bytes);
+    memcpy(h + 8, "WAVEfmt ", 8);
+    put_le32(h + 16, 16);
+    h[20] = 1;
+    h[21] = 0;
+    h[22] = (uint8_t)t->channels;
+    h[23] = 0;
+    put_le32(h + 24, t->rate);
+    put_le32(h + 28, t->rate * t->channels * 2);
+    h[32] = (uint8_t)(t->channels * 2);
+    h[33] = 0;
+    h[34] = 16;
+    h[35] = 0;
+    memcpy(h + 36, "data", 4);
+    put_le32(h + 40, bytes);
+    long at = ftell(t->wav);
+    fseek(t->wav, 0, SEEK_SET);
+    fwrite(h, 1, sizeof h, t->wav);
+    fseek(t->wav, at, SEEK_SET);
+    fflush(t->wav);
+}
+
+static void tap_report(tap_out *t, uint64_t now)
+{
+    uint64_t active = t->active_ns + (t->paused ? 0 : now - t->resumed_ns);
+    double secs = (double)active / 1e9;
+    rl_log(RL_LOG_INFO, "audio",
+           "stream %u: %u Hz %u ch, %.1f s playing, %llu frames written (%.4f of real time), %llu underruns, "
+           "%llu frames dropped, queued %u..%u frames (this period: %llu frames, %llu underruns, %llu dropped)",
+           t->index, t->rate, t->channels, secs, (unsigned long long)t->frames,
+           secs > 0 ? (double)t->frames / (secs * t->rate) : 0.0, (unsigned long long)t->underruns,
+           (unsigned long long)t->dropped, t->min_queued == UINT32_MAX ? 0 : t->min_queued, t->max_queued,
+           (unsigned long long)t->period_frames, (unsigned long long)t->period_underruns,
+           (unsigned long long)t->period_dropped);
+    t->period_frames = t->period_underruns = t->period_dropped = 0;
+    t->last_report_ns = now;
+}
+
+static rl_audio_out *tap_open(const rl_audio_backend *b, uint32_t rate, uint32_t channels)
+{
+    rl_audio_out *in = b->open(rate, channels);
+    if (!in)
+        return NULL;
+    in->b = b;
+    tap_out *t = calloc(1, sizeof *t);
+    if (!t) {
+        b->close(in);
+        return NULL;
+    }
+    t->head.b = &g_tap;
+    t->in = in;
+    t->rate = rate;
+    t->channels = channels;
+    t->index = g_streams++;
+    t->paused = true;
+    t->min_queued = UINT32_MAX;
+    t->opened_ns = t->last_report_ns = rl_clock_ns();
+    const char *e = getenv("RELIFT_AUDIO_STATS");
+    t->report = e && *e && strcmp(e, "0") != 0;
+    const char *w = getenv("RELIFT_AUDIO_WAV");
+    if (w && *w) {
+        char path[4096];
+        if (t->index)
+            snprintf(path, sizeof path, "%s.%u", w, t->index);
+        else
+            snprintf(path, sizeof path, "%s", w);
+        t->wav = fopen(path, "wb");
+        if (t->wav) {
+            uint8_t zero[44] = { 0 };
+            fwrite(zero, 1, sizeof zero, t->wav);
+            wav_header(t);
+            t->report = true;
+            rl_log(RL_LOG_INFO, "audio", "stream %u: recording to %s", t->index, path);
+        } else {
+            rl_log(RL_LOG_WARN, "audio", "cannot write %s", path);
+        }
+    }
+    return &t->head;
+}
+
+static void tap_close(rl_audio_out *o)
+{
+    tap_out *t = (tap_out *)o;
+    uint64_t now = rl_clock_ns();
+    if (t->report)
+        tap_report(t, now);
+    if (t->wav) {
+        wav_header(t);
+        fclose(t->wav);
+    }
+    t->in->b->close(t->in);
+    free(t);
+}
+
+static void tap_write(rl_audio_out *o, const int16_t *pcm, uint32_t frames)
+{
+    tap_out *t = (tap_out *)o;
+    uint64_t now = rl_clock_ns();
+    uint32_t q = t->in->b->queued(t->in);
+    if (!t->paused) {
+        if (t->started && q == 0) {
+            t->underruns++;
+            t->period_underruns++;
+        }
+        if (q < t->min_queued)
+            t->min_queued = q;
+        if (q > t->max_queued)
+            t->max_queued = q;
+    }
+    t->in->b->write(t->in, pcm, frames);
+    t->started = true;
+    t->frames += frames;
+    t->period_frames += frames;
+    t->writes++;
+    if (t->wav) {
+        fwrite(pcm, sizeof *pcm * t->channels, frames, t->wav);
+        t->wav_frames += frames;
+        if (t->writes % 200 == 0)
+            wav_header(t);
+    }
+    if (t->report && now - t->last_report_ns >= 10000000000ull)
+        tap_report(t, now);
+}
+
+static uint32_t tap_queued(rl_audio_out *o)
+{
+    tap_out *t = (tap_out *)o;
+    return t->in->b->queued(t->in);
+}
+
+static void tap_pause(rl_audio_out *o, bool paused)
+{
+    tap_out *t = (tap_out *)o;
+    uint64_t now = rl_clock_ns();
+    if (paused && !t->paused)
+        t->active_ns += now - t->resumed_ns;
+    else if (!paused && t->paused)
+        t->resumed_ns = now;
+    t->paused = paused;
+    t->in->b->pause(t->in, paused);
+}
+
+static const rl_audio_backend g_tap = {
+    .name = "tap",
+    .open = NULL,
+    .close = tap_close,
+    .write = tap_write,
+    .queued = tap_queued,
+    .pause = tap_pause,
+};
+
 rl_audio_out *rl_audio_open(uint32_t rate, uint32_t channels)
 {
     const rl_audio_backend *b = rl_audio_backend_current();
-    rl_audio_out *o = b->open(rate, channels);
+    rl_audio_out *o = tap_open(b, rate, channels);
     if (!o && b != &g_null_audio) {
         rl_log(RL_LOG_WARN, "audio", "%s output failed to open, using the null output", b->name);
         b = &g_null_audio;
-        o = b->open(rate, channels);
+        o = tap_open(b, rate, channels);
     }
+    if (o)
+        rl_log(RL_LOG_INFO, "audio", "output %s, %u Hz, %u channels", b->name, rate, channels);
     return o;
 }
 
@@ -139,6 +318,15 @@ void rl_audio_pause(rl_audio_out *o, bool paused)
 {
     if (o)
         o->b->pause(o, paused);
+}
+
+void rl_audio_count_drop(rl_audio_out *o, uint32_t frames)
+{
+    if (o && o->b == &g_tap) {
+        tap_out *t = (tap_out *)o;
+        t->dropped += frames;
+        t->period_dropped += frames;
+    }
 }
 
 typedef struct stub_opus {

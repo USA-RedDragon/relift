@@ -413,6 +413,8 @@ static void sink_device(audren *ar, const ar_sink *s)
     }
     if (rl_audio_queued(ar->host) < 8 * n)
         rl_audio_write(ar->host, pcm, n);
+    else
+        rl_audio_count_drop(ar->host, n);
     free(pcm);
 }
 

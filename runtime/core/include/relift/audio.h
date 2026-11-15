@@ -8,6 +8,13 @@
  * null output (which drains in real time, so timing still works) and a
  * decoder that returns silence of the right length are used. Setting
  * RELIFT_AUDIO=null selects the null output at run time.
+ *
+ * Every stream keeps statistics (frames written against playing time,
+ * underruns, frames dropped, queue depth). RELIFT_AUDIO_STATS=1 logs them
+ * every 10 s of wall time and at close. RELIFT_AUDIO_WAV=<path> also records
+ * what is handed to the host as 16-bit PCM WAV (stream 0 to the path, stream
+ * n to <path>.n), whichever backend plays it; the header is kept valid while
+ * the run goes on.
  */
 #ifndef RELIFT_AUDIO_H
 #define RELIFT_AUDIO_H
@@ -57,6 +64,9 @@ RL_RUNTIME_API void rl_audio_write(rl_audio_out *o, const int16_t *pcm, uint32_t
 RL_RUNTIME_API uint32_t rl_audio_queued(rl_audio_out *o);
 /** @brief Pauses or resumes playback. */
 RL_RUNTIME_API void rl_audio_pause(rl_audio_out *o, bool paused);
+
+/** @brief Records that a caller discarded frames instead of queueing them (shown in the stream's statistics). */
+RL_RUNTIME_API void rl_audio_count_drop(rl_audio_out *o, uint32_t frames);
 
 /** @brief Opus decoder errors, the values libopus uses. */
 enum {
