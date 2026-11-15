@@ -140,8 +140,6 @@ static void key_event(const SDL_Event *e)
         g_keys[sc / 64] &= ~(1ull << (sc % 64));
 }
 
-static bool key(unsigned sc) { return (g_keys[sc / 64] >> (sc % 64)) & 1; }
-
 static const struct {
     SDL_GamepadButton sdl;
     int rl;
@@ -162,26 +160,6 @@ static const struct {
     { SDL_GAMEPAD_BUTTON_DPAD_LEFT, RL_BTN_DPAD_LEFT },
     { SDL_GAMEPAD_BUTTON_GUIDE, RL_BTN_GUIDE },
     { SDL_GAMEPAD_BUTTON_MISC1, RL_BTN_MISC },
-};
-
-static const struct {
-    SDL_Scancode sc;
-    int rl;
-} g_keypad[] = {
-    { SDL_SCANCODE_Z, RL_BTN_SOUTH },
-    { SDL_SCANCODE_X, RL_BTN_EAST },
-    { SDL_SCANCODE_A, RL_BTN_WEST },
-    { SDL_SCANCODE_S, RL_BTN_NORTH },
-    { SDL_SCANCODE_Q, RL_BTN_LEFT_SHOULDER },
-    { SDL_SCANCODE_W, RL_BTN_RIGHT_SHOULDER },
-    { SDL_SCANCODE_1, RL_BTN_LEFT_TRIGGER },
-    { SDL_SCANCODE_3, RL_BTN_RIGHT_TRIGGER },
-    { SDL_SCANCODE_RETURN, RL_BTN_START },
-    { SDL_SCANCODE_BACKSPACE, RL_BTN_BACK },
-    { SDL_SCANCODE_UP, RL_BTN_DPAD_UP },
-    { SDL_SCANCODE_RIGHT, RL_BTN_DPAD_RIGHT },
-    { SDL_SCANCODE_DOWN, RL_BTN_DPAD_DOWN },
-    { SDL_SCANCODE_LEFT, RL_BTN_DPAD_LEFT },
 };
 
 static int16_t axis(SDL_Gamepad *g, SDL_GamepadAxis a, bool flip)
@@ -215,13 +193,8 @@ static void publish(void)
         p->rx = axis(g, SDL_GAMEPAD_AXIS_RIGHTX, false);
         p->ry = axis(g, SDL_GAMEPAD_AXIS_RIGHTY, true);
     }
-    if (!n) {
-        rl_input_pad *p = &s.pads[0];
-        p->connected = true;
-        for (size_t k = 0; k < sizeof g_keypad / sizeof g_keypad[0]; k++)
-            if (key(g_keypad[k].sc))
-                p->buttons |= 1u << g_keypad[k].rl;
-    }
+    if (!n)
+        s.pads[0].connected = true;
     memcpy(s.keys, g_keys, sizeof s.keys);
     SDL_Keymod m = SDL_GetModState();
     s.modifiers = ((m & SDL_KMOD_CTRL) ? 1u : 0) | ((m & SDL_KMOD_SHIFT) ? 2u : 0) | ((m & SDL_KMOD_ALT) ? 4u : 0) |
