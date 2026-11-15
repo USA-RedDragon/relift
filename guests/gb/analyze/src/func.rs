@@ -1021,7 +1021,14 @@ impl<'a> Run<'a> {
             self.out.entry_dep = true;
         }
         for (u, dep) in &o.unresolved {
-            if *dep == Dep::Computed
+            let fixed = matches!(
+                u.kind,
+                UnresolvedKind::Illegal
+                    | UnresolvedKind::RunsOffWindow
+                    | UnresolvedKind::OutsideRom
+            );
+            if fixed
+                || *dep == Dep::Computed
                 || (u.kind == UnresolvedKind::IndirectJump && sum.target_regs.is_none())
             {
                 let detail = format!("{}, called from {site}", u.detail);

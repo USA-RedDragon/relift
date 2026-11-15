@@ -481,6 +481,30 @@ fn code_that_runs_on_past_the_window_runs_from_ram() {
 }
 
 #[test]
+fn an_unused_opcode_in_a_callee_run_inside_its_callers_is_listed_once() {
+    let r = Cart::new(0x19, 0x02)
+        .put(
+            0,
+            0x150,
+            &[
+                0x11, 0x00, 0x04, 0xCD, 0x00, 0x02, 0x11, 0x10, 0x04, 0xCD, 0x00, 0x02, 0x18, 0xFE,
+            ],
+        )
+        .put(0, 0x200, &[0x7A, 0xA7, 0x20, 0x02, 0xD5, 0xC9, 0xD3])
+        .put(0, 0x400, &[0xC9])
+        .put(0, 0x410, &[0xC9])
+        .analyze();
+    let at: Vec<Loc> = r.unresolved.iter().map(|u| u.at).collect();
+    assert_eq!(
+        kinds(&r),
+        vec![UnresolvedKind::Illegal],
+        "{:?}",
+        r.unresolved
+    );
+    assert_eq!(at, vec![Loc::fixed(0x206)]);
+}
+
+#[test]
 fn coverage_counts_distinct_bytes_per_bank() {
     let r = Cart::new(0x19, 0x04)
         .put(
