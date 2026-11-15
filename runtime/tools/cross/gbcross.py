@@ -331,7 +331,7 @@ def main():
     try:
         tool = tool_for(args.target)
         print(f"{args.target}: {tool.note}")
-        env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS=str(args.jobs))
+        env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS=str(args.jobs), RELIFT_PACKAGE_APPIMAGE="never")
         game, rt = host_build(args, env)
         runtime_libs(args, tool)
         print("runtime libraries build")

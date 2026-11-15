@@ -174,6 +174,7 @@ pub fn relift(dir: &Path, args: &[&str]) -> std::process::Output {
     relift_proc::command(bin)
         .args(args)
         .env_remove("RELIFT_JOBS")
+        .env("RELIFT_PACKAGE_APPIMAGE", "never")
         .current_dir(dir)
         .output()
         .expect("the relift binary runs")

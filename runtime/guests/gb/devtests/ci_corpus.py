@@ -81,7 +81,7 @@ def run(cmd, env, cwd=None, timeout=600):
 
 
 def one_rom(args, index, rom, cases):
-    env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS="1")
+    env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS="1", RELIFT_PACKAGE_APPIMAGE="never")
     name = f"rom{index:03d}"
     proj = os.path.join(args.work, "projects", name)
     os.makedirs(proj, exist_ok=True)
