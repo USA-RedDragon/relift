@@ -700,9 +700,9 @@ host stack unwinds by `RL_PENDING` returns, never by a host `longjmp`.
 
 Lifted `memcpy`, `memmove` and `memset` of the guest's libc run the guest's
 byte, word and pair loads and stores one after another; the host's versions
-move 16 to 64 bytes per instruction. In a game's render thread the Nintendo
-SDK's `__memcpy_device` alone was 7.6% of the samples and `memset` 0.7%.
-[verified: perf of the render thread]
+move 16 to 64 bytes per instruction. In a perf profile of a title's render
+thread the SDK's `__memcpy_device` alone was 7.6% of the samples and
+`memset` 0.7%. [verified: perf profile]
 
 - **Overrides.** `rl_a64_memmove` (x0 = dst, x1 = src, x2 = n) and
   `rl_a64_memset` (x0 = dst, x1 = value, x2 = n) have the lifted signature,
@@ -715,7 +715,9 @@ SDK's `__memcpy_device` alone was 7.6% of the samples and `memset` 0.7%.
   whole code was read and checked to be a plain copy or fill are replaced:
   the SDK's `__memcpy_device` (772 bytes), `__memcpy_fast` (176),
   `__memmove_device` (408) and `memset` (208). Any other routine stays
-  lifted. [verified: disassembly of the four routines in a game's `nnSdk`]
+  lifted. The shapes come from Nintendo SDK 9.5.0 (the only version checked;
+  other versions compile different code and stay lifted until their routines
+  are read and added). [verified: disassembly of the four routines]
 - **Why `memmove` for `memcpy`.** Overlap is undefined for `memcpy`, so any
   behavior is allowed; `memmove` is the one that is always defined. The
   guest routines only touch the destination and source ranges and never
@@ -726,6 +728,18 @@ SDK's `__memcpy_device` alone was 7.6% of the samples and `memset` 0.7%.
   host instruction run again. The partial copy before the fault is not
   specified, as on hardware. The faulting host pc is in libc, so the guest
   backtrace starts at the caller of the routine.
+- **Exclusive monitor.** The monitor is a value compare (section 8): a
+  plain store does not clear it, it only changes the value the next `STXR`
+  compares. The host copy writes the same bytes, so a reservation survives
+  or fails exactly as after the lifted loop's stores. [verified:
+  `memmove_is_seen_by_the_exclusive_monitor_as_a_plain_store`]
+- **Vulkan shadow memory.** Shadow allocations are synchronized by
+  comparing bytes at call boundaries, not by tracking stores, so a host
+  write into shadowed guest memory is found the same as a guest store.
+  [inferred: `vk_mem.c`]
+- **Hot-load.** The hot-load path builds the same override entries from the
+  same recognizer, and an `RL_FN_OVERRIDE` entry replaces an existing one
+  (section 6). [inferred]
 - **Not covered.** The routine's own loads and stores on device memory with
   access-size rules (a guest that relies on 4-byte accesses to MMIO) would
   need the original routine; none of the four is used that way in a

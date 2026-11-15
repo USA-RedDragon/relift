@@ -5,6 +5,7 @@
  */
 #include "a64.h"
 #include "runner.h"
+#include <stdbool.h>
 
 #include <string.h>
 
@@ -88,4 +89,82 @@ TEST(memset_fills_with_the_low_byte)
             CHECK_EQ(g_mem[0x400 + n % 5 + i], 0xa1);
         CHECK_EQ(g_mem[0x400 + n % 5 + n], orig[0x400 + n % 5 + n]);
     }
+}
+
+static int vm_boot(rl_vm *vm, rl_ctx **c)
+{
+    if (rl_core_init(&mem_guest, rl_a64_cpu()) != 0 || rl_vm_init(vm, 32, 0) != 0)
+        return -1;
+    rl_set_mem_base(vm->base);
+    rl_fault_install(vm);
+    struct rl_thread *t = rl_thread_alloc();
+    if (!t)
+        return -1;
+    rl_thread_bind(t);
+    *c = t->ctx;
+    return 0;
+}
+
+static bool faults_at(rl_ctx *c, int (*fn)(rl_ctx *, uint8_t *), uint64_t *addr)
+{
+    rl_fault_catch fc;
+    rl_fault_catch *prev = rl_fault_arm(&fc);
+    bool faulted = false;
+    if (RL_FAULT_SETJMP(fc.jb) == 0) {
+        fn(c, rl_mem_base());
+    } else {
+        faulted = true;
+        *addr = fc.fault.guest_addr;
+    }
+    rl_fault_disarm(prev);
+    return faulted;
+}
+
+TEST(memmove_into_an_unmapped_page_faults_at_a_guest_address)
+{
+    rl_vm vm;
+    rl_ctx *c;
+    CHECK_EQ(vm_boot(&vm, &c), 0);
+    uint64_t hp = vm.host_page;
+    CHECK_EQ(rl_vm_set(&vm, 8 * hp, 2 * hp, RL_VM_RW, 0, RL_VM_FRESH), 0);
+    c->x[0] = 8 * hp + 2 * hp - 32;
+    c->x[1] = 8 * hp;
+    c->x[2] = 64;
+    uint64_t a = 0;
+    CHECK(faults_at(c, rl_a64_memmove, &a));
+    CHECK(a >= 10 * hp && a < 11 * hp);
+    c->x[0] = 8 * hp + 100;
+    c->x[1] = 10 * hp + 8;
+    c->x[2] = 16;
+    CHECK(faults_at(c, rl_a64_memmove, &a));
+    CHECK(a >= 10 * hp && a < 11 * hp);
+    c->x[0] = 10 * hp + 3;
+    c->x[1] = 0x41;
+    c->x[2] = 5;
+    CHECK(faults_at(c, rl_a64_memset, &a));
+    CHECK(a >= 10 * hp && a < 11 * hp);
+    c->x[0] = 8 * hp;
+    c->x[1] = 0x41;
+    c->x[2] = 2 * hp;
+    CHECK(!faults_at(c, rl_a64_memset, &a));
+}
+
+TEST(memmove_is_seen_by_the_exclusive_monitor_as_a_plain_store)
+{
+    rl_ctx *c = boot();
+    CHECK(c != NULL);
+    rl_excl m = { 0 };
+    uint64_t v = rl_ldx(&m, g_mem, 0x800, 8, RL_ORD_PLAIN);
+    uint64_t other = v ^ 0x0101010101010101ull;
+    memcpy(g_mem + 0x900, &other, 8);
+    c->x[0] = 0x800;
+    c->x[1] = 0x900;
+    c->x[2] = 8;
+    CHECK_EQ(rl_a64_memmove(c, g_mem), RL_OK);
+    CHECK_EQ(rl_stx(&m, g_mem, 0x800, 8, 5, RL_ORD_PLAIN), 1);
+    v = rl_ldx(&m, g_mem, 0x800, 8, RL_ORD_PLAIN);
+    memcpy(g_mem + 0x900, &v, 8);
+    CHECK_EQ(rl_a64_memmove(c, g_mem), RL_OK);
+    CHECK_EQ(rl_stx(&m, g_mem, 0x800, 8, 5, RL_ORD_PLAIN), 0);
+    CHECK_EQ(rl_ld64(g_mem, 0x800), 5);
 }
