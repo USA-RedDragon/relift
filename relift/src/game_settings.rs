@@ -176,6 +176,26 @@ pub fn runtime_settings() -> Vec<Setting> {
             Value::Bool(false),
             SettingKind::Bool,
         ),
+        s(
+            "cpu.pac",
+            "Pointer authentication cipher",
+            "fast is a keyed hash; qarma5 is the console's QARMA5. A game sees the same behavior with either, since it cannot learn the keys",
+            Value::String("fast".into()),
+            SettingKind::Enum {
+                choices: ["fast", "qarma5"].map(String::from).into(),
+            },
+        ),
+        s(
+            "cpu.pac_seed",
+            "Pointer authentication key seed",
+            "The seed of the process's pointer authentication keys, which the console picks at random",
+            Value::from(0),
+            SettingKind::Int {
+                min: 0,
+                max: i64::MAX,
+                step: 0,
+            },
+        ),
     ]
 }
 
