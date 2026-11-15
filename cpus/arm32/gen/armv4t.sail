@@ -113,6 +113,10 @@ $relift patch execute_aarch32_instrs_*MLAL_Op_A_txt R_set(dHi) = result[63 .. 32
 /* The shift register Rs is read in the first cycle, so R15 there reads as
  * PC+8; Rn and Rm read in the second cycle give PC+12 (see R_read). */
 $relift patch execute_aarch32_instrs_*_rr_Op_A_txt UInt(R_read(s)[7 .. 0]) ==> UInt(__v4t_ReadRs(s)[7 .. 0])
+/* The Thumb shifts by register (LSL, LSR, ASR, ROR) take one internal
+ * cycle to read the shift register, like the ARM register-shifted forms
+ * (GBATEK THUMB.4: 1S+1I). */
+$relift patch execute_aarch32_instrs_*_r_Op_A_txt let 'shift_n = UInt(R_read(m)[7 .. 0]); ==> __v4t_internal(1);\n    let 'shift_n = UInt(R_read(m)[7 .. 0]);
 /* Multiply cycles: m internal cycles from the multiplier's top bytes, plus
  * one for an accumulate and one for a long result (GBATEK). */
 $relift patch execute_aarch32_instrs_MUL_Op_A_txt (d, m, n, setflags) = { ==> (d, m, n, setflags) = {\n    __v4t_MulCycles(R_read(m), true, 0);

@@ -515,6 +515,16 @@ mod tests {
     }
 
     #[test]
+    fn thumb_shifts_by_register_take_an_internal_cycle() {
+        for op in [0x40A0, 0x40E0, 0x4120, 0x41E0] {
+            let b = Gba::new()
+                .lift_at(&thumb(&[op]), BASE, BASE, true)
+                .expect("lifts");
+            assert_eq!(intrinsics(&b), [FETCH_THUMB, IDLE], "{op:#06x}");
+        }
+    }
+
+    #[test]
     fn a_branch_refills_at_its_target() {
         let img = arm(&[0xEA00_0002]);
         let b = Gba::new().lift_at(&img, BASE, BASE, false).expect("lifts");

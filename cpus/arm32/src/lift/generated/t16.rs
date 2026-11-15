@@ -3912,7 +3912,7 @@ pub(super) fn ASR_i_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
 
 /// `ASR_r_T1`.
 ///
-/// Cut: ConditionPassed, IsFeatureImplemented, PSTATE.NZCV, REG, _PC.
+/// Cut: BUS, ConditionPassed, IsFeatureImplemented, PSTATE.NZCV, REG, _PC.
 pub(super) fn ASR_r_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::ASR_r_T1;
     let w = u128::from(word);
@@ -3922,6 +3922,7 @@ pub(super) fn ASR_r_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
     let s3: i128 = s2 as i128;
     let s4: i128 = s2 as i128;
     let s5: i128 = s1 as i128;
+    st.internal(1);
     let s6: bool = s5 == (15i128);
     let s7: u128 = (pc >> 0) & 0xffffffff;
     let s8: u128 = s7.wrapping_add(0x4u128) & 0xffffffff;
@@ -6868,7 +6869,7 @@ pub(super) fn LSL_i_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
 
 /// `LSL_r_T1`.
 ///
-/// Cut: ConditionPassed, IsFeatureImplemented, PSTATE.NZCV, REG, _PC.
+/// Cut: BUS, ConditionPassed, IsFeatureImplemented, PSTATE.NZCV, REG, _PC.
 pub(super) fn LSL_r_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::LSL_r_T1;
     let w = u128::from(word);
@@ -6878,6 +6879,7 @@ pub(super) fn LSL_r_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
     let s3: i128 = s2 as i128;
     let s4: i128 = s2 as i128;
     let s5: i128 = s1 as i128;
+    st.internal(1);
     let s6: bool = s5 == (15i128);
     let s7: u128 = (pc >> 0) & 0xffffffff;
     let s8: u128 = s7.wrapping_add(0x4u128) & 0xffffffff;
@@ -6989,7 +6991,7 @@ pub(super) fn LSR_i_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
 
 /// `LSR_r_T1`.
 ///
-/// Cut: ConditionPassed, IsFeatureImplemented, PSTATE.NZCV, REG, _PC.
+/// Cut: BUS, ConditionPassed, IsFeatureImplemented, PSTATE.NZCV, REG, _PC.
 pub(super) fn LSR_r_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::LSR_r_T1;
     let w = u128::from(word);
@@ -6999,6 +7001,7 @@ pub(super) fn LSR_r_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
     let s3: i128 = s2 as i128;
     let s4: i128 = s2 as i128;
     let s5: i128 = s1 as i128;
+    st.internal(1);
     let s6: bool = s5 == (15i128);
     let s7: u128 = (pc >> 0) & 0xffffffff;
     let s8: u128 = s7.wrapping_add(0x4u128) & 0xffffffff;
