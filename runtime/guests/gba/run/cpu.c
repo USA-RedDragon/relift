@@ -223,7 +223,13 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
     bool banked = mode == RL_ARM32_USR || mode == RL_ARM32_SYS || mode == RL_ARM32_SVC;
     memcpy(c->r, bios_regs, (banked ? 15 : 13) * sizeof c->r[0]);
     r->stats.bios_irqs++;
-    rl_gba_fetch(machine(c), lr & ~3u, 4, true);
+    unsigned size = (spsr & 0x20u) ? 2u : 4u;
+    uint32_t back = (lr - 4u) & ~(size - 1u);
+    bool code = back >= 0x4000u;
+    if (code)
+        rl_gba_fetch(machine(c), back + 2u * size, size, true);
+    else
+        rl_gba_fetch(machine(c), lr & ~3u, 4, true);
     rl_arm32_exception(c, RL_ARM32_IRQ, lr);
     uint32_t h = stub_entry(c, true);
     if (rl_arm32_call_guest(c, NULL, h, RL_GBA_BIOS_IRQ_RETURN) != RL_OK) {
@@ -231,10 +237,14 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
         rl_process_exit(RL_EXIT_SOFTWARE);
         return RL_GBA_POINT_NONE;
     }
-    uint32_t to = stub_return(c, false);
-    if (to != ((lr - 4u) & ((spsr & 0x20u) ? ~1u : ~3u)) || rl_arm32_cpsr(c) != spsr) {
+    uint32_t to = stub_return(c, code);
+    if (to != back || rl_arm32_cpsr(c) != spsr) {
         g_left = to;
         return RL_GBA_POINT_LEFT;
+    }
+    if (code) {
+        rl_gba_fetch(machine(c), to, size, false);
+        rl_gba_fetch(machine(c), to + size, size, true);
     }
     c->r[13] = sp;
     c->r[14] = lr_mode;
