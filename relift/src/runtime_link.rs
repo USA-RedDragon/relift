@@ -135,13 +135,25 @@ fn opus_from_dir(dir: &Path, origin: String) -> Option<Opus> {
     })
 }
 
+/// pkg-config names the `opus` subdirectory of the include path, but the
+/// runtime includes `<opus/opus.h>`: add the parent of each such directory.
+fn opus_cflags(flags: Vec<String>) -> Vec<String> {
+    let parents: Vec<String> = flags
+        .iter()
+        .filter_map(|f| f.strip_prefix("-I"))
+        .filter_map(|d| d.strip_suffix("/opus"))
+        .map(|d| format!("-I{d}"))
+        .collect();
+    flags.into_iter().chain(parents).collect()
+}
+
 /// libopus for the host target, or `None`.
 pub fn find_opus() -> Option<Opus> {
     if let Some(d) = std::env::var_os("RELIFT_OPUS_DIR").filter(|v| !v.is_empty()) {
         return opus_from_dir(Path::new(&d), "RELIFT_OPUS_DIR".into());
     }
     Some(Opus {
-        cflags: pkg_config("--cflags", "opus")?,
+        cflags: opus_cflags(pkg_config("--cflags", "opus")?),
         libs: pkg_config("--libs", "opus")?,
         origin: "pkg-config".into(),
     })
@@ -396,6 +408,15 @@ mod tests {
         std::fs::remove_dir_all(&d).unwrap();
         assert!(s.cflags[0].ends_with("/include"));
         assert!(s.libs.iter().any(|l| l == "-lSDL3"));
+    }
+
+    #[test]
+    fn pkg_config_opus_include_gains_its_parent() {
+        let flags = vec!["-I/p/include/opus".to_string(), "-I/q".to_string()];
+        assert_eq!(
+            opus_cflags(flags),
+            ["-I/p/include/opus", "-I/q", "-I/p/include"]
+        );
     }
 
     #[test]
