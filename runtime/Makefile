@@ -101,6 +101,9 @@ GB_HDRS := $(CORE_HDRS) $(wildcard guests/gb/*.h)
 GBDEV_SRCS := guests/gb/gbdev.c guests/gb/devtests/lockstep.c
 GBA_SRCS := $(wildcard guests/gba/*.c guests/gba/bios/*.c)
 GBA_HDRS := $(CORE_HDRS) $(wildcard guests/gba/*.h guests/gba/bios/*.h)
+GBX_INC := $(SM83_INC) -Iguests/gb -Iguests/gb/exact -Iguests/gb/exact/include
+GBX_SRCS := $(wildcard guests/gb/exact/*.c)
+GBX_HDRS := $(SM83_HDRS) $(wildcard guests/gb/*.h guests/gb/exact/*.h guests/gb/exact/include/relift/gb/*.h)
 VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c)
 VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h)
 
@@ -133,6 +136,7 @@ SWITCH_OBJS := $(call obj,$(SWITCH_SRCS))
 VK_OBJS := $(call obj,$(VK_SRCS))
 GB_OBJS := $(call obj,$(GB_SRCS))
 GBDEV_OBJS := $(call obj,$(GBDEV_SRCS))
+GBX_OBJS := $(call obj,$(GBX_SRCS))
 GB_TEST_OBJS := $(call obj,$(GB_TEST_SRCS))
 GBA_OBJS := $(call obj,$(GBA_SRCS))
 GBA_TEST_OBJS := $(call obj,$(GBA_TEST_SRCS))
@@ -153,6 +157,7 @@ SWITCH_LIB := $(BUILD)/librelift_switch.a
 VK_LIB := $(BUILD)/librelift_switch_vk.a
 GB_LIB := $(BUILD)/librelift_gb.a
 GBA_LIB := $(BUILD)/librelift_gba.a
+GBX_LIB := $(BUILD)/librelift_gb_exact.a
 STATIC := $(BUILD)/librelift_rt.a
 SHARED := $(BUILD)/librelift_rt.$(SHLIB_EXT)
 CORE_TESTS := $(BUILD)/core_tests
@@ -182,8 +187,8 @@ GBDEV_FRAMES ?= 60
 GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
 
 .PHONY: all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
-all: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
-libs: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(STATIC) $(SHARED)
+all: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
+libs: $(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC) $(SHARED)
 portable: $(PORTABLE)
 
 $(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -234,6 +239,10 @@ $(GBDEV_OBJS): $(BUILD)/obj/%.o: %.c $(GB_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(GB_INC) $(CFLAGS) -c $< -o $@
 
+$(GBX_OBJS): $(BUILD)/obj/%.o: %.c $(GBX_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(GBX_INC) $(CFLAGS) -c $< -o $@
+
 $(VK_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(VK_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(VK_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
@@ -261,8 +270,9 @@ $(SWITCH_LIB): $(SWITCH_OBJS)
 $(VK_LIB): $(VK_OBJS)
 $(GB_LIB): $(GB_OBJS)
 $(GBA_LIB): $(GBA_OBJS)
+$(GBX_LIB): $(GBX_OBJS)
 $(STATIC): $(RT_OBJS)
-$(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(STATIC):
+$(CORE_LIB) $(A64_LIB) $(SM83_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(STATIC):
 	@rm -f $@
 	$(AR) rcs $@ $^
 
