@@ -1,0 +1,18 @@
+[package]
+name = "relift-gb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-cpu-sm83 = { workspace = true }
+relift-emit = { workspace = true }
+relift-gb-analyze = { workspace = true }
+relift-gb-formats = { workspace = true }
+relift-guest = { workspace = true }
+relift-ir = { workspace = true }
+
+[lints]
+workspace = true

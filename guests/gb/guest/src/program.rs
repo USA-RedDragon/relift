@@ -1,0 +1,420 @@
+//! A ROM as lifted units and the program files that run it.
+//!
+//! The fixed window (`$0000-$3FFF`) is one unit; each switchable bank with
+//! code is a unit of its own, so a direct call inside a unit always names
+//! code of the unit's bank, and every transfer that leaves it goes through
+//! dispatch, which picks the function of the bank mapped at run time. A
+//! function keeps only the instructions of its own bank: the analysis may
+//! follow a jump into another bank, and that code then runs through
+//! dispatch too.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
+
+use relift_cpu_sm83::HALF;
+use relift_emit::{Function, Insn, Options, Output};
+use relift_gb_analyze::{Loc, Report};
+use relift_guest::{Frontend, LiftFailure};
+use relift_ir::{Block, Next};
+
+use crate::frontend::{Gb, device_map};
+
+/// The bank of a unit of the fixed window in [`Unit::bank`].
+pub const FIXED: u32 = u32::MAX;
+
+/// One lifted unit: the fixed window or one switchable bank.
+#[derive(Clone, Debug)]
+pub struct Unit {
+    /// The bank whose window functions the unit holds, or [`FIXED`].
+    pub bank: u32,
+    /// The C symbol of the unit table.
+    pub symbol: String,
+    /// The directory of its files, relative to the C directory.
+    pub dir: String,
+    /// The emitted files.
+    pub output: Output,
+    /// Functions in the unit.
+    pub functions: usize,
+}
+
+/// An instruction that did not lift.
+#[derive(Clone, Debug)]
+pub struct Unlifted {
+    /// Where.
+    pub at: Loc,
+    /// Why.
+    pub failure: LiftFailure,
+}
+
+/// Everything a ROM lifts to.
+#[derive(Clone, Debug, Default)]
+pub struct Lifted {
+    /// The units, the fixed window first.
+    pub units: Vec<Unit>,
+    /// Instructions that did not lift.
+    pub unlifted: Vec<Unlifted>,
+    /// Instructions an analysis function held in another bank's window,
+    /// left to dispatch.
+    pub foreign: usize,
+}
+
+fn unit_key(l: Loc) -> u32 {
+    if l.is_window() {
+        u32::from(l.bank)
+    } else {
+        FIXED
+    }
+}
+
+fn bytes_at(rom: &[u8], l: Loc) -> Option<&[u8]> {
+    let start = relift_gb_formats::banks::rom_offset(usize::from(l.bank), l.addr)?;
+    let window_end: u16 = if l.addr < 0x4000 { 0x4000 } else { 0x8000 };
+    let end = start
+        .checked_add(usize::from(window_end.checked_sub(l.addr)?))?
+        .min(rom.len());
+    rom.get(start..end).filter(|s| !s.is_empty())
+}
+
+/// The host name of the function at `l`.
+#[must_use]
+pub fn host_name(l: Loc) -> String {
+    if l.is_window() {
+        format!("gb_b{:03x}_{:04x}", l.bank, l.addr)
+    } else {
+        format!("gb_f_{:04x}", l.addr)
+    }
+}
+
+struct Lifts {
+    blocks: Vec<(u64, Result<Block, LiftFailure>, u64)>,
+    span: u64,
+}
+
+fn lift_function(
+    fe: &Gb,
+    rom: &[u8],
+    f: &relift_gb_analyze::Function,
+    lifted: &mut Lifted,
+) -> Lifts {
+    let own = unit_key(f.entry);
+    let bank = (own != FIXED).then_some(u64::from(own));
+    let mut out = Vec::new();
+    let mut end = u64::from(f.entry.addr);
+    let mut todo: Vec<(Loc, u64)> = Vec::new();
+    for (&l, &len) in &f.body {
+        if unit_key(l) != own && l.is_window() {
+            lifted.foreign += 1;
+            continue;
+        }
+        if l.addr >= f.entry.addr {
+            end = end.max(u64::from(l.addr) + u64::from(len));
+        }
+        todo.push((l, u64::from(l.addr)));
+    }
+    let mut seen = BTreeSet::new();
+    while let Some((l, pc)) = todo.pop() {
+        if !seen.insert(pc) {
+            continue;
+        }
+        let Some(bytes) = bytes_at(rom, l) else {
+            continue;
+        };
+        let raw = bytes
+            .iter()
+            .take(3)
+            .fold(0u64, |a, b| (a << 8) | u64::from(*b));
+        let r = fe.lift(bytes, pc).map(|mut b| {
+            b.bank = bank;
+            b
+        });
+        if let Ok(b) = &r {
+            let targets: Vec<u64> = match b.exit.next {
+                Next::Const(t) => vec![t],
+                Next::Select {
+                    taken, not_taken, ..
+                } => vec![taken, not_taken],
+                Next::Dynamic(_) => Vec::new(),
+            };
+            for t in targets {
+                if t >= HALF && t & 0xFFFF == pc & 0xFFFF {
+                    todo.push((l, t));
+                }
+            }
+        }
+        if let Err(e) = &r
+            && pc < HALF
+        {
+            lifted.unlifted.push(Unlifted {
+                at: l,
+                failure: e.clone(),
+            });
+        }
+        out.push((pc, r, raw));
+    }
+    out.sort_by_key(|(pc, ..)| *pc);
+    Lifts {
+        blocks: out,
+        span: end - u64::from(f.entry.addr),
+    }
+}
+
+/// Lifts every function of `report` (an analysis of `rom`) into units and
+/// emits them; `image_id` identifies the ROM to the runtime.
+#[must_use]
+pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
+    let fe = Gb::new();
+    let mut lifted = Lifted::default();
+    let mut groups: BTreeMap<u32, Vec<(Loc, Lifts)>> = BTreeMap::new();
+    for f in report.functions.values() {
+        if !f.entry.is_window() && f.entry.addr >= 0x8000 {
+            continue;
+        }
+        let l = lift_function(&fe, rom, f, &mut lifted);
+        groups
+            .entry(unit_key(f.entry))
+            .or_default()
+            .push((f.entry, l));
+    }
+    groups.entry(FIXED).or_default();
+    let window: BTreeSet<(u64, u64)> = groups
+        .iter()
+        .filter(|(k, _)| **k != FIXED)
+        .flat_map(|(k, list)| {
+            list.iter().flat_map(move |(e, l)| {
+                std::iter::once((u64::from(*k), u64::from(e.addr))).chain(
+                    l.blocks
+                        .iter()
+                        .filter(|(pc, ..)| (0x4000..0x8000).contains(pc))
+                        .map(move |(pc, ..)| (u64::from(*k), *pc)),
+                )
+            })
+        })
+        .collect();
+    let fe = Gb::with_window(window);
+    let order: Vec<u32> = std::iter::once(FIXED)
+        .chain(groups.keys().copied().filter(|&k| k != FIXED))
+        .collect();
+    for key in order {
+        let list = &groups[&key];
+        let fns: Vec<Function<'_>> = list
+            .iter()
+            .map(|(entry, l)| Function {
+                entry: u64::from(entry.addr),
+                name: host_name(*entry),
+                guest_name: None,
+                span: l.span.max(1),
+                insts: l
+                    .blocks
+                    .iter()
+                    .map(|(pc, r, raw)| {
+                        let i = match r {
+                            Ok(block) => Insn::Lifted { block, raw: *raw },
+                            Err(e) => Insn::Failed(e),
+                        };
+                        (*pc, i)
+                    })
+                    .collect(),
+                tables: BTreeMap::new(),
+                pads: BTreeSet::new(),
+            })
+            .collect();
+        let (dir, symbol, name) = if key == FIXED {
+            ("fixed".to_string(), "rl_unit_gb_fixed".to_string(), "fixed")
+        } else {
+            (
+                format!("bank{key:03x}"),
+                format!("rl_unit_gb_b{key:03x}"),
+                "bank",
+            )
+        };
+        let opts = Options {
+            unit_name: if key == FIXED {
+                name.into()
+            } else {
+                format!("{name}{key:03x}")
+            },
+            unit_symbol: symbol.clone(),
+            io_map: device_map(),
+            image_id,
+            ..Options::default()
+        };
+        let output = relift_emit::emit(&fe, &fns, &[], &opts);
+        lifted.units.push(Unit {
+            bank: key,
+            symbol,
+            dir,
+            output,
+            functions: fns.len(),
+        });
+    }
+    lifted
+}
+
+/// The units of a ROM the analysis refused (a mapper it does not model):
+/// an empty fixed unit, so every instruction runs on the device library's
+/// CPU.
+#[must_use]
+pub fn lift_nothing(image_id: [u8; 32]) -> Lifted {
+    let opts = Options {
+        unit_name: "fixed".into(),
+        unit_symbol: "rl_unit_gb_fixed".into(),
+        io_map: device_map(),
+        image_id,
+        ..Options::default()
+    };
+    Lifted {
+        units: vec![Unit {
+            bank: FIXED,
+            symbol: opts.unit_symbol.clone(),
+            dir: "fixed".into(),
+            output: relift_emit::emit(&Gb::new(), &[], &[], &opts),
+            functions: 0,
+        }],
+        ..Lifted::default()
+    }
+}
+
+/// What the program file needs besides the units.
+#[derive(Clone, Debug)]
+pub struct Program<'a> {
+    /// The title, for the window and reports.
+    pub title: &'a str,
+    /// The hardware the program starts as unless told otherwise
+    /// (`dmg`, `cgb`, ...; see `rl_gb_model_parse`).
+    pub model: &'a str,
+    /// The save file the program reads and writes unless told otherwise.
+    pub save: &'a str,
+}
+
+fn c_string(s: &str) -> String {
+    let mut o = String::from("\"");
+    for b in s.bytes() {
+        match b {
+            b'"' => o.push_str("\\\""),
+            b'\\' => o.push_str("\\\\"),
+            0x20..=0x7E => o.push(char::from(b)),
+            _ => {
+                let _ = write!(o, "\\{b:03o}");
+            }
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it).
+#[must_use]
+pub fn rom_c() -> String {
+    "#include <stddef.h>\n#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_gb_rom[];\nconst uint8_t rl_gb_rom[] = {\n#embed \"rom.bin\"\n};\nextern const size_t rl_gb_rom_len;\nconst size_t rl_gb_rom_len = sizeof rl_gb_rom;\n".into()
+}
+
+/// `program.c`: the unit list and `main`.
+#[must_use]
+pub fn program_c(units: &[Unit], p: &Program<'_>) -> String {
+    let mut t = String::from(
+        "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"gbmain.h\"\n",
+    );
+    for u in units {
+        let _ = writeln!(t, "extern const rl_unit {};", u.symbol);
+    }
+    t.push_str("extern const uint8_t rl_gb_rom[];\nextern const size_t rl_gb_rom_len;\n");
+    t.push_str("static const rl_gb_unit units[] = {\n");
+    for u in units {
+        let _ = writeln!(t, "    {{ &{}, UINT32_C({:#x}) }},", u.symbol, u.bank);
+    }
+    let _ = write!(
+        t,
+        "}};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {} }};\n    return rl_gb_main(&prog, argc, argv);\n}}\n",
+        units.len(),
+        c_string(p.title),
+        c_string(p.model),
+        c_string(p.save)
+    );
+    t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rom() -> Vec<u8> {
+        let mut r = vec![0u8; 0x8000];
+        r[0x147] = 0x01;
+        r[0x148] = 0x00;
+        r[0x100..0x104].copy_from_slice(&[0x00, 0xC3, 0x50, 0x01]);
+        let prog = [0x3E, 0x01, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x40, 0x18, 0xF6];
+        r[0x150..0x150 + prog.len()].copy_from_slice(&prog);
+        r[0x4000..0x4004].copy_from_slice(&[0xC4, 0x10, 0x40, 0xC9]);
+        r[0x4010] = 0xC9;
+        r
+    }
+
+    #[test]
+    fn the_fixed_window_and_each_bank_are_units_of_their_own() {
+        let rom = rom();
+        let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
+        let l = lift(&rom, &report, [0; 32]);
+        let banks: Vec<u32> = l.units.iter().map(|u| u.bank).collect();
+        assert_eq!(banks, [FIXED, 1]);
+        assert!(l.unlifted.is_empty(), "{:?}", l.unlifted);
+        let bank1: String = l.units[1]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        assert!(bank1.contains("gb_b001_4000"), "{bank1}");
+        assert!(bank1.contains("rl_gb_sync(c, mem,"), "{bank1}");
+        assert!(bank1.contains("UINT32_C(0x40030029)"), "{bank1}");
+        let fixed: String = l.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        assert!(fixed.contains("rl_gb_io_write(c, mem,"), "{fixed}");
+        assert!(
+            fixed.contains("rl_indirect(c, UINT64_C(0x4000))"),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn a_flag_write_an_instruction_later_overwrites_survives_its_sync_point() {
+        let mut r = rom();
+        r[0x150..0x153].copy_from_slice(&[0x1C, 0x1C, 0xC9]);
+        let report = relift_gb_analyze::analyze(&r).expect("analyzes");
+        let l = lift(&r, &report, [0; 32]);
+        let c: String = l.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        let first = c.split("L_150: {").nth(1).expect("the first INC E");
+        let first = first.split("L_151: {").next().expect("ends");
+        assert!(first.contains("r10 = "), "{first}");
+        assert!(first.contains("r9 = "), "{first}");
+    }
+
+    #[test]
+    fn the_program_lists_the_units_with_their_banks() {
+        let rom = rom();
+        let report = relift_gb_analyze::analyze(&rom).expect("analyzes");
+        let l = lift(&rom, &report, [0; 32]);
+        let c = program_c(
+            &l.units,
+            &Program {
+                title: "T\"",
+                model: "cgb",
+                save: "a.sav",
+            },
+        );
+        assert!(
+            c.contains("{ &rl_unit_gb_fixed, UINT32_C(0xffffffff) },"),
+            "{c}"
+        );
+        assert!(c.contains("{ &rl_unit_gb_b001, UINT32_C(0x1) },"), "{c}");
+        assert!(c.contains("\"T\\\"\", \"cgb\", \"a.sav\""), "{c}");
+    }
+}

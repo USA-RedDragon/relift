@@ -20,6 +20,7 @@ relift-cache = { path = "core/cache" }
 relift-cpu-a64 = { path = "cpus/a64" }
 relift-cpu-arm32 = { path = "cpus/arm32" }
 relift-cpu-sm83 = { path = "cpus/sm83" }
+relift-gb = { path = "guests/gb/guest" }
 relift-gb-analyze = { path = "guests/gb/analyze" }
 relift-gb-formats = { path = "guests/gb/formats" }
 relift-gb-tools = { path = "guests/gb/tools" }
