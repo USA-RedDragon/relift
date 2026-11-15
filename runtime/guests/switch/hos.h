@@ -124,7 +124,9 @@ enum {
     MS_THREAD_LOCAL = MS_MAPPED | MS_POOL_ALLOCATED | MS_LINEAR_MAPPED | 0xC,
     MS_TRANSFER_MEMORY = MS_IPC_SEND_TYPE3 | MS_IPC_SEND_TYPE1 | MS_MAPPED | MS_QUERY_PHYSICAL_ALLOWED |
                          MS_MAP_DEVICE_ALLOWED | MS_MAP_DEVICE_ALIGNED_ALLOWED | MS_POOL_ALLOCATED | MS_LINEAR_MAPPED | 0xE,
-    MS_INACCESSIBLE = 0x10
+    MS_INACCESSIBLE = 0x10,
+    /** @brief Rest of a host page that a shared memory view fills in part: reported free, refused to maps. */
+    MS_HOST_RESERVED = 1u << 30
 };
 
 /** @brief Memory attribute bits. */

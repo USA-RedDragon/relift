@@ -339,7 +339,7 @@ rl_result hos_cache_range(uint64_t addr, uint64_t size)
     for (uint64_t at = addr; rc == KR_SUCCESS && at < addr + size;) {
         rl_vm_block b = rl_vm_query(&hos.vm, at);
         uint32_t s = state_of(&b);
-        if (s == MS_FREE || s == MS_INACCESSIBLE || !b.size)
+        if ((s & 0xFF) == MS_FREE || s == MS_INACCESSIBLE || !b.size)
             rc = KR_INVALID_MEM_STATE;
         at = b.addr + b.size;
     }
@@ -438,6 +438,15 @@ rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_inf
         rl_vm_block b = rl_vm_query(&hos.vm, addr);
         mi.addr = b.addr;
         mi.size = b.size;
+        if ((state_of(&b) & 0xFF) == MS_FREE) {
+            for (rl_vm_block p; mi.addr && (p = rl_vm_query(&hos.vm, mi.addr - 1), (state_of(&p) & 0xFF) == MS_FREE);) {
+                mi.size += mi.addr - p.addr;
+                mi.addr = p.addr;
+            }
+            for (rl_vm_block n; mi.addr + mi.size < hos.vm.size &&
+                                (n = rl_vm_query(&hos.vm, mi.addr + mi.size), (state_of(&n) & 0xFF) == MS_FREE);)
+                mi.size = n.addr + n.size - mi.addr;
+        }
         mi.type = state_of(&b) & 0xFF;
         mi.attr = attr_of(&b);
         mi.perm = hos_perm(b.perm);
@@ -546,7 +555,7 @@ static rl_result shmem_map(hos_shmem *s, uint64_t addr, uint64_t size, uint32_t 
     }
     if (rl_vm_map_shm(&hos.vm, lo, hi - lo, &s->shm))
         return KR_OUT_OF_MEMORY;
-    uint64_t pad = tag_of(MS_INACCESSIBLE, 0);
+    uint64_t pad = tag_of(MS_HOST_RESERVED, 0);
     if ((lo < addr && rl_vm_set(&hos.vm, lo, addr - lo, RL_VM_NONE, pad, RL_VM_KEEP)) ||
         (hi > addr + size && rl_vm_set(&hos.vm, addr + size, hi - addr - size, RL_VM_NONE, pad, RL_VM_KEEP)) ||
         rl_vm_set(&hos.vm, addr, size, hos_vm_perm(perm), tag_of(MS_SHARED_MEMORY, 0), RL_VM_KEEP)) {

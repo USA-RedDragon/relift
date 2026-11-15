@@ -147,8 +147,11 @@ Prototype names used in the tags:
     The first guest view picks the offset and moves the bytes (services
     reach them through the kernel lock or a per-object lock, so the move is
     safe). The rest of each covered host page must be free guest address
-    space; the kernel reserves it (reported as inaccessible) until the view
-    is unmapped, and refuses the map when another mapping is already there.
+    space; the kernel reserves it until the view is unmapped, and refuses
+    the map when another mapping is already there. svcQueryMemory reports
+    the reserve as free, joined with the free space around it, because
+    nn::os checks that the guard pages around a new view are free; a later
+    map into the reserve is refused.
     A second view at a different offset is refused while the first is
     mapped.
   - **Transfer memory:** lent in place, so it only changes permissions and

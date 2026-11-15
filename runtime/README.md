@@ -209,9 +209,9 @@ any storage with no tree.
 - Shared memory is mapped by mapping the same host pages again. On 16 KiB
   host pages a view that does not fill its host pages needs the rest of
   them free: the kernel reserves that rest (svcQueryMemory reports it as
-  inaccessible, and guest access to it is not trapped) and refuses with an
-  invalid memory state result and a one-time report when another mapping
-  is already there. The object's bytes sit at the host-page offset of its
+  free so guard page checks pass, maps into it are refused, and guest
+  access to it is not trapped) and refuses with an invalid memory state
+  result and a one-time report when another mapping is already there. The object's bytes sit at the host-page offset of its
   first view, so a second view at another offset is refused while the first
   is mapped.
 - The Switch guest does not support 32-bit address spaces (the core does).
