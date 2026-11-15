@@ -430,6 +430,24 @@ fn window_code_without_an_entry_of_its_own_lifts_its_bank() {
 }
 
 #[test]
+fn a_small_image_tries_every_bank_where_the_bank_is_not_known() {
+    let r = Cart::new(0x19, 0x00)
+        .put(0, 0x150, &[0x18, 0xFE])
+        .put(0, 0x40, &[0xCD, 0x00, 0x41, 0xD9])
+        .put(1, 0x4100, &[0xC9])
+        .analyze();
+    assert!(has(&r, 1, 0x4100), "{:?}", r.functions.keys());
+    assert!(!kinds(&r).contains(&UnresolvedKind::UnknownBank));
+    let big = Cart::new(0x19, 0x02)
+        .put(0, 0x150, &[0x18, 0xFE])
+        .put(0, 0x40, &[0xCD, 0x00, 0x41, 0xD9])
+        .put(1, 0x4100, &[0xC9])
+        .analyze();
+    assert!(!has(&big, 1, 0x4100));
+    assert!(kinds(&big).contains(&UnresolvedKind::UnknownBank));
+}
+
+#[test]
 fn a_constant_jump_through_hl_is_followed() {
     let r = Cart::new(0x19, 0x02)
         .put(0, 0x150, &[0x21, 0x00, 0x03, 0xE9])

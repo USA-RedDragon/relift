@@ -2,6 +2,10 @@
 
 use relift_gb_formats::MapperKind;
 
+/// The most banks for which a window address of an unknown bank is tried
+/// in every bank.
+const FEW_BANKS: usize = 4;
+
 /// A ROM bank register.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BankReg {
@@ -125,6 +129,22 @@ impl BankModel {
         }
     }
 
+    /// Every bank the window can hold, when the image has so few banks
+    /// that code may try each where the bank is not known.
+    #[must_use]
+    pub fn few(&self) -> Option<Vec<u16>> {
+        if self.kind.is_none() || self.banks > FEW_BANKS {
+            return None;
+        }
+        let mut v: Vec<u16> = (0..=0xFF)
+            .flat_map(|lo| (0..4).map(move |hi| (lo, hi)))
+            .filter_map(|(lo, hi)| self.effective(lo, hi).ok())
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        Some(v)
+    }
+
     /// The register contents after reset.
     #[must_use]
     pub fn reset(&self) -> (u16, u8) {
@@ -226,6 +246,19 @@ mod tests {
     #[test]
     fn unmodelled_mappers_are_refused() {
         assert!(BankModel::new(MapperKind::Huc3, 64).is_none());
+    }
+
+    #[test]
+    fn a_small_image_lists_every_bank_the_window_can_hold() {
+        let m = BankModel::new(MapperKind::Mbc5, 2).expect("modelled");
+        assert_eq!(m.few(), Some(vec![0, 1]));
+        let m = BankModel::new(MapperKind::Mbc1, 4).expect("modelled");
+        assert_eq!(m.few(), Some(vec![0, 1, 2, 3]));
+        assert_eq!(
+            BankModel::new(MapperKind::Mbc1, 8).and_then(|m| m.few()),
+            None
+        );
+        assert_eq!(BankModel::opaque(2).few(), None);
     }
 
     #[test]

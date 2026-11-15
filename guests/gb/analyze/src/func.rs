@@ -682,6 +682,13 @@ impl<'a> Run<'a> {
                         self.branches.push((loc, t));
                         self.enter(t, st);
                     }
+                    Err((UnresolvedKind::UnknownBank, false)) if self.env.model.few().is_some() => {
+                        for bank in self.env.model.few().into_iter().flatten() {
+                            let t = Loc { bank, addr };
+                            self.branches.push((loc, t));
+                            self.enter(t, st);
+                        }
+                    }
                     Err((k, dep)) => {
                         self.unresolved(loc, k, format!("target ${addr:04X}"), dep);
                     }
@@ -712,6 +719,11 @@ impl<'a> Run<'a> {
                 }
                 match self.flow(&st, addr) {
                     Ok(t) => self.call(loc, t, kind, ret, st),
+                    Err((UnresolvedKind::UnknownBank, false)) if self.env.model.few().is_some() => {
+                        for bank in self.env.model.few().into_iter().flatten() {
+                            self.call(loc, Loc { bank, addr }, kind, ret, st);
+                        }
+                    }
                     Err((k, dep)) => {
                         self.unresolved(loc, k, format!("target ${addr:04X}"), dep);
                     }
@@ -1333,8 +1345,9 @@ impl<'a> Run<'a> {
                                     out.push((*value, Some(bank)));
                                 }
                             }
-                            None => bank_missing.push(*value),
+                            None => self.any_bank(*value, &mut out, &mut bank_missing),
                         },
+                        WindowBank::Unknown => self.any_bank(*value, &mut out, &mut bank_missing),
                         _ => bank_missing.push(*value),
                     }
                 }
@@ -1421,8 +1434,25 @@ impl<'a> Run<'a> {
     }
 
     fn blind(&mut self, st: &State) {
-        if let WindowBank::Known(b) = st.window_bank(self.env.model) {
-            self.out.blind.insert(b);
+        match st.window_bank(self.env.model) {
+            WindowBank::Known(b) => {
+                self.out.blind.insert(b);
+            }
+            WindowBank::Cell(_) | WindowBank::Unknown => {
+                self.out
+                    .blind
+                    .extend(self.env.model.few().into_iter().flatten());
+            }
+            _ => {}
+        }
+    }
+
+    /// A window address whose bank is not known: in every bank, when the
+    /// image has few, otherwise listed.
+    fn any_bank(&self, v: u16, out: &mut Vec<(u16, Option<u16>)>, missing: &mut Vec<u16>) {
+        match self.env.model.few() {
+            Some(banks) => out.extend(banks.into_iter().map(|b| (v, Some(b)))),
+            None => missing.push(v),
         }
     }
 
