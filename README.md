@@ -163,7 +163,16 @@ go to `$XDG_DATA_HOME/<game>` (default `~/.local/share/<game>`), never into
 the AppImage.
 
 It needs `appimagetool` on `PATH` (or `toolchain.appimagetool`); without it
-the build prints how to get it and still finishes. `package.appimage` is
+the build prints how to get it and still finishes. The AppImage runtime (the
+start of the file; MIT, from github.com/AppImage/type2-runtime) is pinned by
+release tag and SHA-256 in `relift/src/appimage_runtime.rs`. The first
+packaging build fetches it into `<cache>/sdk/appimage-runtime/<tag>/<arch>`,
+checks the hash and moves it into place in one step; later builds, on any
+number of processes at once, use the cached file with no network. On a
+machine with no network, copy that file there from another. Its license is
+listed in `BUNDLED.txt` and shipped as `type2-runtime-LICENSE`. Test and
+corpus runs that exercise the program, not the package, set
+`RELIFT_PACKAGE_APPIMAGE=never`. `package.appimage` is
 `auto` (the default), `always` (a missing tool fails the build) or `never`.
 `relift run` and the dev build are unchanged.
 

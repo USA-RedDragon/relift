@@ -19,6 +19,13 @@ env:
   CROSS_IMAGE: ghcr.io/usa-reddragon/rust-cross:1.98.1@sha256:a4d9cb8c3d4a4134c36dec1df78f1b0cc760d7fe443240dd5303ee64a01996c2
   CARGO_DENY_VERSION: 0.20.2
   CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+  # The AppImage type 2 runtime relift packages with: the tag and x86_64 hash
+  # of relift/src/appimage_runtime.rs (the packaging job checks the tag), and
+  # appimagetool, pinned by release and hash.
+  APPIMAGE_RUNTIME_TAG: "20251108"
+  APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+  APPIMAGETOOL_VERSION: 1.9.1
+  APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
 
 jobs:
   checks:
@@ -117,6 +124,46 @@ jobs:
         run: |
           python3 -I runtime/guests/gb/devtests/ci_corpus.py --relift target/debug/relift \
             --roms "$RUNNER_TEMP/gb-roms" --fetch --work "$RUNNER_TEMP/gb-work" --jobs 4
+
+  appimage:
+    name: AppImage packaging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc --version
+          clang --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: The runtime pin in the source is the one the cache is keyed by
+        run: grep -q "pub const TAG: &str = \"$APPIMAGE_RUNTIME_TAG\";" relift/src/appimage_runtime.rs
+
+      - name: Cache the pinned AppImage runtime
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/relift/sdk/appimage-runtime
+          key: appimage-runtime-${{ env.APPIMAGE_RUNTIME_TAG }}-${{ env.APPIMAGE_RUNTIME_SHA256 }}
+
+      - name: Install appimagetool
+        run: |
+          dir="$RUNNER_TEMP/appimagetool"
+          mkdir -p "$dir/bin"
+          curl -fsSL -o "$dir/appimagetool.AppImage" "https://github.com/AppImage/appimagetool/releases/download/$APPIMAGETOOL_VERSION/appimagetool-x86_64.AppImage"
+          echo "$APPIMAGETOOL_SHA256  $dir/appimagetool.AppImage" | sha256sum -c -
+          chmod +x "$dir/appimagetool.AppImage"
+          (cd "$dir" && ./appimagetool.AppImage --appimage-extract >/dev/null)
+          ln -s "$dir/squashfs-root/AppRun" "$dir/bin/appimagetool"
+          echo "$dir/bin" >> "$GITHUB_PATH"
+
+      - name: Package four programs at once
+        run: cargo test --locked -p relift --test appimage_parallel -- --nocapture
 
   generated:
     name: generated templates are current
