@@ -11,6 +11,7 @@
 //! relift-check insn <hex>[,<hex>...] [options]
 //! relift-check forms <name>[,<name>...]|all [options]
 //! relift-check --oracle rustyboi step|rom ...   (Game Boy SM83, see gb/cli.rs)
+//! relift-check --oracle nba rom ...             (GBA, see gba/cli.rs)
 //! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
 //!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
 //!          [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]
@@ -41,6 +42,7 @@
 
 mod emu;
 mod gb;
+mod gba;
 mod mutate;
 mod oracle;
 mod states;
@@ -306,7 +308,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n       relift-check --oracle rustyboi step|rom ...  (Game Boy)\n       relift-check --oracle nba rom ...  (GBA)"
     );
     ExitCode::from(2)
 }
@@ -314,6 +316,9 @@ fn usage() -> ExitCode {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = gb::cli::dispatch(&args) {
+        return code;
+    }
+    if let Some(code) = gba::cli::dispatch(&args) {
         return code;
     }
     if args.len() < 2 {
