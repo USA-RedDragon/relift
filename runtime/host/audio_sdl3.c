@@ -10,6 +10,9 @@
 
 #include <stdlib.h>
 
+/** @brief Silence queued when playback starts on an empty stream (20 ms at 48 kHz), so scheduling jitter of the producer does not reach the device as a gap. */
+#define PRIME_FRAMES 960u
+
 typedef struct sdl_out {
     rl_audio_out head;
     SDL_AudioStream *stream;
@@ -66,8 +69,16 @@ static void sdl_pause(rl_audio_out *h, bool paused)
     sdl_out *o = (sdl_out *)h;
     if (paused)
         SDL_PauseAudioStreamDevice(o->stream);
-    else
+    else {
+        if (SDL_GetAudioStreamQueued(o->stream) == 0) {
+            int bytes = (int)(PRIME_FRAMES * o->frame_bytes);
+            void *zero = calloc(1, (size_t)bytes);
+            if (zero)
+                SDL_PutAudioStreamData(o->stream, zero, bytes);
+            free(zero);
+        }
         SDL_ResumeAudioStreamDevice(o->stream);
+    }
 }
 
 static const rl_audio_backend g_sdl = {

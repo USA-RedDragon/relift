@@ -2,7 +2,9 @@
  * @file audio_tick.c
  * @brief The audio timer: one host thread that calls every registered
  * callback once per 5 ms frame, on absolute deadlines so the rate does not
- * drift, and skips frames after a long stall instead of bursting.
+ * drift. A late thread catches up by running the missed frames back to back
+ * (the audio keeps its length and pitch); only a stall longer than
+ * TICK_CATCHUP_FRAMES skips the rest.
  */
 #include "hos_audio.h"
 
@@ -10,6 +12,9 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
+
+/** @brief Longest backlog (200 ms) run back to back after a stall. */
+#define TICK_CATCHUP_FRAMES 40
 
 /** @brief Most callbacks at once (renderers and outputs). */
 #define TICK_MAX 32
@@ -52,7 +57,7 @@ static void *tick_main(void *arg)
         sleep_until(next);
         uint64_t now = rl_clock_ns();
         next += AUDIO_FRAME_NS;
-        if (now > next + 4 * AUDIO_FRAME_NS)
+        if (now > next + TICK_CATCHUP_FRAMES * AUDIO_FRAME_NS)
             next = now + AUDIO_FRAME_NS;
         pthread_mutex_lock(&g_tick.lock);
         if (g_tick.stop) {
