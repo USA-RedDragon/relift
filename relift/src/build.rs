@@ -15,7 +15,7 @@ use relift_switch_formats::nso::Nso;
 
 use crate::hints::Hint;
 use crate::import::{BoxError, cache_root};
-use crate::mods::stage::{Analyzed, Found, Stage};
+use crate::mods::stage::{Analyzed, Found, Input, Stage};
 use crate::mods::variants::ModulePlan;
 use crate::settings::Settings;
 use crate::ui::Ui;
@@ -226,9 +226,11 @@ fn emit_modules(
         let analyzed = stage.analyze(
             &cpu,
             i,
-            &module,
-            original.as_ref(),
-            &hint_key,
+            &Input {
+                module: &module,
+                original: original.as_ref(),
+                hints: &hint_key,
+            },
             &mut |event| match event {
                 Progress::Found { entries, .. } => {
                     found = entries;

@@ -61,6 +61,17 @@ pub enum Found {
     },
 }
 
+/// The module to analyze.
+#[derive(Clone, Copy)]
+pub struct Input<'a> {
+    /// The module with the user mods applied.
+    pub module: &'a Module,
+    /// The module before them, when they changed it.
+    pub original: Option<&'a Module>,
+    /// The hints that name roots, as the cache key sees them.
+    pub hints: &'a str,
+}
+
 /// The analysis of one module.
 pub struct Analyzed<T> {
     /// Its functions without their code.
@@ -148,12 +159,15 @@ impl Stage {
         &self,
         fe: &(dyn Frontend + Sync),
         i: usize,
-        module: &Module,
-        original: Option<&Module>,
-        hints: &str,
+        input: &Input<'_>,
         on: &mut dyn FnMut(Progress),
         visit: &(dyn Fn(&Function) -> T + Sync),
     ) -> Result<Analyzed<T>, BoxError> {
+        let Input {
+            module,
+            original,
+            hints,
+        } = *input;
         let files = [fe.regs()];
         let path = self.cache_dir.join(format!("{i}.zst"));
         let key_path = self.cache_dir.join(format!("{i}.key"));
