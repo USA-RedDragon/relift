@@ -13,6 +13,19 @@ from three sources, listed per function below:
       memory, stack frames and cycle counts of about 3,500 calls), from which
       the side registers (r1, r3), the stack frames, the edge cases and the
       cycle cost fits were derived.
+  [I] SWI probe 2's console records (tests/vectors_probe2.h): for each
+      long call, a timer interrupt at every offset, with the time the
+      handler was entered, the return address and SPSR it saw and how much of
+      the destination was written; DMA during the calls; the halt call;
+      copies from SRAM; HuffUnComp of every data size. Only whole-call
+      effects and times were fitted to them: when an interrupt inside a
+      call is taken, what its handler finds, and the call's total cycles.
+      The calls run as whole calls; an interrupt inside one enters from
+      relift's own slide address, not from an address inside the console's
+      BIOS.
+  [N] NanoBoyAdvance runs with the console's BIOS as a black box: the
+      destination bytes of HuffUnComp for data sizes 0 to 15 and the
+      whole-call cycles of IntrWait (no BIOS memory was read or traced).
 
 swi.c
   dispatcher frames (SPSR, r11, r12, LR on the supervisor stack; r2 and LR on
@@ -22,6 +35,8 @@ swi.c
   GetBiosChecksum, SoftReset, Halt, Stop, CustomHalt, MultiBoot    [G][P]
   post-boot state and I/O                                          [G]
   cycle cost fits per call                                         [P]
+  cycles before and after a routine in which no interrupt is taken,
+  the IRQ stub's cycles                                            [I]
 math.c
   Div, DivArm (quotient loop, signs, r3 = |quotient|, division by
   zero behaviour)                                                  [G][P]
@@ -33,14 +48,18 @@ math.c
 copy.c
   CpuSet, CpuFastSet, the source check on address bits 25-27,
   the registers they leave                                         [G][P]
+  when an interrupt inside them is taken                           [I]
 decomp.c
   BitUnPack, LZ77UnComp (WRAM and VRAM), HuffUnComp, RLUnComp
   (WRAM and VRAM), Diff8bitUnFilter (WRAM and VRAM),
   Diff16bitUnFilter: formats                                      [G]
   r0, r1, r3 left, VRAM odd-byte handling, stack contents          [P]
+  LZ77UnComp and RLUnComp: when an interrupt inside them is taken  [I]
+  HuffUnComp output and cycles for every data size                 [I][N]
 misc.c
   RegisterRamReset areas and order                                 [G][C][P]
   IntrWait, VBlankIntrWait                                         [G][P]
+  IntrWait's cycles, the registers a handler inside it finds       [I][N]
   SoundBias                                                        [G]
   MidiKey2Freq scale and frequency tables                          [C]
   MidiKey2Freq arithmetic                                          [G][P]
