@@ -173,6 +173,8 @@ typedef struct gba_prefetch {
     uint32_t addr, load;
     int32_t wait;
     bool stopped, ahead;
+    /** @brief WAITCNT turned the prefetch off with a halfword on the way: it still arrives, then the unit stops. */
+    bool drain;
 } gba_prefetch;
 
 enum { GBA_FIFO_WORDS = 7 };
@@ -293,6 +295,8 @@ void gba_flash_write(rl_gba *g, uint32_t addr, uint8_t v);
 
 void gba_waits_rebuild(rl_gba *g);
 void gba_pf_step(rl_gba *g, unsigned clocks);
+/** @brief A WAITCNT write of v: turning the prefetch off lets a halfword on the way arrive, and the cartridge access after it is nonsequential. */
+void gba_pf_waitcnt(rl_gba *g, uint16_t v);
 uint32_t gba_bus_read(rl_gba *g, gba_who who, uint32_t addr, unsigned size, bool seq);
 void gba_bus_write(rl_gba *g, gba_who who, uint32_t addr, unsigned size, uint32_t value, bool seq);
 

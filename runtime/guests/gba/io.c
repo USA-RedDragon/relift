@@ -305,7 +305,7 @@ void gba_sys_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
         gba_waits_rebuild(g);
         return;
     case 0x205:
-        g->waitcnt = (uint16_t)((g->waitcnt & 0x00FF) | (v & 0x5F) << 8);
+        gba_pf_waitcnt(g, (uint16_t)((g->waitcnt & 0x00FF) | (v & 0x5F) << 8));
         gba_waits_rebuild(g);
         return;
     case 0x208:

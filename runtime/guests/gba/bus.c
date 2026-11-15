@@ -92,11 +92,31 @@ static uint16_t rom_burst_read(rl_gba *g, uint32_t addr)
     return h;
 }
 
+static void pf_stop(rl_gba *g)
+{
+    g->pf.stopped = true;
+    g->pf.ahead = false;
+    g->pf.drain = false;
+    g->rom_burst = false;
+}
+
+void gba_pf_waitcnt(rl_gba *g, uint16_t v)
+{
+    gba_prefetch *p = &g->pf;
+    if (pf_on(g) && !(v & 0x4000) && !p->stopped) {
+        if (p->ahead && !pf_full(p))
+            p->drain = true;
+        else
+            pf_stop(g);
+    }
+    g->waitcnt = v;
+}
+
 void gba_pf_step(rl_gba *g, unsigned clocks)
 {
     gba_charge(g, clocks);
     gba_prefetch *p = &g->pf;
-    if (!pf_on(g) || p->stopped)
+    if ((!pf_on(g) && !p->drain) || p->stopped)
         return;
     while (clocks--) {
         if (pf_full(p)) {
@@ -114,6 +134,10 @@ void gba_pf_step(rl_gba *g, unsigned clocks)
             p->load += 2;
         }
         p->wait = (int32_t)wait_cart(g, p->load, true);
+        if (p->drain) {
+            pf_stop(g);
+            break;
+        }
     }
 }
 
@@ -123,6 +147,7 @@ static void pf_reset(rl_gba *g)
         gba_charge(g, 1);
     g->pf.stopped = true;
     g->pf.ahead = false;
+    g->pf.drain = false;
     g->pf.wait = 0;
     g->pf.addr = 0;
     g->pf.load = 0;
@@ -134,14 +159,24 @@ static void pf_sync(rl_gba *g, unsigned size, uint32_t addr)
         gba_charge(g, 1);
     g->pf.stopped = !pf_on(g);
     g->pf.ahead = false;
+    g->pf.drain = false;
     g->pf.addr = addr + size;
     g->pf.load = addr + size;
     g->pf.wait = (int32_t)wait_cart(g, g->pf.load, true);
 }
 
+static uint32_t rom_timed(rl_gba *g, uint32_t addr, unsigned size, bool burst);
+
 static uint16_t pf_read(rl_gba *g)
 {
     gba_prefetch *p = &g->pf;
+    if (pf_empty(p) && !pf_on(g) && !p->drain) {
+        uint16_t h = (uint16_t)rom_timed(g, p->addr, 2, true);
+        g->rom_burst = false;
+        p->addr += 2;
+        p->load = p->addr;
+        return h;
+    }
     if (p->stopped && pf_empty(p)) {
         p->stopped = false;
         p->wait = (int32_t)wait_cart(g, p->load, false);
@@ -290,7 +325,8 @@ static uint32_t fetch_timed(rl_gba *g, uint32_t addr, unsigned size, bool seq)
     bool burst = g->rom_burst && seq;
     gba_prefetch *p = &g->pf;
     uint32_t v;
-    if ((addr & 0x1FFFEu) && pf_on(g) && addr == p->addr && (!pf_empty(p) || p->ahead || !p->stopped)) {
+    bool held = pf_on(g) ? !pf_empty(p) || p->ahead || !p->stopped : !pf_empty(p) || p->drain;
+    if ((addr & 0x1FFFEu) && addr == p->addr && held) {
         gba_pf_step(g, 1);
         v = pf_read(g);
         v |= size == 4 ? (uint32_t)pf_read(g) << 16 : v << 16;
