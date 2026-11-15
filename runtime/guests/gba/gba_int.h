@@ -175,6 +175,7 @@ struct rl_gba {
     gba_ppu_sched ps;
 
     bool halt_req, stop_req, halted, in_bios;
+    uint64_t dma_overlap;
 
     rl_gba_bios bios;
     rl_gba_bus bios_bus;
@@ -256,6 +257,8 @@ void gba_dma_trigger(rl_gba *g, unsigned timing, uint64_t now);
 void gba_dma_hdma(rl_gba *g, uint64_t now);
 void gba_dma_run(rl_gba *g);
 bool gba_dma_due(const rl_gba *g);
+/** @brief True when no DMA channel is armed and no event falls due in the next cycles. */
+bool gba_dma_quiet(const rl_gba *g, unsigned cycles);
 
 uint64_t gba_lcd_pos(const rl_gba *g, uint64_t t);
 

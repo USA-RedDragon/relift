@@ -178,6 +178,35 @@ TEST(an_immediate_dma_waits_two_cycles_and_stalls_the_cpu)
     mach_free(&m);
 }
 
+TEST(a_dma_runs_alongside_the_cpus_internal_cycles)
+{
+    mach m = mach_new();
+    mach_wr(&m, 100, 0x040000D4u, 4, 0x03001000u);
+    mach_wr(&m, 100, 0x040000D8u, 4, 0x02000000u);
+    mach_wr(&m, 100, 0x040000DCu, 4, 0xC4000004u);
+    rl_gba_idle(m.g, 40);
+    CHECK_EQ(mach_now(&m), 140u);
+    CHECK_EQ(rl_gba_read(m.g, 0x040000DEu, 2), 0x4400u);
+    mach_wr(&m, 200, 0x040000DCu, 4, 0xC4000004u);
+    rl_gba_idle(m.g, 10);
+    CHECK_EQ(mach_now(&m), 232u);
+    mach_free(&m);
+}
+
+TEST(disabling_a_triggered_dma_lowers_its_line)
+{
+    mach m = mach_new();
+    mach_wr(&m, 10, 0x040000B0u, 4, 0x03001000u);
+    mach_wr(&m, 10, 0x040000B4u, 4, 0x02000000u);
+    mach_wr(&m, 10, 0x040000B8u, 4, 0xA2000001u);
+    rl_sched_stall(m.c, 1232);
+    rl_sched_run(m.c);
+    CHECK(rl_sched_pending(m.c) & (1ull << RL_GBA_LINE_DMA));
+    rl_gba_write(m.g, 0x040000BAu, 2, 0);
+    CHECK(!(rl_sched_pending(m.c) & (1ull << RL_GBA_LINE_DMA)));
+    mach_free(&m);
+}
+
 TEST(a_dma_from_the_bios_region_writes_its_last_value)
 {
     mach m = mach_new();

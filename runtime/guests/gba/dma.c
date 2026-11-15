@@ -77,6 +77,14 @@ static void arm(rl_gba *g, unsigned i, uint64_t ready)
     }
 }
 
+bool gba_dma_quiet(const rl_gba *g, unsigned cycles)
+{
+    for (unsigned i = 0; i < 4; i++)
+        if (g->dma[i].active)
+            return false;
+    return !g->cpu || rl_sched_clock(g->cpu)->budget > (int64_t)cycles;
+}
+
 bool gba_dma_due(const rl_gba *g)
 {
     uint64_t now = gba_now(g);
@@ -162,6 +170,8 @@ void gba_dma_run(rl_gba *g)
 {
     if (g->dma_running || !g->cpu)
         return;
+    if (rl_sched_clock(g->cpu)->budget <= 0)
+        rl_sched_run(g->cpu);
     int i = pick(g);
     if (i < 0)
         return;
@@ -265,8 +275,11 @@ void gba_dma_write(rl_gba *g, uint32_t addr, uint8_t v, uint64_t now)
             arm(g, i, now + 2);
     } else if (!enabled(c)) {
         c->active = false;
-        if (g->sched)
+        if (g->sched) {
             rl_sched_cancel(g->sched, &c->ev);
+            if (!gba_dma_due(g))
+                rl_sched_lower(g->sched, RL_GBA_LINE_DMA);
+        }
     }
     gba_lcd_repost(g);
 }

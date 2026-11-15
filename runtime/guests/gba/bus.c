@@ -254,6 +254,7 @@ void gba_bus_write(rl_gba *g, gba_who who, uint32_t addr, unsigned size, uint32_
 uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 {
     gba_dma_run(g);
+    g->dma_overlap = 0;
     addr &= ~(size - 1);
     if (!is_rom(addr)) {
         uint32_t v = gba_bus_read(g, GBA_CPU, addr, size, seq);
@@ -279,6 +280,7 @@ uint32_t rl_gba_fetch(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 uint32_t rl_gba_load(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 {
     gba_dma_run(g);
+    g->dma_overlap = 0;
     addr = gba_align(addr, size);
     uint32_t v = gba_bus_read(g, GBA_CPU, addr, size, seq);
     if (!is_rom(addr))
@@ -289,6 +291,7 @@ uint32_t rl_gba_load(rl_gba *g, uint32_t addr, unsigned size, bool seq)
 void rl_gba_store(rl_gba *g, uint32_t addr, unsigned size, uint32_t value, bool seq)
 {
     gba_dma_run(g);
+    g->dma_overlap = 0;
     addr = gba_align(addr, size);
     gba_bus_write(g, GBA_CPU, addr, size, value, seq);
     if (!is_rom(addr))
@@ -298,8 +301,21 @@ void rl_gba_store(rl_gba *g, uint32_t addr, unsigned size, uint32_t value, bool 
 
 void rl_gba_idle(rl_gba *g, unsigned cycles)
 {
-    gba_dma_run(g);
-    gba_pf_step(g, cycles);
+    while (cycles) {
+        uint64_t t = gba_now(g);
+        gba_dma_run(g);
+        uint64_t dma = gba_now(g) - t;
+        if (dma)
+            g->dma_overlap = dma;
+        if (g->dma_overlap) {
+            g->dma_overlap--;
+            cycles--;
+            continue;
+        }
+        unsigned n = gba_dma_quiet(g, cycles) ? cycles : 1;
+        gba_pf_step(g, n);
+        cycles -= n;
+    }
 }
 
 void rl_gba_service(rl_gba *g)
