@@ -112,7 +112,9 @@ lifted code. CI builds and runs 38 corpus cases through this path
 ### Game Boy Advance
 
 Import is not available yet. `relift-gbarom` reads and checks a ROM header and
-lists the save library strings; multiboot images are refused.
+lists the save library strings. `relift-gbarom functions` lists the functions
+of a ROM across ARM and Thumb code, the code it copies to work RAM and the
+transfers it cannot resolve; `--multiboot` reads a multiboot image.
 
 ## Building and running
 
@@ -148,7 +150,7 @@ build its settings and input screens (docs/input.md).
 | `relift-ir` | Switch | print the IR of A64 instruction words or NSO symbols |
 | `relift-vkgen` | Switch | generate the Vulkan forwarding C from `vk.xml` (package `relift-switch-vkgen`, not in the build line above) |
 | `relift-gbrom` | Game Boy | show a ROM header and validate its checksums; `functions` lists functions per bank, unresolved transfers and code run from RAM |
-| `relift-gbarom` | Game Boy Advance | show a ROM header, validate logo hash, complement and size, list save library strings |
+| `relift-gbarom` | Game Boy Advance | show a ROM header, validate logo hash, complement and size, list save library strings; `functions` lists ARM and Thumb functions |
 
 `relift coverage` (Switch projects; `--json` for a machine-readable form, `--module <name>`
 for one module) lists, per module, the functions found, the instructions that
