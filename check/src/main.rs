@@ -17,6 +17,7 @@
 //! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
 //!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
 //!          [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]
+//!          [--pac-states]
 //! ```
 //!
 //! `insn` runs a fixed word sequence. `forms` runs each named encoding (or
@@ -41,6 +42,9 @@
 //! program that produces FPSR flags: blocks whose flags are built in IR
 //! (QC, compares, min/max) are compared in the interpreter, and blocks with
 //! host FP operations or a flags guard go to the slow engine.
+//! `--pac-states` gives the authenticating forms signed and tampered
+//! pointers (see `pac.rs`), counts how many runs the oracle authenticated
+//! and compares the fault addresses of faulting loads.
 
 mod emu;
 mod gb;
@@ -48,6 +52,7 @@ mod gba;
 mod mips;
 mod mutate;
 mod oracle;
+mod pac;
 mod states;
 mod z80;
 
@@ -75,6 +80,8 @@ struct Report {
     slow: u64,
     both_faulted: u64,
     unplaced: u64,
+    authenticated: u64,
+    auth_failed: u64,
     mutation: Option<String>,
     first: Option<String>,
 }
@@ -192,6 +199,16 @@ fn run_all(
             rep.both_faulted += 1;
         }
         let mut d = compare(ir, or);
+        if pac::PAC_STATES.load(std::sync::atomic::Ordering::Relaxed)
+            && let Some(insn) = c.words.last().and_then(|w| decode(*w))
+        {
+            match pac::authenticated(&insn, or) {
+                Some(true) => rep.authenticated += 1,
+                Some(false) => rep.auth_failed += 1,
+                None => {}
+            }
+            d.extend(pac::fault_differs(ir, or));
+        }
         if emu::UNDEF.load(std::sync::atomic::Ordering::Relaxed)
             && d.is_empty()
             && !matches!(or, emu::Outcome::Fault(s) if s.starts_with("signal 4 ") || s.contains("INSN_INVALID") || s.contains("EXCEPTION"))
@@ -232,6 +249,9 @@ fn check_form(
             continue;
         };
         g.fpcr = opts.fpcr;
+        if pac::PAC_STATES.load(std::sync::atomic::Ordering::Relaxed) {
+            pac::place(&insn, &mut g, &mut r);
+        }
         let mut words = states::prelude(&insn, &mut g, &mut r);
         words.push(word);
         ps.push(prepare(words, g, opts, &mut rep));
@@ -288,11 +308,19 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
         (true, false) => "MISSED",
     };
     println!(
-        "{verdict:6} {name:28} {}/{} matched, {} both faulted, {} unplaced{}{}{}",
+        "{verdict:6} {name:28} {}/{} matched, {} both faulted, {} unplaced{}{}{}{}",
         rep.matched,
         rep.states,
         rep.both_faulted,
         rep.unplaced,
+        if rep.authenticated + rep.auth_failed > 0 {
+            format!(
+                ", {} authenticated, {} failed",
+                rep.authenticated, rep.auth_failed
+            )
+        } else {
+            String::new()
+        },
         if rep.slow > 0 {
             format!(", {} to the slow path", rep.slow)
         } else {
@@ -312,7 +340,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n       relift-check --oracle rustyboi step|lift|rom ...  (Game Boy)\n       relift-check --oracle nba rom ...  (GBA)\n       relift-check --oracle ares lift ...  (VR4300)\n       relift-check --oracle sst-z80|zex|ares-z80 ...  (Z80)"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n         [--pac-states]\n       relift-check --oracle rustyboi step|lift|rom ...  (Game Boy)\n       relift-check --oracle nba rom ...  (GBA)\n       relift-check --oracle ares lift ...  (VR4300)\n       relift-check --oracle sst-z80|zex|ares-z80 ...  (Z80)"
     );
     ExitCode::from(2)
 }
@@ -386,6 +414,7 @@ fn main() -> ExitCode {
             "--hand" => emu::HAND.store(true, std::sync::atomic::Ordering::Relaxed),
             "--undef" => emu::UNDEF.store(true, std::sync::atomic::Ordering::Relaxed),
             "--dce" => emu::DCE.store(true, std::sync::atomic::Ordering::Relaxed),
+            "--pac-states" => pac::PAC_STATES.store(true, std::sync::atomic::Ordering::Relaxed),
             _ => return usage(),
         }
         i += 1;

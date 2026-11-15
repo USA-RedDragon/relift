@@ -27,13 +27,18 @@ when it is missing.
 `relift-check` with no arguments prints the full usage. The A64 oracles are
 Unicorn (the default, linked), QEMU user mode, QEMU `max` and an Apple M2
 over ssh; `oracle/README.md` explains the native harness and how to build it.
+For the pointer authentication forms, the sail-arm model itself is an oracle:
+`--oracle 'cmd:relift-cpu-arm64-gen oracle SAIL_LIB MODEL_SRC' --features
+cortex-a78c --pac-states` runs each word in the model evaluated concretely
+(`cpus/arm64/gen/src/oracle.rs`); `--pac-states` gives the authenticating forms
+signed and tampered pointers (`src/pac.rs`).
 `relift-diff-unicorn` is a Unicorn engine for `relift diff --engine`.
 
 ## Folders
 
 | Folder | Holds |
 |---|---|
-| `src` | the checker: A64 (`emu.rs`, `oracle.rs`, `mutate.rs`), `gb/`, `gba/` and `z80/` |
+| `src` | the checker: A64 (`emu.rs`, `oracle.rs`, `mutate.rs`, `pac.rs`), `gb/`, `gba/` and `z80/` |
 | `oracle` | the native A64 harness (`oracle/README.md`), the NanoBoyAdvance oracle (`oracle/nba/README.md`) and the ares VR4300 and Z80 oracles (`oracle/ares/README.md`) |
 | `gba-ppu` | scene generator and comparison of the GBA picture unit with NanoBoyAdvance (`compare.py ORACLE SCENE.scn...`) |
 | `tests` | the Unicorn comparison test |
