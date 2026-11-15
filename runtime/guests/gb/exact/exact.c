@@ -206,6 +206,19 @@ int rl_gbx_add_ram(uint16_t pc, uint16_t op, rl_fn fn)
     return 0;
 }
 
+/**
+ * @brief Whether a read of addr right now gives the byte peek shows: work RAM,
+ * echo RAM, cartridge RAM and high RAM outside an OAM DMA. Video RAM and OAM
+ * (locked while the picture unit reads them), the I/O registers and every
+ * address during a DMA answer the bus differently.
+ */
+static bool peek_is_bus(uint16_t addr)
+{
+    if (addr >= 0xFF80 && addr <= 0xFFFE)
+        return true;
+    return addr >= 0xA000 && addr < 0xFE00 && rlgbd_now(G.h) >= G.dma_until;
+}
+
 /** @brief The key of the open instruction at pc for the RAM table: the opcode, or 0x100 plus the byte after a CB prefix. */
 static uint16_t ram_key(uint16_t pc)
 {
@@ -223,6 +236,8 @@ static rl_fn ram_enter(rl_ctx *c, uint16_t pc)
 {
     uint32_t i = pc - WINDOW_END;
     if (pc < WINDOW_END || !G.ram_n[i])
+        return NULL;
+    if (G.op == 0xCB && !peek_is_bus((uint16_t)(pc + 1)))
         return NULL;
     uint16_t key = ram_key(pc);
     for (uint32_t k = 0; k < G.ram_n[i]; k++)
@@ -378,15 +393,16 @@ static bool may_start_dma(const rl_ctx *c, uint16_t pc, uint8_t op)
     uint16_t hl = (uint16_t)(c->h << 8 | c->l);
     uint8_t n1 = rlgbd_peek(G.h, (uint16_t)(pc + 1));
     uint16_t nn = (uint16_t)(rlgbd_peek(G.h, (uint16_t)(pc + 2)) << 8 | n1);
+    bool known = pc < WINDOW_END || (peek_is_bus((uint16_t)(pc + 1)) && (g_len[op] < 3 || peek_is_bus((uint16_t)(pc + 2))));
     switch (op) {
-    case 0xE0: return hits_dma((uint16_t)(0xFF00 | n1));
+    case 0xE0: return !known || hits_dma((uint16_t)(0xFF00 | n1));
     case 0xE2: return hits_dma((uint16_t)(0xFF00 | c->c));
-    case 0xEA: return hits_dma(nn);
-    case 0x08: return hits_dma(nn) || hits_dma((uint16_t)(nn + 1));
+    case 0xEA: return !known || hits_dma(nn);
+    case 0x08: return !known || hits_dma(nn) || hits_dma((uint16_t)(nn + 1));
     case 0x02: return hits_dma((uint16_t)(c->b << 8 | c->c));
     case 0x12: return hits_dma((uint16_t)(c->d << 8 | c->e));
     case 0x22: case 0x32: case 0x34: case 0x35: case 0x36: return hits_dma(hl);
-    case 0xCB: return (n1 & 7) == 6 && (n1 & 0xC0) != 0x40 && hits_dma(hl);
+    case 0xCB: return (!known || ((n1 & 7) == 6 && (n1 & 0xC0) != 0x40)) && hits_dma(hl);
     case 0xC5: case 0xD5: case 0xE5: case 0xF5: case 0xCD: case 0xC4: case 0xCC: case 0xD4: case 0xDC:
         return pushes_on_dma(c->sp);
     default:
@@ -735,7 +751,7 @@ static int interp(rl_ctx *c, uint8_t *mem)
         G.st.interp[region(at)]++;
         if (G.logging)
             log_insn(at, op);
-        if (G.learning && at >= WINDOW_END) {
+        if (G.learning && at >= WINDOW_END && (op != 0xCB || peek_is_bus((uint16_t)(at + 1)))) {
             uint16_t key = op == 0xCB ? (uint16_t)(0x100u | rlgbd_peek(G.h, (uint16_t)(at + 1))) : op;
             rl_gbx_seen *s = seen_slot(RL_GBX_SEEN_KEY(RL_GBX_SEEN_RAMOP, key, at));
             if (s)
