@@ -283,6 +283,27 @@ pub fn launcher_pngs(icon: Option<&Icon>, seed: &str) -> Vec<(&'static str, Vec<
         .collect()
 }
 
+/// The iOS home screen icons: `(file name in the bundle, PNG)`. Files named
+/// `AppIcon60x60@2x.png` and the like are what `CFBundleIconFiles` lists
+/// without suffix; iOS picks the size and scale it needs. A game without an
+/// icon gets the generated one.
+#[must_use]
+pub fn ios_pngs(icon: Option<&Icon>, seed: &str) -> Vec<(&'static str, Vec<u8>)> {
+    const SIZES: [(&str, usize); 4] = [
+        ("AppIcon60x60@2x.png", 120),
+        ("AppIcon60x60@3x.png", 180),
+        ("AppIcon76x76@2x~ipad.png", 152),
+        ("AppIcon83.5x83.5@2x~ipad.png", 167),
+    ];
+    let Some(img) = image_of(icon, seed, true) else {
+        return Vec::new();
+    };
+    SIZES
+        .iter()
+        .map(|(name, n)| (*name, encode(&scaled(&img, *n))))
+        .collect()
+}
+
 /// A Windows `.ico` of the game's own icon, PNG entries at 16, 32, 48 and
 /// 256 pixels; `None` for a game without one (the executable keeps the
 /// system's icon).
@@ -447,6 +468,18 @@ mod tests {
         let img = decode_own(&unbase64(&icon.data).unwrap()).unwrap();
         assert_eq!((img.width, img.height), (16, 8));
         assert!(from_jpeg(b"not a jpeg").is_none());
+    }
+
+    #[test]
+    fn the_ios_icons_have_the_sizes_ios_asks_for() {
+        for icon in [Some(gradient()), None] {
+            let l = ios_pngs(icon.as_ref(), "g");
+            assert_eq!(l.len(), 4);
+            for ((name, png), n) in l.iter().zip([120u32, 180, 152, 167]) {
+                assert!(name.starts_with("AppIcon"), "{name}");
+                assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), n);
+            }
+        }
     }
 
     #[test]
