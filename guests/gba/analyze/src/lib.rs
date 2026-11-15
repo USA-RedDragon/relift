@@ -23,7 +23,9 @@
 //!   value.
 //! - Data: words read at constant ROM addresses (literal pools, tables)
 //!   are data and never decoded; [`Report::conflicts`] lists instructions
-//!   that a read also covers.
+//!   that a read also covers. Code in RAM reads its own copy as constants
+//!   only in literal (PC-relative) loads: the rest of a copy may be
+//!   variables the program changes.
 //! - Jump tables: a computed jump after a compare with an immediate and a
 //!   conditional branch on it is run for every index the check lets
 //!   through. A jump through a word of a ROM table with a constant base

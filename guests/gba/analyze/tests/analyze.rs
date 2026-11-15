@@ -530,3 +530,53 @@ fn index_times_a_constant_reads_a_table_of_that_stride() {
     assert!(r.data.contains(&(table, 4)) && r.data.contains(&(table + 12, 4)));
     assert!(!found.iter().any(|(x, _)| (table..table + 0x30).contains(x)));
 }
+
+#[test]
+fn only_literal_loads_read_the_copy_of_ram_code_as_constants() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let src = 0x0800_0400;
+    a.arm(
+        e,
+        &[
+            a_ldr_lit(0, e, e + 0x24),
+            a_ldr_lit(1, e + 4, e + 0x28),
+            a_ldr_lit(2, e + 8, e + 0x2C),
+            a_swi(0x0B),
+            a_ldr_lit(0, e + 0x10, e + 0x28),
+            A_MOV_LR_PC,
+            a_bx(0),
+            a_b(e + 0x1C, e + 0x1C),
+            0,
+            src,
+            0x0300_0000,
+            8 | 1 << 26,
+        ],
+    );
+    a.arm(
+        src,
+        &[
+            a_ldr_lit(1, 0x0300_0000, 0x0300_0018),
+            0xE5D1_0000,
+            0xE350_0000,
+            0x012F_FF1E,
+            A_MOV_R0_1,
+            A_BX_LR,
+            0x0300_001C,
+            0,
+        ],
+    );
+    let r = a.run(e);
+    let ram = |addr| Loc {
+        addr,
+        thumb: false,
+        copy: Some(0),
+    };
+    let f = &r.functions[&ram(0x0300_0000)];
+    assert_eq!(
+        f.instructions.keys().map(|l| l.addr).collect::<Vec<_>>(),
+        (0..6).map(|i| 0x0300_0000 + 4 * i).collect::<Vec<_>>()
+    );
+    assert!(r.data.contains(&(0x0300_0018, 4)));
+    assert!(!r.data.iter().any(|(x, _)| *x == 0x0300_001C));
+}

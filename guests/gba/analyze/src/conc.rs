@@ -56,7 +56,14 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: [Abs; 4]) -> Option<Vec
         if matches!(enc, Encoding::SVC_A1 | Encoding::SVC_T1) {
             return None;
         }
-        let out = eval::eval(block, loc, &st, env.image, Some(&mut m));
+        let out = eval::eval(
+            block,
+            loc,
+            &st,
+            env.image,
+            eval::pc_relative(*enc, word, loc.thumb),
+            Some(&mut m),
+        );
         if out.may_skip && out.may_run {
             return None;
         }

@@ -1,5 +1,6 @@
 //! Runs one lifted instruction over the abstract state.
 
+use relift_cpu_arm32::decode::Encoding;
 use relift_cpu_arm32::lift::COND_FAIL;
 use relift_ir::interp::{eval_bin, eval_cmp, eval_un};
 use relift_ir::{BinOp, Block, CmpOp, ExtKind, Flow, Next, Op, Value, Width};
@@ -319,13 +320,29 @@ pub(crate) fn in_scratch(a: u32) -> bool {
     Region::of(a).is_ram() || (SCRATCH_STACK - 0x1_0000..SCRATCH_STACK).contains(&a)
 }
 
+/// Whether the instruction `word` loads relative to the program counter
+/// (a literal): the only reads of code's own RAM copy taken as constants,
+/// since the rest of a copy may be variables the program changes.
+pub(crate) fn pc_relative(enc: Encoding, word: u32, thumb: bool) -> bool {
+    if thumb {
+        return enc == Encoding::LDR_l_T1;
+    }
+    let load = word >> 20 & 1 == 1;
+    let rn_pc = word >> 16 & 0xF == 15;
+    let single = word >> 26 & 3 == 1;
+    let half = word >> 25 & 7 == 0 && word >> 7 & 1 == 1 && word >> 4 & 1 == 1;
+    load && rn_pc && (single || half)
+}
+
 /// Runs `b`, the instruction at `loc`, from state `st`; with `scratch`,
 /// constant addresses in work RAM and the private stack read and write it.
+/// `literal` tells that the instruction is a [`pc_relative`] load.
 pub(crate) fn eval(
     b: &Block,
     loc: Loc,
     st: &State,
     image: &Image<'_>,
+    literal: bool,
     mut scratch: Option<&mut Scratch>,
 ) -> Out {
     let mut out = Out {
@@ -439,6 +456,7 @@ pub(crate) fn eval(
                 image,
                 cx.get(*addr),
                 w / 8,
+                literal,
                 scratch.as_deref(),
             )),
             Op::Store { addr, value, .. } | Op::IoStore { addr, value, .. } => {
@@ -507,6 +525,7 @@ fn load(
     image: &Image<'_>,
     addr: Abs,
     n: u32,
+    literal: bool,
     scratch: Option<&Scratch>,
 ) -> Abs {
     if let Abs::Idx { base, stride } = addr
@@ -534,7 +553,7 @@ fn load(
                 return Abs::K(v);
             }
             let r = Region::of(a);
-            let own = loc.copy.is_some() && r.is_ram();
+            let own = literal && loc.copy.is_some() && r.is_ram();
             if (r == Region::Rom || own)
                 && let Some(v) = image.read(loc.copy, a, n)
             {

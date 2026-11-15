@@ -378,7 +378,8 @@ impl Run<'_> {
 
     fn execute(&mut self, loc: Loc, word: u32, enc: Encoding, block: &Block, st: &State) {
         let fall = Self::fall_loc(loc);
-        let out = eval::eval(block, loc, st, self.env.image, None);
+        let literal = eval::pc_relative(enc, word, loc.thumb);
+        let out = eval::eval(block, loc, st, self.env.image, literal, None);
         if out.may_skip {
             self.succ(loc, fall, st.clone());
         }
@@ -1066,7 +1067,8 @@ impl Run<'_> {
         for _ in 0..32 {
             let w = self.env.image.fetch(l).ok_or(())?;
             let lifted = self.env.lift(l, w).map_err(|_| ())?;
-            let out = eval::eval(&lifted.1, l, &st, self.env.image, None);
+            let literal = eval::pc_relative(lifted.0, w, l.thumb);
+            let out = eval::eval(&lifted.1, l, &st, self.env.image, literal, None);
             if out.may_skip && out.may_run {
                 return Err(());
             }
