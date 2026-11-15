@@ -15,7 +15,7 @@
 #include <string.h>
 
 #if defined(__ANDROID__) && __ANDROID_API__ < 30
-#error "relift needs Android API level 30 or newer (memfd_create): build with an aarch64-linux-android30 or later target"
+#error "relift needs Android API level 30 or newer (memfd_create): build for API level 30 or later (for example with the NDK clang named <arch>-linux-android30-clang)"
 #endif
 
 #if defined(_WIN32)
