@@ -360,7 +360,8 @@ function __v4t_LoadSH address = {
  * with the base in the list does not write back; STM with the base in the
  * list stores the old base when it is the lowest register, else the new
  * one. Transfers are of aligned words, first N then S; LDM ends with one
- * internal cycle. */
+ * internal cycle, except a Thumb LDM with an empty list, which loads R15
+ * without it (the oracle, NanoBoyAdvance, measured as a whole). */
 
 val __v4t_count : bits(16) -> int
 function __v4t_count registers = {
@@ -380,7 +381,9 @@ function __v4t_LDM (n, registers, wback, start, newbase) = {
     let pc : bool = [registers[15]] == 0b1 | IsZero(registers);
     if pc then {
         let data : bits(32) = __v4t_read(address[31 .. 2] @ 0b00, 4);
-        __v4t_internal(1);
+        if not_bool(IsZero(registers) & PSTATE.T == 0b1) then {
+            __v4t_internal(1)
+        };
         LoadWritePC(data)
     } else {
         __v4t_internal(1)

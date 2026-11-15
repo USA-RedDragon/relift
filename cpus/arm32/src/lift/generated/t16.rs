@@ -4999,23 +4999,26 @@ pub(super) fn LDM_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Lift
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s373 {
+    let s378: bool = s4 == 0x0u128;
+    let s379: bool = !s378;
+    let s380: bool = s373 && s379;
+    if s380 {
         st.internal(1);
     }
-    let v378 = b.extract(v377, 1, Width::new(31));
-    let v379 = b.konst(Width::new(1), 0x0);
-    let v380 = b.concat(v378, v379);
+    let v383 = b.extract(v377, 1, Width::new(31));
+    let v384 = b.konst(Width::new(1), 0x0);
+    let v385 = b.concat(v383, v384);
     if s373 {
-        st.branch(b, Target::Dynamic(v380), Kind::Jump, None);
+        st.branch(b, Target::Dynamic(v385), Kind::Jump, None);
     }
-    let s381: bool = !s373;
-    if s381 {
+    let s386: bool = !s373;
+    if s386 {
         st.internal(1);
     }
-    let s382: u128 = rt::lshr(s4, s3) & 0x1;
-    let s383: bool = s382 == 0x0u128;
-    let s384: bool = s6 && s383;
-    if s384 {
+    let s387: u128 = rt::lshr(s4, s3) & 0x1;
+    let s388: bool = s387 == 0x0u128;
+    let s389: bool = s6 && s388;
+    if s389 {
         st.r_set(b, s3 as u32, v219, None);
     }
     Ok(())
@@ -8167,22 +8170,25 @@ pub(super) fn POP_T1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Lift
     } else {
         b.konst(Width::new(32), 0)
     };
-    if s361 {
+    let s366: bool = s4 == 0x0u128;
+    let s367: bool = !s366;
+    let s368: bool = s361 && s367;
+    if s368 {
         st.internal(1);
     }
-    let v366 = b.extract(v365, 1, Width::new(31));
-    let v367 = b.konst(Width::new(1), 0x0);
-    let v368 = b.concat(v366, v367);
+    let v371 = b.extract(v365, 1, Width::new(31));
+    let v372 = b.konst(Width::new(1), 0x0);
+    let v373 = b.concat(v371, v372);
     if s361 {
-        st.branch(b, Target::Dynamic(v368), Kind::Jump, None);
+        st.branch(b, Target::Dynamic(v373), Kind::Jump, None);
     }
-    let s369: bool = !s361;
-    if s369 {
+    let s374: bool = !s361;
+    if s374 {
         st.internal(1);
     }
-    let s370: u128 = (s4 >> 13) & 0x1;
-    let s371: bool = s370 == 0x0u128;
-    if s371 {
+    let s375: u128 = (s4 >> 13) & 0x1;
+    let s376: bool = s375 == 0x0u128;
+    if s376 {
         st.r_set(b, 13, v207, None);
     }
     Ok(())

@@ -583,6 +583,18 @@ mod tests {
     }
 
     #[test]
+    fn a_thumb_ldm_with_an_empty_list_takes_no_internal_cycle() {
+        let empty = Gba::new()
+            .lift_at(&thumb(&[0xC800]), BASE, BASE, true)
+            .expect("lifts");
+        assert!(!intrinsics(&empty).contains(&IDLE));
+        let one = Gba::new()
+            .lift_at(&thumb(&[0xC802]), BASE, BASE, true)
+            .expect("lifts");
+        assert!(intrinsics(&one).contains(&IDLE));
+    }
+
+    #[test]
     fn a_branch_refills_at_its_target() {
         let img = arm(&[0xEA00_0002]);
         let b = Gba::new().lift_at(&img, BASE, BASE, false).expect("lifts");

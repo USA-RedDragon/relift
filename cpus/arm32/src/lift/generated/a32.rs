@@ -19272,20 +19272,20 @@ pub(super) fn LDM_A1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Lift
     if s378 {
         st.internal(1);
     }
-    let v383 = b.extract(v382, 2, Width::new(30));
-    let v384 = b.konst(Width::new(2), 0x0);
-    let v385 = b.concat(v383, v384);
+    let v384 = b.extract(v382, 2, Width::new(30));
+    let v385 = b.konst(Width::new(2), 0x0);
+    let v386 = b.concat(v384, v385);
     if s378 {
-        st.branch(b, Target::Dynamic(v385), Kind::Jump, None);
+        st.branch(b, Target::Dynamic(v386), Kind::Jump, None);
     }
-    let s386: bool = !s378;
-    if s386 {
+    let s387: bool = !s378;
+    if s387 {
         st.internal(1);
     }
-    let s387: u128 = rt::lshr(s3, s4) & 0x1;
-    let s388: bool = s387 == 0x0u128;
-    let s389: bool = s5 && s388;
-    if s389 {
+    let s388: u128 = rt::lshr(s3, s4) & 0x1;
+    let s389: bool = s388 == 0x0u128;
+    let s390: bool = s5 && s389;
+    if s390 {
         st.r_set(b, s4 as u32, v224, None);
     }
     Ok(())
@@ -19694,20 +19694,20 @@ pub(super) fn LDMDA_A1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
     if s384 {
         st.internal(1);
     }
-    let v389 = b.extract(v388, 2, Width::new(30));
-    let v390 = b.konst(Width::new(2), 0x0);
-    let v391 = b.concat(v389, v390);
+    let v390 = b.extract(v388, 2, Width::new(30));
+    let v391 = b.konst(Width::new(2), 0x0);
+    let v392 = b.concat(v390, v391);
     if s384 {
-        st.branch(b, Target::Dynamic(v391), Kind::Jump, None);
+        st.branch(b, Target::Dynamic(v392), Kind::Jump, None);
     }
-    let s392: bool = !s384;
-    if s392 {
+    let s393: bool = !s384;
+    if s393 {
         st.internal(1);
     }
-    let s393: u128 = rt::lshr(s3, s4) & 0x1;
-    let s394: bool = s393 == 0x0u128;
-    let s395: bool = s5 && s394;
-    if s395 {
+    let s394: u128 = rt::lshr(s3, s4) & 0x1;
+    let s395: bool = s394 == 0x0u128;
+    let s396: bool = s5 && s395;
+    if s396 {
         st.r_set(b, s4 as u32, v230, None);
     }
     Ok(())
@@ -20114,20 +20114,20 @@ pub(super) fn LDMDB_A1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
     if s382 {
         st.internal(1);
     }
-    let v387 = b.extract(v386, 2, Width::new(30));
-    let v388 = b.konst(Width::new(2), 0x0);
-    let v389 = b.concat(v387, v388);
+    let v388 = b.extract(v386, 2, Width::new(30));
+    let v389 = b.konst(Width::new(2), 0x0);
+    let v390 = b.concat(v388, v389);
     if s382 {
-        st.branch(b, Target::Dynamic(v389), Kind::Jump, None);
+        st.branch(b, Target::Dynamic(v390), Kind::Jump, None);
     }
-    let s390: bool = !s382;
-    if s390 {
+    let s391: bool = !s382;
+    if s391 {
         st.internal(1);
     }
-    let s391: u128 = rt::lshr(s3, s4) & 0x1;
-    let s392: bool = s391 == 0x0u128;
-    let s393: bool = s5 && s392;
-    if s393 {
+    let s392: u128 = rt::lshr(s3, s4) & 0x1;
+    let s393: bool = s392 == 0x0u128;
+    let s394: bool = s5 && s393;
+    if s394 {
         st.r_set(b, s4 as u32, v228, None);
     }
     Ok(())
@@ -20532,20 +20532,20 @@ pub(super) fn LDMIB_A1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Li
     if s380 {
         st.internal(1);
     }
-    let v385 = b.extract(v384, 2, Width::new(30));
-    let v386 = b.konst(Width::new(2), 0x0);
-    let v387 = b.concat(v385, v386);
+    let v386 = b.extract(v384, 2, Width::new(30));
+    let v387 = b.konst(Width::new(2), 0x0);
+    let v388 = b.concat(v386, v387);
     if s380 {
-        st.branch(b, Target::Dynamic(v387), Kind::Jump, None);
+        st.branch(b, Target::Dynamic(v388), Kind::Jump, None);
     }
-    let s388: bool = !s380;
-    if s388 {
+    let s389: bool = !s380;
+    if s389 {
         st.internal(1);
     }
-    let s389: u128 = rt::lshr(s3, s4) & 0x1;
-    let s390: bool = s389 == 0x0u128;
-    let s391: bool = s5 && s390;
-    if s391 {
+    let s390: u128 = rt::lshr(s3, s4) & 0x1;
+    let s391: bool = s390 == 0x0u128;
+    let s392: bool = s5 && s391;
+    if s392 {
         st.r_set(b, s4 as u32, v226, None);
     }
     Ok(())
