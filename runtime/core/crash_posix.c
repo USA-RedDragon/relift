@@ -126,11 +126,16 @@ void rl_crash_install(void)
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGILL, &sa, NULL);
+#if defined(__ANDROID__)
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+#else
     struct sigaction old;
     if (sigaction(SIGSEGV, NULL, &old) == 0 && !(old.sa_flags & SA_SIGINFO))
         sigaction(SIGSEGV, &sa, NULL);
     if (sigaction(SIGBUS, NULL, &old) == 0 && !(old.sa_flags & SA_SIGINFO))
         sigaction(SIGBUS, &sa, NULL);
+#endif
 }
 
 bool rl_crash_os_symbolize(uintptr_t pc, char *buf, size_t n)
