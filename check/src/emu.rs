@@ -371,6 +371,11 @@ pub fn interpret(blocks: &[Block], words: &[u32], input: &Guest) -> Outcome {
     st.regs[regs::FPCR.index()] = u128::from(input.fpcr);
     st.regs[regs::FPSR.index()] = u128::from(input.fpsr);
     st.regs[regs::FP_FLAGS.index()] = u128::from(FP_FLAGS.load(Ordering::Relaxed));
+    for (i, key) in regs::PacKey::ALL.iter().enumerate() {
+        for (j, hi) in [true, false].into_iter().enumerate() {
+            st.regs[key.reg(hi).index()] = u128::from(regs::CHECK_PAC_KEYS[2 * i + j]);
+        }
+    }
     let mut intr = Arm64Intrinsics { host: 0 };
     for (i, r) in [regs::N, regs::Z, regs::C, regs::V].iter().enumerate() {
         st.regs[r.index()] = u128::from(input.nzcv[i]);
