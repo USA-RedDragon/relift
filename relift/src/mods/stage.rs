@@ -207,9 +207,9 @@ impl Stage {
     }
 
     /// The superset functions of module `i` over its outlines `hot`
-    /// ([`crate::total::superset`]), from the cache when the module is
-    /// unchanged since a build that kept them; gives whether they came from
-    /// the cache.
+    /// ([`crate::total::superset`]), from the cache when the module and
+    /// `hot` are unchanged since a build that kept them; gives whether they
+    /// came from the cache.
     ///
     /// # Errors
     ///
@@ -222,7 +222,15 @@ impl Stage {
         hot: &Layout,
     ) -> Result<(crate::total::Superset, bool), BoxError> {
         let path = self.cache_dir.join(format!("{i}.cold.zst"));
-        let key = format!("cold {}", cache::key(&self.tool, module));
+        let mut h = std::hash::DefaultHasher::new();
+        for o in hot.functions.values() {
+            std::hash::Hash::hash(&(o.entry, &o.runs), &mut h);
+        }
+        let key = format!(
+            "cold {} {:016x}",
+            cache::key(&self.tool, module),
+            std::hash::Hasher::finish(&h)
+        );
         if let Some(layout) = cache::read(&path, &key) {
             return Ok((crate::total::Superset { layout, roots: 0 }, true));
         }
