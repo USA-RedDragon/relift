@@ -94,7 +94,7 @@ typedef enum rl_setting_status {
 } rl_setting_status;
 
 /** @brief Most settings a run can declare. */
-#define RL_SETTINGS_MAX 256u
+#define RL_SETTINGS_MAX 512u
 
 /**
  * @brief Declares settings. A def already declared (the same pointer) is
@@ -115,6 +115,19 @@ RL_RUNTIME_API void rl_settings_declare_runtime(void);
 
 /** @brief Sets key from text, as a --relift-set would. Warns on failure. */
 RL_RUNTIME_API rl_setting_status rl_settings_set(const char *key, const char *value);
+
+/**
+ * @brief The settings file a run writes back to: the last `--relift-settings` file (a launcher's), else the per-user
+ * settings file. False when there is neither.
+ */
+RL_RUNTIME_API bool rl_settings_file(char *out, size_t size);
+
+/**
+ * @brief Sets key as rl_settings_set does and writes the value into rl_settings_file, keeping every other entry of
+ * the file. A NULL value returns the key to its default and removes it from the file. False when the key is unknown,
+ * the value is invalid or the file cannot be written (the value is then set but not saved).
+ */
+RL_RUNTIME_API bool rl_settings_save(const char *key, const char *value);
 
 /**
  * @brief Applies a flat JSON object (key to bool, number or string; null

@@ -340,3 +340,85 @@ TEST(settings_mod_list_orders_file_then_flags)
     CHECK_EQ(rl_settings_load_json("{\"mods\": [1]}", "t"), -1);
     CHECK_EQ(rl_settings_load_json("{\"mods\": []}", "t"), 0);
 }
+
+static char *slurp(const char *path)
+{
+    static char buf[4096];
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    return buf;
+}
+
+TEST(settings_save_keeps_other_entries_and_removes_defaults)
+{
+    fresh();
+    char *path = write_tmp("{ \"mods\": [\"a\", \"b]\"], \"other\": \"keep, this\", \"scale\": 5 }");
+    CHECK(path != NULL);
+    char *argv[] = { "x", "--relift-settings", path, NULL };
+    rl_settings_args(3, argv);
+    char file[512];
+    CHECK(rl_settings_file(file, sizeof file));
+    CHECK(!strcmp(file, path));
+    CHECK(rl_settings_save("scale", "7"));
+    CHECK(rl_settings_save("name", "say \"hi\""));
+    CHECK(rl_settings_save("mode", "high"));
+    CHECK(rl_settings_save("hud", "off"));
+    CHECK(!rl_settings_save("scale", "8"));
+    CHECK(!rl_settings_save("nope", "1"));
+    CHECK_EQ(rl_setting_int("scale"), 7);
+    const char *t = slurp(path);
+    CHECK(t != NULL);
+    CHECK(strstr(t, "\"mods\": [\"a\", \"b]\"]") != NULL);
+    CHECK(strstr(t, "\"other\": \"keep, this\"") != NULL);
+    CHECK(strstr(t, "\"scale\": 7") != NULL);
+    CHECK(strstr(t, "\"name\": \"say \\\"hi\\\"\"") != NULL);
+    CHECK(strstr(t, "\"mode\": \"high\"") != NULL);
+    CHECK(strstr(t, "\"hud\": false") != NULL);
+    CHECK(rl_settings_save("scale", NULL));
+    CHECK_EQ(rl_setting_int("scale"), 3);
+    t = slurp(path);
+    CHECK(strstr(t, "scale") == NULL);
+    rl_settings_reset();
+    CHECK_EQ(rl_settings_declare(g_defs, NDEFS), (int)NDEFS);
+    CHECK_EQ(rl_settings_load_file(path), 5);
+    CHECK(!strcmp(rl_setting_str("name"), "say \"hi\""));
+    CHECK_EQ(rl_setting_enum("mode"), 2);
+    CHECK(!rl_setting_bool("hud"));
+    unlink(path);
+}
+
+TEST(settings_save_creates_the_user_file)
+{
+    fresh();
+    char home[512];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(home, sizeof home, "%s/rl_save_XXXXXX", tmp && *tmp ? tmp : "/tmp");
+    CHECK(mkdtemp(home) != NULL);
+    char *old = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+    char *oldx = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+    setenv("HOME", home, 1);
+    unsetenv("XDG_DATA_HOME");
+    rl_settings_set_app("rltest");
+    CHECK(rl_settings_save("gain", "0.75"));
+    char file[600];
+    CHECK(rl_settings_file(file, sizeof file));
+    const char *t = slurp(file);
+    CHECK(t != NULL);
+    CHECK(strstr(t, "\"gain\": 0.75") != NULL);
+    unlink(file);
+    char dir[600];
+    snprintf(dir, sizeof dir, "%s", file);
+    *strrchr(dir, '/') = 0;
+    remove_dirs_up_to(dir, home);
+    rmdir(home);
+    if (old)
+        setenv("HOME", old, 1);
+    if (oldx)
+        setenv("XDG_DATA_HOME", oldx, 1);
+    free(old);
+    free(oldx);
+}

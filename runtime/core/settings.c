@@ -12,6 +12,11 @@
 
 #include <errno.h>
 #include <math.h>
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -63,6 +68,7 @@ static size_t g_nmods;
 static slot g_slots[RL_SETTINGS_MAX];
 static size_t g_nslots;
 static char *g_app;
+static char *g_file;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void value_free(value *v)
@@ -577,6 +583,321 @@ int rl_settings_load_file(const char *path)
     return r;
 }
 
+/** @brief The end of the JSON value at p (string, array, object or bare token); NULL when malformed. */
+static const char *json_end(const char *p)
+{
+    int depth = 0;
+    do {
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"')
+                p += *p == '\\' && p[1] ? 2 : 1;
+            if (!*p)
+                return NULL;
+            p++;
+        } else if (*p == '[' || *p == '{') {
+            depth++;
+            p++;
+        } else if (*p == ']' || *p == '}') {
+            if (!depth)
+                return p;
+            depth--;
+            p++;
+        } else if (depth) {
+            if (!*p)
+                return NULL;
+            p++;
+        } else {
+            while (*p && *p != ',' && *p != '}' && *p != ']' && *p != ' ' && *p != '\n' && *p != '\r' && *p != '\t')
+                p++;
+            return p;
+        }
+    } while (depth);
+    return p;
+}
+
+typedef struct entry {
+    char *key;
+    char *raw;
+} entry;
+
+static void entries_free(entry *e, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        free(e[i].key);
+        free(e[i].raw);
+    }
+    free(e);
+}
+
+static char *slice(const char *b, const char *e)
+{
+    char *s = malloc((size_t)(e - b) + 1);
+    if (s) {
+        memcpy(s, b, (size_t)(e - b));
+        s[e - b] = 0;
+    }
+    return s;
+}
+
+/** @brief The keys of a flat JSON object with each value's text as written; false when malformed. */
+static bool entries_parse(const char *text, entry **out, size_t *count)
+{
+    jp j = { text };
+    entry *e = NULL;
+    size_t n = 0;
+    skip_ws(&j);
+    if (*j.p++ != '{')
+        return false;
+    skip_ws(&j);
+    if (*j.p == '}') {
+        j.p++;
+        goto done;
+    }
+    for (;;) {
+        skip_ws(&j);
+        char *key = jstring(&j);
+        if (!key)
+            goto bad;
+        skip_ws(&j);
+        const char *b = *j.p == ':' ? ++j.p : NULL;
+        if (b) {
+            skip_ws(&j);
+            b = j.p;
+        }
+        const char *end = b ? json_end(b) : NULL;
+        entry *ne = end && end > b ? realloc(e, (n + 1) * sizeof *e) : NULL;
+        if (!ne) {
+            free(key);
+            goto bad;
+        }
+        e = ne;
+        e[n].key = key;
+        e[n].raw = slice(b, end);
+        n++;
+        j.p = end;
+        skip_ws(&j);
+        if (*j.p == ',') {
+            j.p++;
+            continue;
+        }
+        if (*j.p++ != '}')
+            goto bad;
+        break;
+    }
+done:
+    skip_ws(&j);
+    if (*j.p)
+        goto bad;
+    *out = e;
+    *count = n;
+    return true;
+bad:
+    entries_free(e, n);
+    return false;
+}
+
+static char *read_text(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    char *buf = NULL;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        long len = ftell(f);
+        if (len >= 0 && len < (1L << 24) && fseek(f, 0, SEEK_SET) == 0) {
+            buf = malloc((size_t)len + 1);
+            if (buf && fread(buf, 1, (size_t)len, f) != (size_t)len) {
+                free(buf);
+                buf = NULL;
+            }
+            if (buf)
+                buf[len] = 0;
+        }
+    }
+    fclose(f);
+    return buf;
+}
+
+static void make_dirs(const char *path)
+{
+    char d[4096];
+    size_t n = strlen(path);
+    if (n >= sizeof d)
+        return;
+    memcpy(d, path, n + 1);
+    for (size_t i = 1; i < n; i++) {
+        if (d[i] != '/' && d[i] != '\\')
+            continue;
+        char c = d[i];
+        d[i] = 0;
+#if defined(_WIN32)
+        _mkdir(d);
+#else
+        mkdir(d, 0755);
+#endif
+        d[i] = c;
+    }
+}
+
+static void json_quote(FILE *f, const char *s)
+{
+    fputc('"', f);
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\')
+            fprintf(f, "\\%c", c);
+        else if (c < 0x20)
+            fprintf(f, "\\u%04x", c);
+        else
+            fputc(c, f);
+    }
+    fputc('"', f);
+}
+
+bool rl_settings_file(char *out, size_t size)
+{
+    pthread_mutex_lock(&g_lock);
+    bool ok = false;
+    if (g_file) {
+        int n = snprintf(out, size, "%s", g_file);
+        ok = n > 0 && (size_t)n < size;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return ok || rl_settings_user_file(out, size);
+}
+
+/** @brief The JSON text of a parsed value of d. */
+static char *json_value(const rl_setting_def *d, const value *v)
+{
+    char num[64];
+    switch (d->type) {
+    case RL_SETTING_BOOL:
+        return dup(v->i ? "true" : "false");
+    case RL_SETTING_INT:
+        snprintf(num, sizeof num, "%lld", (long long)v->i);
+        return dup(num);
+    case RL_SETTING_FLOAT:
+        snprintf(num, sizeof num, "%.17g", v->f);
+        return dup(num);
+    default:
+        break;
+    }
+    const char *s = d->type == RL_SETTING_ENUM ? d->choices[v->i] : v->s ? v->s : "";
+    size_t cap = strlen(s) * 6 + 3;
+    char *o = malloc(cap);
+    if (!o)
+        return NULL;
+    size_t n = 0;
+    o[n++] = '"';
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\') {
+            o[n++] = '\\';
+            o[n++] = (char)c;
+        } else if (c < 0x20) {
+            n += (size_t)snprintf(o + n, cap - n, "\\u%04x", c);
+        } else {
+            o[n++] = (char)c;
+        }
+    }
+    o[n++] = '"';
+    o[n] = 0;
+    return o;
+}
+
+bool rl_settings_save(const char *key, const char *val)
+{
+    char err[256];
+    value v;
+    memset(&v, 0, sizeof v);
+    pthread_mutex_lock(&g_lock);
+    slot *s = find(key);
+    if (!s || (val && !parse_value(s->def, val, &v, err, sizeof err))) {
+        pthread_mutex_unlock(&g_lock);
+        rl_log(RL_LOG_WARN, "settings", "%s: %s; not saved", key ? key : "(null)", s ? err : "unknown setting");
+        return false;
+    }
+    char *raw = val ? json_value(s->def, &v) : NULL;
+    value_free(&s->val);
+    s->val = v;
+    const bool port_binding = s->def->type == RL_SETTING_BINDING && !strncmp(key, "bind.", 5);
+    const char *def_str = s->def->def_str;
+    pthread_mutex_unlock(&g_lock);
+    if (port_binding)
+        rl_ports_apply_setting(key, val ? val : def_str ? def_str : "");
+    char path[4096];
+    if (!rl_settings_file(path, sizeof path)) {
+        free(raw);
+        return false;
+    }
+    char *text = read_text(path);
+    entry *e = NULL;
+    size_t n = 0;
+    if (text && !entries_parse(text, &e, &n)) {
+        rl_log(RL_LOG_WARN, "settings", "%s is not a JSON object of settings; %s not saved", path, key);
+        free(text);
+        free(raw);
+        return false;
+    }
+    free(text);
+    size_t at = n;
+    for (size_t i = 0; i < n; i++)
+        if (!strcmp(e[i].key, key))
+            at = i;
+    if (raw && at == n) {
+        entry *ne = realloc(e, (n + 1) * sizeof *e);
+        if (!ne) {
+            entries_free(e, n);
+            free(raw);
+            return false;
+        }
+        e = ne;
+        e[n].key = dup(key);
+        e[n].raw = NULL;
+        n++;
+    }
+    if (at < n) {
+        free(e[at].raw);
+        e[at].raw = raw;
+        raw = NULL;
+    }
+    free(raw);
+    make_dirs(path);
+    char tmp[4200];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    bool ok = f != NULL;
+    if (f) {
+        fputs("{", f);
+        bool first = true;
+        for (size_t i = 0; i < n; i++) {
+            if (!e[i].raw)
+                continue;
+            fputs(first ? "\n  " : ",\n  ", f);
+            first = false;
+            json_quote(f, e[i].key);
+            fprintf(f, ": %s", e[i].raw);
+        }
+        fputs(first ? "}\n" : "\n}\n", f);
+        ok = !ferror(f);
+        if (fclose(f) != 0)
+            ok = false;
+    }
+    entries_free(e, n);
+#if defined(_WIN32)
+    if (ok)
+        remove(path);
+#endif
+    if (ok && rename(tmp, path) != 0)
+        ok = false;
+    if (!ok) {
+        remove(tmp);
+        rl_log(RL_LOG_WARN, "settings", "cannot write %s; %s not saved", path, key);
+    }
+    return ok;
+}
+
 /** @brief The value of `--name value` or `--name=value` at argv[*i]; NULL when the flag is another. */
 static const char *flag_value(int argc, char *const *argv, int *i, const char *name, bool *missing)
 {
@@ -608,6 +929,10 @@ int rl_settings_args(int argc, char *const *argv)
         if (!v)
             continue;
         file_flag = true;
+        pthread_mutex_lock(&g_lock);
+        free(g_file);
+        g_file = dup(v);
+        pthread_mutex_unlock(&g_lock);
         if ((n = rl_settings_load_file(v)) > 0)
             applied += n;
     }
@@ -678,6 +1003,8 @@ void rl_settings_reset(void)
     g_nslots = 0;
     free(g_app);
     g_app = NULL;
+    free(g_file);
+    g_file = NULL;
     pthread_mutex_unlock(&g_lock);
 }
 
