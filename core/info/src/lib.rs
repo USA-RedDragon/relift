@@ -16,7 +16,7 @@ use serde_json::Value;
 
 /// The version of the document's layout. A launcher that knows a higher
 /// protocol than a binary's reads the binary's sections it knows.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// The `--relift-info` flag of a game binary.
 pub const FLAG: &str = "--relift-info";
@@ -110,6 +110,11 @@ pub struct Identity {
     /// or `default`.
     #[serde(default)]
     pub names: BTreeMap<String, String>,
+    /// The key of `names` a reader shows when it has no better match: the
+    /// first language present in [`LANGUAGES`] order, `AmericanEnglish`
+    /// first, or `default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_language: Option<String>,
     /// The publisher per language, as `names`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub publishers: BTreeMap<String, String>,
@@ -137,11 +142,81 @@ pub struct Identity {
     pub base_mismatch: bool,
 }
 
+/// The language keys of [`Identity::names`] in the order a reader falls
+/// back through them.
+pub const LANGUAGES: [&str; 16] = [
+    "AmericanEnglish",
+    "BritishEnglish",
+    "Japanese",
+    "French",
+    "German",
+    "LatinAmericanSpanish",
+    "Spanish",
+    "Italian",
+    "Dutch",
+    "CanadianFrench",
+    "Portuguese",
+    "Russian",
+    "Korean",
+    "TraditionalChinese",
+    "SimplifiedChinese",
+    "BrazilianPortuguese",
+];
+
+impl Identity {
+    /// The title for the first of `wanted` (language keys, best first) the
+    /// game has, else the default language's, else the first present in
+    /// [`LANGUAGES`] order, else any. Empty titles do not count.
+    #[must_use]
+    pub fn title(&self, wanted: &[&str]) -> Option<&str> {
+        let get = |k: &str| {
+            self.names
+                .get(k)
+                .map(String::as_str)
+                .filter(|n| !n.trim().is_empty())
+        };
+        wanted
+            .iter()
+            .find_map(|k| get(k))
+            .or_else(|| self.default_language.as_deref().and_then(get))
+            .or_else(|| LANGUAGES.iter().find_map(|k| get(k)))
+            .or_else(|| get("default"))
+            .or_else(|| {
+                self.names
+                    .values()
+                    .map(String::as_str)
+                    .find(|n| !n.trim().is_empty())
+            })
+    }
+
+    /// The language key to store as [`Identity::default_language`].
+    #[must_use]
+    pub fn first_language(&self) -> Option<String> {
+        LANGUAGES
+            .iter()
+            .find(|k| self.names.get(**k).is_some_and(|n| !n.trim().is_empty()))
+            .map(|k| (*k).to_string())
+            .or_else(|| {
+                self.names
+                    .contains_key("default")
+                    .then(|| "default".to_string())
+            })
+    }
+}
+
 /// An icon, embedded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Icon {
-    /// The image format: `jpeg`, `png`, `raw`.
+    /// The image format: `png` for every icon relift writes (a JPEG icon is
+    /// converted at build time); `jpeg` and `raw` are accepted from older
+    /// documents.
     pub format: String,
+    /// The width in pixels; 0 when unknown.
+    #[serde(default)]
+    pub width: u32,
+    /// The height in pixels; 0 when unknown.
+    #[serde(default)]
+    pub height: u32,
     /// The image bytes in base64.
     pub data: String,
 }
@@ -552,5 +627,61 @@ mod tests {
             assert_eq!(v["apply"], "start");
             assert_eq!(serde_json::from_value::<Setting>(v).unwrap(), s);
         }
+    }
+
+    fn named(pairs: &[(&str, &str)]) -> Identity {
+        let mut id = Identity::default();
+        for (k, v) in pairs {
+            id.names.insert((*k).into(), (*v).into());
+        }
+        id.default_language = id.first_language();
+        id
+    }
+
+    #[test]
+    fn the_title_follows_the_wanted_languages_then_the_fallbacks() {
+        let id = named(&[("German", "G"), ("French", "F"), ("Japanese", "J")]);
+        assert_eq!(id.default_language.as_deref(), Some("Japanese"));
+        assert_eq!(id.title(&["French", "German"]), Some("F"));
+        assert_eq!(id.title(&["Korean", "German"]), Some("G"));
+        assert_eq!(id.title(&["Korean"]), Some("J"));
+        assert_eq!(id.title(&[]), Some("J"));
+        let id = named(&[("Korean", "K"), ("AmericanEnglish", "A")]);
+        assert_eq!(id.default_language.as_deref(), Some("AmericanEnglish"));
+        assert_eq!(id.title(&[]), Some("A"));
+    }
+
+    #[test]
+    fn empty_titles_and_unknown_keys_are_skipped() {
+        let mut id = named(&[("AmericanEnglish", "  "), ("Dutch", "D")]);
+        assert_eq!(id.default_language.as_deref(), Some("Dutch"));
+        assert_eq!(id.title(&["AmericanEnglish"]), Some("D"));
+        id.names.clear();
+        assert_eq!(id.title(&[]), None);
+        let id = named(&[("default", "P")]);
+        assert_eq!(id.default_language.as_deref(), Some("default"));
+        assert_eq!(id.title(&["French"]), Some("P"));
+        let odd = named(&[("Klingon", "K")]);
+        assert_eq!(odd.title(&[]), Some("K"));
+    }
+
+    #[test]
+    fn an_icon_round_trips_and_an_old_one_still_reads() {
+        let id = Identity {
+            icon: Some(Icon {
+                format: "png".into(),
+                width: 256,
+                height: 128,
+                data: "AAAA".into(),
+            }),
+            ..Identity::default()
+        };
+        let v = serde_json::to_value(&id).unwrap();
+        assert_eq!(v["icon"]["width"], 256);
+        assert_eq!(serde_json::from_value::<Identity>(v).unwrap(), id);
+        let old: Identity =
+            serde_json::from_str(r#"{"platform":"switch","icon":{"format":"jpeg","data":"AAAA"}}"#)
+                .unwrap();
+        assert_eq!(old.icon.unwrap().width, 0);
     }
 }

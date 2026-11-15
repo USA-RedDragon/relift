@@ -195,11 +195,15 @@ mod tests {
         let own = png(None, "x");
         let icon = Icon {
             format: "png".into(),
+            width: 128,
+            height: 128,
             data: crate::identity::base64(&own),
         };
         assert_eq!(png(Some(&icon), "y"), own);
         let broken = Icon {
             format: "jpeg".into(),
+            width: 0,
+            height: 0,
             data: crate::identity::base64(b"not a jpeg"),
         };
         assert_eq!(png(Some(&broken), "y"), png(None, "y"));

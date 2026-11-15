@@ -102,6 +102,8 @@ pub fn from_nacp(nacp: &[u8], title_id: u64, icon: Option<&[u8]>) -> Result<Iden
     id.version = (!version.is_empty()).then_some(version);
     id.icon = icon.map(|b| Icon {
         format: "jpeg".into(),
+        width: 0,
+        height: 0,
         data: base64(b),
     });
     Ok(id)
