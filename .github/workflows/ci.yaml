@@ -26,8 +26,31 @@ env:
   APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
   APPIMAGETOOL_VERSION: 1.9.1
   APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 
 jobs:
+  workflows:
+    name: workflow files parse and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          dir="$RUNNER_TEMP/actionlint"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "$ACTIONLINT_SHA256  $dir/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$dir/actionlint.tgz" -C "$dir" actionlint
+
+      - name: Lint every workflow
+        run: |
+          "$RUNNER_TEMP/actionlint/actionlint" -shellcheck= -color
+
   checks:
     name: fmt, clippy, tests, charter, deny
     runs-on: ubuntu-latest

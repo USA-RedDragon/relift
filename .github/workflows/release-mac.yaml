@@ -1,0 +1,162 @@
+name: Release macOS
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  relift:
+    name: relift for ${{ matrix.arch }}
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            rust: aarch64-apple-darwin
+          - arch: x86_64
+            rust: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.rust }}
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-${{ matrix.rust }}
+
+      - name: Build relift
+        run: cargo build --release --locked -p relift --target ${{ matrix.rust }}
+
+      - name: Check what was built
+        run: |
+          bin=target/${{ matrix.rust }}/release/relift
+          archs=$(lipo -archs "$bin")
+          echo "architectures: $archs"
+          test "$archs" = "${{ matrix.arch }}"
+
+      - name: Decide whether to sign
+        id: gate
+        env:
+          HAVE_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 != '' }}
+          HAVE_KEY: ${{ secrets.APPLE_API_KEY_P8 != '' }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "::notice::Signing is skipped on pull requests; the unsigned build above is only a build check."
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+          elif [ "$HAVE_P12" != true ] || [ "$HAVE_KEY" != true ]; then
+            echo "::notice::Signing is skipped: the Apple signing secrets are not available in this repository."
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import the Developer ID into a temporary keychain
+        if: steps.gate.outputs.sign == 'true'
+        env:
+          P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          kc="$RUNNER_TEMP/relift-signing.keychain-db"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          openssl rand -base64 33 > "$RUNNER_TEMP/keychain-password"
+          echo "::add-mask::$(cat "$RUNNER_TEMP/keychain-password")"
+          security list-keychains -d user | tr -d '"' | sed 's/^ *//' > "$RUNNER_TEMP/keychains-before"
+          security create-keychain -p "$(cat "$RUNNER_TEMP/keychain-password")" "$kc"
+          security set-keychain-settings -lut 900 "$kc"
+          security unlock-keychain -p "$(cat "$RUNNER_TEMP/keychain-password")" "$kc"
+          security import "$RUNNER_TEMP/developer-id.p12" -P "$P12_PASSWORD" -f pkcs12 -t priv -A -T /usr/bin/codesign -k "$kc" >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(cat "$RUNNER_TEMP/keychain-password")" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" $(cat "$RUNNER_TEMP/keychains-before")
+          rm -f "$RUNNER_TEMP/developer-id.p12"
+          id=$(security find-identity -v -p codesigning "$kc" | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "Developer ID Application:.*/\1/p' | head -n 1)
+          test -n "$id" || { echo "::error::no Developer ID Application identity in the imported certificate"; exit 1; }
+          echo "RELIFT_SIGN_ID=$id" >> "$GITHUB_ENV"
+          echo "RELIFT_SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+
+      - name: Sign, notarize and verify
+        if: steps.gate.outputs.sign == 'true'
+        env:
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -eu
+          umask 077
+          dist="$RUNNER_TEMP/dist/relift-macos-${{ matrix.arch }}"
+          mkdir -p "$dist"
+          cp target/${{ matrix.rust }}/release/relift LICENSE "$dist/"
+          codesign --force --options runtime --timestamp --identifier relift \
+            --sign "$RELIFT_SIGN_ID" --keychain "$RELIFT_SIGN_KEYCHAIN" "$dist/relift"
+          codesign --verify --strict --verbose=2 "$dist/relift"
+          codesign -dvv "$dist/relift" 2>&1 | grep -q "^TeamIdentifier=$TEAM_ID$" \
+            || { echo "::error::the signature's team is not APPLE_TEAM_ID"; exit 1; }
+          codesign -dvv "$dist/relift" 2>&1 | grep -q 'flags=0x10000(runtime)' \
+            || { echo "::error::the hardened runtime is not on"; exit 1; }
+          printf '%s' "$API_KEY_P8" > "$RUNNER_TEMP/api-key.p8"
+          zip="$RUNNER_TEMP/dist/relift-macos-${{ matrix.arch }}.zip"
+          ditto -c -k --keepParent "$dist" "$zip"
+          xcrun notarytool submit "$zip" --key "$RUNNER_TEMP/api-key.p8" \
+            --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID" --wait --timeout 10m \
+            --output-format json > "$RUNNER_TEMP/notary.json" || true
+          cat "$RUNNER_TEMP/notary.json"
+          status=$(plutil -extract status raw -o - "$RUNNER_TEMP/notary.json" 2>/dev/null || true)
+          if [ "$status" != Accepted ]; then
+            id=$(plutil -extract id raw -o - "$RUNNER_TEMP/notary.json" 2>/dev/null || true)
+            [ -z "$id" ] || xcrun notarytool log "$id" --key "$RUNNER_TEMP/api-key.p8" \
+              --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID" || true
+            echo "::error::notarization status: ${status:-none}"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/api-key.p8"
+          # A bare command-line binary and its zip cannot hold a stapled
+          # ticket, so Gatekeeper looks the notarization up online by the
+          # binary's hash. spctl judges apps and installers only; the
+          # "notarized" requirement asks the same question of a binary.
+          unzip -q "$zip" -d "$RUNNER_TEMP/verify"
+          v="$RUNNER_TEMP/verify/relift-macos-${{ matrix.arch }}/relift"
+          codesign --verify --strict --verbose=2 "$v"
+          codesign --verify --strict --verbose=2 -R="notarized" "$v"
+          echo "artifact=$zip" >> "$GITHUB_ENV"
+
+      - name: Delete the keychain and the key files
+        if: always() && steps.gate.outputs.sign == 'true'
+        run: |
+          kc="$RUNNER_TEMP/relift-signing.keychain-db"
+          if [ -f "$RUNNER_TEMP/keychains-before" ]; then
+            security list-keychains -d user -s $(cat "$RUNNER_TEMP/keychains-before") || true
+          fi
+          security delete-keychain "$kc" || true
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/api-key.p8" \
+            "$RUNNER_TEMP/keychain-password" "$RUNNER_TEMP/keychains-before" "$kc"
+
+      - name: Upload the signed and notarized build
+        if: steps.gate.outputs.sign == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relift-macos-${{ matrix.arch }}
+          path: ${{ env.artifact }}
+          if-no-files-found: error
+          retention-days: 30
