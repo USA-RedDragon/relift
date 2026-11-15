@@ -1,41 +1,61 @@
 # relift
 
-relift is a static recompiler. It translates a game's machine code ahead of
-time into portable C11, which clang or `zig cc` builds into a native program
-for Linux, macOS, Windows and other hosts. The program links against a C
-runtime that stands in for the original console: its operating system, its
-devices, or both.
+relift is a static recompiler under the MIT license. It translates a game's
+machine code ahead of time into portable C11, which clang or `zig cc` builds
+into a native program. The program links against a C runtime that stands in
+for the original console: its operating system, its devices, or both. The
+core is host-agnostic: it names no console and no CPU.
 
-The tool is written in Rust. The core (IR, analysis, C emitter, build driver,
-runtime core) knows no particular console or CPU. Each guest adds a CPU
-frontend under `cpus/` and a guest layer under `guests/` and
-`runtime/guests/`.
+The tool is written in Rust. Each guest adds a CPU frontend under `cpus/`, a
+guest layer under `guests/` and its runtime part under `runtime/guests/`.
+
+**Status: early development.** Nothing is ready for players. The table lists
+what runs and what does not.
 
 | Guest | CPU frontend | State |
 |---|---|---|
-| Nintendo Switch | ARM64 (`cpus/a64`, generated from Arm's Sail model) | libnx test programs build and run end to end on Linux x86-64; commercial games are not running yet |
-| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | test ROMs import, build and run as native programs on Linux, graded by the corpus manifest; commercial games boot (see below) |
+| Nintendo Switch | ARM64 (`cpus/a64`, generated from Arm's Sail model) | Test programs built with libnx run end to end. Commercial Switch games have reached gameplay on Linux x86-64 in manual runs; most games are untested and many will fail. Includes Vulkan forwarding, a core scheduler with preemption points, hot-load, code and data mods, input and settings. |
+| Game Boy and Game Boy Color | SM83 (`cpus/sm83`) | `relift import`, `build` and `run` work on ROMs. Test ROMs from public corpora pass in CI. Retail Game Boy Color games boot and run in manual tests. |
+| Game Boy Advance | ARMv4T (`cpus/arm32`) | Pieces only, no `relift import` yet. The ARMv4T lifter, the machine core, the high-level BIOS, saves and keypad are built and tested against a console and the NanoBoyAdvance oracle. Whole-ROM discovery is planned. |
 
-**Status: early development.** Nothing is ready for players.
+relift ships no game code, keys or data, and never will.
 
-relift ships no game code, keys or data, and never will. You supply your own
-legally obtained dumps.
+## Requirements
 
-## Importing a game
+- Decrypted inputs that you dumped yourself from a console you own. For the
+  Switch: a `.nup` or an extracted `exefs`/`romfs` tree. For the Game Boy:
+  a `.gb` or `.gbc` cartridge ROM. Encrypted dumps are refused: convert them
+  with a separate tool first.
+- The Rust toolchain pinned in `rust-toolchain.toml`. A Game Boy build also
+  uses cargo to build the device library (rustyboi-core) into the cache.
+- clang (or `zig cc`) and ninja.
+- Optional: SDL3 for a window (`pkg-config sdl3`, or `RELIFT_SDL3_DIR`), a
+  Vulkan loader for Switch games that render, and SDL3 plus libopus for sound
+  (`runtime/README.md`). Without SDL3 the program runs headless.
+
+## Quick start
+
+Build the tools once:
+
+```sh
+cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools -p relift-gba-tools
+```
+
+Run `relift` in an empty project folder. Each project holds one `game.toml`;
+artifacts go to the cache directory.
 
 ### Nintendo Switch
-
-relift reads decrypted dumps only. An encrypted dump must first be converted
-to one of the inputs below with a separate tool.
 
 ```sh
 relift import game.nup                 # a NUP container
 relift import dump/                    # an extracted tree
 relift import dump/ --update 65536     # a chosen update
 relift import dump/ --update base      # the base alone
+relift build                           # a shipped build
+relift run                             # a dev build with hot-loading, then run it
 ```
 
-The extracted tree uses the same layout the reference NUP packer
+The extracted tree uses the layout the reference NUP packer
 ([github.com/a55uka/nup](https://github.com/a55uka/nup), "Packing a dump")
 reads:
 
@@ -49,44 +69,50 @@ A directory holding `exefs/` and/or `romfs/` directly is taken as a base.
 The newest update (the highest version) is used unless `--update` names
 another; its exefs and romfs replace the base's when it has them. The same
 choice applies to the update packages of a `.nup`. The program ID comes from
-`main.npdm`.
+`main.npdm`. Import also writes `control.nacp` and `icon.jpg` when the dump
+has them.
 
-`relift coverage` (`--json` for a machine-readable form, `--module <name>`
-for one module) lists what discovery could not resolve: per module, the
-functions found, the instructions that do not lift, each indirect call or
-computed jump left to the dispatcher with its reason (`slot`, `table` or
-`pointer`), and the hint addresses earlier dev runs recorded in `game.toml`.
+`relift build --mods <list>` builds code mods in: Atmosphere or Ryujinx mod
+directories, `.ips` files and `.pchtxt` files, applied in order. Two mods that
+write different bytes at one address are refused. Data mods and cheats are
+chosen at run time (`RELIFT_MODS`, `runtime/README.md`).
 
 ### Game Boy and Game Boy Color
 
 ```sh
-relift import "Some Game (USA).gbc"
+relift import some-game.gbc
 relift build
+relift run
 ```
 
-`relift import` takes a cartridge ROM (`.gb`, `.gbc`) as it is and writes
-`game.toml` with `guest = "gb"`. `relift build --mods hack.ips` applies IPS,
-UPS or BPS ROM-hack patches in order before discovery. The program runs in a
-window (SDL3) or with `--headless`; its battery save is a raw `.sav` next to
-the imported ROM, the format other emulators read. Options of the program:
-`--model dmg|mgb|sgb|cgb|agb|...`, `--frames N` (stop after N frames and
-print the frame hash and the serial output), `--input` (a scripted joypad,
-`frame:buttons,...`), `--png FILE`, `--png-dir DIR --png-every N`,
-`--wav FILE` (record the sound, 44100 Hz stereo, and print its length, peak
-and hash), `--no-audio`, `--case FILE` (grade a test ROM by a corpus case
-spec, sound cases included), `--stats` and `--check` (lockstep against the
-device library's own CPU). In a window the sound goes to the host output, and
-the frames are paced on that output's queue.
+`relift import` takes a cartridge ROM as it is and writes `game.toml` with
+`guest = "gb"`. `relift build --mods hack.ips` applies IPS, UPS or BPS
+ROM-hack patches in order before discovery. `relift run` opens a window (SDL3)
+and runs until you close it. `relift build` prints the path of the built
+program; call it directly for a headless run, with the options below.
+
+The built program takes `--headless`, `--model dmg|mgb|sgb|cgb|agb|...`,
+`--frames N` (stop after N frames and print the frame hash and the serial
+output), `--input` (a scripted joypad, `frame:buttons,...`), `--png FILE`,
+`--png-dir DIR --png-every N`, `--wav FILE` (record the sound, 44100 Hz
+stereo, and print its length, peak and hash), `--no-audio`, `--case FILE`
+(grade a test ROM by a corpus case spec, sound cases included), `--save FILE`,
+`--no-save`, `--stats` and `--check` (lockstep against the device library's
+own CPU). `--help` lists them. In a window the sound goes to the host output,
+and the frames are paced on that output's queue. The battery save is a raw
+`.sav` next to the imported ROM, the format other emulators read.
 
 The devices come from rustyboi-core (`guests/gb/devices`), driven at every
 instruction boundary; lifted code runs the instruction bodies. Code with no
 lifted function (code copied to RAM, or missed by discovery) runs on the
 device library's CPU one instruction at a time until it returns or reaches
-lifted code.
+lifted code. CI builds and runs 38 corpus cases through this path
+(`runtime/guests/gb/devtests/ci_cases.toml`).
 
 ### Game Boy Advance
 
-Import is not available yet. `relift-gbarom` reads and checks a ROM header and lists the save library strings; multiboot images are refused.
+Import is not available yet. `relift-gbarom` reads and checks a ROM header and
+lists the save library strings; multiboot images are refused.
 
 ## Building and running
 
@@ -103,30 +129,66 @@ from it, compiles one shared library, the program loads it and goes on.
 relift adds each such address to the `[hints]` list in `game.toml`, and the
 next `relift build` lifts it with the rest (docs/abi.md section 6).
 
+A built program prints its own description with `--relift-info`: identity,
+run-time settings, input ports and bindings, mods and save kind. `relift info`
+prints the same document without running the program. A launcher reads it to
+build its settings and input screens (docs/input.md).
+
 ## Tools
 
 | Binary | Guest | Does |
 |---|---|---|
-| `relift` | all | the recompiler: `import`, `build`, `run`, `coverage`, `check`, `where`; Game Boy ROMs: `import`, `build`, `run` |
+| `relift` | all | `import`, `build` and `run` for the Switch and the Game Boy; `info` prints a built binary's self-description; `coverage` lists what discovery could not resolve; `diff` compares one lifted function with an interpreter in a live run; `check` and `where` are listed but not implemented |
+| `relift-check` | all | the differential checker in `check/`, a separate workspace: lifted A64 instructions against Unicorn, QEMU or an Apple M2; reference runs on rustyboi-core (Game Boy) and on NanoBoyAdvance (Game Boy Advance) |
 | `relift-nup` | Switch | list and extract `.nup` containers |
 | `relift-romfs` | Switch | list, extract and print files of a romfs image |
 | `relift-nso` | Switch | show, list symbols of and decompress NSO modules |
 | `relift-nro` | Switch | show NRO modules and extract their assets |
 | `relift-npdm` | Switch | show a `main.npdm` |
 | `relift-ir` | Switch | print the IR of A64 instruction words or NSO symbols |
+| `relift-vkgen` | Switch | generate the Vulkan forwarding C from `vk.xml` (package `relift-switch-vkgen`, not in the build line above) |
 | `relift-gbrom` | Game Boy | show a ROM header and validate its checksums; `functions` lists functions per bank, unresolved transfers and code run from RAM |
 | `relift-gbarom` | Game Boy Advance | show a ROM header, validate logo hash, complement and size, list save library strings |
 
-## Building
+`relift coverage` (`--json` for a machine-readable form, `--module <name>`
+for one module) lists, per module, the functions found, the instructions that
+do not lift, each indirect call or computed jump left to the dispatcher with
+its reason (`slot`, `table` or `pointer`), and the hint addresses earlier dev
+runs recorded in `game.toml`.
+
+`relift diff <function>` builds a dev build, runs it under gdb and, at each
+call of the function, runs the same function in the reference interpreter from
+the same registers and live guest memory. It compares the registers and every
+page the interpreter touched (`--count`, `--skip`, `--engine`). It needs gdb
+and exits 1 on a mismatch and 2 when no call was compared.
+
+## Platforms
+
+| Host | State |
+|---|---|
+| Linux x86-64 | built and tested, including Switch and Game Boy runs |
+| macOS arm64 | built and tested (CI and an Apple M2); only the windowless parts of the runtime ran with SDL3 |
+| Windows x86-64 | the runtime tests, fibers, crash handler and hot-load prototype ran on Windows 11; the rest is untested |
+| Linux arm64, Windows arm64, macOS x86-64 | `relift` cross-builds in CI; not run |
+
+## Developing
 
 ```sh
-cargo build --release -p relift -p relift-switch-tools -p relift-gb-tools -p relift-gba-tools
 pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Before contributing, read
-`ARCHITECTURE.md`: section 0 lists the hard rules, and the rest covers
-how the workspace is laid out and which tests hold it in shape.
+`ARCHITECTURE.md`: section 0 lists the hard rules, and the rest covers how the
+workspace is laid out and which tests hold it in shape.
+
+| Document | Holds |
+|---|---|
+| `ARCHITECTURE.md` | crate graph, rules and the tests that enforce them, CI |
+| `docs/abi.md` | the contract between emitted C and the runtime |
+| `docs/input.md` | input ports, controls and bindings |
+| `runtime/README.md` | the C runtime: layers, build, tests, settings, environment |
+| `runtime/guests/switch/vk/README.md` | Vulkan forwarding |
+| `core/README.md`, `cpus/README.md`, `guests/README.md`, `check/README.md` | one page per folder |
 
 ## Configuration
 
