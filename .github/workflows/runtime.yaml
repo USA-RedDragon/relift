@@ -5,10 +5,14 @@ on:
     branches: [main]
     paths:
       - runtime/**
+      - scripts/ci/lib.sh
+      - scripts/ci/runtime-*.sh
       - .github/workflows/runtime.yaml
   pull_request:
     paths:
       - runtime/**
+      - scripts/ci/lib.sh
+      - scripts/ci/runtime-*.sh
       - .github/workflows/runtime.yaml
 
 permissions:
@@ -28,20 +32,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Core names no guest OS and no guest CPU
-        working-directory: runtime
-        run: |
-          python3 --version
-          make charter
-
-      - name: Generated Vulkan types hold the guest layout on every host target
-        working-directory: runtime/guests/switch/vk/gen
-        run: |
-          clang --version
-          for t in x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-windows-gnu aarch64-w64-windows-gnu x86_64-apple-macos aarch64-apple-macos; do
-            echo "$t"
-            clang --target="$t" -ffreestanding -std=c11 -Wall -Wextra -Wpedantic -Werror -fsyntax-only -x c vkg_types.h
-          done
+      - name: Core names no guest OS or CPU; Vulkan types hold the guest layout
+        run: scripts/ci/runtime-charter.sh
 
   c-tests:
     name: C runtime (${{ matrix.os }})
@@ -64,38 +56,11 @@ jobs:
           echo "RELIFT_VK_REQUIRE=1" >> "$GITHUB_ENV"
           echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
 
-      - name: Build the layer libraries, the runtime libraries and each layer's tests
-        working-directory: runtime
-        run: |
-          clang --version
-          make -j2 CC=clang
-
-      - name: Run the core, a64, Switch and Vulkan forwarding tests
-        working-directory: runtime
-        run: make test CC=clang
-
-      - name: Run the tests with simulated 16 KiB host pages
-        if: runner.os == 'Linux'
-        working-directory: runtime
-        env:
-          RELIFT_HOST_PAGE: "16384"
-        run: make test CC=clang
-
-      - name: Run the tests with the 36-bit layout
-        working-directory: runtime
-        env:
-          RELIFT_ADDRESS_BITS: "36"
-        run: make test CC=clang
-
       - name: Install gdb
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gdb
 
-      - name: The gdb frame filter shows guest names
-        if: runner.os == 'Linux'
-        working-directory: runtime
-        run: |
-          gdb --version | head -n 1
-          make gdb-test CC=clang
+      - name: Build the runtime and run its tests in every layout
+        run: scripts/ci/runtime-tests.sh

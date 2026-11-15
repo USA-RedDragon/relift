@@ -14,20 +14,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # The rust-cross image, pinned by digest. Its RUST_VERSION must equal the
-  # channel in rust-toolchain.toml; the cross job checks that.
-  CROSS_IMAGE: ghcr.io/usa-reddragon/rust-cross:1.98.1@sha256:a4d9cb8c3d4a4134c36dec1df78f1b0cc760d7fe443240dd5303ee64a01996c2
-  CARGO_DENY_VERSION: 0.20.2
-  CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
   # The AppImage type 2 runtime relift packages with: the tag and x86_64 hash
-  # of relift/src/appimage_runtime.rs (the packaging job checks the tag), and
-  # appimagetool, pinned by release and hash.
+  # of relift/src/appimage_runtime.rs, the cache key; scripts/ci/appimage.sh
+  # checks the tag.
   APPIMAGE_RUNTIME_TAG: "20251108"
   APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
-  APPIMAGETOOL_VERSION: 1.9.1
-  APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
-  ACTIONLINT_VERSION: 1.7.12
-  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 
 jobs:
   workflows:
@@ -39,17 +30,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install actionlint
-        run: |
-          dir="$RUNNER_TEMP/actionlint"
-          mkdir -p "$dir"
-          curl -fsSL -o "$dir/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          echo "$ACTIONLINT_SHA256  $dir/actionlint.tgz" | sha256sum -c -
-          tar -xzf "$dir/actionlint.tgz" -C "$dir" actionlint
-
       - name: Lint every workflow
-        run: |
-          "$RUNNER_TEMP/actionlint/actionlint" -shellcheck= -color
+        run: scripts/ci/workflows.sh
 
   checks:
     name: fmt, clippy, tests, charter, deny
@@ -72,52 +54,8 @@ jobs:
             check
             guests/gb/devices
 
-      - name: fmt
-        run: |
-          cargo fmt --all --check
-          cargo fmt --manifest-path check/Cargo.toml --all --check
-          cargo fmt --manifest-path guests/gb/devices/Cargo.toml --all --check
-
-      - name: clippy
-        run: |
-          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-          cargo clippy --manifest-path check/Cargo.toml --all-targets --all-features --locked -- -D warnings
-          cargo clippy --manifest-path guests/gb/devices/Cargo.toml --all-targets --all-features --locked -- -D warnings
-
-      - name: charter, unsafe roster and funnels
-        run: cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
-
-      - name: tests
-        run: |
-          cargo test --workspace --locked
-          cargo test --manifest-path guests/gb/devices/Cargo.toml --release --locked
-
-      - name: generated config docs are current
-        run: |
-          version=$(grep -A1 '^name = "configulator-rs"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
-          cargo install configulator-cli --locked --version "=$version" --root "$RUNNER_TEMP/configulator"
-          cd relift
-          "$RUNNER_TEMP/configulator/bin/configulator" --type Settings --sample --format toml --sample-file ../relift.example.toml --check
-          "$RUNNER_TEMP/configulator/bin/configulator" --type Settings --markdown --markdown-file ../README.md --env-prefix RELIFT_ --env-separator _ --check
-
-      - name: generated Vulkan forwarding is current
-        run: |
-          cfg=guests/switch/vkgen/vkgen.toml
-          url=$(sed -n 's/^url = "\(.*\)"$/\1/p' "$cfg")
-          sum=$(sed -n 's/^sha256 = "\(.*\)"$/\1/p' "$cfg")
-          curl -fsSL -o "$RUNNER_TEMP/vk.xml" "$url"
-          echo "$sum  $RUNNER_TEMP/vk.xml" | sha256sum -c -
-          cargo run --locked -q -p relift-switch-vkgen -- --xml "$RUNNER_TEMP/vk.xml" --config "$cfg" --out runtime/guests/switch/vk/gen --check
-
-      - name: cargo-deny
-        run: |
-          dir="$RUNNER_TEMP/cargo-deny"
-          mkdir -p "$dir"
-          name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
-          curl -fsSL -o "$dir/deny.tgz" "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$name.tar.gz"
-          echo "$CARGO_DENY_SHA256  $dir/deny.tgz" | sha256sum -c -
-          tar -xzf "$dir/deny.tgz" -C "$dir"
-          "$dir/$name/cargo-deny" check
+      - name: fmt, clippy, tests, charter, generated docs and Vulkan forwarding, deny
+        run: scripts/ci/checks.sh
 
   gb-corpus:
     name: Game Boy corpus subset through relift
@@ -140,13 +78,8 @@ jobs:
             .
             guests/gb/devices
 
-      - name: Build relift
-        run: cargo build --locked -p relift
-
       - name: Import, build and run the cases of runtime/guests/gb/devtests/ci_cases.toml
-        run: |
-          python3 -I runtime/guests/gb/devtests/ci_corpus.py --relift target/debug/relift \
-            --roms "$RUNNER_TEMP/gb-roms" --fetch --work "$RUNNER_TEMP/gb-work" --jobs 4
+        run: scripts/ci/gb-corpus.sh
 
   appimage:
     name: AppImage packaging
@@ -165,29 +98,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: The runtime pin in the source is the one the cache is keyed by
-        run: |
-          grep -q "pub const TAG: &str = \"$APPIMAGE_RUNTIME_TAG\";" relift/src/appimage_runtime.rs
-
       - name: Cache the pinned AppImage runtime
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/relift/sdk/appimage-runtime
           key: appimage-runtime-${{ env.APPIMAGE_RUNTIME_TAG }}-${{ env.APPIMAGE_RUNTIME_SHA256 }}
 
-      - name: Install appimagetool
-        run: |
-          dir="$RUNNER_TEMP/appimagetool"
-          mkdir -p "$dir/bin"
-          curl -fsSL -o "$dir/appimagetool.AppImage" "https://github.com/AppImage/appimagetool/releases/download/$APPIMAGETOOL_VERSION/appimagetool-x86_64.AppImage"
-          echo "$APPIMAGETOOL_SHA256  $dir/appimagetool.AppImage" | sha256sum -c -
-          chmod +x "$dir/appimagetool.AppImage"
-          (cd "$dir" && ./appimagetool.AppImage --appimage-extract >/dev/null)
-          ln -s "$dir/squashfs-root/AppRun" "$dir/bin/appimagetool"
-          echo "$dir/bin" >> "$GITHUB_PATH"
-
       - name: Package four programs at once
-        run: cargo test --locked -p relift --test appimage_parallel -- --nocapture
+        run: scripts/ci/appimage.sh
 
   generated:
     name: generated templates are current
@@ -205,26 +123,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: fetch the pinned Sail sources
-        run: cpus/a64/gen/fetch-sail.sh "$RUNNER_TEMP/sail"
-
-      - name: regenerate and compare
-        run: |
-          cpus/a64/gen/regen.sh "$RUNNER_TEMP/sail/lib" "$RUNNER_TEMP/sail/model"
-          git diff --exit-code -- cpus/a64/src/lift/sail/generated
-
-      - name: regenerate and compare the SM83 templates
-        run: |
-          cpus/sm83/gen/regen.sh "$RUNNER_TEMP/sail/lib"
-          git diff --exit-code -- cpus/sm83/src/lift/sail/generated.rs
-
-      - name: fetch the pinned Sail sources (ARMv4T)
-        run: cpus/arm32/gen/fetch-sail.sh "$RUNNER_TEMP/sail-arm32"
-
-      - name: regenerate and compare (ARMv4T)
-        run: |
-          cpus/arm32/gen/regen.sh "$RUNNER_TEMP/sail-arm32/lib" "$RUNNER_TEMP/sail-arm32/model"
-          git diff --exit-code -- cpus/arm32/src/decode/generated.rs cpus/arm32/src/lift/generated
+      - name: regenerate the Sail templates and compare
+        run: scripts/ci/generated.sh
 
   macos:
     name: tests (macOS)
@@ -243,7 +143,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: tests
-        run: cargo test --workspace --locked
+        run: scripts/ci/tests.sh
 
   cross:
     name: cross ${{ matrix.target }}
@@ -275,20 +175,5 @@ jobs:
           sudo docker image prune --all --force
           df -h /
 
-      - name: Pull the cross image
-        run: docker pull "$CROSS_IMAGE"
-
       - name: Build relift for ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          docker run --rm -v "$PWD:/project" -w /project -e TARGET "$CROSS_IMAGE" bash -euo pipefail -c '
-            pinned=$(sed -n "s/^channel = \"\(.*\)\"$/\1/p" rust-toolchain.toml)
-            test "${RUST_VERSION:?the image must set RUST_VERSION}" = "$pinned" \
-              || { echo "::error::the image carries Rust $RUST_VERSION but rust-toolchain.toml pins $pinned"; exit 1; }
-            export RUSTUP_TOOLCHAIN="$RUST_VERSION"
-            rustup target list --installed | grep -qx "$TARGET" \
-              || { echo "::error::the image no longer ships $TARGET std"; exit 1; }
-            CARGO_TARGET_DIR=target/cross cargo build --locked --release -p relift --target "$TARGET"
-            ls -l target/cross/"$TARGET"/release/relift*
-          '
+        run: scripts/ci/cross-image.sh "${{ matrix.target }}"
