@@ -1534,8 +1534,8 @@ struct Package<'a> {
     android: Option<&'a crate::android::AndroidBuild>,
 }
 
-/// The release output of the target: an APK for Android, on Linux an
-/// AppImage of the program, nothing else yet.
+/// The release output of the target: an APK for Android, a signed `.app` on
+/// macOS, on Linux an AppImage of the program.
 fn package(settings: &Settings, req: &Package<'_>, ui: &mut Ui) -> Result<(), BoxError> {
     if let Some(a) = req.android {
         let label = if req.label.is_empty() {
@@ -1553,6 +1553,22 @@ fn package(settings: &Settings, req: &Package<'_>, ui: &mut Ui) -> Result<(), Bo
         exe: req.exe,
         import: req.import,
     };
+    if let Some(p) = crate::macapp::package(settings, &request, ui)? {
+        ui.summary(&Line::new().text(format!("  app: {}", p.path.display())));
+        ui.summary(&Line::new().text(format!(
+            "  bundled: {}; {}",
+            if p.bundled.is_empty() {
+                "no libraries".to_string()
+            } else {
+                p.bundled.join(", ")
+            },
+            match (&p.signed_with, p.notarized) {
+                (None, _) => "ad-hoc signature".to_string(),
+                (Some(_), false) => "Developer ID signature".to_string(),
+                (Some(_), true) => "Developer ID signature, notarized and stapled".to_string(),
+            }
+        )));
+    }
     if let Some(p) = crate::appimage::package(settings, &request, ui)? {
         let libs: Vec<&str> = p.bundled.iter().map(|b| b.soname.as_str()).collect();
         ui.summary(&Line::new().text(format!("  appimage: {}", p.path.display())));

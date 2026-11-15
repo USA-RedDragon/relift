@@ -144,7 +144,7 @@ impl Policy {
     }
 }
 
-fn slug(name: &str) -> String {
+pub(crate) fn slug(name: &str) -> String {
     let s: String = name
         .chars()
         .map(|c| {
@@ -159,7 +159,7 @@ fn slug(name: &str) -> String {
     if s.is_empty() { "game".into() } else { s }
 }
 
-fn display_name(info: &Info, fallback: &str) -> String {
+pub(crate) fn display_name(info: &Info, fallback: &str) -> String {
     let n = &info.identity.names;
     let pick = n
         .get("AmericanEnglish")
@@ -245,7 +245,7 @@ pub fn resolve(exe: &Path, extra: &[PathBuf]) -> Result<Vec<Bundled>, BoxError> 
     Ok(found)
 }
 
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)? {
         let e = e?;
@@ -457,13 +457,13 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
 }
 
 #[cfg(unix)]
-fn set_mode(p: &Path, mode: u32) -> std::io::Result<()> {
+pub(crate) fn set_mode(p: &Path, mode: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-fn set_mode(_: &Path, _: u32) -> std::io::Result<()> {
+pub(crate) fn set_mode(_: &Path, _: u32) -> std::io::Result<()> {
     Ok(())
 }
 

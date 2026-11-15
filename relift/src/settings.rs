@@ -75,6 +75,31 @@ pub struct Package {
         description = "the password of the keystore and its key"
     )]
     pub android_keystore_pass: String,
+
+    #[configulator(
+        name = "notarize",
+        default = "false",
+        description = "notarize a macOS game build with Apple (needs toolchain.codesign-identity and the notarize-* keys)"
+    )]
+    pub notarize: bool,
+
+    #[configulator(
+        name = "notarize-key",
+        description = "the App Store Connect API key file (.p8) that notarization signs in with"
+    )]
+    pub notarize_key: PathBuf,
+
+    #[configulator(
+        name = "notarize-key-id",
+        description = "the key ID of the notarization API key"
+    )]
+    pub notarize_key_id: String,
+
+    #[configulator(
+        name = "notarize-issuer",
+        description = "the issuer ID of the notarization API key"
+    )]
+    pub notarize_issuer: String,
 }
 
 /// How lifted code is written as C.
@@ -124,6 +149,18 @@ pub struct Toolchain {
         description = "the Android NDK (empty: ANDROID_NDK_HOME, then the SDK's newest)"
     )]
     pub android_ndk: PathBuf,
+
+    #[configulator(
+        name = "codesign-identity",
+        description = "the identity that signs macOS game builds, such as a Developer ID Application certificate name or its SHA-1 (empty: an ad-hoc signature)"
+    )]
+    pub codesign_identity: String,
+
+    #[configulator(
+        name = "codesign-keychain",
+        description = "the keychain that holds the signing identity (empty: the default keychain search list)"
+    )]
+    pub codesign_keychain: PathBuf,
 }
 
 impl Validate for Settings {

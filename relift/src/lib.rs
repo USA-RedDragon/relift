@@ -21,6 +21,7 @@ pub mod icon;
 pub mod identity;
 pub mod import;
 pub mod info;
+pub mod macapp;
 pub mod mods;
 pub mod paths;
 pub mod runtime_link;

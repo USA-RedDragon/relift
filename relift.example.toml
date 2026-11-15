@@ -10,6 +10,8 @@ ninja = ""
 appimagetool = ""
 android-sdk = ""
 android-ndk = ""
+codesign-identity = ""
+codesign-keychain = ""
 
 [emit]
 shard-kib = 4096
@@ -20,3 +22,7 @@ appimage = "auto"
 android-id = ""
 android-keystore = ""
 android-keystore-pass = ""
+notarize = false
+notarize-key = ""
+notarize-key-id = ""
+notarize-issuer = ""
