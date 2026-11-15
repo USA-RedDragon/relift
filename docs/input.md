@@ -13,6 +13,9 @@ and default bindings.
 | GB, GBC, GBA | `p1` |
 | NDS | `p1` and `touch` (declared) |
 
+Android builds of Switch, GB, GBC and GBA games also have the port
+`touchpad`, the on-screen controller (below).
+
 The tables live in `core/input/src/native.rs`. The C tables the runtime reads
 are generated from them (`runtime/guests/switch/ports_gen.c`,
 `runtime/guests/gb/ports_gen.c`); a test fails when they are stale, and
@@ -73,6 +76,55 @@ names a pad). A `+` or `-` suffix keeps one half of a range.
 The key binding setting type is `bind.<port id>.<control id>`; its value is
 the list. A launcher passes it like any setting; the runtime applies it with
 `rl_ports_apply_setting`.
+
+## On-screen controller
+
+On a touch screen (Android) the runtime draws a controller over the game
+picture: the port `touchpad`, listed in the self-description with
+`origin = "host"`. Its controls are the `p1` controls it draws, each bound by
+default to its own shape (`bind.touchpad.a = "touch:a"`), so it can be
+rebound like any port. Each frame its values merge into `p1`: a `p1` control
+reads pressed when its own bindings or the `touchpad` control of the same id
+say so (axes take the larger magnitude). Builds for other hosts show it only
+with `input.touch_pad.show = always`; the port is declared only when it can
+show.
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| `input.touch_pad.show` | `auto` (only while no gamepad is connected; keyboard and mouse do not count), `always`, `never` | `auto` |
+| `input.touch_pad.opacity` | 20 to 100 (percent) | 60 |
+| `input.touch_pad.size` | 70 to 150 (percent) | 100 |
+| `input.touch_pad.haptics` | `true`, `false`: a short tick on a press or a d-pad direction change | `true` |
+
+When a gamepad connects the controller releases what it holds, fades out in
+150 ms and a toast says so; it fades back in when the last one disconnects.
+Up to 10 fingers: a finger belongs to the first shape it lands on until it
+lifts. The d-pad has eight zones and follows a sliding finger; a finger slides
+between face buttons; sticks are fixed with a 10% dead zone; hit areas are
+about 15% larger than drawn and at least 48 dp. On Switch the landscape
+picture keeps its full size with the controller over its corners, and a
+finger no shape takes is the `touch` port's.
+
+The Hide button hides every other control and stays faintly visible as Show;
+the hidden state is not saved. The Menu tab and the system back gesture open
+the pause sheet: Resume, Edit controller layout, Settings (the settings above)
+and Leave game. While a sheet or the editor is open the game is paused.
+
+The editor moves and resizes each group and changes the spacing between a
+group's buttons (0.60 to 1.80 times the distance between centers). Holding a
+button detaches it to move and resize it alone; Attach puts it back. D-pads
+and stick bases are not detachable. Reset returns the guest and orientation to
+the built-in layout. Places are saved, per guest and orientation, as:
+
+```
+input.touch_pad.layout.<guest>.<orientation>.<group> = "x,y,scale,spacing"
+input.touch_pad.layout.<guest>.<orientation>.control.<control> = "x,y,scale"
+```
+
+with x and y the center as a fraction of the screen. The runtime writes
+setting changes back into the settings file a launcher passed with
+`--relift-settings`, or the per-user `settings.json`, keeping the other
+entries.
 
 ## Reading input
 
