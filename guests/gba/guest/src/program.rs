@@ -106,39 +106,50 @@ fn raw(img: &[u8], base: u32, l: Loc) -> u64 {
     if l.thumb { v | RAW_THUMB } else { v }
 }
 
-/// The instructions of a function that no other one of it reaches by
-/// falling through or by a constant branch: where its computed jumps can
-/// land inside it (the analysis follows them; the emitter turns each into a
-/// case of the jump's switch, with dispatch for any other target).
-fn landings(blocks: &BTreeMap<u64, (Result<Block, LiftFailure>, u64)>, entry: u32) -> Vec<u64> {
-    let mut reached = BTreeSet::new();
-    for (&pc, (b, _)) in blocks {
-        let Ok(b) = b else { continue };
-        let fall = pc + u64::from(b.len);
-        match b.exit.next {
-            Next::Const(t) => {
-                reached.insert(t);
-            }
+/// The instructions of a function that neither its entry nor its jump
+/// tables reach by falling through or by constant branches: where its
+/// computed jumps can land inside it (the analysis follows them; the
+/// emitter turns each into a case of the jump's switch, with dispatch for
+/// any other target). A block that only branches to itself is a landing.
+fn landings(
+    blocks: &BTreeMap<u64, (Result<Block, LiftFailure>, u64)>,
+    entry: u32,
+    tables: &BTreeMap<u64, Vec<u64>>,
+) -> Vec<u64> {
+    let succ = |pc: u64| -> Vec<u64> {
+        let Some((Ok(b), _)) = blocks.get(&pc) else {
+            return Vec::new();
+        };
+        let mut out = match b.exit.next {
+            Next::Const(t) => vec![t],
             Next::Select {
                 taken, not_taken, ..
-            } => {
-                reached.insert(taken);
-                reached.insert(not_taken);
-            }
-            Next::Dynamic(_) => {}
-        }
+            } => vec![taken, not_taken],
+            Next::Dynamic(_) => Vec::new(),
+        };
         if !matches!(b.exit.flow, Flow::Jump)
             || b.insts
                 .iter()
                 .any(|i| matches!(i.op, relift_ir::Op::Guard(..)))
         {
-            reached.insert(fall);
+            out.push(pc + u64::from(b.len));
+        }
+        out
+    };
+    let mut reached: BTreeSet<u64> = tables.values().flatten().copied().collect();
+    reached.insert(u64::from(entry));
+    let mut todo: Vec<u64> = reached.iter().copied().collect();
+    while let Some(pc) = todo.pop() {
+        for t in succ(pc) {
+            if blocks.contains_key(&t) && reached.insert(t) {
+                todo.push(t);
+            }
         }
     }
     blocks
         .keys()
         .copied()
-        .filter(|pc| *pc != u64::from(entry) && !reached.contains(pc))
+        .filter(|pc| !reached.contains(pc))
         .collect()
 }
 
@@ -238,7 +249,7 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
                     .push(u64::from(e.target.addr));
             }
         }
-        let landing = landings(&blocks, entry.addr);
+        let landing = landings(&blocks, entry.addr, &tables);
         for (&pc, (b, _)) in &blocks {
             if let Ok(b) = b
                 && matches!(b.exit.next, Next::Dynamic(_))
@@ -431,6 +442,25 @@ mod tests {
         assert!(c.contains("gba_t_080000d2"), "{c}");
         assert!(c.contains("rl_gba_swi_trap(c, mem, 0x105u)"), "{c}");
         assert!(c.contains("rl_arm32_call(c,"), "{c}");
+    }
+
+    #[test]
+    fn a_loop_on_itself_after_a_computed_jump_is_a_landing() {
+        let base = 0x0800_0000u32;
+        let mut img = vec![0u8; 0x20];
+        img[0..4].copy_from_slice(&0xE12F_FF10u32.to_le_bytes());
+        img[4..8].copy_from_slice(&0xEAFF_FFFEu32.to_le_bytes());
+        let fe = Gba::with_calls(BTreeSet::new());
+        let mut blocks = BTreeMap::new();
+        for pc in [base, base + 4] {
+            blocks.insert(u64::from(pc), (fe.lift_at(&img, base, pc, false), 0));
+        }
+        assert_eq!(
+            landings(&blocks, base, &BTreeMap::new()),
+            [u64::from(base) + 4]
+        );
+        let tables = BTreeMap::from([(u64::from(base), vec![u64::from(base) + 4])]);
+        assert!(landings(&blocks, base, &tables).is_empty());
     }
 
     #[test]
