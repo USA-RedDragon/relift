@@ -279,8 +279,6 @@ struct hos_thread {
     int32_t cur_core;
     /** @brief In the scheduler's queues: started and not blocked. */
     bool runnable;
-    /** @brief Set when the thread must give up its core at its next svc; read without the lock. */
-    int preempt;
     /** @brief When the thread last stopped being selected on a core (ns). */
     uint64_t last_sched_ns;
     /** @brief When the thread got its core (ns), for the round robin of the preemption priorities. */
@@ -575,7 +573,7 @@ void hos_sched_ready(hos_thread *t);
 void hos_sched_unready(hos_thread *t);
 /** @brief Waits until t, runnable, holds its core. Lock held once (it waits on t->cv). */
 void hos_sched_run(hos_thread *t);
-/** @brief The svc exit check: gives the core up when asked to, and runs the round robin. Lock not held. */
+/** @brief The svc exit check and the preemption hook: gives the core up when asked to, and runs the round robin. Lock not held. */
 void hos_sched_point(void);
 /** @brief The calling guest thread blocks in host code (IPC, a Vulkan wait): frees its core. Lock and host locks not held. */
 void hos_sched_leave(void);

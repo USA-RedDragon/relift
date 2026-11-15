@@ -207,5 +207,7 @@ any storage with no tree.
   (svcSleepThread 0, -1 and -2). A thread waiting in an svc, an IPC request
   or a blocking Vulkan call gives its core up. Where Horizon preempts a
   thread at any instruction when a better one becomes ready, the runtime
-  preempts it at its next svc; the round robin of priorities 59 and 63 also
-  runs at svcs. A mutex owner inherits the priority of its waiters.
+  preempts it at its next svc or preemption point (a jump back closing a
+  loop that calls, holds another loop or waits on memory, a computed jump,
+  a recursive call; docs/abi.md section 14.1); the round robin of
+  priorities 59 and 63 runs at svcs. A mutex owner inherits the priority of its waiters.

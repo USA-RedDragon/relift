@@ -8,8 +8,10 @@
  *
  * The queues, the selection with its migration to idle cores, and the yields
  * are a port of the logic of Ryujinx (MIT) KPriorityQueue and KScheduler.
- * Horizon preempts at any instruction; here the holder leaves at its next
- * svc, and the round robin of priorities 59 and 63 runs at the holder's svcs.
+ * Horizon preempts at any instruction; here the scheduler ends the budget of
+ * the holder's preemption clock and the holder leaves at its next svc or
+ * preemption point (docs/abi.md section 14.1), and the round robin of
+ * priorities 59 and 63 runs at the holder's svcs.
  */
 #include "hos.h"
 
@@ -206,7 +208,7 @@ static void grant(int32_t c, hos_thread *t)
     hos_core *k = &s->cores[c];
     k->holder = t;
     t->cur_core = c;
-    __atomic_store_n(&t->preempt, 0, __ATOMIC_RELAXED);
+    rl_preempt_clear(t->rt->ctx);
     uint64_t now = rl_clock_ns();
     t->slice_ns = now;
     if (k->last != t) {
@@ -223,7 +225,7 @@ static void kick(int32_t c)
     hos_thread *sel = k->selected, *h = k->holder;
     if (h == sel) {
         if (h) {
-            __atomic_store_n(&h->preempt, 0, __ATOMIC_RELAXED);
+            rl_preempt_clear(h->rt->ctx);
             k->preempt_ns = 0;
         }
         return;
@@ -231,7 +233,7 @@ static void kick(int32_t c)
     if (h) {
         if (!k->preempt_ns) {
             k->preempt_ns = rl_clock_ns();
-            __atomic_store_n(&h->preempt, 1, __ATOMIC_RELEASE);
+            rl_preempt_request(h->rt->ctx);
         }
         return;
     }
@@ -255,7 +257,7 @@ static void release(hos_thread *t)
     hos_core *k = &s->cores[c];
     k->holder = NULL;
     t->cur_core = -1;
-    __atomic_store_n(&t->preempt, 0, __ATOMIC_RELAXED);
+    rl_preempt_clear(t->rt->ctx);
     if (k->preempt_ns) {
         uint64_t d = rl_clock_ns() - k->preempt_ns;
         k->preempt_ns = 0;
@@ -272,6 +274,12 @@ static void release(hos_thread *t)
     kick(c);
 }
 
+static void preempted(rl_ctx *c)
+{
+    (void)c;
+    hos_sched_point();
+}
+
 void hos_sched_init(void)
 {
     const char *e = getenv("RELIFT_SCHED");
@@ -279,6 +287,7 @@ void hos_sched_init(void)
     hos.sched.stats = e && strstr(e, "stats");
     if (hos.sched.free)
         rl_log(RL_LOG_WARN, "sched", "RELIFT_SCHED=free: guest threads run freely, ignoring priorities and cores");
+    rl_set_preempt_hook(preempted);
 }
 
 void hos_sched_ready(hos_thread *t)
@@ -366,10 +375,12 @@ void hos_sched_point(void)
     if (!t || s->free)
         return;
     bool rr = t->prio >= 59;
-    if (!__atomic_load_n(&t->preempt, __ATOMIC_ACQUIRE) && !rr && !s->stats)
+    if (!rl_time_spent(&t->rt->ctx->time) && !rr && !s->stats)
         return;
     hos_lock();
-    if (t->runnable) {
+    if (!t->runnable)
+        rl_preempt_clear(t->rt->ctx);
+    else {
         uint64_t now = rl_clock_ns();
         int32_t c = t->cur_core;
         if (rr && c >= 0 && t->prio == rr_prio(c) && now - t->slice_ns >= RR_NS) {
