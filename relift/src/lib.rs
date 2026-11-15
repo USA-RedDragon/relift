@@ -2,6 +2,7 @@
 //! integration tests can name them.
 
 pub mod appimage;
+pub mod appimage_runtime;
 pub mod build;
 pub mod cli;
 pub mod coverage;

@@ -324,7 +324,9 @@ pub fn desktop_file(slug: &str, name: &str, platform: &str) -> String {
 
 fn licenses_file(name: &str, bundled: &[Bundled]) -> String {
     let mut s = format!(
-        "{name}\n\nThis AppImage holds a program built with relift and these third-party components.\nThe game's own code and data belong to their rights holders.\n\n- relift runtime and the code relift generated: MIT (the text is in relift/LICENSE)\n"
+        "{name}\n\nThis AppImage holds a program built with relift and these third-party components.\nThe game's own code and data belong to their rights holders.\n\n- relift runtime and the code relift generated: MIT (the text is in relift-LICENSE)\n- AppImage type 2 runtime ({}), the start of this file: MIT, {} (the text is in type2-runtime-LICENSE)\n",
+        crate::appimage_runtime::TAG,
+        crate::appimage_runtime::HOME
     );
     for b in bundled {
         match KNOWN.iter().find(|k| b.soname.starts_with(k.prefix)) {
@@ -356,6 +358,10 @@ fn write_licenses(
         licenses_file(name, bundled).as_bytes(),
     )?;
     relift_cache::write_if_changed(&dir.join("relift-LICENSE"), LICENSE_RELIFT.as_bytes())?;
+    relift_cache::write_if_changed(
+        &dir.join("type2-runtime-LICENSE"),
+        crate::appimage_runtime::LICENSE.as_bytes(),
+    )?;
     for b in bundled {
         let Some(k) = KNOWN.iter().find(|k| b.soname.starts_with(k.prefix)) else {
             continue;
@@ -524,19 +530,43 @@ pub fn package(
     let doc =
         relift_info::section::read(&image).map_err(|e| format!("{}: {e}", req.exe.display()))?;
     let info = Info::from_bytes(doc)?;
+    let runtime = crate::appimage_runtime::ensure(&crate::import::cache_root(settings)?, arch())?;
     let out = req.exe.parent().ok_or("the program has no folder")?;
-    let dir = out.join("appimage").join("AppDir");
-    let mut packaged = layout(req, &info, &dir)?;
-    let target = out.join(format!("{}.AppImage", slug(req.name)));
-    let _ = std::fs::remove_file(&target);
-    let output = relift_proc::command(&tool)
-        .args(["--no-appstream", "--comp", "zstd"])
+    let scratch = out
+        .join("appimage")
+        .join(format!("build-{}", crate::appimage_runtime::unique()));
+    let result = assemble(&tool, &runtime, req, &info, out, &scratch);
+    let _ = std::fs::remove_dir_all(&scratch);
+    Ok(Some(result?))
+}
+
+/// Lays out and packs one AppImage inside `scratch`, a folder no other build
+/// uses (the AppDir, the tool's `TMPDIR` and the unfinished image), then
+/// renames the finished image over `<project>.AppImage` in one step.
+fn assemble(
+    tool: &Path,
+    runtime: &Path,
+    req: &Request,
+    info: &Info,
+    out: &Path,
+    scratch: &Path,
+) -> Result<Packaged, BoxError> {
+    let dir = scratch.join("AppDir");
+    let tmp = scratch.join("tmp");
+    std::fs::create_dir_all(&tmp)?;
+    let mut packaged = layout(req, info, &dir)?;
+    let slug = slug(req.name);
+    let image = scratch.join(format!("{slug}.AppImage"));
+    let output = relift_proc::command(tool)
+        .args(["--no-appstream", "--comp", "zstd", "--runtime-file"])
+        .arg(runtime)
         .arg(&dir)
-        .arg(&target)
+        .arg(&image)
         .env("ARCH", arch())
+        .env("TMPDIR", &tmp)
         .output()
         .map_err(|e| format!("{}: {e}", tool.display()))?;
-    if !output.status.success() || !target.is_file() {
+    if !output.status.success() || !image.is_file() {
         let log = String::from_utf8_lossy(&output.stderr);
         let tail: Vec<&str> = log.lines().rev().take(12).collect();
         return Err(format!(
@@ -547,8 +577,10 @@ pub fn package(
         )
         .into());
     }
+    let target = out.join(format!("{slug}.AppImage"));
+    std::fs::rename(&image, &target).map_err(|e| format!("{}: {e}", target.display()))?;
     packaged.path = target;
-    Ok(Some(packaged))
+    Ok(packaged)
 }
 
 #[cfg(test)]
@@ -666,6 +698,7 @@ mod tests {
             "usr/share/relift/romfs/a.bin",
             "usr/share/licenses/my-game/BUNDLED.txt",
             "usr/share/licenses/my-game/relift-LICENSE",
+            "usr/share/licenses/my-game/type2-runtime-LICENSE",
             INFO_PATH,
         ] {
             assert!(out.join(f).exists(), "{f}");
