@@ -810,29 +810,37 @@ fn with_writers<R>(emit: &mut dyn FnMut(&mut Write<'_>) -> R) -> (R, std::io::Re
     let shared = std::sync::Mutex::new(rx);
     let rx = &shared;
     std::thread::scope(move |sc| {
-        let workers: Vec<_> = (0..WRITERS)
-            .map(|_| {
-                sc.spawn(move || {
-                    let mut r = Ok(());
-                    loop {
-                        let next = rx
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .recv();
-                        let Ok((path, text)) = next else { break };
-                        if r.is_ok() {
-                            r = relift_cache::write_if_changed(&path, text.as_bytes()).map(|_| ());
-                        }
+        let mut workers = Vec::new();
+        for _ in 0..relift_proc::workers::jobs().clamp(1, WRITERS) {
+            let spawned = std::thread::Builder::new().spawn_scoped(sc, move || {
+                let mut r = Ok(());
+                loop {
+                    let next = rx
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .recv();
+                    let Ok((path, text)) = next else { break };
+                    if r.is_ok() {
+                        r = relift_cache::write_if_changed(&path, text.as_bytes()).map(|_| ());
                     }
-                    r
-                })
-            })
-            .collect();
+                }
+                r
+            });
+            match spawned {
+                Ok(h) => workers.push(h),
+                Err(_) => break,
+            }
+        }
+        let inline = workers.is_empty();
+        let mut r = Ok(());
         let out = emit(&mut |path, text| {
-            let _ = tx.send((path, text));
+            if !inline {
+                let _ = tx.send((path, text));
+            } else if r.is_ok() {
+                r = relift_cache::write_if_changed(&path, text.as_bytes()).map(|_| ());
+            }
         });
         drop(tx);
-        let mut r = Ok(());
         for w in workers {
             let done = w
                 .join()

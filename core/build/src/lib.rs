@@ -354,23 +354,23 @@ fn run(
     let mut readers = Vec::new();
     if let Some(out) = child.stdout.take() {
         let tx = tx.clone();
-        readers.push(std::thread::spawn(move || {
+        readers.push(std::thread::Builder::new().spawn(move || {
             for l in io::BufReader::new(out).lines().map_while(Result::ok) {
                 if tx.send(l).is_err() {
                     break;
                 }
             }
-        }));
+        })?);
     }
     if let Some(err) = child.stderr.take() {
         let tx = tx.clone();
-        readers.push(std::thread::spawn(move || {
+        readers.push(std::thread::Builder::new().spawn(move || {
             for l in io::BufReader::new(err).lines().map_while(Result::ok) {
                 if tx.send(l).is_err() {
                     break;
                 }
             }
-        }));
+        })?);
     }
     drop(tx);
     let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
@@ -420,52 +420,63 @@ fn compile_parallel(
     let next = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
     let (tx, rx) = channel::<Result<usize, Error>>();
+    let work = |tx: std::sync::mpsc::Sender<Result<usize, Error>>| {
+        loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            let Some(c) = stale.get(i) else { break };
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            let r = relift_proc::command(prog)
+                .args(pre)
+                .args(&c.flags)
+                .arg("-c")
+                .arg(&c.src)
+                .arg("-o")
+                .arg(&c.obj)
+                .stdin(std::process::Stdio::null())
+                .output();
+            let r = match r {
+                Ok(o) if o.status.success() => Ok(i),
+                Ok(o) => {
+                    let mut msg = format!("cc {} failed ({})", c.src.display(), o.status);
+                    for l in String::from_utf8_lossy(&o.stderr)
+                        .lines()
+                        .chain(String::from_utf8_lossy(&o.stdout).lines())
+                        .rev()
+                        .take(TAIL_LINES)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                    {
+                        msg.push('\n');
+                        msg.push_str(l);
+                    }
+                    Err(Error::Failed(msg))
+                }
+                Err(e) => Err(e.into()),
+            };
+            let failed = r.is_err();
+            if tx.send(r).is_err() || failed {
+                break;
+            }
+        }
+    };
     std::thread::scope(|sc| {
+        let work = &work;
+        let mut started = 0;
         for _ in 0..workers.clamp(1, stale.len().max(1)) {
             let tx = tx.clone();
-            let (next, stop) = (&next, &stop);
-            sc.spawn(move || {
-                loop {
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(c) = stale.get(i) else { break };
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let r = relift_proc::command(prog)
-                        .args(pre)
-                        .args(&c.flags)
-                        .arg("-c")
-                        .arg(&c.src)
-                        .arg("-o")
-                        .arg(&c.obj)
-                        .stdin(std::process::Stdio::null())
-                        .output();
-                    let r = match r {
-                        Ok(o) if o.status.success() => Ok(i),
-                        Ok(o) => {
-                            let mut msg = format!("cc {} failed ({})", c.src.display(), o.status);
-                            for l in String::from_utf8_lossy(&o.stderr)
-                                .lines()
-                                .chain(String::from_utf8_lossy(&o.stdout).lines())
-                                .rev()
-                                .take(TAIL_LINES)
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev()
-                            {
-                                msg.push('\n');
-                                msg.push_str(l);
-                            }
-                            Err(Error::Failed(msg))
-                        }
-                        Err(e) => Err(e.into()),
-                    };
-                    let failed = r.is_err();
-                    if tx.send(r).is_err() || failed {
-                        break;
-                    }
-                }
-            });
+            if std::thread::Builder::new()
+                .spawn_scoped(sc, move || work(tx))
+                .is_err()
+            {
+                break;
+            }
+            started += 1;
+        }
+        if started == 0 {
+            work(tx.clone());
         }
         drop(tx);
         let mut done = 0;

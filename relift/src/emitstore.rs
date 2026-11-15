@@ -204,19 +204,22 @@ impl EmitStore {
         }
         let queue = Arc::new(Queue::new());
         let names = Arc::new(Mutex::new(Vec::new()));
-        let workers = (0..WORKERS)
-            .map(|_| {
-                let queue = Arc::clone(&queue);
-                let names = Arc::clone(&names);
-                let dir = dir.to_path_buf();
-                std::thread::spawn(move || {
-                    while let Some(job) = queue.pop() {
-                        let r = write_frame(&dir, job.name, &job.content);
-                        lock(&names).push((job.slot, r));
-                    }
-                })
-            })
-            .collect();
+        let mut workers = Vec::new();
+        for _ in 0..relift_proc::workers::jobs().clamp(1, WORKERS) {
+            let queue = Arc::clone(&queue);
+            let names = Arc::clone(&names);
+            let dir = dir.to_path_buf();
+            let spawned = std::thread::Builder::new().spawn(move || {
+                while let Some(job) = queue.pop() {
+                    let r = write_frame(&dir, job.name, &job.content);
+                    lock(&names).push((job.slot, r));
+                }
+            });
+            match spawned {
+                Ok(h) => workers.push(h),
+                Err(_) => break,
+            }
+        }
         Ok(EmitStore {
             dir: dir.to_path_buf(),
             tool,
@@ -284,6 +287,11 @@ impl EmitStore {
             entries,
         });
         let name = format!("{}_{slot}", self.build_id);
+        if self.workers.is_empty() {
+            let r = write_frame(&self.dir, name, &content);
+            lock(&self.names).push((slot, r));
+            return;
+        }
         self.queue.push(Job {
             slot,
             name,
