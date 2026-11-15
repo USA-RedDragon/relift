@@ -92,10 +92,10 @@ int rl_gba_cpu_cond_fail(rl_ctx *c, uint8_t *mem, uint64_t next)
 }
 
 /** @brief The BIOS stub's entry after the exception entry: stacks registers and gives the handler, whose state its bit 0 sets (BX). */
-static uint32_t stub_entry(rl_ctx *c)
+static uint32_t stub_entry(rl_ctx *c, bool from_code)
 {
     rl_gba *g = machine(c);
-    rl_gba_irq_cpu ic = {.r = {c->r[0], c->r[1], c->r[2], c->r[3]}, .r12 = c->r[12], .lr = c->r[14], .sp = c->r[13]};
+    rl_gba_irq_cpu ic = {.r = {c->r[0], c->r[1], c->r[2], c->r[3]}, .r12 = c->r[12], .lr = c->r[14], .sp = c->r[13], .from_code = from_code};
     uint32_t h = rl_gba_bios_irq_entry(rl_gba_bios_of(g), rl_gba_bios_bus(g), &ic);
     for (unsigned i = 0; i < 4; i++)
         c->r[i] = ic.r[i];
@@ -109,10 +109,10 @@ static uint32_t stub_entry(rl_ctx *c)
 }
 
 /** @brief The stub's tail after the handler jumped to 0x138: unstacks and returns from the exception; gives where to. */
-static uint32_t stub_return(rl_ctx *c)
+static uint32_t stub_return(rl_ctx *c, bool from_code)
 {
     rl_gba *g = machine(c);
-    rl_gba_irq_cpu ic = {.r = {c->r[0], c->r[1], c->r[2], c->r[3]}, .r12 = c->r[12], .lr = c->r[14], .sp = c->r[13]};
+    rl_gba_irq_cpu ic = {.r = {c->r[0], c->r[1], c->r[2], c->r[3]}, .r12 = c->r[12], .lr = c->r[14], .sp = c->r[13], .from_code = from_code};
     uint32_t to = rl_gba_bios_irq_return(rl_gba_bios_of(g), rl_gba_bios_bus(g), &ic);
     for (unsigned i = 0; i < 4; i++)
         c->r[i] = ic.r[i];
@@ -140,8 +140,10 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
         return RL_NO_IRQ;
     }
     r->stats.irqs++;
+    unsigned size = c->t ? 2u : 4u;
+    rl_gba_fetch(g, (uint32_t)next + 2u * size, size, !c->code_ns);
     rl_arm32_exception(c, RL_ARM32_IRQ, (uint32_t)next + 4u);
-    uint32_t h = stub_entry(c);
+    uint32_t h = stub_entry(c, true);
     rl_arm32_call(c, RL_GBA_BIOS_IRQ_RETURN);
     return h;
 }
@@ -150,7 +152,12 @@ static uint64_t irq_return(rl_ctx *c, uint8_t *mem, uint64_t expected)
 {
     (void)mem;
     (void)expected;
-    return stub_return(c);
+    uint32_t to = stub_return(c, true);
+    unsigned size = c->t ? 2u : 4u;
+    rl_gba_fetch(machine(c), to, size, false);
+    rl_gba_fetch(machine(c), to + size, size, true);
+    c->code_ns = 0;
+    return to;
 }
 
 /** @brief Where a SWI's call ends when a handler inside it changed its return (RL_GBA_SWI_LEFT). */
@@ -172,14 +179,15 @@ static int bios_point(void *user, uint32_t lr, uint32_t spsr, const uint32_t *bi
     memcpy(regs, c->r, sizeof regs);
     rl_arm32_set_cpsr(c, spsr);
     r->stats.bios_irqs++;
+    rl_gba_fetch(machine(c), lr & ~3u, 4, true);
     rl_arm32_exception(c, RL_ARM32_IRQ, lr);
-    uint32_t h = stub_entry(c);
+    uint32_t h = stub_entry(c, true);
     if (rl_arm32_call_guest(c, NULL, h, RL_GBA_BIOS_IRQ_RETURN) != RL_OK) {
         rl_log(RL_LOG_ERROR, "gba", "an interrupt handler inside a BIOS call did not return; stopping");
         rl_process_exit(RL_EXIT_SOFTWARE);
         return RL_GBA_POINT_NONE;
     }
-    uint32_t to = stub_return(c);
+    uint32_t to = stub_return(c, false);
     if (to != ((lr - 4u) & ((spsr & 0x20u) ? ~1u : ~3u)) || rl_arm32_cpsr(c) != spsr) {
         g_left = to;
         return RL_GBA_POINT_LEFT;
