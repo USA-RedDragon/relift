@@ -1683,30 +1683,6 @@ static int vkt_vkCreateComputePipelines(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkCreateDescriptorSetLayout, c->x[0]);
-    const VkDescriptorSetLayoutCreateInfo * a1 = vkg_ain_VkDescriptorSetLayoutCreateInfo(&k, c->x[1], 1);
-    const VkAllocationCallbacks * a2 = NULL;
-    VkDescriptorSetLayout * a3 = (VkDescriptorSetLayout *)vkf_ptr(&k, c->x[3]);
-    PFN_vkCreateDescriptorSetLayout fn = (PFN_vkCreateDescriptorSetLayout)k.fns->f[VKG_vkCreateDescriptorSetLayout];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkCreateDescriptorSetLayout);
-    VkResult checked = vkf_check_set_layout(&k);
-    if (checked < 0) {
-        c->x[0] = (uint32_t)checked;
-        return vkf_end(&k);
-    }
-    VkResult r = fn(a0, a1, a2, a3);
-    vkf_note_set_layout(&k);
-    c->x[0] = (uint32_t)r;
-    return vkf_end(&k);
-}
-
 static int vkt_vkCreateDescriptorUpdateTemplate(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -2500,27 +2476,6 @@ static int vkt_vkGetBufferOpaqueCaptureAddress(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkGetBufferOpaqueCaptureAddress);
     uint64_t r = fn(a0, a1);
     c->x[0] = (uint64_t)r;
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetDescriptorSetLayoutSupport(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetDescriptorSetLayoutSupport, c->x[0]);
-    const VkDescriptorSetLayoutCreateInfo * a1 = vkg_ain_VkDescriptorSetLayoutCreateInfo(&k, c->x[1], 1);
-    uint64_t n2 = 1;
-    VkDescriptorSetLayoutSupport *a2 = vkg_ain_VkDescriptorSetLayoutSupport(&k, c->x[2], n2);
-    PFN_vkGetDescriptorSetLayoutSupport fn = (PFN_vkGetDescriptorSetLayoutSupport)k.fns->f[VKG_vkGetDescriptorSetLayoutSupport];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetDescriptorSetLayoutSupport);
-    fn(a0, a1, a2);
-    {
-        uint64_t w2 = 1;
-        vkg_aout_VkDescriptorSetLayoutSupport(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
-    }
     return vkf_end(&k);
 }
 
@@ -4250,7 +4205,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkh_vkCreateDebugReportCallbackEXT,
     vkh_vkCreateDebugUtilsMessengerEXT,
     vkh_vkCreateDescriptorPool,
-    vkt_vkCreateDescriptorSetLayout,
+    vkh_vkCreateDescriptorSetLayout,
     vkt_vkCreateDescriptorUpdateTemplate,
     vkh_vkCreateDevice,
     vkt_vkCreateEvent,
@@ -4320,7 +4275,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetBufferMemoryRequirements,
     vkt_vkGetBufferMemoryRequirements2,
     vkt_vkGetBufferOpaqueCaptureAddress,
-    vkt_vkGetDescriptorSetLayoutSupport,
+    vkh_vkGetDescriptorSetLayoutSupport,
     vkt_vkGetDeviceBufferMemoryRequirements,
     vkt_vkGetDeviceGroupPeerMemoryFeatures,
     vkt_vkGetDeviceGroupPresentCapabilitiesKHR,

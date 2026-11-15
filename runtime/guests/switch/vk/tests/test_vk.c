@@ -1988,3 +1988,90 @@ TEST(vk_dont_care_attachments_keep_contents)
     }
     rl_settings_reset();
 }
+
+static uint32_t g_seen_bindings[4], g_seen_counts[4], g_seen_flags[4], g_seen_n;
+static bool g_seen_sampler;
+static PFN_vkCreateDescriptorSetLayout g_real_layout;
+
+static VkResult seen_layout(VkDevice dev, const VkDescriptorSetLayoutCreateInfo *ci,
+                            const VkAllocationCallbacks *a, VkDescriptorSetLayout *out)
+{
+    g_seen_n = ci->bindingCount;
+    for (uint32_t i = 0; i < ci->bindingCount && i < 4; i++) {
+        g_seen_bindings[i] = ci->pBindings[i].binding;
+        g_seen_counts[i] = ci->pBindings[i].descriptorCount;
+        if (ci->pBindings[i].pImmutableSamplers)
+            g_seen_sampler = ci->pBindings[i].binding == 7 && ci->pBindings[i].pImmutableSamplers[0] != NULL;
+    }
+    const VkDescriptorSetLayoutBindingFlagsCreateInfo *f = ci->pNext;
+    for (uint32_t i = 0; f && i < f->bindingCount && i < 4; i++)
+        g_seen_flags[i] = f->pBindingFlags[i];
+    VkDescriptorSetLayoutCreateInfo plain = *ci;
+    plain.pNext = NULL;
+    return g_real_layout(dev, &plain, a, out);
+}
+
+TEST(vk_set_layout_bindings_reach_the_host_in_order)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t dev = make_device(pds[0], queue_family(pds[0], 0), NULL, 0);
+    CHECK(dev != 0);
+    VkSamplerCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .maxLod = 1.0f };
+    uint64_t gs = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateSampler", dev, gput(&sci, sizeof sci), 0, gs)), VK_SUCCESS);
+    uint64_t sampler = g64(gs);
+    VkDescriptorSetLayoutBinding b[3] = {
+        { .binding = 3, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .descriptorCount = 1,
+          .stageFlags = VK_SHADER_STAGE_ALL },
+        { .binding = 8, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 64,
+          .stageFlags = VK_SHADER_STAGE_ALL },
+        { .binding = 7, .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = 1,
+          .stageFlags = VK_SHADER_STAGE_ALL, .pImmutableSamplers = GP(gput(&sampler, sizeof sampler)) },
+    };
+    uint64_t gb = gput(b, sizeof b);
+    const VkDescriptorBindingFlags flags[3] = { 1, 2, 4 };
+    uint64_t gf = gput(flags, sizeof flags);
+    VkDescriptorSetLayoutBindingFlagsCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+        .bindingCount = 3,
+        .pBindingFlags = GP(gf),
+    };
+    VkDescriptorSetLayoutCreateInfo lci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = GP(gput(&fci, sizeof fci)),
+        .bindingCount = 3,
+        .pBindings = GP(gb),
+    };
+    vkf_obj *o = vkf_obj_of(dev, VKG_KIND_VkDevice);
+    CHECK(o != NULL);
+    g_real_layout = (PFN_vkCreateDescriptorSetLayout)o->fns->f[VKG_vkCreateDescriptorSetLayout];
+    o->fns->f[VKG_vkCreateDescriptorSetLayout] = (void (*)(void))seen_layout;
+    uint64_t gl = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateDescriptorSetLayout", dev, gput(&lci, sizeof lci), 0, gl)), VK_SUCCESS);
+    o->fns->f[VKG_vkCreateDescriptorSetLayout] = (void (*)(void))g_real_layout;
+    CHECK_EQ(g_seen_n, 3);
+    CHECK_EQ(g_seen_bindings[0], 3);
+    CHECK_EQ(g_seen_bindings[1], 7);
+    CHECK_EQ(g_seen_bindings[2], 8);
+    CHECK_EQ(g_seen_counts[1], 1);
+    CHECK_EQ(g_seen_counts[2], 64);
+    CHECK(g_seen_sampler);
+    CHECK_EQ(g_seen_flags[0], 1);
+    CHECK_EQ(g_seen_flags[1], 4);
+    CHECK_EQ(g_seen_flags[2], 2);
+    CHECK_EQ(memcmp(g_mem + gb, b, sizeof b), 0);
+    CHECK_EQ(memcmp(g_mem + gf, flags, sizeof flags), 0);
+    lci.pNext = NULL;
+    VkDescriptorSetLayoutSupport sup = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT };
+    uint64_t gsup = gput(&sup, sizeof sup);
+    G("vkGetDescriptorSetLayoutSupport", dev, gput(&lci, sizeof lci), gsup);
+    CHECK_EQ(rl_ld32(g_mem, gsup + 16), VK_TRUE);
+    G("vkDestroyDescriptorSetLayout", dev, g64(gl), 0);
+    G("vkDestroySampler", dev, sampler, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}

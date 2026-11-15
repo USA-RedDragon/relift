@@ -97,6 +97,8 @@ hand_commands = [
     "vkCreateRenderPass",
     "vkCreateRenderPass2",
     "vkCmdBeginRendering",
+    "vkCreateDescriptorSetLayout",
+    "vkGetDescriptorSetLayoutSupport",
     "vkAllocateCommandBuffers",
     "vkFreeCommandBuffers",
     "vkDestroyCommandPool",

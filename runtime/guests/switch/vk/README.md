@@ -139,6 +139,11 @@ hold the allocation, and allocates from it. Freeing a set goes to the host
 pool it came from; resetting or destroying the guest pool applies to all of
 them.
 
+Set layouts reach the host with their bindings sorted by binding number, and
+the binding flags of `VkDescriptorSetLayoutBindingFlagsCreateInfo` permuted to
+match. Any order is valid, but Mesa's Turnip reads the immutable samplers of a
+binding given out of order past their end and crashes.
+
 ## Secondary command buffers
 
 The console driver runs a secondary command buffer handed straight to

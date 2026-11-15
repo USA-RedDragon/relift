@@ -1427,6 +1427,8 @@ int vkh_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCmdBeginRendering(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetDescriptorSetLayoutSupport(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkAllocateCommandBuffers(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem);
