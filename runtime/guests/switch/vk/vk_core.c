@@ -608,6 +608,22 @@ static bool host_has(const VkExtensionProperties *p, uint32_t n, const char *nam
     return false;
 }
 
+#define PORTABILITY_ENUMERATION "VK_KHR_portability_enumeration"
+#define PORTABILITY_SUBSET "VK_KHR_portability_subset"
+#define ENUMERATE_PORTABILITY_BIT 0x1u
+
+static bool device_has(vkf_call *k, VkPhysicalDevice pd, const char *name)
+{
+    PFN_vkEnumerateDeviceExtensionProperties f = VKF_FN(k->fns, vkEnumerateDeviceExtensionProperties);
+    uint32_t n = 0;
+    if (f(pd, NULL, &n, NULL) < 0)
+        return false;
+    VkExtensionProperties *p = vkf_alloc(k, (n + 1) * sizeof *p);
+    if (f(pd, NULL, &n, p) < 0)
+        return false;
+    return host_has(p, n, name);
+}
+
 static const VkExtensionProperties *host_instance_exts(vkf_call *k, uint32_t *n)
 {
     PFN_vkEnumerateInstanceExtensionProperties f = VKF_FN(&vkf.global, vkEnumerateInstanceExtensionProperties);
@@ -713,7 +729,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     uint32_t n_prov = 0;
     for (const char *const *e = sp ? sp->instance_extensions : NULL; e && *e; e++)
         n_prov++;
-    const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_prov + 1) * sizeof *exts);
+    const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_prov + 2) * sizeof *exts);
     uint32_t n = 0;
     bool vi = false;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++) {
@@ -742,6 +758,10 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
             if (!have)
                 exts[n++] = *e;
         }
+    }
+    if (host_has(host, n_host, PORTABILITY_ENUMERATION)) {
+        exts[n++] = PORTABILITY_ENUMERATION;
+        ci->flags |= ENUMERATE_PORTABILITY_BIT;
     }
     ci->ppEnabledExtensionNames = exts;
     ci->enabledExtensionCount = n;
@@ -824,10 +844,12 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     uint32_t n_extra = 0;
     void *chain = NULL;
     vkf_mem_device_setup(&k, d, pd, &extra, &n_extra, &chain);
-    const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_extra + 1) * sizeof *exts);
+    const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_extra + 2) * sizeof *exts);
     uint32_t n = 0;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; i++)
         exts[n++] = ci->ppEnabledExtensionNames[i];
+    if (device_has(&k, pd, PORTABILITY_SUBSET))
+        exts[n++] = PORTABILITY_SUBSET;
     for (uint32_t j = 0; j < n_extra; j++) {
         bool have = false;
         for (uint32_t i = 0; i < n; i++)
