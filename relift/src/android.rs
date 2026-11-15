@@ -27,10 +27,22 @@ const ACTIVITY_JAVA: &str = r#"package dev.relift.app;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import org.json.JSONObject;
 import org.libsdl.app.SDLActivity;
 
 public class MainActivity extends SDLActivity implements Runnable, OnBackInvokedCallback {
@@ -59,11 +71,82 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
                 }
             }
         }
-        String a = getIntent().getStringExtra("relift_args");
-        if (a == null || a.trim().isEmpty()) {
-            return new String[0];
+        getExternalFilesDir(null);
+        installGpuDriver(getIntent().getStringExtra("relift_gpu_driver_install"));
+        ArrayList<String> args = new ArrayList<>();
+        String driver = getIntent().getStringExtra("relift_gpu_driver");
+        if (driver != null && !driver.trim().isEmpty()) {
+            args.add("--relift-set");
+            args.add("video.gpu_driver=" + driver.trim());
         }
-        return a.trim().split("\\s+");
+        String a = getIntent().getStringExtra("relift_args");
+        if (a != null && !a.trim().isEmpty()) {
+            args.addAll(Arrays.asList(a.trim().split("\\s+")));
+        }
+        return args.toArray(new String[0]);
+    }
+
+    private void installGpuDriver(String zip) {
+        if (zip == null || zip.isEmpty()) {
+            return;
+        }
+        File ext = getExternalFilesDir(null);
+        File src = new File(zip);
+        if (!src.isAbsolute() && ext != null) {
+            src = new File(ext, zip);
+        }
+        String name = src.getName().replaceAll("\\.zip$", "").replaceAll("[^A-Za-z0-9._-]", "_");
+        File root = new File(getFilesDir(), "gpu_drivers");
+        File tmp = new File(root, ".new-" + name);
+        File dest = new File(root, name);
+        try {
+            if (name.isEmpty() || name.startsWith(".") || name.equals("system") || name.length() >= 96) {
+                throw new IOException("not a usable package name: " + name);
+            }
+            delete(tmp);
+            if (!tmp.mkdirs()) {
+                throw new IOException("cannot make " + tmp);
+            }
+            try (ZipInputStream in = new ZipInputStream(new FileInputStream(src))) {
+                byte[] buf = new byte[1 << 16];
+                for (ZipEntry e; (e = in.getNextEntry()) != null; ) {
+                    String n = e.getName();
+                    if (e.isDirectory() || n.contains("/") || n.contains("\\") || n.startsWith(".")) {
+                        continue;
+                    }
+                    File f = new File(tmp, n);
+                    try (OutputStream out = new FileOutputStream(f)) {
+                        for (int r; (r = in.read(buf)) > 0; ) {
+                            out.write(buf, 0, r);
+                        }
+                    }
+                    f.setReadOnly();
+                }
+            }
+            String lib = new JSONObject(new String(Files.readAllBytes(new File(tmp, "meta.json").toPath()), "UTF-8"))
+                    .getString("libraryName");
+            if (lib.contains("/") || lib.startsWith(".") || !new File(tmp, lib).isFile()) {
+                throw new IOException("meta.json names no library of the package");
+            }
+            delete(dest);
+            if (!tmp.renameTo(dest)) {
+                throw new IOException("cannot move the package to " + dest);
+            }
+            Log.i("relift", "GPU driver package " + name + " installed (" + lib + ")");
+        } catch (Exception e) {
+            delete(tmp);
+            Log.e("relift", "GPU driver package " + zip + " not installed: " + e);
+        }
+    }
+
+    private static void delete(File f) {
+        File[] kids = f.listFiles();
+        if (kids != null) {
+            for (File k : kids) {
+                delete(k);
+            }
+        }
+        f.delete();
     }
 
     public void reliftHaptic() {
@@ -140,7 +223,25 @@ pub struct Deps {
     pub sdl3_jar: PathBuf,
     pub opus_include: PathBuf,
     pub opus_lib: PathBuf,
+    /// libadrenotools, which loads a custom Vulkan driver package
+    /// (`video.gpu_driver`); arm64 only.
+    pub adrenotools: Option<Adrenotools>,
 }
+
+/// The libadrenotools build of one target.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Adrenotools {
+    pub include: PathBuf,
+    /// `libadrenotools.so`, which the program links.
+    pub lib: PathBuf,
+    /// The hook libraries it loads from the program's own folder.
+    pub hooks: Vec<PathBuf>,
+    /// The license texts of libadrenotools and liblinkernsbypass, by name.
+    pub licenses: Vec<(String, PathBuf)>,
+}
+
+/// The libadrenotools libraries an APK carries next to `libmain.so`.
+const ADRENOTOOLS_LIBS: [&str; 3] = ["libadrenotools.so", "libhook_impl.so", "libmain_hook.so"];
 
 fn version_key(p: &Path) -> Vec<u64> {
     p.file_name()
@@ -299,17 +400,44 @@ impl Deps {
     pub fn find(cache_root: &Path, t: Target) -> Result<Self, BoxError> {
         let sdl = cache_root.join("sdk").join("sdl3").join(t.sdk_dir);
         let opus = cache_root.join("sdk").join("opus").join(t.sdk_dir);
+        let at = cache_root.join("sdk").join("adrenotools").join(t.sdk_dir);
+        let at_lib = at.join("lib");
+        let adrenotools = (t.abi == "arm64-v8a").then(|| Adrenotools {
+            include: at.join("include"),
+            lib: at_lib.join(ADRENOTOOLS_LIBS[0]),
+            hooks: ADRENOTOOLS_LIBS[1..]
+                .iter()
+                .map(|n| at_lib.join(n))
+                .collect(),
+            licenses: ["libadrenotools", "liblinkernsbypass"]
+                .map(|n| {
+                    (
+                        n.to_string(),
+                        at.join("share/licenses").join(n).join("LICENSE"),
+                    )
+                })
+                .into(),
+        });
         let d = Self {
             sdl3_include: sdl.join("include"),
             sdl3_lib: sdl.join("lib").join("libSDL3.so"),
             sdl3_jar: sdl.join("java").join("SDL3.jar"),
             opus_include: opus.join("include"),
             opus_lib: opus.join("lib").join("libopus.a"),
+            adrenotools,
         };
-        for p in [&d.sdl3_lib, &d.sdl3_jar, &d.opus_lib] {
+        let at_files = d.adrenotools.iter().flat_map(|a| {
+            std::iter::once(&a.lib)
+                .chain(&a.hooks)
+                .chain(a.licenses.iter().map(|(_, p)| p))
+        });
+        for p in [&d.sdl3_lib, &d.sdl3_jar, &d.opus_lib]
+            .into_iter()
+            .chain(at_files)
+        {
             if !p.is_file() {
                 return Err(format!(
-                    "{}: not found; build SDL3 and libopus for {} with `python3 runtime/tools/cross/android_deps.py --cache {}`",
+                    "{}: not found; build SDL3, libopus and libadrenotools for {} with `python3 runtime/tools/cross/android_deps.py --cache {}`",
                     p.display(),
                     t.name,
                     cache_root.display()
@@ -751,6 +879,21 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         &format!("lib/{}/libSDL3.so", a.target.abi),
         std::fs::read(&a.deps.sdl3_lib)?,
     );
+    for lib in a
+        .deps
+        .adrenotools
+        .iter()
+        .flat_map(|t| std::iter::once(&t.lib).chain(&t.hooks))
+    {
+        let name = lib.file_name().ok_or("a library path without a name")?;
+        z.add(
+            &format!("lib/{}/{}", a.target.abi, name.to_string_lossy()),
+            std::fs::read(lib)?,
+        );
+    }
+    for (name, text) in a.deps.adrenotools.iter().flat_map(|t| &t.licenses) {
+        z.add(&format!("assets/licenses/{name}.txt"), std::fs::read(text)?);
+    }
     let unaligned = w.join("unaligned.apk");
     relift_cache::write_if_changed(&unaligned, &z.finish()?)?;
     let aligned = w.join("aligned.apk");
@@ -878,6 +1021,7 @@ mod tests {
             sdl3_jar: PathBuf::new(),
             opus_include: PathBuf::new(),
             opus_lib: PathBuf::new(),
+            adrenotools: None,
         };
         let a = Apk {
             package: "dev.relift.game.x",

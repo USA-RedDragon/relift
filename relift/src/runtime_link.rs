@@ -63,6 +63,9 @@ pub struct Extras {
     pub host: Vec<PathBuf>,
     pub opus_src: Option<PathBuf>,
     pub opus: Option<Opus>,
+    /// libadrenotools, which lets `video.gpu_driver` load a custom Vulkan
+    /// driver package on Android.
+    pub adrenotools: Option<crate::android::Adrenotools>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -225,6 +228,7 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         opus,
         sdl3,
         vulkan: find_moltenvk(cache_root),
+        adrenotools: None,
     })
 }
 
@@ -264,6 +268,7 @@ pub fn android_extras(
             .collect(),
         opus_src: None,
         opus: None,
+        adrenotools: deps.adrenotools.clone(),
     })
 }
 
@@ -295,7 +300,7 @@ impl Extras {
             .any(|h| h.file_name().is_some_and(|n| n == name))
     }
 
-    /// Defines every runtime file needs.
+    /// Defines and include paths every runtime file needs.
     pub fn defines(&self) -> Vec<String> {
         let mut d = Vec::new();
         if self.sdl3.is_some() {
@@ -310,6 +315,10 @@ impl Extras {
         if self.opus.is_some() || self.has_host("opus_libopus.c") {
             d.push("-DRL_HOST_OPUS".into());
         }
+        if let Some(a) = &self.adrenotools {
+            d.push("-DRL_ADRENOTOOLS".into());
+            d.push(format!("-I{}", a.include.display()));
+        }
         d
     }
 
@@ -323,6 +332,9 @@ impl Extras {
                 format!("-Wl,-rpath,{dir}"),
                 "-lMoltenVK".into(),
             ]);
+        }
+        if let Some(a) = &self.adrenotools {
+            l.push(a.lib.display().to_string());
         }
         if let Some(o) = &self.opus {
             l.extend(o.libs.iter().cloned());
@@ -434,10 +446,32 @@ mod tests {
             host: Vec::new(),
             opus_src: None,
             opus: None,
+            adrenotools: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
         assert!(e.libs().is_empty());
+    }
+
+    #[test]
+    fn adrenotools_defines_includes_and_links_it() {
+        let e = Extras {
+            vk: Vec::new(),
+            window: None,
+            sdl3: None,
+            vulkan: None,
+            host: vec![PathBuf::from("android_sdl3.c")],
+            opus_src: None,
+            opus: None,
+            adrenotools: Some(crate::android::Adrenotools {
+                include: PathBuf::from("/a/include"),
+                lib: PathBuf::from("/a/lib/libadrenotools.so"),
+                hooks: Vec::new(),
+                licenses: Vec::new(),
+            }),
+        };
+        assert_eq!(e.defines(), ["-DRL_ADRENOTOOLS", "-I/a/include"]);
+        assert_eq!(e.libs(), ["/a/lib/libadrenotools.so"]);
     }
 
     #[test]
@@ -458,6 +492,7 @@ mod tests {
             host: Vec::new(),
             opus_src: None,
             opus: None,
+            adrenotools: None,
         };
         assert!(e.note().contains("MoltenVK linked (t)"));
         assert_eq!(e.defines(), ["-DRL_VULKAN_LINKED"]);
