@@ -1001,6 +1001,7 @@ TEST(hid_reports_bound_keyboard_inputs)
     CHECK(rl_ports_apply_setting("bind.p1.a", "key:x"));
     CHECK(rl_ports_apply_setting("bind.p1.lstick_x", "key:left-,key:right+"));
     CHECK(rl_ports_apply_setting("bind.p1.zr", "gamepad:south"));
+    CHECK(rl_ports_apply_setting("bind.p1.dpad_right", ""));
     rl_input_snapshot s = blank();
     s.keys[0] |= 1ull << 27;
     s.keys[1] |= 1ull << (79 % 64);

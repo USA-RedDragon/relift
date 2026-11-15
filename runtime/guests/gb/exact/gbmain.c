@@ -598,6 +598,8 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     const char *model = p->model, *case_file = NULL, *input = NULL;
     bool headless = false, check = false, no_audio = false;
     rl_gb_declare_settings();
+    bool color = p->rom_len > 0x143 && (p->rom[0x143] & 0x80);
+    rl_ports_declare(color ? rl_gbc_ports : rl_gb_ports, color ? rl_gbc_ports_count : rl_gb_ports_count);
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -733,9 +735,6 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
         }
     if (!H.in_case)
         load_save(&H);
-    bool color = p->rom_len > 0x143 && (p->rom[0x143] & 0x80);
-    rl_ports_declare(color ? rl_gbc_ports : rl_gb_ports, color ? rl_gbc_ports_count : rl_gb_ports_count);
-    rl_ports_bind_defaults();
     for (int i = 0; i < 8; i++)
         H.pad[i] = rl_ports_find("p1", g_buttons[i]);
     if (headless)

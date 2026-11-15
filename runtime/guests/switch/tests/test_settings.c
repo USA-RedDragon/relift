@@ -1,12 +1,13 @@
 /**
  * @file test_settings.c
  * @brief The Switch layer's settings: the save folder (setting, environment
- * and the per-user fallback) and the graphics device key.
+ * and the per-user fallback), the graphics device key and key bindings.
  */
 #include "hos_fs.h"
 #include "services.h"
 #include "t.h"
 
+#include <relift/ports.h>
 #include <relift/settings.h>
 
 #include <stdio.h>
@@ -73,5 +74,17 @@ TEST(graphics_device_is_a_declared_string)
     CHECK(!strcmp(rl_setting_str("vk.device"), "lavapipe"));
     setenv("RELIFT_VK_DEVICE", "nvidia", 1);
     CHECK(!strcmp(rl_setting_str("vk.device"), "nvidia"));
+    clean();
+}
+
+TEST(key_bindings_can_be_set_from_the_arguments)
+{
+    clean();
+    rl_switch_declare_settings();
+    rl_switch_declare_ports();
+    char *argv[] = { "x", "--relift-set", "bind.p1.a=key:f", NULL };
+    CHECK_EQ(rl_settings_args(3, argv), 1);
+    CHECK(!strcmp(rl_setting_binding("bind.p1.a"), "key:f"));
+    rl_ports_bind_defaults();
     clean();
 }

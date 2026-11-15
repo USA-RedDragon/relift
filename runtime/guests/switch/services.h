@@ -47,6 +47,8 @@ void rl_srv_install_nv(void);
 void rl_srv_install_fs(void);
 /** @brief Declares the settings of the Switch layer (and the core's); idempotent. */
 void rl_switch_declare_settings(void);
+/** @brief Declares the Switch ports and their bind.* settings; idempotent. Call before reading arguments so --relift-set and settings files can rebind keys. */
+void rl_switch_declare_ports(void);
 /** @brief Registers acc:u0 with one local user, the applet manager's preselected user. */
 void rl_srv_install_acc(void);
 /** @brief Registers mm:u, the multimedia clock request service. */

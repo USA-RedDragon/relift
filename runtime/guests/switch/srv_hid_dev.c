@@ -308,6 +308,11 @@ static void ports_init(void)
     g_ports_ready = true;
 }
 
+void rl_switch_declare_ports(void)
+{
+    ports_init();
+}
+
 static int16_t axis_value(float v)
 {
     float f = v * 32767.0f;

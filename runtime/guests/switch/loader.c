@@ -523,6 +523,7 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
     _setmode(_fileno(stderr), _O_BINARY);
 #endif
     rl_switch_declare_settings();
+    rl_switch_declare_ports();
     rl_settings_args(argc, argv);
     main_args a = { p };
     uint32_t base = g_nhooks;
