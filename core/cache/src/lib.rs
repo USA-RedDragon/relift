@@ -41,6 +41,53 @@ pub fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<bool> {
     Ok(true)
 }
 
+/// Makes the tree `to` hold the files of `from` that `keep` accepts (by
+/// path relative to `from`), writing only files whose bytes differ, so a
+/// file that did not change keeps its mtime, and removing files of `to`
+/// that `from` no longer has. Returns how many files were written.
+///
+/// # Errors
+///
+/// Any error reading `from` or writing `to`.
+pub fn sync_tree(from: &Path, to: &Path, keep: &dyn Fn(&Path) -> bool) -> io::Result<usize> {
+    sync_dir(from, to, Path::new(""), keep)
+}
+
+fn sync_dir(from: &Path, to: &Path, rel: &Path, keep: &dyn Fn(&Path) -> bool) -> io::Result<usize> {
+    std::fs::create_dir_all(to)?;
+    let mut wanted = std::collections::BTreeSet::new();
+    let mut written = 0;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let name = e.file_name();
+        let rel = rel.join(&name);
+        let kind = e.file_type()?;
+        if kind.is_dir() {
+            if keep(&rel) {
+                written += sync_dir(&e.path(), &to.join(&name), &rel, keep)?;
+                wanted.insert(name);
+            }
+        } else if keep(&rel) {
+            written += usize::from(write_if_changed(
+                &to.join(&name),
+                &std::fs::read(e.path())?,
+            )?);
+            wanted.insert(name);
+        }
+    }
+    for e in std::fs::read_dir(to)? {
+        let e = e?;
+        if !wanted.contains(&e.file_name()) {
+            if e.file_type()?.is_dir() {
+                std::fs::remove_dir_all(e.path())?;
+            } else {
+                std::fs::remove_file(e.path())?;
+            }
+        }
+    }
+    Ok(written)
+}
+
 /// Where a [`StreamWriter`] stands.
 enum State {
     /// Every byte so far equals the old file's; nothing is written yet.
