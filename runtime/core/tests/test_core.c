@@ -339,6 +339,55 @@ TEST(core_hot_units_fill_a_fixed_table)
     rl_thread_free(t);
 }
 
+static int fn_trap(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->r[1] = 0x7;
+    return RL_OK;
+}
+
+static int fn_first(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    c->r[1] = 0xF;
+    return RL_OK;
+}
+
+TEST(core_code_maps_fill_every_slot_of_their_pages)
+{
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    CHECK_EQ(rl_dispatch_reserve(0x1000, 0x1000 + 2 * RL_CODE_PAGE_SLOTS), 0);
+    static const rl_fn_entry hot[] = { { 0x1000, 2, 0, fn_a } };
+    static const rl_fn_entry cold[] = { { 0x1000, 0, 0, fn_b }, { 0x1002, 0, RL_FN_FRAGMENT, fn_b } };
+    rl_unit h = unit_of(hot, 1, sizeof(struct rl_ctx));
+    rl_unit cu = unit_of(cold, 2, sizeof(struct rl_ctx));
+    const rl_unit *list[] = { &h, &cu };
+    CHECK_EQ(rl_units_register(list, 2), 0);
+    static uint8_t pat[RL_CODE_PAGE_BYTES];
+    pat[0] = RL_CODE_HOT | RL_CODE_COLD << 2 | RL_CODE_COLD << 4;
+    static const uint32_t pages[] = { 0 };
+    rl_code_map m = { RL_CODE_MAP_VERSION, 1, 1, 0x1000, pages, pat, &h, &cu, "fake" };
+    const rl_code_map *maps[] = { &m };
+    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    pat[0] = RL_CODE_HOT | RL_CODE_HOT << 2;
+    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    pat[0] = RL_CODE_COLD | RL_CODE_COLD << 2;
+    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    m.pattern_count = 0;
+    pat[0] = RL_CODE_HOT | RL_CODE_COLD << 2;
+    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    m.pattern_count = 1;
+    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, fn_first), 0);
+    CHECK(rl_dispatch_find(0x1000) == fn_a);
+    CHECK(rl_dispatch_find(0x1002) == fn_first);
+    CHECK(rl_dispatch_find(0x1004) == fn_trap);
+    CHECK(rl_dispatch_find(0x1000 + 2 * (RL_CODE_PAGE_SLOTS - 1)) == fn_trap);
+    CHECK(rl_core_cold(0x1004) == NULL);
+    CHECK(rl_core_cold(0x1002) == fn_b);
+    CHECK(rl_dispatch_find(0x1002) == fn_b);
+    CHECK(rl_core_cold(0x1002) == fn_b);
+}
+
 TEST(core_dev_miss_without_a_server_says_why)
 {
     CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);

@@ -420,6 +420,27 @@ RL_RUNTIME_API int rl_run_from(rl_ctx *c, uint8_t *mem, uint64_t pc);
 
 /** @brief Registers units into the dispatch table. Call after rl_core_init and before any guest thread starts. Returns 0 or -1 (a unit failed its checks). */
 RL_RUNTIME_API int rl_units_register(const rl_unit *const *units, uint32_t count);
+/**
+ * @brief Checks each code map against its units and the dispatch table
+ * (docs/abi.md section 5.1): every RL_CODE_HOT slot is an entry of the hot
+ * unit, every RL_CODE_COLD slot an entry of the cold unit and none of the
+ * hot one, and every RL_CODE_TRAP slot an entry of neither and still empty.
+ * Then stores trap in every RL_CODE_TRAP slot and, when cold_first is not
+ * NULL (a dev build), cold_first in every RL_CODE_COLD slot that holds the
+ * cold unit's function, so the first dispatch to each is logged
+ * (rl_core_cold). Call after every static unit is registered. Returns 0 or
+ * -1 (a map failed its checks).
+ */
+RL_RUNTIME_API int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn trap, rl_fn cold_first);
+/** @brief The trap of an RL_CODE_TRAP slot: reports that guest target holds no instruction and stops (rl_guest_fatal). */
+RL_RUNTIME_API int rl_core_trap(rl_ctx *c, uint8_t *mem, uint64_t target);
+/**
+ * @brief The cold function of the RL_CODE_COLD slot of guest target, for a
+ * CPU layer's cold_first of rl_code_maps_register: logs the first dispatch to
+ * the slot with its module offset and puts the cold function back in it.
+ * Returns NULL when target is not such a slot.
+ */
+RL_RUNTIME_API rl_fn rl_core_cold(uint64_t target);
 /** @brief Widens the dispatch table to cover guest code [lo, hi), so units loaded later fit without moving it. Call before any guest thread starts. Returns 0 or -1. */
 RL_RUNTIME_API int rl_dispatch_reserve(uint64_t lo, uint64_t hi);
 /**

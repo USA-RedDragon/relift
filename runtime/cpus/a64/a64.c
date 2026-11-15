@@ -95,6 +95,16 @@ int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
     return rl_core_miss(c, mem, c->pc);
 }
 
+int rl_dispatch_trap(rl_ctx *c, uint8_t *mem) { return rl_core_trap(c, mem, c->pc); }
+
+int rl_dispatch_cold(rl_ctx *c, uint8_t *mem)
+{
+    rl_fn f = rl_core_cold(c->pc);
+    if (f)
+        RL_MUSTTAIL return f(c, mem);
+    return rl_core_trap(c, mem, c->pc);
+}
+
 int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r)
 {
     (void)mem;

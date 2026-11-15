@@ -57,6 +57,10 @@ typedef struct rl_switch_program {
     const rl_mods *mods;
     /** @brief The image id (RL_IMAGE_ID_BYTES bytes) of the guest image set, or NULL when the units carry it. */
     const uint8_t *image_id;
+    /** @brief The class maps of the modules' executable pages (rl_code_map), or NULL for none. */
+    const rl_code_map *const *code_maps;
+    /** @brief Number of entries in code_maps. */
+    uint32_t code_map_count;
 } rl_switch_program;
 
 /**

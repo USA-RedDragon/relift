@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 4u
+#define RL_ABI_VERSION 5u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0
@@ -374,6 +374,50 @@ typedef struct rl_unit {
     /** @brief Function maps of the unit's shards (crash reports), or NULL. */
     const rl_fn_map *const *maps;
 } rl_unit;
+
+/** @brief The class of one dispatch slot in an rl_code_map. */
+enum rl_code_class {
+    /** @brief No instruction (padding or data in an executable page): dispatch there stops the program. */
+    RL_CODE_TRAP = 0,
+    /** @brief An entry of the module's hot unit. */
+    RL_CODE_HOT = 1,
+    /** @brief An instruction only the module's cold unit enters. */
+    RL_CODE_COLD = 2
+};
+
+/** @brief Dispatch slots per page of an rl_code_map. */
+#define RL_CODE_PAGE_SLOTS 1024u
+/** @brief Bytes of one page pattern: two bits per slot. */
+#define RL_CODE_PAGE_BYTES (RL_CODE_PAGE_SLOTS / 4u)
+/** @brief rl_code_map.version of this contract. */
+#define RL_CODE_MAP_VERSION 1u
+
+/**
+ * @brief The class of every dispatch slot of a module's executable pages
+ * (docs/abi.md section 5.1): with it the dispatch table over those pages has
+ * no empty slot. Slot k of a page is bits 2 * (k % 4) and up of byte k / 4 of
+ * its pattern, an enum rl_code_class.
+ */
+typedef struct rl_code_map {
+    /** @brief RL_CODE_MAP_VERSION. */
+    uint32_t version;
+    /** @brief Number of pages. */
+    uint32_t page_count;
+    /** @brief Number of patterns. */
+    uint32_t pattern_count;
+    /** @brief Guest address of the first slot of the first page. */
+    uint64_t lo;
+    /** @brief Per page, the index of its pattern in patterns. */
+    const uint32_t *pages;
+    /** @brief The page patterns, RL_CODE_PAGE_BYTES each. */
+    const uint8_t *patterns;
+    /** @brief The module's hot unit: an entry at every RL_CODE_HOT slot. */
+    const rl_unit *hot;
+    /** @brief The module's cold unit: an entry at every RL_CODE_COLD slot. */
+    const rl_unit *cold;
+    /** @brief Module name for reports. */
+    const char *module;
+} rl_code_map;
 
 /** @brief Name of the function a hot-loaded library exports: `RL_UNIT_EXPORT const rl_unit *relift_unit(void)`. */
 #define RL_UNIT_SYMBOL "relift_unit"

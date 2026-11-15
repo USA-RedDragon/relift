@@ -17,6 +17,11 @@ static uint64_t g_lo;
 static uint64_t g_count;
 static uint8_t g_image[RL_IMAGE_ID_BYTES];
 static bool g_have_image;
+/* Dev builds: the cold function of each RL_CODE_COLD slot not dispatched to yet. */
+static rl_fn *g_cold;
+static rl_fn g_cold_first;
+static const rl_code_map *const *g_maps;
+static uint32_t g_map_count;
 
 void rl_dispatch_view(rl_ctx *c)
 {
@@ -58,6 +63,11 @@ void rl_units_reset(void)
     rl_fn_maps_reset();
     free(g_table);
     g_table = NULL;
+    free(g_cold);
+    g_cold = NULL;
+    g_cold_first = NULL;
+    g_maps = NULL;
+    g_map_count = 0;
     g_lo = 0;
     g_count = 0;
     g_have_image = false;
@@ -202,6 +212,151 @@ int rl_unit_add(const rl_unit *u, char *why, size_t n)
             __atomic_store_n(slot, e->fn, __ATOMIC_RELEASE);
     }
     return 0;
+}
+
+/* The entry of u at guest address a, walking u's sorted entries from *k. */
+static const rl_fn_entry *entry_at(const rl_unit *u, uint32_t *k, uint64_t a)
+{
+    while (*k < u->fn_count && u->fns[*k].guest_addr < a)
+        (*k)++;
+    return *k < u->fn_count && u->fns[*k].guest_addr == a ? &u->fns[*k] : NULL;
+}
+
+static const char *class_name(unsigned cls)
+{
+    switch (cls) {
+    case RL_CODE_TRAP:
+        return "trap";
+    case RL_CODE_HOT:
+        return "hot";
+    case RL_CODE_COLD:
+        return "cold";
+    default:
+        return "unknown";
+    }
+}
+
+/* Checks map m against its units and the table; with fill, stores trap and cold_first. */
+static int code_map_walk(const rl_code_map *m, rl_fn trap, rl_fn cold_first, bool fill)
+{
+    uint32_t sh = rl_core_cpu()->code_shift;
+    const char *name = m->module ? m->module : "?";
+    if (m->version != RL_CODE_MAP_VERSION || !m->hot || !m->cold || !m->pages || !m->patterns) {
+        rl_log(RL_LOG_ERROR, "dispatch", "code map of %s: version %u or its tables are wrong", name, m->version);
+        return -1;
+    }
+    uint64_t span = (uint64_t)m->page_count * RL_CODE_PAGE_SLOTS;
+    if (m->lo < g_lo || (m->lo & ((1ull << sh) - 1)) || ((m->lo - g_lo) >> sh) + span > g_count) {
+        rl_log(RL_LOG_ERROR, "dispatch", "code map of %s at 0x%llx is outside the dispatch table", name,
+               (unsigned long long)m->lo);
+        return -1;
+    }
+    uint32_t kh = 0, kc = 0;
+    uint64_t bad = 0, first = 0;
+    unsigned first_cls = 0;
+    bool first_hot = false, first_cold = false, first_full = false;
+    uint64_t base = (m->lo - g_lo) >> sh;
+    for (uint32_t p = 0; p < m->page_count; p++) {
+        if (m->pages[p] >= m->pattern_count) {
+            rl_log(RL_LOG_ERROR, "dispatch", "code map of %s: page %u names pattern %u of %u", name, p, m->pages[p],
+                   m->pattern_count);
+            return -1;
+        }
+        const uint8_t *pat = m->patterns + (size_t)m->pages[p] * RL_CODE_PAGE_BYTES;
+        for (uint32_t s = 0; s < RL_CODE_PAGE_SLOTS; s++) {
+            uint64_t i = (uint64_t)p * RL_CODE_PAGE_SLOTS + s;
+            uint64_t a = m->lo + (i << sh);
+            unsigned cls = (pat[s / 4] >> (2 * (s % 4))) & 3u;
+            const rl_fn_entry *h = entry_at(m->hot, &kh, a);
+            const rl_fn_entry *cd = entry_at(m->cold, &kc, a);
+            rl_fn *slot = &g_table[base + i];
+            if (fill) {
+                if (cls == RL_CODE_TRAP)
+                    *slot = trap;
+                else if (cls == RL_CODE_COLD && cold_first && *slot == cd->fn) {
+                    g_cold[base + i] = *slot;
+                    *slot = cold_first;
+                }
+                continue;
+            }
+            bool ok = cls == RL_CODE_HOT    ? h && *slot
+                      : cls == RL_CODE_COLD ? cd && !h && *slot
+                      : cls == RL_CODE_TRAP ? !h && !cd && !*slot
+                                            : false;
+            if (!ok && !bad++) {
+                first = a;
+                first_cls = cls;
+                first_hot = h != NULL;
+                first_cold = cd != NULL;
+                first_full = *slot != NULL;
+            }
+        }
+    }
+    if (bad) {
+        rl_log(RL_LOG_ERROR, "dispatch",
+               "code map of %s: %llu slots disagree with its units, the first at 0x%llx (class %s, hot entry %s, "
+               "cold entry %s, slot %s)",
+               name, (unsigned long long)bad, (unsigned long long)first, class_name(first_cls), first_hot ? "yes" : "no",
+               first_cold ? "yes" : "no", first_full ? "set" : "empty");
+        return -1;
+    }
+    return 0;
+}
+
+int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn trap, rl_fn cold_first)
+{
+    if (!rl_core_cpu() || !g_table || !trap) {
+        rl_log(RL_LOG_ERROR, "dispatch", "code maps registered before the units or without a trap");
+        return -1;
+    }
+    for (uint32_t k = 0; k < count; k++)
+        if (code_map_walk(maps[k], trap, cold_first, false) != 0)
+            return -1;
+    if (cold_first && count) {
+        free(g_cold);
+        g_cold = calloc(g_count, sizeof *g_cold);
+        if (!g_cold)
+            return -1;
+        g_cold_first = cold_first;
+    }
+    for (uint32_t k = 0; k < count; k++)
+        code_map_walk(maps[k], trap, cold_first, true);
+    g_maps = maps;
+    g_map_count = count;
+    return 0;
+}
+
+int rl_core_trap(rl_ctx *c, uint8_t *mem, uint64_t target)
+{
+    (void)mem;
+    return rl_guest_fatal(c, "dispatch", "jump to guest 0x%llx, which holds no instruction (padding or data)",
+                          (unsigned long long)target);
+}
+
+rl_fn rl_core_cold(uint64_t target)
+{
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    if (!g_cold || !cpu || target < g_lo)
+        return NULL;
+    uint64_t i = (target - g_lo) >> cpu->code_shift;
+    if (i >= g_count || !g_cold[i])
+        return NULL;
+    rl_fn f = g_cold[i];
+    rl_fn expect = g_cold_first;
+    if (__atomic_compare_exchange_n(&g_table[i], &expect, f, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        const char *mod = "?";
+        uint64_t off = target;
+        for (uint32_t k = 0; k < g_map_count; k++) {
+            const rl_code_map *m = g_maps[k];
+            if (target >= m->lo && ((target - m->lo) >> cpu->code_shift) < (uint64_t)m->page_count * RL_CODE_PAGE_SLOTS) {
+                mod = m->module ? m->module : "?";
+                off = target - m->lo;
+            }
+        }
+        rl_log(RL_LOG_INFO, "cold", "first entry to cold code at 0x%llx (%s+0x%llx)", (unsigned long long)target, mod,
+               (unsigned long long)off);
+    }
+    return f;
 }
 
 int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target)

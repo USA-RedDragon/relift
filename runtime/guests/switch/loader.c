@@ -453,6 +453,17 @@ static int run_program(void *arg)
         if (link_module(p, &p->modules[i]) != 0)
             return 1;
     attach_mods(p);
+    if (p->code_map_count) {
+#if defined(RL_HOTLOAD)
+        rl_fn cold_first = rl_dispatch_cold;
+#else
+        rl_fn cold_first = NULL;
+#endif
+        if (rl_code_maps_register(p->code_maps, p->code_map_count, rl_dispatch_trap, cold_first) != 0) {
+            rl_log(RL_LOG_ERROR, "loader", "the code maps disagree with the lifted units");
+            return 1;
+        }
+    }
     if (p->mods) {
         bool on[RL_MODS_MAX];
         if (rl_mods_choose(p->mods, on) != 0)

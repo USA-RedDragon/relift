@@ -442,6 +442,11 @@ static inline rl_u128 rl_cas128(uint8_t *mem, uint64_t a, rl_u128 expected, rl_u
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
 RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 
+/** @brief The function of an RL_CODE_TRAP slot (rl_code_maps_register): reports that c->pc holds no instruction and stops. */
+RL_RUNTIME_API int rl_dispatch_trap(rl_ctx *c, uint8_t *mem);
+/** @brief The function of a dev build's RL_CODE_COLD slot not dispatched to yet: logs the entry at c->pc (rl_core_cold) and runs the cold code there. */
+RL_RUNTIME_API int rl_dispatch_cold(rl_ctx *c, uint8_t *mem);
+
 /** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss or a misaligned target. */
 static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
 {
