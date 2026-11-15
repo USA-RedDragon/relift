@@ -297,6 +297,7 @@ pub fn switch_document(
             id
         }
     };
+    id.default_language = id.first_language();
     id.version = id.version.or_else(|| {
         g.and_then(|g| g.get("version"))
             .and_then(|v| v.as_integer())
