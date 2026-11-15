@@ -716,3 +716,19 @@ fn a_byte_stored_to_an_io_register_is_not_assumed_to_read_back() {
         .analyze();
     assert!(has(&r, 0, 0x300), "{:?}", r.functions.keys());
 }
+
+#[test]
+fn code_walked_only_inside_a_caller_is_part_of_the_callee() {
+    let r = Cart::new(0x19, 0x04)
+        .put(
+            0,
+            0x150,
+            &[0x3E, 0x01, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x40, 0x18, 0xFE],
+        )
+        .put(1, 0x4000, &[0xCD, 0x00, 0x02, 0xC9])
+        .put(0, 0x200, &[0xCD, 0x00, 0x41, 0x3E, 0x05, 0xC9])
+        .put(1, 0x4100, &[0xC9])
+        .analyze();
+    let f = &r.functions[&Loc::fixed(0x200)];
+    assert!(f.body.contains_key(&Loc::fixed(0x203)), "{:?}", f.body);
+}

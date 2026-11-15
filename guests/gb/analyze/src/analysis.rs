@@ -97,6 +97,7 @@ impl<'a> Driver<'a> {
             entries: BTreeMap::new(),
             roots: BTreeMap::new(),
             results: FxMap::default(),
+            inline_bodies: FxMap::default(),
             summaries: FxMap::default(),
             cells: FxMap::default(),
             known: FxSet::default(),
@@ -121,6 +122,19 @@ impl<'a> Driver<'a> {
                         });
                     }
                 }
+            }
+        }
+        for (l, n) in self
+            .inline_bodies
+            .values()
+            .flat_map(|m| m.values())
+            .flatten()
+        {
+            for k in 0..u16::from(*n) {
+                bytes.insert(Loc {
+                    addr: l.addr.wrapping_add(k),
+                    ..*l
+                });
             }
         }
         let mut out = Vec::new();
@@ -154,6 +168,7 @@ struct Driver<'a> {
     entries: BTreeMap<Loc, Origin>,
     roots: BTreeMap<Loc, State>,
     results: FxMap<Loc, (Outcome, Option<Outcome>)>,
+    inline_bodies: FxMap<Loc, FxMap<Loc, BTreeMap<Loc, u8>>>,
     summaries: FxMap<Loc, Summary>,
     cells: FxMap<u16, CellInfo>,
     known: FxSet<Loc>,
@@ -288,6 +303,7 @@ impl Driver<'_> {
             cache: RefCell::new(FxMap::default()),
             probes: &self.probes,
             budget: RefCell::new(STEP_BUDGET),
+            inline_body: RefCell::new(FxMap::default()),
         };
         let alone = if self.roots.contains_key(&e) && !self.called.contains(&e) {
             Outcome::default()
@@ -296,6 +312,7 @@ impl Driver<'_> {
         };
         let root = self.roots.get(&e).map(|s| func::run_alone(&env, e, *s));
         self.steps += STEP_BUDGET - *env.budget.borrow();
+        let inline_body = env.inline_body.take();
         drop(env);
         let mut sum = summarize(&alone);
         if let Some(old) = self.summaries.get(&e) {
@@ -371,6 +388,7 @@ impl Driver<'_> {
             }
         }
         self.results.insert(e, (alone, root));
+        self.inline_bodies.insert(e, inline_body);
     }
 
     fn solve(&mut self) {
@@ -425,6 +443,17 @@ impl Driver<'_> {
                 }
             }
         }
+        let mut extra: FxMap<Loc, BTreeMap<Loc, u8>> = FxMap::default();
+        for (e, m) in &self.inline_bodies {
+            if reach.contains(e) {
+                for (f, b) in m {
+                    extra
+                        .entry(*f)
+                        .or_default()
+                        .extend(b.iter().map(|(l, n)| (*l, *n)));
+                }
+            }
+        }
         for (loc, origin) in &self.entries {
             if !reach.contains(loc) {
                 continue;
@@ -435,6 +464,9 @@ impl Driver<'_> {
             let mut body = alone.body.clone();
             if let Some(r) = root {
                 body.extend(r.body.iter().map(|(l, n)| (*l, *n)));
+            }
+            if let Some(b) = extra.get(loc) {
+                body.extend(b.iter().map(|(l, n)| (*l, *n)));
             }
             let mut own = BTreeSet::new();
             for (l, len) in &body {

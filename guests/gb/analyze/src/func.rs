@@ -205,6 +205,7 @@ pub(crate) struct Env<'a> {
     pub cache: RefCell<FxMap<(Loc, State), Rc<Outcome>>>,
     pub probes: &'a RefCell<Probes>,
     pub budget: RefCell<usize>,
+    pub inline_body: RefCell<FxMap<Loc, BTreeMap<Loc, u8>>>,
 }
 
 const MAX_DEPTH: u8 = 4;
@@ -407,6 +408,13 @@ impl<'a> Run<'a> {
         let len = ins.length();
         if self.record_body {
             self.out.body.insert(loc, len);
+        } else {
+            self.env
+                .inline_body
+                .borrow_mut()
+                .entry(self.func)
+                .or_default()
+                .insert(loc, len);
         }
         let next_addr = loc.addr.wrapping_add(u16::from(len));
         let next = if next_addr < loc.addr {
