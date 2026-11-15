@@ -71,6 +71,7 @@ const NONE: &[&str] = &[];
 /// (`relift-emit-wasm` until a browser build uses it), so the reachability controls skip them; the
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
+    "relift-cpu-arm32",
     "relift-emit-wasm",
     "relift-gb-analyze",
     "relift-gb-tools",
@@ -212,6 +213,14 @@ const CHARTERS: &[Charter] = &[
         band: 2,
         why: "the ARM64 frontend, over the IR and the guest contract only",
         normal: &["relift-guest", "relift-ir"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-cpu-arm32",
+        band: 2,
+        why: "the ARMv4T (GBA ARM7TDMI) decoder and lifter, over the IR only; no guest uses it yet",
+        normal: &["relift-ir"],
         dev: NONE,
         build: NONE,
     },

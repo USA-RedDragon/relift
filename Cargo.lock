@@ -933,6 +933,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-arm32"
+version = "0.1.0"
+dependencies = [
+ "relift-ir",
+]
+
+[[package]]
 name = "relift-cpu-sm83"
 version = "0.1.0"
 dependencies = [
