@@ -26,11 +26,12 @@ const LIFTED_OPT: &str = "-O0";
 const ROM_FILE: &str = "rom.gba";
 
 /// The runtime directories the program compiles, below the runtime root.
-const LAYERS: [&str; 5] = [
+const LAYERS: [&str; 6] = [
     "core",
     "cpus/arm32",
     "guests/gba",
     "guests/gba/bios",
+    "guests/gba/ppu",
     "guests/gba/run",
 ];
 

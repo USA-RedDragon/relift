@@ -24,13 +24,15 @@ typedef struct rl_gba_program {
 } rl_gba_program;
 
 /**
- * @brief Runs the ROM headless. Options: --headless (the default until a
- * picture unit draws frames), --frames N (stop at the start of the Nth
- * VBlank and print the frame count, the video memory hash and the
- * registers), --save FILE (the backup file instead of the one
- * rl_gba_save_path names), --no-save, --stats (counters on stderr), and the
- * runtime's --relift-set and --relift-settings. The backup loads at start,
- * is written a second after the game last changed it and at exit.
+ * @brief Runs the ROM in a window (the SDL3 backend when built and a display
+ * exists) or headless. Options: --headless, --frames N (stop at the end of
+ * the Nth frame and print the frame count, the frame hash as
+ * rl_gba_frame_hash gives it, the registers and memory hashes), --png FILE
+ * (the last frame at exit), --png-dir DIR with --png-every N (every Nth
+ * frame), --save FILE (the backup file instead of the one rl_gba_save_path
+ * names), --no-save, --stats (counters on stderr), and the runtime's
+ * --relift-set and --relift-settings. The backup loads at start, is written
+ * a second after the game last changed it and at exit.
  */
 RL_RUNTIME_API int rl_gba_main(const rl_gba_program *p, int argc, char **argv);
 
