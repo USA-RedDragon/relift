@@ -730,6 +730,32 @@ pub fn program_files(
     out
 }
 
+const ANDROID_ENTRY: &str = r#"#ifdef __ANDROID__
+#include <relift/android.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+static void set_dir(const char *env, const char *base, const char *name)
+{
+    char p[4096];
+    if (!base || getenv(env))
+        return;
+    snprintf(p, sizeof p, "%s/%s", base, name);
+    mkdir(p, 0771);
+    setenv(env, p, 0);
+}
+static void set_android_dirs(void)
+{
+    rl_android_init();
+    set_dir("RELIFT_SAVE", rl_android_files_dir(), "save");
+    set_dir("RELIFT_SDMC", rl_android_files_dir(), "sdmc");
+    set_dir("RELIFT_ROMFS", rl_android_external_dir(), "romfs");
+    set_dir("RELIFT_DLC", rl_android_external_dir(), "dlc");
+}
+__attribute__((visibility("default"))) int SDL_main(int argc, char **argv)
+#endif
+"#;
+
 /// `program.c`: the module table, the process parameters and `main`. The
 /// images live in the `image<i>.c` files [`program_files`] adds.
 fn program_c(
@@ -811,9 +837,12 @@ fn program_c(
     if fp_flags {
         t.push_str("#include \"a64.h\"\n");
     }
+    t.push_str("#include <string.h>\nextern int relift_info_main(void);\n");
+    t.push_str(ANDROID_ENTRY);
     t.push_str(
-        "#include <string.h>\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
+        "#ifndef __ANDROID__\nint main(int argc, char **argv)\n#endif\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
     );
+    t.push_str("#ifdef __ANDROID__\n    set_android_dirs();\n#endif\n");
     if fp_flags {
         t.push_str("    rl_a64_set_fp_flags(1);\n");
     }
