@@ -674,7 +674,7 @@ Mac unless marked]:
     `rl_resume` with the block's x0-x29, sp and pc (x30 is the pc, as on
     hardware). The jump to the pad is then the same table entry as in the
     libgcc shape. [verified: the SDK module's routine has exactly this
-    code, and in a game's build the table holds the override at it; the
+    code, and in a commercial game's build the table holds the override at it; the
     synthetic unwinder in `relift/tests/tiny/eh.s` ends in it]. The
     routine is reached by a tail branch only, so the guest layer also scans
     the text for such routines and roots them (`known_routines`);
@@ -1180,7 +1180,7 @@ are also call boundaries. [inferred]
     (`lift_for_emit`) leaves out the IR's NaN handling after those
     operations; the reference lift that the interpreter and the checker run
     keeps it, and `relift/tests/emit_interp` and `emit_flags` compare the
-    two. On a commercial game that handling was about a sixth of the lifted code.
+    two. In a commercial game that handling was about a sixth of the lifted code.
   - Non-default modes on x86-64 go to the slow path. If Horizon's default
     FPCR turns out to set FZ or DN, x86-64 needs a fast path for that mode
     before performance work. [open]
