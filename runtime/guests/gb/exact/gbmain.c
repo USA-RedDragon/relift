@@ -48,6 +48,9 @@ typedef struct host {
     uint32_t frames;
     uint32_t stop_frames;
     bool in_case;
+    bool show;
+    bool reported;
+    int case_ret;
     int verdict;
     bool quit;
     const char *png;
@@ -345,6 +348,32 @@ static void print_stats(void)
             (unsigned long long)s->interp[RL_GBX_RAM], (unsigned long long)s->max_depth);
 }
 
+static int verdict_report(host *H, int code)
+{
+    int ret = 0;
+    if (H->diverged) {
+        ret = 70;
+    } else if (H->in_case && H->verdict == RLGBD_CASE_CONTINUE) {
+        printf("relift-gb: fail: the run stopped before a verdict (status %d)\n", code);
+        ret = 1;
+    } else if (H->in_case) {
+        const char *word = H->verdict == RLGBD_CASE_PASS ? "pass" : H->verdict == RLGBD_CASE_UNSUPPORTED ? "unsupported" : "fail";
+        printf("relift-gb: %s: %s\n", word, rlgbd_case_detail(H->h));
+        ret = H->verdict == RLGBD_CASE_PASS ? 0 : H->verdict == RLGBD_CASE_UNSUPPORTED ? 3 : 1;
+    }
+    fflush(stdout);
+    return ret;
+}
+
+static void hold_frame(host *H)
+{
+    while (!__atomic_load_n(&H->quit, __ATOMIC_ACQUIRE)) {
+        rl_window_present_rgb(H->win, rlgbd_frame_rgb(H->h), 160, 144);
+        struct timespec d = {0, 50000000L};
+        nanosleep(&d, NULL);
+    }
+}
+
 typedef struct run_args {
     host *H;
     rl_ctx *c;
@@ -379,6 +408,11 @@ static int run_body(void *arg)
     a->c->sp = r.sp;
     int code = rl_gbx_run(a->c, a->mem, r.pc);
     audio_drain(H);
+    if (H->show && H->win && H->in_case && !H->diverged) {
+        H->case_ret = verdict_report(H, code);
+        H->reported = true;
+        hold_frame(H);
+    }
     rl_audio_close(H->out);
     H->out = NULL;
     if (H->win) {
@@ -422,6 +456,7 @@ static void usage(FILE *out)
           "  --wav FILE          record the sound as 44100 Hz stereo WAV\n"
           "  --no-audio          open no sound output\n"
           "  --case FILE         grade the run by a corpus case spec\n"
+          "  --show              with --case, run in a window and keep the last frame up after the verdict\n"
           "  --save FILE         battery save file (default: next to the ROM)\n"
           "  --no-save           do not read or write a battery save\n"
           "  --stats             print run statistics\n"
@@ -451,6 +486,8 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
             H.stop_frames = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--case"))
             case_file = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--show"))
+            H.show = true;
         else if (!strcmp(a, "--input"))
             input = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png"))
@@ -505,7 +542,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
             fprintf(stderr, "relift-gb: cannot read %s\n", case_file);
             return 2;
         }
-        headless = true;
+        headless = !H.show;
         H.save = NULL;
     } else if (H.stop_frames) {
         char line[64];
@@ -567,17 +604,7 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     run_args ra = {.H = &H, .c = t->ctx, .mem = mem};
     int code = rl_window_main(run_body, &ra);
     rl_window_set_events(NULL, NULL);
-    int ret = 0;
-    if (H.diverged) {
-        ret = 70;
-    } else if (H.in_case && H.verdict == RLGBD_CASE_CONTINUE) {
-        printf("relift-gb: fail: the run stopped before a verdict (status %d)\n", code);
-        ret = 1;
-    } else if (H.in_case) {
-        const char *word = H.verdict == RLGBD_CASE_PASS ? "pass" : H.verdict == RLGBD_CASE_UNSUPPORTED ? "unsupported" : "fail";
-        printf("relift-gb: %s: %s\n", word, rlgbd_case_detail(H.h));
-        ret = H.verdict == RLGBD_CASE_PASS ? 0 : H.verdict == RLGBD_CASE_UNSUPPORTED ? 3 : 1;
-    }
+    int ret = H.reported ? H.case_ret : verdict_report(&H, code);
     if (H.ref)
         fprintf(stderr, "relift-gb: check: %llu steps matched\n", (unsigned long long)H.checked);
     if (H.audio && (H.wav || H.stop_frames))
