@@ -25,6 +25,9 @@ RL_RUNTIME_API const char *rl_android_files_dir(void);
 /** @brief The app's external files directory (no trailing slash; the one a user can copy data into), or NULL. */
 RL_RUNTIME_API const char *rl_android_external_dir(void);
 
+/** @brief A short haptic tick (the system's virtual key feedback). */
+RL_RUNTIME_API void rl_android_haptic(void);
+
 #endif
 
 #endif

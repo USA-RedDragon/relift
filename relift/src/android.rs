@@ -18,22 +18,61 @@ use relift_progress::Line;
 /// The Android API level the runtime builds for (`memfd_create` in bionic).
 pub const MIN_API: u32 = 30;
 
-/// The activity class of the APK: SDL's activity plus launch arguments from
-/// the intent.
+/// The activity class of the APK: SDL's activity plus launch arguments and
+/// environment variables from the intent, and the haptic tick of the
+/// on-screen controller.
 const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 const ACTIVITY_JAVA: &str = r#"package dev.relift.app;
 
+import android.os.Build;
+import android.os.Bundle;
+import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import org.libsdl.app.SDLActivity;
 
-public class MainActivity extends SDLActivity {
+public class MainActivity extends SDLActivity implements Runnable, OnBackInvokedCallback {
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this);
+        }
+    }
+
+    @Override
+    public void onBackInvoked() {
+        onNativeKeyDown(KeyEvent.KEYCODE_BACK);
+        onNativeKeyUp(KeyEvent.KEYCODE_BACK);
+    }
+
     @Override
     protected String[] getArguments() {
+        String e = getIntent().getStringExtra("relift_env");
+        if (e != null) {
+            for (String kv : e.trim().split("\\s+")) {
+                int i = kv.indexOf('=');
+                if (i > 0) {
+                    nativeSetenv(kv.substring(0, i), kv.substring(i + 1));
+                }
+            }
+        }
         String a = getIntent().getStringExtra("relift_args");
         if (a == null || a.trim().isEmpty()) {
             return new String[0];
         }
         return a.trim().split("\\s+");
+    }
+
+    public void reliftHaptic() {
+        runOnUiThread(this);
+    }
+
+    @Override
+    public void run() {
+        getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
     }
 }
 "#;

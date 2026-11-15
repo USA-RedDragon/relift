@@ -1,6 +1,6 @@
 /**
  * @file android_sdl3.c
- * @brief Android glue through SDL3 (zlib license): logcat for stdio, the app's files directory.
+ * @brief Android glue through SDL3 (zlib license): logcat for stdio, the app's files directory, the haptic tick.
  */
 #ifdef __ANDROID__
 
@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 
 #include <android/log.h>
+#include <jni.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -91,5 +92,22 @@ void rl_android_init(void)
 const char *rl_android_files_dir(void) { return SDL_GetAndroidInternalStoragePath(); }
 
 const char *rl_android_external_dir(void) { return SDL_GetAndroidExternalStoragePath(); }
+
+void rl_android_haptic(void)
+{
+    JNIEnv *env = SDL_GetAndroidJNIEnv();
+    jobject act = SDL_GetAndroidActivity();
+    if (!env || !act)
+        return;
+    jclass c = (*env)->GetObjectClass(env, act);
+    jmethodID m = c ? (*env)->GetMethodID(env, c, "reliftHaptic", "()V") : NULL;
+    if (m)
+        (*env)->CallVoidMethod(env, act, m);
+    if ((*env)->ExceptionCheck(env))
+        (*env)->ExceptionClear(env);
+    if (c)
+        (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, act);
+}
 
 #endif

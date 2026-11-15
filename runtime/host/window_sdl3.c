@@ -7,11 +7,18 @@
  * surface creation from other threads go through SDL_RunOnMainThread, which
  * the event loop in run serves. Keyboard, mouse and gamepads become
  * rl_input snapshots; with no gamepad connected, pad 0 follows the keyboard.
+ * Fingers, the gamepad count, the view size and the back gesture go to the
+ * on-screen controller (touchpad.h); when it is in use, frames are drawn at
+ * the picture place it names with its overlay on top.
  */
 #include <relift/appinfo.h>
 #include <relift/input.h>
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 #include <relift/window.h>
+#ifdef __ANDROID__
+#include <relift/android.h>
+#endif
 
 #include "core.h"
 
@@ -30,6 +37,9 @@ typedef struct sdl_win {
     SDL_Renderer *r;
     SDL_Texture *t;
     uint32_t tw, th;
+    SDL_Texture *ov;
+    uint32_t ow, oh;
+    bool logical;
     bool no_renderer;
     struct sdl_win *next;
 } sdl_win;
@@ -43,9 +53,29 @@ static sdl_win *g_wins;
 static SDL_Gamepad *g_pads[RL_INPUT_PADS];
 static uint64_t g_keys[4];
 
+static void leave(void)
+{
+    SDL_Event e;
+    memset(&e, 0, sizeof e);
+    e.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&e);
+}
+
+static const rl_touchpad_host g_touch_host = {
+#ifdef __ANDROID__
+    .haptic = rl_android_haptic,
+#endif
+    .leave = leave,
+};
+
 static int sdl_init(void)
 {
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+#ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+#endif
+    rl_touchpad_set_host(&g_touch_host);
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         rl_log(RL_LOG_INFO, "window", "SDL video init failed: %s", SDL_GetError());
         return -1;
@@ -88,6 +118,30 @@ static void pixel_size(sdl_win *w)
     SDL_GetWindowSizeInPixels(w->w, &pw, &ph);
     __atomic_store_n(&w->width, (uint32_t)(pw > 0 ? pw : 0), __ATOMIC_RELAXED);
     __atomic_store_n(&w->height, (uint32_t)(ph > 0 ? ph : 0), __ATOMIC_RELAXED);
+    float density = SDL_GetWindowPixelDensity(w->w), scale = SDL_GetWindowDisplayScale(w->w);
+    if (density <= 0)
+        density = 1;
+    if (scale <= 0)
+        scale = density;
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(w->w, &ww, &wh);
+    SDL_Rect safe = { 0, 0, ww, wh };
+    int32_t in[4] = { 0, 0, 0, 0 };
+    if (SDL_GetWindowSafeArea(w->w, &safe)) {
+        in[0] = (int32_t)((float)safe.x * density);
+        in[1] = (int32_t)((float)safe.y * density);
+        in[2] = (int32_t)((float)(ww - safe.x - safe.w) * density);
+        in[3] = (int32_t)((float)(wh - safe.y - safe.h) * density);
+    }
+    rl_touchpad_view((uint32_t)(pw > 0 ? pw : 0), (uint32_t)(ph > 0 ? ph : 0), scale, in);
+}
+
+static uint32_t pad_count(void)
+{
+    uint32_t n = 0;
+    for (int i = 0; i < RL_INPUT_PADS; i++)
+        n += g_pads[i] != NULL;
+    return n;
 }
 
 static void window_event(const SDL_Event *e)
@@ -117,23 +171,57 @@ static void window_event(const SDL_Event *e)
 
 static void pad_event(const SDL_Event *e)
 {
+    char name[128] = "";
     if (e->type == SDL_EVENT_GAMEPAD_ADDED) {
         for (int i = 0; i < RL_INPUT_PADS; i++)
             if (!g_pads[i]) {
                 g_pads[i] = SDL_OpenGamepad(e->gdevice.which);
+                if (!g_pads[i])
+                    return;
+                const char *n = SDL_GetGamepadName(g_pads[i]);
+                SDL_strlcpy(name, n ? n : "", sizeof name);
+                rl_touchpad_gamepad(true, name, pad_count());
                 return;
             }
         return;
     }
     for (int i = 0; i < RL_INPUT_PADS; i++)
         if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == e->gdevice.which) {
+            const char *n = SDL_GetGamepadName(g_pads[i]);
+            SDL_strlcpy(name, n ? n : "", sizeof name);
             SDL_CloseGamepad(g_pads[i]);
             g_pads[i] = NULL;
+            rl_touchpad_gamepad(false, name, pad_count());
         }
+}
+
+static void finger_event(const SDL_Event *e)
+{
+    sdl_win *w = find(e->tfinger.windowID);
+    if (!w)
+        w = g_wins;
+    if (!w)
+        return;
+    int phase = e->type == SDL_EVENT_FINGER_DOWN     ? RL_TOUCHPAD_DOWN
+                : e->type == SDL_EVENT_FINGER_MOTION ? RL_TOUCHPAD_MOVE
+                : e->type == SDL_EVENT_FINGER_UP     ? RL_TOUCHPAD_UP
+                                                     : RL_TOUCHPAD_CANCEL;
+    float x = e->tfinger.x * (float)__atomic_load_n(&w->width, __ATOMIC_RELAXED);
+    float y = e->tfinger.y * (float)__atomic_load_n(&w->height, __ATOMIC_RELAXED);
+    rl_touchpad_finger((uint64_t)e->tfinger.fingerID, phase, x, y);
 }
 
 static void key_event(const SDL_Event *e)
 {
+    if (e->key.scancode == SDL_SCANCODE_AC_BACK) {
+        if (e->key.down && !e->key.repeat) {
+            if (rl_touchpad_current())
+                rl_touchpad_back();
+            else
+                rl_window_emit(NULL, RL_WINDOW_CLOSE);
+        }
+        return;
+    }
     unsigned sc = (unsigned)e->key.scancode;
     if (sc >= 256)
         return;
@@ -209,6 +297,7 @@ static void publish(void)
     s.pointer.y = (int32_t)y;
     s.pointer.buttons = ((mb & SDL_BUTTON_LMASK) ? 1u << RL_PTR_LEFT : 0) | ((mb & SDL_BUTTON_RMASK) ? 1u << RL_PTR_RIGHT : 0) |
                         ((mb & SDL_BUTTON_MMASK) ? 1u << RL_PTR_MIDDLE : 0);
+    s.touch_count = rl_touchpad_game_touches(s.touches, RL_INPUT_TOUCHES);
     rl_input_publish(&s);
 }
 
@@ -220,6 +309,9 @@ static void handle(const SDL_Event *e)
         pad_event(e);
     else if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP)
         key_event(e);
+    else if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_FINGER_MOTION ||
+             e->type == SDL_EVENT_FINGER_UP || e->type == SDL_EVENT_FINGER_CANCELED)
+        finger_event(e);
     else if (e->type == SDL_EVENT_QUIT)
         rl_window_emit(NULL, RL_WINDOW_CLOSE);
 }
@@ -352,6 +444,8 @@ static void do_close(void *p)
     SDL_UnlockMutex(g_lock);
     if (w->t)
         SDL_DestroyTexture(w->t);
+    if (w->ov)
+        SDL_DestroyTexture(w->ov);
     if (w->r)
         SDL_DestroyRenderer(w->r);
     SDL_DestroyWindow(w->w);
@@ -436,14 +530,51 @@ static void do_present(void *p)
             return;
         }
         SDL_SetTextureScaleMode(w->t, SDL_SCALEMODE_NEAREST);
-        SDL_SetRenderLogicalPresentation(w->r, (int)q->width, (int)q->height, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
         w->tw = q->width;
         w->th = q->height;
+        w->logical = false;
     }
     SDL_UpdateTexture(w->t, NULL, q->rgb, (int)(q->width * 3));
+    bool pad = rl_touchpad_wanted();
+    if (w->logical == pad) {
+        SDL_SetRenderLogicalPresentation(w->r, pad ? 0 : (int)q->width, pad ? 0 : (int)q->height,
+                                         pad ? SDL_LOGICAL_PRESENTATION_DISABLED
+                                             : SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+        w->logical = !pad;
+    }
     SDL_SetRenderDrawColor(w->r, 0, 0, 0, 255);
     SDL_RenderClear(w->r);
-    SDL_RenderTexture(w->r, w->t, NULL, NULL);
+    if (!pad) {
+        SDL_RenderTexture(w->r, w->t, NULL, NULL);
+        SDL_RenderPresent(w->r);
+        return;
+    }
+    rl_touchpad_tick(rl_clock_ns());
+    int32_t pic[4];
+    rl_touchpad_picture(pic);
+    SDL_FRect dst = { (float)pic[0], (float)pic[1], (float)pic[2], (float)pic[3] };
+    SDL_RenderTexture(w->r, w->t, NULL, &dst);
+    uint32_t ow = 0, oh = 0;
+    int32_t dirty[4];
+    const uint8_t *px = rl_touchpad_pixels(&ow, &oh, dirty);
+    if (px && (!w->ov || w->ow != ow || w->oh != oh)) {
+        if (w->ov)
+            SDL_DestroyTexture(w->ov);
+        w->ov = SDL_CreateTexture(w->r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, (int)ow, (int)oh);
+        w->ow = ow;
+        w->oh = oh;
+        if (w->ov) {
+            SDL_SetTextureBlendMode(w->ov, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+            SDL_UpdateTexture(w->ov, NULL, px, (int)(ow * 4));
+        }
+        dirty[2] = 0;
+    }
+    if (px && w->ov && dirty[2] > 0 && dirty[3] > 0) {
+        SDL_Rect r = { dirty[0], dirty[1], dirty[2], dirty[3] };
+        SDL_UpdateTexture(w->ov, &r, px + ((size_t)dirty[1] * ow + (size_t)dirty[0]) * 4, (int)(ow * 4));
+    }
+    if (px && w->ov)
+        SDL_RenderTexture(w->r, w->ov, NULL, NULL);
     SDL_RenderPresent(w->r);
 }
 
