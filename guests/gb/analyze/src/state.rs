@@ -8,9 +8,13 @@
 //! can address its own frame through `ld hl,sp+e`. Reads of ROM at a known
 //! address and bank give the constant byte.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use relift_cpu_sm83::{FlagEffect, Immediate, Instruction, Mnemonic, Operand, Reg8, Reg16};
 
 use crate::bankmodel::{BankModel, BankReg};
+use crate::fx::FxMap;
 use crate::image::Image;
 use crate::loc::Loc;
 
@@ -186,6 +190,103 @@ pub(crate) fn split(w: Word) -> (Val, Val) {
     }
 }
 
+type Slots = [Val; SLOTS];
+type Cells = [(u16, Val); CELLS];
+
+/// Values shared by every state that has the same ones: states are copied
+/// at every instruction, their stacks and stored bytes rarely change.
+struct Pool<T> {
+    all: Vec<Rc<T>>,
+    ids: FxMap<Rc<T>, u32>,
+}
+
+impl<T: Eq + std::hash::Hash> Pool<T> {
+    fn new(first: T) -> Pool<T> {
+        let mut p = Pool {
+            all: Vec::new(),
+            ids: FxMap::default(),
+        };
+        p.intern(first);
+        p
+    }
+
+    fn intern(&mut self, v: T) -> u32 {
+        if let Some(id) = self.ids.get(&v) {
+            return *id;
+        }
+        let id = u32::try_from(self.all.len()).unwrap_or(u32::MAX);
+        let rc = Rc::new(v);
+        self.all.push(rc.clone());
+        self.ids.insert(rc, id);
+        id
+    }
+}
+
+thread_local! {
+    static FRAMES: RefCell<Pool<Slots>> = RefCell::new(Pool::new([Val::Top; SLOTS]));
+    static STORES: RefCell<Pool<Cells>> = RefCell::new(Pool::new([(0, Val::Top); CELLS]));
+}
+
+/// Forget the stacks and stored bytes of earlier analyses.
+pub(crate) fn reset_pools() {
+    FRAMES.with_borrow_mut(|f| *f = Pool::new([Val::Top; SLOTS]));
+    STORES.with_borrow_mut(|f| *f = Pool::new([(0, Val::Top); CELLS]));
+}
+
+/// The stack slots of a state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Frame(u32);
+
+impl Frame {
+    const TOP: Frame = Frame(0);
+
+    fn of(slots: Slots) -> Frame {
+        Frame(FRAMES.with_borrow_mut(|f| f.intern(slots)))
+    }
+
+    fn slots(self) -> Rc<Slots> {
+        FRAMES.with_borrow(|f| f.all[self.0 as usize].clone())
+    }
+
+    fn get(self, i: usize) -> Val {
+        FRAMES.with_borrow(|f| f.all[self.0 as usize][i])
+    }
+
+    fn with(self, i: usize, v: Val) -> Frame {
+        if self.get(i) == v {
+            return self;
+        }
+        let mut s = *self.slots();
+        s[i] = v;
+        Frame::of(s)
+    }
+
+    fn join(self, other: Frame) -> Frame {
+        if self == other {
+            return self;
+        }
+        let (a, b) = (self.slots(), other.slots());
+        Frame::of(std::array::from_fn(|i| join_val(a[i], b[i])))
+    }
+}
+
+/// The bytes a path stored at constant RAM addresses, newest first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Stored(u32);
+
+impl Stored {
+    const NONE: Stored = Stored(0);
+
+    fn of(cells: Cells) -> Stored {
+        Stored(STORES.with_borrow_mut(|f| f.intern(cells)))
+    }
+
+    /// The address and value of each stored byte.
+    pub(crate) fn get(self) -> Rc<Cells> {
+        STORES.with_borrow(|f| f.all[self.0 as usize].clone())
+    }
+}
+
 /// What is known on one path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct State {
@@ -195,8 +296,8 @@ pub(crate) struct State {
     pub lo: Bv,
     pub hi: Bv,
     pub sp: Option<i16>,
-    pub stack: [Val; SLOTS],
-    pub cells: [(u16, Val); CELLS],
+    stack: Frame,
+    pub cells: Stored,
     pub z: Option<bool>,
     pub c: Option<bool>,
     pub cp: Option<(u16, u8)>,
@@ -223,8 +324,8 @@ impl State {
             lo: Bv::Unknown,
             hi: Bv::Unknown,
             sp: Some(0),
-            stack: [Val::Top; SLOTS],
-            cells: [(0, Val::Top); CELLS],
+            stack: Frame::TOP,
+            cells: Stored::NONE,
             z: None,
             c: None,
             cp: None,
@@ -256,11 +357,14 @@ impl State {
         st.lo = Bv::Entry;
         st.hi = Bv::Entry;
         let ret = Sym::at(Base::Ret, 0);
-        st.set_slot(0, Val::Lo(ret));
-        st.set_slot(1, Val::Hi(ret));
+        let mut slots = [Val::Top; SLOTS];
+        let at = |off: i16| (off - STACK_LO) as usize;
+        slots[at(0)] = Val::Lo(ret);
+        slots[at(1)] = Val::Hi(ret);
         for off in 2..STACK_HI {
-            st.set_slot(off, Val::At(Sym::at(Base::Sp, off as u16)));
+            slots[at(off)] = Val::At(Sym::at(Base::Sp, off as u16));
         }
+        st.stack = Frame::of(slots);
         st
     }
 
@@ -286,13 +390,15 @@ impl State {
         if self.sp != other.sp {
             self.sp = None;
         }
-        for (a, b) in self.stack.iter_mut().zip(other.stack.iter()) {
-            *a = join_val(*a, *b);
-        }
-        for c in &mut self.cells {
-            if c.1 != Val::Top && !other.cells.contains(c) {
-                *c = (0, Val::Top);
+        self.stack = self.stack.join(other.stack);
+        if self.cells != other.cells {
+            let (mut a, b) = (*self.cells.get(), other.cells.get());
+            for c in &mut a {
+                if c.1 != Val::Top && !b.contains(c) {
+                    *c = (0, Val::Top);
+                }
             }
+            self.cells = Stored::of(a);
         }
         if self.z != other.z {
             self.z = None;
@@ -321,7 +427,7 @@ impl State {
 
     pub(crate) fn slot(&self, off: i16) -> Val {
         if (STACK_LO..STACK_HI).contains(&off) {
-            self.stack[(off - STACK_LO) as usize]
+            self.stack.get((off - STACK_LO) as usize)
         } else {
             Val::Top
         }
@@ -329,7 +435,7 @@ impl State {
 
     pub(crate) fn set_slot(&mut self, off: i16, v: Val) {
         if (STACK_LO..STACK_HI).contains(&off) {
-            self.stack[(off - STACK_LO) as usize] = v;
+            self.stack = self.stack.with((off - STACK_LO) as usize, v);
         }
     }
 
@@ -377,6 +483,11 @@ impl State {
         }
     }
 
+    /// Forget every stack slot.
+    pub(crate) fn clear_stack(&mut self) {
+        self.stack = Frame::TOP;
+    }
+
     pub(crate) fn kill_all(&mut self) {
         for r in 0..7 {
             self.set(r, Val::Top);
@@ -385,7 +496,7 @@ impl State {
     }
 
     pub(crate) fn kill_memory(&mut self) {
-        self.cells = [(0, Val::Top); CELLS];
+        self.cells = Stored::NONE;
         self.z = None;
         self.c = None;
         self.cp = None;
@@ -402,6 +513,7 @@ impl State {
 
     pub(crate) fn cell(&self, addr: u16) -> Option<Val> {
         self.cells
+            .get()
             .iter()
             .find(|c| c.0 == addr && c.1 != Val::Top)
             .map(|c| c.1)
@@ -417,18 +529,21 @@ impl State {
         if !plain_ram(addr) {
             return;
         }
-        if let Some(c) = self.cells.iter_mut().find(|c| c.0 == addr) {
+        let mut cells = *self.cells.get();
+        if let Some(c) = cells.iter_mut().find(|c| c.0 == addr) {
             c.1 = v;
-            return;
+        } else {
+            cells.rotate_right(1);
+            cells[0] = (addr, v);
         }
-        self.cells.rotate_right(1);
-        self.cells[0] = (addr, v);
+        self.cells = Stored::of(cells);
     }
 
     /// Constant bytes stored on this path, with their addresses.
     pub(crate) fn const_cells(&self) -> Vec<(u16, u8)> {
         let mut v: Vec<(u16, u8)> = self
             .cells
+            .get()
             .iter()
             .filter_map(|c| c.1.konst().map(|k| (c.0, k)))
             .collect();
@@ -1239,12 +1354,12 @@ fn store(cx: &Ctx<'_>, st: &mut State, a: Addr, v: Val, events: &mut Vec<Write>)
         }
         Addr::Sym(s) if s.depends_on_entry() => {
             events.push(Write::Param);
-            st.cells = [(0, Val::Top); CELLS];
+            st.cells = Stored::NONE;
             st.nonzero = None;
         }
         Addr::Sym(_) | Addr::Unknown => {
             events.push(Write::Unknown);
-            st.cells = [(0, Val::Top); CELLS];
+            st.cells = Stored::NONE;
             st.nonzero = None;
         }
     }
@@ -1318,7 +1433,7 @@ fn step_ld(cx: &Ctx<'_>, st: &mut State, ins: &Instruction, events: &mut Vec<Wri
         }
         (Operand::R16(Reg16::Sp), Operand::Imm16, _) => {
             st.sp = Some(STACK_HI - 2);
-            st.stack = [Val::Top; SLOTS];
+            st.clear_stack();
             st.switched = true;
         }
         (Operand::R16(Reg16::Sp), _, _) => st.sp = None,

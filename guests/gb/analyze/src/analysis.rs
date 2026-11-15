@@ -57,6 +57,7 @@ fn reg_name(i: usize) -> char {
 /// The header does not parse, or the mapper's ROM banking is not modelled.
 pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
     let cart = Cartridge::parse(rom).map_err(AnalyzeError::Format)?;
+    crate::state::reset_pools();
     let kind = cart.mapper();
     let banks = rom.len().div_ceil(ROM_BANK_SIZE).max(1);
     let model = BankModel::new(kind, banks).ok_or(AnalyzeError::Mapper(kind.name()))?;

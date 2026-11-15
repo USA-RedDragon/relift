@@ -901,7 +901,7 @@ impl<'a> Run<'a> {
     fn probe(&self, target: Loc, st: &State) -> Option<[Val; 7]> {
         let mut norm = State::symbolic();
         norm.kill_memory();
-        norm.stack = [Val::Top; state::SLOTS];
+        norm.clear_stack();
         norm.lo = st.lo;
         norm.hi = st.hi;
         let cx = self.cx();
@@ -1712,6 +1712,7 @@ impl<'a> Run<'a> {
             {
                 let with = st
                     .cells
+                    .get()
                     .iter()
                     .filter(|(a, _)| *a != cell && *a != cell.wrapping_add(1))
                     .filter_map(|(a, v)| match v {
