@@ -409,6 +409,28 @@ static char *append(char *spec, const char *line)
     return s;
 }
 
+static void usage(FILE *out)
+{
+    fputs("usage: game [options]\n"
+          "  --model NAME        hardware revision: dmg, mgb, sgb, cgb, agb and others\n"
+          "  --headless          open no window\n"
+          "  --frames N          stop after N frames; print the frame hash and serial output\n"
+          "  --input SPEC        scripted joypad, frame:buttons,...\n"
+          "  --png FILE          write the last frame as a PNG\n"
+          "  --png-dir DIR       write frames as PNG files into DIR\n"
+          "  --png-every N       with --png-dir, one frame in N\n"
+          "  --wav FILE          record the sound as 44100 Hz stereo WAV\n"
+          "  --no-audio          open no sound output\n"
+          "  --case FILE         grade the run by a corpus case spec\n"
+          "  --save FILE         battery save file (default: next to the ROM)\n"
+          "  --no-save           do not read or write a battery save\n"
+          "  --stats             print run statistics\n"
+          "  --check             run in lockstep with the device library's CPU\n"
+          "  --relift-set K=V    set a run-time setting; --relift-settings FILE reads a file\n"
+          "  --help              print this text\n",
+          out);
+}
+
 int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
 {
     host H;
@@ -451,7 +473,10 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
             check = true;
         else if (!strncmp(a, "--relift-", 9))
             i += strchr(a, '=') ? 0 : 1;
-        else {
+        else if (!strcmp(a, "--help") || !strcmp(a, "-h")) {
+            usage(stdout);
+            return 0;
+        } else {
             fprintf(stderr, "relift-gb: unknown option %s\n", a);
             return 2;
         }
