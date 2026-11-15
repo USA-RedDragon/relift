@@ -93,8 +93,6 @@ pub struct Variants<'a> {
     pub list: &'a [Bundled],
     /// The module's plan.
     pub plan: &'a ModulePlan,
-    /// The image id of the build.
-    pub image_id: [u8; 32],
 }
 
 fn raw(m: &Module, pc: u64) -> u64 {
@@ -184,7 +182,6 @@ pub fn emit(v: &Variants<'_>, dir: &Path) -> Result<(Vec<PathBuf>, Vec<SwapC>), 
                     unit_name: format!("{}+mod{mask}", v.module.name),
                     unit_symbol: sym,
                     module_base: v.module.base,
-                    image_id: v.image_id,
                     ..relift_emit::Options::default()
                 },
             );

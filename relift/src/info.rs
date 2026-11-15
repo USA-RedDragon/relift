@@ -393,6 +393,17 @@ pub fn c_file(info: &Info) -> String {
     embed::c_source(&info.to_bytes())
 }
 
+/// The C definition of `rl_image_id`, the hash of a program's module images.
+#[must_use]
+pub fn image_id_c(image_id: &[u8; 32]) -> String {
+    let mut t = String::from("const unsigned char rl_image_id[32] = {");
+    for b in image_id {
+        let _ = write!(t, " {b},");
+    }
+    t.push_str(" };\n");
+    t
+}
+
 /// `relift info [binary]`: print the document of a built binary, from its
 /// section, without running it. Without an argument the project's last
 /// build is read.

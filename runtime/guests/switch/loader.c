@@ -437,6 +437,7 @@ static int run_program(void *arg)
         rl_log(RL_LOG_ERROR, "loader", "cannot allocate the dispatch table");
         return 1;
     }
+    rl_dispatch_set_image(p->image_id);
     if (p->units && p->unit_count) {
         if (rl_units_register(p->units, p->unit_count) != 0) {
             rl_log(RL_LOG_ERROR, "loader", "a static unit was refused");

@@ -187,7 +187,6 @@ fn emit_modules(
     hints: &BTreeSet<Hint>,
     stage: &mut Stage,
 ) -> Result<Emitted, BoxError> {
-    let image_id = image_id(placed);
     let mut done = Emitted {
         files: Vec::new(),
         units: Vec::new(),
@@ -371,7 +370,6 @@ fn emit_modules(
                     overrides: &overrides,
                     list: &stage.bundled.clone(),
                     plan: &plan,
-                    image_id,
                 },
                 &cdir.join("mods").join(i.to_string()),
             )?;
@@ -446,7 +444,6 @@ fn emit_modules(
                     unit_symbol: unit.clone(),
                     module_base: p.base,
                     parts,
-                    image_id,
                     test_fault: test_fault(),
                     window,
                     ..relift_emit::Options::default()
@@ -849,7 +846,10 @@ fn lift_and_emit(
         stage.info(),
     )?;
     let info_c = cdir.join(crate::info::C_FILE);
-    relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
+    relift_cache::write_if_changed(
+        &info_c,
+        (crate::info::c_file(&doc) + &crate::info::image_id_c(&image_id(&placed))).as_bytes(),
+    )?;
     prog.push(info_c);
     let settings_c = cdir.join("game_settings.c");
     relift_cache::write_if_changed(
@@ -866,6 +866,7 @@ fn lift_and_emit(
         &emitted.units,
         fp_flags,
         mods_c.as_ref().map(|_| crate::mods::bundled::SYMBOL),
+        true,
     ) {
         let path = cdir.join(&f.name);
         relift_cache::write_if_changed(&path, &f.bytes)?;

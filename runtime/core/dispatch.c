@@ -37,6 +37,14 @@ rl_fn rl_dispatch_find(uint64_t a)
 
 const uint8_t *rl_dispatch_image(void) { return g_have_image ? g_image : NULL; }
 
+void rl_dispatch_set_image(const uint8_t *id)
+{
+    if (!id)
+        return;
+    memcpy(g_image, id, RL_IMAGE_ID_BYTES);
+    g_have_image = true;
+}
+
 static bool image_zero(const uint8_t *id)
 {
     for (uint32_t i = 0; i < RL_IMAGE_ID_BYTES; i++)

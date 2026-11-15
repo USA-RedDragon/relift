@@ -55,6 +55,8 @@ typedef struct rl_switch_program {
     uint32_t unit_count;
     /** @brief Bundled code mods (relift/mods.h), or NULL for none. */
     const rl_mods *mods;
+    /** @brief The image id (RL_IMAGE_ID_BYTES bytes) of the guest image set, or NULL when the units carry it. */
+    const uint8_t *image_id;
 } rl_switch_program;
 
 /**

@@ -441,6 +441,8 @@ RL_RUNTIME_API const uint8_t *rl_dispatch_image(void);
  * fails, and always in a build without RL_HOTLOAD.
  */
 RL_RUNTIME_API rl_fn rl_core_miss_load(rl_ctx *c, uint64_t target, uint32_t fp_mode);
+/** @brief Sets the image id of the guest image set (RL_IMAGE_ID_BYTES bytes) that hot-loaded units must carry, for static units that carry none. NULL leaves it unset. */
+RL_RUNTIME_API void rl_dispatch_set_image(const uint8_t *id);
 /** @brief Drops the dispatch table (tests). */
 RL_RUNTIME_API void rl_units_reset(void);
 /** @brief Copies the dispatch view into c. */
