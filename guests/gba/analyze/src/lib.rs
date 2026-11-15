@@ -72,6 +72,14 @@
 //!   instruction as it is fetched and goes on at these entries when the
 //!   bytes are not the ones it was lifted from. A new copy runs again the
 //!   functions that transfer into its range.
+//! - Rewritten fields: a word loaded from a constant RAM address, with one
+//!   field of up to six bits above bit 0 cleared and then ORed with a
+//!   value not known, is that word with the field set
+//!   (a field symbol). A run that stores such words to
+//!   constant addresses is taken to set the same field value in each, and
+//!   makes a rewrite for every value of the field. This is a prediction:
+//!   an instruction whose bytes the program set otherwise finds no lifted
+//!   code and stops the program with a report.
 //!
 //! Function runs are repeated until the summaries (returns, registers
 //! kept, argument effects), the entries and the RAM facts stop changing.

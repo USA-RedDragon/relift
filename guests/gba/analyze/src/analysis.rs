@@ -14,7 +14,7 @@ use crate::loc::Loc;
 use crate::report::{CopyKind, Function, Origin, RamCopy, Report, UnresolvedKind};
 use relift_cpu_arm32::regs::{self, Mode};
 
-use crate::val::{Abs, State};
+use crate::val::{self, Abs, State};
 
 /// Why an image cannot be analyzed.
 #[derive(Debug)]
@@ -100,6 +100,10 @@ pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
 /// the code is: when one found falls inside a table that was read past it, the
 /// discovery starts again with it known, until no table is read past a
 /// stop.
+/// The field stores of one run that keep the same bits: the first store,
+/// the bits kept and each store's address and source word.
+type FieldGroup = (Loc, u32, Vec<(u32, u32)>);
+
 fn discover(image: Image<'_>, entry: Loc) -> Report {
     let mut stops = BTreeSet::new();
     let mut cache = RefCell::new(HashMap::new());
@@ -384,6 +388,10 @@ impl<'a> Driver<'a> {
     /// another rewrite in place leaves for that one's entry. Where copies
     /// at one address hold different instructions, each copy gets an entry
     /// at the first of each run of them and at those a branch reaches.
+    /// A run that stores words which are another word of RAM with one
+    /// field set to a value not known ([`val::Base::Field`]) is taken to
+    /// set the same value in each, and makes a rewrite for every value the
+    /// field can hold.
     fn rewritten(&mut self) -> bool {
         let stores: BTreeSet<(u32, u8, u32, Loc)> = self
             .runs
@@ -449,7 +457,7 @@ impl<'a> Driver<'a> {
                     if at + size <= a {
                         continue;
                     }
-                    let Some(p) = self.rewrite(b, a, n, v, site) else {
+                    let Some(p) = self.rewrite(b, &[(a, n, v)], site) else {
                         continue;
                     };
                     for c in [b, p] {
@@ -458,6 +466,67 @@ impl<'a> Driver<'a> {
                             thumb,
                             copy: Some(c),
                         });
+                    }
+                }
+            }
+        }
+        let groups: BTreeSet<FieldGroup> = self
+            .runs
+            .values()
+            .flat_map(|r| {
+                let mut by: BTreeMap<u32, (Loc, Vec<(u32, u32)>)> = BTreeMap::new();
+                for &(s, a, src, keep) in &r.field_stores {
+                    let g = by.entry(keep).or_insert((s, Vec::new()));
+                    g.0 = g.0.min(s);
+                    g.1.push((a, src));
+                }
+                by.into_iter().map(|(k, (s, mut v))| {
+                    v.sort_unstable();
+                    v.dedup();
+                    (s, k, v)
+                })
+            })
+            .collect();
+        for (site, keep, stores) in &groups {
+            let Some((lo, bits)) = val::field(*keep) else {
+                continue;
+            };
+            let hit = |a: u32| -> Vec<(u32, bool, u16)> {
+                code.range(a.saturating_sub(3)..a + 4)
+                    .flat_map(|(&at, ls)| ls.iter().map(move |&(t, b)| (at, t, b)))
+                    .filter(|&(at, t, _)| at + if t { 2 } else { 4 } > a)
+                    .collect()
+            };
+            let bases: BTreeSet<u16> = stores
+                .iter()
+                .flat_map(|&(a, _)| hit(a))
+                .map(|h| h.2)
+                .collect();
+            for b in bases {
+                for v in 0..1u32 << bits {
+                    let writes: Vec<(u32, u8, u32)> = stores
+                        .iter()
+                        .filter_map(|&(a, src)| {
+                            let w = self.image.read(Some(b), src, 4)?;
+                            Some((a, 4, (w & keep) | (v << lo)))
+                        })
+                        .collect();
+                    let Some(p) = self.rewrite(b, &writes, *site) else {
+                        continue;
+                    };
+                    for &(a, _) in stores {
+                        for (at, thumb, hb) in hit(a) {
+                            if hb != b {
+                                continue;
+                            }
+                            for c in [b, p] {
+                                roots.push(Loc {
+                                    addr: at,
+                                    thumb,
+                                    copy: Some(c),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -472,16 +541,18 @@ impl<'a> Driver<'a> {
         added
     }
 
-    /// The copy that holds copy `b` with `v` stored at `a` (`n` bytes),
-    /// made when no copy does; `None` when the store changes no byte of
-    /// `b`.
-    fn rewrite(&mut self, b: u16, a: u32, n: u8, v: u32, site: Loc) -> Option<u16> {
+    /// The copy that holds copy `b` with each `(a, n, v)` of `writes`
+    /// stored (`v` at `a`, `n` bytes), made when no copy does; `None` when
+    /// they change no byte of `b`.
+    fn rewrite(&mut self, b: u16, writes: &[(u32, u8, u32)], site: Loc) -> Option<u16> {
         let c = self.image.copies.get(usize::from(b))?;
         let mut bytes = c.bytes.to_vec();
-        for i in 0..u32::from(n) {
-            let off = a.wrapping_add(i).wrapping_sub(c.dst) as usize;
-            if let Some(x) = bytes.get_mut(off) {
-                *x = (v >> (8 * i)) as u8;
+        for &(a, n, v) in writes {
+            for i in 0..u32::from(n) {
+                let off = a.wrapping_add(i).wrapping_sub(c.dst) as usize;
+                if let Some(x) = bytes.get_mut(off) {
+                    *x = (v >> (8 * i)) as u8;
+                }
             }
         }
         if *bytes == *c.bytes {

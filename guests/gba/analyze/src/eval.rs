@@ -7,7 +7,7 @@ use relift_ir::{BinOp, Block, CmpOp, ExtKind, Flow, Next, Op, Value, Width};
 
 use crate::image::Image;
 use crate::loc::{Loc, Region};
-use crate::val::{Abs, Base, DMA_BASE, DMA_HALVES, SP, State, Sym, UNBOUNDED};
+use crate::val::{Abs, Base, DMA_BASE, DMA_HALVES, SP, State, Sym, UNBOUNDED, field};
 
 /// A DMA channel enabled with the register values at that point.
 #[derive(Clone, Copy, Debug)]
@@ -240,6 +240,26 @@ fn bin(op: BinOp, a: Abs, b: Abs, w: u32) -> Abs {
         }),
         (BinOp::Sub, S(s), S(t)) if w == 32 && s.base == t.base && s.align == 0 && t.align == 0 => {
             K(u128::from(s.off.wrapping_sub(t.off)))
+        }
+        (BinOp::And, S(s), K(m)) | (BinOp::And, K(m), S(s))
+            if w == 32
+                && s.off == 0
+                && s.align == 0
+                && let Base::Mem(addr) = s.base
+                && field(m as u32).is_some() =>
+        {
+            Abs::sym(
+                Base::Field {
+                    addr,
+                    keep: m as u32,
+                },
+                0,
+            )
+        }
+        (BinOp::Or, S(s), x) | (BinOp::Or, x, S(s))
+            if w == 32 && matches!(s.base, Base::Field { .. }) && !sym(x) =>
+        {
+            S(s)
         }
         (BinOp::And, S(s), K(m)) | (BinOp::And, K(m), S(s)) if w == 32 => match m {
             0xFFFF_FFFF => S(s),

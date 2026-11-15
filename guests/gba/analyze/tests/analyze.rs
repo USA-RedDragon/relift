@@ -365,6 +365,70 @@ fn a_constant_stored_into_code_in_ram_makes_a_rewrite_with_entries_in_both() {
 }
 
 #[test]
+fn a_field_set_to_an_unknown_value_makes_a_rewrite_for_each_value() {
+    let mut a = Asm::new();
+    let e = 0x0800_0100;
+    let src = 0x0800_0400;
+    let lsr = 0xE1A0_0120;
+    let w = 0x0300_0000;
+    a.arm(
+        src,
+        &[
+            lsr,
+            A_BX_LR,
+            0xE24F_1010,
+            0xE591_2000,
+            0xE3C2_2D3E,
+            0xE182_2380,
+            0xE581_2000,
+            A_BX_LR,
+        ],
+    );
+    let pool = e + 0x80;
+    a.arm(
+        e,
+        &[
+            a_ldr_lit(0, e, pool),
+            a_ldr_lit(1, e + 4, pool + 4),
+            a_ldr_lit(2, e + 8, pool + 8),
+            a_swi(0x0B),
+            a_ldr_lit(0, e + 0x10, pool + 12),
+            A_MOV_LR_PC,
+            a_bx(0),
+            a_ldr_lit(0, e + 0x1C, pool + 4),
+            A_MOV_LR_PC,
+            a_bx(0),
+            a_b(e + 0x28, e + 0x28),
+        ],
+    );
+    a.arm(pool, &[src, w, 8 | 1 << 26, w + 8]);
+    let r = a.run(e);
+    let rewrites: Vec<_> = r
+        .copies
+        .iter()
+        .filter(|c| c.kind == CopyKind::Rewrite(0))
+        .collect();
+    assert_eq!(rewrites.len(), 31, "{:?}", r.copies);
+    let shifts: BTreeSet<u32> = rewrites
+        .iter()
+        .map(|c| {
+            let v = u32::from_le_bytes(c.bytes[..4].try_into().expect("a word"));
+            assert_eq!(v & !0xF80, lsr & !0xF80);
+            (v >> 7) & 31
+        })
+        .collect();
+    assert_eq!(shifts.len(), 31);
+    assert!(!shifts.contains(&((lsr >> 7) & 31)));
+    for copy in [0, 1, 31] {
+        assert!(r.functions.contains_key(&Loc {
+            addr: w,
+            thumb: false,
+            copy: Some(copy),
+        }));
+    }
+}
+
+#[test]
 fn copies_with_other_code_at_one_address_get_entries_where_they_differ() {
     let mut a = Asm::new();
     let e = 0x0800_0100;

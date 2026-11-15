@@ -199,6 +199,10 @@ pub(crate) struct FnRun {
     /// Constants stored to constant RAM addresses: the store, address, size
     /// and value.
     pub ram_stores: Vec<(Loc, u32, u8, u32)>,
+    /// Words stored to constant RAM addresses that are another RAM word
+    /// with one field set to a value not known ([`Base::Field`]): the
+    /// store, address, the word's address and the bits it keeps.
+    pub field_stores: Vec<(Loc, u32, u32, u32)>,
     pub irq: Vec<u32>,
     pub copies: Vec<RamCopy>,
     pub swis: Vec<Swi>,
@@ -541,10 +545,23 @@ impl Run<'_> {
     }
 
     fn ram_store(&mut self, site: Loc, a: Abs, n: u8, v: Abs) {
-        if let (Some(a), Some(v)) = (a.k32(), v.k32())
-            && Region::of(a).is_ram()
-        {
-            self.out.ram_stores.push((site, a, n, v));
+        let Some(a) = a.k32().filter(|a| Region::of(*a).is_ram()) else {
+            return;
+        };
+        match v {
+            Abs::K(_) => {
+                if let Some(v) = v.k32() {
+                    self.out.ram_stores.push((site, a, n, v));
+                }
+            }
+            Abs::S(Sym {
+                base: Base::Field { addr, keep },
+                off: 0,
+                align: 0,
+            }) if n == 4 && a.is_multiple_of(4) => {
+                self.out.field_stores.push((site, a, addr, keep));
+            }
+            _ => {}
         }
     }
 

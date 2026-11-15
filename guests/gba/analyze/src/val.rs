@@ -23,6 +23,22 @@ pub(crate) enum Base {
     /// The word the caller left at this offset from the entry stack
     /// pointer (zero or above), loaded before this run stored there.
     Frame(i32),
+    /// The word at RAM address `addr` with the bits outside `keep` (one
+    /// field of at most [`FIELD_BITS`] bits above bit 0) cleared and then
+    /// set to some value: a read-modify-write of one field of the word.
+    Field { addr: u32, keep: u32 },
+}
+
+/// The widest field a [`Base::Field`] tracks.
+pub(crate) const FIELD_BITS: u32 = 6;
+
+/// The field `!keep` when it is one run of at most [`FIELD_BITS`] bits
+/// that leaves bit 0: its lowest bit and width.
+pub(crate) fn field(keep: u32) -> Option<(u32, u32)> {
+    let f = !keep;
+    let lo = f.trailing_zeros();
+    let n = f.count_ones();
+    (f != 0 && lo > 0 && n <= FIELD_BITS && f >> lo == (1 << n) - 1).then_some((lo, n))
 }
 
 /// `base + off` with the low `align` bits cleared after the addition.
