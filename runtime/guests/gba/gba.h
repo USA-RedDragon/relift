@@ -289,6 +289,8 @@ bool rl_gba_irq_sample(rl_gba *g);
  * inside an access no longer end the CPU's time slice for it.
  */
 void rl_gba_irq_boundary(rl_gba *g);
+/** @brief The CPU's I bit cleared: with the line up, the next sync point takes the interrupt (a break that survives the instruction's bus accesses). */
+void rl_gba_irq_unmasked(rl_gba *g);
 
 /** @brief Callbacks into the CPU layer. */
 typedef struct rl_gba_cpu_hooks {

@@ -201,6 +201,14 @@ bool rl_gba_irq_sample(rl_gba *g)
 
 void rl_gba_irq_boundary(rl_gba *g) { g->irq_want = false; }
 
+void rl_gba_irq_unmasked(rl_gba *g)
+{
+    if (!g->irq.line || !g->cpu)
+        return;
+    g->irq_want = true;
+    rl_sched_break(g->cpu);
+}
+
 void rl_gba_request_irq(rl_gba *g, uint16_t sources) { gba_irq_set(g, sources, gba_now(g)); }
 
 void gba_halt(rl_gba *g)

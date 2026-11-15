@@ -37,6 +37,13 @@ RL_RUNTIME_API int rl_gba_cpu_fetch_code(rl_ctx *c, uint32_t pc, unsigned thumb,
 RL_RUNTIME_API rl_fn rl_gba_cpu_variant(rl_ctx *c, uint32_t pc, unsigned thumb);
 /** @brief n internal cycles of the CPU, which leave the bus to the prefetch buffer. */
 RL_RUNTIME_API void rl_gba_cpu_idle(rl_ctx *c, uint32_t n);
+/**
+ * @brief MSR writes i to the I bit: a set masks interrupts at once; a clear
+ * lets the next instruction run before a pending interrupt is taken (the
+ * mask opens at that instruction's fetch), as on NanoBoyAdvance. An
+ * exception return's write goes to rl_arm32_set_i.
+ */
+RL_RUNTIME_API void rl_gba_cpu_msr_i(rl_ctx *c, uint32_t i);
 /** @brief A taken branch to target refills the pipeline: a nonsequential and a sequential fetch there. */
 RL_RUNTIME_API void rl_gba_cpu_refill(rl_ctx *c, uint32_t target, unsigned thumb, unsigned taken);
 /**

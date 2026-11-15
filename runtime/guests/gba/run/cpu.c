@@ -60,10 +60,28 @@ void rl_gba_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
 
 static void charge(rl_ctx *c, uint64_t cycles) { c->time.budget -= (int64_t)cycles; }
 
+/** @brief An MSR cleared the I bit and the mask opens at the next fetch (rl_gba_cpu_msr_i). */
+static bool g_unmask;
+
+void rl_gba_cpu_msr_i(rl_ctx *c, uint32_t i)
+{
+    g_unmask = !(i & 1u) && c->i;
+    if (g_unmask)
+        c->i = 0;
+    else
+        rl_arm32_set_i(c, i);
+}
+
 void rl_gba_cpu_fetch(rl_ctx *c, uint32_t pc, unsigned thumb)
 {
     unsigned size = thumb ? 2u : 4u;
     rl_gba_fetch(machine(c), pc + 2u * size, size, !c->code_ns);
+    if (g_unmask) {
+        g_unmask = false;
+        c->i = 1;
+        rl_arm32_set_i(c, 0);
+        rl_gba_irq_unmasked(machine(c));
+    }
     c->code_ns = 0;
     c->data_open = 0;
 }
@@ -174,7 +192,7 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
     if (r->check)
         r->check(r->check_user, c);
     rl_gba_irq_boundary(g);
-    if (c->i || !rl_gba_irq_line(g))
+    if (c->i || g_unmask || !rl_gba_irq_line(g))
         return RL_NO_IRQ;
     if (!rl_gba_irq_sample(g)) {
         rl_sched_break(r->k);

@@ -11,7 +11,9 @@
 //!   accesses, then the internal cycles (`rl_gba_cpu_idle` in place of the
 //!   block's ticks), then a taken branch's refill (`rl_gba_cpu_refill`);
 //! - a write of the I bit tells the runtime (`rl_arm32_set_i`), so the IRQ
-//!   line is masked exactly while I is set;
+//!   line is masked exactly while I is set; an MSR's (an I write without a
+//!   refill) goes to `rl_gba_cpu_msr_i`, since a clear there lets one more
+//!   instruction run before a pending interrupt;
 //! - SWI is a trap into the high-level BIOS (`rl_gba_swi_trap`), which goes
 //!   on at the next instruction;
 //! - the second half of a Thumb BL pair calls the constant its first half
@@ -62,6 +64,8 @@ pub const IDLE: &str = "arm32.idle";
 pub const IDLE_IF: &str = "arm32.idle_if";
 /// The intrinsic of a write of the I bit.
 pub const SET_I: &str = "arm32.set_i";
+/// The intrinsic of an MSR's write of the I bit.
+pub const MSR_I: &str = "arm32.msr_i";
 /// The intrinsic of a call's host frame: the return address.
 pub const CALL: &str = "arm32.call";
 
@@ -332,7 +336,11 @@ fn reshape(b: &mut Block, bus: &[Bus], pc: u32, thumb: bool, swi: bool, unit: Op
         push(b, Op::intrinsic(CALL, vec![r]), None);
     }
     if let Some(v) = last_set(b, regs::I) {
-        push(b, Op::intrinsic(SET_I, vec![v]), None);
+        push(
+            b,
+            Op::intrinsic(if refills || swi { SET_I } else { MSR_I }, vec![v]),
+            None,
+        );
     }
     push(b, Op::Sync, None);
 }
@@ -406,6 +414,7 @@ impl Frontend for Gba {
             (IDLE, [n]) => format!("rl_gba_cpu_idle(c, (uint32_t)({n}))"),
             (IDLE_IF, [on, n]) => format!("rl_gba_cpu_idle(c, (uint32_t)({on}) * (uint32_t)({n}))"),
             (SET_I, [i]) => format!("rl_arm32_set_i(c, (uint32_t)({i}))"),
+            (MSR_I, [i]) => format!("rl_gba_cpu_msr_i(c, (uint32_t)({i}))"),
             (CALL, [r]) => format!("rl_arm32_call(c, (uint32_t)({r}))"),
             _ => return None,
         })
@@ -666,10 +675,10 @@ mod tests {
     }
 
     #[test]
-    fn msr_reports_the_i_bit() {
+    fn msr_reports_the_i_bit_as_an_msr() {
         let img = arm(&[0xE121_F000]);
         let b = Gba::new().lift_at(&img, BASE, BASE, false).expect("lifts");
-        assert_eq!(intrinsics(&b), [FETCH_ARM, SET_I]);
+        assert_eq!(intrinsics(&b), [FETCH_ARM, MSR_I]);
     }
 
     #[test]
