@@ -8975,6 +8975,1626 @@ pub(super) fn ASRV_64_dp_2src(word: u32, b: &mut Builder, st: &mut St) -> Result
     Ok(())
 }
 
+/// `AUTDA_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn AUTDA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTDA_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = st.has(Feature::PAuth);
+    let s14: bool = s7 && s13;
+    let s15: bool = s14 && s12;
+    let v16 = st.x_read(b, s3 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v19 = b.get(crate::regs::PacKey::DA.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v34 = b.extract(v16, 55, Width::new(1));
+    let v35 = b.concat(v34, v34);
+    let v36 = b.concat(v35, v34);
+    let v37 = b.concat(v36, v34);
+    let v38 = b.concat(v37, v34);
+    let v39 = b.concat(v38, v34);
+    let v40 = b.concat(v39, v34);
+    let v41 = b.concat(v40, v34);
+    let v42 = b.concat(v41, v34);
+    let v43 = b.concat(v42, v34);
+    let v44 = b.concat(v43, v34);
+    let v45 = b.concat(v44, v34);
+    let v46 = b.concat(v45, v34);
+    let v47 = b.concat(v46, v34);
+    let v48 = b.concat(v47, v34);
+    let v49 = b.concat(v48, v34);
+    let v50 = b.concat(v49, v34);
+    let v51 = b.concat(v50, v34);
+    let v52 = b.concat(v51, v34);
+    let v53 = b.concat(v52, v34);
+    let v54 = b.concat(v53, v34);
+    let v55 = b.concat(v54, v34);
+    let v56 = b.concat(v55, v34);
+    let v57 = b.concat(v56, v34);
+    let v58 = b.concat(v57, v34);
+    let v59 = b.concat(v58, v34);
+    let v60 = b.concat(v59, v34);
+    let v61 = b.concat(v60, v34);
+    let v62 = b.concat(v61, v34);
+    let v63 = b.concat(v62, v34);
+    let v64 = b.concat(v63, v34);
+    let v65 = b.concat(v64, v34);
+    let v66 = b.concat(v65, v34);
+    let v67 = b.concat(v66, v34);
+    let v68 = b.concat(v67, v34);
+    let v69 = b.concat(v68, v34);
+    let v70 = b.concat(v69, v34);
+    let v71 = b.concat(v70, v34);
+    let v72 = b.concat(v71, v34);
+    let v73 = b.concat(v72, v34);
+    let v74 = b.concat(v73, v34);
+    let v75 = b.concat(v74, v34);
+    let v76 = b.concat(v75, v34);
+    let v77 = b.concat(v76, v34);
+    let v78 = b.concat(v77, v34);
+    let v79 = b.concat(v78, v34);
+    let v80 = b.concat(v79, v34);
+    let v81 = b.concat(v80, v34);
+    let v82 = b.concat(v81, v34);
+    let v83 = b.concat(v82, v34);
+    let v84 = b.concat(v83, v34);
+    let v85 = b.concat(v84, v34);
+    let v86 = b.concat(v85, v34);
+    let v87 = b.concat(v86, v34);
+    let v88 = b.concat(v87, v34);
+    let v89 = b.concat(v88, v34);
+    let v90 = b.concat(v89, v34);
+    let v91 = b.concat(v90, v34);
+    let v92 = b.concat(v91, v34);
+    let v93 = b.concat(v92, v34);
+    let v94 = b.concat(v93, v34);
+    let v95 = b.concat(v94, v34);
+    let v96 = b.concat(v95, v34);
+    let v97 = b.concat(v96, v34);
+    let v98 = b.extract(v97, 0, Width::new(25));
+    let v99 = b.extract(v16, 0, Width::new(39));
+    let v100 = b.concat(v98, v99);
+    let v101 = b.extract(v20, 64, Width::new(64));
+    let v102 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v105 = b.pac(v100, v17, v101, v102);
+    let s108: bool = st.has(Feature::PAuth2);
+    let s109: bool = !s108;
+    let v111 = b.extract(v105, 39, Width::new(16));
+    let v112 = b.extract(v16, 39, Width::new(16));
+    let v113 = b.cmp(CmpOp::Eq, v111, v112);
+    let v114 = b.extract(v105, 56, Width::new(8));
+    let v115 = b.extract(v16, 56, Width::new(8));
+    let v116 = b.cmp(CmpOp::Eq, v114, v115);
+    let v117 = b.and(v113, v116);
+    let v119 = b.extract(v100, 63, Width::new(1));
+    let v120 = b.konst(Width::new(2), 0x1);
+    let v121 = b.concat(v119, v120);
+    let v122 = b.extract(v100, 0, Width::new(61));
+    let v123 = b.concat(v121, v122);
+    let v124 = b.select(v117, v100, v123);
+    let v127 = b.extract(v16, 39, Width::new(16));
+    let v128 = b.extract(v105, 39, Width::new(16));
+    let v129 = b.bin(BinOp::Xor, v127, v128);
+    let v130 = b.extract(v16, 55, Width::new(9));
+    let v131 = b.concat(v130, v129);
+    let v132 = b.extract(v16, 0, Width::new(39));
+    let v133 = b.concat(v131, v132);
+    let v134 = b.extract(v133, 56, Width::new(8));
+    let v135 = b.extract(v105, 56, Width::new(8));
+    let v136 = b.bin(BinOp::Xor, v134, v135);
+    let v137 = b.extract(v133, 0, Width::new(56));
+    let v138 = b.concat(v136, v137);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v139 = if s109 { v124 } else { v138 };
+    if s15 {
+        st.x_set(b, s3 as u32, v139, None);
+    }
+    let s140: bool = !s12;
+    let s141: bool = s14 && s140;
+    let v142 = st.x_read(b, s3 as u32, 64);
+    let v143 = st.x_read(b, s4 as u32, 64);
+    let v144 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v145 = b.get(crate::regs::PacKey::DA.reg(false));
+    let v146 = b.concat(v144, v145);
+    let v160 = b.extract(v142, 55, Width::new(1));
+    let v161 = b.concat(v160, v160);
+    let v162 = b.concat(v161, v160);
+    let v163 = b.concat(v162, v160);
+    let v164 = b.concat(v163, v160);
+    let v165 = b.concat(v164, v160);
+    let v166 = b.concat(v165, v160);
+    let v167 = b.concat(v166, v160);
+    let v168 = b.concat(v167, v160);
+    let v169 = b.concat(v168, v160);
+    let v170 = b.concat(v169, v160);
+    let v171 = b.concat(v170, v160);
+    let v172 = b.concat(v171, v160);
+    let v173 = b.concat(v172, v160);
+    let v174 = b.concat(v173, v160);
+    let v175 = b.concat(v174, v160);
+    let v176 = b.concat(v175, v160);
+    let v177 = b.concat(v176, v160);
+    let v178 = b.concat(v177, v160);
+    let v179 = b.concat(v178, v160);
+    let v180 = b.concat(v179, v160);
+    let v181 = b.concat(v180, v160);
+    let v182 = b.concat(v181, v160);
+    let v183 = b.concat(v182, v160);
+    let v184 = b.concat(v183, v160);
+    let v185 = b.concat(v184, v160);
+    let v186 = b.concat(v185, v160);
+    let v187 = b.concat(v186, v160);
+    let v188 = b.concat(v187, v160);
+    let v189 = b.concat(v188, v160);
+    let v190 = b.concat(v189, v160);
+    let v191 = b.concat(v190, v160);
+    let v192 = b.concat(v191, v160);
+    let v193 = b.concat(v192, v160);
+    let v194 = b.concat(v193, v160);
+    let v195 = b.concat(v194, v160);
+    let v196 = b.concat(v195, v160);
+    let v197 = b.concat(v196, v160);
+    let v198 = b.concat(v197, v160);
+    let v199 = b.concat(v198, v160);
+    let v200 = b.concat(v199, v160);
+    let v201 = b.concat(v200, v160);
+    let v202 = b.concat(v201, v160);
+    let v203 = b.concat(v202, v160);
+    let v204 = b.concat(v203, v160);
+    let v205 = b.concat(v204, v160);
+    let v206 = b.concat(v205, v160);
+    let v207 = b.concat(v206, v160);
+    let v208 = b.concat(v207, v160);
+    let v209 = b.concat(v208, v160);
+    let v210 = b.concat(v209, v160);
+    let v211 = b.concat(v210, v160);
+    let v212 = b.concat(v211, v160);
+    let v213 = b.concat(v212, v160);
+    let v214 = b.concat(v213, v160);
+    let v215 = b.concat(v214, v160);
+    let v216 = b.concat(v215, v160);
+    let v217 = b.concat(v216, v160);
+    let v218 = b.concat(v217, v160);
+    let v219 = b.concat(v218, v160);
+    let v220 = b.concat(v219, v160);
+    let v221 = b.concat(v220, v160);
+    let v222 = b.concat(v221, v160);
+    let v223 = b.concat(v222, v160);
+    let v224 = b.extract(v223, 0, Width::new(25));
+    let v225 = b.extract(v142, 0, Width::new(39));
+    let v226 = b.concat(v224, v225);
+    let v227 = b.extract(v146, 64, Width::new(64));
+    let v228 = b.extract(v146, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v231 = b.pac(v226, v143, v227, v228);
+    let s234: bool = st.has(Feature::PAuth2);
+    let s235: bool = !s234;
+    let v237 = b.extract(v231, 39, Width::new(16));
+    let v238 = b.extract(v142, 39, Width::new(16));
+    let v239 = b.cmp(CmpOp::Eq, v237, v238);
+    let v240 = b.extract(v231, 56, Width::new(8));
+    let v241 = b.extract(v142, 56, Width::new(8));
+    let v242 = b.cmp(CmpOp::Eq, v240, v241);
+    let v243 = b.and(v239, v242);
+    let v245 = b.extract(v226, 63, Width::new(1));
+    let v246 = b.konst(Width::new(2), 0x1);
+    let v247 = b.concat(v245, v246);
+    let v248 = b.extract(v226, 0, Width::new(61));
+    let v249 = b.concat(v247, v248);
+    let v250 = b.select(v243, v226, v249);
+    let v253 = b.extract(v142, 39, Width::new(16));
+    let v254 = b.extract(v231, 39, Width::new(16));
+    let v255 = b.bin(BinOp::Xor, v253, v254);
+    let v256 = b.extract(v142, 55, Width::new(9));
+    let v257 = b.concat(v256, v255);
+    let v258 = b.extract(v142, 0, Width::new(39));
+    let v259 = b.concat(v257, v258);
+    let v260 = b.extract(v259, 56, Width::new(8));
+    let v261 = b.extract(v231, 56, Width::new(8));
+    let v262 = b.bin(BinOp::Xor, v260, v261);
+    let v263 = b.extract(v259, 0, Width::new(56));
+    let v264 = b.concat(v262, v263);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v265 = if s235 { v250 } else { v264 };
+    if s141 {
+        st.x_set(b, s3 as u32, v265, None);
+    }
+    let v270 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v272 = b.get(crate::regs::PacKey::DA.reg(false));
+    Ok(())
+}
+
+/// `AUTDB_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn AUTDB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTDB_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = st.has(Feature::PAuth);
+    let s14: bool = s7 && s13;
+    let s15: bool = s14 && s12;
+    let v16 = st.x_read(b, s3 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v19 = b.get(crate::regs::PacKey::DB.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v34 = b.extract(v16, 55, Width::new(1));
+    let v35 = b.concat(v34, v34);
+    let v36 = b.concat(v35, v34);
+    let v37 = b.concat(v36, v34);
+    let v38 = b.concat(v37, v34);
+    let v39 = b.concat(v38, v34);
+    let v40 = b.concat(v39, v34);
+    let v41 = b.concat(v40, v34);
+    let v42 = b.concat(v41, v34);
+    let v43 = b.concat(v42, v34);
+    let v44 = b.concat(v43, v34);
+    let v45 = b.concat(v44, v34);
+    let v46 = b.concat(v45, v34);
+    let v47 = b.concat(v46, v34);
+    let v48 = b.concat(v47, v34);
+    let v49 = b.concat(v48, v34);
+    let v50 = b.concat(v49, v34);
+    let v51 = b.concat(v50, v34);
+    let v52 = b.concat(v51, v34);
+    let v53 = b.concat(v52, v34);
+    let v54 = b.concat(v53, v34);
+    let v55 = b.concat(v54, v34);
+    let v56 = b.concat(v55, v34);
+    let v57 = b.concat(v56, v34);
+    let v58 = b.concat(v57, v34);
+    let v59 = b.concat(v58, v34);
+    let v60 = b.concat(v59, v34);
+    let v61 = b.concat(v60, v34);
+    let v62 = b.concat(v61, v34);
+    let v63 = b.concat(v62, v34);
+    let v64 = b.concat(v63, v34);
+    let v65 = b.concat(v64, v34);
+    let v66 = b.concat(v65, v34);
+    let v67 = b.concat(v66, v34);
+    let v68 = b.concat(v67, v34);
+    let v69 = b.concat(v68, v34);
+    let v70 = b.concat(v69, v34);
+    let v71 = b.concat(v70, v34);
+    let v72 = b.concat(v71, v34);
+    let v73 = b.concat(v72, v34);
+    let v74 = b.concat(v73, v34);
+    let v75 = b.concat(v74, v34);
+    let v76 = b.concat(v75, v34);
+    let v77 = b.concat(v76, v34);
+    let v78 = b.concat(v77, v34);
+    let v79 = b.concat(v78, v34);
+    let v80 = b.concat(v79, v34);
+    let v81 = b.concat(v80, v34);
+    let v82 = b.concat(v81, v34);
+    let v83 = b.concat(v82, v34);
+    let v84 = b.concat(v83, v34);
+    let v85 = b.concat(v84, v34);
+    let v86 = b.concat(v85, v34);
+    let v87 = b.concat(v86, v34);
+    let v88 = b.concat(v87, v34);
+    let v89 = b.concat(v88, v34);
+    let v90 = b.concat(v89, v34);
+    let v91 = b.concat(v90, v34);
+    let v92 = b.concat(v91, v34);
+    let v93 = b.concat(v92, v34);
+    let v94 = b.concat(v93, v34);
+    let v95 = b.concat(v94, v34);
+    let v96 = b.concat(v95, v34);
+    let v97 = b.concat(v96, v34);
+    let v98 = b.extract(v97, 0, Width::new(25));
+    let v99 = b.extract(v16, 0, Width::new(39));
+    let v100 = b.concat(v98, v99);
+    let v101 = b.extract(v20, 64, Width::new(64));
+    let v102 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v105 = b.pac(v100, v17, v101, v102);
+    let s108: bool = st.has(Feature::PAuth2);
+    let s109: bool = !s108;
+    let v111 = b.extract(v105, 39, Width::new(16));
+    let v112 = b.extract(v16, 39, Width::new(16));
+    let v113 = b.cmp(CmpOp::Eq, v111, v112);
+    let v114 = b.extract(v105, 56, Width::new(8));
+    let v115 = b.extract(v16, 56, Width::new(8));
+    let v116 = b.cmp(CmpOp::Eq, v114, v115);
+    let v117 = b.and(v113, v116);
+    let v119 = b.extract(v100, 63, Width::new(1));
+    let v120 = b.konst(Width::new(2), 0x2);
+    let v121 = b.concat(v119, v120);
+    let v122 = b.extract(v100, 0, Width::new(61));
+    let v123 = b.concat(v121, v122);
+    let v124 = b.select(v117, v100, v123);
+    let v127 = b.extract(v16, 39, Width::new(16));
+    let v128 = b.extract(v105, 39, Width::new(16));
+    let v129 = b.bin(BinOp::Xor, v127, v128);
+    let v130 = b.extract(v16, 55, Width::new(9));
+    let v131 = b.concat(v130, v129);
+    let v132 = b.extract(v16, 0, Width::new(39));
+    let v133 = b.concat(v131, v132);
+    let v134 = b.extract(v133, 56, Width::new(8));
+    let v135 = b.extract(v105, 56, Width::new(8));
+    let v136 = b.bin(BinOp::Xor, v134, v135);
+    let v137 = b.extract(v133, 0, Width::new(56));
+    let v138 = b.concat(v136, v137);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v139 = if s109 { v124 } else { v138 };
+    if s15 {
+        st.x_set(b, s3 as u32, v139, None);
+    }
+    let s140: bool = !s12;
+    let s141: bool = s14 && s140;
+    let v142 = st.x_read(b, s3 as u32, 64);
+    let v143 = st.x_read(b, s4 as u32, 64);
+    let v144 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v145 = b.get(crate::regs::PacKey::DB.reg(false));
+    let v146 = b.concat(v144, v145);
+    let v160 = b.extract(v142, 55, Width::new(1));
+    let v161 = b.concat(v160, v160);
+    let v162 = b.concat(v161, v160);
+    let v163 = b.concat(v162, v160);
+    let v164 = b.concat(v163, v160);
+    let v165 = b.concat(v164, v160);
+    let v166 = b.concat(v165, v160);
+    let v167 = b.concat(v166, v160);
+    let v168 = b.concat(v167, v160);
+    let v169 = b.concat(v168, v160);
+    let v170 = b.concat(v169, v160);
+    let v171 = b.concat(v170, v160);
+    let v172 = b.concat(v171, v160);
+    let v173 = b.concat(v172, v160);
+    let v174 = b.concat(v173, v160);
+    let v175 = b.concat(v174, v160);
+    let v176 = b.concat(v175, v160);
+    let v177 = b.concat(v176, v160);
+    let v178 = b.concat(v177, v160);
+    let v179 = b.concat(v178, v160);
+    let v180 = b.concat(v179, v160);
+    let v181 = b.concat(v180, v160);
+    let v182 = b.concat(v181, v160);
+    let v183 = b.concat(v182, v160);
+    let v184 = b.concat(v183, v160);
+    let v185 = b.concat(v184, v160);
+    let v186 = b.concat(v185, v160);
+    let v187 = b.concat(v186, v160);
+    let v188 = b.concat(v187, v160);
+    let v189 = b.concat(v188, v160);
+    let v190 = b.concat(v189, v160);
+    let v191 = b.concat(v190, v160);
+    let v192 = b.concat(v191, v160);
+    let v193 = b.concat(v192, v160);
+    let v194 = b.concat(v193, v160);
+    let v195 = b.concat(v194, v160);
+    let v196 = b.concat(v195, v160);
+    let v197 = b.concat(v196, v160);
+    let v198 = b.concat(v197, v160);
+    let v199 = b.concat(v198, v160);
+    let v200 = b.concat(v199, v160);
+    let v201 = b.concat(v200, v160);
+    let v202 = b.concat(v201, v160);
+    let v203 = b.concat(v202, v160);
+    let v204 = b.concat(v203, v160);
+    let v205 = b.concat(v204, v160);
+    let v206 = b.concat(v205, v160);
+    let v207 = b.concat(v206, v160);
+    let v208 = b.concat(v207, v160);
+    let v209 = b.concat(v208, v160);
+    let v210 = b.concat(v209, v160);
+    let v211 = b.concat(v210, v160);
+    let v212 = b.concat(v211, v160);
+    let v213 = b.concat(v212, v160);
+    let v214 = b.concat(v213, v160);
+    let v215 = b.concat(v214, v160);
+    let v216 = b.concat(v215, v160);
+    let v217 = b.concat(v216, v160);
+    let v218 = b.concat(v217, v160);
+    let v219 = b.concat(v218, v160);
+    let v220 = b.concat(v219, v160);
+    let v221 = b.concat(v220, v160);
+    let v222 = b.concat(v221, v160);
+    let v223 = b.concat(v222, v160);
+    let v224 = b.extract(v223, 0, Width::new(25));
+    let v225 = b.extract(v142, 0, Width::new(39));
+    let v226 = b.concat(v224, v225);
+    let v227 = b.extract(v146, 64, Width::new(64));
+    let v228 = b.extract(v146, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v231 = b.pac(v226, v143, v227, v228);
+    let s234: bool = st.has(Feature::PAuth2);
+    let s235: bool = !s234;
+    let v237 = b.extract(v231, 39, Width::new(16));
+    let v238 = b.extract(v142, 39, Width::new(16));
+    let v239 = b.cmp(CmpOp::Eq, v237, v238);
+    let v240 = b.extract(v231, 56, Width::new(8));
+    let v241 = b.extract(v142, 56, Width::new(8));
+    let v242 = b.cmp(CmpOp::Eq, v240, v241);
+    let v243 = b.and(v239, v242);
+    let v245 = b.extract(v226, 63, Width::new(1));
+    let v246 = b.konst(Width::new(2), 0x2);
+    let v247 = b.concat(v245, v246);
+    let v248 = b.extract(v226, 0, Width::new(61));
+    let v249 = b.concat(v247, v248);
+    let v250 = b.select(v243, v226, v249);
+    let v253 = b.extract(v142, 39, Width::new(16));
+    let v254 = b.extract(v231, 39, Width::new(16));
+    let v255 = b.bin(BinOp::Xor, v253, v254);
+    let v256 = b.extract(v142, 55, Width::new(9));
+    let v257 = b.concat(v256, v255);
+    let v258 = b.extract(v142, 0, Width::new(39));
+    let v259 = b.concat(v257, v258);
+    let v260 = b.extract(v259, 56, Width::new(8));
+    let v261 = b.extract(v231, 56, Width::new(8));
+    let v262 = b.bin(BinOp::Xor, v260, v261);
+    let v263 = b.extract(v259, 0, Width::new(56));
+    let v264 = b.concat(v262, v263);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v265 = if s235 { v250 } else { v264 };
+    if s141 {
+        st.x_set(b, s3 as u32, v265, None);
+    }
+    let v270 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v272 = b.get(crate::regs::PacKey::DB.reg(false));
+    Ok(())
+}
+
+/// `AUTDZA_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn AUTDZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTDZA_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v9 = st.x_read(b, 31, 64);
+    let v10 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v11 = b.get(crate::regs::PacKey::DA.reg(false));
+    let v12 = b.concat(v10, v11);
+    let v26 = b.extract(v8, 55, Width::new(1));
+    let v27 = b.concat(v26, v26);
+    let v28 = b.concat(v27, v26);
+    let v29 = b.concat(v28, v26);
+    let v30 = b.concat(v29, v26);
+    let v31 = b.concat(v30, v26);
+    let v32 = b.concat(v31, v26);
+    let v33 = b.concat(v32, v26);
+    let v34 = b.concat(v33, v26);
+    let v35 = b.concat(v34, v26);
+    let v36 = b.concat(v35, v26);
+    let v37 = b.concat(v36, v26);
+    let v38 = b.concat(v37, v26);
+    let v39 = b.concat(v38, v26);
+    let v40 = b.concat(v39, v26);
+    let v41 = b.concat(v40, v26);
+    let v42 = b.concat(v41, v26);
+    let v43 = b.concat(v42, v26);
+    let v44 = b.concat(v43, v26);
+    let v45 = b.concat(v44, v26);
+    let v46 = b.concat(v45, v26);
+    let v47 = b.concat(v46, v26);
+    let v48 = b.concat(v47, v26);
+    let v49 = b.concat(v48, v26);
+    let v50 = b.concat(v49, v26);
+    let v51 = b.concat(v50, v26);
+    let v52 = b.concat(v51, v26);
+    let v53 = b.concat(v52, v26);
+    let v54 = b.concat(v53, v26);
+    let v55 = b.concat(v54, v26);
+    let v56 = b.concat(v55, v26);
+    let v57 = b.concat(v56, v26);
+    let v58 = b.concat(v57, v26);
+    let v59 = b.concat(v58, v26);
+    let v60 = b.concat(v59, v26);
+    let v61 = b.concat(v60, v26);
+    let v62 = b.concat(v61, v26);
+    let v63 = b.concat(v62, v26);
+    let v64 = b.concat(v63, v26);
+    let v65 = b.concat(v64, v26);
+    let v66 = b.concat(v65, v26);
+    let v67 = b.concat(v66, v26);
+    let v68 = b.concat(v67, v26);
+    let v69 = b.concat(v68, v26);
+    let v70 = b.concat(v69, v26);
+    let v71 = b.concat(v70, v26);
+    let v72 = b.concat(v71, v26);
+    let v73 = b.concat(v72, v26);
+    let v74 = b.concat(v73, v26);
+    let v75 = b.concat(v74, v26);
+    let v76 = b.concat(v75, v26);
+    let v77 = b.concat(v76, v26);
+    let v78 = b.concat(v77, v26);
+    let v79 = b.concat(v78, v26);
+    let v80 = b.concat(v79, v26);
+    let v81 = b.concat(v80, v26);
+    let v82 = b.concat(v81, v26);
+    let v83 = b.concat(v82, v26);
+    let v84 = b.concat(v83, v26);
+    let v85 = b.concat(v84, v26);
+    let v86 = b.concat(v85, v26);
+    let v87 = b.concat(v86, v26);
+    let v88 = b.concat(v87, v26);
+    let v89 = b.concat(v88, v26);
+    let v90 = b.extract(v89, 0, Width::new(25));
+    let v91 = b.extract(v8, 0, Width::new(39));
+    let v92 = b.concat(v90, v91);
+    let v93 = b.extract(v12, 64, Width::new(64));
+    let v94 = b.extract(v12, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v97 = b.pac(v92, v9, v93, v94);
+    let s100: bool = st.has(Feature::PAuth2);
+    let s101: bool = !s100;
+    let v103 = b.extract(v97, 39, Width::new(16));
+    let v104 = b.extract(v8, 39, Width::new(16));
+    let v105 = b.cmp(CmpOp::Eq, v103, v104);
+    let v106 = b.extract(v97, 56, Width::new(8));
+    let v107 = b.extract(v8, 56, Width::new(8));
+    let v108 = b.cmp(CmpOp::Eq, v106, v107);
+    let v109 = b.and(v105, v108);
+    let v111 = b.extract(v92, 63, Width::new(1));
+    let v112 = b.konst(Width::new(2), 0x1);
+    let v113 = b.concat(v111, v112);
+    let v114 = b.extract(v92, 0, Width::new(61));
+    let v115 = b.concat(v113, v114);
+    let v116 = b.select(v109, v92, v115);
+    let v119 = b.extract(v8, 39, Width::new(16));
+    let v120 = b.extract(v97, 39, Width::new(16));
+    let v121 = b.bin(BinOp::Xor, v119, v120);
+    let v122 = b.extract(v8, 55, Width::new(9));
+    let v123 = b.concat(v122, v121);
+    let v124 = b.extract(v8, 0, Width::new(39));
+    let v125 = b.concat(v123, v124);
+    let v126 = b.extract(v125, 56, Width::new(8));
+    let v127 = b.extract(v97, 56, Width::new(8));
+    let v128 = b.bin(BinOp::Xor, v126, v127);
+    let v129 = b.extract(v125, 0, Width::new(56));
+    let v130 = b.concat(v128, v129);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v131 = if s101 { v116 } else { v130 };
+    if s7 {
+        st.x_set(b, s2 as u32, v131, None);
+    }
+    let v134 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v136 = b.get(crate::regs::PacKey::DA.reg(false));
+    Ok(())
+}
+
+/// `AUTDZB_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn AUTDZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTDZB_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v9 = st.x_read(b, 31, 64);
+    let v10 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v11 = b.get(crate::regs::PacKey::DB.reg(false));
+    let v12 = b.concat(v10, v11);
+    let v26 = b.extract(v8, 55, Width::new(1));
+    let v27 = b.concat(v26, v26);
+    let v28 = b.concat(v27, v26);
+    let v29 = b.concat(v28, v26);
+    let v30 = b.concat(v29, v26);
+    let v31 = b.concat(v30, v26);
+    let v32 = b.concat(v31, v26);
+    let v33 = b.concat(v32, v26);
+    let v34 = b.concat(v33, v26);
+    let v35 = b.concat(v34, v26);
+    let v36 = b.concat(v35, v26);
+    let v37 = b.concat(v36, v26);
+    let v38 = b.concat(v37, v26);
+    let v39 = b.concat(v38, v26);
+    let v40 = b.concat(v39, v26);
+    let v41 = b.concat(v40, v26);
+    let v42 = b.concat(v41, v26);
+    let v43 = b.concat(v42, v26);
+    let v44 = b.concat(v43, v26);
+    let v45 = b.concat(v44, v26);
+    let v46 = b.concat(v45, v26);
+    let v47 = b.concat(v46, v26);
+    let v48 = b.concat(v47, v26);
+    let v49 = b.concat(v48, v26);
+    let v50 = b.concat(v49, v26);
+    let v51 = b.concat(v50, v26);
+    let v52 = b.concat(v51, v26);
+    let v53 = b.concat(v52, v26);
+    let v54 = b.concat(v53, v26);
+    let v55 = b.concat(v54, v26);
+    let v56 = b.concat(v55, v26);
+    let v57 = b.concat(v56, v26);
+    let v58 = b.concat(v57, v26);
+    let v59 = b.concat(v58, v26);
+    let v60 = b.concat(v59, v26);
+    let v61 = b.concat(v60, v26);
+    let v62 = b.concat(v61, v26);
+    let v63 = b.concat(v62, v26);
+    let v64 = b.concat(v63, v26);
+    let v65 = b.concat(v64, v26);
+    let v66 = b.concat(v65, v26);
+    let v67 = b.concat(v66, v26);
+    let v68 = b.concat(v67, v26);
+    let v69 = b.concat(v68, v26);
+    let v70 = b.concat(v69, v26);
+    let v71 = b.concat(v70, v26);
+    let v72 = b.concat(v71, v26);
+    let v73 = b.concat(v72, v26);
+    let v74 = b.concat(v73, v26);
+    let v75 = b.concat(v74, v26);
+    let v76 = b.concat(v75, v26);
+    let v77 = b.concat(v76, v26);
+    let v78 = b.concat(v77, v26);
+    let v79 = b.concat(v78, v26);
+    let v80 = b.concat(v79, v26);
+    let v81 = b.concat(v80, v26);
+    let v82 = b.concat(v81, v26);
+    let v83 = b.concat(v82, v26);
+    let v84 = b.concat(v83, v26);
+    let v85 = b.concat(v84, v26);
+    let v86 = b.concat(v85, v26);
+    let v87 = b.concat(v86, v26);
+    let v88 = b.concat(v87, v26);
+    let v89 = b.concat(v88, v26);
+    let v90 = b.extract(v89, 0, Width::new(25));
+    let v91 = b.extract(v8, 0, Width::new(39));
+    let v92 = b.concat(v90, v91);
+    let v93 = b.extract(v12, 64, Width::new(64));
+    let v94 = b.extract(v12, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v97 = b.pac(v92, v9, v93, v94);
+    let s100: bool = st.has(Feature::PAuth2);
+    let s101: bool = !s100;
+    let v103 = b.extract(v97, 39, Width::new(16));
+    let v104 = b.extract(v8, 39, Width::new(16));
+    let v105 = b.cmp(CmpOp::Eq, v103, v104);
+    let v106 = b.extract(v97, 56, Width::new(8));
+    let v107 = b.extract(v8, 56, Width::new(8));
+    let v108 = b.cmp(CmpOp::Eq, v106, v107);
+    let v109 = b.and(v105, v108);
+    let v111 = b.extract(v92, 63, Width::new(1));
+    let v112 = b.konst(Width::new(2), 0x2);
+    let v113 = b.concat(v111, v112);
+    let v114 = b.extract(v92, 0, Width::new(61));
+    let v115 = b.concat(v113, v114);
+    let v116 = b.select(v109, v92, v115);
+    let v119 = b.extract(v8, 39, Width::new(16));
+    let v120 = b.extract(v97, 39, Width::new(16));
+    let v121 = b.bin(BinOp::Xor, v119, v120);
+    let v122 = b.extract(v8, 55, Width::new(9));
+    let v123 = b.concat(v122, v121);
+    let v124 = b.extract(v8, 0, Width::new(39));
+    let v125 = b.concat(v123, v124);
+    let v126 = b.extract(v125, 56, Width::new(8));
+    let v127 = b.extract(v97, 56, Width::new(8));
+    let v128 = b.bin(BinOp::Xor, v126, v127);
+    let v129 = b.extract(v125, 0, Width::new(56));
+    let v130 = b.concat(v128, v129);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v131 = if s101 { v116 } else { v130 };
+    if s7 {
+        st.x_set(b, s2 as u32, v131, None);
+    }
+    let v134 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v136 = b.get(crate::regs::PacKey::DB.reg(false));
+    Ok(())
+}
+
+/// `AUTIA_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn AUTIA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIA_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = st.has(Feature::PAuth);
+    let s14: bool = s7 && s13;
+    let s15: bool = s14 && s12;
+    let v16 = st.x_read(b, s3 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v19 = b.get(crate::regs::PacKey::IA.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v34 = b.extract(v16, 55, Width::new(1));
+    let v35 = b.concat(v34, v34);
+    let v36 = b.concat(v35, v34);
+    let v37 = b.concat(v36, v34);
+    let v38 = b.concat(v37, v34);
+    let v39 = b.concat(v38, v34);
+    let v40 = b.concat(v39, v34);
+    let v41 = b.concat(v40, v34);
+    let v42 = b.concat(v41, v34);
+    let v43 = b.concat(v42, v34);
+    let v44 = b.concat(v43, v34);
+    let v45 = b.concat(v44, v34);
+    let v46 = b.concat(v45, v34);
+    let v47 = b.concat(v46, v34);
+    let v48 = b.concat(v47, v34);
+    let v49 = b.concat(v48, v34);
+    let v50 = b.concat(v49, v34);
+    let v51 = b.concat(v50, v34);
+    let v52 = b.concat(v51, v34);
+    let v53 = b.concat(v52, v34);
+    let v54 = b.concat(v53, v34);
+    let v55 = b.concat(v54, v34);
+    let v56 = b.concat(v55, v34);
+    let v57 = b.concat(v56, v34);
+    let v58 = b.concat(v57, v34);
+    let v59 = b.concat(v58, v34);
+    let v60 = b.concat(v59, v34);
+    let v61 = b.concat(v60, v34);
+    let v62 = b.concat(v61, v34);
+    let v63 = b.concat(v62, v34);
+    let v64 = b.concat(v63, v34);
+    let v65 = b.concat(v64, v34);
+    let v66 = b.concat(v65, v34);
+    let v67 = b.concat(v66, v34);
+    let v68 = b.concat(v67, v34);
+    let v69 = b.concat(v68, v34);
+    let v70 = b.concat(v69, v34);
+    let v71 = b.concat(v70, v34);
+    let v72 = b.concat(v71, v34);
+    let v73 = b.concat(v72, v34);
+    let v74 = b.concat(v73, v34);
+    let v75 = b.concat(v74, v34);
+    let v76 = b.concat(v75, v34);
+    let v77 = b.concat(v76, v34);
+    let v78 = b.concat(v77, v34);
+    let v79 = b.concat(v78, v34);
+    let v80 = b.concat(v79, v34);
+    let v81 = b.concat(v80, v34);
+    let v82 = b.concat(v81, v34);
+    let v83 = b.concat(v82, v34);
+    let v84 = b.concat(v83, v34);
+    let v85 = b.concat(v84, v34);
+    let v86 = b.concat(v85, v34);
+    let v87 = b.concat(v86, v34);
+    let v88 = b.concat(v87, v34);
+    let v89 = b.concat(v88, v34);
+    let v90 = b.concat(v89, v34);
+    let v91 = b.concat(v90, v34);
+    let v92 = b.concat(v91, v34);
+    let v93 = b.concat(v92, v34);
+    let v94 = b.concat(v93, v34);
+    let v95 = b.concat(v94, v34);
+    let v96 = b.concat(v95, v34);
+    let v97 = b.concat(v96, v34);
+    let v98 = b.extract(v97, 0, Width::new(25));
+    let v99 = b.extract(v16, 0, Width::new(39));
+    let v100 = b.concat(v98, v99);
+    let v101 = b.extract(v20, 64, Width::new(64));
+    let v102 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v105 = b.pac(v100, v17, v101, v102);
+    let s108: bool = st.has(Feature::PAuth2);
+    let s109: bool = !s108;
+    let v111 = b.extract(v105, 39, Width::new(16));
+    let v112 = b.extract(v16, 39, Width::new(16));
+    let v113 = b.cmp(CmpOp::Eq, v111, v112);
+    let v114 = b.extract(v105, 56, Width::new(8));
+    let v115 = b.extract(v16, 56, Width::new(8));
+    let v116 = b.cmp(CmpOp::Eq, v114, v115);
+    let v117 = b.and(v113, v116);
+    let v119 = b.extract(v100, 63, Width::new(1));
+    let v120 = b.konst(Width::new(2), 0x1);
+    let v121 = b.concat(v119, v120);
+    let v122 = b.extract(v100, 0, Width::new(61));
+    let v123 = b.concat(v121, v122);
+    let v124 = b.select(v117, v100, v123);
+    let v127 = b.extract(v16, 39, Width::new(16));
+    let v128 = b.extract(v105, 39, Width::new(16));
+    let v129 = b.bin(BinOp::Xor, v127, v128);
+    let v130 = b.extract(v16, 55, Width::new(9));
+    let v131 = b.concat(v130, v129);
+    let v132 = b.extract(v16, 0, Width::new(39));
+    let v133 = b.concat(v131, v132);
+    let v134 = b.extract(v133, 56, Width::new(8));
+    let v135 = b.extract(v105, 56, Width::new(8));
+    let v136 = b.bin(BinOp::Xor, v134, v135);
+    let v137 = b.extract(v133, 0, Width::new(56));
+    let v138 = b.concat(v136, v137);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v139 = if s109 { v124 } else { v138 };
+    if s15 {
+        st.x_set(b, s3 as u32, v139, None);
+    }
+    let s140: bool = !s12;
+    let s141: bool = s14 && s140;
+    let v142 = st.x_read(b, s3 as u32, 64);
+    let v143 = st.x_read(b, s4 as u32, 64);
+    let v144 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v145 = b.get(crate::regs::PacKey::IA.reg(false));
+    let v146 = b.concat(v144, v145);
+    let v160 = b.extract(v142, 55, Width::new(1));
+    let v161 = b.concat(v160, v160);
+    let v162 = b.concat(v161, v160);
+    let v163 = b.concat(v162, v160);
+    let v164 = b.concat(v163, v160);
+    let v165 = b.concat(v164, v160);
+    let v166 = b.concat(v165, v160);
+    let v167 = b.concat(v166, v160);
+    let v168 = b.concat(v167, v160);
+    let v169 = b.concat(v168, v160);
+    let v170 = b.concat(v169, v160);
+    let v171 = b.concat(v170, v160);
+    let v172 = b.concat(v171, v160);
+    let v173 = b.concat(v172, v160);
+    let v174 = b.concat(v173, v160);
+    let v175 = b.concat(v174, v160);
+    let v176 = b.concat(v175, v160);
+    let v177 = b.concat(v176, v160);
+    let v178 = b.concat(v177, v160);
+    let v179 = b.concat(v178, v160);
+    let v180 = b.concat(v179, v160);
+    let v181 = b.concat(v180, v160);
+    let v182 = b.concat(v181, v160);
+    let v183 = b.concat(v182, v160);
+    let v184 = b.concat(v183, v160);
+    let v185 = b.concat(v184, v160);
+    let v186 = b.concat(v185, v160);
+    let v187 = b.concat(v186, v160);
+    let v188 = b.concat(v187, v160);
+    let v189 = b.concat(v188, v160);
+    let v190 = b.concat(v189, v160);
+    let v191 = b.concat(v190, v160);
+    let v192 = b.concat(v191, v160);
+    let v193 = b.concat(v192, v160);
+    let v194 = b.concat(v193, v160);
+    let v195 = b.concat(v194, v160);
+    let v196 = b.concat(v195, v160);
+    let v197 = b.concat(v196, v160);
+    let v198 = b.concat(v197, v160);
+    let v199 = b.concat(v198, v160);
+    let v200 = b.concat(v199, v160);
+    let v201 = b.concat(v200, v160);
+    let v202 = b.concat(v201, v160);
+    let v203 = b.concat(v202, v160);
+    let v204 = b.concat(v203, v160);
+    let v205 = b.concat(v204, v160);
+    let v206 = b.concat(v205, v160);
+    let v207 = b.concat(v206, v160);
+    let v208 = b.concat(v207, v160);
+    let v209 = b.concat(v208, v160);
+    let v210 = b.concat(v209, v160);
+    let v211 = b.concat(v210, v160);
+    let v212 = b.concat(v211, v160);
+    let v213 = b.concat(v212, v160);
+    let v214 = b.concat(v213, v160);
+    let v215 = b.concat(v214, v160);
+    let v216 = b.concat(v215, v160);
+    let v217 = b.concat(v216, v160);
+    let v218 = b.concat(v217, v160);
+    let v219 = b.concat(v218, v160);
+    let v220 = b.concat(v219, v160);
+    let v221 = b.concat(v220, v160);
+    let v222 = b.concat(v221, v160);
+    let v223 = b.concat(v222, v160);
+    let v224 = b.extract(v223, 0, Width::new(25));
+    let v225 = b.extract(v142, 0, Width::new(39));
+    let v226 = b.concat(v224, v225);
+    let v227 = b.extract(v146, 64, Width::new(64));
+    let v228 = b.extract(v146, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v231 = b.pac(v226, v143, v227, v228);
+    let s234: bool = st.has(Feature::PAuth2);
+    let s235: bool = !s234;
+    let v237 = b.extract(v231, 39, Width::new(16));
+    let v238 = b.extract(v142, 39, Width::new(16));
+    let v239 = b.cmp(CmpOp::Eq, v237, v238);
+    let v240 = b.extract(v231, 56, Width::new(8));
+    let v241 = b.extract(v142, 56, Width::new(8));
+    let v242 = b.cmp(CmpOp::Eq, v240, v241);
+    let v243 = b.and(v239, v242);
+    let v245 = b.extract(v226, 63, Width::new(1));
+    let v246 = b.konst(Width::new(2), 0x1);
+    let v247 = b.concat(v245, v246);
+    let v248 = b.extract(v226, 0, Width::new(61));
+    let v249 = b.concat(v247, v248);
+    let v250 = b.select(v243, v226, v249);
+    let v253 = b.extract(v142, 39, Width::new(16));
+    let v254 = b.extract(v231, 39, Width::new(16));
+    let v255 = b.bin(BinOp::Xor, v253, v254);
+    let v256 = b.extract(v142, 55, Width::new(9));
+    let v257 = b.concat(v256, v255);
+    let v258 = b.extract(v142, 0, Width::new(39));
+    let v259 = b.concat(v257, v258);
+    let v260 = b.extract(v259, 56, Width::new(8));
+    let v261 = b.extract(v231, 56, Width::new(8));
+    let v262 = b.bin(BinOp::Xor, v260, v261);
+    let v263 = b.extract(v259, 0, Width::new(56));
+    let v264 = b.concat(v262, v263);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v265 = if s235 { v250 } else { v264 };
+    if s141 {
+        st.x_set(b, s3 as u32, v265, None);
+    }
+    let v270 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v272 = b.get(crate::regs::PacKey::IA.reg(false));
+    Ok(())
+}
+
+/// `AUTIB_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn AUTIB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIB_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = st.has(Feature::PAuth);
+    let s14: bool = s7 && s13;
+    let s15: bool = s14 && s12;
+    let v16 = st.x_read(b, s3 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v19 = b.get(crate::regs::PacKey::IB.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v34 = b.extract(v16, 55, Width::new(1));
+    let v35 = b.concat(v34, v34);
+    let v36 = b.concat(v35, v34);
+    let v37 = b.concat(v36, v34);
+    let v38 = b.concat(v37, v34);
+    let v39 = b.concat(v38, v34);
+    let v40 = b.concat(v39, v34);
+    let v41 = b.concat(v40, v34);
+    let v42 = b.concat(v41, v34);
+    let v43 = b.concat(v42, v34);
+    let v44 = b.concat(v43, v34);
+    let v45 = b.concat(v44, v34);
+    let v46 = b.concat(v45, v34);
+    let v47 = b.concat(v46, v34);
+    let v48 = b.concat(v47, v34);
+    let v49 = b.concat(v48, v34);
+    let v50 = b.concat(v49, v34);
+    let v51 = b.concat(v50, v34);
+    let v52 = b.concat(v51, v34);
+    let v53 = b.concat(v52, v34);
+    let v54 = b.concat(v53, v34);
+    let v55 = b.concat(v54, v34);
+    let v56 = b.concat(v55, v34);
+    let v57 = b.concat(v56, v34);
+    let v58 = b.concat(v57, v34);
+    let v59 = b.concat(v58, v34);
+    let v60 = b.concat(v59, v34);
+    let v61 = b.concat(v60, v34);
+    let v62 = b.concat(v61, v34);
+    let v63 = b.concat(v62, v34);
+    let v64 = b.concat(v63, v34);
+    let v65 = b.concat(v64, v34);
+    let v66 = b.concat(v65, v34);
+    let v67 = b.concat(v66, v34);
+    let v68 = b.concat(v67, v34);
+    let v69 = b.concat(v68, v34);
+    let v70 = b.concat(v69, v34);
+    let v71 = b.concat(v70, v34);
+    let v72 = b.concat(v71, v34);
+    let v73 = b.concat(v72, v34);
+    let v74 = b.concat(v73, v34);
+    let v75 = b.concat(v74, v34);
+    let v76 = b.concat(v75, v34);
+    let v77 = b.concat(v76, v34);
+    let v78 = b.concat(v77, v34);
+    let v79 = b.concat(v78, v34);
+    let v80 = b.concat(v79, v34);
+    let v81 = b.concat(v80, v34);
+    let v82 = b.concat(v81, v34);
+    let v83 = b.concat(v82, v34);
+    let v84 = b.concat(v83, v34);
+    let v85 = b.concat(v84, v34);
+    let v86 = b.concat(v85, v34);
+    let v87 = b.concat(v86, v34);
+    let v88 = b.concat(v87, v34);
+    let v89 = b.concat(v88, v34);
+    let v90 = b.concat(v89, v34);
+    let v91 = b.concat(v90, v34);
+    let v92 = b.concat(v91, v34);
+    let v93 = b.concat(v92, v34);
+    let v94 = b.concat(v93, v34);
+    let v95 = b.concat(v94, v34);
+    let v96 = b.concat(v95, v34);
+    let v97 = b.concat(v96, v34);
+    let v98 = b.extract(v97, 0, Width::new(25));
+    let v99 = b.extract(v16, 0, Width::new(39));
+    let v100 = b.concat(v98, v99);
+    let v101 = b.extract(v20, 64, Width::new(64));
+    let v102 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v105 = b.pac(v100, v17, v101, v102);
+    let s108: bool = st.has(Feature::PAuth2);
+    let s109: bool = !s108;
+    let v111 = b.extract(v105, 39, Width::new(16));
+    let v112 = b.extract(v16, 39, Width::new(16));
+    let v113 = b.cmp(CmpOp::Eq, v111, v112);
+    let v114 = b.extract(v105, 56, Width::new(8));
+    let v115 = b.extract(v16, 56, Width::new(8));
+    let v116 = b.cmp(CmpOp::Eq, v114, v115);
+    let v117 = b.and(v113, v116);
+    let v119 = b.extract(v100, 63, Width::new(1));
+    let v120 = b.konst(Width::new(2), 0x2);
+    let v121 = b.concat(v119, v120);
+    let v122 = b.extract(v100, 0, Width::new(61));
+    let v123 = b.concat(v121, v122);
+    let v124 = b.select(v117, v100, v123);
+    let v127 = b.extract(v16, 39, Width::new(16));
+    let v128 = b.extract(v105, 39, Width::new(16));
+    let v129 = b.bin(BinOp::Xor, v127, v128);
+    let v130 = b.extract(v16, 55, Width::new(9));
+    let v131 = b.concat(v130, v129);
+    let v132 = b.extract(v16, 0, Width::new(39));
+    let v133 = b.concat(v131, v132);
+    let v134 = b.extract(v133, 56, Width::new(8));
+    let v135 = b.extract(v105, 56, Width::new(8));
+    let v136 = b.bin(BinOp::Xor, v134, v135);
+    let v137 = b.extract(v133, 0, Width::new(56));
+    let v138 = b.concat(v136, v137);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v139 = if s109 { v124 } else { v138 };
+    if s15 {
+        st.x_set(b, s3 as u32, v139, None);
+    }
+    let s140: bool = !s12;
+    let s141: bool = s14 && s140;
+    let v142 = st.x_read(b, s3 as u32, 64);
+    let v143 = st.x_read(b, s4 as u32, 64);
+    let v144 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v145 = b.get(crate::regs::PacKey::IB.reg(false));
+    let v146 = b.concat(v144, v145);
+    let v160 = b.extract(v142, 55, Width::new(1));
+    let v161 = b.concat(v160, v160);
+    let v162 = b.concat(v161, v160);
+    let v163 = b.concat(v162, v160);
+    let v164 = b.concat(v163, v160);
+    let v165 = b.concat(v164, v160);
+    let v166 = b.concat(v165, v160);
+    let v167 = b.concat(v166, v160);
+    let v168 = b.concat(v167, v160);
+    let v169 = b.concat(v168, v160);
+    let v170 = b.concat(v169, v160);
+    let v171 = b.concat(v170, v160);
+    let v172 = b.concat(v171, v160);
+    let v173 = b.concat(v172, v160);
+    let v174 = b.concat(v173, v160);
+    let v175 = b.concat(v174, v160);
+    let v176 = b.concat(v175, v160);
+    let v177 = b.concat(v176, v160);
+    let v178 = b.concat(v177, v160);
+    let v179 = b.concat(v178, v160);
+    let v180 = b.concat(v179, v160);
+    let v181 = b.concat(v180, v160);
+    let v182 = b.concat(v181, v160);
+    let v183 = b.concat(v182, v160);
+    let v184 = b.concat(v183, v160);
+    let v185 = b.concat(v184, v160);
+    let v186 = b.concat(v185, v160);
+    let v187 = b.concat(v186, v160);
+    let v188 = b.concat(v187, v160);
+    let v189 = b.concat(v188, v160);
+    let v190 = b.concat(v189, v160);
+    let v191 = b.concat(v190, v160);
+    let v192 = b.concat(v191, v160);
+    let v193 = b.concat(v192, v160);
+    let v194 = b.concat(v193, v160);
+    let v195 = b.concat(v194, v160);
+    let v196 = b.concat(v195, v160);
+    let v197 = b.concat(v196, v160);
+    let v198 = b.concat(v197, v160);
+    let v199 = b.concat(v198, v160);
+    let v200 = b.concat(v199, v160);
+    let v201 = b.concat(v200, v160);
+    let v202 = b.concat(v201, v160);
+    let v203 = b.concat(v202, v160);
+    let v204 = b.concat(v203, v160);
+    let v205 = b.concat(v204, v160);
+    let v206 = b.concat(v205, v160);
+    let v207 = b.concat(v206, v160);
+    let v208 = b.concat(v207, v160);
+    let v209 = b.concat(v208, v160);
+    let v210 = b.concat(v209, v160);
+    let v211 = b.concat(v210, v160);
+    let v212 = b.concat(v211, v160);
+    let v213 = b.concat(v212, v160);
+    let v214 = b.concat(v213, v160);
+    let v215 = b.concat(v214, v160);
+    let v216 = b.concat(v215, v160);
+    let v217 = b.concat(v216, v160);
+    let v218 = b.concat(v217, v160);
+    let v219 = b.concat(v218, v160);
+    let v220 = b.concat(v219, v160);
+    let v221 = b.concat(v220, v160);
+    let v222 = b.concat(v221, v160);
+    let v223 = b.concat(v222, v160);
+    let v224 = b.extract(v223, 0, Width::new(25));
+    let v225 = b.extract(v142, 0, Width::new(39));
+    let v226 = b.concat(v224, v225);
+    let v227 = b.extract(v146, 64, Width::new(64));
+    let v228 = b.extract(v146, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v231 = b.pac(v226, v143, v227, v228);
+    let s234: bool = st.has(Feature::PAuth2);
+    let s235: bool = !s234;
+    let v237 = b.extract(v231, 39, Width::new(16));
+    let v238 = b.extract(v142, 39, Width::new(16));
+    let v239 = b.cmp(CmpOp::Eq, v237, v238);
+    let v240 = b.extract(v231, 56, Width::new(8));
+    let v241 = b.extract(v142, 56, Width::new(8));
+    let v242 = b.cmp(CmpOp::Eq, v240, v241);
+    let v243 = b.and(v239, v242);
+    let v245 = b.extract(v226, 63, Width::new(1));
+    let v246 = b.konst(Width::new(2), 0x2);
+    let v247 = b.concat(v245, v246);
+    let v248 = b.extract(v226, 0, Width::new(61));
+    let v249 = b.concat(v247, v248);
+    let v250 = b.select(v243, v226, v249);
+    let v253 = b.extract(v142, 39, Width::new(16));
+    let v254 = b.extract(v231, 39, Width::new(16));
+    let v255 = b.bin(BinOp::Xor, v253, v254);
+    let v256 = b.extract(v142, 55, Width::new(9));
+    let v257 = b.concat(v256, v255);
+    let v258 = b.extract(v142, 0, Width::new(39));
+    let v259 = b.concat(v257, v258);
+    let v260 = b.extract(v259, 56, Width::new(8));
+    let v261 = b.extract(v231, 56, Width::new(8));
+    let v262 = b.bin(BinOp::Xor, v260, v261);
+    let v263 = b.extract(v259, 0, Width::new(56));
+    let v264 = b.concat(v262, v263);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v265 = if s235 { v250 } else { v264 };
+    if s141 {
+        st.x_set(b, s3 as u32, v265, None);
+    }
+    let v270 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v272 = b.get(crate::regs::PacKey::IB.reg(false));
+    Ok(())
+}
+
+/// `AUTIZA_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn AUTIZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIZA_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v9 = st.x_read(b, 31, 64);
+    let v10 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v11 = b.get(crate::regs::PacKey::IA.reg(false));
+    let v12 = b.concat(v10, v11);
+    let v26 = b.extract(v8, 55, Width::new(1));
+    let v27 = b.concat(v26, v26);
+    let v28 = b.concat(v27, v26);
+    let v29 = b.concat(v28, v26);
+    let v30 = b.concat(v29, v26);
+    let v31 = b.concat(v30, v26);
+    let v32 = b.concat(v31, v26);
+    let v33 = b.concat(v32, v26);
+    let v34 = b.concat(v33, v26);
+    let v35 = b.concat(v34, v26);
+    let v36 = b.concat(v35, v26);
+    let v37 = b.concat(v36, v26);
+    let v38 = b.concat(v37, v26);
+    let v39 = b.concat(v38, v26);
+    let v40 = b.concat(v39, v26);
+    let v41 = b.concat(v40, v26);
+    let v42 = b.concat(v41, v26);
+    let v43 = b.concat(v42, v26);
+    let v44 = b.concat(v43, v26);
+    let v45 = b.concat(v44, v26);
+    let v46 = b.concat(v45, v26);
+    let v47 = b.concat(v46, v26);
+    let v48 = b.concat(v47, v26);
+    let v49 = b.concat(v48, v26);
+    let v50 = b.concat(v49, v26);
+    let v51 = b.concat(v50, v26);
+    let v52 = b.concat(v51, v26);
+    let v53 = b.concat(v52, v26);
+    let v54 = b.concat(v53, v26);
+    let v55 = b.concat(v54, v26);
+    let v56 = b.concat(v55, v26);
+    let v57 = b.concat(v56, v26);
+    let v58 = b.concat(v57, v26);
+    let v59 = b.concat(v58, v26);
+    let v60 = b.concat(v59, v26);
+    let v61 = b.concat(v60, v26);
+    let v62 = b.concat(v61, v26);
+    let v63 = b.concat(v62, v26);
+    let v64 = b.concat(v63, v26);
+    let v65 = b.concat(v64, v26);
+    let v66 = b.concat(v65, v26);
+    let v67 = b.concat(v66, v26);
+    let v68 = b.concat(v67, v26);
+    let v69 = b.concat(v68, v26);
+    let v70 = b.concat(v69, v26);
+    let v71 = b.concat(v70, v26);
+    let v72 = b.concat(v71, v26);
+    let v73 = b.concat(v72, v26);
+    let v74 = b.concat(v73, v26);
+    let v75 = b.concat(v74, v26);
+    let v76 = b.concat(v75, v26);
+    let v77 = b.concat(v76, v26);
+    let v78 = b.concat(v77, v26);
+    let v79 = b.concat(v78, v26);
+    let v80 = b.concat(v79, v26);
+    let v81 = b.concat(v80, v26);
+    let v82 = b.concat(v81, v26);
+    let v83 = b.concat(v82, v26);
+    let v84 = b.concat(v83, v26);
+    let v85 = b.concat(v84, v26);
+    let v86 = b.concat(v85, v26);
+    let v87 = b.concat(v86, v26);
+    let v88 = b.concat(v87, v26);
+    let v89 = b.concat(v88, v26);
+    let v90 = b.extract(v89, 0, Width::new(25));
+    let v91 = b.extract(v8, 0, Width::new(39));
+    let v92 = b.concat(v90, v91);
+    let v93 = b.extract(v12, 64, Width::new(64));
+    let v94 = b.extract(v12, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v97 = b.pac(v92, v9, v93, v94);
+    let s100: bool = st.has(Feature::PAuth2);
+    let s101: bool = !s100;
+    let v103 = b.extract(v97, 39, Width::new(16));
+    let v104 = b.extract(v8, 39, Width::new(16));
+    let v105 = b.cmp(CmpOp::Eq, v103, v104);
+    let v106 = b.extract(v97, 56, Width::new(8));
+    let v107 = b.extract(v8, 56, Width::new(8));
+    let v108 = b.cmp(CmpOp::Eq, v106, v107);
+    let v109 = b.and(v105, v108);
+    let v111 = b.extract(v92, 63, Width::new(1));
+    let v112 = b.konst(Width::new(2), 0x1);
+    let v113 = b.concat(v111, v112);
+    let v114 = b.extract(v92, 0, Width::new(61));
+    let v115 = b.concat(v113, v114);
+    let v116 = b.select(v109, v92, v115);
+    let v119 = b.extract(v8, 39, Width::new(16));
+    let v120 = b.extract(v97, 39, Width::new(16));
+    let v121 = b.bin(BinOp::Xor, v119, v120);
+    let v122 = b.extract(v8, 55, Width::new(9));
+    let v123 = b.concat(v122, v121);
+    let v124 = b.extract(v8, 0, Width::new(39));
+    let v125 = b.concat(v123, v124);
+    let v126 = b.extract(v125, 56, Width::new(8));
+    let v127 = b.extract(v97, 56, Width::new(8));
+    let v128 = b.bin(BinOp::Xor, v126, v127);
+    let v129 = b.extract(v125, 0, Width::new(56));
+    let v130 = b.concat(v128, v129);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v131 = if s101 { v116 } else { v130 };
+    if s7 {
+        st.x_set(b, s2 as u32, v131, None);
+    }
+    let v134 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v136 = b.get(crate::regs::PacKey::IA.reg(false));
+    Ok(())
+}
+
+/// `AUTIZB_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn AUTIZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::AUTIZB_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v9 = st.x_read(b, 31, 64);
+    let v10 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v11 = b.get(crate::regs::PacKey::IB.reg(false));
+    let v12 = b.concat(v10, v11);
+    let v26 = b.extract(v8, 55, Width::new(1));
+    let v27 = b.concat(v26, v26);
+    let v28 = b.concat(v27, v26);
+    let v29 = b.concat(v28, v26);
+    let v30 = b.concat(v29, v26);
+    let v31 = b.concat(v30, v26);
+    let v32 = b.concat(v31, v26);
+    let v33 = b.concat(v32, v26);
+    let v34 = b.concat(v33, v26);
+    let v35 = b.concat(v34, v26);
+    let v36 = b.concat(v35, v26);
+    let v37 = b.concat(v36, v26);
+    let v38 = b.concat(v37, v26);
+    let v39 = b.concat(v38, v26);
+    let v40 = b.concat(v39, v26);
+    let v41 = b.concat(v40, v26);
+    let v42 = b.concat(v41, v26);
+    let v43 = b.concat(v42, v26);
+    let v44 = b.concat(v43, v26);
+    let v45 = b.concat(v44, v26);
+    let v46 = b.concat(v45, v26);
+    let v47 = b.concat(v46, v26);
+    let v48 = b.concat(v47, v26);
+    let v49 = b.concat(v48, v26);
+    let v50 = b.concat(v49, v26);
+    let v51 = b.concat(v50, v26);
+    let v52 = b.concat(v51, v26);
+    let v53 = b.concat(v52, v26);
+    let v54 = b.concat(v53, v26);
+    let v55 = b.concat(v54, v26);
+    let v56 = b.concat(v55, v26);
+    let v57 = b.concat(v56, v26);
+    let v58 = b.concat(v57, v26);
+    let v59 = b.concat(v58, v26);
+    let v60 = b.concat(v59, v26);
+    let v61 = b.concat(v60, v26);
+    let v62 = b.concat(v61, v26);
+    let v63 = b.concat(v62, v26);
+    let v64 = b.concat(v63, v26);
+    let v65 = b.concat(v64, v26);
+    let v66 = b.concat(v65, v26);
+    let v67 = b.concat(v66, v26);
+    let v68 = b.concat(v67, v26);
+    let v69 = b.concat(v68, v26);
+    let v70 = b.concat(v69, v26);
+    let v71 = b.concat(v70, v26);
+    let v72 = b.concat(v71, v26);
+    let v73 = b.concat(v72, v26);
+    let v74 = b.concat(v73, v26);
+    let v75 = b.concat(v74, v26);
+    let v76 = b.concat(v75, v26);
+    let v77 = b.concat(v76, v26);
+    let v78 = b.concat(v77, v26);
+    let v79 = b.concat(v78, v26);
+    let v80 = b.concat(v79, v26);
+    let v81 = b.concat(v80, v26);
+    let v82 = b.concat(v81, v26);
+    let v83 = b.concat(v82, v26);
+    let v84 = b.concat(v83, v26);
+    let v85 = b.concat(v84, v26);
+    let v86 = b.concat(v85, v26);
+    let v87 = b.concat(v86, v26);
+    let v88 = b.concat(v87, v26);
+    let v89 = b.concat(v88, v26);
+    let v90 = b.extract(v89, 0, Width::new(25));
+    let v91 = b.extract(v8, 0, Width::new(39));
+    let v92 = b.concat(v90, v91);
+    let v93 = b.extract(v12, 64, Width::new(64));
+    let v94 = b.extract(v12, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v97 = b.pac(v92, v9, v93, v94);
+    let s100: bool = st.has(Feature::PAuth2);
+    let s101: bool = !s100;
+    let v103 = b.extract(v97, 39, Width::new(16));
+    let v104 = b.extract(v8, 39, Width::new(16));
+    let v105 = b.cmp(CmpOp::Eq, v103, v104);
+    let v106 = b.extract(v97, 56, Width::new(8));
+    let v107 = b.extract(v8, 56, Width::new(8));
+    let v108 = b.cmp(CmpOp::Eq, v106, v107);
+    let v109 = b.and(v105, v108);
+    let v111 = b.extract(v92, 63, Width::new(1));
+    let v112 = b.konst(Width::new(2), 0x2);
+    let v113 = b.concat(v111, v112);
+    let v114 = b.extract(v92, 0, Width::new(61));
+    let v115 = b.concat(v113, v114);
+    let v116 = b.select(v109, v92, v115);
+    let v119 = b.extract(v8, 39, Width::new(16));
+    let v120 = b.extract(v97, 39, Width::new(16));
+    let v121 = b.bin(BinOp::Xor, v119, v120);
+    let v122 = b.extract(v8, 55, Width::new(9));
+    let v123 = b.concat(v122, v121);
+    let v124 = b.extract(v8, 0, Width::new(39));
+    let v125 = b.concat(v123, v124);
+    let v126 = b.extract(v125, 56, Width::new(8));
+    let v127 = b.extract(v97, 56, Width::new(8));
+    let v128 = b.bin(BinOp::Xor, v126, v127);
+    let v129 = b.extract(v125, 0, Width::new(56));
+    let v130 = b.concat(v128, v129);
+    if st.has(Feature::FPACCOMBINE) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::FPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v131 = if s101 { v116 } else { v130 };
+    if s7 {
+        st.x_set(b, s2 as u32, v131, None);
+    }
+    let v134 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v136 = b.get(crate::regs::PacKey::IB.reg(false));
+    Ok(())
+}
+
 /// `BFM_32M_bitfield`.
 ///
 /// Cut: DecodeBitMasks, X_read, X_set.
@@ -29537,6 +31157,1809 @@ pub(super) fn ORR_64_log_shift(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `PACDA_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn PACDA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACDA_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = s7 && s12;
+    let v14 = st.x_read(b, s3 as u32, 64);
+    let v15 = st.sp_read(b);
+    let v16 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v17 = b.get(crate::regs::PacKey::DA.reg(false));
+    let v18 = b.concat(v16, v17);
+    let v31 = b.extract(v14, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v33 = b.concat(v31, v31);
+    let v34 = b.concat(v33, v31);
+    let v35 = b.concat(v34, v31);
+    let v36 = b.concat(v35, v31);
+    let v37 = b.concat(v36, v31);
+    let v38 = b.concat(v37, v31);
+    let v39 = b.concat(v38, v31);
+    let v40 = b.concat(v39, v31);
+    let v41 = b.concat(v40, v31);
+    let v42 = b.concat(v41, v31);
+    let v43 = b.concat(v42, v31);
+    let v44 = b.concat(v43, v31);
+    let v45 = b.concat(v44, v31);
+    let v46 = b.concat(v45, v31);
+    let v47 = b.concat(v46, v31);
+    let v48 = b.concat(v47, v31);
+    let v49 = b.concat(v48, v31);
+    let v50 = b.concat(v49, v31);
+    let v51 = b.concat(v50, v31);
+    let v52 = b.concat(v51, v31);
+    let v53 = b.concat(v52, v31);
+    let v54 = b.concat(v53, v31);
+    let v55 = b.concat(v54, v31);
+    let v56 = b.concat(v55, v31);
+    let v57 = b.concat(v56, v31);
+    let v58 = b.concat(v57, v31);
+    let v59 = b.concat(v58, v31);
+    let v60 = b.concat(v59, v31);
+    let v61 = b.concat(v60, v31);
+    let v62 = b.concat(v61, v31);
+    let v63 = b.concat(v62, v31);
+    let v64 = b.concat(v63, v31);
+    let v65 = b.concat(v64, v31);
+    let v66 = b.concat(v65, v31);
+    let v67 = b.concat(v66, v31);
+    let v68 = b.concat(v67, v31);
+    let v69 = b.concat(v68, v31);
+    let v70 = b.concat(v69, v31);
+    let v71 = b.concat(v70, v31);
+    let v72 = b.concat(v71, v31);
+    let v73 = b.concat(v72, v31);
+    let v74 = b.concat(v73, v31);
+    let v75 = b.concat(v74, v31);
+    let v76 = b.concat(v75, v31);
+    let v77 = b.concat(v76, v31);
+    let v78 = b.concat(v77, v31);
+    let v79 = b.concat(v78, v31);
+    let v80 = b.concat(v79, v31);
+    let v81 = b.concat(v80, v31);
+    let v82 = b.concat(v81, v31);
+    let v83 = b.concat(v82, v31);
+    let v84 = b.concat(v83, v31);
+    let v85 = b.concat(v84, v31);
+    let v86 = b.concat(v85, v31);
+    let v87 = b.concat(v86, v31);
+    let v88 = b.concat(v87, v31);
+    let v89 = b.concat(v88, v31);
+    let v90 = b.concat(v89, v31);
+    let v91 = b.concat(v90, v31);
+    let v92 = b.concat(v91, v31);
+    let v93 = b.concat(v92, v31);
+    let v94 = b.concat(v93, v31);
+    let v95 = b.concat(v94, v31);
+    let v96 = b.extract(v95, 0, Width::new(25));
+    let v97 = b.extract(v14, 0, Width::new(39));
+    let v98 = b.concat(v96, v97);
+    let v99 = b.extract(v18, 64, Width::new(64));
+    let v100 = b.extract(v18, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v103 = b.pac(v98, v15, v99, v100);
+    let v106 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v107 = b.bin(BinOp::And, v14, v106);
+    let v108 = b.konst(Width::new(64), 0x0);
+    let v109 = b.cmp(CmpOp::Eq, v107, v108);
+    let v110 = b.not(v109);
+    let v111 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v112 = b.bin(BinOp::And, v14, v111);
+    let v113 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v114 = b.cmp(CmpOp::Ne, v112, v113);
+    let v115 = b.and(v110, v114);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s116: bool = st.has(Feature::PAuth2);
+    let s117: bool = !s116;
+    let v119 = b.extract(v103, 62, Width::new(1));
+    let v120 = b.not(v119);
+    let v121 = b.extract(v103, 63, Width::new(1));
+    let v122 = b.concat(v121, v120);
+    let v123 = b.extract(v103, 0, Width::new(62));
+    let v124 = b.concat(v122, v123);
+    let v127 = if s117 { v124 } else { v103 };
+    let v129 = b.select(v115, v127, v103);
+    let s130: bool = st.has(Feature::PAuth2);
+    let s131: bool = !s130;
+    let v133 = b.extract(v129, 56, Width::new(8));
+    let v134 = b.concat(v133, v31);
+    let v135 = b.extract(v129, 39, Width::new(16));
+    let v136 = b.concat(v134, v135);
+    let v137 = b.extract(v14, 0, Width::new(39));
+    let v138 = b.concat(v136, v137);
+    let v141 = b.extract(v14, 56, Width::new(8));
+    let v142 = b.extract(v129, 56, Width::new(8));
+    let v143 = b.bin(BinOp::Xor, v141, v142);
+    let v144 = b.concat(v143, v31);
+    let v145 = b.extract(v14, 39, Width::new(16));
+    let v146 = b.extract(v129, 39, Width::new(16));
+    let v147 = b.bin(BinOp::Xor, v145, v146);
+    let v148 = b.concat(v144, v147);
+    let v149 = b.extract(v14, 0, Width::new(39));
+    let v150 = b.concat(v148, v149);
+    let v151 = if s131 { v138 } else { v150 };
+    if s13 {
+        st.x_set(b, s3 as u32, v151, None);
+    }
+    let s152: bool = !s12;
+    let s153: bool = s7 && s152;
+    let v154 = st.x_read(b, s3 as u32, 64);
+    let v155 = st.x_read(b, s4 as u32, 64);
+    let v156 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v157 = b.get(crate::regs::PacKey::DA.reg(false));
+    let v158 = b.concat(v156, v157);
+    let v171 = b.extract(v154, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v173 = b.concat(v171, v171);
+    let v174 = b.concat(v173, v171);
+    let v175 = b.concat(v174, v171);
+    let v176 = b.concat(v175, v171);
+    let v177 = b.concat(v176, v171);
+    let v178 = b.concat(v177, v171);
+    let v179 = b.concat(v178, v171);
+    let v180 = b.concat(v179, v171);
+    let v181 = b.concat(v180, v171);
+    let v182 = b.concat(v181, v171);
+    let v183 = b.concat(v182, v171);
+    let v184 = b.concat(v183, v171);
+    let v185 = b.concat(v184, v171);
+    let v186 = b.concat(v185, v171);
+    let v187 = b.concat(v186, v171);
+    let v188 = b.concat(v187, v171);
+    let v189 = b.concat(v188, v171);
+    let v190 = b.concat(v189, v171);
+    let v191 = b.concat(v190, v171);
+    let v192 = b.concat(v191, v171);
+    let v193 = b.concat(v192, v171);
+    let v194 = b.concat(v193, v171);
+    let v195 = b.concat(v194, v171);
+    let v196 = b.concat(v195, v171);
+    let v197 = b.concat(v196, v171);
+    let v198 = b.concat(v197, v171);
+    let v199 = b.concat(v198, v171);
+    let v200 = b.concat(v199, v171);
+    let v201 = b.concat(v200, v171);
+    let v202 = b.concat(v201, v171);
+    let v203 = b.concat(v202, v171);
+    let v204 = b.concat(v203, v171);
+    let v205 = b.concat(v204, v171);
+    let v206 = b.concat(v205, v171);
+    let v207 = b.concat(v206, v171);
+    let v208 = b.concat(v207, v171);
+    let v209 = b.concat(v208, v171);
+    let v210 = b.concat(v209, v171);
+    let v211 = b.concat(v210, v171);
+    let v212 = b.concat(v211, v171);
+    let v213 = b.concat(v212, v171);
+    let v214 = b.concat(v213, v171);
+    let v215 = b.concat(v214, v171);
+    let v216 = b.concat(v215, v171);
+    let v217 = b.concat(v216, v171);
+    let v218 = b.concat(v217, v171);
+    let v219 = b.concat(v218, v171);
+    let v220 = b.concat(v219, v171);
+    let v221 = b.concat(v220, v171);
+    let v222 = b.concat(v221, v171);
+    let v223 = b.concat(v222, v171);
+    let v224 = b.concat(v223, v171);
+    let v225 = b.concat(v224, v171);
+    let v226 = b.concat(v225, v171);
+    let v227 = b.concat(v226, v171);
+    let v228 = b.concat(v227, v171);
+    let v229 = b.concat(v228, v171);
+    let v230 = b.concat(v229, v171);
+    let v231 = b.concat(v230, v171);
+    let v232 = b.concat(v231, v171);
+    let v233 = b.concat(v232, v171);
+    let v234 = b.concat(v233, v171);
+    let v235 = b.concat(v234, v171);
+    let v236 = b.extract(v235, 0, Width::new(25));
+    let v237 = b.extract(v154, 0, Width::new(39));
+    let v238 = b.concat(v236, v237);
+    let v239 = b.extract(v158, 64, Width::new(64));
+    let v240 = b.extract(v158, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v243 = b.pac(v238, v155, v239, v240);
+    let v246 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v247 = b.bin(BinOp::And, v154, v246);
+    let v248 = b.konst(Width::new(64), 0x0);
+    let v249 = b.cmp(CmpOp::Eq, v247, v248);
+    let v250 = b.not(v249);
+    let v251 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v252 = b.bin(BinOp::And, v154, v251);
+    let v253 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v254 = b.cmp(CmpOp::Ne, v252, v253);
+    let v255 = b.and(v250, v254);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s256: bool = st.has(Feature::PAuth2);
+    let s257: bool = !s256;
+    let v259 = b.extract(v243, 62, Width::new(1));
+    let v260 = b.not(v259);
+    let v261 = b.extract(v243, 63, Width::new(1));
+    let v262 = b.concat(v261, v260);
+    let v263 = b.extract(v243, 0, Width::new(62));
+    let v264 = b.concat(v262, v263);
+    let v267 = if s257 { v264 } else { v243 };
+    let v269 = b.select(v255, v267, v243);
+    let s270: bool = st.has(Feature::PAuth2);
+    let s271: bool = !s270;
+    let v273 = b.extract(v269, 56, Width::new(8));
+    let v274 = b.concat(v273, v171);
+    let v275 = b.extract(v269, 39, Width::new(16));
+    let v276 = b.concat(v274, v275);
+    let v277 = b.extract(v154, 0, Width::new(39));
+    let v278 = b.concat(v276, v277);
+    let v281 = b.extract(v154, 56, Width::new(8));
+    let v282 = b.extract(v269, 56, Width::new(8));
+    let v283 = b.bin(BinOp::Xor, v281, v282);
+    let v284 = b.concat(v283, v171);
+    let v285 = b.extract(v154, 39, Width::new(16));
+    let v286 = b.extract(v269, 39, Width::new(16));
+    let v287 = b.bin(BinOp::Xor, v285, v286);
+    let v288 = b.concat(v284, v287);
+    let v289 = b.extract(v154, 0, Width::new(39));
+    let v290 = b.concat(v288, v289);
+    let v291 = if s271 { v278 } else { v290 };
+    if s153 {
+        st.x_set(b, s3 as u32, v291, None);
+    }
+    Ok(())
+}
+
+/// `PACDB_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn PACDB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACDB_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = s7 && s12;
+    let v14 = st.x_read(b, s3 as u32, 64);
+    let v15 = st.sp_read(b);
+    let v16 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v17 = b.get(crate::regs::PacKey::DB.reg(false));
+    let v18 = b.concat(v16, v17);
+    let v31 = b.extract(v14, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v33 = b.concat(v31, v31);
+    let v34 = b.concat(v33, v31);
+    let v35 = b.concat(v34, v31);
+    let v36 = b.concat(v35, v31);
+    let v37 = b.concat(v36, v31);
+    let v38 = b.concat(v37, v31);
+    let v39 = b.concat(v38, v31);
+    let v40 = b.concat(v39, v31);
+    let v41 = b.concat(v40, v31);
+    let v42 = b.concat(v41, v31);
+    let v43 = b.concat(v42, v31);
+    let v44 = b.concat(v43, v31);
+    let v45 = b.concat(v44, v31);
+    let v46 = b.concat(v45, v31);
+    let v47 = b.concat(v46, v31);
+    let v48 = b.concat(v47, v31);
+    let v49 = b.concat(v48, v31);
+    let v50 = b.concat(v49, v31);
+    let v51 = b.concat(v50, v31);
+    let v52 = b.concat(v51, v31);
+    let v53 = b.concat(v52, v31);
+    let v54 = b.concat(v53, v31);
+    let v55 = b.concat(v54, v31);
+    let v56 = b.concat(v55, v31);
+    let v57 = b.concat(v56, v31);
+    let v58 = b.concat(v57, v31);
+    let v59 = b.concat(v58, v31);
+    let v60 = b.concat(v59, v31);
+    let v61 = b.concat(v60, v31);
+    let v62 = b.concat(v61, v31);
+    let v63 = b.concat(v62, v31);
+    let v64 = b.concat(v63, v31);
+    let v65 = b.concat(v64, v31);
+    let v66 = b.concat(v65, v31);
+    let v67 = b.concat(v66, v31);
+    let v68 = b.concat(v67, v31);
+    let v69 = b.concat(v68, v31);
+    let v70 = b.concat(v69, v31);
+    let v71 = b.concat(v70, v31);
+    let v72 = b.concat(v71, v31);
+    let v73 = b.concat(v72, v31);
+    let v74 = b.concat(v73, v31);
+    let v75 = b.concat(v74, v31);
+    let v76 = b.concat(v75, v31);
+    let v77 = b.concat(v76, v31);
+    let v78 = b.concat(v77, v31);
+    let v79 = b.concat(v78, v31);
+    let v80 = b.concat(v79, v31);
+    let v81 = b.concat(v80, v31);
+    let v82 = b.concat(v81, v31);
+    let v83 = b.concat(v82, v31);
+    let v84 = b.concat(v83, v31);
+    let v85 = b.concat(v84, v31);
+    let v86 = b.concat(v85, v31);
+    let v87 = b.concat(v86, v31);
+    let v88 = b.concat(v87, v31);
+    let v89 = b.concat(v88, v31);
+    let v90 = b.concat(v89, v31);
+    let v91 = b.concat(v90, v31);
+    let v92 = b.concat(v91, v31);
+    let v93 = b.concat(v92, v31);
+    let v94 = b.concat(v93, v31);
+    let v95 = b.concat(v94, v31);
+    let v96 = b.extract(v95, 0, Width::new(25));
+    let v97 = b.extract(v14, 0, Width::new(39));
+    let v98 = b.concat(v96, v97);
+    let v99 = b.extract(v18, 64, Width::new(64));
+    let v100 = b.extract(v18, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v103 = b.pac(v98, v15, v99, v100);
+    let v106 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v107 = b.bin(BinOp::And, v14, v106);
+    let v108 = b.konst(Width::new(64), 0x0);
+    let v109 = b.cmp(CmpOp::Eq, v107, v108);
+    let v110 = b.not(v109);
+    let v111 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v112 = b.bin(BinOp::And, v14, v111);
+    let v113 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v114 = b.cmp(CmpOp::Ne, v112, v113);
+    let v115 = b.and(v110, v114);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s116: bool = st.has(Feature::PAuth2);
+    let s117: bool = !s116;
+    let v119 = b.extract(v103, 62, Width::new(1));
+    let v120 = b.not(v119);
+    let v121 = b.extract(v103, 63, Width::new(1));
+    let v122 = b.concat(v121, v120);
+    let v123 = b.extract(v103, 0, Width::new(62));
+    let v124 = b.concat(v122, v123);
+    let v127 = if s117 { v124 } else { v103 };
+    let v129 = b.select(v115, v127, v103);
+    let s130: bool = st.has(Feature::PAuth2);
+    let s131: bool = !s130;
+    let v133 = b.extract(v129, 56, Width::new(8));
+    let v134 = b.concat(v133, v31);
+    let v135 = b.extract(v129, 39, Width::new(16));
+    let v136 = b.concat(v134, v135);
+    let v137 = b.extract(v14, 0, Width::new(39));
+    let v138 = b.concat(v136, v137);
+    let v141 = b.extract(v14, 56, Width::new(8));
+    let v142 = b.extract(v129, 56, Width::new(8));
+    let v143 = b.bin(BinOp::Xor, v141, v142);
+    let v144 = b.concat(v143, v31);
+    let v145 = b.extract(v14, 39, Width::new(16));
+    let v146 = b.extract(v129, 39, Width::new(16));
+    let v147 = b.bin(BinOp::Xor, v145, v146);
+    let v148 = b.concat(v144, v147);
+    let v149 = b.extract(v14, 0, Width::new(39));
+    let v150 = b.concat(v148, v149);
+    let v151 = if s131 { v138 } else { v150 };
+    if s13 {
+        st.x_set(b, s3 as u32, v151, None);
+    }
+    let s152: bool = !s12;
+    let s153: bool = s7 && s152;
+    let v154 = st.x_read(b, s3 as u32, 64);
+    let v155 = st.x_read(b, s4 as u32, 64);
+    let v156 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v157 = b.get(crate::regs::PacKey::DB.reg(false));
+    let v158 = b.concat(v156, v157);
+    let v171 = b.extract(v154, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v173 = b.concat(v171, v171);
+    let v174 = b.concat(v173, v171);
+    let v175 = b.concat(v174, v171);
+    let v176 = b.concat(v175, v171);
+    let v177 = b.concat(v176, v171);
+    let v178 = b.concat(v177, v171);
+    let v179 = b.concat(v178, v171);
+    let v180 = b.concat(v179, v171);
+    let v181 = b.concat(v180, v171);
+    let v182 = b.concat(v181, v171);
+    let v183 = b.concat(v182, v171);
+    let v184 = b.concat(v183, v171);
+    let v185 = b.concat(v184, v171);
+    let v186 = b.concat(v185, v171);
+    let v187 = b.concat(v186, v171);
+    let v188 = b.concat(v187, v171);
+    let v189 = b.concat(v188, v171);
+    let v190 = b.concat(v189, v171);
+    let v191 = b.concat(v190, v171);
+    let v192 = b.concat(v191, v171);
+    let v193 = b.concat(v192, v171);
+    let v194 = b.concat(v193, v171);
+    let v195 = b.concat(v194, v171);
+    let v196 = b.concat(v195, v171);
+    let v197 = b.concat(v196, v171);
+    let v198 = b.concat(v197, v171);
+    let v199 = b.concat(v198, v171);
+    let v200 = b.concat(v199, v171);
+    let v201 = b.concat(v200, v171);
+    let v202 = b.concat(v201, v171);
+    let v203 = b.concat(v202, v171);
+    let v204 = b.concat(v203, v171);
+    let v205 = b.concat(v204, v171);
+    let v206 = b.concat(v205, v171);
+    let v207 = b.concat(v206, v171);
+    let v208 = b.concat(v207, v171);
+    let v209 = b.concat(v208, v171);
+    let v210 = b.concat(v209, v171);
+    let v211 = b.concat(v210, v171);
+    let v212 = b.concat(v211, v171);
+    let v213 = b.concat(v212, v171);
+    let v214 = b.concat(v213, v171);
+    let v215 = b.concat(v214, v171);
+    let v216 = b.concat(v215, v171);
+    let v217 = b.concat(v216, v171);
+    let v218 = b.concat(v217, v171);
+    let v219 = b.concat(v218, v171);
+    let v220 = b.concat(v219, v171);
+    let v221 = b.concat(v220, v171);
+    let v222 = b.concat(v221, v171);
+    let v223 = b.concat(v222, v171);
+    let v224 = b.concat(v223, v171);
+    let v225 = b.concat(v224, v171);
+    let v226 = b.concat(v225, v171);
+    let v227 = b.concat(v226, v171);
+    let v228 = b.concat(v227, v171);
+    let v229 = b.concat(v228, v171);
+    let v230 = b.concat(v229, v171);
+    let v231 = b.concat(v230, v171);
+    let v232 = b.concat(v231, v171);
+    let v233 = b.concat(v232, v171);
+    let v234 = b.concat(v233, v171);
+    let v235 = b.concat(v234, v171);
+    let v236 = b.extract(v235, 0, Width::new(25));
+    let v237 = b.extract(v154, 0, Width::new(39));
+    let v238 = b.concat(v236, v237);
+    let v239 = b.extract(v158, 64, Width::new(64));
+    let v240 = b.extract(v158, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v243 = b.pac(v238, v155, v239, v240);
+    let v246 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v247 = b.bin(BinOp::And, v154, v246);
+    let v248 = b.konst(Width::new(64), 0x0);
+    let v249 = b.cmp(CmpOp::Eq, v247, v248);
+    let v250 = b.not(v249);
+    let v251 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v252 = b.bin(BinOp::And, v154, v251);
+    let v253 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v254 = b.cmp(CmpOp::Ne, v252, v253);
+    let v255 = b.and(v250, v254);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s256: bool = st.has(Feature::PAuth2);
+    let s257: bool = !s256;
+    let v259 = b.extract(v243, 62, Width::new(1));
+    let v260 = b.not(v259);
+    let v261 = b.extract(v243, 63, Width::new(1));
+    let v262 = b.concat(v261, v260);
+    let v263 = b.extract(v243, 0, Width::new(62));
+    let v264 = b.concat(v262, v263);
+    let v267 = if s257 { v264 } else { v243 };
+    let v269 = b.select(v255, v267, v243);
+    let s270: bool = st.has(Feature::PAuth2);
+    let s271: bool = !s270;
+    let v273 = b.extract(v269, 56, Width::new(8));
+    let v274 = b.concat(v273, v171);
+    let v275 = b.extract(v269, 39, Width::new(16));
+    let v276 = b.concat(v274, v275);
+    let v277 = b.extract(v154, 0, Width::new(39));
+    let v278 = b.concat(v276, v277);
+    let v281 = b.extract(v154, 56, Width::new(8));
+    let v282 = b.extract(v269, 56, Width::new(8));
+    let v283 = b.bin(BinOp::Xor, v281, v282);
+    let v284 = b.concat(v283, v171);
+    let v285 = b.extract(v154, 39, Width::new(16));
+    let v286 = b.extract(v269, 39, Width::new(16));
+    let v287 = b.bin(BinOp::Xor, v285, v286);
+    let v288 = b.concat(v284, v287);
+    let v289 = b.extract(v154, 0, Width::new(39));
+    let v290 = b.concat(v288, v289);
+    let v291 = if s271 { v278 } else { v290 };
+    if s153 {
+        st.x_set(b, s3 as u32, v291, None);
+    }
+    Ok(())
+}
+
+/// `PACDZA_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn PACDZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACDZA_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let v6 = st.x_read(b, s2 as u32, 64);
+    let v7 = st.x_read(b, 31, 64);
+    let v8 = b.get(crate::regs::PacKey::DA.reg(true));
+    let v9 = b.get(crate::regs::PacKey::DA.reg(false));
+    let v10 = b.concat(v8, v9);
+    let v23 = b.extract(v6, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v25 = b.concat(v23, v23);
+    let v26 = b.concat(v25, v23);
+    let v27 = b.concat(v26, v23);
+    let v28 = b.concat(v27, v23);
+    let v29 = b.concat(v28, v23);
+    let v30 = b.concat(v29, v23);
+    let v31 = b.concat(v30, v23);
+    let v32 = b.concat(v31, v23);
+    let v33 = b.concat(v32, v23);
+    let v34 = b.concat(v33, v23);
+    let v35 = b.concat(v34, v23);
+    let v36 = b.concat(v35, v23);
+    let v37 = b.concat(v36, v23);
+    let v38 = b.concat(v37, v23);
+    let v39 = b.concat(v38, v23);
+    let v40 = b.concat(v39, v23);
+    let v41 = b.concat(v40, v23);
+    let v42 = b.concat(v41, v23);
+    let v43 = b.concat(v42, v23);
+    let v44 = b.concat(v43, v23);
+    let v45 = b.concat(v44, v23);
+    let v46 = b.concat(v45, v23);
+    let v47 = b.concat(v46, v23);
+    let v48 = b.concat(v47, v23);
+    let v49 = b.concat(v48, v23);
+    let v50 = b.concat(v49, v23);
+    let v51 = b.concat(v50, v23);
+    let v52 = b.concat(v51, v23);
+    let v53 = b.concat(v52, v23);
+    let v54 = b.concat(v53, v23);
+    let v55 = b.concat(v54, v23);
+    let v56 = b.concat(v55, v23);
+    let v57 = b.concat(v56, v23);
+    let v58 = b.concat(v57, v23);
+    let v59 = b.concat(v58, v23);
+    let v60 = b.concat(v59, v23);
+    let v61 = b.concat(v60, v23);
+    let v62 = b.concat(v61, v23);
+    let v63 = b.concat(v62, v23);
+    let v64 = b.concat(v63, v23);
+    let v65 = b.concat(v64, v23);
+    let v66 = b.concat(v65, v23);
+    let v67 = b.concat(v66, v23);
+    let v68 = b.concat(v67, v23);
+    let v69 = b.concat(v68, v23);
+    let v70 = b.concat(v69, v23);
+    let v71 = b.concat(v70, v23);
+    let v72 = b.concat(v71, v23);
+    let v73 = b.concat(v72, v23);
+    let v74 = b.concat(v73, v23);
+    let v75 = b.concat(v74, v23);
+    let v76 = b.concat(v75, v23);
+    let v77 = b.concat(v76, v23);
+    let v78 = b.concat(v77, v23);
+    let v79 = b.concat(v78, v23);
+    let v80 = b.concat(v79, v23);
+    let v81 = b.concat(v80, v23);
+    let v82 = b.concat(v81, v23);
+    let v83 = b.concat(v82, v23);
+    let v84 = b.concat(v83, v23);
+    let v85 = b.concat(v84, v23);
+    let v86 = b.concat(v85, v23);
+    let v87 = b.concat(v86, v23);
+    let v88 = b.extract(v87, 0, Width::new(25));
+    let v89 = b.extract(v6, 0, Width::new(39));
+    let v90 = b.concat(v88, v89);
+    let v91 = b.extract(v10, 64, Width::new(64));
+    let v92 = b.extract(v10, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v95 = b.pac(v90, v7, v91, v92);
+    let v98 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v99 = b.bin(BinOp::And, v6, v98);
+    let v100 = b.konst(Width::new(64), 0x0);
+    let v101 = b.cmp(CmpOp::Eq, v99, v100);
+    let v102 = b.not(v101);
+    let v103 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v104 = b.bin(BinOp::And, v6, v103);
+    let v105 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v106 = b.cmp(CmpOp::Ne, v104, v105);
+    let v107 = b.and(v102, v106);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s108: bool = st.has(Feature::PAuth2);
+    let s109: bool = !s108;
+    let v111 = b.extract(v95, 62, Width::new(1));
+    let v112 = b.not(v111);
+    let v113 = b.extract(v95, 63, Width::new(1));
+    let v114 = b.concat(v113, v112);
+    let v115 = b.extract(v95, 0, Width::new(62));
+    let v116 = b.concat(v114, v115);
+    let v119 = if s109 { v116 } else { v95 };
+    let v121 = b.select(v107, v119, v95);
+    let s122: bool = st.has(Feature::PAuth2);
+    let s123: bool = !s122;
+    let v125 = b.extract(v121, 56, Width::new(8));
+    let v126 = b.concat(v125, v23);
+    let v127 = b.extract(v121, 39, Width::new(16));
+    let v128 = b.concat(v126, v127);
+    let v129 = b.extract(v6, 0, Width::new(39));
+    let v130 = b.concat(v128, v129);
+    let v133 = b.extract(v6, 56, Width::new(8));
+    let v134 = b.extract(v121, 56, Width::new(8));
+    let v135 = b.bin(BinOp::Xor, v133, v134);
+    let v136 = b.concat(v135, v23);
+    let v137 = b.extract(v6, 39, Width::new(16));
+    let v138 = b.extract(v121, 39, Width::new(16));
+    let v139 = b.bin(BinOp::Xor, v137, v138);
+    let v140 = b.concat(v136, v139);
+    let v141 = b.extract(v6, 0, Width::new(39));
+    let v142 = b.concat(v140, v141);
+    let v143 = if s123 { v130 } else { v142 };
+    if s5 {
+        st.x_set(b, s2 as u32, v143, None);
+    }
+    Ok(())
+}
+
+/// `PACDZB_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn PACDZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACDZB_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let v6 = st.x_read(b, s2 as u32, 64);
+    let v7 = st.x_read(b, 31, 64);
+    let v8 = b.get(crate::regs::PacKey::DB.reg(true));
+    let v9 = b.get(crate::regs::PacKey::DB.reg(false));
+    let v10 = b.concat(v8, v9);
+    let v23 = b.extract(v6, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v25 = b.concat(v23, v23);
+    let v26 = b.concat(v25, v23);
+    let v27 = b.concat(v26, v23);
+    let v28 = b.concat(v27, v23);
+    let v29 = b.concat(v28, v23);
+    let v30 = b.concat(v29, v23);
+    let v31 = b.concat(v30, v23);
+    let v32 = b.concat(v31, v23);
+    let v33 = b.concat(v32, v23);
+    let v34 = b.concat(v33, v23);
+    let v35 = b.concat(v34, v23);
+    let v36 = b.concat(v35, v23);
+    let v37 = b.concat(v36, v23);
+    let v38 = b.concat(v37, v23);
+    let v39 = b.concat(v38, v23);
+    let v40 = b.concat(v39, v23);
+    let v41 = b.concat(v40, v23);
+    let v42 = b.concat(v41, v23);
+    let v43 = b.concat(v42, v23);
+    let v44 = b.concat(v43, v23);
+    let v45 = b.concat(v44, v23);
+    let v46 = b.concat(v45, v23);
+    let v47 = b.concat(v46, v23);
+    let v48 = b.concat(v47, v23);
+    let v49 = b.concat(v48, v23);
+    let v50 = b.concat(v49, v23);
+    let v51 = b.concat(v50, v23);
+    let v52 = b.concat(v51, v23);
+    let v53 = b.concat(v52, v23);
+    let v54 = b.concat(v53, v23);
+    let v55 = b.concat(v54, v23);
+    let v56 = b.concat(v55, v23);
+    let v57 = b.concat(v56, v23);
+    let v58 = b.concat(v57, v23);
+    let v59 = b.concat(v58, v23);
+    let v60 = b.concat(v59, v23);
+    let v61 = b.concat(v60, v23);
+    let v62 = b.concat(v61, v23);
+    let v63 = b.concat(v62, v23);
+    let v64 = b.concat(v63, v23);
+    let v65 = b.concat(v64, v23);
+    let v66 = b.concat(v65, v23);
+    let v67 = b.concat(v66, v23);
+    let v68 = b.concat(v67, v23);
+    let v69 = b.concat(v68, v23);
+    let v70 = b.concat(v69, v23);
+    let v71 = b.concat(v70, v23);
+    let v72 = b.concat(v71, v23);
+    let v73 = b.concat(v72, v23);
+    let v74 = b.concat(v73, v23);
+    let v75 = b.concat(v74, v23);
+    let v76 = b.concat(v75, v23);
+    let v77 = b.concat(v76, v23);
+    let v78 = b.concat(v77, v23);
+    let v79 = b.concat(v78, v23);
+    let v80 = b.concat(v79, v23);
+    let v81 = b.concat(v80, v23);
+    let v82 = b.concat(v81, v23);
+    let v83 = b.concat(v82, v23);
+    let v84 = b.concat(v83, v23);
+    let v85 = b.concat(v84, v23);
+    let v86 = b.concat(v85, v23);
+    let v87 = b.concat(v86, v23);
+    let v88 = b.extract(v87, 0, Width::new(25));
+    let v89 = b.extract(v6, 0, Width::new(39));
+    let v90 = b.concat(v88, v89);
+    let v91 = b.extract(v10, 64, Width::new(64));
+    let v92 = b.extract(v10, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v95 = b.pac(v90, v7, v91, v92);
+    let v98 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v99 = b.bin(BinOp::And, v6, v98);
+    let v100 = b.konst(Width::new(64), 0x0);
+    let v101 = b.cmp(CmpOp::Eq, v99, v100);
+    let v102 = b.not(v101);
+    let v103 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v104 = b.bin(BinOp::And, v6, v103);
+    let v105 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v106 = b.cmp(CmpOp::Ne, v104, v105);
+    let v107 = b.and(v102, v106);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s108: bool = st.has(Feature::PAuth2);
+    let s109: bool = !s108;
+    let v111 = b.extract(v95, 62, Width::new(1));
+    let v112 = b.not(v111);
+    let v113 = b.extract(v95, 63, Width::new(1));
+    let v114 = b.concat(v113, v112);
+    let v115 = b.extract(v95, 0, Width::new(62));
+    let v116 = b.concat(v114, v115);
+    let v119 = if s109 { v116 } else { v95 };
+    let v121 = b.select(v107, v119, v95);
+    let s122: bool = st.has(Feature::PAuth2);
+    let s123: bool = !s122;
+    let v125 = b.extract(v121, 56, Width::new(8));
+    let v126 = b.concat(v125, v23);
+    let v127 = b.extract(v121, 39, Width::new(16));
+    let v128 = b.concat(v126, v127);
+    let v129 = b.extract(v6, 0, Width::new(39));
+    let v130 = b.concat(v128, v129);
+    let v133 = b.extract(v6, 56, Width::new(8));
+    let v134 = b.extract(v121, 56, Width::new(8));
+    let v135 = b.bin(BinOp::Xor, v133, v134);
+    let v136 = b.concat(v135, v23);
+    let v137 = b.extract(v6, 39, Width::new(16));
+    let v138 = b.extract(v121, 39, Width::new(16));
+    let v139 = b.bin(BinOp::Xor, v137, v138);
+    let v140 = b.concat(v136, v139);
+    let v141 = b.extract(v6, 0, Width::new(39));
+    let v142 = b.concat(v140, v141);
+    let v143 = if s123 { v130 } else { v142 };
+    if s5 {
+        st.x_set(b, s2 as u32, v143, None);
+    }
+    Ok(())
+}
+
+/// `PACGA_64P_dp_2src`.
+///
+/// Cut: ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn PACGA_64P_dp_2src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACGA_64P_dp_2src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: u128 = (w >> 16) & 0x1f;
+    let s4: i128 = s1 as i128;
+    let s5: i128 = s2 as i128;
+    let s6: i128 = s3 as i128;
+    let s7: bool = st.has(Feature::PAuth);
+    let s8: bool = !s7;
+    if s8 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s9: bool = !s8;
+    let s10: bool = s6 == (31i128);
+    let s14: bool = if s10 { true } else { false };
+    let s15: bool = s9 && s14;
+    let v16 = st.x_read(b, s5 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::GA.reg(true));
+    let v19 = b.get(crate::regs::PacKey::GA.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v21 = b.extract(v20, 64, Width::new(64));
+    let v22 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v25 = b.pac(v16, v17, v21, v22);
+    let v28 = b.extract(v25, 32, Width::new(32));
+    let v29 = b.konst(Width::new(32), 0x0);
+    let v30 = b.concat(v28, v29);
+    if s15 {
+        st.x_set(b, s4 as u32, v30, None);
+    }
+    let s31: bool = !s14;
+    let s32: bool = s9 && s31;
+    let v33 = st.x_read(b, s5 as u32, 64);
+    let v34 = st.x_read(b, s6 as u32, 64);
+    let v35 = b.get(crate::regs::PacKey::GA.reg(true));
+    let v36 = b.get(crate::regs::PacKey::GA.reg(false));
+    let v37 = b.concat(v35, v36);
+    let v38 = b.extract(v37, 64, Width::new(64));
+    let v39 = b.extract(v37, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v42 = b.pac(v33, v34, v38, v39);
+    let v45 = b.extract(v42, 32, Width::new(32));
+    let v46 = b.konst(Width::new(32), 0x0);
+    let v47 = b.concat(v45, v46);
+    if s32 {
+        st.x_set(b, s4 as u32, v47, None);
+    }
+    Ok(())
+}
+
+/// `PACIA_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn PACIA_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACIA_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = st.has(Feature::PAuth);
+    let s14: bool = s7 && s13;
+    let s15: bool = s14 && s12;
+    let v16 = st.x_read(b, s3 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v19 = b.get(crate::regs::PacKey::IA.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v33 = b.extract(v16, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v35 = b.concat(v33, v33);
+    let v36 = b.concat(v35, v33);
+    let v37 = b.concat(v36, v33);
+    let v38 = b.concat(v37, v33);
+    let v39 = b.concat(v38, v33);
+    let v40 = b.concat(v39, v33);
+    let v41 = b.concat(v40, v33);
+    let v42 = b.concat(v41, v33);
+    let v43 = b.concat(v42, v33);
+    let v44 = b.concat(v43, v33);
+    let v45 = b.concat(v44, v33);
+    let v46 = b.concat(v45, v33);
+    let v47 = b.concat(v46, v33);
+    let v48 = b.concat(v47, v33);
+    let v49 = b.concat(v48, v33);
+    let v50 = b.concat(v49, v33);
+    let v51 = b.concat(v50, v33);
+    let v52 = b.concat(v51, v33);
+    let v53 = b.concat(v52, v33);
+    let v54 = b.concat(v53, v33);
+    let v55 = b.concat(v54, v33);
+    let v56 = b.concat(v55, v33);
+    let v57 = b.concat(v56, v33);
+    let v58 = b.concat(v57, v33);
+    let v59 = b.concat(v58, v33);
+    let v60 = b.concat(v59, v33);
+    let v61 = b.concat(v60, v33);
+    let v62 = b.concat(v61, v33);
+    let v63 = b.concat(v62, v33);
+    let v64 = b.concat(v63, v33);
+    let v65 = b.concat(v64, v33);
+    let v66 = b.concat(v65, v33);
+    let v67 = b.concat(v66, v33);
+    let v68 = b.concat(v67, v33);
+    let v69 = b.concat(v68, v33);
+    let v70 = b.concat(v69, v33);
+    let v71 = b.concat(v70, v33);
+    let v72 = b.concat(v71, v33);
+    let v73 = b.concat(v72, v33);
+    let v74 = b.concat(v73, v33);
+    let v75 = b.concat(v74, v33);
+    let v76 = b.concat(v75, v33);
+    let v77 = b.concat(v76, v33);
+    let v78 = b.concat(v77, v33);
+    let v79 = b.concat(v78, v33);
+    let v80 = b.concat(v79, v33);
+    let v81 = b.concat(v80, v33);
+    let v82 = b.concat(v81, v33);
+    let v83 = b.concat(v82, v33);
+    let v84 = b.concat(v83, v33);
+    let v85 = b.concat(v84, v33);
+    let v86 = b.concat(v85, v33);
+    let v87 = b.concat(v86, v33);
+    let v88 = b.concat(v87, v33);
+    let v89 = b.concat(v88, v33);
+    let v90 = b.concat(v89, v33);
+    let v91 = b.concat(v90, v33);
+    let v92 = b.concat(v91, v33);
+    let v93 = b.concat(v92, v33);
+    let v94 = b.concat(v93, v33);
+    let v95 = b.concat(v94, v33);
+    let v96 = b.concat(v95, v33);
+    let v97 = b.concat(v96, v33);
+    let v98 = b.extract(v97, 0, Width::new(25));
+    let v99 = b.extract(v16, 0, Width::new(39));
+    let v100 = b.concat(v98, v99);
+    let v101 = b.extract(v20, 64, Width::new(64));
+    let v102 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v105 = b.pac(v100, v17, v101, v102);
+    let v108 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v109 = b.bin(BinOp::And, v16, v108);
+    let v110 = b.konst(Width::new(64), 0x0);
+    let v111 = b.cmp(CmpOp::Eq, v109, v110);
+    let v112 = b.not(v111);
+    let v113 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v114 = b.bin(BinOp::And, v16, v113);
+    let v115 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v116 = b.cmp(CmpOp::Ne, v114, v115);
+    let v117 = b.and(v112, v116);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s118: bool = st.has(Feature::PAuth2);
+    let s119: bool = !s118;
+    let v121 = b.extract(v105, 62, Width::new(1));
+    let v122 = b.not(v121);
+    let v123 = b.extract(v105, 63, Width::new(1));
+    let v124 = b.concat(v123, v122);
+    let v125 = b.extract(v105, 0, Width::new(62));
+    let v126 = b.concat(v124, v125);
+    let v129 = if s119 { v126 } else { v105 };
+    let v131 = b.select(v117, v129, v105);
+    let s132: bool = st.has(Feature::PAuth2);
+    let s133: bool = !s132;
+    let v135 = b.extract(v131, 56, Width::new(8));
+    let v136 = b.concat(v135, v33);
+    let v137 = b.extract(v131, 39, Width::new(16));
+    let v138 = b.concat(v136, v137);
+    let v139 = b.extract(v16, 0, Width::new(39));
+    let v140 = b.concat(v138, v139);
+    let v143 = b.extract(v16, 56, Width::new(8));
+    let v144 = b.extract(v131, 56, Width::new(8));
+    let v145 = b.bin(BinOp::Xor, v143, v144);
+    let v146 = b.concat(v145, v33);
+    let v147 = b.extract(v16, 39, Width::new(16));
+    let v148 = b.extract(v131, 39, Width::new(16));
+    let v149 = b.bin(BinOp::Xor, v147, v148);
+    let v150 = b.concat(v146, v149);
+    let v151 = b.extract(v16, 0, Width::new(39));
+    let v152 = b.concat(v150, v151);
+    let v153 = if s133 { v140 } else { v152 };
+    if s15 {
+        st.x_set(b, s3 as u32, v153, None);
+    }
+    let s154: bool = !s12;
+    let s155: bool = s14 && s154;
+    let v156 = st.x_read(b, s3 as u32, 64);
+    let v157 = st.x_read(b, s4 as u32, 64);
+    let v158 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v159 = b.get(crate::regs::PacKey::IA.reg(false));
+    let v160 = b.concat(v158, v159);
+    let v173 = b.extract(v156, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v175 = b.concat(v173, v173);
+    let v176 = b.concat(v175, v173);
+    let v177 = b.concat(v176, v173);
+    let v178 = b.concat(v177, v173);
+    let v179 = b.concat(v178, v173);
+    let v180 = b.concat(v179, v173);
+    let v181 = b.concat(v180, v173);
+    let v182 = b.concat(v181, v173);
+    let v183 = b.concat(v182, v173);
+    let v184 = b.concat(v183, v173);
+    let v185 = b.concat(v184, v173);
+    let v186 = b.concat(v185, v173);
+    let v187 = b.concat(v186, v173);
+    let v188 = b.concat(v187, v173);
+    let v189 = b.concat(v188, v173);
+    let v190 = b.concat(v189, v173);
+    let v191 = b.concat(v190, v173);
+    let v192 = b.concat(v191, v173);
+    let v193 = b.concat(v192, v173);
+    let v194 = b.concat(v193, v173);
+    let v195 = b.concat(v194, v173);
+    let v196 = b.concat(v195, v173);
+    let v197 = b.concat(v196, v173);
+    let v198 = b.concat(v197, v173);
+    let v199 = b.concat(v198, v173);
+    let v200 = b.concat(v199, v173);
+    let v201 = b.concat(v200, v173);
+    let v202 = b.concat(v201, v173);
+    let v203 = b.concat(v202, v173);
+    let v204 = b.concat(v203, v173);
+    let v205 = b.concat(v204, v173);
+    let v206 = b.concat(v205, v173);
+    let v207 = b.concat(v206, v173);
+    let v208 = b.concat(v207, v173);
+    let v209 = b.concat(v208, v173);
+    let v210 = b.concat(v209, v173);
+    let v211 = b.concat(v210, v173);
+    let v212 = b.concat(v211, v173);
+    let v213 = b.concat(v212, v173);
+    let v214 = b.concat(v213, v173);
+    let v215 = b.concat(v214, v173);
+    let v216 = b.concat(v215, v173);
+    let v217 = b.concat(v216, v173);
+    let v218 = b.concat(v217, v173);
+    let v219 = b.concat(v218, v173);
+    let v220 = b.concat(v219, v173);
+    let v221 = b.concat(v220, v173);
+    let v222 = b.concat(v221, v173);
+    let v223 = b.concat(v222, v173);
+    let v224 = b.concat(v223, v173);
+    let v225 = b.concat(v224, v173);
+    let v226 = b.concat(v225, v173);
+    let v227 = b.concat(v226, v173);
+    let v228 = b.concat(v227, v173);
+    let v229 = b.concat(v228, v173);
+    let v230 = b.concat(v229, v173);
+    let v231 = b.concat(v230, v173);
+    let v232 = b.concat(v231, v173);
+    let v233 = b.concat(v232, v173);
+    let v234 = b.concat(v233, v173);
+    let v235 = b.concat(v234, v173);
+    let v236 = b.concat(v235, v173);
+    let v237 = b.concat(v236, v173);
+    let v238 = b.extract(v237, 0, Width::new(25));
+    let v239 = b.extract(v156, 0, Width::new(39));
+    let v240 = b.concat(v238, v239);
+    let v241 = b.extract(v160, 64, Width::new(64));
+    let v242 = b.extract(v160, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v245 = b.pac(v240, v157, v241, v242);
+    let v248 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v249 = b.bin(BinOp::And, v156, v248);
+    let v250 = b.konst(Width::new(64), 0x0);
+    let v251 = b.cmp(CmpOp::Eq, v249, v250);
+    let v252 = b.not(v251);
+    let v253 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v254 = b.bin(BinOp::And, v156, v253);
+    let v255 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v256 = b.cmp(CmpOp::Ne, v254, v255);
+    let v257 = b.and(v252, v256);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s258: bool = st.has(Feature::PAuth2);
+    let s259: bool = !s258;
+    let v261 = b.extract(v245, 62, Width::new(1));
+    let v262 = b.not(v261);
+    let v263 = b.extract(v245, 63, Width::new(1));
+    let v264 = b.concat(v263, v262);
+    let v265 = b.extract(v245, 0, Width::new(62));
+    let v266 = b.concat(v264, v265);
+    let v269 = if s259 { v266 } else { v245 };
+    let v271 = b.select(v257, v269, v245);
+    let s272: bool = st.has(Feature::PAuth2);
+    let s273: bool = !s272;
+    let v275 = b.extract(v271, 56, Width::new(8));
+    let v276 = b.concat(v275, v173);
+    let v277 = b.extract(v271, 39, Width::new(16));
+    let v278 = b.concat(v276, v277);
+    let v279 = b.extract(v156, 0, Width::new(39));
+    let v280 = b.concat(v278, v279);
+    let v283 = b.extract(v156, 56, Width::new(8));
+    let v284 = b.extract(v271, 56, Width::new(8));
+    let v285 = b.bin(BinOp::Xor, v283, v284);
+    let v286 = b.concat(v285, v173);
+    let v287 = b.extract(v156, 39, Width::new(16));
+    let v288 = b.extract(v271, 39, Width::new(16));
+    let v289 = b.bin(BinOp::Xor, v287, v288);
+    let v290 = b.concat(v286, v289);
+    let v291 = b.extract(v156, 0, Width::new(39));
+    let v292 = b.concat(v290, v291);
+    let v293 = if s273 { v280 } else { v292 };
+    if s155 {
+        st.x_set(b, s3 as u32, v293, None);
+    }
+    let v298 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v300 = b.get(crate::regs::PacKey::IA.reg(false));
+    Ok(())
+}
+
+/// `PACIB_64P_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, SP_read, X_read, X_set.
+pub(super) fn PACIB_64P_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACIB_64P_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: u128 = (w >> 5) & 0x1f;
+    let s3: i128 = s1 as i128;
+    let s4: i128 = s2 as i128;
+    let s5: bool = st.has(Feature::PAuth);
+    let s6: bool = !s5;
+    if s6 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s7: bool = !s6;
+    let s8: bool = s4 == (31i128);
+    let s12: bool = if s8 { true } else { false };
+    let s13: bool = st.has(Feature::PAuth);
+    let s14: bool = s7 && s13;
+    let s15: bool = s14 && s12;
+    let v16 = st.x_read(b, s3 as u32, 64);
+    let v17 = st.sp_read(b);
+    let v18 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v19 = b.get(crate::regs::PacKey::IB.reg(false));
+    let v20 = b.concat(v18, v19);
+    let v33 = b.extract(v16, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v35 = b.concat(v33, v33);
+    let v36 = b.concat(v35, v33);
+    let v37 = b.concat(v36, v33);
+    let v38 = b.concat(v37, v33);
+    let v39 = b.concat(v38, v33);
+    let v40 = b.concat(v39, v33);
+    let v41 = b.concat(v40, v33);
+    let v42 = b.concat(v41, v33);
+    let v43 = b.concat(v42, v33);
+    let v44 = b.concat(v43, v33);
+    let v45 = b.concat(v44, v33);
+    let v46 = b.concat(v45, v33);
+    let v47 = b.concat(v46, v33);
+    let v48 = b.concat(v47, v33);
+    let v49 = b.concat(v48, v33);
+    let v50 = b.concat(v49, v33);
+    let v51 = b.concat(v50, v33);
+    let v52 = b.concat(v51, v33);
+    let v53 = b.concat(v52, v33);
+    let v54 = b.concat(v53, v33);
+    let v55 = b.concat(v54, v33);
+    let v56 = b.concat(v55, v33);
+    let v57 = b.concat(v56, v33);
+    let v58 = b.concat(v57, v33);
+    let v59 = b.concat(v58, v33);
+    let v60 = b.concat(v59, v33);
+    let v61 = b.concat(v60, v33);
+    let v62 = b.concat(v61, v33);
+    let v63 = b.concat(v62, v33);
+    let v64 = b.concat(v63, v33);
+    let v65 = b.concat(v64, v33);
+    let v66 = b.concat(v65, v33);
+    let v67 = b.concat(v66, v33);
+    let v68 = b.concat(v67, v33);
+    let v69 = b.concat(v68, v33);
+    let v70 = b.concat(v69, v33);
+    let v71 = b.concat(v70, v33);
+    let v72 = b.concat(v71, v33);
+    let v73 = b.concat(v72, v33);
+    let v74 = b.concat(v73, v33);
+    let v75 = b.concat(v74, v33);
+    let v76 = b.concat(v75, v33);
+    let v77 = b.concat(v76, v33);
+    let v78 = b.concat(v77, v33);
+    let v79 = b.concat(v78, v33);
+    let v80 = b.concat(v79, v33);
+    let v81 = b.concat(v80, v33);
+    let v82 = b.concat(v81, v33);
+    let v83 = b.concat(v82, v33);
+    let v84 = b.concat(v83, v33);
+    let v85 = b.concat(v84, v33);
+    let v86 = b.concat(v85, v33);
+    let v87 = b.concat(v86, v33);
+    let v88 = b.concat(v87, v33);
+    let v89 = b.concat(v88, v33);
+    let v90 = b.concat(v89, v33);
+    let v91 = b.concat(v90, v33);
+    let v92 = b.concat(v91, v33);
+    let v93 = b.concat(v92, v33);
+    let v94 = b.concat(v93, v33);
+    let v95 = b.concat(v94, v33);
+    let v96 = b.concat(v95, v33);
+    let v97 = b.concat(v96, v33);
+    let v98 = b.extract(v97, 0, Width::new(25));
+    let v99 = b.extract(v16, 0, Width::new(39));
+    let v100 = b.concat(v98, v99);
+    let v101 = b.extract(v20, 64, Width::new(64));
+    let v102 = b.extract(v20, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v105 = b.pac(v100, v17, v101, v102);
+    let v108 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v109 = b.bin(BinOp::And, v16, v108);
+    let v110 = b.konst(Width::new(64), 0x0);
+    let v111 = b.cmp(CmpOp::Eq, v109, v110);
+    let v112 = b.not(v111);
+    let v113 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v114 = b.bin(BinOp::And, v16, v113);
+    let v115 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v116 = b.cmp(CmpOp::Ne, v114, v115);
+    let v117 = b.and(v112, v116);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s118: bool = st.has(Feature::PAuth2);
+    let s119: bool = !s118;
+    let v121 = b.extract(v105, 62, Width::new(1));
+    let v122 = b.not(v121);
+    let v123 = b.extract(v105, 63, Width::new(1));
+    let v124 = b.concat(v123, v122);
+    let v125 = b.extract(v105, 0, Width::new(62));
+    let v126 = b.concat(v124, v125);
+    let v129 = if s119 { v126 } else { v105 };
+    let v131 = b.select(v117, v129, v105);
+    let s132: bool = st.has(Feature::PAuth2);
+    let s133: bool = !s132;
+    let v135 = b.extract(v131, 56, Width::new(8));
+    let v136 = b.concat(v135, v33);
+    let v137 = b.extract(v131, 39, Width::new(16));
+    let v138 = b.concat(v136, v137);
+    let v139 = b.extract(v16, 0, Width::new(39));
+    let v140 = b.concat(v138, v139);
+    let v143 = b.extract(v16, 56, Width::new(8));
+    let v144 = b.extract(v131, 56, Width::new(8));
+    let v145 = b.bin(BinOp::Xor, v143, v144);
+    let v146 = b.concat(v145, v33);
+    let v147 = b.extract(v16, 39, Width::new(16));
+    let v148 = b.extract(v131, 39, Width::new(16));
+    let v149 = b.bin(BinOp::Xor, v147, v148);
+    let v150 = b.concat(v146, v149);
+    let v151 = b.extract(v16, 0, Width::new(39));
+    let v152 = b.concat(v150, v151);
+    let v153 = if s133 { v140 } else { v152 };
+    if s15 {
+        st.x_set(b, s3 as u32, v153, None);
+    }
+    let s154: bool = !s12;
+    let s155: bool = s14 && s154;
+    let v156 = st.x_read(b, s3 as u32, 64);
+    let v157 = st.x_read(b, s4 as u32, 64);
+    let v158 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v159 = b.get(crate::regs::PacKey::IB.reg(false));
+    let v160 = b.concat(v158, v159);
+    let v173 = b.extract(v156, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v175 = b.concat(v173, v173);
+    let v176 = b.concat(v175, v173);
+    let v177 = b.concat(v176, v173);
+    let v178 = b.concat(v177, v173);
+    let v179 = b.concat(v178, v173);
+    let v180 = b.concat(v179, v173);
+    let v181 = b.concat(v180, v173);
+    let v182 = b.concat(v181, v173);
+    let v183 = b.concat(v182, v173);
+    let v184 = b.concat(v183, v173);
+    let v185 = b.concat(v184, v173);
+    let v186 = b.concat(v185, v173);
+    let v187 = b.concat(v186, v173);
+    let v188 = b.concat(v187, v173);
+    let v189 = b.concat(v188, v173);
+    let v190 = b.concat(v189, v173);
+    let v191 = b.concat(v190, v173);
+    let v192 = b.concat(v191, v173);
+    let v193 = b.concat(v192, v173);
+    let v194 = b.concat(v193, v173);
+    let v195 = b.concat(v194, v173);
+    let v196 = b.concat(v195, v173);
+    let v197 = b.concat(v196, v173);
+    let v198 = b.concat(v197, v173);
+    let v199 = b.concat(v198, v173);
+    let v200 = b.concat(v199, v173);
+    let v201 = b.concat(v200, v173);
+    let v202 = b.concat(v201, v173);
+    let v203 = b.concat(v202, v173);
+    let v204 = b.concat(v203, v173);
+    let v205 = b.concat(v204, v173);
+    let v206 = b.concat(v205, v173);
+    let v207 = b.concat(v206, v173);
+    let v208 = b.concat(v207, v173);
+    let v209 = b.concat(v208, v173);
+    let v210 = b.concat(v209, v173);
+    let v211 = b.concat(v210, v173);
+    let v212 = b.concat(v211, v173);
+    let v213 = b.concat(v212, v173);
+    let v214 = b.concat(v213, v173);
+    let v215 = b.concat(v214, v173);
+    let v216 = b.concat(v215, v173);
+    let v217 = b.concat(v216, v173);
+    let v218 = b.concat(v217, v173);
+    let v219 = b.concat(v218, v173);
+    let v220 = b.concat(v219, v173);
+    let v221 = b.concat(v220, v173);
+    let v222 = b.concat(v221, v173);
+    let v223 = b.concat(v222, v173);
+    let v224 = b.concat(v223, v173);
+    let v225 = b.concat(v224, v173);
+    let v226 = b.concat(v225, v173);
+    let v227 = b.concat(v226, v173);
+    let v228 = b.concat(v227, v173);
+    let v229 = b.concat(v228, v173);
+    let v230 = b.concat(v229, v173);
+    let v231 = b.concat(v230, v173);
+    let v232 = b.concat(v231, v173);
+    let v233 = b.concat(v232, v173);
+    let v234 = b.concat(v233, v173);
+    let v235 = b.concat(v234, v173);
+    let v236 = b.concat(v235, v173);
+    let v237 = b.concat(v236, v173);
+    let v238 = b.extract(v237, 0, Width::new(25));
+    let v239 = b.extract(v156, 0, Width::new(39));
+    let v240 = b.concat(v238, v239);
+    let v241 = b.extract(v160, 64, Width::new(64));
+    let v242 = b.extract(v160, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v245 = b.pac(v240, v157, v241, v242);
+    let v248 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v249 = b.bin(BinOp::And, v156, v248);
+    let v250 = b.konst(Width::new(64), 0x0);
+    let v251 = b.cmp(CmpOp::Eq, v249, v250);
+    let v252 = b.not(v251);
+    let v253 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v254 = b.bin(BinOp::And, v156, v253);
+    let v255 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v256 = b.cmp(CmpOp::Ne, v254, v255);
+    let v257 = b.and(v252, v256);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s258: bool = st.has(Feature::PAuth2);
+    let s259: bool = !s258;
+    let v261 = b.extract(v245, 62, Width::new(1));
+    let v262 = b.not(v261);
+    let v263 = b.extract(v245, 63, Width::new(1));
+    let v264 = b.concat(v263, v262);
+    let v265 = b.extract(v245, 0, Width::new(62));
+    let v266 = b.concat(v264, v265);
+    let v269 = if s259 { v266 } else { v245 };
+    let v271 = b.select(v257, v269, v245);
+    let s272: bool = st.has(Feature::PAuth2);
+    let s273: bool = !s272;
+    let v275 = b.extract(v271, 56, Width::new(8));
+    let v276 = b.concat(v275, v173);
+    let v277 = b.extract(v271, 39, Width::new(16));
+    let v278 = b.concat(v276, v277);
+    let v279 = b.extract(v156, 0, Width::new(39));
+    let v280 = b.concat(v278, v279);
+    let v283 = b.extract(v156, 56, Width::new(8));
+    let v284 = b.extract(v271, 56, Width::new(8));
+    let v285 = b.bin(BinOp::Xor, v283, v284);
+    let v286 = b.concat(v285, v173);
+    let v287 = b.extract(v156, 39, Width::new(16));
+    let v288 = b.extract(v271, 39, Width::new(16));
+    let v289 = b.bin(BinOp::Xor, v287, v288);
+    let v290 = b.concat(v286, v289);
+    let v291 = b.extract(v156, 0, Width::new(39));
+    let v292 = b.concat(v290, v291);
+    let v293 = if s273 { v280 } else { v292 };
+    if s155 {
+        st.x_set(b, s3 as u32, v293, None);
+    }
+    let v298 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v300 = b.get(crate::regs::PacKey::IB.reg(false));
+    Ok(())
+}
+
+/// `PACIZA_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn PACIZA_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACIZA_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v9 = st.x_read(b, 31, 64);
+    let v10 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v11 = b.get(crate::regs::PacKey::IA.reg(false));
+    let v12 = b.concat(v10, v11);
+    let v25 = b.extract(v8, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v27 = b.concat(v25, v25);
+    let v28 = b.concat(v27, v25);
+    let v29 = b.concat(v28, v25);
+    let v30 = b.concat(v29, v25);
+    let v31 = b.concat(v30, v25);
+    let v32 = b.concat(v31, v25);
+    let v33 = b.concat(v32, v25);
+    let v34 = b.concat(v33, v25);
+    let v35 = b.concat(v34, v25);
+    let v36 = b.concat(v35, v25);
+    let v37 = b.concat(v36, v25);
+    let v38 = b.concat(v37, v25);
+    let v39 = b.concat(v38, v25);
+    let v40 = b.concat(v39, v25);
+    let v41 = b.concat(v40, v25);
+    let v42 = b.concat(v41, v25);
+    let v43 = b.concat(v42, v25);
+    let v44 = b.concat(v43, v25);
+    let v45 = b.concat(v44, v25);
+    let v46 = b.concat(v45, v25);
+    let v47 = b.concat(v46, v25);
+    let v48 = b.concat(v47, v25);
+    let v49 = b.concat(v48, v25);
+    let v50 = b.concat(v49, v25);
+    let v51 = b.concat(v50, v25);
+    let v52 = b.concat(v51, v25);
+    let v53 = b.concat(v52, v25);
+    let v54 = b.concat(v53, v25);
+    let v55 = b.concat(v54, v25);
+    let v56 = b.concat(v55, v25);
+    let v57 = b.concat(v56, v25);
+    let v58 = b.concat(v57, v25);
+    let v59 = b.concat(v58, v25);
+    let v60 = b.concat(v59, v25);
+    let v61 = b.concat(v60, v25);
+    let v62 = b.concat(v61, v25);
+    let v63 = b.concat(v62, v25);
+    let v64 = b.concat(v63, v25);
+    let v65 = b.concat(v64, v25);
+    let v66 = b.concat(v65, v25);
+    let v67 = b.concat(v66, v25);
+    let v68 = b.concat(v67, v25);
+    let v69 = b.concat(v68, v25);
+    let v70 = b.concat(v69, v25);
+    let v71 = b.concat(v70, v25);
+    let v72 = b.concat(v71, v25);
+    let v73 = b.concat(v72, v25);
+    let v74 = b.concat(v73, v25);
+    let v75 = b.concat(v74, v25);
+    let v76 = b.concat(v75, v25);
+    let v77 = b.concat(v76, v25);
+    let v78 = b.concat(v77, v25);
+    let v79 = b.concat(v78, v25);
+    let v80 = b.concat(v79, v25);
+    let v81 = b.concat(v80, v25);
+    let v82 = b.concat(v81, v25);
+    let v83 = b.concat(v82, v25);
+    let v84 = b.concat(v83, v25);
+    let v85 = b.concat(v84, v25);
+    let v86 = b.concat(v85, v25);
+    let v87 = b.concat(v86, v25);
+    let v88 = b.concat(v87, v25);
+    let v89 = b.concat(v88, v25);
+    let v90 = b.extract(v89, 0, Width::new(25));
+    let v91 = b.extract(v8, 0, Width::new(39));
+    let v92 = b.concat(v90, v91);
+    let v93 = b.extract(v12, 64, Width::new(64));
+    let v94 = b.extract(v12, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v97 = b.pac(v92, v9, v93, v94);
+    let v100 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v101 = b.bin(BinOp::And, v8, v100);
+    let v102 = b.konst(Width::new(64), 0x0);
+    let v103 = b.cmp(CmpOp::Eq, v101, v102);
+    let v104 = b.not(v103);
+    let v105 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v106 = b.bin(BinOp::And, v8, v105);
+    let v107 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v108 = b.cmp(CmpOp::Ne, v106, v107);
+    let v109 = b.and(v104, v108);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s110: bool = st.has(Feature::PAuth2);
+    let s111: bool = !s110;
+    let v113 = b.extract(v97, 62, Width::new(1));
+    let v114 = b.not(v113);
+    let v115 = b.extract(v97, 63, Width::new(1));
+    let v116 = b.concat(v115, v114);
+    let v117 = b.extract(v97, 0, Width::new(62));
+    let v118 = b.concat(v116, v117);
+    let v121 = if s111 { v118 } else { v97 };
+    let v123 = b.select(v109, v121, v97);
+    let s124: bool = st.has(Feature::PAuth2);
+    let s125: bool = !s124;
+    let v127 = b.extract(v123, 56, Width::new(8));
+    let v128 = b.concat(v127, v25);
+    let v129 = b.extract(v123, 39, Width::new(16));
+    let v130 = b.concat(v128, v129);
+    let v131 = b.extract(v8, 0, Width::new(39));
+    let v132 = b.concat(v130, v131);
+    let v135 = b.extract(v8, 56, Width::new(8));
+    let v136 = b.extract(v123, 56, Width::new(8));
+    let v137 = b.bin(BinOp::Xor, v135, v136);
+    let v138 = b.concat(v137, v25);
+    let v139 = b.extract(v8, 39, Width::new(16));
+    let v140 = b.extract(v123, 39, Width::new(16));
+    let v141 = b.bin(BinOp::Xor, v139, v140);
+    let v142 = b.concat(v138, v141);
+    let v143 = b.extract(v8, 0, Width::new(39));
+    let v144 = b.concat(v142, v143);
+    let v145 = if s125 { v132 } else { v144 };
+    if s7 {
+        st.x_set(b, s2 as u32, v145, None);
+    }
+    let v148 = b.get(crate::regs::PacKey::IA.reg(true));
+    let v150 = b.get(crate::regs::PacKey::IA.reg(false));
+    Ok(())
+}
+
+/// `PACIZB_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, ComputePACQARMA, IsFeatureImplemented, PACKEY, X_read, X_set.
+pub(super) fn PACIZB_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::PACIZB_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v9 = st.x_read(b, 31, 64);
+    let v10 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v11 = b.get(crate::regs::PacKey::IB.reg(false));
+    let v12 = b.concat(v10, v11);
+    let v25 = b.extract(v8, 63, Width::new(1));
+    if st.has(Feature::CONSTPACFIELD) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v27 = b.concat(v25, v25);
+    let v28 = b.concat(v27, v25);
+    let v29 = b.concat(v28, v25);
+    let v30 = b.concat(v29, v25);
+    let v31 = b.concat(v30, v25);
+    let v32 = b.concat(v31, v25);
+    let v33 = b.concat(v32, v25);
+    let v34 = b.concat(v33, v25);
+    let v35 = b.concat(v34, v25);
+    let v36 = b.concat(v35, v25);
+    let v37 = b.concat(v36, v25);
+    let v38 = b.concat(v37, v25);
+    let v39 = b.concat(v38, v25);
+    let v40 = b.concat(v39, v25);
+    let v41 = b.concat(v40, v25);
+    let v42 = b.concat(v41, v25);
+    let v43 = b.concat(v42, v25);
+    let v44 = b.concat(v43, v25);
+    let v45 = b.concat(v44, v25);
+    let v46 = b.concat(v45, v25);
+    let v47 = b.concat(v46, v25);
+    let v48 = b.concat(v47, v25);
+    let v49 = b.concat(v48, v25);
+    let v50 = b.concat(v49, v25);
+    let v51 = b.concat(v50, v25);
+    let v52 = b.concat(v51, v25);
+    let v53 = b.concat(v52, v25);
+    let v54 = b.concat(v53, v25);
+    let v55 = b.concat(v54, v25);
+    let v56 = b.concat(v55, v25);
+    let v57 = b.concat(v56, v25);
+    let v58 = b.concat(v57, v25);
+    let v59 = b.concat(v58, v25);
+    let v60 = b.concat(v59, v25);
+    let v61 = b.concat(v60, v25);
+    let v62 = b.concat(v61, v25);
+    let v63 = b.concat(v62, v25);
+    let v64 = b.concat(v63, v25);
+    let v65 = b.concat(v64, v25);
+    let v66 = b.concat(v65, v25);
+    let v67 = b.concat(v66, v25);
+    let v68 = b.concat(v67, v25);
+    let v69 = b.concat(v68, v25);
+    let v70 = b.concat(v69, v25);
+    let v71 = b.concat(v70, v25);
+    let v72 = b.concat(v71, v25);
+    let v73 = b.concat(v72, v25);
+    let v74 = b.concat(v73, v25);
+    let v75 = b.concat(v74, v25);
+    let v76 = b.concat(v75, v25);
+    let v77 = b.concat(v76, v25);
+    let v78 = b.concat(v77, v25);
+    let v79 = b.concat(v78, v25);
+    let v80 = b.concat(v79, v25);
+    let v81 = b.concat(v80, v25);
+    let v82 = b.concat(v81, v25);
+    let v83 = b.concat(v82, v25);
+    let v84 = b.concat(v83, v25);
+    let v85 = b.concat(v84, v25);
+    let v86 = b.concat(v85, v25);
+    let v87 = b.concat(v86, v25);
+    let v88 = b.concat(v87, v25);
+    let v89 = b.concat(v88, v25);
+    let v90 = b.extract(v89, 0, Width::new(25));
+    let v91 = b.extract(v8, 0, Width::new(39));
+    let v92 = b.concat(v90, v91);
+    let v93 = b.extract(v12, 64, Width::new(64));
+    let v94 = b.extract(v12, 0, Width::new(64));
+    if st.has(Feature::PACIMP) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    if st.has(Feature::PACQARMA3) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let v97 = b.pac(v92, v9, v93, v94);
+    let v100 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v101 = b.bin(BinOp::And, v8, v100);
+    let v102 = b.konst(Width::new(64), 0x0);
+    let v103 = b.cmp(CmpOp::Eq, v101, v102);
+    let v104 = b.not(v103);
+    let v105 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v106 = b.bin(BinOp::And, v8, v105);
+    let v107 = b.konst(Width::new(64), 0x7fff8000000000);
+    let v108 = b.cmp(CmpOp::Ne, v106, v107);
+    let v109 = b.and(v104, v108);
+    if st.has(Feature::EPAC) {
+        return Err(LiftError::Unsupported(ENC));
+    }
+    let s110: bool = st.has(Feature::PAuth2);
+    let s111: bool = !s110;
+    let v113 = b.extract(v97, 62, Width::new(1));
+    let v114 = b.not(v113);
+    let v115 = b.extract(v97, 63, Width::new(1));
+    let v116 = b.concat(v115, v114);
+    let v117 = b.extract(v97, 0, Width::new(62));
+    let v118 = b.concat(v116, v117);
+    let v121 = if s111 { v118 } else { v97 };
+    let v123 = b.select(v109, v121, v97);
+    let s124: bool = st.has(Feature::PAuth2);
+    let s125: bool = !s124;
+    let v127 = b.extract(v123, 56, Width::new(8));
+    let v128 = b.concat(v127, v25);
+    let v129 = b.extract(v123, 39, Width::new(16));
+    let v130 = b.concat(v128, v129);
+    let v131 = b.extract(v8, 0, Width::new(39));
+    let v132 = b.concat(v130, v131);
+    let v135 = b.extract(v8, 56, Width::new(8));
+    let v136 = b.extract(v123, 56, Width::new(8));
+    let v137 = b.bin(BinOp::Xor, v135, v136);
+    let v138 = b.concat(v137, v25);
+    let v139 = b.extract(v8, 39, Width::new(16));
+    let v140 = b.extract(v123, 39, Width::new(16));
+    let v141 = b.bin(BinOp::Xor, v139, v140);
+    let v142 = b.concat(v138, v141);
+    let v143 = b.extract(v8, 0, Width::new(39));
+    let v144 = b.concat(v142, v143);
+    let v145 = if s125 { v132 } else { v144 };
+    if s7 {
+        st.x_set(b, s2 as u32, v145, None);
+    }
+    let v148 = b.get(crate::regs::PacKey::IB.reg(true));
+    let v150 = b.get(crate::regs::PacKey::IB.reg(false));
+    Ok(())
+}
+
 /// `RBIT_32_dp_1src`.
 ///
 /// Cut: X_read, X_set.
@@ -43556,6 +46979,188 @@ pub(super) fn UMULH_64_dp_3src(word: u32, b: &mut Builder, st: &mut St) -> Resul
     Ok(())
 }
 
+/// `XPACD_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, IsFeatureImplemented, X_read, X_set.
+pub(super) fn XPACD_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::XPACD_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v22 = b.extract(v8, 55, Width::new(1));
+    let v23 = b.concat(v22, v22);
+    let v24 = b.concat(v23, v22);
+    let v25 = b.concat(v24, v22);
+    let v26 = b.concat(v25, v22);
+    let v27 = b.concat(v26, v22);
+    let v28 = b.concat(v27, v22);
+    let v29 = b.concat(v28, v22);
+    let v30 = b.concat(v29, v22);
+    let v31 = b.concat(v30, v22);
+    let v32 = b.concat(v31, v22);
+    let v33 = b.concat(v32, v22);
+    let v34 = b.concat(v33, v22);
+    let v35 = b.concat(v34, v22);
+    let v36 = b.concat(v35, v22);
+    let v37 = b.concat(v36, v22);
+    let v38 = b.concat(v37, v22);
+    let v39 = b.concat(v38, v22);
+    let v40 = b.concat(v39, v22);
+    let v41 = b.concat(v40, v22);
+    let v42 = b.concat(v41, v22);
+    let v43 = b.concat(v42, v22);
+    let v44 = b.concat(v43, v22);
+    let v45 = b.concat(v44, v22);
+    let v46 = b.concat(v45, v22);
+    let v47 = b.concat(v46, v22);
+    let v48 = b.concat(v47, v22);
+    let v49 = b.concat(v48, v22);
+    let v50 = b.concat(v49, v22);
+    let v51 = b.concat(v50, v22);
+    let v52 = b.concat(v51, v22);
+    let v53 = b.concat(v52, v22);
+    let v54 = b.concat(v53, v22);
+    let v55 = b.concat(v54, v22);
+    let v56 = b.concat(v55, v22);
+    let v57 = b.concat(v56, v22);
+    let v58 = b.concat(v57, v22);
+    let v59 = b.concat(v58, v22);
+    let v60 = b.concat(v59, v22);
+    let v61 = b.concat(v60, v22);
+    let v62 = b.concat(v61, v22);
+    let v63 = b.concat(v62, v22);
+    let v64 = b.concat(v63, v22);
+    let v65 = b.concat(v64, v22);
+    let v66 = b.concat(v65, v22);
+    let v67 = b.concat(v66, v22);
+    let v68 = b.concat(v67, v22);
+    let v69 = b.concat(v68, v22);
+    let v70 = b.concat(v69, v22);
+    let v71 = b.concat(v70, v22);
+    let v72 = b.concat(v71, v22);
+    let v73 = b.concat(v72, v22);
+    let v74 = b.concat(v73, v22);
+    let v75 = b.concat(v74, v22);
+    let v76 = b.concat(v75, v22);
+    let v77 = b.concat(v76, v22);
+    let v78 = b.concat(v77, v22);
+    let v79 = b.concat(v78, v22);
+    let v80 = b.concat(v79, v22);
+    let v81 = b.concat(v80, v22);
+    let v82 = b.concat(v81, v22);
+    let v83 = b.concat(v82, v22);
+    let v84 = b.concat(v83, v22);
+    let v85 = b.concat(v84, v22);
+    let v86 = b.extract(v85, 0, Width::new(25));
+    let v87 = b.extract(v8, 0, Width::new(39));
+    let v88 = b.concat(v86, v87);
+    if s7 {
+        st.x_set(b, s2 as u32, v88, None);
+    }
+    Ok(())
+}
+
+/// `XPACI_64Z_dp_1src`.
+///
+/// Cut: CalculateBottomPACBit, IsFeatureImplemented, X_read, X_set.
+pub(super) fn XPACI_64Z_dp_1src(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
+    const ENC: Encoding = Encoding::XPACI_64Z_dp_1src;
+    let w = u128::from(word);
+    let pc = u128::from(b.pc());
+    let s1: u128 = (w >> 0) & 0x1f;
+    let s2: i128 = s1 as i128;
+    let s3: bool = st.has(Feature::PAuth);
+    let s4: bool = !s3;
+    if s4 {
+        return Err(LiftError::Undefined(ENC));
+    }
+    let s5: bool = !s4;
+    let s6: bool = st.has(Feature::PAuth);
+    let s7: bool = s5 && s6;
+    let v8 = st.x_read(b, s2 as u32, 64);
+    let v22 = b.extract(v8, 55, Width::new(1));
+    let v23 = b.concat(v22, v22);
+    let v24 = b.concat(v23, v22);
+    let v25 = b.concat(v24, v22);
+    let v26 = b.concat(v25, v22);
+    let v27 = b.concat(v26, v22);
+    let v28 = b.concat(v27, v22);
+    let v29 = b.concat(v28, v22);
+    let v30 = b.concat(v29, v22);
+    let v31 = b.concat(v30, v22);
+    let v32 = b.concat(v31, v22);
+    let v33 = b.concat(v32, v22);
+    let v34 = b.concat(v33, v22);
+    let v35 = b.concat(v34, v22);
+    let v36 = b.concat(v35, v22);
+    let v37 = b.concat(v36, v22);
+    let v38 = b.concat(v37, v22);
+    let v39 = b.concat(v38, v22);
+    let v40 = b.concat(v39, v22);
+    let v41 = b.concat(v40, v22);
+    let v42 = b.concat(v41, v22);
+    let v43 = b.concat(v42, v22);
+    let v44 = b.concat(v43, v22);
+    let v45 = b.concat(v44, v22);
+    let v46 = b.concat(v45, v22);
+    let v47 = b.concat(v46, v22);
+    let v48 = b.concat(v47, v22);
+    let v49 = b.concat(v48, v22);
+    let v50 = b.concat(v49, v22);
+    let v51 = b.concat(v50, v22);
+    let v52 = b.concat(v51, v22);
+    let v53 = b.concat(v52, v22);
+    let v54 = b.concat(v53, v22);
+    let v55 = b.concat(v54, v22);
+    let v56 = b.concat(v55, v22);
+    let v57 = b.concat(v56, v22);
+    let v58 = b.concat(v57, v22);
+    let v59 = b.concat(v58, v22);
+    let v60 = b.concat(v59, v22);
+    let v61 = b.concat(v60, v22);
+    let v62 = b.concat(v61, v22);
+    let v63 = b.concat(v62, v22);
+    let v64 = b.concat(v63, v22);
+    let v65 = b.concat(v64, v22);
+    let v66 = b.concat(v65, v22);
+    let v67 = b.concat(v66, v22);
+    let v68 = b.concat(v67, v22);
+    let v69 = b.concat(v68, v22);
+    let v70 = b.concat(v69, v22);
+    let v71 = b.concat(v70, v22);
+    let v72 = b.concat(v71, v22);
+    let v73 = b.concat(v72, v22);
+    let v74 = b.concat(v73, v22);
+    let v75 = b.concat(v74, v22);
+    let v76 = b.concat(v75, v22);
+    let v77 = b.concat(v76, v22);
+    let v78 = b.concat(v77, v22);
+    let v79 = b.concat(v78, v22);
+    let v80 = b.concat(v79, v22);
+    let v81 = b.concat(v80, v22);
+    let v82 = b.concat(v81, v22);
+    let v83 = b.concat(v82, v22);
+    let v84 = b.concat(v83, v22);
+    let v85 = b.concat(v84, v22);
+    let v86 = b.extract(v85, 0, Width::new(25));
+    let v87 = b.extract(v8, 0, Width::new(39));
+    let v88 = b.concat(v86, v87);
+    if s7 {
+        st.x_set(b, s2 as u32, v88, None);
+    }
+    Ok(())
+}
+
 /// The generated template of `enc`, if there is one.
 pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
     Some(match enc {
@@ -43589,6 +47194,14 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::AND_64_log_shift => AND_64_log_shift,
         Encoding::ASRV_32_dp_2src => ASRV_32_dp_2src,
         Encoding::ASRV_64_dp_2src => ASRV_64_dp_2src,
+        Encoding::AUTDA_64P_dp_1src => AUTDA_64P_dp_1src,
+        Encoding::AUTDB_64P_dp_1src => AUTDB_64P_dp_1src,
+        Encoding::AUTDZA_64Z_dp_1src => AUTDZA_64Z_dp_1src,
+        Encoding::AUTDZB_64Z_dp_1src => AUTDZB_64Z_dp_1src,
+        Encoding::AUTIA_64P_dp_1src => AUTIA_64P_dp_1src,
+        Encoding::AUTIB_64P_dp_1src => AUTIB_64P_dp_1src,
+        Encoding::AUTIZA_64Z_dp_1src => AUTIZA_64Z_dp_1src,
+        Encoding::AUTIZB_64Z_dp_1src => AUTIZB_64Z_dp_1src,
         Encoding::BFM_32M_bitfield => BFM_32M_bitfield,
         Encoding::BFM_64M_bitfield => BFM_64M_bitfield,
         Encoding::BICS_32_log_shift => BICS_32_log_shift,
@@ -43821,6 +47434,15 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::ORR_32_log_shift => ORR_32_log_shift,
         Encoding::ORR_64_log_imm => ORR_64_log_imm,
         Encoding::ORR_64_log_shift => ORR_64_log_shift,
+        Encoding::PACDA_64P_dp_1src => PACDA_64P_dp_1src,
+        Encoding::PACDB_64P_dp_1src => PACDB_64P_dp_1src,
+        Encoding::PACDZA_64Z_dp_1src => PACDZA_64Z_dp_1src,
+        Encoding::PACDZB_64Z_dp_1src => PACDZB_64Z_dp_1src,
+        Encoding::PACGA_64P_dp_2src => PACGA_64P_dp_2src,
+        Encoding::PACIA_64P_dp_1src => PACIA_64P_dp_1src,
+        Encoding::PACIB_64P_dp_1src => PACIB_64P_dp_1src,
+        Encoding::PACIZA_64Z_dp_1src => PACIZA_64Z_dp_1src,
+        Encoding::PACIZB_64Z_dp_1src => PACIZB_64Z_dp_1src,
         Encoding::RBIT_32_dp_1src => RBIT_32_dp_1src,
         Encoding::RBIT_64_dp_1src => RBIT_64_dp_1src,
         Encoding::REV16_32_dp_1src => REV16_32_dp_1src,
@@ -43899,6 +47521,8 @@ pub(crate) fn template(enc: Encoding) -> Option<GenFn> {
         Encoding::UMIN_64_dp_2src => UMIN_64_dp_2src,
         Encoding::UMSUBL_64WA_dp_3src => UMSUBL_64WA_dp_3src,
         Encoding::UMULH_64_dp_3src => UMULH_64_dp_3src,
+        Encoding::XPACD_64Z_dp_1src => XPACD_64Z_dp_1src,
+        Encoding::XPACI_64Z_dp_1src => XPACI_64Z_dp_1src,
         _ => return None,
     })
 }

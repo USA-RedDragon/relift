@@ -2,7 +2,9 @@
 //!
 //! Slots: `x0` to `x30` (indexes 0 to 30), `sp` (31), the flags `n`, `z`,
 //! `c`, `v` as one-bit slots (32 to 35), `v0` to `v31` as 128-bit slots (36 to
-//! 67), then `fpcr`, `fpsr`, `tpidr_el0` and `tpidrro_el0`.
+//! 67), then `fpcr`, `fpsr`, `tpidr_el0` and `tpidrro_el0`, the `fp_flags`
+//! pseudo-register, and the pointer authentication keys (73 to 82), each key
+//! as its high and low halves in the order IA, IB, DA, DB, GA.
 
 use relift_ir::{Reg, RegDecl, RegFile, Width};
 
@@ -10,7 +12,7 @@ const fn decl(name: &'static str, width: Width) -> RegDecl {
     RegDecl { name, width }
 }
 
-static DECLS: [RegDecl; 73] = [
+static DECLS: [RegDecl; 83] = [
     decl("x0", Width::W64),
     decl("x1", Width::W64),
     decl("x2", Width::W64),
@@ -84,6 +86,16 @@ static DECLS: [RegDecl; 73] = [
     decl("tpidr_el0", Width::W64),
     decl("tpidrro_el0", Width::W64),
     decl("fp_flags", Width::W1),
+    decl("apiakeyhi_el1", Width::W64),
+    decl("apiakeylo_el1", Width::W64),
+    decl("apibkeyhi_el1", Width::W64),
+    decl("apibkeylo_el1", Width::W64),
+    decl("apdakeyhi_el1", Width::W64),
+    decl("apdakeylo_el1", Width::W64),
+    decl("apdbkeyhi_el1", Width::W64),
+    decl("apdbkeylo_el1", Width::W64),
+    decl("apgakeyhi_el1", Width::W64),
+    decl("apgakeylo_el1", Width::W64),
 ];
 
 /// The A64 register file.
@@ -129,3 +141,41 @@ pub const TPIDRRO_EL0: Reg = Reg(71);
 /// FPSR census found a read that can be used), else 0. Read-only; blocks
 /// whose flags the host cannot give leave for the slow path while it is 1.
 pub const FP_FLAGS: Reg = Reg(72);
+
+/// A pointer authentication key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PacKey {
+    /// Instruction key A.
+    IA,
+    /// Instruction key B.
+    IB,
+    /// Data key A.
+    DA,
+    /// Data key B.
+    DB,
+    /// The generic key.
+    GA,
+}
+
+impl PacKey {
+    /// Every key, in slot order.
+    pub const ALL: [PacKey; 5] = [PacKey::IA, PacKey::IB, PacKey::DA, PacKey::DB, PacKey::GA];
+
+    /// The key of the system register named `AP<key>Key{Hi,Lo}_EL1`, and
+    /// whether it is the high half.
+    pub fn of_register(name: &str) -> Option<(PacKey, bool)> {
+        let rest = name.strip_prefix("AP")?.strip_suffix("_EL1")?;
+        let (k, hi) = match rest.strip_suffix("KeyHi") {
+            Some(k) => (k, true),
+            None => (rest.strip_suffix("KeyLo")?, false),
+        };
+        let key = PacKey::ALL.into_iter().find(|p| format!("{p:?}") == k)?;
+        Some((key, hi))
+    }
+
+    /// The slot holding the high (`hi`) or low half of the key. Read-only
+    /// for the guest: the HLE kernel chooses the keys.
+    pub fn reg(self, hi: bool) -> Reg {
+        Reg(73 + 2 * self as u16 + u16::from(!hi))
+    }
+}

@@ -59,6 +59,30 @@ impl Features {
         .with(Feature::SHA256)
         .with(Feature::CRC32);
 
+    /// The Cortex-A78C (the Nintendo Switch 2 CPU), from its ID registers
+    /// (Technical Reference Manual r0p2): Armv8.2-A with the Cryptographic
+    /// Extension, CRC32, LSE, RDM, FP16, DotProd, FlagM, LRCPC2, DPB, RAS,
+    /// LOR, SSBS, CSV2 and CSV3, and pointer authentication with QARMA5 and
+    /// PAuth2 but without EPAC, FPAC or BTI (`ID_AA64ISAR1_EL1.APA` 3,
+    /// `GPA` 1).
+    pub const CORTEX_A78C: Features = Features::CORTEX_A57
+        .with(Feature::LSE)
+        .with(Feature::RDM)
+        .with(Feature::FP16)
+        .with(Feature::DotProd)
+        .with(Feature::FlagM)
+        .with(Feature::LRCPC)
+        .with(Feature::LRCPC2)
+        .with(Feature::DPB)
+        .with(Feature::RAS)
+        .with(Feature::LOR)
+        .with(Feature::SSBS)
+        .with(Feature::CSV2)
+        .with(Feature::CSV3)
+        .with(Feature::PAuth)
+        .with(Feature::PAuth2)
+        .with(Feature::PACQARMA5);
+
     /// Every feature the specification names; what [`super::decode`] uses.
     pub const ALL: Features = {
         let mut s = Features::NONE;
@@ -105,7 +129,7 @@ impl Features {
         Feature::all().filter(|f| self.has(*f))
     }
 
-    /// Parses a comma-separated list: a base (`armv8.0`, `cortex-a57`,
+    /// Parses a comma-separated list: a base (`armv8.0`, `cortex-a57`, `cortex-a78c`,
     /// `all`, `none`) and features (`FEAT_LSE` or `LSE`), each optionally
     /// preceded by `-` to remove it.
     pub fn parse(text: &str) -> Result<Features, String> {
@@ -118,6 +142,7 @@ impl Features {
             let base = match name.to_ascii_lowercase().as_str() {
                 "armv8.0" => Some(Features::ARMV8_0),
                 "cortex-a57" => Some(Features::CORTEX_A57),
+                "cortex-a78c" => Some(Features::CORTEX_A78C),
                 "all" => Some(Features::ALL),
                 "none" => Some(Features::NONE),
                 _ => None,

@@ -99,6 +99,9 @@ const LIFT_TIME_FEATURES: &[&str] = &[
     "FEAT_CSSC",
     "FEAT_HBC",
     "FEAT_SB",
+    "FEAT_PAuth",
+    "FEAT_PAuth2",
+    "FEAT_PACQARMA5",
 ];
 
 /// How a template sees a feature: `Some(true)` for a base feature,
@@ -121,7 +124,30 @@ const STUBS_OK: &[&str] = &[
     "Hint_PreloadData",
     "Hint_PreloadDataForWrite",
     "Hint_PreloadInstr",
+    "SynchronizeContext",
 ];
+
+/// SCR_EL3.API and APK: pointer authentication does not trap to EL3.
+const SCR_EL3_PAC: u128 = (1 << 17) | (1 << 16);
+/// HCR_EL2.API and APK: nor to EL2.
+const HCR_EL2_PAC: u128 = (1 << 41) | (1 << 40);
+/// SCTLR_EL1.EnIA, EnIB, EnDA and EnDB: the kernel enables every key for
+/// EL0.
+const SCTLR_EL1_EN_PAC: u128 = (1 << 31) | (1 << 30) | (1 << 27) | (1 << 13);
+/// The guest's 39-bit address space: T0SZ and T1SZ 25, top-byte ignore
+/// off for both halves (TBI0, TBI1 zero), as the Switch's kernel sets it.
+const TCR_EL1: u128 = 25 | (25 << 16);
+
+/// The lowest bit of the pointer authentication field: 64 - TxSZ of the
+/// guest's address space, the same for both halves.
+fn bottom_pac_bit() -> R<V> {
+    let t0 = TCR_EL1 & 0x3f;
+    let t1 = (TCR_EL1 >> 16) & 0x3f;
+    if t0 != t1 {
+        return fail("halves of the address space differ in size");
+    }
+    Ok(V::Int(64 - t0 as i128))
+}
 
 /// The model files the A64 generator reads, in load order.
 pub const ARM64_SRC_FILES: &[&str] = &[
@@ -158,7 +184,14 @@ impl Cpu for Arm64 {
             "SEE" => Some(Ok(V::Int(-1))),
             "__BranchTaken" | "SPESampleInFlight" | "InGuardedPage" => Some(Ok(V::Bool(false))),
             "BTypeNext" => Some(Ok(V::Bits(2, 0))),
-            _ => None,
+            n => {
+                let (key, hi) = relift_cpu_arm64::regs::PacKey::of_register(n)?;
+                g.used_cut.insert("PACKEY");
+                Some(Ok(g.dy(
+                    K::Bits(64),
+                    format!("b.get(crate::regs::PacKey::{key:?}.reg({hi}))"),
+                )))
+            }
         }
     }
 
@@ -199,8 +232,10 @@ impl Cpu for Arm64 {
 
     fn reg_config(name: &str) -> u128 {
         match name {
-            "SCR_EL3" => 1 | (1 << 10),
-            "HCR_EL2" => 1 << 31,
+            "SCR_EL3" => 1 | (1 << 10) | SCR_EL3_PAC,
+            "HCR_EL2" => (1 << 31) | HCR_EL2_PAC,
+            "SCTLR_EL1" => SCTLR_EL1_EN_PAC,
+            "TCR_EL1" => TCR_EL1,
             _ => 0,
         }
     }
@@ -350,6 +385,8 @@ pub const CUT: &[&str] = &[
     "AESMixColumns",
     "AESInvMixColumns",
     "Sbox",
+    "ComputePACQARMA",
+    "CalculateBottomPACBit",
 ];
 
 /// Absent features whose tests do not change what an EL0 instruction does
@@ -397,6 +434,56 @@ pub fn verify_crypto(m: &relift_sail::model::Model) -> Result<(), String> {
             if got != V::Bits(w, want) {
                 return Err(format!("{name}({x:#x}): Sail {got:?}, cut {want:#x}"));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Checks the `ComputePACQARMA` cut (`relift_ir::Op::Pac`) against the Sail
+/// QARMA5, `ComputePACQARMA` with `isqarma3` false, on concrete values: the
+/// paper's test vector, the basis vectors of each input and pseudo-random
+/// inputs. Fails with the first difference.
+pub fn verify_pac(m: &relift_sail::model::Model) -> Result<(), String> {
+    let mut cases = vec![[
+        0xfb62_3599_da6e_8127u64,
+        0x477d_469d_ec0b_8762,
+        0x84be_85ce_9804_e94b,
+        0xec28_02d4_e0a4_88e9,
+    ]];
+    for arg in 0..4 {
+        for bit in [0, 1, 17, 39, 55, 63] {
+            let mut c = [0x0123_4567_89ab_cdefu64; 4];
+            c[arg] ^= 1 << bit;
+            cases.push(c);
+        }
+    }
+    let mut s = 0x9e37_79b9_7f4a_7c15u64;
+    for _ in 0..64 {
+        let mut c = [0u64; 4];
+        for x in &mut c {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            *x = s;
+        }
+        cases.push(c);
+    }
+    for [d, md, k0, k1] in cases {
+        let mut g: Gen<'_, Arm64> = Gen::new(m, 0, 0);
+        g.cpu.no_cut = true;
+        let args = [d, md, k0, k1]
+            .iter()
+            .map(|x| V::Bits(64, u128::from(*x)))
+            .chain([V::Bool(false)])
+            .collect();
+        let got = g
+            .call("ComputePACQARMA", args, None)
+            .map_err(|e| format!("ComputePACQARMA({d:#x}, {md:#x}) does not evaluate: {e:?}"))?;
+        let want = relift_ir::interp::eval_pac(d, md, k0, k1);
+        if got != V::Bits(64, u128::from(want)) {
+            return Err(format!(
+                "ComputePACQARMA({d:#x}, {md:#x}, {k0:#x}, {k1:#x}): Sail {got:?}, cut {want:#x}"
+            ));
         }
     }
     Ok(())
@@ -809,7 +896,9 @@ impl Arm64Cut for Gen<'_, Arm64> {
 
     /// Runs the cut function `name`, or gives `None` when `name` is not cut.
     fn arm64_cut(&mut self, name: &str, a: &[V], _hint: Option<u32>) -> R<Option<V>> {
-        if self.cpu.no_cut && CRYPTO_CUT.iter().any(|(n, _)| *n == name) {
+        if self.cpu.no_cut
+            && (CRYPTO_CUT.iter().any(|(n, _)| *n == name) || name == "ComputePACQARMA")
+        {
             return Ok(None);
         }
         if name == "HaveFP16Ext" {
@@ -1147,6 +1236,21 @@ impl Arm64Cut for Gen<'_, Arm64> {
                     format!("b.crypto(CryptoOp::{op:?}, {xs})"),
                 )
             }
+            "ComputePACQARMA" => {
+                if a[4] != V::Bool(false) {
+                    return fail("QARMA3 has no cut");
+                }
+                let mut xs = Vec::new();
+                for v in &a[..4] {
+                    let v = self.extend(v, 64, false)?;
+                    xs.push(self.dx(&v)?.to_string());
+                }
+                self.dy(
+                    K::Bits(64),
+                    format!("b.pac({}, {}, {}, {})", xs[0], xs[1], xs[2], xs[3]),
+                )
+            }
+            "CalculateBottomPACBit" => bottom_pac_bit()?,
             "DataMemoryBarrier" | "DataSynchronizationBarrier" => {
                 let order = match a.get(1) {
                     Some(V::Enum(t, i)) if name == "DataMemoryBarrier" => {

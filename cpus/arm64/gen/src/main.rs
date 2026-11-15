@@ -165,6 +165,12 @@ fn real_main() -> ExitCode {
         eprintln!("the cipher cut differs from the model: {e}");
         return ExitCode::FAILURE;
     }
+    if matches!(args[0].as_str(), "try" | "gen")
+        && let Err(e) = cut::verify_pac(&m)
+    {
+        eprintln!("the pointer authentication cut differs from the model: {e}");
+        return ExitCode::FAILURE;
+    }
     match args[0].as_str() {
         "parse-all" => {
             let (ok, bad) = m.parse_all();
