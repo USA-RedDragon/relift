@@ -1201,12 +1201,21 @@ are also call boundaries. [inferred]
     for NaNs. A NaN result still goes to the slow path: the compiler may
     fold an operation without keeping its NaN (x * 1.0 to x keeps a
     signaling NaN). [inferred]
-  - Because these helpers give Arm's NaN for 32- and 64-bit add, subtract,
-    multiply, divide, square root and fused multiply-add, the emitter's lift
-    (`lift_for_emit`) leaves out the IR's NaN handling after those
-    operations; the reference lift that the interpreter and the checker run
-    keeps it, and `relift/tests/emit_interp` and `emit_flags` compare the
-    two. In a commercial game that handling was about a sixth of the lifted code.
+  - **Dependency: the A64 frontend relies on these helpers for Arm's NaN.**
+    Because the inline fast paths and their slow paths give Arm's NaN for
+    32- and 64-bit add, subtract, multiply, divide, square root and fused
+    multiply-add, the emitter's lift (`lift_for_emit`, through
+    `sail::exact_host` in `cpus/arm64/src/lift/sail/rt.rs`) leaves out the
+    IR's NaN handling after those operations. Lifted code then has no other
+    NaN handling for them: any change that lets a host NaN through (dropping
+    the NaN test of a fast path, `rl_fp_nan_fixup` returning 0, a slow path
+    that does not follow `FPProcessNaNs` and `FPDefaultNaN`, or a new host
+    path for these operations) breaks guest results, and must instead make
+    `exact_host` keep the NaN handling for the affected operations. The
+    reference lift that the interpreter and the checker run keeps it, and
+    `relift/tests/emit_interp` and `emit_flags` compare the two. In a
+    commercial game that handling was about a sixth of the lifted code.
+    [verified: emit_interp, emit_flags]
   - Non-default modes on x86-64 go to the slow path. If Horizon's default
     FPCR turns out to set FZ or DN, x86-64 needs a fast path for that mode
     before performance work. [open]

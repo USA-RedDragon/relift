@@ -603,6 +603,12 @@ static inline void rl_sev(void) { __atomic_signal_fence(__ATOMIC_SEQ_CST); }
  * fpcr is the generation-time FPCR of the calling function. fpsr is NULL in
  * the default build; in the fp-exact build it points to the FPSR local and the
  * cumulative bits are ORed in.
+ *
+ * The A64 frontend depends on the add, sub, mul, div, muladd and sqrt slow
+ * paths and their inline fast paths below giving Arm's NaN results
+ * (FPProcessNaNs, FPDefaultNaN): the emitter's lift leaves out the IR's NaN
+ * handling after those operations (sail::exact_host, docs/abi.md 10.1). A
+ * change that lets a host NaN through must first make exact_host keep it.
  */
 RL_RUNTIME_API uint32_t rl_fp32_add(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr);
 /** @brief FPSub, single. */
@@ -764,8 +770,9 @@ static inline int rl_fp_fast(uint32_t fpcr, const uint32_t *fpsr)
  * @brief True when a NaN result of the inline fast path must come from the
  * slow path instead. On x86-64 the host NaN rules differ from Arm's; on
  * arm64 the host gives Arm's, but the compiler may fold an operation whose
- * NaN it does not keep (x * 1.0 to x keeps a signaling NaN). The emitter
- * relies on these helpers for the Arm NaN (`lift_for_emit`).
+ * NaN it does not keep (x * 1.0 to x keeps a signaling NaN). Must stay 1 on
+ * every host: the emitter's lift has no NaN handling of its own for these
+ * operations (`lift_for_emit`, see the FP cut layer above).
  */
 static inline int rl_fp_nan_fixup(void) { return 1; }
 

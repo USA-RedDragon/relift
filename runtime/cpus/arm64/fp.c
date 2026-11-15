@@ -865,6 +865,11 @@ static inline void commit(const fpenv *v, uint32_t *fpsr)
 
 #define ENV(fpcr) { (fpcr), 0, 0 }
 
+/*
+ * The NaN results of add, sub, mul, div, muladd and sqrt below are the only
+ * Arm NaN handling lifted code gets for them: the emitter's lift leaves it
+ * out (sail::exact_host, docs/abi.md 10.1).
+ */
 uint32_t rl_fp32_add(uint32_t a, uint32_t b, uint32_t fpcr, uint32_t *fpsr)
 {
     fpenv v = ENV(fpcr);

@@ -395,7 +395,9 @@ thread_local! {
 /// Runs `f` lifting for the C emitter, whose FP add, subtract, multiply,
 /// divide, square root and fused multiply-add of 32 and 64 bits give the
 /// Arm result, NaNs included (`relift/arm64/abi.h`): their `FpOp`s then stand
-/// for the whole operation and are not followed by the NaN handling.
+/// for the whole operation and are not followed by the NaN handling. A
+/// runtime change that lets a host NaN through for one of them must first
+/// make `Fp::exact` false for it (docs/abi.md 10.1).
 pub fn exact_host<T>(f: impl FnOnce() -> T) -> T {
     struct Reset(bool);
     impl Drop for Reset {
