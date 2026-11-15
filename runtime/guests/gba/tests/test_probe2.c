@@ -89,10 +89,10 @@ typedef struct gap {
 } gap;
 
 static const gap gaps[] = {
-    {"A_irq_CpuSet16_copy_ws4317", 509, R_INSIDE},
-    {"A_irq_CpuSet16_fill_ws4317", 438, R_INSIDE},
-    {"A_irq_CpuSet32_copy_ws4317", 436, R_INSIDE},
-    {"A_irq_CpuSet32_fill_ws4317", 389, R_INSIDE},
+    {"A_irq_CpuSet16_copy_ws4317", 507, R_INSIDE},
+    {"A_irq_CpuSet16_fill_ws4317", 436, R_INSIDE},
+    {"A_irq_CpuSet32_copy_ws4317", 434, R_INSIDE},
+    {"A_irq_CpuSet32_fill_ws4317", 387, R_INSIDE},
     {"A_irq_CpuFastSet_copy_ws4317", 361, R_INSIDE},
     {"A_irq_CpuFastSet_fill_ws4317", 268, R_INSIDE},
     {"A_irq_LZ77UnCompWram_ws4317", 703, R_INSIDE},
@@ -110,7 +110,7 @@ static const gap gaps[] = {
     {"A_irq_RLUnCompWram_ws0000", 343, R_INSIDE},
     {"A_irq_RLUnCompVram_ws0000", 365, R_INSIDE},
     {"A_irq_CpuSet32_copy_ws4317_dma3", 213, R_DMA},
-    {"A_hblankdma_CpuSet16_copy_ws4317", 106, R_HBLANK},
+    {"A_hblankdma_CpuSet16_copy_ws4317", 104, R_HBLANK},
     {"A_hblankdma_LZ77UnCompWram_ws4317", 219, R_HBLANK},
     {"halt_ime1", 96, R_RETURN},
 };

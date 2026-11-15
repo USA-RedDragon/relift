@@ -397,7 +397,17 @@ static uint64_t charged(unsigned number, const bios_call *c)
     return c->bus_cyc + (uint64_t)(m->base + events_cost(m, c)) - BIOS_SITE_FIT;
 }
 
-static uint64_t model_now(const bios_call *c) { return c->bus_cyc + (uint64_t)events_cost(c->model, c); }
+/**
+ * @brief Cycles by which a call's accesses come before the place its event
+ * costs give them (CpuSet: fitted to whole calls that VRAM contention
+ * lengthens, by the phase of the display line they start at).
+ */
+static const int32_t leads[0x20] = {[0x0B] = 29};
+
+static uint64_t model_now(const bios_call *c)
+{
+    return c->bus_cyc + (uint64_t)(events_cost(c->model, c) - leads[c->model - models]);
+}
 
 static void hide(bios_call *c)
 {
