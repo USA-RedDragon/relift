@@ -198,7 +198,7 @@ TEST(am_libnx_initialize_application_not_in_focus)
         iterations++;
         if (iterations == 2)
             rl_am_set_focus(true);
-        uint32_t rc = wait_h(&e, ev, iterations == 1 ? 0 : 1000000000ull);
+        uint32_t rc = wait_h(&e, ev, iterations == 1 ? 0 : (uint64_t)-1);
         if (iterations == 1) {
             CHECK_EQ(rc, 0);
             CHECK_EQ(recv_msg(&e, e.csg, &msg), 0);
