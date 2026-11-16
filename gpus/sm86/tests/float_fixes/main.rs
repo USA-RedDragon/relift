@@ -1164,3 +1164,162 @@ fn float_programs_preserve_signed_zeros_infinities_and_nans() {
     let s = translate_with(&int, &host(lacking)).unwrap_or_else(|e| panic!("{e}"));
     assert!(s.interface.host.inexact.is_empty());
 }
+
+/// F2I R14, R4 from F32 to `size` (0: 8, 1: 16, 2: 32 bits), round to
+/// nearest.
+fn f2i(signed: bool, size: u64, ntz: bool) -> u128 {
+    word(
+        0x105,
+        1,
+        &[
+            (16, 8, 14),
+            (32, 8, 4),
+            (72, 1, u64::from(signed)),
+            (75, 2, size),
+            (77, 1, u64::from(ntz)),
+            (84, 3, 2),
+        ],
+    )
+}
+
+/// F2I of a NaN is the lowest value of the signed type of that width, not
+/// sign-extended (also for unsigned types), or zero with `.NTZ`.
+#[test]
+fn f2i_nan_and_saturation() {
+    let rows: [(u32, [u32; 12]); 8] = [
+        (
+            0x7fc0_0000,
+            [
+                0x80,
+                0,
+                0x80,
+                0,
+                0x8000,
+                0,
+                0x8000,
+                0,
+                0x8000_0000,
+                0,
+                0x8000_0000,
+                0,
+            ],
+        ),
+        (
+            0xffc0_0000,
+            [
+                0x80,
+                0,
+                0x80,
+                0,
+                0x8000,
+                0,
+                0x8000,
+                0,
+                0x8000_0000,
+                0,
+                0x8000_0000,
+                0,
+            ],
+        ),
+        (
+            0x7f80_0001,
+            [
+                0x80,
+                0,
+                0x80,
+                0,
+                0x8000,
+                0,
+                0x8000,
+                0,
+                0x8000_0000,
+                0,
+                0x8000_0000,
+                0,
+            ],
+        ),
+        (
+            0x7f80_0000,
+            [
+                0xff,
+                0xff,
+                0x7f,
+                0x7f,
+                0xffff,
+                0xffff,
+                0x7fff,
+                0x7fff,
+                u32::MAX,
+                u32::MAX,
+                0x7fff_ffff,
+                0x7fff_ffff,
+            ],
+        ),
+        (
+            0xff80_0000,
+            [
+                0,
+                0,
+                0xffff_ff80,
+                0xffff_ff80,
+                0,
+                0,
+                0xffff_8000,
+                0xffff_8000,
+                0,
+                0,
+                0x8000_0000,
+                0x8000_0000,
+            ],
+        ),
+        (
+            0x4f80_0000,
+            [
+                0xff,
+                0xff,
+                0x7f,
+                0x7f,
+                0xffff,
+                0xffff,
+                0x7fff,
+                0x7fff,
+                u32::MAX,
+                u32::MAX,
+                0x7fff_ffff,
+                0x7fff_ffff,
+            ],
+        ),
+        (
+            0xbf80_0000,
+            [
+                0,
+                0,
+                u32::MAX,
+                u32::MAX,
+                0,
+                0,
+                u32::MAX,
+                u32::MAX,
+                0,
+                0,
+                u32::MAX,
+                u32::MAX,
+            ],
+        ),
+        (0x3f80_0000, [1; 12]),
+    ];
+    for h in HostProfile::presets() {
+        let o = host(h.clone());
+        let devs = devices(&h);
+        let mut k = 0;
+        for size in 0..3 {
+            for signed in [false, true] {
+                for ntz in [false, true] {
+                    let cases: Vec<_> = rows.iter().map(|&(a, w)| (a, 0, 0, w[k])).collect();
+                    check("F2I", &o, &devs, f2i(signed, size, ntz), &cases);
+                    k += 1;
+                }
+            }
+        }
+    }
+}
