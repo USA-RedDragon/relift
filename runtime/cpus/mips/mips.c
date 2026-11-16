@@ -54,6 +54,14 @@ uint64_t rl_mips_exception(rl_ctx *c, uint32_t code, uint64_t pc, bool in_delay,
     return base + 0x180u;
 }
 
+/** @brief Gives the scheduler the interrupt lines Status lets in; a line already up ends the budget. */
+static void irq_mask(rl_ctx *c)
+{
+    uint32_t st = c->cp0_status;
+    bool on = (st & (RL_MIPS_SR_IE | RL_MIPS_SR_EXL | RL_MIPS_SR_ERL)) == RL_MIPS_SR_IE;
+    rl_set_irq_mask(c, on ? (st >> 8) & 0x7Cu : 0u);
+}
+
 uint64_t rl_mips_eret(rl_ctx *c)
 {
     uint64_t to;
@@ -65,6 +73,7 @@ uint64_t rl_mips_eret(rl_ctx *c)
         c->cp0_status &= ~(uint32_t)RL_MIPS_SR_EXL;
     }
     c->cp0_ll_bit = 0;
+    irq_mask(c);
     return to;
 }
 
@@ -162,9 +171,7 @@ void rl_mips_cp0_sync(rl_ctx *c)
 {
     timer_check(c);
     rl_mips_random(c);
-    uint32_t st = c->cp0_status;
-    bool on = (st & (RL_MIPS_SR_IE | RL_MIPS_SR_EXL | RL_MIPS_SR_ERL)) == RL_MIPS_SR_IE;
-    rl_set_irq_mask(c, on ? (st >> 8) & 0x7Cu : 0u);
+    irq_mask(c);
     if (rl_mips_irq_pending(c))
         end_budget(c);
 }

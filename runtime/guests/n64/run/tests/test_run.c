@@ -52,6 +52,29 @@ static int handler(rl_ctx *c, uint8_t *mem)
     RL_MUSTTAIL return rl_mips_eret_to(c, rl_mips_eret(c))(c, mem);
 }
 
+/** @brief The budget before the first handler's ERET and after it. */
+static int64_t eret_budget[2];
+
+/**
+ * @brief Takes the VI interrupt, and the first time raises the SP interrupt
+ * while EXL is set. ERET may go anywhere (an OS switching threads), so it
+ * must end the budget itself for the line to be taken at the next sync point.
+ */
+static int handler2(rl_ctx *c, uint8_t *mem)
+{
+    (void)mem;
+    hs.handlers++;
+    rl_mips_cp0_sync(c);
+    rl_n64_write(c->machine, 0x04400010u, 4, 0);
+    rl_n64_write(c->machine, 0x04040010u, 4, hs.handlers == 1 ? 0x10u : 0x08u);
+    if (hs.handlers == 1)
+        eret_budget[0] = c->time.budget;
+    uint64_t to = rl_mips_eret(c);
+    if (hs.handlers == 1)
+        eret_budget[1] = c->time.budget;
+    RL_MUSTTAIL return rl_mips_eret_to(c, to)(c, mem);
+}
+
 static int main_fn(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
@@ -63,7 +86,7 @@ static int main_fn(rl_ctx *c, uint8_t *mem)
 static int spin_fn(rl_ctx *c, uint8_t *mem)
 {
     hs.mains++;
-    rl_n64_write(c->machine, 0x0430000Cu, 4, 0x80u);
+    rl_n64_write(c->machine, 0x0430000Cu, 4, c->r[3] ? 0x82u : 0x80u);
     rl_n64_write(c->machine, 0x04400000u, 4, 0x3002u);
     rl_n64_write(c->machine, 0x0440000Cu, 4, 0x10u);
     rl_n64_write(c->machine, 0x04400018u, 4, 0x20Du);
@@ -71,7 +94,7 @@ static int spin_fn(rl_ctx *c, uint8_t *mem)
     rl_n64_write(c->machine, 0x04400020u, 4, 0x0C150C15u);
     c->cp0_status = 0x34000401u;
     int rc = rl_n64_cp0_sync(c, mem, K0(0x1004));
-    while (!rc && !hs.handlers && hs.spins < 1000000) {
+    while (!rc && hs.handlers < (c->r[3] ? 2 : 1) && hs.spins < 1000000) {
         hs.spins++;
         c->time.budget -= 100;
         if (c->time.budget <= 0)
@@ -85,6 +108,11 @@ static const rl_fn_entry fns_main[] = {
 };
 static const rl_fn_entry fns_spin[] = {
     {K0(0x180), 8, RL_FN_RANGE, handler},
+    {K0(0x1000), 8, RL_FN_RANGE, spin_fn},
+};
+
+static const rl_fn_entry fns_spin2[] = {
+    {K0(0x180), 8, RL_FN_RANGE, handler2},
     {K0(0x1000), 8, RL_FN_RANGE, spin_fn},
 };
 
@@ -185,6 +213,17 @@ TEST(n64_run_a_vi_interrupt_enters_the_vector_at_a_sync_point)
     CHECK_EQ(hs.handler_epc, K0(0x1004));
     CHECK_EQ(rl_n64_irq_pending(mach), 0);
     CHECK_EQ(run.c->cp0_status & 2u, 0u);
+}
+
+TEST(n64_run_an_interrupt_raised_in_a_handler_is_taken_right_after_eret)
+{
+    CHECK(boot(fns_spin2, 2) == 0);
+    run.c->r[3] = 1;
+    CHECK_EQ(rl_n64_run_start(&run), RL_OK);
+    CHECK_EQ(hs.handlers, 2);
+    CHECK(eret_budget[0] > 0);
+    CHECK(eret_budget[1] <= 0);
+    CHECK_EQ(rl_n64_irq_pending(mach), 0);
 }
 
 TEST(n64_run_starts_the_boot_code_in_dmem)
