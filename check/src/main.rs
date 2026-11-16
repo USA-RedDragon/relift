@@ -13,6 +13,7 @@
 //! relift-check --oracle rustyboi step|rom ...   (Game Boy SM83, see gb/cli.rs)
 //! relift-check --oracle nba rom ...             (GBA, see gba/cli.rs)
 //! relift-check --oracle ares lift ...           (VR4300, see mips/cli.rs)
+//! relift-check --oracle sst-z80|zex|ares-z80 ... (Z80, see z80/cli.rs)
 //! options: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]
 //!          [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]
 //!          [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]
@@ -48,6 +49,7 @@ mod mips;
 mod mutate;
 mod oracle;
 mod states;
+mod z80;
 
 use std::process::ExitCode;
 
@@ -310,7 +312,7 @@ fn print(name: &str, rep: &Report, opts: &Opts) -> bool {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n       relift-check --oracle rustyboi step|lift|rom ...  (Game Boy)\n       relift-check --oracle nba rom ...  (GBA)\n       relift-check --oracle ares lift ...  (VR4300)"
+        "usage: relift-check insn <hex>[,<hex>...] [options]\n       relift-check forms <name>[,<name>...]|all [options]\noptions: [-n N] [--seed S] [--mutate] [--hand] [--dce] [--fpcr HEX] [--fpsr]\n         [--oracle unicorn|qemu|qemu-max|m2|cmd:<argv>] [--features SPEC]\n         [--slow cmd:<argv>] [--all-slow] [--fp-flags] [--undef]\n       relift-check --oracle rustyboi step|lift|rom ...  (Game Boy)\n       relift-check --oracle nba rom ...  (GBA)\n       relift-check --oracle ares lift ...  (VR4300)\n       relift-check --oracle sst-z80|zex|ares-z80 ...  (Z80)"
     );
     ExitCode::from(2)
 }
@@ -324,6 +326,9 @@ fn main() -> ExitCode {
         return code;
     }
     if let Some(code) = mips::cli::dispatch(&args) {
+        return code;
+    }
+    if let Some(code) = z80::cli::dispatch(&args) {
         return code;
     }
     if args.len() < 2 {

@@ -404,6 +404,7 @@ dependencies = [
  "relift-cpu-arm64",
  "relift-cpu-mips",
  "relift-cpu-sm83",
+ "relift-cpu-z80",
  "relift-diff",
  "relift-guest",
  "relift-ir",
@@ -432,6 +433,13 @@ name = "relift-cpu-sm83"
 version = "0.1.0"
 dependencies = [
  "relift-guest",
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-z80"
+version = "0.1.0"
+dependencies = [
  "relift-ir",
 ]
 
