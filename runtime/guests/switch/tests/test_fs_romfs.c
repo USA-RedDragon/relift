@@ -3,11 +3,14 @@
  * @brief fsp-srv data storages through IPC: the program's RomFS and add-on
  * content as read-only IStorage objects. The test reads the image the way
  * libnn's romfs driver does (header, hash tables, metadata, file data) from a
- * synthetic tree and compares every file with its source.
+ * synthetic tree and compares every file with its source. Plain image files,
+ * images inside larger files and RomFS maps must serve the same bytes as the
+ * tree they were made from, alone and under mod layers.
  */
 #include "hos_fs.h"
 #include "hos_mods.h"
 
+#include <relift/datacheck.h>
 #include <relift/input.h>
 #include <relift/settings.h>
 #include "tc.h"
@@ -809,4 +812,265 @@ TEST(mods_cheat_writes_ram_every_frame)
     }
     rl_hos_mods_clear();
     tree_remove(mod);
+}
+
+/**
+ * @brief SHA-256 of the image make_tree's tree makes. relift's Rust image
+ * builder (guests/switch/formats/tests/romfs_image.rs) checks the same value
+ * for the same tree, so both build the same bytes.
+ */
+#define TREE_IMAGE_SHA256 "aab39cbfc9b47d2af177964bdf0b8fd65ee678b118ee12e4404354277699829c"
+
+static uint8_t *image_bytes(rl_romfs_image *img)
+{
+    uint64_t n = rl_romfs_image_size(img);
+    uint8_t *b = malloc((size_t)n);
+    if (b && rl_romfs_image_read(img, 0, b, n) != 0) {
+        free(b);
+        return NULL;
+    }
+    return b;
+}
+
+static void write_at(const char *path, const void *data, size_t n, bool append)
+{
+    FILE *f = fopen(path, append ? "ab" : "wb");
+    if (!f || (n && fwrite(data, 1, n, f) != n)) {
+        fprintf(stderr, "  cannot write %s\n", path);
+        exit(2);
+    }
+    fclose(f);
+}
+
+static bool same_image(rl_romfs_image *a, rl_romfs_image *b)
+{
+    uint8_t *x, *y;
+    bool ok;
+    if (!a || !b || rl_romfs_image_size(a) != rl_romfs_image_size(b) ||
+        rl_romfs_image_file_count(a) != rl_romfs_image_file_count(b))
+        return false;
+    x = image_bytes(a);
+    y = image_bytes(b);
+    ok = x && y && memcmp(x, y, (size_t)rl_romfs_image_size(a)) == 0;
+    free(x);
+    free(y);
+    return ok;
+}
+
+static void put_u32(uint8_t *p, uint32_t v)
+{
+    for (int i = 0; i < 4; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static void put_u64(uint8_t *p, uint64_t v)
+{
+    put_u32(p, (uint32_t)v);
+    put_u32(p + 4, (uint32_t)(v >> 32));
+}
+
+/**
+ * @brief Writes dir/data.bin (a 0x100 byte header, then every file's data
+ * in reverse table order) and dir/romfs.map serving img from it. Returns the
+ * map's path.
+ */
+static void make_map(const char *dir, const uint8_t *img, uint64_t size, char *map_path, size_t n)
+{
+    char data_path[1024];
+    uint64_t data_off = rd64(img + 0x48), fm = rd64(img + 0x38), fsz = rd64(img + 0x40);
+    uint64_t at = 0x100, nfiles = 0, k = 0;
+    uint8_t head[0x100], *map, *pieces;
+    size_t map_size;
+    static const char src[] = "data.bin";
+    snprintf(data_path, sizeof data_path, "%s/data.bin", dir);
+    snprintf(map_path, n, "%s/romfs.map", dir);
+    for (int i = 0; i < 0x100; i++)
+        head[i] = (uint8_t)(i * 7 + 1);
+    write_at(data_path, head, sizeof head, false);
+    for (uint64_t r = 0; r < fsz; r += 0x20 + ((rd32(img + fm + r + 0x1C) + 3) & ~3u))
+        if (rd64(img + fm + r + 0x10))
+            nfiles++;
+    map_size = 0x40 + 0x40 + 8 + (size_t)nfiles * 0x20 + (size_t)data_off;
+    map = calloc(1, map_size);
+    pieces = map + 0x88;
+    memcpy(map, "RLRFMAP1", 8);
+    put_u32(map + 8, 1);
+    put_u64(map + 0x10, size);
+    put_u64(map + 0x18, data_off);
+    put_u64(map + 0x20, nfiles);
+    put_u64(map + 0x28, 0x40);
+    put_u64(map + 0x30, 0x88);
+    put_u64(map + 0x38, 0x88 + nfiles * 0x20);
+    put_u64(map + 0x48, 0);
+    memcpy(map + 0x50, head, 32);
+    put_u32(map + 0x70, (uint32_t)strlen(src));
+    memcpy(map + 0x80, src, strlen(src));
+    for (uint64_t r = 0; r < fsz; r += 0x20 + ((rd32(img + fm + r + 0x1C) + 3) & ~3u)) {
+        uint64_t off = data_off + rd64(img + fm + r + 8), len = rd64(img + fm + r + 0x10);
+        if (!len)
+            continue;
+        put_u64(pieces + k * 0x20, off);
+        put_u64(pieces + k * 0x20 + 8, len);
+        k++;
+    }
+    for (uint64_t i = 0; i < nfiles; i++) {
+        uint8_t *p = pieces + (nfiles - 1 - i) * 0x20;
+        put_u64(p + 0x18, at);
+        write_at(data_path, img + rd64(p), (size_t)rd64(p + 8), true);
+        at += rd64(p + 8);
+    }
+    put_u64(map + 0x40, at);
+    {
+        uint64_t prev = 0;
+        for (uint64_t i = 0; i < nfiles; i++) {
+            uint8_t *p = pieces + i * 0x20;
+            if (rd64(p) < prev) {
+                fprintf(stderr, "  pieces out of order\n");
+                exit(2);
+            }
+            prev = rd64(p);
+        }
+    }
+    memcpy(map + 0x88 + nfiles * 0x20, img, (size_t)data_off);
+    write_at(map_path, map, map_size, false);
+    free(map);
+}
+
+TEST(romfs_image_file_and_map_serve_the_tree_bytes)
+{
+    char root[512], out[512], path[1024], map[1024];
+    rl_romfs_image *tree, *file, *packed, *mapped;
+    uint8_t *bytes;
+    uint64_t size;
+    char hex[65];
+    make_root(root, sizeof root);
+    make_root(out, sizeof out);
+    make_tree(root);
+    tree = rl_romfs_image_open(root);
+    CHECK(tree != NULL);
+    size = rl_romfs_image_size(tree);
+    bytes = image_bytes(tree);
+    CHECK(bytes != NULL);
+    rl_data_sha256(bytes, (size_t)size, hex);
+    if (strcmp(hex, TREE_IMAGE_SHA256) != 0)
+        fprintf(stderr, "  tree image sha256 %s\n", hex);
+    CHECK_EQ(strcmp(hex, TREE_IMAGE_SHA256), 0);
+    CHECK_EQ(rl_romfs_image_file_count(tree), 45);
+
+    snprintf(path, sizeof path, "%s/romfs.img", out);
+    write_at(path, bytes, (size_t)size, false);
+    file = rl_romfs_image_open(path);
+    CHECK(same_image(tree, file));
+
+    snprintf(path, sizeof path, "%s/pack.bin", out);
+    {
+        uint8_t junk[0x1234];
+        memset(junk, 0xA5, sizeof junk);
+        write_at(path, junk, sizeof junk, false);
+        write_at(path, bytes, (size_t)size, true);
+        write_at(path, junk, 77, true);
+    }
+    packed = rl_romfs_image_open_file(path, 0x1234, size);
+    CHECK(same_image(tree, packed));
+    CHECK(rl_romfs_image_open_file(path, 0x1234, rl_romfs_image_size(packed) + 78) == NULL);
+    CHECK_EQ(errno, EINVAL);
+    CHECK(rl_romfs_image_open_file(path, 0, 0) == NULL);
+    CHECK_EQ(errno, EINVAL);
+
+    make_map(out, bytes, size, map, sizeof map);
+    mapped = rl_romfs_image_open(map);
+    CHECK(same_image(tree, mapped));
+    {
+        uint8_t b[16];
+        CHECK_EQ(rl_romfs_image_read(mapped, size - 8, b, 16), RL_ROMFS_RANGE);
+    }
+    rl_romfs_image_close(mapped);
+    snprintf(path, sizeof path, "%s/data.bin", out);
+    {
+        int fd = open(path, O_WRONLY);
+        CHECK(fd >= 0);
+        CHECK_EQ(pwrite(fd, "x", 1, 3), 1);
+        close(fd);
+    }
+    CHECK(rl_romfs_image_open(map) == NULL);
+    CHECK_EQ(errno, ESTALE);
+
+    rl_romfs_image_close(tree);
+    rl_romfs_image_close(file);
+    rl_romfs_image_close(packed);
+    free(bytes);
+    tree_remove(root);
+    tree_remove(out);
+}
+
+TEST(romfs_mods_layer_over_an_image_as_over_its_tree)
+{
+    char base[512], out[512], mod[512], img_path[1024];
+    const char *const mf[] = { "a.txt", "mod a", "sub/deep/new.txt", "mod new", "added/z", "mod z", NULL };
+    rl_romfs_layer layers[2];
+    rl_romfs_image *tree, *img;
+    warns wt, wi;
+    uint8_t *bytes;
+    make_root(base, sizeof base);
+    make_root(out, sizeof out);
+    make_root(mod, sizeof mod);
+    make_tree(base);
+    layer_tree(mod, mf);
+    tree = rl_romfs_image_open(base);
+    bytes = image_bytes(tree);
+    snprintf(img_path, sizeof img_path, "%s/romfs.img", out);
+    write_at(img_path, bytes, (size_t)rl_romfs_image_size(tree), false);
+    rl_romfs_image_close(tree);
+    free(bytes);
+    memset(&wt, 0, sizeof wt);
+    memset(&wi, 0, sizeof wi);
+    layers[0] = (rl_romfs_layer) { "base", base, true };
+    layers[1] = (rl_romfs_layer) { "mod", mod, false };
+    tree = rl_romfs_image_open_layers(layers, 2, on_conflict, &wt);
+    layers[0].root = img_path;
+    img = rl_romfs_image_open_layers(layers, 2, on_conflict, &wi);
+    CHECK(img != NULL);
+    CHECK(same_image(tree, img));
+    CHECK_EQ(rl_romfs_image_file_count(img), 47);
+    CHECK_EQ(wt.n, wi.n);
+    rl_romfs_image_close(tree);
+    rl_romfs_image_close(img);
+    tree_remove(base);
+    tree_remove(out);
+    tree_remove(mod);
+}
+
+TEST(romfs_addon_from_an_image_file)
+{
+    env e = boot();
+    tc_obj a;
+    image ia;
+    char src[512], dlc[512], dir[700], img_path[800];
+    const uint64_t id = 0x0100000000001003ull;
+    rl_romfs_image *tree;
+    uint8_t *bytes;
+    uint64_t ids[4];
+    make_root(src, sizeof src);
+    make_root(dlc, sizeof dlc);
+    write_file(src, "pack.dat", "image add-on", 12);
+    tree = rl_romfs_image_open(src);
+    bytes = image_bytes(tree);
+    snprintf(dir, sizeof dir, "%s/%016llx", dlc, (unsigned long long)id);
+    mkdir(dir, 0777);
+    strcat(dir, "/0");
+    mkdir(dir, 0777);
+    snprintf(img_path, sizeof img_path, "%s/romfs.img", dir);
+    write_at(img_path, bytes, (size_t)rl_romfs_image_size(tree), false);
+    rl_romfs_image_close(tree);
+    free(bytes);
+    rl_hos_fs_set_addons(dlc);
+    CHECK_EQ(rl_hos_fs_addon_ids(ids, 4), 1);
+    CHECK_EQ(ids[0], id);
+    CHECK_EQ(open_data_id(&e, id, &a), 0);
+    CHECK(image_open(&ia, &e, a));
+    CHECK(image_has(&ia, "pack.dat", "image add-on"));
+    image_close(&ia);
+    rl_hos_fs_set_addons(NULL);
+    tree_remove(src);
+    tree_remove(dlc);
 }

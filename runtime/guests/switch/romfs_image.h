@@ -1,10 +1,22 @@
 /**
  * @file romfs_image.h
- * @brief A byte-exact RomFS image synthesized from an extracted tree: the
- * header and metadata tables are built in memory when the tree is opened and
- * file data is read from the host files on demand, so a game with many
- * gigabytes of data needs only the metadata in memory and no second copy on
- * disk.
+ * @brief The RomFS image a game reads, from one of three sources:
+ *
+ * - an extracted tree: the header and metadata tables are built in memory
+ *   when the tree is opened and file data is read from the host files on
+ *   demand, so a game with many gigabytes of data needs only the metadata in
+ *   memory and no second copy on disk;
+ * - a plain image file (relift's romfs.img), possibly at an offset inside a
+ *   larger file, served as it is with positioned reads;
+ * - a RomFS map (relift's romfs.map, "RLRFMAP1"): the metadata of an image and
+ *   the places in other host files (a .nup, a blob of decompressed files)
+ *   where each file's data already is. Its format is described in
+ *   guests/switch/formats/src/romfs_image.rs. Every source it names is
+ *   checked by size and by 32 recorded bytes when the map is opened.
+ *
+ * The image and map sources take one host file descriptor per file and no
+ * directory scan, so opening a game with hundreds of thousands of files costs
+ * the same as opening one.
  *
  * The layout follows the RomFS format as libnn reads it: a 0x50 byte header,
  * the directory and file hash tables, the directory and file metadata, then
@@ -25,17 +37,25 @@ typedef struct rl_romfs_image rl_romfs_image;
 #define RL_ROMFS_RANGE (-1)
 
 /**
- * @brief Scans the extracted tree at root and builds the metadata. Returns
- * NULL with errno set when the directory cannot be read or is too large for
- * the format.
+ * @brief Opens root: an extracted tree (scanned, metadata built), a plain
+ * image file or a RomFS map. Returns NULL with errno set when it cannot be
+ * read, is malformed (EINVAL), names a source that changed (ESTALE) or is too
+ * large for the format.
  */
 rl_romfs_image *rl_romfs_image_open(const char *root);
+
+/**
+ * @brief Opens the plain image of length bytes at offset in the file at path
+ * (length 0: to the end of the file), or with offset and length 0 a RomFS map.
+ * Returns NULL with errno set as rl_romfs_image_open does.
+ */
+rl_romfs_image *rl_romfs_image_open_file(const char *path, uint64_t offset, uint64_t length);
 
 /** @brief One tree of a layered image. */
 typedef struct rl_romfs_layer {
     /** @brief Name used in conflict reports; NULL uses root. */
     const char *name;
-    /** @brief Extracted tree. */
+    /** @brief Extracted tree, plain image file or RomFS map. */
     const char *root;
     /** @brief True for the base tree: replacing its files is not a conflict. */
     bool base;
@@ -52,7 +72,8 @@ typedef void (*rl_romfs_conflict_fn)(void *user, const char *path, const char *w
  * @brief Builds one image from layers in order, later layers in front: for a
  * name two layers both provide, the later one wins per file and directories
  * merge. The result is byte-exact for the merged tree, and with one layer
- * equals rl_romfs_image_open. Returns NULL with errno set as rl_romfs_image_open does.
+ * equals rl_romfs_image_open (one image or map layer is served as it is).
+ * Returns NULL with errno set as rl_romfs_image_open does.
  */
 rl_romfs_image *rl_romfs_image_open_layers(const rl_romfs_layer *layers, size_t n, rl_romfs_conflict_fn warn,
                                            void *user);

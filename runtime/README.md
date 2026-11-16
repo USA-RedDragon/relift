@@ -226,17 +226,25 @@ program that names an app keeps saves in `<user folder>/save`; otherwise
 | `RELIFT_HOST_PAGE=16384` | Manage guest memory in 16 KiB host pages on a 4 KiB host, to test the Apple and Android policy |
 | `RELIFT_SDMC=<dir>` | Host directory served as the SD card (`./sdmc`, created when missing) |
 | `RELIFT_SAVE=<dir>` | The `save.dir` setting. Host directory that holds save data (`./save`): `<program id>/user-<uid>` for account saves, `device`, `bcat`, `temporary` and `cache-<index>` for the other kinds, each created on first open. A mount works on a copy; `Commit` swaps the copy in atomically, and a mount closed without `Commit` loses its writes |
-| `RELIFT_ROMFS=<dir>` | Extracted romfs tree served as the program's data storage (`relift run` sets it from the import) |
+| `RELIFT_ROMFS=<path>` | The program's data storage: a RomFS map (`romfs.map`, reading the files in place in a `.nup`), a plain RomFS image (`romfs.img`) or an extracted romfs tree (`relift run` sets it from the import) |
 | `RELIFT_MODS=<list>` | Ordered run-time data mods, `:` separated (`;` on Windows), later wins: Atmosphere `contents/<title id>` folders (or a folder holding `contents/`) and Ryujinx mod folders (or a `mods` folder of them), each with `romfs/` and `cheats/<build id>.txt`. Romfs files layer in front of the base tree (conflicts warn, naming the winner); dmnt cheats run each guest frame (a buffer queued to vi or a Vulkan present). Cheats that write lifted code are reported as needing a rebuild |
-| `RELIFT_DLC=<dir>` | Add-on content trees, `<16 hex digit add-on id>/<index>/romfs` (`relift run` sets it from the import) |
+| `RELIFT_DLC=<dir>` | Add-on content, `<16 hex digit add-on id>/<index>/` holding `romfs.map`, `romfs.img` or a `romfs/` tree (`relift run` sets it from the import) |
 | `RELIFT_DEV_SOCKET=<path>` | Dev builds (`-DRL_HOTLOAD`, made by `relift run`): the socket of relift's dev server, which builds a library for each missed address (docs/abi.md section 6). `relift run` sets it; a dev build without it stops at the first miss with exit status 70 |
 | `RELIFT_ADDRESS_BITS=36` | Ask the guest layer for this address width. The Switch guest accepts 36 and 39 and uses the 36-bit layout even when the NPDM asks for 39 bits (the fallback when the host cannot reserve 2^39 bytes) |
 
 ## Data storage
 
 fsp-srv serves the program's romfs (commands 200 to 202) as a read-only
-`IStorage` over one RomFS image that `guests/switch/romfs_image.c` builds
-in memory from the extracted tree when the guest first opens the storage:
+`IStorage` over one RomFS image (`guests/switch/romfs_image.c`). A plain
+image file is served as it is with positioned reads. A RomFS map, which
+`relift import` writes for a `.nup`, holds the image's metadata and where
+each file's data is in other host files (the `.nup` itself, and a blob of
+the files the `.nup` stores zstd compressed); every file it reads is checked
+by size and 32 recorded bytes when it opens, so a changed dump fails with a
+message instead of serving wrong bytes. Either opens with one or two file
+descriptors and no directory scan, whatever the number of files in the
+romfs. From an extracted tree the image is built
+in memory when the guest first opens the storage:
 the 0x50 byte header, the directory and file hash tables and metadata
 (entries sorted by name, the name hash libnn uses) and the file data at
 0x200-aligned offsets. Only the metadata is held in memory; file data is

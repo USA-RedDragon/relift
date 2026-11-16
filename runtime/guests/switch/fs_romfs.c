@@ -1,7 +1,8 @@
 /**
  * @file fs_romfs.c
  * @brief The data storages of fsp-srv: the program's RomFS and add-on content
- * as read-only IStorage objects over synthesized RomFS images.
+ * as read-only IStorage objects over RomFS images (romfs_image.h). An add-on
+ * is <root>/<id>/0/ holding romfs.map, romfs.img or a romfs/ tree.
  *
  * Commands 200 to 203 of IFileSystemProxy and the IStorage commands follow
  * switchbrew.org (Filesystem services) and libnx (ISC) fs_sf.h, read as
@@ -21,6 +22,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
+
+#include "hostio.h"
 
 /** @brief Largest piece moved between an image and guest memory in one step. */
 #define STORAGE_CHUNK 0x100000u
@@ -112,6 +116,19 @@ void rl_hos_fs_set_addons(const char *dir)
     pthread_mutex_unlock(&g_lock);
 }
 
+static bool addon_path(const char *root, const char *id, char *out, size_t n)
+{
+    static const char *const names[] = { "romfs.map", "romfs.img", "romfs" };
+    struct stat st;
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        if (snprintf(out, n, "%s/%s/0/%s", root, id, names[i]) >= (int)n || stat(out, &st) != 0)
+            continue;
+        if (i < 2 ? S_ISREG(st.st_mode) : S_ISDIR(st.st_mode))
+            return true;
+    }
+    return false;
+}
+
 static int id_cmp(const void *a, const void *b)
 {
     uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
@@ -143,7 +160,6 @@ size_t rl_hos_fs_addon_ids(uint64_t *out, size_t cap)
     char root[PATH_MAX];
     char path[PATH_MAX];
     struct dirent *de;
-    struct stat st;
     uint64_t *ids = NULL;
     size_t n = 0, alloc = 0;
     DIR *d;
@@ -155,8 +171,7 @@ size_t rl_hos_fs_addon_ids(uint64_t *out, size_t cap)
         uint64_t id;
         if (!parse_id(de->d_name, &id))
             continue;
-        if (snprintf(path, sizeof path, "%s/%s/0/romfs", root, de->d_name) >= (int)sizeof path ||
-            stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+        if (!addon_path(root, de->d_name, path, sizeof path))
             continue;
         if (n == alloc) {
             uint64_t *grown = realloc(ids, (alloc ? alloc * 2 : 16) * sizeof *ids);
@@ -195,9 +210,22 @@ static rl_romfs_image *source_image(source *s, rl_result *rc)
     }
     if (!s->tried) {
         s->tried = true;
+        const char *what = s->nlayers ? s->layers[0].root : s->dir;
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
         s->img = s->nlayers ? rl_romfs_image_open_layers(s->layers, s->nlayers, s->warn, s->warn_user)
                             : rl_romfs_image_open(s->dir);
         s->err = s->img ? 0 : errno;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        if (s->img)
+            rl_log(RL_LOG_INFO, "fs", "romfs %s: %u files, %llu MiB, opened in %lld ms", what,
+                   rl_romfs_image_file_count(s->img), (unsigned long long)(rl_romfs_image_size(s->img) >> 20),
+                   (long long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
+        else if (s->err == ESTALE)
+            rl_log(RL_LOG_ERROR, "fs", "romfs %s: a file it reads changed since the import; import the game again",
+                   what);
+        else if (s->err != ENOENT)
+            rl_log(RL_LOG_ERROR, "fs", "romfs %s: %s", what, strerror(s->err));
     }
     if (!s->img)
         *rc = open_error(s->err);
@@ -214,7 +242,9 @@ static source *addon_source(uint64_t id)
     for (size_t i = 0; i < g_naddons; i++)
         if (g_addons[i]->id == id)
             return g_addons[i];
-    if (snprintf(dir, sizeof dir, "%s/%016llx/0/romfs", g_addon_root, (unsigned long long)id) >= (int)sizeof dir)
+    char name[17];
+    snprintf(name, sizeof name, "%016llx", (unsigned long long)id);
+    if (!addon_path(g_addon_root, name, dir, sizeof dir))
         return NULL;
     s = calloc(1, sizeof *s);
     grown = s ? realloc(g_addons, (g_naddons + 1) * sizeof *grown) : NULL;

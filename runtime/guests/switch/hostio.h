@@ -20,6 +20,9 @@
 #ifndef EDQUOT
 #define EDQUOT (-1000)
 #endif
+#ifndef ESTALE
+#define ESTALE (-1001)
+#endif
 
 #define off_t int64_t
 #define stat _stat64
