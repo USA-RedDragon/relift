@@ -109,6 +109,8 @@ struct rl_nds {
     uint8_t vramcnt[10];
     /** @brief The ARM7 wrote HALTCNT: the store ends in a halt. */
     bool halt_req;
+    /** @brief The CPU waits in rl_nds_halt. */
+    bool halted[2];
 
     nds_irq irq[2];
     nds_ipc ipc;
@@ -144,6 +146,17 @@ static inline uint64_t nds_now(const rl_nds *m, unsigned cpu) { return m->cpu[cp
 /** @brief Charges ticks to cpu (an ARM7 charge is rounded up to whole cycles). */
 void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks);
 
+/** @brief The ARM9's TCM byte at addr for this kind of access, or NULL when the access goes to the bus (ITCM over DTCM; load mode sends reads to the bus). */
+static inline uint8_t *nds_tcm(rl_nds *m, uint32_t addr, bool code, bool write)
+{
+    const rl_arm32_tcm *t = &m->tcm;
+    if (t->itcm_on && addr < t->itcm_size && (write || !t->itcm_load))
+        return &m->itcm[addr & (RL_CP15_ITCM_SIZE - 1)];
+    if (!code && t->dtcm_on && (uint64_t)(addr - t->dtcm_base) < t->dtcm_size && (write || !t->dtcm_load))
+        return &m->dtcm[addr & (RL_CP15_DTCM_SIZE - 1)];
+    return NULL;
+}
+
 /** @brief Decodes addr (aligned) for cpu; code true for an instruction fetch, write for a store. */
 nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write);
 /** @brief Rebuilds the GBA slot rows of the cost table from EXMEMCNT. */
@@ -177,6 +190,17 @@ void nds_ipc_reset(rl_nds *m);
 uint32_t nds_ipc_read(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now);
 /** @brief A write of the mask bits of v to IPCSYNC, IPCFIFOCNT or IPCFIFOSEND. */
 void nds_ipc_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+
+/** @brief True when cpu's bus access at addr reaches state the other CPU shares (rl_nds_ordered without the TCMs). */
+bool nds_shared(unsigned cpu, uint32_t addr);
+/** @brief Waits until the other CPU is past cpu in the order (rl_sched_order); nothing before rl_nds_attach. */
+void nds_order(rl_nds *m, unsigned cpu);
+/** @brief Sets the CPUs' ranks from EXMEMCNT bit 15. */
+void nds_ranks(rl_nds *m);
+/** @brief Raises or lowers cpu's wake line after IE & IF changed; a halted CPU's clock moves to the wake tick. */
+void nds_wake_line(rl_nds *m, unsigned cpu);
+/** @brief Routes the wake lines and sets the masks and ranks. */
+int nds_order_attach(rl_nds *m);
 
 /** @brief The scheduler address of cpu's I/O address addr: the ARM7's registers sit 4 GiB above the ARM9's. */
 static inline uint64_t nds_io_key(unsigned cpu, uint32_t addr) { return (uint64_t)cpu << 32 | addr; }

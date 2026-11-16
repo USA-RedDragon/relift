@@ -2,7 +2,8 @@
  * @file irq.c
  * @brief The interrupt controller of each CPU: IME, IE and IF (acknowledged
  * by writing 1), the IRQ input that rises NDS_IRQ_DELAY ticks after a
- * request meets IME and IE, and the wake condition IE & IF.
+ * request meets IME and IE, and the wake condition IE & IF (the scheduler
+ * line that ends a halt, order.c).
  *
  * Fresh C from GBATEK ("DS Interrupts"). The delay of the IRQ input is the
  * spike's two ticks, not measured on a console yet.
@@ -19,6 +20,7 @@ void nds_irq_update(rl_nds *m, unsigned cpu, uint64_t tick)
 {
     nds_irq *q = &m->irq[cpu];
     uint32_t hit = q->ie & q->iflag;
+    bool woke = q->wake_at != NDS_NEVER;
     if (q->ime && hit) {
         if (q->line_at == NDS_NEVER)
             q->line_at = tick + NDS_IRQ_DELAY;
@@ -31,6 +33,8 @@ void nds_irq_update(rl_nds *m, unsigned cpu, uint64_t tick)
     } else {
         q->wake_at = NDS_NEVER;
     }
+    if (woke != (q->wake_at != NDS_NEVER))
+        nds_wake_line(m, cpu);
 }
 
 void nds_irq_set(rl_nds *m, unsigned cpu, uint32_t bits, uint64_t tick)

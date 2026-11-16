@@ -9,7 +9,8 @@
 ndst *ndst_new(void)
 {
     static ndst t;
-    t.s = rl_sched_create(NULL);
+    rl_sched_config cfg = {.ordered = true};
+    t.s = rl_sched_create(&cfg);
     t.k[RL_NDS_ARM9] = rl_sched_add_cpu(t.s, 1);
     t.k[RL_NDS_ARM7] = rl_sched_add_cpu(t.s, 2);
     t.m = rl_nds_create();

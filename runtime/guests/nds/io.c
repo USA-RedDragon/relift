@@ -39,6 +39,7 @@ static void exmem_write(rl_nds *m, unsigned cpu, uint16_t v, uint16_t mask)
     if (cpu == RL_NDS_ARM9) {
         uint16_t shared = mask & 0xE880;
         m->exmem[RL_NDS_ARM9] = (uint16_t)((m->exmem[RL_NDS_ARM9] & ~shared) | (v & shared));
+        nds_ranks(m);
     }
     nds_costs_rebuild(m);
 }

@@ -83,11 +83,20 @@ rl_nds *rl_nds_create(void);
 /** @brief Frees the machine. */
 void rl_nds_destroy(rl_nds *m);
 
+/** @brief The scheduler line that ends a halt of the ARM9 (IE & IF not zero); a CPU layer keeps it in the CPU's mask whatever its I bit. */
+#define RL_NDS_LINE_WAKE9 0u
+/** @brief The ARM7's wake line. */
+#define RL_NDS_LINE_WAKE7 1u
+
 /**
  * @brief Adds the machine's devices to s, maps each CPU's I/O registers and
- * binds the two CPUs: arm9 must count one tick per cycle and arm7 two.
- * Returns 0, or -1 when m is attached already, a CPU is missing or s cannot
- * take the devices.
+ * binds the two CPUs: arm9 must count one tick per cycle and arm7 two, both
+ * spawned on fibers (rl_sched_spawn) when they run timed code. s must be
+ * created with rl_sched_config.ordered set, so that the CPUs agree on the
+ * order of their shared accesses (rl_sched_order). Routes the wake lines,
+ * sets the CPUs' masks to them and their ranks from EXMEMCNT. Returns 0, or
+ * -1 when m is attached already, a CPU is missing or s cannot take the
+ * devices.
  */
 int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7);
 /** @brief The scheduler CPU of cpu (RL_NDS_ARM9 or RL_NDS_ARM7), or NULL before rl_nds_attach. */
@@ -103,8 +112,10 @@ uint64_t rl_nds_now(const rl_nds *m, unsigned cpu);
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq);
 /**
  * @brief A data read of size bytes (1, 2 or 4) at addr, aligned down; seq
- * true for the second and later words of LDM. Stalls on a busy main RAM,
- * charges the cost and returns the value, zero-extended.
+ * true for the second and later words of LDM. Waits for the other CPU when
+ * the access is ordered (rl_nds_ordered), stalls on a busy main RAM,
+ * charges the cost and returns the value, zero-extended. A store to the
+ * ARM7's HALTCNT that asks for a halt ends in rl_nds_halt.
  */
 uint32_t rl_nds_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq);
 /** @brief The write twin of rl_nds_load. */
@@ -113,9 +124,9 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
 void rl_nds_idle(rl_nds *m, unsigned cpu, unsigned ticks);
 
 /**
- * @brief True when a data access of cpu at addr reaches state the other CPU
- * shares: I/O, shared work RAM, main RAM, the GBA slot and the ARM7's video
- * RAM window. The ARM9's TCMs, video RAM, palette and OAM, the ARM7's
+ * @brief True when a data access of cpu at addr is ordered against the
+ * other CPU (it reaches state the other CPU shares): I/O, shared work RAM,
+ * main RAM, the GBA slot and the ARM7's video RAM window. The ARM9's TCMs, video RAM, palette and OAM, the ARM7's
  * own work RAM and both BIOS regions are private.
  */
 bool rl_nds_ordered(const rl_nds *m, unsigned cpu, uint32_t addr);
@@ -169,6 +180,24 @@ void rl_nds_request_irq(rl_nds *m, unsigned cpu, uint32_t sources);
 bool rl_nds_irq_line(const rl_nds *m, unsigned cpu);
 /** @brief The tick from which cpu's IRQ input is asserted, or UINT64_MAX while it is not. */
 uint64_t rl_nds_irq_at(const rl_nds *m, unsigned cpu);
+
+/**
+ * @brief HALT of cpu (the ARM7's HALTCNT, the ARM9's wait for interrupt):
+ * ordered like an I/O access; unless IE & IF is set already, cpu leaves the
+ * order and the other CPU and the events run until a request wakes it. Its
+ * clock then reads the later of its own tick and the request's tick plus
+ * the IRQ delay. Returns true when woken, false when nothing could wake it
+ * (the other CPU is gone and no event is queued).
+ */
+bool rl_nds_halt(rl_nds *m, unsigned cpu);
+/**
+ * @brief The interrupt check of a block boundary, for a CPU whose I bit is
+ * clear: when IME and IE could let an interrupt in, waits for the other CPU
+ * (rl_sched_order) and runs the events due, then returns true when the IRQ
+ * input is asserted at cpu's tick. An interrupt therefore arrives at the
+ * first block boundary at or after its tick.
+ */
+bool rl_nds_irq_poll(rl_nds *m, unsigned cpu);
 
 /** @brief Kinds of access in the cost table. */
 enum {

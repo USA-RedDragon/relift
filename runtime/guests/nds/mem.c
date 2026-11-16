@@ -52,11 +52,9 @@ static nds_where at(uint8_t *p, bool main)
 
 static nds_where decode9(rl_nds *m, uint32_t addr, bool code, bool write)
 {
-    const rl_arm32_tcm *t = &m->tcm;
-    if (t->itcm_on && addr < t->itcm_size && (write || !t->itcm_load))
-        return (nds_where){.p = &m->itcm[addr & (RL_CP15_ITCM_SIZE - 1)], .kind = NDS_K_MEM, .tcm = true};
-    if (!code && t->dtcm_on && (uint64_t)(addr - t->dtcm_base) < t->dtcm_size && (write || !t->dtcm_load))
-        return (nds_where){.p = &m->dtcm[addr & (RL_CP15_DTCM_SIZE - 1)], .kind = NDS_K_MEM, .tcm = true};
+    uint8_t *tcm = nds_tcm(m, addr, code, write);
+    if (tcm)
+        return (nds_where){.p = tcm, .kind = NDS_K_MEM, .tcm = true};
     switch (addr >> 24) {
     case 0x02:
         return at(&m->main[addr & (RL_NDS_MAIN_SIZE - 1)], true);
@@ -110,20 +108,26 @@ nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool wri
     return cpu == RL_NDS_ARM9 ? decode9(m, addr, code, write) : decode7(m, addr);
 }
 
-bool rl_nds_ordered(const rl_nds *m, unsigned cpu, uint32_t addr)
+bool nds_shared(unsigned cpu, uint32_t addr)
 {
     unsigned r = addr >> 24;
+    if (cpu == RL_NDS_ARM9)
+        return (r >= 0x02 && r <= 0x04) || (r >= 0x08 && r <= 0x0A);
+    if (r == 0x03)
+        return addr < 0x03800000u;
+    return r == 0x02 || r == 0x04 || r == 0x06 || (r >= 0x08 && r <= 0x0A);
+}
+
+bool rl_nds_ordered(const rl_nds *m, unsigned cpu, uint32_t addr)
+{
     if (cpu == RL_NDS_ARM9) {
         const rl_arm32_tcm *t = &m->tcm;
         if (t->itcm_on && addr < t->itcm_size)
             return false;
         if (t->dtcm_on && (uint64_t)(addr - t->dtcm_base) < t->dtcm_size)
             return false;
-        return (r >= 0x02 && r <= 0x04) || (r >= 0x08 && r <= 0x0A);
     }
-    if (r == 0x03)
-        return addr < 0x03800000u;
-    return r == 0x02 || r == 0x04 || r == 0x06 || (r >= 0x08 && r <= 0x0A);
+    return nds_shared(cpu, addr);
 }
 
 uint32_t nds_slot_read(const rl_nds *m, unsigned cpu, uint32_t addr, unsigned size)
@@ -234,7 +238,7 @@ int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7
     m->sched = s;
     m->cpu[RL_NDS_ARM9] = arm9;
     m->cpu[RL_NDS_ARM7] = arm7;
-    if (nds_io_attach(m) != 0) {
+    if (nds_io_attach(m) != 0 || nds_order_attach(m) != 0) {
         m->sched = NULL;
         m->cpu[0] = m->cpu[1] = NULL;
         return -1;

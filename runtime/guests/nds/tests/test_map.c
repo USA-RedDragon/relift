@@ -88,6 +88,7 @@ TEST(tcms_come_from_cp15_with_itcm_priority_and_load_mode)
 {
     ndst *t = ndst_new();
     rl_nds *m = t->m;
+    ndst_to(t, RL_NDS_ARM7, 1000);
     w9(t, 0x027C0000u, 4, 0x0BADF00Du);
     w9(t, 0x00000000u, 4, 0xDEADu);
     CHECK_EQ(r9(t, 0x00000000u, 4), 0);
@@ -224,12 +225,13 @@ TEST(costs_follow_gbatek_and_charge_the_clock)
     CHECK_EQ(c->t[RL_NDS_ARM7][RL_NDS_DATA][0x0A][0][0], 18);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x0A][0][1], 20);
     w9(t, 0x04000204u, 2, 0x001Au);
+    ndst_to(t, RL_NDS_ARM7, 1000);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x08][1][0], 18);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x08][1][1], 8);
     CHECK_EQ(c->t[RL_NDS_ARM9][RL_NDS_DATA][0x0A][0][0], 18);
 
     rl_nds_load(m, RL_NDS_ARM7, 0x03800000u, 4, false);
-    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 2);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 1002);
     rl_nds_idle(m, RL_NDS_ARM9, 3);
     rl_nds_load(m, RL_NDS_ARM9, 0x04000130u, 2, false);
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 4 + 8);
@@ -243,6 +245,7 @@ TEST(tcm_accesses_cost_one_arm9_cycle_off_the_bus)
 {
     ndst *t = ndst_new();
     rl_nds *m = t->m;
+    ndst_to(t, RL_NDS_ARM7, 1000);
     rl_nds_cp15_write(m, RL_CP15_KEY(0, 9, 1, 1), 0x0C);
     rl_nds_cp15_write(m, RL_CP15_KEY(0, 1, 0, 0), rl_nds_cp15(m)->control | RL_CP15_ITCM_ON);
     rl_nds_store(m, RL_NDS_ARM9, 0x100u, 4, 7, false);
@@ -263,6 +266,7 @@ TEST(main_ram_serves_one_cpu_at_a_time)
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 40);
     rl_nds_load(m, RL_NDS_ARM7, 0x03800000u, 4, false);
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 42);
+    ndst_to(t, RL_NDS_ARM7, 200);
     ndst_to(t, RL_NDS_ARM9, 100);
     rl_nds_store(m, RL_NDS_ARM9, 0x02000000u, 2, 1, true);
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 102);

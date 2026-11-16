@@ -1,8 +1,10 @@
 /**
  * @file ndst.h
  * @brief The test fixture of the NDS machine: a machine attached to a
- * scheduler with the two CPUs (ratios 1 and 2), driven from the test's own
- * host thread by moving the CPUs' clocks.
+ * scheduler in ordered mode with the two CPUs (ratios 1 and 2), driven from
+ * the test's own host thread by moving the CPUs' clocks. A timed ordered
+ * access from the host thread must not need to wait (the other CPU has no
+ * fiber to run): keep the other CPU's clock ahead.
  */
 #ifndef RELIFT_NDS_NDST_H
 #define RELIFT_NDS_NDST_H
