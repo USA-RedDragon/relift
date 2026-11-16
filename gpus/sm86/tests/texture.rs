@@ -1,0 +1,225 @@
+use relift_gpu_sm86::program::Program;
+use relift_gpu_sm86::translate::{
+    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
+    texture_binding, translate,
+};
+
+fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
+    let mut w: u128 =
+        u128::from(op) | (u128::from(form) << 9) | (7u128 << 12) | (7u128 << 110) | (7u128 << 113);
+    for &(lo, len, v) in fields {
+        let m = ((1u128 << len) - 1) << lo;
+        w = (w & !m) | ((u128::from(v) << lo) & m);
+    }
+    w.to_le_bytes()
+}
+
+fn exit_and_halt(code: &mut Vec<u8>) {
+    code.extend(word(0x14d, 4, &[(87, 3, 7)]));
+    code.extend(word(0x147, 4, &[(34, 48, 0xffff_ffff_fffc), (87, 3, 7)]));
+}
+
+fn sph_fragment() -> Vec<u8> {
+    let mut w = [0u32; 32];
+    w[0] = 2 | (4 << 5) | (5 << 10);
+    w[18] = 0xf;
+    w.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+fn mov(rd: u64, imm: u64) -> [u8; 16] {
+    word(0x002, 4, &[(16, 8, rd), (32, 32, imm), (72, 4, 0xf)])
+}
+
+/// A texture instruction: opcode `op` (0x160 TEX, 0x163 TLD4, 0x166 TLD,
+/// 0x169 TMML, 0x16c TXD, 0x16f TXQ) bound to `c[3]` byte 0x10, Rd R0,
+/// Rd2 R2, Ra R8, Rb R4.
+fn tex(op: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
+    let mut f = vec![
+        (16, 8, 0),
+        (64, 8, 2),
+        (24, 8, 8),
+        (32, 8, 4),
+        (40, 14, 4),
+        (54, 5, 3),
+        (72, 4, 0xf),
+        (81, 3, 7),
+        (84, 3, 1),
+    ];
+    f.extend_from_slice(fields);
+    word(op, 5, &f)
+}
+
+fn insts(words: &[u32], opcode: u32) -> Vec<Vec<u32>> {
+    let mut out = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        let n = ((words[k] >> 16) as usize).max(1);
+        if words[k] & 0xffff == opcode {
+            out.push(words[k..k + n].to_vec());
+        }
+        k += n;
+    }
+    out
+}
+
+fn compute(body: &[[u8; 16]]) -> relift_gpu_sm86::translate::Shader {
+    let mut b = Vec::new();
+    for w in body {
+        b.extend(w);
+    }
+    exit_and_halt(&mut b);
+    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[test]
+fn bound_texture_uses_the_pools() {
+    let s = compute(&[tex(0x160, &[(60, 1, 1), (61, 3, 1), (87, 3, 1)])]);
+    assert!(s.interface.textures.contains(&(3, 16)));
+    assert_eq!(
+        s.interface.texture_kinds.get(&(3, 16)),
+        Some(&TEXTURE_KIND_SPEC)
+    );
+    for b in [
+        SAMPLER_BINDING,
+        texture_binding(Kind::Float, Dim::D2),
+        texture_binding(Kind::Sint, Dim::D2),
+        texture_binding(Kind::Uint, Dim::D2),
+    ] {
+        assert!(s.interface.texture_bindings.contains(&b), "binding {b}");
+    }
+    assert_eq!(insts(&s.spirv, 88).len(), 3);
+    assert!(!insts(&s.spirv, 52).is_empty());
+}
+
+#[test]
+fn depth_compare_reads_floats_only() {
+    let s = compute(&[tex(
+        0x160,
+        &[(60, 1, 1), (61, 3, 5), (78, 1, 1), (87, 3, 1)],
+    )]);
+    assert!(s.interface.texture_kinds.is_empty());
+    assert_eq!(insts(&s.spirv, 90).len(), 1);
+}
+
+#[test]
+fn bindless_index_is_non_uniform() {
+    let mut w = tex(0x161, &[(59, 1, 1), (61, 3, 1), (87, 3, 1)]);
+    w[1] = (w[1] & !0x0e) | (1 << 1);
+    let s = compute(&[w]);
+    assert!(s.interface.textures.is_empty());
+    let decos = insts(&s.spirv, 71);
+    assert!(decos.iter().any(|d| d.get(2) == Some(&5300)));
+}
+
+#[test]
+fn constant_offsets_stay_constant() {
+    let s = compute(&[
+        mov(4, 0xf1),
+        tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)]),
+    ]);
+    let samples = insts(&s.spirv, 88);
+    assert!(samples.iter().all(|i| i[5] & 8 != 0));
+}
+
+#[test]
+fn run_time_offsets_move_the_coordinates() {
+    let s = compute(&[tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)])]);
+    assert!(insts(&s.spirv, 88).iter().all(|i| i[5] & 0x18 == 0));
+    assert!(!insts(&s.spirv, 103).is_empty());
+}
+
+#[test]
+fn fetch_gather_and_queries() {
+    let s = compute(&[
+        tex(0x166, &[(61, 3, 5), (87, 3, 3)]),
+        tex(0x163, &[(61, 3, 1), (76, 2, 2), (87, 2, 1)]),
+        tex(0x16f, &[(62, 2, 0)]),
+        tex(0x16c, &[(61, 3, 1)]),
+        tex(0x169, &[(61, 3, 1)]),
+    ]);
+    assert_eq!(insts(&s.spirv, 95).len(), 3);
+    assert_eq!(insts(&s.spirv, 96).len(), 12);
+    assert!(!insts(&s.spirv, 103).is_empty());
+    assert!(!insts(&s.spirv, 106).is_empty());
+    assert!(insts(&s.spirv, 105).is_empty());
+    assert!(
+        s.interface
+            .texture_bindings
+            .contains(&texture_binding(Kind::Uint, Dim::Array2))
+    );
+}
+
+#[test]
+fn fragment_queries_the_lod() {
+    let mut b = sph_fragment();
+    b.extend(tex(0x169, &[(61, 3, 3)]));
+    b.extend(tex(0x160, &[(61, 3, 1), (87, 3, 2)]));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(insts(&s.spirv, 105).len(), 1);
+    let implicit = insts(&s.spirv, 87);
+    assert_eq!(implicit.len(), 3);
+    assert!(implicit.iter().all(|i| i[5] == 1));
+}
+
+#[test]
+fn half_results_pack_in_pairs() {
+    let s = compute(&[tex(0x160, &[(61, 3, 1), (79, 2, 1), (87, 3, 1)])]);
+    assert!(!insts(&s.spirv, 196).is_empty());
+}
+
+#[test]
+fn surfaces_are_storage_images() {
+    let sust = word(
+        0xb9b,
+        0,
+        &[
+            (24, 8, 8),
+            (32, 8, 4),
+            (40, 14, 0x12),
+            (54, 5, 2),
+            (59, 2, 0),
+            (61, 3, 3),
+            (72, 4, 0xf),
+            (84, 3, 1),
+        ],
+    );
+    let suld = word(
+        0xb99,
+        0,
+        &[
+            (16, 8, 0),
+            (24, 8, 8),
+            (40, 14, 0x13),
+            (54, 5, 2),
+            (59, 2, 0),
+            (61, 3, 3),
+            (72, 1, 1),
+            (73, 3, 4),
+            (81, 3, 7),
+            (84, 3, 1),
+        ],
+    );
+    let s = compute(&[sust, suld]);
+    assert_eq!(insts(&s.spirv, 99).len(), 3);
+    assert_eq!(insts(&s.spirv, 98).len(), 1);
+    assert!(
+        s.interface
+            .texture_bindings
+            .contains(&image_binding(ImageKind::Raw32, ImageDim::D2))
+    );
+    assert!(s.interface.textures.contains(&(2, 0x48)));
+}
+
+#[test]
+fn rejects_texture_forms_it_cannot_translate() {
+    for w in [
+        tex(0x166, &[(61, 3, 1), (77, 1, 1), (87, 3, 1)]),
+        tex(0x16f, &[(62, 2, 2)]),
+        tex(0x16c, &[(61, 3, 1), (87, 1, 1)]),
+    ] {
+        let mut b = w.to_vec();
+        exit_and_halt(&mut b);
+        assert!(translate(&Program::parse(&b)).is_err());
+    }
+}

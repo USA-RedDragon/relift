@@ -13,6 +13,11 @@ mod io;
 mod mem;
 mod tex;
 
+pub use tex::{
+    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
+    texture_binding,
+};
+
 use crate::program::{Program, Stage};
 use crate::spirv::{Module, glsl, op};
 use crate::{CBank, Inst, Operand, RegMods, Word};
@@ -69,6 +74,11 @@ pub struct Interface {
     pub local_bytes: u32,
     /// Texture handle reads: (bank, byte offset) of each bound handle.
     pub textures: BTreeSet<(u32, u32)>,
+    /// Bindings of set [`TEXTURE_SET`] the program declares.
+    pub texture_bindings: BTreeSet<u32>,
+    /// Specialization constant id per bound handle whose texture's numeric
+    /// kind the runtime picks (see [`Kind`]).
+    pub texture_kinds: BTreeMap<(u32, u32), u32>,
 }
 
 /// A translated program.
@@ -125,6 +135,7 @@ pub(crate) struct Ctx {
     pub word: Word,
     pub pc: u64,
     pub sph_words: [u32; 32],
+    pub tex: tex::Prep,
 }
 
 impl Ctx {
@@ -549,6 +560,7 @@ pub fn translate(p: &Program) -> Res<Shader> {
         word: Word(0),
         pc: 0,
         sph_words: p.sph.as_ref().map_or([0; 32], |s| s.words),
+        tex: tex::Prep::new(&code.insts, &code.words),
     };
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);

@@ -107,6 +107,39 @@ pub mod op {
     pub const MEMORY_BARRIER: u16 = 225;
     pub const LOOP_MERGE: u16 = 246;
     pub const UNREACHABLE: u16 = 255;
+    pub const TYPE_IMAGE: u16 = 25;
+    pub const TYPE_SAMPLER: u16 = 26;
+    pub const TYPE_SAMPLED_IMAGE: u16 = 27;
+    pub const SPEC_CONSTANT_OP: u16 = 52;
+    pub const IMAGE_TEXEL_POINTER: u16 = 60;
+    pub const SAMPLED_IMAGE: u16 = 86;
+    pub const IMAGE_SAMPLE_IMPLICIT_LOD: u16 = 87;
+    pub const IMAGE_SAMPLE_EXPLICIT_LOD: u16 = 88;
+    pub const IMAGE_SAMPLE_DREF_IMPLICIT_LOD: u16 = 89;
+    pub const IMAGE_SAMPLE_DREF_EXPLICIT_LOD: u16 = 90;
+    pub const IMAGE_FETCH: u16 = 95;
+    pub const IMAGE_GATHER: u16 = 96;
+    pub const IMAGE_DREF_GATHER: u16 = 97;
+    pub const IMAGE_READ: u16 = 98;
+    pub const IMAGE_WRITE: u16 = 99;
+    pub const IMAGE_QUERY_SIZE_LOD: u16 = 103;
+    pub const IMAGE_QUERY_SIZE: u16 = 104;
+    pub const IMAGE_QUERY_LOD: u16 = 105;
+    pub const IMAGE_QUERY_LEVELS: u16 = 106;
+    pub const IMAGE_QUERY_SAMPLES: u16 = 107;
+    pub const ATOMIC_EXCHANGE: u16 = 229;
+    pub const ATOMIC_COMPARE_EXCHANGE: u16 = 230;
+    pub const ATOMIC_I_INCREMENT: u16 = 232;
+    pub const ATOMIC_I_DECREMENT: u16 = 233;
+    pub const ATOMIC_I_ADD: u16 = 234;
+    pub const ATOMIC_S_MIN: u16 = 236;
+    pub const ATOMIC_U_MIN: u16 = 237;
+    pub const ATOMIC_S_MAX: u16 = 238;
+    pub const ATOMIC_U_MAX: u16 = 239;
+    pub const ATOMIC_AND: u16 = 240;
+    pub const ATOMIC_OR: u16 = 241;
+    pub const ATOMIC_XOR: u16 = 242;
+    pub const PHI: u16 = 245;
 }
 
 pub mod glsl {
@@ -260,6 +293,23 @@ impl Module {
     }
     pub fn t_runtime_array(&mut self, t: u32) -> u32 {
         self.ty(op::TYPE_RUNTIME_ARRAY, &[t])
+    }
+    /// An `OpTypeImage`: sampled type, `Dim`, depth, arrayed, multisampled,
+    /// sampled (1) or storage (2), image format.
+    pub fn t_image(&mut self, args: [u32; 7]) -> u32 {
+        self.ty(op::TYPE_IMAGE, &args)
+    }
+    pub fn t_sampler(&mut self) -> u32 {
+        self.ty(op::TYPE_SAMPLER, &[])
+    }
+    pub fn t_sampled_image(&mut self, image: u32) -> u32 {
+        self.ty(op::TYPE_SAMPLED_IMAGE, &[image])
+    }
+    /// An `OpSpecConstantOp` of `ty` computing `opcode` over `args`.
+    pub fn spec_op(&mut self, ty: u32, opcode: u16, args: &[u32]) -> u32 {
+        let mut a = vec![u32::from(opcode)];
+        a.extend_from_slice(args);
+        self.konst(op::SPEC_CONSTANT_OP, ty, &a)
     }
     pub fn c_u32(&mut self, v: u32) -> u32 {
         let t = self.t_u32();
