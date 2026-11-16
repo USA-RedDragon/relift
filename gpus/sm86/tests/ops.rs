@@ -49,3 +49,19 @@ fn fmnmx_nan() {
         &["FMNMX.NAN R17, R6, R7, !PT", "FMNMX.NAN R7, R6, 1, !PT"],
     );
 }
+
+#[test]
+fn f2ip() {
+    check(
+        &[
+            w(0x1c0f_e200_0000_0408, 0x0000_0007_060b_7243),
+            w(0x0c4f_e200_0000_d508, 0x0000_0007_060d_7243),
+            w(0x000f_e200_0000_04ff, 0x0000_0006_ff05_7243),
+        ],
+        &[
+            "F2IP.U8.F32.NTZ R11, R6, R7, R8",
+            "F2IP.S8.F32.TRUNC.NTZ R13, R6, R7, R8.H1",
+            "F2IP.U8.F32.NTZ R5, RZ, R6, RZ",
+        ],
+    );
+}

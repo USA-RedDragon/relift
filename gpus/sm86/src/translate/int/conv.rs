@@ -1,5 +1,5 @@
-//! Conversions between integers and floats: F2I, I2F, I2FP, F2F, F2FP and
-//! the half-precision form of FRND.
+//! Conversions between integers and floats: F2I, I2F, I2FP, F2F, F2FP,
+//! F2IP and the half-precision form of FRND.
 //!
 //! Every rounding step is built from integer operations on the bit
 //! patterns, so the results do not depend on how the device converts or
@@ -16,6 +16,7 @@ pub(super) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "I2F" | "I2FP" => i2f(c, i),
         "F2F" => f2f(c, i),
         "F2FP" | "UF2FP" => f2fp(c, i),
+        "F2IP" => f2ip(c, i),
         _ => return None,
     })
 }
@@ -445,6 +446,50 @@ fn f2i(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         c.store_dst(&i.ops[0], lo)
     }
+}
+
+/// F2IP: two floats to saturated 8-bit integers, packed under the low half
+/// (or with `.H1` the high half) of the third source: byte 0 from the
+/// second source, byte 1 from the first, bytes 2 and 3 from the third.
+/// Denormal inputs round to zero and `.NTZ` makes a NaN zero.
+fn f2ip(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let mut signed = false;
+    let mut how = glsl::ROUND_EVEN;
+    for m in &i.mods {
+        match *m {
+            "U8" | "F32" | "NTZ" => {}
+            "S8" => signed = true,
+            "TRUNC" => how = glsl::TRUNC,
+            m => return bad(format!("F2IP.{m}")),
+        }
+    }
+    if !i.has("NTZ") {
+        return bad("F2IP without NTZ");
+    }
+    let mut bytes = Vec::new();
+    for o in &i.ops[1..3] {
+        let v = c.usrc(o)?;
+        let f = c.f32t();
+        let x = c.as_float(v);
+        let r = c.ext(f, how, &[x]);
+        let t = c.boolt();
+        let is_nan = c.m.emit(op::IS_NAN, t, &[x]);
+        let b = f2i_small(c, r, signed, 8, is_nan, true);
+        bytes.push(c.and_k(b, 0xff));
+    }
+    let (v, m) = c.raw(&i.ops[3])?;
+    if m.neg || m.abs || m.not {
+        return bad("F2IP third source modifiers");
+    }
+    let top = match m.swz {
+        Swz::None => c.sh(op::SHIFT_LEFT_LOGICAL, v, 16),
+        Swz::H(1) => c.and_k(v, 0xffff_0000),
+        s => return bad(format!("F2IP selector {s:?}")),
+    };
+    let hi = c.sh(op::SHIFT_LEFT_LOGICAL, bytes[0], 8);
+    let r = c.ib(op::BITWISE_OR, top, hi);
+    let r = c.ib(op::BITWISE_OR, r, bytes[1]);
+    c.store_dst(&i.ops[0], r)
 }
 
 fn f2i_small(c: &mut Ctx, r: u32, signed: bool, size: u32, is_nan: u32, ntz: bool) -> u32 {
