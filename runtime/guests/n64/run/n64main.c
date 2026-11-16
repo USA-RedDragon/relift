@@ -7,6 +7,8 @@
 #include "n64main.h"
 #include "cpu.h"
 
+#include "hostlib.h"
+
 #include <relift/audio.h>
 #include <relift/ports.h>
 #include <relift/settings.h>
@@ -488,6 +490,15 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     if (H.save[0] && rl_n64_save_load(m, H.save) < 0)
         rl_log(RL_LOG_WARN, "n64", "a save of %s does not fit this cartridge; it is ignored", H.save);
     rl_n64_set_frame_hook(m, on_frame, &H);
+    void *rdp = NULL;
+    if (p->renderer) {
+        char rdp_why[160];
+        rdp = p->renderer->create(m, rl_hostlib_vulkan_gipa(), rdp_why, sizeof rdp_why);
+        if (rdp)
+            rl_n64_set_rdp(m, p->renderer->ops, rdp);
+        else
+            rl_log(RL_LOG_WARN, "n64", "the RDP draws nothing: %s", rdp_why);
+    }
     H.run.check = on_check;
     H.run.check_user = &H;
     if (headless)
@@ -497,5 +508,7 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     rl_window_set_events(NULL, NULL);
     rl_n64_run_free(&H.run);
     rl_n64_destroy(m);
+    if (rdp)
+        p->renderer->destroy(rdp);
     return r;
 }

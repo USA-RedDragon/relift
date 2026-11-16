@@ -92,8 +92,11 @@ static void line(rl_n64 *m)
         if (++m->vi.leap_counter == 5)
             m->vi.leap_counter = 0;
     }
-    if (m->vi.vcounter == ((m->vi.v_video >> 16) & 0x3FFu) >> 1)
+    if (m->vi.vcounter == ((m->vi.v_video >> 16) & 0x3FFu) >> 1) {
+        if (m->dp.ops && m->dp.ops->vi_frame)
+            m->dp.ops->vi_frame(m->dp.user, m->vi.field);
         frame(m);
+    }
     if (half_lines & 1u) {
         if (m->vi.vcounter == coincidence >> 1)
             rl_n64_mi_raise(m, RL_N64_IRQ_VI);
@@ -193,6 +196,8 @@ uint32_t rl_n64_vi_read(rl_n64 *m, unsigned i)
 void rl_n64_vi_write(rl_n64 *m, unsigned i, uint32_t v)
 {
     catch_up(m, rl_n64_now(m));
+    if (m->dp.ops && m->dp.ops->vi_register)
+        m->dp.ops->vi_register(m->dp.user, i, v);
     switch (i) {
     case 0:
         m->vi.control = v;
@@ -326,6 +331,17 @@ static void refresh(rl_n64 *m)
 
 bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
 {
+    if (m->dp.ops && m->dp.ops->vi_picture) {
+        uint32_t w = 0, h = 0;
+        const uint8_t *rgba = m->dp.ops->vi_picture(m->dp.user, &w, &h);
+        if (!rgba || (size_t)w * h > (size_t)640u * 576u)
+            return false;
+        for (size_t i = 0; i < (size_t)w * h; i++)
+            memcpy(rgb + i * 3u, rgba + i * 4u, 3);
+        *width = w;
+        *height = h;
+        return true;
+    }
     if (!m->vi.screen)
         return false;
     if (active(m))

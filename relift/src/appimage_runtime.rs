@@ -83,7 +83,7 @@ pub(crate) fn unique() -> String {
     )
 }
 
-fn download(url: &str, to: &Path) -> Result<(), String> {
+pub(crate) fn download(url: &str, to: &Path) -> Result<(), String> {
     let out = relift_proc::command("curl")
         .args(["--fail", "--silent", "--show-error", "--location"])
         .args([

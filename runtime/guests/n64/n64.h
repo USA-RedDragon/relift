@@ -228,13 +228,16 @@ RL_RUNTIME_API bool rl_n64_save_path(char *out, size_t size, const char *rom_pat
 RL_RUNTIME_API void rl_n64_declare_settings(void);
 
 /**
- * @brief The picture VI outputs now, as ares' software path draws it: the
- * lines and columns the video registers give inside the 640 by 480 (NTSC) or
- * 640 by 576 (PAL) output, read from RDRAM through the scale registers
- * (RGBA5551 or RGBA8888, the guard band at the edges, no filters), the lines
- * of the other field kept from the last picture when VI interlaces. Writes
+ * @brief The picture VI outputs. With a renderer that scans out VI (its
+ * vi_picture), the picture of the last frame it scanned out (false before
+ * the first, or when it is larger than 640 by 576). Else the picture now, as
+ * ares' software path draws it: the lines and columns the video registers
+ * give inside the 640 by 480 (NTSC) or 640 by 576 (PAL) output, read from
+ * RDRAM through the scale registers (RGBA5551 or RGBA8888, the guard band at
+ * the edges, no filters), the lines of the other field kept from the last
+ * picture when VI interlaces (false when VI has never been on). Writes
  * width * height RGB pixels to rgb (room for 640 * 576 * 3 bytes) and the
- * size. Returns false when VI has never been on.
+ * size.
  */
 RL_RUNTIME_API bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height);
 /**
@@ -289,9 +292,32 @@ typedef struct rl_n64_rdp_ops {
     void (*sync_full)(void *user);
     /** @brief Whether the renderer hit a state the hardware hangs in (NULL: never); the DP then stays busy with no interrupt. */
     bool (*crashed)(void *user);
+    /**
+     * @brief The VI side (all NULL: the machine's own scan-out). vi_register
+     * takes every VI register write (index 0 to 13, the value written);
+     * vi_frame starts the scan-out of a frame at the frame edge of an active
+     * VI, with the field; vi_picture returns the last frame's picture as
+     * width * height RGBA bytes, valid until the next vi_frame, NULL before
+     * the first.
+     */
+    void (*vi_register)(void *user, unsigned index, uint32_t value);
+    void (*vi_frame)(void *user, unsigned field);
+    const uint8_t *(*vi_picture)(void *user, uint32_t *width, uint32_t *height);
 } rl_n64_rdp_ops;
 /** @brief Sets the renderer (NULL: commands are taken and draw nothing). */
 RL_RUNTIME_API void rl_n64_set_rdp(rl_n64 *m, const rl_n64_rdp_ops *ops, void *user);
+
+/** @brief A renderer a program links: how to make one, its operations, how to free it. */
+typedef struct rl_n64_renderer {
+    /**
+     * @brief Makes a renderer over the RDRAM of m on the Vulkan device of the
+     * host's vkGetInstanceProcAddr gipa; NULL when it cannot run here, with
+     * the reason in why.
+     */
+    void *(*create)(rl_n64 *m, void *gipa, char *why, size_t why_len);
+    const rl_n64_rdp_ops *ops;
+    void (*destroy)(void *renderer);
+} rl_n64_renderer;
 
 /**
  * @brief What the PIF's boot (IPL1 and IPL2 in the PIF ROM, which relift

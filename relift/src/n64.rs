@@ -317,6 +317,12 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     )?;
     prog.push(settings_c);
     compile(settings, &out, &cdir, &files, &prog, ui)?;
+    let notice = crate::build::runtime_dir(settings).join("guests/n64/rdp/NOTICE");
+    std::fs::create_dir_all(out.join("licenses"))?;
+    relift_cache::write_if_changed(
+        &out.join("licenses").join("parallel-rdp.txt"),
+        &std::fs::read(&notice).map_err(|e| format!("{}: {e}", notice.display()))?,
+    )?;
     let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {}, {} instructions not lifted, {} in all",
@@ -397,7 +403,7 @@ fn compile(
             inc("guests/n64/run/include"),
         ])
         .chain(extras.defines())
-        .chain(static_rt)
+        .chain(static_rt.clone())
         .chain(trace)
         .collect();
     let obj = |src: &Path, tag: &str| {
@@ -457,6 +463,63 @@ fn compile(
     rt_plan_compiles.extend(extras.compiles(&rt, &rt_flags, &|s| {
         if shared { rt_obj(s) } else { obj(s, "rt") }
     }));
+    let prdp = crate::parallel_rdp::ensure(&cache_root(settings)?)?;
+    let pinc = crate::parallel_rdp::INCLUDES.map(|p| format!("-I{}", prdp.join(p).display()));
+    let cxx: Vec<String> = ["-x", "c++", "-std=c++17", "-O2", "-g0", "-pthread"]
+        .map(String::from)
+        .into_iter()
+        .chain(
+            zig.then(|| ["-fno-sanitize=undefined", "-lc++"].map(String::from))
+                .into_iter()
+                .flatten(),
+        )
+        .chain(pinc.clone())
+        .chain([inc("core/include"), inc("guests/n64")])
+        .chain(static_rt.clone())
+        .collect();
+    let no_load = vec![
+        "-include".to_string(),
+        rt.join("guests/n64/rdp/noload.h").display().to_string(),
+    ];
+    let pobj = |s: &Path, root: &Path| {
+        let stem = s.strip_prefix(root).unwrap_or(s);
+        rt_dir
+            .join("obj")
+            .join("prdp")
+            .join(stem)
+            .with_extension("o")
+    };
+    for src in crate::parallel_rdp::SOURCES.iter().map(|p| prdp.join(p)) {
+        rt_plan_compiles.push(Compile {
+            obj: pobj(&src, &prdp),
+            src,
+            flags: cxx.iter().cloned().chain(no_load.clone()).collect(),
+            pool: None,
+            stage: 0,
+        });
+    }
+    let glue = rt.join("guests/n64/rdp/prdp.cpp");
+    rt_plan_compiles.push(Compile {
+        obj: pobj(&glue, &rt),
+        src: glue,
+        flags: cxx,
+        pool: None,
+        stage: 0,
+    });
+    let volk = prdp.join(crate::parallel_rdp::VOLK);
+    rt_plan_compiles.push(Compile {
+        obj: pobj(&volk, &prdp),
+        src: volk,
+        flags: ["-std=c11", "-O2"]
+            .map(String::from)
+            .into_iter()
+            .chain(no_load)
+            .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
+            .chain(pinc)
+            .collect(),
+        pool: None,
+        stage: 0,
+    });
     let row = ui.row("");
     ui.begin(row, "compile");
     let mut link: Vec<String> = Vec::new();
@@ -510,6 +573,14 @@ fn compile(
     } else {
         ["-lpthread", "-lm", "-ldl"].map(String::from).into()
     };
+    let libs: Vec<String> = libs
+        .into_iter()
+        .chain([if zig || cfg!(target_vendor = "apple") {
+            "-lc++".to_string()
+        } else {
+            "-lstdc++".to_string()
+        }])
+        .collect();
     let plan = Plan {
         cc: cc.clone(),
         compiles,

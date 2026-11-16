@@ -54,6 +54,13 @@ jobs:
             check
             guests/gb/devices
 
+      - name: Install Mesa's lavapipe for the N64 picture test
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mesa-vulkan-drivers libvulkan1
+          echo "RELIFT_VK_REQUIRE=1" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)" >> "$GITHUB_ENV"
+
       - name: fmt, clippy, tests, charter, generated docs and Vulkan forwarding, deny
         run: scripts/ci/checks.sh
 

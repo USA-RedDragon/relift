@@ -513,7 +513,7 @@ pub fn program_c(p: &Program<'_>) -> String {
     }
     let _ = write!(
         s,
-        "}};\nextern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u, {} }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
+        "}};\nextern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nextern const rl_n64_renderer rl_n64_prdp;\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u, {}, &rl_n64_prdp }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
         p.units.len(),
         p.code.len(),
         c_string(p.title),

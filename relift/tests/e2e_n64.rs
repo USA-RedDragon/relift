@@ -5,8 +5,11 @@
 //! headless. The routine is bound by its hash when the DMA brings it in, so
 //! the run shows its store with no missed code. A second ROM loads a
 //! microcode routine into IMEM with an SP DMA and starts the RSP, whose
-//! lifted code stores a word in DMEM and breaks. Skipped with a note when
-//! clang is not on `PATH`.
+//! lifted code stores a word in DMEM and breaks. A third draws with the
+//! RDP and shows it through VI, both through parallel-rdp, and checks the
+//! picture against the one ares scans out (skipped with a note without a
+//! Vulkan device, unless `RELIFT_VK_REQUIRE` is set). Skipped with a note
+//! when clang is not on `PATH`.
 
 mod tiny;
 
@@ -257,4 +260,150 @@ fn microcode_loaded_by_sp_dma_runs_lifted_on_the_rsp() {
         &0x1234u32.to_be_bytes(),
         "the CPU read what the RSP stored"
     );
+}
+
+/// The display list of [`vi_rom`]: a 320 by 240 RGBA5551 color image at
+/// `0x300000`, the scissor around it, fill mode, the whole image filled
+/// dark blue, a red and then a green rectangle, a full sync.
+const VI_DL: [u32; 20] = [
+    0xFF10_013F,
+    0x0030_0000,
+    0xED00_0000,
+    0x0050_03C0,
+    0xEF30_0000,
+    0x0000_0000,
+    0xF700_0000,
+    0x0843_0843,
+    0xF64F_C3BC,
+    0x0000_0000,
+    0xF700_0000,
+    0xF801_F801,
+    0xF647_C35C,
+    0x0008_0060,
+    0xF700_0000,
+    0x07C1_07C1,
+    0xF61F_C1BC,
+    0x0010_00C0,
+    0xE900_0000,
+    0x0000_0000,
+];
+
+/// The VI registers of [`vi_rom`], in order from VI_CONTROL: 16-bit color
+/// with the console's filters, origin `0x300000`, NTSC timing.
+const VI_REGS: [u32; 14] = [
+    0x0000_3002,
+    0x0030_0000,
+    320,
+    0x200,
+    0,
+    0x03E5_2239,
+    0x20D,
+    0xC15,
+    0x0C15_0C15,
+    0x006C_02EC,
+    0x0025_01FF,
+    0x000E_0204,
+    0x200,
+    0x400,
+];
+
+/// A ROM that draws with the RDP and shows it through VI: boot code at
+/// `0x80001000` that stores [`VI_DL`] at `0x280000` through KSEG1, runs it
+/// from RDRAM, sets [`VI_REGS`] and loops; and, in the boot code area, a
+/// stand-in boot (a PI DMA of the first MiB to `0x1000` and a jump there)
+/// for a reference emulator that starts the cartridge's own boot code.
+fn vi_rom() -> Vec<u8> {
+    let mut rom = synth::rom(&synth::Spec {
+        entry: 0x8000_1000,
+        ..synth::Spec::default()
+    });
+    let stand_in = [
+        lui(T0, 0xA460),
+        ori(T1, 0, 0x1000),
+        sw(T1, 0, T0),
+        lui(T1, 0x1000),
+        ori(T1, T1, 0x1000),
+        sw(T1, 4, T0),
+        lui(T1, 0x000F),
+        ori(T1, T1, 0xFFFF),
+        sw(T1, 0xC, T0),
+        lw(T2, 0x10, T0),
+        andi(T2, T2, 1),
+        bne(T2, 0, -3),
+        NOP,
+        lui(T4, 0x8000),
+        ori(T4, T4, 0x1000),
+        T4 << 21 | 8,
+        NOP,
+    ];
+    let mut boot = vec![lui(T0, 0xA028)];
+    for (k, w) in VI_DL.iter().enumerate() {
+        let off = u16::try_from(4 * k).expect("fits");
+        boot.extend([
+            lui(T1, (w >> 16) as u16),
+            ori(T1, T1, *w as u16),
+            sw(T1, off, T0),
+        ]);
+    }
+    let end = 0x28_0000 + 4 * u32::try_from(VI_DL.len()).expect("fits");
+    boot.extend([
+        lui(T0, 0xA410),
+        ori(T1, 0, 1),
+        sw(T1, 0xC, T0),
+        lui(T1, 0x0028),
+        sw(T1, 0, T0),
+        lui(T1, (end >> 16) as u16),
+        ori(T1, T1, end as u16),
+        sw(T1, 4, T0),
+        lui(T0, 0xA440),
+    ]);
+    for (k, w) in VI_REGS.iter().enumerate() {
+        let off = u16::try_from(4 * k).expect("fits");
+        boot.extend([
+            lui(T1, (w >> 16) as u16),
+            ori(T1, T1, *w as u16),
+            sw(T1, off, T0),
+        ]);
+    }
+    boot.extend([bne(0, T0, -1), NOP]);
+    for (k, w) in stand_in.iter().enumerate() {
+        rom[0x40 + 4 * k..0x44 + 4 * k].copy_from_slice(&w.to_be_bytes());
+    }
+    let code = 0x1000 + 4 * boot.len();
+    for (k, w) in boot.iter().enumerate() {
+        rom[0x1000 + 4 * k..0x1004 + 4 * k].copy_from_slice(&w.to_be_bytes());
+    }
+    rom[code..0x2000].fill(0);
+    rom
+}
+
+/// The hash (FNV-1a over the RGB bytes, as `--frames` prints it) of the
+/// 640 by 240 picture ares (commit
+/// `0b928930af4cc59ed99e942996f0d3c815379388`, parallel-rdp with its default
+/// options, the boot through the stand-in) scans out of [`vi_rom`] at frame
+/// 60, when the picture has long been still.
+const VI_ARES: &str = "640x240 hash 88f2675215d3ff3d";
+
+#[test]
+fn the_rdp_and_vi_draw_the_picture_ares_draws() {
+    let Some((_root, host)) = build("e2e-n64-vi", &vi_rom(), &[]) else {
+        return;
+    };
+    let out = relift_proc::command(host.join("game"))
+        .args(["--headless", "--no-audio", "--frames", "40", "--stats"])
+        .output()
+        .expect("the game runs");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{err}");
+    if err.contains("the RDP draws nothing") {
+        assert!(
+            std::env::var_os("RELIFT_VK_REQUIRE").is_none(),
+            "RELIFT_VK_REQUIRE is set but parallel-rdp did not start: {err}"
+        );
+        eprintln!("skipped: no Vulkan device for parallel-rdp ({err})");
+        return;
+    }
+    assert!(err.contains("misses 0"), "{err}");
+    assert!(stdout.contains(VI_ARES), "{stdout}{err}");
 }

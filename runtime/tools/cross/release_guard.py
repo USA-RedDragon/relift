@@ -6,8 +6,10 @@
 - sources: no file under DIR (the runtime, tests excluded) maps executable
   memory (PROT_EXEC, MAP_JIT, PAGE_EXECUTE*, FILE_MAP_EXECUTE) or calls
   dlopen, LoadLibrary or adrenotools_open_libvulkan, except hostlib.c and its
-  header (host libraries such as the Vulkan loader) and devload.c (the
-  hot-load path, built only with RL_HOTLOAD).
+  header (host libraries such as the Vulkan loader), devload.c (the
+  hot-load path, built only with RL_HOTLOAD) and the N64 renderer's
+  noload.h (which renames those calls in parallel-rdp to stubs that open
+  nothing).
 - objects: no object file under DIR holds the hot-load connection
   (RELIFT_DEV_SOCKET), and only hostlib objects import dlopen, LoadLibrary or
   adrenotools_open_libvulkan.
@@ -35,7 +37,7 @@ import sys
 
 EXEC_API = re.compile(rb"\b(PROT_EXEC|MAP_JIT|PAGE_EXECUTE\w*|FILE_MAP_EXECUTE|VirtualProtect\w*Exec\w*)\b")
 LOAD_API = re.compile(rb"\b(dlopen|LoadLibrary[AWX]?(?:Ex[AW]?)?|LoadPackagedLibrary|adrenotools_open_libvulkan)\b")
-ALLOWED_LOAD = {"hostlib.c", "hostlib.h", "devload.c"}
+ALLOWED_LOAD = {"hostlib.c", "hostlib.h", "devload.c", "noload.h"}
 HOTLOAD = b"RELIFT_DEV_SOCKET"
 INTERPRETER = (b"rlgbd_exec_native", b"rlgbd_step_native", b"3cpu7opcodes", b"16step_instruction")
 

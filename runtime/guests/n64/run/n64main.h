@@ -36,6 +36,8 @@ typedef struct rl_n64_program {
     uint32_t entry;
     /** @brief The path of the ROM the project imported, which names the save files (rl_n64_save_path); "" for none. */
     const char *rom_path;
+    /** @brief The renderer the program links (NULL: the RDP draws nothing). */
+    const rl_n64_renderer *renderer;
 } rl_n64_program;
 
 /**

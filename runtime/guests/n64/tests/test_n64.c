@@ -198,7 +198,7 @@ static void put64(rl_n64 *m, uint32_t a, uint64_t v)
 
 TEST(n64_dp_runs_whole_commands_and_raises_its_interrupt_at_sync_full)
 {
-    static const rl_n64_rdp_ops ops = {rdp_command, rdp_sync, NULL};
+    static const rl_n64_rdp_ops ops = {rdp_command, rdp_sync, NULL, NULL, NULL, NULL};
     mach t = mach_new(0x2000);
     rdp_seen r = {0};
     rl_n64_set_rdp(t.m, &ops, &r);
@@ -265,6 +265,59 @@ TEST(n64_vi_counts_lines_and_interrupts_at_its_line)
     CHECK(seen > 200);
     rl_n64_write(t.m, 0x04400010u, 4, 0);
     CHECK_EQ(rl_n64_irq_pending(t.m), 0);
+    mach_free(&t);
+}
+
+typedef struct vi_seen {
+    uint32_t regs[14];
+    unsigned writes, frames;
+    uint8_t picture[2 * 1 * 4];
+} vi_seen;
+
+static void vi_reg(void *user, unsigned index, uint32_t value)
+{
+    vi_seen *v = user;
+    v->regs[index] = value;
+    v->writes++;
+}
+
+static void vi_frame(void *user, unsigned field)
+{
+    (void)field;
+    ((vi_seen *)user)->frames++;
+}
+
+static const uint8_t *vi_picture(void *user, uint32_t *w, uint32_t *h)
+{
+    vi_seen *v = user;
+    if (!v->frames)
+        return NULL;
+    *w = 2;
+    *h = 1;
+    return v->picture;
+}
+
+TEST(n64_a_renderer_with_a_vi_side_sees_every_register_and_frame_and_gives_the_picture)
+{
+    static const rl_n64_rdp_ops ops = {rdp_command, rdp_sync, NULL, vi_reg, vi_frame, vi_picture};
+    mach t = mach_new(0x2000);
+    vi_seen v = {.picture = {1, 2, 3, 0xFF, 4, 5, 6, 0xFF}};
+    rl_n64_set_rdp(t.m, &ops, &v);
+    static uint8_t rgb[640 * 576 * 3];
+    uint32_t w = 0, h = 0;
+    vi_ntsc(t.m, 0x3002u, 0x100000u, 320u, 0x200u);
+    CHECK_EQ(v.writes, 13);
+    CHECK_EQ(v.regs[1], 0x100000u);
+    CHECK_EQ(v.regs[10], 0x002501FFu);
+    CHECK(!rl_n64_scanout(t.m, rgb, &w, &h));
+    advance(&t, RL_N64_HZ / 30u);
+    CHECK(v.frames >= 1);
+    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK_EQ(w, 2);
+    CHECK_EQ(h, 1);
+    CHECK_EQ(rgb[0], 1);
+    CHECK_EQ(rgb[3], 4);
+    CHECK_EQ(rgb[5], 6);
     mach_free(&t);
 }
 

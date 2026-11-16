@@ -31,6 +31,7 @@ pub mod macapp;
 pub mod mods;
 pub mod n64;
 pub mod nds;
+pub mod parallel_rdp;
 pub mod paths;
 pub mod push;
 pub mod report;
