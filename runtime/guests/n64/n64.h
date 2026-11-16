@@ -258,18 +258,28 @@ RL_RUNTIME_API bool rl_n64_rsp_halted(const rl_n64 *m);
 /** @brief SP_PC: where the RSP starts or stopped. */
 RL_RUNTIME_API uint32_t rl_n64_sp_pc(const rl_n64 *m);
 
+/** @brief The most 64-bit command words the DP takes in one list, as ares's queue. */
+#define RL_N64_DP_QUEUE 0x8000u
+
 /**
- * @brief The RDP side's command hook: the command list [start, end) of
- * RDRAM (or of DMEM when xbus) is ready, as a DPC_END write or an unfreeze
- * makes it. The hook owns its completion: it reports progress with
- * rl_n64_dp_progress and raises the DP interrupt itself. Without a hook the
- * commands are taken at once (DPC_CURRENT reaches DPC_END) and do nothing.
+ * @brief The renderer behind the DP. The machine takes each command list
+ * as ares does: at the DPC_END write (or the unfreeze) it reads [current,
+ * end) from RDRAM or DMEM, cuts it into commands by their lengths, hands
+ * each command of code 8 and up to command, and at each Sync_Full calls
+ * sync_full (which returns when everything before it is drawn) and raises
+ * the DP interrupt. A command cut by DPC_END waits for the next list. The
+ * RDP takes no time: DPC_CURRENT reaches DPC_END in the write.
  */
-typedef void rl_n64_dp_submit(void *user, rl_n64 *m, uint32_t start, uint32_t end, bool xbus);
-/** @brief Sets the DP command hook (NULL: none). */
-RL_RUNTIME_API void rl_n64_set_dp_submit(rl_n64 *m, rl_n64_dp_submit *hook, void *user);
-/** @brief The RDP side took the commands up to current; busy says whether it still works on them. */
-RL_RUNTIME_API void rl_n64_dp_progress(rl_n64 *m, uint32_t current, bool busy);
+typedef struct rl_n64_rdp_ops {
+    /** @brief One command of count 32-bit words (first the high half of each 64-bit word). */
+    void (*command)(void *user, const uint32_t *words, unsigned count);
+    /** @brief Waits until every command so far is done. */
+    void (*sync_full)(void *user);
+    /** @brief Whether the renderer hit a state the hardware hangs in (NULL: never); the DP then stays busy with no interrupt. */
+    bool (*crashed)(void *user);
+} rl_n64_rdp_ops;
+/** @brief Sets the renderer (NULL: commands are taken and draw nothing). */
+RL_RUNTIME_API void rl_n64_set_rdp(rl_n64 *m, const rl_n64_rdp_ops *ops, void *user);
 
 /**
  * @brief What the PIF's boot (IPL1 and IPL2 in the PIF ROM, which relift

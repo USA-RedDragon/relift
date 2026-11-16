@@ -299,30 +299,89 @@ static void sp_reg_write(rl_n64 *m, unsigned i, uint32_t v, uint64_t at)
     }
 }
 
-/** @brief Hands the command list [current, end) to the RDP side. */
-static void dp_flush(rl_n64 *m)
+/** @brief The 64-bit words of each command by its code, as ares's parallel-rdp path counts them. */
+static const uint8_t dp_length[64] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 4, 6, 12, 14, 12, 14, 20, 22, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+};
+
+/** @brief The DP's Sync_Full: everything drawn, the DP interrupt raised. */
+static void dp_sync_full(rl_n64 *m)
 {
-    if (m->dp.freeze || m->dp.current == m->dp.end)
-        return;
-    m->stats.dp_submits++;
-    if (m->dp.submit) {
-        m->dp.busy = true;
-        m->dp.submit(m->dp.submit_user, m, m->dp.current, m->dp.end, m->dp.xbus);
-        return;
+    if (!m->dp.crashed) {
+        rl_n64_mi_raise(m, RL_N64_IRQ_DP);
+        m->dp.buffer_busy = false;
+        m->dp.pipe_busy = false;
     }
+    m->dp.start_gclk = false;
+}
+
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
+/** @brief Takes the commands [current, end) into the queue and runs every whole one. */
+static void dp_render(rl_n64 *m)
+{
+    uint32_t current = m->dp.current & ~7u, end = m->dp.end & ~7u;
+    if (current >= end)
+        return;
+    uint32_t length = (end - current) / 8u;
+    if (m->dp.queue_size + length >= RL_N64_DP_QUEUE)
+        return;
+    uint32_t *q = m->dp.queue;
+    for (; length; length--, current += 8u) {
+        uint32_t i = m->dp.queue_size++ * 2u;
+        if (m->dp.xbus) {
+            q[i] = be32(m->spmem + (current & 0xFFCu));
+            q[i + 1] = be32(m->spmem + ((current + 4u) & 0xFFCu));
+        } else {
+            q[i] = be32(m->rdram + (current & (RL_N64_RDRAM_SIZE - 4u)));
+            q[i + 1] = be32(m->rdram + ((current + 4u) & (RL_N64_RDRAM_SIZE - 4u)));
+        }
+    }
+    const rl_n64_rdp_ops *ops = m->dp.ops;
+    while (m->dp.queue_offset < m->dp.queue_size) {
+        const uint32_t *w = q + m->dp.queue_offset * 2u;
+        uint32_t code = w[0] >> 24 & 63u, n = dp_length[code];
+        if (m->dp.queue_offset + n > m->dp.queue_size) {
+            m->dp.start = m->dp.current = m->dp.end;
+            return;
+        }
+        if (code >= 8u && ops && ops->command)
+            ops->command(m->dp.user, w, n * 2u);
+        if (code == 0x29u) {
+            if (ops && ops->sync_full)
+                ops->sync_full(m->dp.user);
+            dp_sync_full(m);
+        }
+        m->dp.queue_offset += n;
+    }
+    m->dp.queue_offset = 0;
+    m->dp.queue_size = 0;
     m->dp.current = m->dp.end;
 }
 
-void rl_n64_set_dp_submit(rl_n64 *m, rl_n64_dp_submit *hook, void *user)
+/** @brief Hands the command list [current, end) to the RDP, as ares's flushCommands. */
+static void dp_flush(rl_n64 *m)
 {
-    m->dp.submit = hook;
-    m->dp.submit_user = user;
+    if (m->dp.freeze || m->dp.crashed || m->dp.end <= m->dp.current)
+        return;
+    m->stats.dp_submits++;
+    m->dp.buffer_busy = true;
+    m->dp.pipe_busy = true;
+    m->dp.start_gclk = true;
+    dp_render(m);
+    if (m->dp.ops && m->dp.ops->crashed && m->dp.ops->crashed(m->dp.user)) {
+        m->dp.crashed = true;
+        m->dp.pipe_busy = true;
+    }
+    m->dp.buffer_busy = false;
+    m->dp.ready = true;
 }
 
-void rl_n64_dp_progress(rl_n64 *m, uint32_t current, bool busy)
+void rl_n64_set_rdp(rl_n64 *m, const rl_n64_rdp_ops *ops, void *user)
 {
-    m->dp.current = current & 0xFFFFF8u;
-    m->dp.busy = busy;
+    m->dp.ops = ops;
+    m->dp.user = user;
 }
 
 /** @brief DP register i (0 to 7) read at RSP cycle at. */
@@ -336,11 +395,17 @@ static uint32_t dp_reg_read(rl_n64 *m, unsigned i, uint64_t at)
     case 2:
         return m->dp.current;
     case 3:
-        return (m->dp.xbus ? 0x1u : 0u) | (m->dp.freeze ? 0x2u : 0u) | (m->dp.flush ? 0x4u : 0u) |
-               (m->dp.busy ? 0x60u : 0u) | (m->dp.ready ? 0x80u : 0u) |
-               (m->dp.end_valid ? 0x200u : 0u) | (m->dp.start_valid ? 0x400u : 0u);
+        return (m->dp.xbus ? 0x1u : 0u) | (m->dp.freeze || m->dp.crashed ? 0x2u : 0u) |
+               (m->dp.flush ? 0x4u : 0u) | (m->dp.start_gclk ? 0x8u : 0u) | (m->dp.tmem_busy ? 0x10u : 0u) |
+               (m->dp.pipe_busy ? 0x20u : 0u) | (m->dp.buffer_busy ? 0x40u : 0u) |
+               (m->dp.ready ? 0x80u : 0u) | (m->dp.end_valid ? 0x200u : 0u) |
+               (m->dp.start_valid ? 0x400u : 0u);
     case 4:
         return (uint32_t)(at - m->dp.clock_base) & 0xFFFFFFu;
+    case 5:
+        return m->dp.buffer_busy ? 1u : 0u;
+    case 6:
+        return m->dp.pipe_busy ? 1u : 0u;
     default:
         return 0;
     }
@@ -378,6 +443,12 @@ static void dp_reg_write(rl_n64 *m, unsigned i, uint32_t v, uint64_t at)
             m->dp.flush = false;
         if (v & 0x20u)
             m->dp.flush = true;
+        if ((v & 0x40u) && !m->dp.crashed)
+            m->dp.tmem_busy = false;
+        if ((v & 0x80u) && !m->dp.crashed)
+            m->dp.pipe_busy = false;
+        if ((v & 0x100u) && !m->dp.crashed)
+            m->dp.buffer_busy = false;
         if (v & 0x200u)
             m->dp.clock_base = at;
         break;

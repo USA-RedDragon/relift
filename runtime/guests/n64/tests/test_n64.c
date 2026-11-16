@@ -159,6 +159,61 @@ TEST(n64_sp_dma_moves_rows_between_rdram_and_dmem)
 }
 
 /** @brief The NTSC progressive setup krom's tests write. */
+typedef struct rdp_seen {
+    unsigned commands, words, syncs;
+    uint32_t first[2];
+} rdp_seen;
+
+static void rdp_command(void *user, const uint32_t *w, unsigned n)
+{
+    rdp_seen *r = user;
+    if (!r->commands++) {
+        r->first[0] = w[0];
+        r->first[1] = w[1];
+    }
+    r->words += n;
+}
+
+static void rdp_sync(void *user) { ((rdp_seen *)user)->syncs++; }
+
+static void put64(uint8_t *p, uint64_t v)
+{
+    for (int i = 0; i < 8; i++)
+        p[i] = (uint8_t)(v >> (56 - 8 * i));
+}
+
+TEST(n64_dp_runs_whole_commands_and_raises_its_interrupt_at_sync_full)
+{
+    static const rl_n64_rdp_ops ops = {rdp_command, rdp_sync, NULL};
+    mach t = mach_new(0x2000);
+    rdp_seen r = {0};
+    rl_n64_set_rdp(t.m, &ops, &r);
+    uint8_t *ram = rl_n64_rdram(t.m);
+    put64(ram + 0x1000, 0x3600000000000000ull);
+    put64(ram + 0x1008, 0x0800000000000001ull);
+    put64(ram + 0x1010, 0);
+    put64(ram + 0x1018, 0);
+    put64(ram + 0x1020, 0);
+    put64(ram + 0x1028, 0x2900000000000000ull);
+    rl_n64_write(t.m, 0x04100000u, 4, 0x1000u);
+    rl_n64_write(t.m, 0x04100004u, 4, 0x1018u);
+    CHECK_EQ(r.commands, 1);
+    CHECK_EQ(r.syncs, 0);
+    CHECK_EQ(rl_n64_read(t.m, 0x04100008u, 4), 0x1018u);
+    CHECK_EQ(rl_n64_read(t.m, 0x04300008u, 4) & 0x20u, 0);
+    CHECK_EQ(rl_n64_read(t.m, 0x0410000Cu, 4) & 0xE8u, 0xA8u);
+    rl_n64_write(t.m, 0x04100004u, 4, 0x1030u);
+    CHECK_EQ(r.commands, 3);
+    CHECK_EQ(r.words, 2 + 8 + 2);
+    CHECK_EQ(r.first[0], 0x36000000u);
+    CHECK_EQ(r.syncs, 1);
+    CHECK_EQ(rl_n64_read(t.m, 0x04100008u, 4), 0x1030u);
+    CHECK_EQ(rl_n64_read(t.m, 0x04300008u, 4) & 0x20u, 0x20u);
+    CHECK_EQ(rl_n64_read(t.m, 0x0410000Cu, 4) & 0xE8u, 0x80u);
+    CHECK_EQ(rl_n64_get_stats(t.m)->dp_submits, 2);
+    mach_free(&t);
+}
+
 static void vi_ntsc(rl_n64 *m, uint32_t control, uint32_t origin, uint32_t width, uint32_t intr)
 {
     rl_n64_write(m, 0x04400000u, 4, control);

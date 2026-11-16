@@ -126,10 +126,14 @@ struct rl_n64 {
 
     struct {
         uint32_t start, end, current;
-        bool start_valid, end_valid, xbus, freeze, flush, busy, ready;
+        bool start_valid, end_valid, xbus, freeze, flush, ready, start_gclk, crashed;
+        bool buffer_busy, pipe_busy, tmem_busy;
         uint64_t clock_base;
-        rl_n64_dp_submit *submit;
-        void *submit_user;
+        /** @brief Command words taken but not yet run: a command cut by DPC_END waits here for the rest (64-bit words size, from offset). */
+        uint32_t queue_size, queue_offset;
+        uint32_t queue[RL_N64_DP_QUEUE * 2u];
+        const rl_n64_rdp_ops *ops;
+        void *user;
     } dp;
 
     struct {
