@@ -81,6 +81,8 @@ const STANDALONE: &[&str] = &[
     "relift-sms-formats",
     "relift-sms-tools",
     "relift-switch-shaders",
+    "relift-n64-formats",
+    "relift-n64-tools",
     "relift-switch-tools",
     "relift-switch-vkgen",
 ];
@@ -339,6 +341,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-n64-formats",
+        band: 2,
+        why: "the Nintendo 64 cartridge format: byte orders, header, boot variant by hash, checksum, Yay0, Yaz0 and MIO0 decoders and their scan; reads bytes only",
+        normal: NONE,
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-sms-tools",
         band: 2,
         why: "single-purpose tools for Master System, Game Gear and SG-1000 files, thin wrappers over relift-sms-formats",
@@ -347,6 +357,19 @@ const CHARTERS: &[Charter] = &[
             "relift-cache",
             "relift-proc",
             "relift-sms-formats",
+            "serde_json",
+        ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-n64-tools",
+        band: 2,
+        why: "single-purpose tools for Nintendo 64 files, thin wrappers over relift-n64-formats",
+        normal: &["clap", "relift-cache", "relift-n64-formats", "serde_json"],
+        dev: &[
+            "relift-cache",
+            "relift-n64-formats",
+            "relift-proc",
             "serde_json",
         ],
         build: NONE,

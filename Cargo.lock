@@ -1156,6 +1156,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-n64-formats"
+version = "0.1.0"
+
+[[package]]
+name = "relift-n64-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "relift-n64-formats",
+ "relift-proc",
+ "serde_json",
+]
+
+[[package]]
 name = "relift-override"
 version = "0.1.0"
 dependencies = [
