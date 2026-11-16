@@ -238,6 +238,8 @@ void vkf_decode_note_image(int64_t count, int64_t host_bytes, int64_t guest_byte
 void vkf_decode_stats_frame(uint64_t frame);
 /** @brief Logs the decode stats once at the end, when anything was decoded. */
 void vkf_decode_stats_exit(void);
+/** @brief Logs how many chunks of tracked shadow mappings opened and closed, every stats.every presents. */
+void vkf_shadow_stats_frame(uint64_t frame);
 
 /** @brief Turns on for the host the device features the layer stands in for (textureCompressionBC when decoding BC). */
 void vkf_decode_device_features(vkf_call *k, VkPhysicalDevice pd, VkDeviceCreateInfo *ci);

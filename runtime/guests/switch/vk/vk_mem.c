@@ -12,9 +12,19 @@
  * changed move, toward the guest only the bytes the device changed, so
  * neither side's writes overwrite the other's). The guest range for each
  * mapping comes from the map window of rl_vk_config.
+ *
+ * Where the fault handler is up, a shadow copy is tracked: its guest pages
+ * are a shared-memory object the layer also maps for itself, and they have
+ * no host access while closed. The first guest access to a closed chunk
+ * faults; the hook moves the device's changes in and opens the chunk. Each
+ * synchronization closes every open chunk and moves the guest's changes out.
+ * Only the chunks the guest touched since the last synchronization are
+ * compared, and the guest sees the device's writes exactly as the untracked
+ * copy does: as of its first access after the synchronization.
  */
 #include "vkf.h"
 
+#include <relift/settings.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,6 +48,12 @@ typedef struct vkf_mem {
     uint8_t *base;
     /** @brief True while the guest has it mapped. */
     bool mapped;
+    /** @brief Tracked shadow: the guest pages, also mapped at shm.host (NULL host when untracked). */
+    rl_shm shm;
+    /** @brief Tracked shadow: one byte per chunk, nonzero while the guest may access the chunk. */
+    uint8_t *open;
+    /** @brief Tracked shadow: number of nonzero bytes in open. */
+    uint64_t open_n;
 } vkf_mem;
 
 
@@ -393,9 +409,9 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-enum { SYNC_LINE = 64 };
+enum { SYNC_LINE = 64, SYNC_BLOCK = 4096, TRACK_CHUNK = 64 * 1024 };
 
-static void merge(const uint8_t *from, uint8_t *to, uint8_t *base, uint64_t size)
+static void merge_lines(const uint8_t *from, uint8_t *to, uint8_t *base, uint64_t size)
 {
     for (uint64_t at = 0; at < size; at += SYNC_LINE) {
         uint64_t n = size - at < SYNC_LINE ? size - at : SYNC_LINE;
@@ -411,17 +427,204 @@ static void merge(const uint8_t *from, uint8_t *to, uint8_t *base, uint64_t size
     }
 }
 
+static void merge(const uint8_t *from, uint8_t *to, uint8_t *base, uint64_t size)
+{
+    for (uint64_t at = 0; at < size; at += SYNC_BLOCK) {
+        uint64_t n = size - at < SYNC_BLOCK ? size - at : SYNC_BLOCK;
+        if (memcmp(from + at, base + at, n))
+            merge_lines(from + at, to + at, base + at, n);
+    }
+}
+
+/** @brief Tracked shadow mappings sorted by va, and their open state; the fault hook takes only this lock. */
+static pthread_mutex_t g_track_lock = PTHREAD_MUTEX_INITIALIZER;
+static vkf_mem **g_tracked;
+static uint32_t g_tracked_n, g_tracked_cap;
+static uint64_t g_chunk;
+static uint64_t g_opened, g_closed;
+
+static vkf_mem *tracked_at(uint64_t addr)
+{
+    uint32_t lo = 0, hi = g_tracked_n;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+        vkf_mem *r = g_tracked[mid];
+        if (addr < r->va)
+            hi = mid;
+        else if (addr >= r->va + r->va_size)
+            lo = mid + 1;
+        else
+            return r;
+    }
+    return NULL;
+}
+
+/** @brief Moves the device's changes into chunk c and gives the guest access to it. Under g_track_lock. */
+static void open_chunk(vkf_mem *r, uint64_t c)
+{
+    uint64_t at = c * g_chunk, end = at + g_chunk < r->va_size ? at + g_chunk : r->va_size;
+    if (at < r->size)
+        merge(r->host + at, r->shm.host + at, r->base + at, (end < r->size ? end : r->size) - at);
+    if (rl_vm_host_access(vkf.cfg.vm, r->va + at, end - at, true) == 0) {
+        r->open[c] = 1;
+        r->open_n++;
+        g_opened++;
+    }
+}
+
+static bool track_fault(const rl_fault *f)
+{
+    pthread_mutex_lock(&g_track_lock);
+    vkf_mem *r = tracked_at(f->guest_addr);
+    bool ok = false;
+    if (r) {
+        uint64_t c = (f->guest_addr - r->va) / g_chunk;
+        if (!r->open[c])
+            open_chunk(r, c);
+        ok = r->open[c];
+    }
+    pthread_mutex_unlock(&g_track_lock);
+    return ok;
+}
+
+/** @brief Takes the guest's access to the open chunks overlapping [off, off+size) and moves its changes out. */
+static void close_chunks(vkf_mem *r, uint64_t off, uint64_t size)
+{
+    pthread_mutex_lock(&g_track_lock);
+    uint64_t last = (off + size - 1) / g_chunk;
+    for (uint64_t c = off / g_chunk; r->open_n && c <= last; c++) {
+        if (!r->open[c])
+            continue;
+        uint64_t e = c;
+        while (e + 1 <= last && r->open[e + 1])
+            e++;
+        uint64_t at = c * g_chunk, end = (e + 1) * g_chunk < r->va_size ? (e + 1) * g_chunk : r->va_size;
+        if (rl_vm_host_access(vkf.cfg.vm, r->va + at, end - at, false) == 0) {
+            memset(r->open + c, 0, e - c + 1);
+            r->open_n -= e - c + 1;
+            g_closed += e - c + 1;
+        } else
+            rl_log(RL_LOG_ERROR, "vk", "could not close guest 0x%llx of a shadow mapping", (unsigned long long)(r->va + at));
+        if (at < r->size)
+            merge(r->shm.host + at, r->host + at, r->base + at, (end < r->size ? end : r->size) - at);
+        c = e;
+    }
+    pthread_mutex_unlock(&g_track_lock);
+}
+
+static void track_add(vkf_mem *r)
+{
+    pthread_mutex_lock(&g_track_lock);
+    if (g_tracked_n == g_tracked_cap) {
+        g_tracked_cap = g_tracked_cap ? g_tracked_cap * 2 : 64;
+        g_tracked = realloc(g_tracked, g_tracked_cap * sizeof *g_tracked);
+        if (!g_tracked)
+            abort();
+    }
+    uint32_t i = 0;
+    while (i < g_tracked_n && g_tracked[i]->va < r->va)
+        i++;
+    memmove(&g_tracked[i + 1], &g_tracked[i], (g_tracked_n - i) * sizeof *g_tracked);
+    g_tracked[i] = r;
+    g_tracked_n++;
+    pthread_mutex_unlock(&g_track_lock);
+}
+
+/** @brief Drops r from tracking and closes its pages; the guest range keeps them until it is discarded. */
+static void track_drop(vkf_mem *r)
+{
+    if (!r->open)
+        return;
+    pthread_mutex_lock(&g_track_lock);
+    for (uint32_t i = 0; i < g_tracked_n; i++)
+        if (g_tracked[i] == r) {
+            memmove(&g_tracked[i], &g_tracked[i + 1], (g_tracked_n - i - 1) * sizeof *g_tracked);
+            g_tracked_n--;
+            break;
+        }
+    pthread_mutex_unlock(&g_track_lock);
+    rl_shm_destroy(&r->shm);
+    free(r->open);
+    r->open = NULL;
+    r->open_n = 0;
+}
+
+/**
+ * @brief Backs a shadow mapping's guest range with tracked pages holding
+ * base. Returns false, with nothing changed, where tracking is unavailable.
+ */
+static bool track_map(vkf_mem *r)
+{
+    rl_vm *vm = vkf.cfg.vm;
+    if (!rl_fault_installed())
+        return false;
+    if (!g_chunk) {
+        g_chunk = TRACK_CHUNK > vm->host_page ? TRACK_CHUNK : vm->host_page;
+        rl_fault_set_hook(track_fault);
+    }
+    uint64_t chunks = (r->va_size + g_chunk - 1) / g_chunk;
+    uint8_t *open = calloc(chunks, 1);
+    if (!open || rl_shm_create(&r->shm, r->va_size)) {
+        free(open);
+        return false;
+    }
+    memcpy(r->shm.host, r->base, r->size);
+    if (rl_vm_map_shm(vm, r->va, r->va_size, &r->shm) || vkf_vm_set(r->va, r->va_size, RL_VM_RW, RL_VM_KEEP) ||
+        rl_vm_host_access(vm, r->va, r->va_size, false)) {
+        vkf_vm_set(r->va, r->va_size, RL_VM_NONE, RL_VM_DISCARD);
+        rl_shm_destroy(&r->shm);
+        free(open);
+        return false;
+    }
+    r->open = open;
+    track_add(r);
+    return true;
+}
+
 static void sync_range(vkf_mem *r, uint64_t off, uint64_t size, bool to_host)
 {
     if (r->mode != RL_VK_MAP_SHADOW || !r->mapped || !r->base || off >= r->size)
         return;
     if (size == VK_WHOLE_SIZE || off + size > r->size)
         size = r->size - off;
+    if (r->open) {
+        close_chunks(r, off, size);
+        return;
+    }
     uint8_t *g = vkf.cfg.vm->base + r->va + off;
     if (to_host)
         merge(g, r->host + off, r->base + off, size);
     else
         merge(r->host + off, g, r->base + off, size);
+}
+
+uint64_t rl_vk_shadow_chunks_opened(void)
+{
+    pthread_mutex_lock(&g_track_lock);
+    uint64_t n = g_opened;
+    pthread_mutex_unlock(&g_track_lock);
+    return n;
+}
+
+void vkf_shadow_stats_frame(uint64_t frame)
+{
+    static uint64_t every, last_opened, last_closed;
+    static bool read;
+    if (!read) {
+        int64_t n = rl_setting_int("stats.every");
+        every = n > 0 ? (uint64_t)n : 0;
+        read = true;
+    }
+    if (!every || frame % every || !g_chunk)
+        return;
+    pthread_mutex_lock(&g_track_lock);
+    uint64_t opened = g_opened - last_opened, closed = g_closed - last_closed;
+    last_opened = g_opened;
+    last_closed = g_closed;
+    pthread_mutex_unlock(&g_track_lock);
+    rl_log(RL_LOG_INFO, "stats", "frame %llu: shadow mappings opened %.1f and closed %.1f chunks of %llu KiB per frame",
+           (unsigned long long)frame, (double)opened / (double)every, (double)closed / (double)every,
+           (unsigned long long)(g_chunk >> 10));
 }
 
 static void unmap_one(vkf_dev *d, vkf_mem *r, void *dev)
@@ -442,6 +645,7 @@ static void unmap_one(vkf_dev *d, vkf_mem *r, void *dev)
             sync_range(r, 0, VK_WHOLE_SIZE, true);
             VKF_FN(&d->fns, vkUnmapMemory)(dev, (VkDeviceMemory)(uintptr_t)r->handle);
         }
+        track_drop(r);
         free(r->base);
         r->base = NULL;
         r->host = NULL;
@@ -455,6 +659,7 @@ static void release_one(vkf_dev *d, vkf_mem *r, bool host_alive, void *dev)
         unmap_one(d, r, dev);
     else
         r->mapped = false;
+    track_drop(r);
     if (r->va) {
         vkf_vm_set(r->va, r->va_size, RL_VM_NONE, RL_VM_DISCARD);
         vkf_va_free(r->va);
@@ -534,20 +739,24 @@ int vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
         res = VKF_FN(k.fns, vkMapMemory)(dev, (VkDeviceMemory)(uintptr_t)r->handle, 0, VK_WHOLE_SIZE, 0, &p);
         if (res >= 0) {
             if (!r->va) {
-                r->va_size = r->size;
-                r->va = vkf_va_alloc(r->size, 0);
+                uint64_t page = vkf.cfg.vm->host_page;
+                r->va_size = (r->size + page - 1) & ~(page - 1);
+                r->va = vkf_va_alloc(r->va_size, 0);
             }
             uint8_t *base = r->va ? malloc(r->size) : NULL;
-            if (!base || vkf_vm_set(r->va, r->va_size, RL_VM_RW, RL_VM_FRESH)) {
+            if (base)
+                memcpy(base, p, r->size);
+            r->base = base;
+            r->host = p;
+            bool tracked = base && track_map(r);
+            if (!tracked && (!base || vkf_vm_set(r->va, r->va_size, RL_VM_RW, RL_VM_FRESH))) {
                 free(base);
+                r->base = NULL;
+                r->host = NULL;
                 VKF_FN(k.fns, vkUnmapMemory)(dev, (VkDeviceMemory)(uintptr_t)r->handle);
                 res = VK_ERROR_MEMORY_MAP_FAILED;
-            } else {
-                r->host = p;
-                r->base = base;
-                memcpy(base, p, r->size);
+            } else if (!tracked)
                 memcpy(mem + r->va, base, r->size);
-            }
         }
     }
     if (res >= 0) {

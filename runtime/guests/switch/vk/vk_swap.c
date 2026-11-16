@@ -1402,6 +1402,7 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     if (vkf_capture_due(&frame))
         capture(s, q, i, frame);
     vkf_decode_stats_frame(frame + 1);
+    vkf_shadow_stats_frame(frame + 1);
     vkf_present_id pid;
     VkPresentInfoKHR pi = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,

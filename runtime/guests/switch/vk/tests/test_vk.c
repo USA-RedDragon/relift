@@ -861,6 +861,75 @@ TEST(vk_shadow_keeps_guest_writes_across_waits)
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 
+/**
+ * @brief A tracked shadow allocation opens only the chunks the guest touches:
+ * a write to one chunk opens it, a submit closes it and moves the write to the
+ * device, and a read after the wait opens only the chunk it reads, which then
+ * holds the device's bytes.
+ */
+TEST(vk_shadow_tracks_only_touched_chunks)
+{
+    setenv(RL_VK_MAP_ENV, "shadow", 1);
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t pd = pds[0];
+    uint32_t qf = queue_family(pd, VK_QUEUE_GRAPHICS_BIT);
+    CHECK(qf != UINT32_MAX);
+    uint64_t dev = make_device(pd, qf, NULL, 0);
+    CHECK(dev != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, qf, 0, gq);
+    uint64_t queue = g64(gq);
+
+    enum { CHUNK = 64 * 1024, CHUNKS = 8 };
+    mapped_buf b;
+    CHECK_EQ(make_mapped(pd, dev, CHUNKS * CHUNK, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, &b), 0);
+    uint64_t opened = rl_vk_shadow_chunks_opened();
+    memset(g_mem + b.ptr + 5 * CHUNK, 0x55, 256);
+    CHECK_EQ(rl_vk_shadow_chunks_opened(), opened + 1);
+
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+    VkBufferCopy copy = { .srcOffset = 5 * CHUNK, .dstOffset = 2 * CHUNK, .size = 256 };
+    G("vkCmdCopyBuffer", cb, b.buf, b.buf, 1, gput(&copy, sizeof copy));
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", queue)), VK_SUCCESS);
+
+    unsigned bad = 0;
+    for (uint32_t i = 0; i < 256; i++)
+        if (g_mem[b.ptr + 2 * CHUNK + i] != 0x55)
+            bad++;
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(rl_vk_shadow_chunks_opened(), opened + 2);
+    CHECK_EQ(g_mem[b.ptr + 7 * CHUNK], 0);
+    CHECK_EQ(rl_vk_shadow_chunks_opened(), opened + 3);
+
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyBuffer", dev, b.buf, 0);
+    G("vkFreeMemory", dev, b.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
 static uint64_t g_cb_calls, g_cb_user, g_cb_sev, g_cb_x19, g_cb_len, g_cb_sp;
 static char g_cb_msg[256];
 
