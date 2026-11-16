@@ -205,6 +205,34 @@ typedef struct nds_disp {
     /** @brief The start of VBlank, which hands over the frame. */
     rl_event ev;
 } nds_disp;
+/** @brief One DMA channel. */
+typedef struct nds_dma_ch {
+    /** @brief The registers as written: source and destination address, count and control (the whole 32-bit word). */
+    uint32_t sad, dad, cnt;
+    /** @brief The working source, destination and remaining units of the transfer. */
+    uint32_t src, dst, len;
+    /** @brief The tick from which the transfer may run (start delay or trigger tick). */
+    uint64_t ready;
+    /** @brief Armed: enabled and its start condition met. */
+    bool active;
+    /** @brief The first unit of a trigger is still to come (it is a nonsequential access). */
+    bool first;
+    /** @brief The unit that runs next is the second of the trigger. */
+    bool after_first;
+} nds_dma_ch;
+
+/** @brief The four DMA channels of one CPU and the engine that runs them one unit at a time. */
+typedef struct nds_dma {
+    nds_dma_ch ch[4];
+    /** @brief DMAxFILL, ARM9 only. */
+    uint32_t fill[4];
+    /** @brief Runs the next slice of transfers. */
+    rl_event ev;
+    /** @brief The tick the engine's bus time has reached. */
+    uint64_t at;
+    rl_nds *m;
+    uint8_t cpu;
+} nds_dma;
 
 /** @brief What an address decodes to. */
 typedef enum nds_kind {
@@ -288,6 +316,7 @@ struct rl_nds {
     nds_math math;
     nds_lcd lcd;
     nds_disp disp;
+    nds_dma dma[2];
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
@@ -379,6 +408,8 @@ static inline uint32_t nds_vram_rd(const rl_nds *m, unsigned view, uint32_t addr
     return pg->banks ? nds_vram_read_slow(m, view, addr, size) : 0;
 }
 
+/** @brief Decodes addr for a bus master that has no TCM access (a DMA channel of cpu). */
+nds_where nds_decode_bus(rl_nds *m, unsigned cpu, uint32_t addr, bool write);
 /** @brief Rebuilds the GBA slot rows of the cost table from EXMEMCNT. */
 void nds_costs_rebuild(rl_nds *m);
 /** @brief The open bus value of the GBA slot for cpu at addr. */
@@ -467,6 +498,62 @@ void nds_math_reset(rl_nds *m);
 uint32_t nds_math_read(rl_nds *m, uint32_t off, uint64_t now);
 /** @brief A write of the mask bits of v to a math unit register; control and parameter writes start the unit. */
 void nds_math_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+
+/** @brief Power-on state of both DMA engines. */
+void nds_dma_reset(rl_nds *m);
+/** @brief Starts the engines' clocks at the CPUs' current ticks. */
+void nds_dma_attach(rl_nds *m);
+/** @brief DMA registers (word offset off, 0xB0 to 0xEF) at tick now. */
+uint32_t nds_dma_read(rl_nds *m, unsigned cpu, uint32_t off);
+/** @brief A write of the mask bits of v to a DMA register at tick now; enabling an immediate channel starts it. */
+void nds_dma_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+/**
+ * @brief If cpu has a DMA transfer that may run now, the CPU waits on the bus until it is done (called before a
+ * bus access of cpu, with its clock at the access).
+ */
+void nds_dma_wait(rl_nds *m, unsigned cpu);
+/** @brief True when a channel of cpu is armed (the CPU's bus accesses may have to wait). */
+static inline bool nds_dma_live(const rl_nds *m, unsigned cpu)
+{
+    for (unsigned i = 0; i < 4; i++)
+        if (m->dma[cpu].ch[i].active)
+            return true;
+    return false;
+}
+
+/** @brief Start timings of the DMA channels (the channel's mode bits), per CPU (GBATEK "DS DMA Transfers"). */
+enum {
+    NDS_DMA9_IMMEDIATE = 0,
+    NDS_DMA9_VBLANK = 1,
+    NDS_DMA9_HBLANK = 2,
+    NDS_DMA9_DISPLAY_START = 3,
+    NDS_DMA9_MAIN_DISPLAY = 4,
+    NDS_DMA9_CARD = 5,
+    NDS_DMA9_GBA_SLOT = 6,
+    NDS_DMA9_GXFIFO = 7,
+    NDS_DMA7_IMMEDIATE = 0,
+    NDS_DMA7_VBLANK = 1,
+    NDS_DMA7_CARD = 2,
+    /** @brief Mode 3 of channels 0 and 2: the wireless interrupt. */
+    NDS_DMA7_WIRELESS = 3,
+    /** @brief Mode 3 of channels 1 and 3: the GBA slot (the same mode value as NDS_DMA7_WIRELESS, other channels). */
+    NDS_DMA7_GBA_SLOT = 8 | 3,
+};
+/**
+ * @brief A start condition of timing (NDS_DMA9_* for the ARM9, NDS_DMA7_* for
+ * the ARM7) happens at tick: every enabled channel of cpu set to that timing
+ * transfers its count (the display lane raises VBLANK, HBLANK, DISPLAY_START
+ * and MAIN_DISPLAY, the 3D lane GXFIFO, the cartridge CARD itself). A channel
+ * that is still running ignores the trigger.
+ */
+void nds_dma_start(rl_nds *m, unsigned cpu, unsigned timing, uint64_t tick);
+
+/** @brief The access cost in ticks of cpu (kind RL_NDS_CODE or RL_NDS_DATA) at addr. */
+unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq);
+/** @brief A read on the bus of cpu without its TCMs (a DMA's view) at tick now; no cost. */
+uint32_t nds_bus_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint64_t now, bool *main);
+/** @brief The write twin of nds_bus_load. */
+void nds_bus_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, uint64_t now, bool *main);
 
 /** @brief The scheduler address of cpu's I/O address addr: the ARM7's registers sit 4 GiB above the ARM9's. */
 static inline uint64_t nds_io_key(unsigned cpu, uint32_t addr) { return (uint64_t)cpu << 32 | addr; }

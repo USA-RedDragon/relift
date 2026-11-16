@@ -17,7 +17,7 @@ void nds_charge(rl_nds *m, unsigned cpu, uint64_t ticks)
     rl_sched_stall(m->cpu[cpu], cpu == RL_NDS_ARM9 ? ticks : (ticks + 1) / 2);
 }
 
-static unsigned cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq)
+unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq)
 {
     unsigned r = addr >> 24;
     return m->costs.t[cpu][kind][r > 14 ? 15 : r][size >> 1][seq];
@@ -60,6 +60,35 @@ static uint32_t bus_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, 
     }
 }
 
+uint32_t nds_bus_load(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint64_t now, bool *main)
+{
+    nds_where w = nds_decode_bus(m, cpu, addr, false);
+    *main = w.main;
+    switch (w.kind) {
+    case NDS_K_MEM:
+        return nds_ld(w.p, size);
+    case NDS_K_IO:
+        return nds_io_read(m, cpu, addr, size, now);
+    case NDS_K_SLOT:
+        return nds_slot_read(m, cpu, addr, size);
+    default:
+        return 0;
+    }
+}
+
+void nds_bus_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value, uint64_t now, bool *main)
+{
+    nds_where w = nds_decode_bus(m, cpu, addr, true);
+    *main = w.main;
+    if (w.kind == NDS_K_MEM && w.p) {
+        nds_st(w.p, size, value);
+        nds_watch_store(m, w.p);
+    } else if (w.kind == NDS_K_IO) {
+        nds_io_write(m, cpu, addr, size, value, now);
+        m->halt_req = false;
+    }
+}
+
 static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq, bool code)
 {
     addr &= ~(size - 1);
@@ -71,11 +100,13 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
         }
         edge(m, cpu);
     }
+    if (nds_dma_live(m, cpu))
+        nds_dma_wait(m, cpu);
     if (nds_shared(cpu, addr))
         nds_order(m, cpu);
     nds_where w = nds_decode(m, cpu, addr, code, false);
     uint32_t v = bus_read(m, cpu, addr, size, w);
-    finish(m, cpu, w.main, cost(m, cpu, code ? RL_NDS_CODE : RL_NDS_DATA, addr, size, seq && !(code && cpu == RL_NDS_ARM9)));
+    finish(m, cpu, w.main, nds_cost(m, cpu, code ? RL_NDS_CODE : RL_NDS_DATA, addr, size, seq && !(code && cpu == RL_NDS_ARM9)));
     return v;
 }
 
@@ -103,6 +134,8 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         }
         edge(m, cpu);
     }
+    if (nds_dma_live(m, cpu))
+        nds_dma_wait(m, cpu);
     if (nds_shared(cpu, addr))
         nds_order(m, cpu);
     nds_where w = nds_decode(m, cpu, addr, false, true);
@@ -121,7 +154,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         else
             nds_io_write(m, cpu, addr, size, value, 0);
     }
-    finish(m, cpu, w.main, cost(m, cpu, RL_NDS_DATA, addr, size, seq));
+    finish(m, cpu, w.main, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq));
     if (m->halt_req) {
         m->halt_req = false;
         if (!rl_nds_halt(m, cpu))

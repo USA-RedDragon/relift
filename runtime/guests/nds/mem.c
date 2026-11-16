@@ -45,9 +45,9 @@ static nds_where at(uint8_t *p, bool main)
     return (nds_where){.p = p, .kind = NDS_K_MEM, .main = main};
 }
 
-static nds_where decode9(rl_nds *m, uint32_t addr, bool code, bool write)
+static nds_where decode9(rl_nds *m, uint32_t addr, bool code, bool write, bool tcm_on)
 {
-    uint8_t *tcm = nds_tcm(m, addr, code, write);
+    uint8_t *tcm = tcm_on ? nds_tcm(m, addr, code, write) : NULL;
     if (tcm)
         return (nds_where){.p = tcm, .kind = NDS_K_MEM, .tcm = true};
     switch (addr >> 24) {
@@ -102,7 +102,12 @@ static nds_where decode7(rl_nds *m, uint32_t addr)
 
 nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write)
 {
-    return cpu == RL_NDS_ARM9 ? decode9(m, addr, code, write) : decode7(m, addr);
+    return cpu == RL_NDS_ARM9 ? decode9(m, addr, code, write, true) : decode7(m, addr);
+}
+
+nds_where nds_decode_bus(rl_nds *m, unsigned cpu, uint32_t addr, bool write)
+{
+    return cpu == RL_NDS_ARM9 ? decode9(m, addr, false, write, false) : decode7(m, addr);
 }
 
 bool nds_drops_byte(unsigned cpu, uint32_t addr)
@@ -250,6 +255,7 @@ int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7
     nds_timer_attach(m);
     nds_lcd_attach(m);
     nds_disp_resync(m, nds_now(m, RL_NDS_ARM9));
+    nds_dma_attach(m);
     return 0;
 }
 

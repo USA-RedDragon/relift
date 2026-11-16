@@ -2,8 +2,8 @@
  * @file io.c
  * @brief The I/O registers of both CPUs as one scheduler device: the word
  * dispatch with byte lanes to the interrupt controllers (irq.c), IPC
- * (ipc.c), the timers (timer.c), the ARM9's math unit (math.c), the
- * display timing (lcd.c), the
+ * (ipc.c), the timers (timer.c), DMA (dma.c), the ARM9's math unit (math.c),
+ * the display timing (lcd.c), the
  * system registers (EXMEMCNT and EXMEMSTAT,
  * WRAMCNT and WRAMSTAT, VRAMCNT, POSTFLG, HALTCNT) and register file stubs
  * for the registers no device models yet.
@@ -48,12 +48,16 @@ static void exmem_write(rl_nds *m, unsigned cpu, uint16_t v, uint16_t mask)
 
 static bool math_reg(unsigned cpu, uint32_t off) { return cpu == RL_NDS_ARM9 && off >= 0x280 && off < 0x2C0; }
 
+static bool dma_reg(unsigned cpu, uint32_t off) { return off >= 0xB0 && off < (cpu == RL_NDS_ARM9 ? 0xF0u : 0xE0u); }
+
 static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 {
     if (nds_disp_reg(cpu, off))
         return nds_disp_read(m, off);
     if (off >= 0x100 && off < 0x110)
         return nds_timer_read(m, cpu, off, now);
+    if (dma_reg(cpu, off))
+        return nds_dma_read(m, cpu, off);
     if (math_reg(cpu, off))
         return nds_math_read(m, off, now);
     switch (off) {
@@ -100,6 +104,10 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     }
     if (off >= 0x100 && off < 0x110) {
         nds_timer_write(m, cpu, off, v, mask, now);
+        return;
+    }
+    if (dma_reg(cpu, off)) {
+        nds_dma_write(m, cpu, off, v, mask, now);
         return;
     }
     if (math_reg(cpu, off)) {
@@ -185,6 +193,7 @@ void nds_io_reset(rl_nds *m)
     nds_irq_reset(m);
     nds_ipc_reset(m);
     nds_timer_reset(m);
+    nds_dma_reset(m);
     nds_math_reset(m);
     nds_lcd_reset(m);
     nds_disp_reset(m);
