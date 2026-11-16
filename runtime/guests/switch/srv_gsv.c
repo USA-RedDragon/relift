@@ -185,7 +185,44 @@ static rl_result boot_native_memory_management(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
-static const rl_ipc_class gpu_session_class = { "nn::gsv::GpuSession", NULL, 0, 0, NULL };
+/** @brief The GpuSession user version the SDKs seen use (nn::gpu::impl::user::UserBootFunction::MyUserVersion). */
+#define GPU_USER_VERSION 4u
+
+/**
+ * @brief GpuSession 11 (unnamed): no input; the lowest and highest user
+ * versions the server takes, from which nn::gpu builds a mask of the
+ * versions it may boot with. Only the one the SDK sends is taken.
+ */
+static rl_result gpu_user_versions(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 8);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    out[0] = GPU_USER_VERSION;
+    out[1] = GPU_USER_VERSION;
+    return KR_SUCCESS;
+}
+
+static const rl_ipc_class gpu_user_class = { "nn::gsv::GpuUserSession", NULL, 0, 0, NULL };
+
+/** @brief GpuSession 12 (unnamed): the u32 user version to boot with; a session for that user. */
+static rl_result gpu_open_user(rl_ipc_req *r)
+{
+    uint32_t version;
+    if (!rl_srv_in(r, &version, 4))
+        return SF_RESULT_INVALID_HEADER;
+    if (version != GPU_USER_VERSION)
+        return SF_RESULT_NOT_SUPPORTED;
+    return push_session(r, &gpu_user_class);
+}
+
+static const rl_ipc_cmd gpu_session_cmds[] = {
+    { 11, "GetUserVersionRange", gpu_user_versions },
+    { 12, "OpenUser", gpu_open_user },
+};
+
+static const rl_ipc_class gpu_session_class = { "nn::gsv::GpuSession", gpu_session_cmds,
+                                                sizeof gpu_session_cmds / sizeof gpu_session_cmds[0], 0, NULL };
 
 /** @brief CreateGpuSessionWithRemoteMemory: u64 version; a GpuSession. */
 static rl_result create_gpu_session(rl_ipc_req *r)
