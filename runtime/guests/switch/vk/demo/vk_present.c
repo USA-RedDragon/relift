@@ -631,7 +631,7 @@ static void build_image(void)
     }
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && defined(RL_HOST_VIDEO)
 #include <relift/android.h>
 
 #include <stdio.h>
