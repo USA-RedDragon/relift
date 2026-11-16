@@ -640,6 +640,25 @@ fn brx_becomes_a_switch() {
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("brx", &s.spirv);
     assert!(spirv_has(&s.spirv, 251), "no OpSwitch");
+    let w = &s.spirv;
+    let mut k = 5;
+    let mut checked = false;
+    while k < w.len() {
+        let n = (w[k] >> 16) as usize;
+        if w[k] & 0xffff == 251 {
+            let default = w[k + 2];
+            let cases: Vec<u32> = w[k + 3..k + n].chunks(2).map(|c| c[1]).collect();
+            assert_eq!(cases.len(), 2, "{:?}", &w[k..k + n]);
+            assert!(!cases.contains(&default), "default falls into a case");
+            let at = (5..w.len())
+                .find(|&j| w[j] == (2 << 16 | 248) && w[j + 1] == default)
+                .expect("default label");
+            assert_eq!(w[at + 2] & 0xffff, 253, "default does not return");
+            checked = true;
+        }
+        k += n.max(1);
+    }
+    assert!(checked);
 }
 
 #[test]

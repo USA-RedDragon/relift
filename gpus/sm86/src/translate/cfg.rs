@@ -22,7 +22,9 @@
 //! after the jump and the code nothing else reaches: each instruction after
 //! an unconditional transfer that is unreachable without the jump belongs
 //! to the nearest jump before it. The jump becomes an OpSwitch over those
-//! addresses (the first is also the default).
+//! addresses. Its default, an address outside the cases, ends the
+//! invocation: a fragment is discarded, any other stage returns without
+//! its outputs, so a missed case shows instead of running the wrong one.
 //!
 //! A graph this cannot express (irreducible, recursive calls) is rejected
 //! with the reason.
@@ -45,8 +47,7 @@ enum Sel {
 enum Term {
     Jump(usize),
     Branch(Vec<Operand>, usize, usize),
-    /// Jump to `selector + base`: (address, block) cases; the first case is
-    /// also the default.
+    /// Jump to `selector + base`: (address, block) cases.
     Switch(Sel, u32, Vec<(u32, usize)>),
 }
 
@@ -652,6 +653,9 @@ enum Head {
     Cond(u32),
     /// Selector and one literal per target; the first target is the default.
     Switch(u32, Vec<u32>),
+    /// Selector and one literal per target; any other value ends the
+    /// invocation.
+    Cases(u32, Vec<u32>),
 }
 
 struct Emit<'a> {
@@ -778,7 +782,7 @@ impl Emit<'_> {
             Some(r) => Some((r, merge)),
             None => follow.map(|(f, _)| (f, merge)),
         };
-        let switch = matches!(head, Head::Switch(..));
+        let switch = matches!(head, Head::Switch(..) | Head::Cases(..));
         let mut arms: Vec<(u32, Dest)> = Vec::new();
         let mut by_target: HashMap<usize, u32> = HashMap::new();
         let mut labels = Vec::new();
@@ -816,6 +820,21 @@ impl Emit<'_> {
                     a.push(l);
                 }
                 c.m.emit_void(op::SWITCH, &a);
+            }
+            Head::Cases(sel, lits) => {
+                let trap = c.m.id();
+                let mut a = vec![sel, trap];
+                for (k, &l) in labels.iter().enumerate() {
+                    a.push(lits[k]);
+                    a.push(l);
+                }
+                c.m.emit_void(op::SWITCH, &a);
+                c.m.emit_void(op::LABEL, &[trap]);
+                if c.stage == crate::program::Stage::Fragment {
+                    c.m.emit_void(op::KILL, &[]);
+                } else {
+                    c.m.emit_void(op::RETURN, &[]);
+                }
             }
         }
         for (l, d) in arms {
@@ -945,7 +964,7 @@ impl Emit<'_> {
                 Term::Switch(sel, base, cases) => {
                     let s = self.selector(c, sel, base);
                     let lits = cases.iter().map(|x| x.0).collect();
-                    (Head::Switch(s, lits), cases.iter().map(|x| x.1).collect())
+                    (Head::Cases(s, lits), cases.iter().map(|x| x.1).collect())
                 }
             };
             let pd = self.g.ipdom(lp.map(|l| l.header), cur);
