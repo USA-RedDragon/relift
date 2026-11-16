@@ -149,6 +149,7 @@ static int entry_check(rl_ctx *c, uint8_t *mem)
     return rl_guest_fatal(c, "n64", "missed code: %s", why);
 }
 
+#ifdef RL_N64_TRACE
 /** @brief A call site the trace saw: its return address, the VI frame and cycle of its first call, its calls and the frame of its last. */
 typedef struct trace_site {
     uint64_t ret;
@@ -225,6 +226,7 @@ void rl_n64_trace_write(void)
     free(g_trace.sites);
     g_trace.sites = NULL;
 }
+#endif
 
 static uint64_t rsp_run(void *user, uint32_t *pc, uint64_t from, uint64_t to)
 {

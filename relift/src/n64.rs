@@ -346,6 +346,9 @@ fn compile(
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
         .collect();
     let static_rt = cfg!(windows).then_some("-DRL_STATIC_RUNTIME".to_string());
+    let trace = std::env::var_os("RELIFT_N64_TRACE")
+        .is_some_and(|v| !v.is_empty() && v != "0")
+        .then(|| "-DRL_N64_TRACE".to_string());
     let lifted_flags: Vec<String> = base
         .iter()
         .map(|f| {
@@ -363,6 +366,7 @@ fn compile(
             inc("guests/n64/run/include"),
         ])
         .chain(static_rt.clone())
+        .chain(trace.clone())
         .collect();
     let mut extras = crate::runtime_link::extras(&rt, &cache_root(settings)?)?;
     extras.vk.clear();
@@ -394,6 +398,7 @@ fn compile(
         ])
         .chain(extras.defines())
         .chain(static_rt)
+        .chain(trace)
         .collect();
     let obj = |src: &Path, tag: &str| {
         let stem = src

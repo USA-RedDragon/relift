@@ -203,6 +203,11 @@ pub fn scratch(name: &str) -> PathBuf {
 /// Runs relift in `dir`. `RELIFT_TEST_BIN` replaces the binary cargo built,
 /// for a test built on one host and run on another.
 pub fn relift(dir: &Path, args: &[&str]) -> std::process::Output {
+    relift_env(dir, args, &[])
+}
+
+/// As [`relift`], with `env` set for the run.
+pub fn relift_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
     let bin = std::env::var_os("RELIFT_TEST_BIN").map_or_else(
         || PathBuf::from(env!("CARGO_BIN_EXE_relift")),
         PathBuf::from,
@@ -211,6 +216,7 @@ pub fn relift(dir: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .env_remove("RELIFT_JOBS")
         .env("RELIFT_PACKAGE_APPIMAGE", "never")
+        .envs(env.iter().copied())
         .current_dir(dir)
         .output()
         .expect("the relift binary runs")

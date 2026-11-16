@@ -600,14 +600,18 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
  * signature so the miss stays a tail call.
  */
 RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
-/** @brief Called at every lifted call with its return address when set (a development trace); NULL by default. */
+#ifdef RL_N64_TRACE
+/** @brief Called at every lifted call with its return address when set (a development trace); NULL by default. Exists only in builds that define RL_N64_TRACE. */
 RL_RUNTIME_API extern void (*rl_mips_call_trace)(rl_ctx *c, uint64_t ret);
+#endif
 
 /** @brief A lifted call that returns to ret opens a host frame. */
 static inline void rl_mips_call(rl_ctx *c, uint64_t ret)
 {
+#ifdef RL_N64_TRACE
     if (RL_UNLIKELY(rl_mips_call_trace != 0))
         rl_mips_call_trace(c, ret);
+#endif
     if (c->depth < RL_MIPS_SHADOW)
         c->shadow[c->depth] = ret;
     c->depth++;

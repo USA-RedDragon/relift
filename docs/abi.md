@@ -2182,10 +2182,14 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   for this guest yet. A transfer from one run to another is always a
   computed one, through dispatch, so the other run's check sees the bytes
   that are there when it runs.
-- `RELIFT_N64_TRACE=PATH` (a development aid, off by default) records
-  every lifted call site's first VI frame and cycle, its count and its last
-  frame, and writes them to PATH at exit in the order of first call, for a
-  diff against an emulator's executed-address trace.
+- `RELIFT_N64_TRACE=PATH` (a development aid) records every lifted call
+  site's first VI frame and cycle, its count and its last frame, and
+  writes them to PATH at exit in the order of first call, for a diff
+  against an emulator's executed-address trace. It is compiled out unless
+  the build asks for it: `relift build` with `RELIFT_N64_TRACE=1` in its
+  environment defines `RL_N64_TRACE` for the lifted code and the runtime,
+  and only then does a lifted call test the hook or the run layer read the
+  variable. A default build has no trace branch in lifted code.
 
 ### The RSP
 

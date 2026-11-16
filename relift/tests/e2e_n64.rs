@@ -93,9 +93,13 @@ fn rom() -> Vec<u8> {
     rom
 }
 
-/// Imports, builds and runs `rom` headless for 3 frames with `--stats` and
-/// `--dump`; the scratch root and the run's stderr, or `None` without clang.
-fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)> {
+/// Imports and builds `rom` with `env` set for the build; the scratch root
+/// and the directory of the built game, or `None` without clang.
+fn build(
+    name: &str,
+    rom: &[u8],
+    env: &[(&str, &str)],
+) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     if relift_build::find_tool("clang").is_none() {
         eprintln!("skipped: no clang on PATH");
         return None;
@@ -115,11 +119,18 @@ fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)>
     );
     let toml = std::fs::read_to_string(project.join("game.toml")).expect("game.toml");
     assert!(toml.contains("guest = \"n64\""), "{toml}");
-    let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
+    let out = tiny::relift_env(&project, &["--cache-dir", &cache, "-j", "4", "build"], env);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     assert!(stderr.contains("0 instructions not lifted"), "{stderr}");
     let host = root.join("cache/projects/game/build/host");
+    Some((root, host))
+}
+
+/// Imports, builds and runs `rom` headless for 3 frames with `--stats` and
+/// `--dump`; the scratch root and the run's stderr, or `None` without clang.
+fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)> {
+    let (root, host) = build(name, rom, &[])?;
     let dump = root.join("dump").display().to_string();
     let out = relift_proc::command(host.join("game"))
         .args(["--headless", "--frames", "3", "--stats", "--dump", &dump])
@@ -129,6 +140,37 @@ fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)>
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "{stdout}{err}");
     Some((root, format!("{stdout}{err}")))
+}
+
+/// Runs the built game headless for 3 frames with the call trace asked for
+/// at `trace`; whether the run succeeded.
+fn run_traced(host: &std::path::Path, trace: &std::path::Path) -> bool {
+    relift_proc::command(host.join("game"))
+        .args(["--headless", "--frames", "3"])
+        .env("RELIFT_N64_TRACE", trace)
+        .output()
+        .expect("the game runs")
+        .status
+        .success()
+}
+
+#[test]
+fn the_call_trace_exists_only_in_builds_that_ask_for_it() {
+    let r = rom();
+    let Some((root, host)) = build("e2e-n64-trace", &r, &[("RELIFT_N64_TRACE", "1")]) else {
+        return;
+    };
+    let trace = root.join("calls.tsv");
+    assert!(run_traced(&host, &trace));
+    let text = std::fs::read_to_string(&trace).expect("the trace is written");
+    assert!(text.starts_with("call\tframe\tcycle\tcount\tlast_frame\n"));
+    assert!(text.lines().count() >= 2, "{text}");
+    let Some((root, host)) = build("e2e-n64-no-trace", &r, &[]) else {
+        return;
+    };
+    let trace = root.join("calls.tsv");
+    assert!(run_traced(&host, &trace));
+    assert!(!trace.exists(), "a default build writes no trace");
 }
 
 #[test]
