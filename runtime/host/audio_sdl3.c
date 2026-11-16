@@ -30,6 +30,7 @@ static const rl_audio_backend g_sdl;
 
 static rl_audio_out *sdl_open(uint32_t rate, uint32_t channels)
 {
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         rl_log(RL_LOG_WARN, "audio", "SDL audio init failed: %s", SDL_GetError());
         return NULL;
