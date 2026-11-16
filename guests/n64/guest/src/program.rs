@@ -230,11 +230,12 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         let mut covered: BTreeSet<u64> = BTreeSet::new();
         let mut fns: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
         let none = BTreeSet::new();
-        for e in entries {
+        for &e in &entries {
             let r = reach(&blocks, e, &none);
             covered.extend(&r);
             fns.insert(e, r);
         }
+        let found = covered.clone();
         let pcs: Vec<u64> = blocks.keys().copied().collect();
         for pc in pcs {
             if covered.contains(&pc) {
@@ -288,17 +289,34 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         let output = relift_emit::emit(&fe, &functions, &[], &opts);
         let index = out.units.len();
         for u in &units {
+            let source = match u.source {
+                Source::Rom => 0,
+                Source::Stream(n) => n + 1,
+            };
+            let first = sext(u.link.unwrap_or(link));
             out.code.push(Code {
                 unit: index,
-                source: match u.source {
-                    Source::Rom => 0,
-                    Source::Stream(n) => n + 1,
-                },
+                source,
                 offset: u.offset,
                 len: u.len,
-                link: sext(u.link.unwrap_or(link)),
+                link: first,
                 hash: u.hash,
             });
+            if let Some((k0, k1)) = core(&found, first, u.len)
+                && (k0, k1) != (0, u.len)
+                && u.reloc == 0
+            {
+                let lo = (u.offset + k0) as usize;
+                let hi = (u.offset + k1) as usize;
+                out.code.push(Code {
+                    unit: index,
+                    source,
+                    offset: u.offset + k0,
+                    len: k1 - k0,
+                    link: first.wrapping_add(u64::from(k0)),
+                    hash: fnv(bytes.get(lo..hi).unwrap_or_default()),
+                });
+            }
         }
         out.units.push(SegmentUnit {
             segment: si,
@@ -309,6 +327,25 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         });
     }
     out
+}
+
+/// The part of the run of `len` bytes at `first` that the functions the
+/// analysis entered cover, from the first such word to the last, as byte
+/// offsets: the run less the words only the sweep added at its ends, which
+/// may be data a loader does not bring along.
+fn core(found: &BTreeSet<u64>, first: u64, len: u32) -> Option<(u32, u32)> {
+    let end = first.wrapping_add(u64::from(len));
+    let mut inside = found.range(first..end);
+    let a = *inside.next()?;
+    let b = inside.next_back().copied().unwrap_or(a);
+    Some(((a - first) as u32, (b + 4 - first) as u32))
+}
+
+/// FNV-1a (64-bit) of `b`.
+fn fnv(b: &[u8]) -> u64 {
+    b.iter().fold(0xCBF2_9CE4_8422_2325, |h, &x| {
+        (h ^ u64::from(x)).wrapping_mul(0x0100_0000_01B3)
+    })
 }
 
 /// The boot variant number the runtime's boot takes: 6101, 6102, 6103,
@@ -413,6 +450,14 @@ pub fn program_c(p: &Program<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_core_of_a_run_drops_only_its_sweep_only_ends() {
+        let found: BTreeSet<u64> = [0x110, 0x114, 0x120].into_iter().collect();
+        assert_eq!(core(&found, 0x100, 0x40), Some((0x10, 0x24)));
+        assert_eq!(core(&found, 0x110, 0x14), Some((0, 0x14)));
+        assert_eq!(core(&found, 0x200, 0x40), None);
+    }
     use relift_n64_formats::synth::{self, Spec};
 
     /// A ROM whose boot image at 0x80001000 calls a leaf and loops.

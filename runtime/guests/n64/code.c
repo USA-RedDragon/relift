@@ -6,6 +6,9 @@
  * its bytes in RDRAM with the hash it was lifted from; on a match the run's
  * functions take its slots. Several runs may be linked at one address (code
  * a game loads in turn); the check binds the one whose bytes are there now.
+ * A run may also be listed a second time without the words at its ends
+ * that only the sweep found (data a loader may not bring along); only the
+ * functions that start inside the run that matched take slots.
  * A DMA into RDRAM (rl_n64_code_loaded, rl_n64_code_written) or an
  * instruction cache invalidation puts the stub back over the runs it
  * touches, so the next entry checks again. Nothing is interpreted: an entry
@@ -140,9 +143,10 @@ static void bind(rl_n64 *m, uint32_t i)
         rl_dispatch_set(a, NULL);
     for (uint32_t k = 0; k < u->fn_count; k++) {
         const rl_fn_entry *e = &u->fns[k];
+        if (e->guest_addr < lo || e->guest_addr >= hi)
+            continue;
         uint64_t end = e->guest_addr + ((e->flags & RL_FN_RANGE) ? e->guest_size : 4u);
-        uint64_t a = e->guest_addr > lo ? e->guest_addr : lo;
-        for (; a < end && a < hi; a += 4)
+        for (uint64_t a = e->guest_addr; a < end && a < hi; a += 4)
             if (!rl_dispatch_find(a))
                 rl_dispatch_set(a, e->fn);
     }
