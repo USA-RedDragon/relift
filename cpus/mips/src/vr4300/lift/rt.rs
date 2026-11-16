@@ -1,7 +1,9 @@
-//! The run-time side of the generated templates: `St` holds the lift-time
-//! state of one block (pending register writes, the delay-slot and branch
-//! state, the static exception) and turns the cut calls of the templates
-//! into IR.
+//! The run-time side of the VR4300 templates: `St` holds the lift-time
+//! state of one block and turns the cut calls of the templates into IR.
+//! The pending register writes, the delay-slot and branch state, guards,
+//! exceptions and the memory I/O path are the shared core of every MIPS
+//! profile (`crate::common::rt`); `St` adds the VR4300 register file,
+//! translation, the coprocessors and the CP0 effects.
 //!
 //! - Register writes are pending until [`St::finish`]; a write under a
 //!   guard becomes a select of the new and the old value.
@@ -33,122 +35,14 @@
 //!   instructions and CACHE are `mips_tlb(op, run)` and `mips_cache(op,
 //!   vaddr, run)`, where `run` is 1 when the instruction is not annulled.
 
-use relift_ir::{
-    BinOp, Builder, CmpOp, Endian, FpOp, FpRound, IoKind, Op, Reg, UnOp, Value, Width,
-};
+use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Reg, Value, Width};
 
+use crate::common::rt::Core;
+pub use crate::common::rt::{Access, EXC_GUARD, Exc, IN_DELAY, Target, sext, sint};
 use crate::vr4300::regs;
 
-/// Where a branch goes when it is taken.
-#[derive(Clone, Copy, Debug)]
-pub enum Target {
-    /// A known address.
-    Const(u64),
-    /// An address computed in the block.
-    Dynamic(Value),
-}
-
-/// The kind of a memory access, for the TLB exception it raises.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Access {
-    /// A load.
-    LoadData,
-    /// A store.
-    StoreData,
-}
-
-/// The model's exceptions (the overlay's `Exception` enum).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Exc {
-    /// Interrupt.
-    Interrupt,
-    /// TLB modification.
-    TLBMod,
-    /// TLB miss or invalid on a load or fetch.
-    TLBL,
-    /// TLB miss or invalid on a store.
-    TLBS,
-    /// Address error on a load or fetch.
-    AdEL,
-    /// Address error on a store.
-    AdES,
-    /// System call.
-    Sys,
-    /// Breakpoint.
-    Bp,
-    /// Reserved instruction.
-    ResI,
-    /// Coprocessor unusable.
-    CpU,
-    /// Integer overflow.
-    Ov,
-    /// Trap.
-    Tr,
-    /// The model's CP2 exception, not raised on the VR4300.
-    C2E,
-    /// The model's CP2 trap, not raised on the VR4300.
-    C2Trap,
-    /// 64-bit TLB refill on a load.
-    XTLBRefillL,
-    /// 64-bit TLB refill on a store.
-    XTLBRefillS,
-    /// 64-bit TLB invalid on a load.
-    XTLBInvL,
-    /// 64-bit TLB invalid on a store.
-    XTLBInvS,
-    /// Machine check.
-    MCheck,
-    /// Floating-point exception.
-    FPE,
-}
-
-impl Exc {
-    /// The Cause.ExcCode number.
-    pub fn code(self) -> u32 {
-        match self {
-            Exc::Interrupt => 0,
-            Exc::TLBMod => 1,
-            Exc::TLBL | Exc::XTLBRefillL | Exc::XTLBInvL => 2,
-            Exc::TLBS | Exc::XTLBRefillS | Exc::XTLBInvS => 3,
-            Exc::AdEL => 4,
-            Exc::AdES => 5,
-            Exc::Sys => 8,
-            Exc::Bp => 9,
-            Exc::ResI => 10,
-            Exc::CpU => 11,
-            Exc::Ov => 12,
-            Exc::Tr => 13,
-            Exc::FPE => 15,
-            Exc::C2E | Exc::C2Trap => 18,
-            Exc::MCheck => 24,
-        }
-    }
-}
-
-/// The guard code of an exception is this plus its ExcCode.
-pub const EXC_GUARD: u32 = 0x1000;
-/// Added to an exception's or the FPU slow path's guard code when the
-/// delay slot left.
-pub const IN_DELAY: u32 = 0x100;
 /// The guard code of an FPU operation the fast path does not take.
 pub const FP_SLOW: u32 = 0x2000;
-
-/// `x` of width `from` sign-extended to `to` bits.
-pub fn sext(x: u128, from: u32, to: u32) -> u128 {
-    let s = 128 - from;
-    let v = (((x << s) as i128) >> s) as u128;
-    if to >= 128 {
-        v
-    } else {
-        v & ((1u128 << to) - 1)
-    }
-}
-
-/// `x` of width `w` as a signed integer.
-pub fn sint(x: u128, w: u32) -> i128 {
-    let s = 128 - w;
-    ((x << s) as i128) >> s
-}
 
 /// A CP0 effect the runtime carries out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,17 +67,7 @@ pub struct Options {
 
 /// The lift-time state of one block.
 pub struct St {
-    opts: Options,
-    proved: Vec<Value>,
-    pc: u64,
-    in_delay: bool,
-    pending: Vec<(Reg, Value)>,
-    slot_guard: Option<Value>,
-    branch: Option<(Target, Option<Value>)>,
-    annul: Option<Option<Value>>,
-    has_slot: bool,
-    jump: Option<Value>,
-    exception: Option<Exc>,
+    core: Core,
     sys: Vec<Sys>,
 }
 
@@ -196,56 +80,45 @@ impl St {
     /// The state for the instruction at `pc`, lifted with `opts`.
     pub fn with_options(pc: u64, opts: Options) -> St {
         St {
-            opts,
-            proved: Vec::new(),
-            pc,
-            in_delay: false,
-            pending: Vec::new(),
-            slot_guard: None,
-            branch: None,
-            annul: None,
-            has_slot: false,
-            jump: None,
-            exception: None,
+            core: Core::new(pc, opts.plain_below, Endian::Big),
             sys: Vec::new(),
         }
+    }
+
+    pub(crate) fn core(&mut self) -> &mut Core {
+        &mut self.core
     }
 
     /// Moves on to the delay slot at `pc + 4` of the branch lifted so far:
     /// its effects are guarded by "not annulled".
     pub fn enter_delay_slot(&mut self, b: &mut Builder) {
-        self.in_delay = true;
-        self.pc += 4;
-        self.slot_guard = match self.annul {
-            Some(Some(g)) => Some(b.not(g)),
-            _ => None,
-        };
+        self.core.enter_delay_slot(b);
     }
 
     /// Whether the instruction lifted so far has a delay slot.
     pub fn has_delay_slot(&self) -> bool {
-        self.has_slot
+        self.core.has_delay_slot()
     }
 
     /// The branch target and the condition under which it is taken (`None`:
     /// always).
     pub fn branch_target(&self) -> Option<(Target, Option<Value>)> {
-        self.branch
+        self.core.branch_target()
     }
 
     /// Whether a likely branch always annuls its slot.
     pub fn annuls_always(&self) -> bool {
-        matches!(self.annul, Some(None))
+        self.core.annuls_always()
     }
 
     /// The target of a jump without a delay slot (ERET).
     pub fn jump(&self) -> Option<Value> {
-        self.jump
+        self.core.jump()
     }
 
     /// The exception raised whenever the block runs, if any.
     pub fn exception_static(&self) -> Option<Exc> {
-        self.exception
+        self.core.exception_static()
     }
 
     /// The CP0 effects, in order.
@@ -253,84 +126,8 @@ impl St {
         &self.sys
     }
 
-    /// Whether `v` is 1 whenever the block gets past its earlier guards.
-    fn holds(&self, b: &Builder, v: Value) -> bool {
-        match b.op(v) {
-            Some(Op::Un(UnOp::Not, x)) => self.proved.contains(x),
-            Some(Op::Bin(BinOp::And, x, y)) => {
-                let (x, y) = (*x, *y);
-                self.holds(b, x) && self.holds(b, y)
-            }
-            _ => false,
-        }
-    }
-
-    /// `g` without the parts the earlier guards proved.
-    fn simplify(&self, b: &Builder, g: Option<Value>) -> Option<Value> {
-        let v = g?;
-        if self.holds(b, v) {
-            return None;
-        }
-        match b.op(v) {
-            Some(Op::Bin(BinOp::And, x, y)) if self.holds(b, *x) => Some(*y),
-            Some(Op::Bin(BinOp::And, x, y)) if self.holds(b, *y) => Some(*x),
-            _ => Some(v),
-        }
-    }
-
-    /// The template guard `g` and the slot guard together.
-    fn guard(&self, b: &mut Builder, g: Option<Value>) -> Option<Value> {
-        let g = self.simplify(b, g);
-        match (g, self.slot_guard) {
-            (Some(x), Some(y)) => Some(b.and(x, y)),
-            (x, None) => x,
-            (None, y) => y,
-        }
-    }
-
-    /// A guard exit with `code` when `bad` holds under the guard `g`.
-    fn exit_if(&mut self, b: &mut Builder, bad: Value, g: Option<Value>, code: u32) {
-        let c = match self.guard(b, g) {
-            Some(g) => b.and(g, bad),
-            None => bad,
-        };
-        b.guard(c, code);
-        if self.simplify(b, g).is_none() {
-            self.proved.push(bad);
-        }
-    }
-
-    fn exc_code(&self, e: Exc) -> u32 {
-        EXC_GUARD + e.code() + self.delay_flag()
-    }
-
     fn fp_slow(&self) -> u32 {
-        FP_SLOW + self.delay_flag()
-    }
-
-    fn delay_flag(&self) -> u32 {
-        if self.in_delay { IN_DELAY } else { 0 }
-    }
-
-    fn get(&mut self, b: &mut Builder, r: Reg) -> Value {
-        match self.pending.iter().find(|(p, _)| *p == r) {
-            Some((_, v)) => *v,
-            None => b.get(r),
-        }
-    }
-
-    fn set(&mut self, b: &mut Builder, r: Reg, v: Value, g: Option<Value>) {
-        let v = match self.guard(b, g) {
-            Some(g) => {
-                let old = self.get(b, r);
-                b.select(g, v, old)
-            }
-            None => v,
-        };
-        match self.pending.iter_mut().find(|(p, _)| *p == r) {
-            Some(p) => p.1 = v,
-            None => self.pending.push((r, v)),
-        }
+        FP_SLOW + self.core.delay_flag()
     }
 
     fn named(name: &str) -> Reg {
@@ -339,12 +136,12 @@ impl St {
 
     /// The instruction's address.
     pub fn pc(&self) -> u128 {
-        u128::from(self.pc)
+        self.core.pc()
     }
 
     /// Whether the instruction is a delay slot.
     pub fn in_delay(&self) -> bool {
-        self.in_delay
+        self.core.in_delay()
     }
 
     /// General register `n`.
@@ -352,34 +149,34 @@ impl St {
         if n == 0 {
             return b.konst(Width::W64, 0);
         }
-        self.get(b, regs::gpr(n))
+        self.core.get(b, regs::gpr(n))
     }
 
     /// Writes general register `n` (a write to `r0` is dropped).
     pub fn set_gpr(&mut self, b: &mut Builder, n: u8, v: Value, g: Option<Value>) {
         if n != 0 {
-            self.set(b, regs::gpr(n), v, g);
+            self.core.set(b, regs::gpr(n), v, g);
         }
     }
 
     /// FPU register `n`, all 64 bits.
     pub fn fpr(&mut self, b: &mut Builder, n: u8) -> Value {
-        self.get(b, regs::fpr(n))
+        self.core.get(b, regs::fpr(n))
     }
 
     /// Writes FPU register `n`.
     pub fn set_fpr(&mut self, b: &mut Builder, n: u8, v: Value, g: Option<Value>) {
-        self.set(b, regs::fpr(n), v, g);
+        self.core.set(b, regs::fpr(n), v, g);
     }
 
     /// The model register `name`.
     pub fn reg(&mut self, b: &mut Builder, name: &str) -> Value {
-        self.get(b, St::named(name))
+        self.core.get(b, St::named(name))
     }
 
     /// Writes the model register `name`.
     pub fn set_reg(&mut self, b: &mut Builder, name: &str, v: Value, g: Option<Value>) {
-        self.set(b, St::named(name), v, g);
+        self.core.set(b, St::named(name), v, g);
     }
 
     /// The CP0 Random register.
@@ -391,58 +188,33 @@ impl St {
     /// exception, which the guard cannot carry yet: the runtime recomputes
     /// it.
     pub fn exception(&mut self, b: &mut Builder, e: Exc, _addr: Option<Value>, g: Option<Value>) {
-        let code = self.exc_code(e);
-        match self.guard(b, g) {
-            None => {
-                if self.exception.is_none() {
-                    self.exception = Some(e);
-                }
-                let t = b.konst(Width::W1, 1);
-                b.guard(t, code);
-            }
-            Some(c) => {
-                b.guard(c, code);
-                if let Some(g) = g
-                    && self.simplify(b, Some(g)) == Some(g)
-                {
-                    self.proved.push(g);
-                }
-            }
-        }
+        self.core.exception(b, e, g);
     }
 
     /// A branch to `t` under `g`, after the delay slot.
     pub fn branch(&mut self, b: &mut Builder, t: Target, g: Option<Value>) {
-        let g = self.guard(b, g);
-        self.branch = Some((t, g));
-        self.has_slot = true;
+        self.core.branch(b, t, g);
     }
 
     /// A likely branch not taken under `g`: its slot is annulled.
     pub fn annul(&mut self, b: &mut Builder, _next: u64, g: Option<Value>) {
-        let g = self.guard(b, g);
-        self.annul = Some(g);
-        self.has_slot = true;
+        self.core.annul(b, g);
     }
 
     /// A branch not taken: the slot runs, then the next instruction.
     pub fn delay_slot(&mut self, _b: &mut Builder, _g: Option<Value>) {
-        self.has_slot = true;
+        self.core.delay_slot();
     }
 
     /// A jump to `v` without a delay slot under `g` (ERET's two arms).
     pub fn jump_now(&mut self, b: &mut Builder, v: Value, g: Option<Value>) {
-        let v = match (self.guard(b, g), self.jump) {
-            (Some(c), Some(old)) => b.select(c, v, old),
-            _ => v,
-        };
-        self.jump = Some(v);
+        self.core.jump_now(b, v, g);
     }
 
     /// Whether coprocessor `n` is usable: its Status.CU bit, and for CP0
     /// also kernel mode (KSU = 0, EXL or ERL).
     fn cop_usable(&mut self, b: &mut Builder, n: u32) -> Value {
-        let st = self.get(b, regs::CP0_STATUS);
+        let st = self.core.get(b, regs::CP0_STATUS);
         let cu = b.extract(st, 28 + n, Width::W1);
         if n != 0 {
             return cu;
@@ -462,11 +234,13 @@ impl St {
     pub fn check_cop(&mut self, b: &mut Builder, n: u32, g: Option<Value>) {
         let ok = self.cop_usable(b, n);
         let bad = b.not(ok);
-        let code = self.exc_code(Exc::CpU);
-        self.exit_if(b, bad, g, code);
+        let code = self.core.exc_code(Exc::CpU);
+        self.core.exit_if(b, bad, g, code);
     }
 
-    /// The physical address of `va`: kseg0 and kseg1 only.
+    /// The physical address of `va`: kseg0 and kseg1 only; any other
+    /// address leaves through a TLBL or TLBS guard (the TLB is the
+    /// runtime's).
     pub fn translate(&mut self, b: &mut Builder, va: Value, a: Access, g: Option<Value>) -> Value {
         let hi = b.extract(va, 30, Width::new(34));
         let k = b.konst(Width::new(34), 0x3_FFFF_FFFE);
@@ -477,27 +251,14 @@ impl St {
         } else {
             Exc::TLBS
         };
-        let code = self.exc_code(e);
-        self.exit_if(b, bad, g, code);
+        let code = self.core.exc_code(e);
+        self.core.exit_if(b, bad, g, code);
         let m = b.konst(Width::W64, 0x1FFF_FFFF);
         b.bin(BinOp::And, va, m)
     }
 
-    /// Leaves through the guard `code` when the access at `pa` is
-    /// conditional (`g`) and may not be plain memory.
-    fn device_exit(&mut self, b: &mut Builder, pa: Value, g: Option<Value>, code: Exc) {
-        let (Some(_), Some(limit)) = (g, self.opts.plain_below) else {
-            return;
-        };
-        let k = b.konst(Width::W64, u128::from(limit));
-        let dev = b.cmp(CmpOp::Ule, k, pa);
-        let code = self.exc_code(code);
-        b.guard(dev, code);
-    }
-
-    /// A big-endian load of `n` bytes at `pa` under `g`. A load of plain
-    /// memory has no effect the block must order, so one under a guard
-    /// runs unconditionally.
+    /// A big-endian load of `n` bytes at `pa` under `g`; a conditional one
+    /// that may not be plain memory leaves through the TLBL guard.
     pub fn load(
         &mut self,
         b: &mut Builder,
@@ -506,23 +267,14 @@ impl St {
         _ll: bool,
         g: Option<Value>,
     ) -> Value {
-        let g = self.guard(b, g);
-        self.device_exit(b, pa, g, Exc::TLBL);
-        b.io_load(pa, Width::new(8 * n), Endian::Big, IoKind::Any)
+        self.core.load(b, pa, n, Exc::TLBL, g)
     }
 
-    /// A big-endian store of `n` bytes of `v` at `pa` under `g`.
+    /// A big-endian store of `n` bytes of `v` at `pa` under `g`; a
+    /// conditional one that may not be plain memory leaves through the
+    /// TLBS guard.
     pub fn store(&mut self, b: &mut Builder, pa: Value, n: u32, v: Value, g: Option<Value>) {
-        let g = self.guard(b, g);
-        self.device_exit(b, pa, g, Exc::TLBS);
-        let v = match g {
-            Some(c) => {
-                let old = b.io_load(pa, Width::new(8 * n), Endian::Big, IoKind::Any);
-                b.select(c, v, old)
-            }
-            None => v,
-        };
-        b.io_store(pa, v, Endian::Big, IoKind::Any);
+        self.core.store(b, pa, n, v, Exc::TLBS, g);
     }
 
     /// SC and SCD: the overlay calls this only when LLbit is set, and the
@@ -539,18 +291,10 @@ impl St {
         b.konst(Width::W1, 1)
     }
 
-    /// The value 1 when the instruction is not annulled under `g`.
-    fn runs(&mut self, b: &mut Builder, g: Option<Value>) -> Value {
-        match self.guard(b, g) {
-            Some(c) => c,
-            None => b.konst(Width::W1, 1),
-        }
-    }
-
     /// TLBR (0), TLBWI (1), TLBWR (2) or TLBP (3).
     pub fn tlb(&mut self, b: &mut Builder, op: u32, g: Option<Value>) {
         let k = b.konst(Width::W32, u128::from(op));
-        let r = self.runs(b, g);
+        let r = self.core.runs(b, g);
         b.intrinsic("mips_tlb", &[k, r], None);
         self.sys.push(Sys::Tlb(op));
     }
@@ -558,7 +302,7 @@ impl St {
     /// CACHE with operation `op` at `va`.
     pub fn cache(&mut self, b: &mut Builder, op: u32, va: Value, g: Option<Value>) {
         let k = b.konst(Width::W32, u128::from(op));
-        let r = self.runs(b, g);
+        let r = self.core.runs(b, g);
         b.intrinsic("mips_cache", &[k, va, r], None);
         self.sys.push(Sys::Cache(op));
     }
@@ -594,10 +338,10 @@ impl St {
         let Some((fop, ow)) = fp_op(op, int_src, w) else {
             let t = b.konst(Width::W1, 1);
             let code = self.fp_slow();
-            self.exit_if(b, t, g, code);
+            self.core.exit_if(b, t, g, code);
             return b.konst(Width::W64, 0);
         };
-        let fcr = self.get(b, regs::FCR31);
+        let fcr = self.core.get(b, regs::FCR31);
         let mut slow = {
             let en = b.extract(fcr, 7, Width::new(5));
             let z = b.konst(Width::new(5), 0);
@@ -639,13 +383,13 @@ impl St {
             slow = b.or(slow, c);
         }
         let code = self.fp_slow();
-        self.exit_if(b, slow, g, code);
+        self.core.exit_if(b, slow, g, code);
         let opk = b.konst(Width::W32, u128::from(op));
         let fk = b.konst(Width::W32, u128::from(fmt));
         let x64 = b.zext(x, Width::W64);
         let y64 = b.zext(y, Width::W64);
         let new = b.intrinsic("mips_fcr31", &[opk, fk, fcr, x64, y64], Some(Width::W32));
-        self.set(b, regs::FCR31, new, g);
+        self.core.set(b, regs::FCR31, new, g);
         if ow == Width::W64 {
             r
         } else {
@@ -667,27 +411,23 @@ impl St {
         let w = if fmt == 0x10 { Width::W32 } else { Width::W64 };
         let x = b.extract(x, 0, w);
         let y = b.extract(y, 0, w);
-        let fcr = self.get(b, regs::FCR31);
+        let fcr = self.core.get(b, regs::FCR31);
         let c1 = not_normal(b, x, w);
         let c2 = not_normal(b, y, w);
         let slow = b.or(c1, c2);
         let code = self.fp_slow();
-        self.exit_if(b, slow, g, code);
+        self.core.exit_if(b, slow, g, code);
         let ck = b.konst(Width::W32, u128::from(cond));
         let fk = b.konst(Width::W32, u128::from(fmt));
         let x64 = b.zext(x, Width::W64);
         let y64 = b.zext(y, Width::W64);
         let new = b.intrinsic("mips_fcmp", &[ck, fk, fcr, x64, y64], Some(Width::W32));
-        self.set(b, regs::FCR31, new, g);
+        self.core.set(b, regs::FCR31, new, g);
     }
 
     /// Writes the pending registers, in slot order.
     pub fn finish(&mut self, b: &mut Builder) {
-        let mut p = std::mem::take(&mut self.pending);
-        p.sort_by_key(|(r, _)| r.index());
-        for (r, v) in p {
-            b.set(r, v);
-        }
+        self.core.finish(b);
     }
 }
 

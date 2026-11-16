@@ -5,10 +5,13 @@ pub mod rt;
 
 use std::fmt;
 
-use relift_ir::{Block, Builder, Exit, Flow, Next, Width};
+use relift_ir::{Block, Builder, Width};
 
 use super::decode::{self, Encoding};
 use super::regs;
+use crate::common;
+use crate::common::lift::Profile;
+use crate::common::rt::Core;
 pub use rt::{EXC_GUARD, Exc, FP_SLOW, IN_DELAY, Options, St, Sys};
 
 /// Why an instruction did not lift.
@@ -41,7 +44,7 @@ impl fmt::Display for LiftError {
 }
 
 /// A generated template.
-pub(crate) type GenFn = fn(u32, &mut Builder, &mut St) -> Result<(), LiftError>;
+pub(crate) type GenFn = common::lift::Template<St, LiftError>;
 
 /// Whether `enc` has a template.
 pub fn has_template(enc: Encoding) -> bool {
@@ -60,10 +63,28 @@ pub struct Lifted {
     pub sys: Vec<Sys>,
 }
 
-fn template(word: u32) -> Result<(Encoding, GenFn), LiftError> {
-    let enc = decode::decode(word).ok_or(LiftError::Reserved(word))?;
-    let f = generated::template(enc).ok_or(LiftError::Unsupported(enc))?;
-    Ok((enc, f))
+impl Profile for St {
+    type Enc = Encoding;
+    type Err = LiftError;
+
+    fn core(&mut self) -> &mut Core {
+        St::core(self)
+    }
+
+    fn decode(word: u32) -> Result<Encoding, LiftError> {
+        decode::decode(word).ok_or(LiftError::Reserved(word))
+    }
+
+    fn template(enc: Encoding) -> Result<GenFn, LiftError> {
+        generated::template(enc).ok_or(LiftError::Unsupported(enc))
+    }
+
+    fn slot_ok(enc: Encoding) -> Result<(), LiftError> {
+        if enc.has_delay_slot() || enc == Encoding::Eret {
+            return Err(LiftError::BranchInDelaySlot(enc));
+        }
+        Ok(())
+    }
 }
 
 /// Lifts the instruction `word` at `pc` with the default [`Options`]. When
@@ -77,55 +98,14 @@ pub fn lift(pc: u64, word: u32, slot: u32) -> Result<Lifted, LiftError> {
 /// instruction it holds (a branch and its delay slot are two, also when
 /// the slot is annulled).
 pub fn lift_with(pc: u64, word: u32, slot: u32, opts: Options) -> Result<Lifted, LiftError> {
-    let (enc, f) = template(word)?;
     let mut b = Builder::new(regs::regs(), Width::W64, pc);
     let mut st = St::with_options(pc, opts);
-    f(word, &mut b, &mut st)?;
-    let mut encs = vec![enc];
-    let mut len = 4;
-    if st.has_delay_slot() && st.exception_static().is_none() {
-        len = 8;
-        if !st.annuls_always() {
-            let (senc, sf) = template(slot)?;
-            if senc.has_delay_slot() || senc == Encoding::Eret {
-                return Err(LiftError::BranchInDelaySlot(senc));
-            }
-            encs.push(senc);
-            st.enter_delay_slot(&mut b);
-            sf(slot, &mut b, &mut st)?;
-        }
-    }
-    b.tick(len / 4);
-    st.finish(&mut b);
-    let after = pc.wrapping_add(u64::from(len));
-    let next = match st.branch_target() {
-        Some((rt::Target::Const(t), None)) => Next::Const(t),
-        Some((rt::Target::Const(t), Some(cond))) => Next::Select {
-            cond,
-            taken: t,
-            not_taken: after,
-        },
-        Some((rt::Target::Dynamic(v), None)) => Next::Dynamic(v),
-        Some((rt::Target::Dynamic(v), Some(c))) => {
-            let k = b.konst(Width::W64, u128::from(after));
-            Next::Dynamic(b.select(c, v, k))
-        }
-        None => match st.jump() {
-            Some(j) => Next::Dynamic(j),
-            None => Next::Const(after),
-        },
-    };
+    let body = common::lift::body(&mut b, &mut st, pc, word, slot)?;
     let exception = st.exception_static();
     let sys = st.sys_effects().to_vec();
     Ok(Lifted {
-        encs,
-        block: b.finish(
-            len,
-            Exit {
-                next,
-                flow: Flow::Jump,
-            },
-        ),
+        encs: body.encs,
+        block: b.finish(body.len, body.exit),
         exception,
         sys,
     })

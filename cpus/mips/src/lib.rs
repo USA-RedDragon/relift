@@ -12,6 +12,7 @@
 //! exceptions and the slow paths leave the block through guards before any
 //! effect (see [`lift::rt`]).
 
+mod common;
 pub mod vr4300;
 
 pub use vr4300::{decode, lift, regs};
