@@ -84,6 +84,7 @@ mod func;
 mod image;
 mod report;
 mod scan;
+mod ucode;
 mod val;
 
 pub use analysis::{AnalyzeError, Options, analyze, analyze_with};
@@ -92,3 +93,4 @@ pub use report::{
     Boot, Function, Origin, PiDma, Report, RspImage, RspOrigin, Stats, Unit, Unresolved,
     UnresolvedKind,
 };
+pub use ucode::{RspLayout, RspPart};

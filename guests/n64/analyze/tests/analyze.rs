@@ -681,3 +681,61 @@ fn a_segment_table_entry_links_an_overlay() {
         "the overlay is code at its table link"
     );
 }
+
+#[test]
+fn a_microcode_overlay_dma_gives_its_imem_layout() {
+    let mut b = rom(ENTRY, 0x10_4000);
+    let ucode = ENTRY + 0x1000;
+    let ovl = ENTRY + 0x3000;
+    let mut code = vec![lui(T0, 0xA404)];
+    code.extend(li(T1, 0x1000));
+    code.push(sw(T1, 0, T0));
+    code.extend(li(T1, ucode & 0x1FFF_FFFF));
+    code.push(sw(T1, 4, T0));
+    code.extend(li(T1, 0x0FF));
+    code.extend([sw(T1, 8, T0), jr(RA), NOP]);
+    put(&mut b, at(ENTRY), &code);
+    let mtc0 = |rt: u32, rd: u32| 0x4080_0000 | rt << 16 | rd << 11;
+    let vmulf = |vd: u32| 0x4A00_0000 | 2 << 16 | 1 << 11 | vd << 6;
+    let o = ovl & 0x1FFF_FFFF;
+    let mut rsp = vec![
+        ori(T0, ZERO, 0x1080),
+        lui(T1, (o >> 16) as u16),
+        ori(T1, T1, o as u16),
+        ori(T2, ZERO, 0x7F),
+        mtc0(T0, 0),
+        mtc0(T1, 1),
+        mtc0(T2, 2),
+        0x0800_0020,
+        NOP,
+    ];
+    rsp.resize(32, vmulf(3));
+    rsp.extend((0..31).map(vmulf));
+    rsp.push(0x0000_000D);
+    put(&mut b, at(ucode), &rsp);
+    let over: Vec<u32> = (0..31)
+        .map(|k| vmulf(31 - k))
+        .chain([0x0000_000D])
+        .collect();
+    put(&mut b, at(ovl), &over);
+    let rep = run(&b);
+    let base = rep
+        .rsp_layouts
+        .iter()
+        .find(|l| l.parts.len() == 1)
+        .expect("the microcode as loaded");
+    assert_eq!(base.parts[0].offset, at(ucode) as u32);
+    assert_eq!(base.parts[0].len, 0x100);
+    assert_eq!(base.ranges, vec![(0x80, 0x100)]);
+    assert!(!base.unknown);
+    let with = rep
+        .rsp_layouts
+        .iter()
+        .find(|l| l.parts.len() == 2)
+        .expect("the layout with the overlay");
+    assert_eq!(
+        (with.parts[1].imem, with.parts[1].offset, with.parts[1].len),
+        (0x80, at(ovl) as u32, 0x80)
+    );
+    assert_eq!((with.parts[0].imem, with.parts[0].len), (0, 0x80));
+}

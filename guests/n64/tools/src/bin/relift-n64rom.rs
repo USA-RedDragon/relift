@@ -263,6 +263,16 @@ fn report_json(r: &Report) -> Value {
                 RspOrigin::Scan => json!("scan"),
             },
         })).collect::<Vec<_>>(),
+        "rsp_layouts": r.rsp_layouts.iter().map(|l| json!({
+            "parts": l.parts.iter().map(|p| json!({
+                "imem": p.imem,
+                "source": source_json(p.source),
+                "offset": p.offset,
+                "len": p.len,
+            })).collect::<Vec<_>>(),
+            "ranges": l.ranges,
+            "unknown": l.unknown,
+        })).collect::<Vec<_>>(),
         "stats": {
             "run_words": r.stats.run_words,
             "swept_words": r.stats.swept_words,
@@ -334,6 +344,41 @@ fn functions(common: &Common, cic_arg: Option<&str>) -> Result<(), BoxError> {
             i.offset,
             i.len,
             i.hash
+        )?;
+    }
+    for l in &r.rsp_layouts {
+        let parts: Vec<String> = l
+            .parts
+            .iter()
+            .map(|p| {
+                format!(
+                    "{:03X}+{:X} from {} {:08X}",
+                    p.imem,
+                    p.len,
+                    source_text(p.source),
+                    p.offset
+                )
+            })
+            .collect();
+        let ranges: Vec<String> = l
+            .ranges
+            .iter()
+            .map(|(a, b)| format!("{a:03X}-{b:03X}"))
+            .collect();
+        writeln!(
+            out,
+            "rsp layout: {}; DMA overwrites {}{}",
+            parts.join(", "),
+            if ranges.is_empty() {
+                "nothing".to_owned()
+            } else {
+                ranges.join(" ")
+            },
+            if l.unknown {
+                ", and IMEM it cannot tell"
+            } else {
+                ""
+            }
         )?;
     }
     for f in &r.functions {

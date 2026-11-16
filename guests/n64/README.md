@@ -7,7 +7,7 @@ the RDP and audio are not there yet; controller 1 and the cartridge saves (SRAM,
 | Crate | Folder | Does |
 |---|---|---|
 | `relift-n64-formats` | `formats` | Byte orders and normalization, the header, the boot variant by hash, CRC1/CRC2, Yay0, Yaz0 and MIO0 decoders and a stream scan |
-| `relift-n64-analyze` | `analyze` | Code discovery: the VR4300 IR over abstract values from the boot entry, the PI DMA fixed point, the ROM-wide region scan with the link address vote, relocation masks, the sweep and the RSP image list |
+| `relift-n64-analyze` | `analyze` | Code discovery: the VR4300 IR over abstract values from the boot entry, the PI DMA fixed point, the ROM-wide region scan with the link address vote, relocation masks, the sweep, the RSP image list and the microcodes' IMEM layouts |
 | `relift-n64` | `guest` | The VR4300 frontend for the runtime's N64 layer, the RSP frontend for its RSP layer and the build's lift: one unit per segment linked in RDRAM and one per relocatable RSP image of at most 4 KiB, `program.c` with every code run's source, link address and hash, `rsp_images.c` with every RSP image's bytes and successors |
 | `relift-n64-tools` | `tools` | `relift-n64rom`: `info`, `streams`, `normalize`, `functions` |
 
@@ -23,7 +23,7 @@ relift-n64rom functions --json --cic 6102 rom.z64
 ```
 
 `functions` prints the entry point, the counts, the constant PI DMAs, the RSP
-images and one line per function entry (address, source, source offset,
+images, the IMEM layouts and one line per function entry (address, source, source offset,
 origin), then the transfers left unknown. With `--json` it also lists the
 segments and the code units: each unit is a run of code words with its
 source (the ROM or a decoded stream), offset, link address and a hash of the
@@ -56,6 +56,16 @@ invalidation makes the next entry check again. An entry that no lifted run
 matches is missed code: the program stops with a report (and an RDRAM dump
 with `--dump`). Nothing is interpreted; `--stats` prints `interpreted 0`
 with the binding counters.
+
+RSP microcode is found the same way, with no per-game table: the scan finds
+runs of RSP code, and each microcode the CPU code loads is run over abstract
+values from its start (`analyze/src/ucode.rs`). Its own SP DMAs to IMEM
+lead, through the task words the CPU code wrote into DMEM and the constant
+addresses the CPU code builds, to the RSP code and data in RDRAM and, through
+the analysis's segments, to their bytes in the ROM; an overlay table in the
+microcode's data gives the overlays. The analysis lists each IMEM layout
+it can make (its own code, the overlays over it and what remains of the
+code around them) with the IMEM its DMAs may overwrite.
 
 Controller 1 reads the `p1` port (`bind.p1.<control>` settings, a gamepad
 or the keyboard: arrows for the stick, X, Z and C for A, B and Z, I, J, K,

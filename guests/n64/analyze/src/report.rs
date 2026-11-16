@@ -3,6 +3,7 @@
 use relift_n64_formats::{Cic, Stream};
 
 use crate::image::{Segment, Source};
+use crate::ucode::RspLayout;
 
 /// How the boot code loads the game, as the analysis models it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,6 +215,9 @@ pub struct Report {
     pub pi_dma: Vec<PiDma>,
     /// The RSP images.
     pub rsp: Vec<RspImage>,
+    /// The IMEM layouts the microcodes make, with the IMEM ranges their own
+    /// DMAs may overwrite.
+    pub rsp_layouts: Vec<RspLayout>,
     /// Counts.
     pub stats: Stats,
 }

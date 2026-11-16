@@ -26,6 +26,9 @@ pub(crate) struct Summary {
     pub frame_dirty: u64,
     /// DMAs whose operands depend on the entry values.
     pub effects: Rc<[Dma]>,
+    /// The SP addresses, depending on the entry values, of SP DMAs from a
+    /// computed RDRAM address.
+    pub sp_mems: Rc<[Abs]>,
 }
 
 impl Summary {
@@ -36,6 +39,7 @@ impl Summary {
             keep: ABI_KEEP,
             frame_dirty: 0xF,
             effects: Rc::from(Vec::new()),
+            sp_mems: Rc::from(Vec::new()),
         }
     }
 }
@@ -70,6 +74,9 @@ pub(crate) struct FnRun {
     pub bases: Vec<u32>,
     /// DMAs with constant operands: site and DMA.
     pub dma: Vec<(u32, DmaConst)>,
+    /// The IMEM addresses of SP DMAs to a constant IMEM address from a
+    /// computed RDRAM address.
+    pub sp_imem: Vec<u32>,
     /// Jump tables: site, physical base, entries followed.
     pub tables: Vec<(u32, u32, u32)>,
     /// A path reached a word that does not lift.
@@ -114,6 +121,7 @@ struct Run<'a> {
     open: bool,
     dirty: u64,
     effects: Vec<Dma>,
+    sp_mems: Vec<Abs>,
     out: FnRun,
 }
 
@@ -135,6 +143,7 @@ pub(crate) fn run(env: &Env<'_>, entry: Loc) -> FnRun {
         open: false,
         dirty: 0,
         effects: Vec::new(),
+        sp_mems: Vec::new(),
         out: FnRun::default(),
     };
     r.states.insert(entry.1, State::entry());
@@ -358,6 +367,9 @@ impl Run<'_> {
         match c {
             Some(c) => self.out.dma.push((pc, c)),
             None => {
+                if let Dma::Sp { mem, .. } = d {
+                    self.sp_mem(mem);
+                }
                 let ops = match d {
                     Dma::Pi { dram, cart, len }
                     | Dma::Sp {
@@ -377,10 +389,31 @@ impl Run<'_> {
         }
     }
 
+    /// Records the SP address `mem` of an SP DMA from a computed RDRAM
+    /// address: a constant IMEM address, or one that depends on the entry
+    /// values for the callers.
+    fn sp_mem(&mut self, mem: Abs) {
+        match mem.k32() {
+            Some(m) if m & 0x1000 != 0 => {
+                if !self.out.sp_imem.contains(&(m & 0xFFF)) {
+                    self.out.sp_imem.push(m & 0xFFF);
+                }
+            }
+            Some(_) => {}
+            None if matches!(mem, Abs::S(_)) && !self.sp_mems.contains(&mem) => {
+                self.sp_mems.push(mem);
+            }
+            None => {}
+        }
+    }
+
     /// The state after a call returns: the callee's summary applied.
     fn resume(&mut self, site: u32, after: u32, st: &State, s: &Summary) {
         for e in s.effects.iter() {
             self.dma(site, subst_dma(*e, st));
+        }
+        for m in s.sp_mems.iter() {
+            self.sp_mem(subst(*m, st));
         }
         if !s.returns {
             return;
@@ -424,6 +457,7 @@ impl Run<'_> {
                     keep: a.keep & s.keep,
                     frame_dirty: a.frame_dirty | s.frame_dirty,
                     effects: a.effects.iter().chain(s.effects.iter()).copied().collect(),
+                    sp_mems: a.sp_mems.iter().chain(s.sp_mems.iter()).copied().collect(),
                 },
             });
         }
@@ -437,6 +471,9 @@ impl Run<'_> {
         for e in s.effects.iter() {
             let d = subst_dma(*e, st);
             self.dma(to.1, d);
+        }
+        for m in s.sp_mems.iter() {
+            self.sp_mem(subst(*m, st));
         }
         if s.returns {
             self.returns.push((st.clone(), s.keep));
@@ -534,6 +571,7 @@ impl Run<'_> {
             keep,
             frame_dirty: self.dirty,
             effects: Rc::from(std::mem::take(&mut self.effects)),
+            sp_mems: Rc::from(std::mem::take(&mut self.sp_mems)),
         });
         self.out
     }

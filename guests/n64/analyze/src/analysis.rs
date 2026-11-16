@@ -18,6 +18,7 @@ use crate::report::{
     Function, Origin, PiDma, Report, RspImage, RspOrigin, Stats, Unit, Unresolved, fnv,
 };
 use crate::scan::{self, Words};
+use crate::ucode::{self, RspLayout};
 use crate::val::{PHYS, SLOTS, State, sext32};
 
 /// Why the analysis did not run.
@@ -673,6 +674,7 @@ impl<'a> Driver<'a> {
             })
             .collect();
         let rsp = self.rsp(&sp, words);
+        let rsp_layouts = self.layouts(&sp, &rsp, &units, &functions);
         Report {
             boot,
             entry,
@@ -683,8 +685,82 @@ impl<'a> Driver<'a> {
             unresolved,
             pi_dma,
             rsp,
+            rsp_layouts,
             stats,
         }
+    }
+
+    /// The IMEM layouts of the microcodes ([`ucode`]): those the CPU code
+    /// loads with constant SP DMAs, and the RSP code at the constant
+    /// addresses the CPU code stores or passes, for SP DMAs to a constant
+    /// IMEM address from a computed one.
+    fn layouts(
+        &self,
+        sp: &BTreeSet<(u32, u32, u32, u32, u32)>,
+        rsp: &[RspImage],
+        units: &[Unit],
+        functions: &[Function],
+    ) -> Vec<RspLayout> {
+        let mut groups: BTreeMap<Loc, BTreeSet<ucode::Cand>> = BTreeMap::new();
+        let mut computed = BTreeSet::new();
+        for (l, r) in self.runs() {
+            computed.extend(r.sp_imem.iter().copied());
+            groups
+                .entry(l)
+                .or_default()
+                .extend(r.consts.iter().map(|c| (l.0, ucode::cand_addr(*c))));
+        }
+        let entries: BTreeSet<Loc> = functions.iter().map(|f| (f.segment, f.addr)).collect();
+        for u in units {
+            let Some(link) = u.link else {
+                continue;
+            };
+            let bytes = self.image.src.bytes(u.source);
+            let Some(code) = bytes.get(u.offset as usize..(u.offset + u.len) as usize) else {
+                continue;
+            };
+            let words: Vec<u32> = code
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_be_bytes(*c))
+                .collect();
+            for (at, c) in materialized(&words) {
+                let addr = link.wrapping_add(4 * at as u32);
+                let f = entries
+                    .range(..=(u.segment, addr))
+                    .next_back()
+                    .filter(|f| f.0 == u.segment)
+                    .copied()
+                    .unwrap_or((u.segment, link));
+                groups
+                    .entry(f)
+                    .or_default()
+                    .insert((u.segment, ucode::cand_addr(c)));
+            }
+        }
+        let mut partners: HashMap<ucode::Cand, BTreeSet<ucode::Cand>> = HashMap::new();
+        for set in groups.values() {
+            for c in set {
+                partners.entry(*c).or_default().extend(set.iter().copied());
+            }
+        }
+        let cpu = ucode::Cpu {
+            image: &self.image,
+            partners,
+            constant: sp
+                .iter()
+                .filter(|d| d.2 & 0x1000 != 0)
+                .map(|&(seg, _, mem, dram, len)| (seg, mem & 0xFFF, dram, len))
+                .collect(),
+            computed,
+            code: rsp
+                .iter()
+                .filter(|i| i.origin == RspOrigin::Scan)
+                .map(|i| (i.source, i.offset, i.offset + i.len))
+                .collect(),
+        };
+        ucode::layouts(&cpu)
     }
 
     fn rsp(&self, sp: &BTreeSet<(u32, u32, u32, u32, u32)>, words: &[Words]) -> Vec<RspImage> {
@@ -726,6 +802,47 @@ impl<'a> Driver<'a> {
         }
         out
     }
+}
+
+/// The kseg0 and kseg1 addresses and RDRAM physical addresses code words
+/// make, by the index of the word that completes each: a `LUI` and, within
+/// the next 16 words, an `ADDIU` or `ORI` of its register before the
+/// register is written again.
+fn materialized(words: &[u32]) -> Vec<(usize, u32)> {
+    let mut out = Vec::new();
+    for (i, &w) in words.iter().enumerate() {
+        if w >> 26 != 0x0F {
+            continue;
+        }
+        let r = w >> 16 & 31;
+        let hi = w << 16;
+        for (k, &x) in words.iter().enumerate().skip(i + 1).take(16) {
+            let (op, rs, rt) = (x >> 26, x >> 21 & 31, x >> 16 & 31);
+            if rs == r && (op == 0x09 || op == 0x0D) {
+                let lo = x & 0xFFFF;
+                let c = if op == 0x09 {
+                    hi.wrapping_add(i32::from(lo as u16 as i16) as u32)
+                } else {
+                    hi | lo
+                };
+                let kseg = c >> 30 == 2 && c % 4 == 0;
+                let phys = (0x400..RDRAM_END).contains(&c) && c % 8 == 0;
+                if kseg || phys {
+                    out.push((k, c));
+                }
+            }
+            let writes = match op {
+                0 => x >> 11 & 31,
+                0x02 | 0x04..=0x07 | 0x28..=0x2F => 0,
+                0x03 => 31,
+                _ => rt,
+            };
+            if writes == r {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// The largest segment a segment table entry may give.
