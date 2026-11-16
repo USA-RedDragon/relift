@@ -63,7 +63,12 @@ list of hard rules; read it before changing anything.
   `cpus/mips/gen/P.sail` (`cpus/mips/gen/README.md`): `vr4300.sail`
   carries the VR4300 rules and all of COP1, `r3000a.sail` the MIPS I subset
   of the R3000A stub. Their notice is next to the crate manifest; the same
-  job checks them.
+  job checks them. The RSP table
+  and templates (`cpus/rsp/src/decode/generated.rs`,
+  `cpus/rsp/src/lift/generated/*.rs`) come from the same model and the
+  overlay `cpus/rsp/gen/rsp.sail` (`cpus/rsp/gen/README.md`), which keeps
+  the RSP's scalar subset and adds all of COP2 over the IR's lane
+  operations; the same job checks them.
 - **`unsafe` is forbidden** outside the roster in
   `relift/tests/unsafe_roster.rs`. Ceilings only fall.
 - **The CI gate** is `cargo clippy --workspace --all-targets --all-features
@@ -104,7 +109,9 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-cpu-arm32` | `cpus/arm32` | ARMv4T (Game Boy Advance ARM7TDMI) decoder and lifter to `relift-ir`, with templates generated from sail-arm AArch32 and an ARMv4T overlay, checked against console records |
 | 3 | `relift-cpu-arm32-gen` | `cpus/arm32/gen` | Generates the ARMv4T decode tables and lifting templates from sail-arm and `cpus/arm32/gen/armv4t.sail`: the ARMv4T cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 2 | `relift-cpu-mips` | `cpus/mips` | MIPS decoders and lifters to `relift-ir`, one profile per CPU (VR4300, the Nintendo 64 CPU; an R3000A stub, the PlayStation CPU), with templates generated from sail-cheri-mips and a per-profile overlay; a branch lifts with its delay slot |
+| 2 | `relift-cpu-rsp` | `cpus/rsp` | RSP (Nintendo 64 signal processor) decoder and lifter to `relift-ir`, with templates generated from sail-cheri-mips and an RSP overlay; the vector unit (COP2) is written over the IR's lane operations |
 | 3 | `relift-cpu-mips-gen` | `cpus/mips/gen` | Generates each MIPS profile's decode table and lifting templates from sail-cheri-mips and the profile's overlay (`vr4300.sail`, `r3000a.sail`): the MIPS cut and `Form` over `relift-sail`; run by hand, linked by nothing |
+| 3 | `relift-cpu-rsp-gen` | `cpus/rsp/gen` | Generates the RSP decode table and lifting templates from sail-cheri-mips and `cpus/rsp/gen/rsp.sail`: the RSP cut (lane builtins, DMEM lines, the divider ROMs) and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-z80-gen` | `cpus/z80/gen` | Generates the Z80 lifting templates (`cpus/z80/src/lift/generated.rs`) from our Sail model `cpus/z80/sail/z80.sail`: the Z80 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 2 | `relift-cpu-z80` | `cpus/z80` | Z80 (NMOS) decoder, lifter to `relift-ir` over the templates generated from the Z80 Sail model (every page, the interrupt entries, port intrinsics and the T-state of every bus access) and the `Frontend` for the C emitter; no guest uses it yet |
