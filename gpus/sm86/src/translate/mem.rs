@@ -375,6 +375,16 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ok(())
 }
 
+/// Register `k` of the register tuple that starts at `base`: every word of
+/// an RZ tuple is RZ (reads zero, writes vanish).
+pub(crate) fn tuple_reg(base: u8, k: u32) -> Res<u8> {
+    if base == 255 {
+        return Ok(255);
+    }
+    u8::try_from(u32::from(base) + k)
+        .map_err(|_| super::Unsupported(format!("register tuple R{base} past RZ")))
+}
+
 pub(crate) fn store_words(c: &mut Ctx, d: u8, vals: &[u32]) {
     if d == 255 {
         return;

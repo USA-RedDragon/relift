@@ -9,7 +9,7 @@
 //! hosts without them.
 
 use super::scratch::Space;
-use super::{addr_operand, spv, store_words};
+use super::{addr_operand, spv, store_words, tuple_reg};
 use crate::spirv::op;
 use crate::translate::float::Round;
 use crate::translate::{Ctx, Res, bad};
@@ -169,20 +169,20 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<u32
     } else {
         c.u32t()
     };
-    let load = |c: &mut Ctx, r: u8| {
-        if s.ty.wide() {
+    let load = |c: &mut Ctx, r: u8| -> Res<u32> {
+        Ok(if s.ty.wide() {
             let lo = c.load_reg(r);
-            let hi = c.load_reg(r.wrapping_add(1));
+            let hi = c.load_reg(tuple_reg(r, 1)?);
             let u = c.u32t();
             let v2 = c.m.t_vec(u, 2);
             let pair = c.m.emit(op::COMPOSITE_CONSTRUCT, v2, &[lo, hi]);
             c.m.emit(op::BITCAST, t, &[pair])
         } else {
             c.load_reg(r)
-        }
+        })
     };
-    let xv = load(c, x);
-    let yv = y.map(|y| load(c, y));
+    let xv = load(c, x)?;
+    let yv = y.map(|y| load(c, y)).transpose()?;
     if s.ty.wide() && !c.host.int64_atomics_buffer {
         return Ok(c.locked_rmw64(addr, |c, old| apply64(c, s, t, old, xv, yv)));
     }

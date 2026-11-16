@@ -28,6 +28,7 @@
 //! registers from R0: four per target that has any component, then the
 //! sample mask and depth when SPH word 19 bit 0 or bit 1 asks for either.
 
+use super::mem::tuple_reg;
 use super::{INPUT, Interp, OUTPUT, Res, bad};
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
@@ -470,7 +471,7 @@ fn ald(c: &mut Ctx, i: &Inst) -> Res<()> {
             c.iface.inputs.entry(loc).or_insert(None);
         }
         let u = c.load_slot(&s);
-        c.store_reg(d.wrapping_add(k as u8), u);
+        c.store_reg(tuple_reg(d, k)?, u);
     }
     Ok(())
 }
@@ -484,7 +485,7 @@ fn ast(c: &mut Ctx, i: &Inst) -> Res<()> {
     let s = Ctx::dst_reg(&i.ops[1])?;
     for k in 0..width(i) {
         let slot = c.output_slot(off + 4 * k)?;
-        let u = c.load_reg(s.wrapping_add(k as u8));
+        let u = c.load_reg(tuple_reg(s, k)?);
         c.store_slot(&slot, u);
     }
     Ok(())

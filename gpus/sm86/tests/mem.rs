@@ -245,3 +245,51 @@ fn ldsm_gathers_rows_across_lanes() {
         assert!(s.interface.shared_bytes >= 0x50, "{name}");
     }
 }
+
+/// Ids of the `u32` zero constants in a module.
+fn u32_zeros(words: &[u32]) -> Vec<u32> {
+    let mut u32s = Vec::new();
+    let mut zeros = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        let len = ((words[k] >> 16) as usize).max(1);
+        let w = &words[k..k + len];
+        match w[0] & 0xffff {
+            21 if w[2] == 32 && w[3] == 0 => u32s.push(w[1]),
+            43 if u32s.contains(&w[1]) && w[3] == 0 => zeros.push(w[2]),
+            _ => {}
+        }
+        k += len;
+    }
+    zeros
+}
+
+#[test]
+fn wide_atomics_read_both_words_of_rz_as_zero() {
+    let cas = word(
+        0x1a9,
+        1,
+        &[
+            (16, 8, 4),
+            (24, 8, 6),
+            (32, 8, 255),
+            (64, 8, 8),
+            (72, 1, 1),
+            (73, 4, 2),
+            (81, 3, 7),
+        ],
+    );
+    let s = run(&[cas], &[".64 PT, R4, [R6], RZ, R8"]);
+    let zeros = u32_zeros(&s.spirv);
+    let mut k = 5;
+    let mut rz_pair = false;
+    while k < s.spirv.len() {
+        let len = ((s.spirv[k] >> 16) as usize).max(1);
+        let w = &s.spirv[k..k + len];
+        if w[0] & 0xffff == 80 && len == 5 && zeros.contains(&w[3]) && zeros.contains(&w[4]) {
+            rz_pair = true;
+        }
+        k += len;
+    }
+    assert!(rz_pair, "the RZ pair is not zero in both words");
+}
