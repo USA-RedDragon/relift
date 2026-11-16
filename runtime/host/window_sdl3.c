@@ -78,6 +78,7 @@ static void leave(void)
 static const rl_touchpad_host g_touch_host = {
 #ifdef __ANDROID__
     .haptic = rl_android_haptic,
+    .settings = rl_android_settings,
 #endif
     .leave = leave,
 };

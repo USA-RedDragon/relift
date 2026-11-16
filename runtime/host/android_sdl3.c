@@ -1,12 +1,15 @@
 /**
  * @file android_sdl3.c
- * @brief Android glue through SDL3 (zlib license): logcat for stdio, the app's files directory, the haptic tick.
+ * @brief Android glue through SDL3 (zlib license): logcat for stdio, the app's files directory, the haptic tick,
+ * the app's settings page and its GPU driver checks.
  */
 #ifdef __ANDROID__
 
 #include "core.h"
+#include "hostlib.h"
 
 #include <relift/android.h>
+#include <relift/touchpad.h>
 
 #include <SDL3/SDL.h>
 
@@ -64,8 +67,37 @@ static void leave(uint32_t code)
     _exit((int)code);
 }
 
+static bool call_activity(const char *method, const char *arg)
+{
+    JNIEnv *env = SDL_GetAndroidJNIEnv();
+    jobject act = SDL_GetAndroidActivity();
+    if (!env || !act)
+        return false;
+    jclass c = (*env)->GetObjectClass(env, act);
+    jmethodID m = c ? (*env)->GetMethodID(env, c, method, arg ? "(Ljava/lang/String;)V" : "()V") : NULL;
+    if (m) {
+        if (arg) {
+            jstring s = (*env)->NewStringUTF(env, arg);
+            (*env)->CallVoidMethod(env, act, m, s);
+            if (s)
+                (*env)->DeleteLocalRef(env, s);
+        } else {
+            (*env)->CallVoidMethod(env, act, m);
+        }
+    }
+    if ((*env)->ExceptionCheck(env))
+        (*env)->ExceptionClear(env);
+    if (c)
+        (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, act);
+    return m != NULL;
+}
+
+static void driver_failed(const char *name) { call_activity("reliftGpuDriverFailed", name); }
+
 static void init_once(void)
 {
+    rl_hostlib_on_gpu_driver_failed(driver_failed);
     const char *dir = rl_android_files_dir();
     if (dir)
         setenv("HOME", dir, 1);
@@ -93,21 +125,49 @@ const char *rl_android_files_dir(void) { return SDL_GetAndroidInternalStoragePat
 
 const char *rl_android_external_dir(void) { return SDL_GetAndroidExternalStoragePath(); }
 
-void rl_android_haptic(void)
+JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeSettingsDone(JNIEnv *env, jclass cls,
+                                                                          jboolean controller);
+JNIEXPORT jstring JNICALL Java_dev_relift_app_MainActivity_nativeGpuDriverLoaded(JNIEnv *env, jclass cls);
+JNIEXPORT jstring JNICALL Java_dev_relift_app_GpuProbe_nativeProbe(JNIEnv *env, jclass cls, jstring dir,
+                                                                  jstring library);
+
+void rl_android_haptic(void) { call_activity("reliftHaptic", NULL); }
+
+void rl_android_settings(void)
 {
-    JNIEnv *env = SDL_GetAndroidJNIEnv();
-    jobject act = SDL_GetAndroidActivity();
-    if (!env || !act)
-        return;
-    jclass c = (*env)->GetObjectClass(env, act);
-    jmethodID m = c ? (*env)->GetMethodID(env, c, "reliftHaptic", "()V") : NULL;
-    if (m)
-        (*env)->CallVoidMethod(env, act, m);
-    if ((*env)->ExceptionCheck(env))
-        (*env)->ExceptionClear(env);
-    if (c)
-        (*env)->DeleteLocalRef(env, c);
-    (*env)->DeleteLocalRef(env, act);
+    if (!call_activity("reliftOpenSettings", NULL))
+        rl_touchpad_host_settings_done(false);
+}
+
+JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeSettingsDone(JNIEnv *env, jclass cls,
+                                                                          jboolean controller)
+{
+    (void)env;
+    (void)cls;
+    rl_touchpad_host_settings_done(controller);
+}
+
+JNIEXPORT jstring JNICALL Java_dev_relift_app_MainActivity_nativeGpuDriverLoaded(JNIEnv *env, jclass cls)
+{
+    (void)cls;
+    const char *name = rl_hostlib_gpu_driver_loaded();
+    return name ? (*env)->NewStringUTF(env, name) : NULL;
+}
+
+JNIEXPORT jstring JNICALL Java_dev_relift_app_GpuProbe_nativeProbe(JNIEnv *env, jclass cls, jstring dir,
+                                                                  jstring library)
+{
+    (void)cls;
+    const char *d = dir ? (*env)->GetStringUTFChars(env, dir, NULL) : NULL;
+    const char *l = library ? (*env)->GetStringUTFChars(env, library, NULL) : NULL;
+    char out[2048], text[2100];
+    bool ok = rl_hostlib_vulkan_probe(d, l, out, sizeof out);
+    snprintf(text, sizeof text, "%s\n%s", ok ? "ok" : "error", out);
+    if (d)
+        (*env)->ReleaseStringUTFChars(env, dir, d);
+    if (l)
+        (*env)->ReleaseStringUTFChars(env, library, l);
+    return (*env)->NewStringUTF(env, text);
 }
 
 #endif

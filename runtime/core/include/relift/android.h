@@ -28,6 +28,12 @@ RL_RUNTIME_API const char *rl_android_external_dir(void);
 /** @brief A short haptic tick (the system's virtual key feedback). */
 RL_RUNTIME_API void rl_android_haptic(void);
 
+/**
+ * @brief Shows the app's settings page over the paused game (the pause sheet's Settings); the page calls
+ * rl_touchpad_host_settings_done when the player leaves it.
+ */
+RL_RUNTIME_API void rl_android_settings(void);
+
 #endif
 
 #endif
