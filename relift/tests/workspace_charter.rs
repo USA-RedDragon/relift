@@ -72,6 +72,7 @@ const NONE: &[&str] = &[];
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-cpu-arm32",
+    "relift-cpu-mips",
     "relift-emit-wasm",
     "relift-gb-analyze",
     "relift-gb-tools",
@@ -221,6 +222,14 @@ const CHARTERS: &[Charter] = &[
         member: "relift-cpu-arm32",
         band: 2,
         why: "the ARMv4T (GBA ARM7TDMI) decoder and lifter, over the IR only; no guest uses it yet",
+        normal: &["relift-ir"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-cpu-mips",
+        band: 2,
+        why: "the VR4300 (N64 CPU) decoder and lifter, over the IR only; no guest uses it yet",
         normal: &["relift-ir"],
         dev: NONE,
         build: NONE,
@@ -409,6 +418,14 @@ const CHARTERS: &[Charter] = &[
         band: 3,
         why: "the ARMv4T decode table and template generator over the lifter's register file and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-arm32", "relift-sail"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-cpu-mips-gen",
+        band: 3,
+        why: "the VR4300 decode table and template generator over the lifter's register file and the Sail frontend, run by hand; nothing links it",
+        normal: &["relift-cpu-mips", "relift-sail"],
         dev: NONE,
         build: NONE,
     },

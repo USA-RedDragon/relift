@@ -961,6 +961,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-mips"
+version = "0.1.0"
+dependencies = [
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-mips-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-mips",
+ "relift-sail",
+]
+
+[[package]]
 name = "relift-cpu-sm83"
 version = "0.1.0"
 dependencies = [
