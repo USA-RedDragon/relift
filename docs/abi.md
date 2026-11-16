@@ -2709,7 +2709,10 @@ another host thread ends instead of one the code counts down.
 
   `rl_time_spent` is a relaxed atomic load of the budget compared with
   zero: one load and a branch that is never taken while no preemption is
-  pending. The registers stay in their locals: `rl_preempt` only waits for
+  pending. `rl_preempt` is declared `RL_COLD_CALL` (`preserve_all` and
+  `cold` on x86-64 and arm64): the caller keeps its live values in their
+  registers across it, so a short function whose only call is the check
+  needs no callee-saved registers and no spills for it. The registers stay in their locals: `rl_preempt` only waits for
   the core, so it needs none of them, and storing them would keep values
   alive that the code otherwise drops (the flags above all). A first
   version that stored and reloaded the context around `rl_sync` cost

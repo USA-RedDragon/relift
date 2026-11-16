@@ -169,6 +169,21 @@ _Static_assert(offsetof(rl_time, deadline) == 8, "time deadline");
 _Static_assert(sizeof(rl_time) == 16, "rl_time size");
 
 /**
+ * @brief The calling convention of rare calls out of lifted code, such as
+ * rl_preempt: the callee keeps every register, so the caller saves none of
+ * its live values around the call and needs no stack frame for them, and
+ * the compiler lays the call out of the hot path.
+ */
+#if defined(__has_attribute)
+#if __has_attribute(preserve_all) && (defined(__x86_64__) || defined(__aarch64__))
+#define RL_COLD_CALL __attribute__((preserve_all, cold))
+#endif
+#endif
+#ifndef RL_COLD_CALL
+#define RL_COLD_CALL __attribute__((cold))
+#endif
+
+/**
  * @brief Whether the budget of t is spent, read at a preemption point of a
  * CPU whose guest OS preempts threads (docs/abi.md section 14.1): there the
  * budget stays positive while the thread may run on, and another host thread
@@ -181,7 +196,7 @@ static inline int rl_time_spent(rl_time *t) { return __atomic_load_n(&t->budget,
  * register fields are stale here (the registers live in the caller's
  * locals) and stay untouched.
  */
-RL_RUNTIME_API void rl_preempt(rl_ctx *c);
+RL_RUNTIME_API RL_COLD_CALL void rl_preempt(rl_ctx *c);
 
 /** @brief The interrupt hook's answer when no interrupt is taken. */
 #define RL_NO_IRQ UINT64_MAX

@@ -461,22 +461,20 @@ static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
 {
     uint64_t off = target - c->disp_lo;
     uint64_t i = (off >> RL_ARM64_CODE_SHIFT) | (off << (64 - RL_ARM64_CODE_SHIFT));
-    rl_fn f = 0;
-    if (i < c->disp_count) {
+    if (RL_UNLIKELY(i >= c->disp_count))
+        return 0;
 #if defined(RL_HOTLOAD)
-        f = __atomic_load_n(&c->disp_table[i], __ATOMIC_ACQUIRE);
+    return __atomic_load_n(&c->disp_table[i], __ATOMIC_ACQUIRE);
 #else
-        f = c->disp_table[i];
+    return c->disp_table[i];
 #endif
-    }
-    return f;
 }
 
 /** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss or a misaligned target. */
 static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
 {
     rl_fn f = rl_find(c, target);
-    return f ? f : rl_dispatch_miss;
+    return RL_UNLIKELY(!f) ? rl_dispatch_miss : f;
 }
 
 /** @brief Indirect call: records the target for the miss handler and returns the function to call. */
@@ -608,7 +606,7 @@ RL_RUNTIME_API int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm);
 /** @brief BRK #imm: a guest breakpoint. Reports a guest crash naming imm; always returns RL_PENDING with RL_PEND_EXIT_PROCESS. */
 RL_RUNTIME_API int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm);
 /** @brief UDF, HLT, an instruction relift cannot lift, or MSR to a read-only register. Reports a guest crash; always returns RL_PENDING with RL_PEND_EXIT_PROCESS. */
-RL_RUNTIME_API int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
+RL_RUNTIME_API __attribute__((cold)) int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
 
 /** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: the guest's clock (rl_guest_clock_ns, the host's monotonic clock by default) in RL_CNTFRQ ticks. */
 RL_RUNTIME_API uint64_t rl_mrs_cntpct(rl_ctx *c);
