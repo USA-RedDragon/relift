@@ -1,9 +1,10 @@
 #!/bin/sh
 # Fetches ares at a pinned commit and builds z80-step, the one-instruction
-# stepper over ares' Z80 core, with clang++. ares is ISC; the binary stays
+# stepper over ares' Z80 core, and psg-step, the sample stepper over its SN76489,
+# with clang++. ares is ISC; the binary stays
 # outside relift and runs as a separate process. Usage: build-step.sh [cache dir]
 # The cache dir (default ~/.cache/relift/ares-oracle) gets src/ (the ares
-# tree), build/ and bin/z80-step.
+# tree), build/ and bin/z80-step and bin/psg-step.
 set -eu
 commit=0b928930af4cc59ed99e942996f0d3c815379388
 url=https://github.com/ares-emulator/ares/archive/$commit.tar.gz
@@ -35,4 +36,8 @@ fi
 # shellcheck disable=SC2086
 $cxx $flags "$here/z80-step.cpp" "$src/ares/component/processor/z80/z80.cpp" "$here/ares.gen.cpp" \
     "$cache/build/nall.o" -o "$cache/bin/z80-step" -lpthread
+# shellcheck disable=SC2086
+$cxx $flags "$here/psg-step.cpp" "$src/ares/component/audio/sn76489/sn76489.cpp" "$here/ares.gen.cpp" \
+    "$cache/build/nall.o" -o "$cache/bin/psg-step" -lpthread
 echo "$cache/bin/z80-step"
+echo "$cache/bin/psg-step"

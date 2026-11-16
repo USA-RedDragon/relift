@@ -2,7 +2,7 @@
 
 Two separate builds from the same pinned ares commit: `build.sh` builds the
 Nintendo 64 oracle for the VR4300 lifter, and `build-step.sh` builds the
-stepper for the Z80 templates.
+steppers for the Z80 templates and the SN76489 device.
 
 ## VR4300 oracle (n64-oracle)
 
@@ -115,3 +115,22 @@ times of the NMI and IM 2 entries differ: ares pushes PC and then waits where
 the chip's 5 T-state acknowledge cycle comes first (NMI), and reads the vector
 before pushing PC where the chip pushes first (IM 2). The templates follow
 the Zilog manual.
+
+## SN76489 oracle (psg-step)
+
+`psg-step` drives ares' SN76489 and the mix of `ms/psg/psg.cpp` from a script
+of timed writes and prints every sample: the four attenuations ares' `clock()`
+returns and the left and right values, as hexadecimal floats. ares' volume
+table is the same scale as relift's (`2^(-level/3)`, 15 off), so the mixed
+values are compared exactly too, with no mapping.
+
+    check/oracle/ares/build-step.sh [cache dir]
+    make -C runtime BUILD=<dir> <dir>/sms_psg_script
+    python3 -I check/oracle/ares/psg-compare.py --ares <cache>/bin/psg-step \
+        --relift <dir>/sms_psg_script [--scripts N] [--events N] [--seed N]
+
+Each random script runs once as a Master System and once as a Game Gear and
+must give identical samples. The script format is in the header of
+`psg-step.cpp`. A write at clock t is applied after every sample complete by t;
+the harness fixes that order itself, so the comparison covers the chip and the
+mix, not ares' thread scheduling.
