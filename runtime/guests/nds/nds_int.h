@@ -268,6 +268,20 @@ typedef struct nds_dev {
     rl_nds *m;
 } nds_dev;
 
+/** @brief One of the sound controller's 16 channels (stored as written; no audio is made yet). */
+typedef struct nds_snd_ch {
+    uint32_t cnt, sad, len;
+    uint16_t tmr, pnt;
+} nds_snd_ch;
+
+/** @brief The ARM7's sound registers (0x04000400 to 0x0400051F) and the power registers beside them. */
+typedef struct nds_sound {
+    nds_snd_ch ch[16];
+    uint16_t soundcnt, bias;
+    uint8_t capcnt[2];
+    uint32_t capdad[2], caplen[2];
+} nds_sound;
+
 /** @brief KEYCNT of each CPU and the host's input. */
 typedef struct nds_keypad {
     uint16_t cnt[2];
@@ -326,6 +340,10 @@ struct rl_nds {
     nds_disp disp;
     nds_dma dma[2];
     nds_keypad pad;
+    nds_sound snd;
+    /** @brief POWCNT2 (ARM7 0x04000304, bits 0 and 1) and WIFIWAITCNT (0x04000206, bits 0 to 5). */
+    uint8_t powcnt2;
+    uint8_t wifiwait;
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
@@ -563,6 +581,15 @@ uint32_t nds_keypad_read(rl_nds *m, unsigned cpu, uint32_t off);
 void nds_keypad_write(rl_nds *m, unsigned cpu, uint32_t v, uint32_t mask, uint64_t now);
 /** @brief EXTKEYIN as the ARM7 reads it. */
 uint16_t nds_extkeyin(const rl_nds *m);
+
+/** @brief Power-on state of the ARM7's system registers. */
+void nds_sys_reset(rl_nds *m);
+/** @brief True when the ARM7 register at word offset off is one of nds_sys_*. */
+bool nds_sys_has(uint32_t off);
+/** @brief POWCNT2, BIOSPROT, WIFIWAITCNT (half of word 0x204) or a sound register at word offset off. */
+uint32_t nds_sys_read(rl_nds *m, uint32_t off);
+/** @brief A write of the mask bits of v to one of them. */
+void nds_sys_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask);
 
 /** @brief The access cost in ticks of cpu (kind RL_NDS_CODE or RL_NDS_DATA) at addr. */
 unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq);

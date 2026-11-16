@@ -76,7 +76,7 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
     case 0x004:
         return nds_lcd_read(m, cpu, now);
     case 0x204:
-        return exmem_read(m, cpu) | (cpu == RL_NDS_ARM7 ? regs_word(m, cpu, off) & 0xFFFF0000u : 0);
+        return exmem_read(m, cpu) | (cpu == RL_NDS_ARM7 && (m->powcnt2 & 2) ? (uint32_t)m->wifiwait << 16 : 0);
     case 0x240:
         if (cpu == RL_NDS_ARM7)
             return m->vramstat | (uint32_t)m->wramcnt << 8;
@@ -92,6 +92,8 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
     case 0x300:
         return m->postflg[cpu];
     default:
+        if (cpu == RL_NDS_ARM7 && nds_sys_has(off))
+            return nds_sys_read(m, off);
         if (off < NDS_REGS)
             return regs_word(m, cpu, off);
         return 0;
@@ -143,8 +145,8 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     case 0x204:
         if (mask & 0xFFFF)
             exmem_write(m, cpu, (uint16_t)v, (uint16_t)mask);
-        if (cpu == RL_NDS_ARM7)
-            regs_put(m, cpu, off, v, mask & 0xFFFF0000u);
+        if (cpu == RL_NDS_ARM7 && (m->powcnt2 & 2) && (mask >> 16 & 0xFF))
+            m->wifiwait = (uint8_t)(((m->wifiwait & ~(mask >> 16)) | ((v >> 16) & (mask >> 16))) & 0x3F);
         return;
     case 0x240:
     case 0x244:
@@ -171,7 +173,9 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
             m->halt_req = true;
         return;
     default:
-        if (off < NDS_REGS)
+        if (cpu == RL_NDS_ARM7 && nds_sys_has(off))
+            nds_sys_write(m, off, v, mask);
+        else if (off < NDS_REGS)
             regs_put(m, cpu, off, v, mask);
         return;
     }
@@ -206,6 +210,7 @@ void nds_io_reset(rl_nds *m)
     nds_ipc_reset(m);
     nds_timer_reset(m);
     nds_dma_reset(m);
+    nds_sys_reset(m);
     nds_math_reset(m);
     nds_lcd_reset(m);
     nds_disp_reset(m);
