@@ -90,7 +90,7 @@ TEST(n64_pi_dma_copies_the_cartridge_and_raises_its_interrupt_later)
     CHECK_EQ(rl_n64_read(t.m, 0x04600000u, 4), 0x3000u);
     CHECK_EQ(rl_n64_read(t.m, 0x04600004u, 4), 0x10002000u);
     uint32_t pages = 0x1000u / 0x200u;
-    uint32_t cycles = ((14u + 0x40u + 1u) * pages + (0x12u + 1u + 0x03u + 1u) * 0x1000u / 2u + 26u * 28u) * 3u;
+    uint32_t cycles = ((14u + 0x40u + 1u) * pages + (0x12u + 1u + 0x03u + 1u) * 0x1000u / 2u + 26u * 28u) * 3u / 2u;
     advance(&t, cycles - 1u);
     CHECK_EQ(rl_n64_irq_pending(t.m), 0);
     advance(&t, 2);

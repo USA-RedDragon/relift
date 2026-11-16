@@ -33,7 +33,7 @@ static n64_bsd *bsd_for(rl_n64 *m, uint32_t a)
     return (hi == 0x05u || (hi >= 0x08u && hi <= 0x0Fu)) ? &m->pi.bsd[1] : &m->pi.bsd[0];
 }
 
-/** @brief The cycles of a DMA of len bytes (len already rounded) starting at cart address a. */
+/** @brief The CPU ticks of a DMA of len bytes (len already rounded) starting at cart address a: ares counts RCP cycles, 1.5 ticks each. */
 static uint32_t duration(rl_n64 *m, uint32_t a, uint32_t len)
 {
     n64_bsd *bsd = bsd_for(m, a);
@@ -63,7 +63,7 @@ static uint32_t duration(rl_n64 *m, uint32_t a, uint32_t len)
     uint32_t cycles = (14u + bsd->latency + 1u) * pages;
     cycles += (bsd->pulse_width + 1u + bsd->release + 1u) * len / 2u;
     cycles += buffers * 28u + partial;
-    return cycles * 3u;
+    return (cycles * 3u + 1u) / 2u;
 }
 
 /** @brief Cartridge to RDRAM, in ares' block shape: 128-byte blocks that stop at 2 KiB rows, the first block's short form. */
