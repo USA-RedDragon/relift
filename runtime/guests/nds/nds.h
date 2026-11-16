@@ -4,8 +4,9 @@
  * (core/include/relift/sched.h): the ARM9 and ARM7 memory maps with their
  * mirrors, the shared work RAM banks, the tightly coupled memories of the
  * ARM9 (from the ARMv5TE CP15 registers of the CPU layer), the BIOS regions
- * as high-level stubs, the I/O registers of each CPU and the access costs
- * of every region.
+ * as high-level stubs, the I/O registers of each CPU with its interrupt
+ * controller, IPCSYNC and the IPC FIFOs, and the access costs of every
+ * region.
  *
  * Time. One scheduler tick is half a bus cycle (1/67,027,964 s): an ARM9
  * cycle is one tick (rl_sched_add_cpu ratio 1) and an ARM7 cycle two ticks
@@ -140,6 +141,34 @@ const rl_arm32_cp15 *rl_nds_cp15(const rl_nds *m);
  * caller passes on to rl_nds_halt).
  */
 unsigned rl_nds_cp15_write(rl_nds *m, uint32_t key, uint32_t value);
+
+/** @brief Interrupt sources, as bits of IE and IF (GBATEK "DS Interrupts"). */
+enum {
+    RL_NDS_IRQ_VBLANK = 1u << 0,
+    RL_NDS_IRQ_HBLANK = 1u << 1,
+    RL_NDS_IRQ_VCOUNT = 1u << 2,
+    RL_NDS_IRQ_TIMER0 = 1u << 3,
+    RL_NDS_IRQ_RTC = 1u << 7,
+    RL_NDS_IRQ_DMA0 = 1u << 8,
+    RL_NDS_IRQ_KEYPAD = 1u << 12,
+    RL_NDS_IRQ_SLOT = 1u << 13,
+    RL_NDS_IRQ_IPC_SYNC = 1u << 16,
+    RL_NDS_IRQ_IPC_SEND_EMPTY = 1u << 17,
+    RL_NDS_IRQ_IPC_RECV = 1u << 18,
+    RL_NDS_IRQ_CARD_DONE = 1u << 19,
+    RL_NDS_IRQ_CARD_IREQ = 1u << 20,
+    RL_NDS_IRQ_GXFIFO = 1u << 21,
+    RL_NDS_IRQ_LID = 1u << 22,
+    RL_NDS_IRQ_SPI = 1u << 23,
+    RL_NDS_IRQ_WIFI = 1u << 24,
+};
+
+/** @brief Requests the interrupts in sources of cpu at its current tick (for devices outside this layer). */
+void rl_nds_request_irq(rl_nds *m, unsigned cpu, uint32_t sources);
+/** @brief True while cpu's IRQ input is asserted at its current tick (IME, IE and IF meet, after the input's delay). */
+bool rl_nds_irq_line(const rl_nds *m, unsigned cpu);
+/** @brief The tick from which cpu's IRQ input is asserted, or UINT64_MAX while it is not. */
+uint64_t rl_nds_irq_at(const rl_nds *m, unsigned cpu);
 
 /** @brief Kinds of access in the cost table. */
 enum {

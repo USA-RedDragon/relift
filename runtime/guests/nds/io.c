@@ -1,7 +1,8 @@
 /**
  * @file io.c
  * @brief The I/O registers of both CPUs as one scheduler device: the word
- * dispatch with byte lanes, the system registers (EXMEMCNT and EXMEMSTAT,
+ * dispatch with byte lanes to the interrupt controllers (irq.c) and IPC
+ * (ipc.c), the system registers (EXMEMCNT and EXMEMSTAT,
  * WRAMCNT and WRAMSTAT, VRAMCNT, POSTFLG, HALTCNT) and register file stubs
  * for the registers no device models yet.
  *
@@ -44,8 +45,17 @@ static void exmem_write(rl_nds *m, unsigned cpu, uint16_t v, uint16_t mask)
 
 static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 {
-    (void)now;
     switch (off) {
+    case 0x180:
+    case 0x184:
+    case 0x188:
+    case NDS_FIFORECV:
+        return nds_ipc_read(m, cpu, off, now);
+    case 0x208:
+    case 0x20C:
+    case 0x210:
+    case 0x214:
+        return nds_irq_read(m, cpu, off);
     case 0x204:
         return exmem_read(m, cpu) | (cpu == RL_NDS_ARM7 ? regs_word(m, cpu, off) & 0xFFFF0000u : 0);
     case 0x240:
@@ -71,8 +81,19 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 
 static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now)
 {
-    (void)now;
     switch (off) {
+    case 0x180:
+    case 0x184:
+    case 0x188:
+    case NDS_FIFORECV:
+        nds_ipc_write(m, cpu, off, v, mask, now);
+        return;
+    case 0x208:
+    case 0x20C:
+    case 0x210:
+    case 0x214:
+        nds_irq_write(m, cpu, off, v, mask, now);
+        return;
     case 0x204:
         if (mask & 0xFFFF)
             exmem_write(m, cpu, (uint16_t)v, (uint16_t)mask);
@@ -132,6 +153,8 @@ void nds_io_reset(rl_nds *m)
     m->postflg[0] = m->postflg[1] = 0;
     memset(m->vramcnt, 0, sizeof m->vramcnt);
     m->halt_req = false;
+    nds_irq_reset(m);
+    nds_ipc_reset(m);
 }
 
 static uint64_t io_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)

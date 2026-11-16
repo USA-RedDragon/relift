@@ -13,6 +13,44 @@
 /** @brief Bytes of each CPU's I/O register file stub (0x04000000 to 0x04001FFF). */
 #define NDS_REGS 0x2000u
 
+/** @brief Ticks from a request that meets IME and IE to the CPU's IRQ input (the spike's value, not measured). */
+#define NDS_IRQ_DELAY 2u
+/** @brief Words of each IPC FIFO. */
+#define NDS_FIFO_WORDS 16u
+/** @brief Offset of IPCFIFORECV from the I/O base. */
+#define NDS_FIFORECV 0x100000u
+
+/** @brief The interrupt controller of one CPU. */
+typedef struct nds_irq {
+    uint32_t ie, iflag;
+    bool ime;
+    /** @brief The tick from which the IRQ input is asserted, NDS_NEVER while IME, IE and IF do not meet. */
+    uint64_t line_at;
+    /** @brief The tick from which IE & IF wakes a halted CPU, NDS_NEVER while it is zero. */
+    uint64_t wake_at;
+} nds_irq;
+
+/** @brief One IPC FIFO (the send FIFO of one CPU). */
+typedef struct nds_fifo {
+    uint32_t q[NDS_FIFO_WORDS];
+    uint8_t rd, n;
+} nds_fifo;
+
+/** @brief IPCSYNC and the FIFOs. */
+typedef struct nds_ipc {
+    /** @brief IPCSYNC bits 8 to 11 and 14 written by each CPU. */
+    uint8_t sync_out[2];
+    bool sync_irq[2];
+    /** @brief IPCFIFOCNT bits 2, 10, 14 and 15 of each CPU. */
+    uint16_t cnt[2];
+    /** @brief fifo[c] is the send FIFO of CPU c. */
+    nds_fifo fifo[2];
+    /** @brief The word each CPU received last (what an empty IPCFIFORECV reads). */
+    uint32_t last[2];
+    /** @brief The IRQ conditions at the last change, for the edges. */
+    bool send_cond[2], recv_cond[2];
+} nds_ipc;
+
 /** @brief What an address decodes to. */
 typedef enum nds_kind {
     /** @brief Nothing: reads 0, writes are dropped. */
@@ -72,6 +110,9 @@ struct rl_nds {
     /** @brief The ARM7 wrote HALTCNT: the store ends in a halt. */
     bool halt_req;
 
+    nds_irq irq[2];
+    nds_ipc ipc;
+
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
     rl_nds_costs costs;
@@ -118,6 +159,24 @@ void nds_io_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
 void nds_io_reset(rl_nds *m);
 /** @brief Adds the I/O device to the scheduler and maps both CPUs' I/O. */
 int nds_io_attach(rl_nds *m);
+
+/** @brief Power-on state of both interrupt controllers. */
+void nds_irq_reset(rl_nds *m);
+/** @brief Recomputes cpu's IRQ input and wake condition after a change at tick. */
+void nds_irq_update(rl_nds *m, unsigned cpu, uint64_t tick);
+/** @brief Sets bits in cpu's IF at tick. */
+void nds_irq_set(rl_nds *m, unsigned cpu, uint32_t bits, uint64_t tick);
+/** @brief IME, IE or IF (word offset off). */
+uint32_t nds_irq_read(rl_nds *m, unsigned cpu, uint32_t off);
+/** @brief A write of the mask bits of v to IME, IE or IF (acknowledge) at tick now. */
+void nds_irq_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
+
+/** @brief Power-on state of IPCSYNC and the FIFOs. */
+void nds_ipc_reset(rl_nds *m);
+/** @brief IPCSYNC, IPCFIFOCNT or IPCFIFORECV (which pops) at word offset off. */
+uint32_t nds_ipc_read(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now);
+/** @brief A write of the mask bits of v to IPCSYNC, IPCFIFOCNT or IPCFIFOSEND. */
+void nds_ipc_write(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now);
 
 /** @brief The scheduler address of cpu's I/O address addr: the ARM7's registers sit 4 GiB above the ARM9's. */
 static inline uint64_t nds_io_key(unsigned cpu, uint32_t addr) { return (uint64_t)cpu << 32 | addr; }
