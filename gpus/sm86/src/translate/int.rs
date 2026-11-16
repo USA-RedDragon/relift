@@ -104,12 +104,32 @@ impl Ctx {
     }
 }
 
+/// MOV; a lane mask other than `0xf` writes only the lanes whose position
+/// in their 2x2 quad has its bit set.
 fn mov(c: &mut Ctx, i: &Inst) -> Res<()> {
-    if i.ops.len() == 3 && !matches!(i.ops[2], Operand::Hex(0xf) | Operand::Int(0xf)) {
-        return bad("MOV with a partial lane mask");
-    }
     let v = c.usrc(&i.ops[1])?;
-    c.store_dst(&i.ops[0], v)
+    let mask = match i.ops.get(2) {
+        None => 0xf,
+        Some(Operand::Hex(m)) => *m as u32,
+        Some(Operand::Int(m)) => *m as u32,
+        Some(o) => return bad(format!("MOV lane mask {o}")),
+    };
+    if mask & 0xf == 0xf {
+        return c.store_dst(&i.ops[0], v);
+    }
+    let Operand::Reg(d, _) = i.ops[0] else {
+        return bad("MOV with a lane mask to a uniform register");
+    };
+    let lane = c.lane_id();
+    let q = c.and_k(lane, 3);
+    let k = c.kc(mask);
+    let bit = c.ib(op::SHIFT_RIGHT_LOGICAL, k, q);
+    let bit = c.and_k(bit, 1);
+    let on = c.cmp_k(op::I_NOT_EQUAL, bit, 0);
+    let old = c.load_reg(d);
+    let r = c.bpick(on, v, old);
+    c.store_reg(d, r);
+    Ok(())
 }
 
 fn s2r(c: &mut Ctx, i: &Inst) -> Res<()> {
