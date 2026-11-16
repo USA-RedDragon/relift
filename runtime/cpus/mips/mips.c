@@ -292,12 +292,20 @@ const rl_cpu_desc *rl_mips_cpu(void) { return &g_mips; }
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     g_stats.misses++;
-    return rl_core_miss(c, mem, c->pc);
+    return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
+}
+
+int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+{
+    g_stats.misses++;
+    rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
+    c->pend.pc = 0;
+    return rl_core_miss_at(c, mem, &m);
 }
 
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     (void)mem;
-    return rl_guest_fatal(c, "guest", "undefined instruction 0x%08x at guest pc 0x%016llx", insn,
-                          (unsigned long long)pc);
+    return rl_guest_stop_at(c, "undefined instruction", pc, "undefined instruction 0x%08x at guest pc 0x%016llx", insn,
+                            (unsigned long long)pc);
 }
