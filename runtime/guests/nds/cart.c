@@ -239,7 +239,7 @@ void nds_cart_attach(rl_nds *m) { repost(&m->cart); }
 int rl_nds_set_cartridge(rl_nds *m, const uint8_t *rom, size_t len)
 {
     nds_cart *c = &m->cart;
-    if (!rom || len < 0x200 || len > 0x40000000u)
+    if (!rom || len < 0x170 || len > 0x40000000u)
         return -1;
     c->rom = rom;
     c->rom_len = len;

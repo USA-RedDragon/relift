@@ -62,6 +62,10 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
         return nds_keypad_read(m, cpu, off);
     if ((off >= 0x1A0 && off < 0x1C0 && off != 0x1A8 && off != 0x1AC) || off == NDS_CARDPORT)
         return nds_cart_read(m, off, now);
+    if (cpu == RL_NDS_ARM7 && off == 0x1C0)
+        return nds_spi_read(m, now);
+    if (cpu == RL_NDS_ARM7 && off == 0x138)
+        return nds_rtc_read(m, now);
     if (math_reg(cpu, off))
         return nds_math_read(m, off, now);
     switch (off) {
@@ -122,6 +126,14 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     }
     if (off >= 0x1A0 && off < 0x1C0) {
         nds_cart_write(m, off, v, mask, now);
+        return;
+    }
+    if (cpu == RL_NDS_ARM7 && off == 0x1C0) {
+        nds_spi_write(m, v, mask, now);
+        return;
+    }
+    if (cpu == RL_NDS_ARM7 && off == 0x138) {
+        nds_rtc_write(m, v, mask, now);
         return;
     }
     if (off == 0x134 && cpu == RL_NDS_ARM7) {
@@ -218,6 +230,8 @@ void nds_io_reset(rl_nds *m)
     nds_dma_reset(m);
     nds_sys_reset(m);
     nds_cart_reset(m);
+    nds_spi_reset(m);
+    nds_rtc_reset(m);
     nds_math_reset(m);
     nds_lcd_reset(m);
     nds_disp_reset(m);

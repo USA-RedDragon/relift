@@ -200,3 +200,45 @@ void rl_nds_declare_settings(void)
     rl_settings_declare_runtime();
     rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
 }
+
+static void poke(rl_nds *m, uint32_t addr, unsigned size, uint32_t v) { rl_nds_write(m, RL_NDS_ARM9, addr, size, v); }
+
+void rl_nds_user_settings(const rl_nds *m, uint8_t out[0x70])
+{
+    if (m->spi.fw)
+        memcpy(out, m->spi.fw + 0x3FF00, 0x70);
+    else
+        memset(out, 0, 0x70);
+}
+
+void rl_nds_boot_state(rl_nds *m)
+{
+    const nds_cart *c = &m->cart;
+    rl_nds_write(m, RL_NDS_ARM9, 0x04000204u, 2, 0xE880u);
+    uint16_t hdr_crc = 0, sec_crc = 0;
+    if (c->rom && c->rom_len >= 0x170) {
+        hdr_crc = (uint16_t)(c->rom[0x15E] | c->rom[0x15F] << 8);
+        sec_crc = (uint16_t)(c->rom[0x6C] | c->rom[0x6D] << 8);
+    }
+    for (unsigned copy = 0; copy < 2; copy++) {
+        uint32_t base = copy ? 0x027FFC00u : 0x027FF800u;
+        poke(m, base, 4, c->chip_id);
+        poke(m, base + 4, 4, c->chip_id);
+        poke(m, base + 8, 2, hdr_crc);
+        poke(m, base + 10, 2, sec_crc);
+        poke(m, base + 12, 2, 0);
+        poke(m, base + 14, 2, 0);
+    }
+    poke(m, 0x027FF810u, 2, 0xFFFF);
+    poke(m, 0x027FF850u, 2, 0x5835);
+    poke(m, 0x027FFC10u, 2, 0x5835);
+    poke(m, 0x027FF864u, 4, 0);
+    poke(m, 0x027FF868u, 4, 0x3FE00);
+    poke(m, 0x027FF880u, 4, 7);
+    poke(m, 0x027FF884u, 4, 6);
+    poke(m, 0x027FF890u, 4, 0xB0002A22u);
+    uint8_t user[0x70];
+    rl_nds_user_settings(m, user);
+    for (unsigned i = 0; i < 0x70; i += 4)
+        poke(m, 0x027FFC80u + i, 4, (uint32_t)user[i] | (uint32_t)user[i + 1] << 8 | (uint32_t)user[i + 2] << 16 | (uint32_t)user[i + 3] << 24);
+}

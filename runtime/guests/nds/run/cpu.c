@@ -419,6 +419,9 @@ static int boot_memory(rl_nds_run *r)
         r->cpu[cpu].entry = entry;
     }
     load(m, RL_NDS_ARM9, 0x027FFE00u, p->rom, 0x170);
+    if (rl_nds_set_cartridge(m, p->rom, p->rom_len) != 0)
+        return -1;
+    rl_nds_boot_state(m);
     rl_nds_write(m, RL_NDS_ARM9, 0x027FFC40u, 2, 1);
     rl_nds_write(m, RL_NDS_ARM9, 0x04000247u, 1, 3);
     rl_nds_write(m, RL_NDS_ARM9, 0x04000304u, 2, 0x820F);

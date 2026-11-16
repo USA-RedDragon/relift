@@ -342,6 +342,8 @@ struct rl_nds {
     nds_dma dma[2];
     nds_keypad pad;
     nds_cart cart;
+    nds_spi spi;
+    nds_rtc rtc;
     nds_sound snd;
     /** @brief POWCNT2 (ARM7 0x04000304, bits 0 and 1) and WIFIWAITCNT (0x04000206, bits 0 to 5). */
     uint8_t powcnt2;

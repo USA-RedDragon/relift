@@ -292,6 +292,20 @@ typedef struct rl_nds_input {
  */
 void rl_nds_set_input(rl_nds *m, const rl_nds_input *in);
 
+/** @brief A date and time for the clock. */
+typedef struct rl_nds_time {
+    /** @brief 2000 to 2099. */
+    uint16_t year;
+    uint8_t month, day, hour, minute, second;
+} rl_nds_time;
+
+/**
+ * @brief Sets the real-time clock to t as of tick 0 of the run; it then runs
+ * with the emulated time. Without a call the clock starts at 2000-01-01
+ * 00:00:00. The program passes the host's clock or a pinned time.
+ */
+void rl_nds_set_time(rl_nds *m, const rl_nds_time *t);
+
 /**
  * @brief Gives the machine the cartridge image (kept by pointer: it must
  * outlive the machine), which the slot serves with the chip ID derived from
@@ -300,6 +314,15 @@ void rl_nds_set_input(rl_nds *m, const rl_nds_input *in);
 int rl_nds_set_cartridge(rl_nds *m, const uint8_t *rom, size_t len);
 /** @brief The chip ID the cartridge reports (B8 and the first-stage command). */
 uint32_t rl_nds_chip_id(const rl_nds *m);
+
+/**
+ * @brief The memory the boot code leaves for a cartridge (GBATEK "BIOS RAM
+ * Usage"): the cartridge's chip ID and header CRC, the firmware's user
+ * settings at 0x027FFC80, the boot indicator, and EXMEMCNT as the BIOS sets
+ * it (the ARM7 owns the cartridge and the GBA slot). Call after the
+ * cartridge is set and the header is in main RAM.
+ */
+void rl_nds_boot_state(rl_nds *m);
 
 /**
  * @brief Chooses the backup chip by name (auto, eeprom512, eeprom8k, eeprom64k,
@@ -324,6 +347,9 @@ int rl_nds_save_poll(rl_nds *m, const char *path, uint64_t quiet);
 bool rl_nds_save_path(char *out, size_t size, const char *rom_path);
 /** @brief Declares the save settings. */
 void rl_nds_declare_settings(void);
+
+/** @brief The 0x70 bytes of the newest user settings in the firmware image. */
+void rl_nds_user_settings(const rl_nds *m, uint8_t out[0x70]);
 
 /** @brief Kinds of access in the cost table. */
 enum {

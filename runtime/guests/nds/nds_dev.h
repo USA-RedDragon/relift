@@ -89,6 +89,55 @@ typedef struct nds_cart {
     nds_backup bk;
 } nds_cart;
 
+/** @brief The SPI devices. */
+enum {
+    NDS_SPI_POWER = 0,
+    NDS_SPI_FIRMWARE = 1,
+    NDS_SPI_TOUCH = 2,
+};
+
+/** @brief The ARM7's SPI bus. */
+typedef struct nds_spi {
+    uint16_t cnt;
+    uint8_t data;
+    uint64_t end;
+    rl_event ev;
+    rl_nds *m;
+    bool open[3];
+    unsigned pos[3];
+    uint8_t pm[8];
+    /** @brief Firmware flash. */
+    uint8_t op;
+    uint32_t addr;
+    bool wel;
+    uint8_t *fw;
+    /** @brief Touch screen controller: the control byte of the open conversion and the reply bits still to shift out. */
+    uint32_t reply;
+    unsigned reply_bits;
+} nds_spi;
+
+/** @brief The real-time clock. */
+typedef struct nds_rtc {
+    /** @brief The 16-bit register at 0x04000138. */
+    uint16_t reg;
+    /** @brief Seconds since 2000-01-01 at tick 0. */
+    int64_t base;
+    /** @brief The weekday counter: dow_val on the day number dow_day (days since 2000-01-01). */
+    uint8_t dow_val;
+    int64_t dow_day;
+    uint8_t stat1, stat2, adjust, free_reg;
+    uint8_t alarm1[3], alarm2[3], freq;
+    bool open;
+    unsigned nbits;
+    uint8_t cmd;
+    bool reading;
+    uint8_t buf[7];
+    unsigned len, byte;
+    unsigned bit;
+    uint8_t in;
+    bool out;
+} nds_rtc;
+
 /** @brief Power-on state of the cartridge slot, with no cartridge. */
 void nds_cart_reset(rl_nds *m);
 /** @brief Posts the slot's event once the scheduler exists. */
@@ -108,5 +157,27 @@ void nds_bk_free(nds_backup *b);
 void nds_bk_close(nds_backup *b);
 /** @brief One byte on the AUXSPI bus: in is sent, the return value comes back; hold keeps the chip selected afterwards. */
 uint8_t nds_bk_byte(nds_backup *b, uint8_t in, bool hold, uint64_t now);
+
+/** @brief Power-on state of the SPI bus and the firmware. */
+void nds_spi_reset(rl_nds *m);
+/** @brief Frees the firmware image. */
+void nds_spi_free(rl_nds *m);
+/** @brief Posts the bus's event. */
+void nds_spi_attach(rl_nds *m);
+/** @brief SPICNT and SPIDATA (word offset 0x1C0) at tick now. */
+uint32_t nds_spi_read(rl_nds *m, uint64_t now);
+/** @brief A write of the mask bits of v to them. */
+void nds_spi_write(rl_nds *m, uint32_t v, uint32_t mask, uint64_t now);
+/** @brief Fills image (NDS_FIRMWARE_SIZE bytes) with the generated firmware; no Nintendo code, data or identifiers. */
+void nds_firmware_build(uint8_t *image);
+/** @brief The CRC-16 of the BIOS, firmware and user settings checks (poly 0xA001, reflected). */
+uint16_t nds_crc16(uint16_t init, const uint8_t *p, size_t n);
+
+/** @brief Power-on state of the clock (2000-01-01 00:00:00). */
+void nds_rtc_reset(rl_nds *m);
+/** @brief The RTC register at 0x04000138 read at tick now. */
+uint32_t nds_rtc_read(rl_nds *m, uint64_t now);
+/** @brief A write of the mask bits of v to it. */
+void nds_rtc_write(rl_nds *m, uint32_t v, uint32_t mask, uint64_t now);
 
 #endif

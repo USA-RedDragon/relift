@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /** @brief Most --peek options and --png-frames entries. */
 #define PEEKS 16u
@@ -21,7 +22,10 @@
 
 typedef struct host {
     rl_nds_run run;
+    rl_event save_ev;
+    char save[4096];
     bool stats;
+    bool no_save;
     uint32_t peek[PEEKS];
     uint32_t peeks;
     /** @brief --png: the last frame at the end of the run. */
@@ -186,8 +190,42 @@ static void report(void)
             (unsigned long long)s->orders, (unsigned long long)s->order_waits, (unsigned long long)s->switches);
 }
 
+/** @brief Writes the save now when it changed. */
+static void save_now(void)
+{
+    if (H.save[0] && rl_nds_save_dirty(H.run.m) && rl_nds_save_write(H.run.m, H.save) < 0)
+        rl_log(RL_LOG_WARN, "nds", "could not write the save %s", H.save);
+}
+
+/** @brief Once per emulated second: writes a save that has been quiet for a second. */
+static void save_tick(rl_sched *s, rl_event *e, uint64_t when)
+{
+    if (H.save[0] && rl_nds_save_poll(H.run.m, H.save, RL_NDS_TICK_HZ) < 0)
+        rl_log(RL_LOG_WARN, "nds", "could not write the save %s", H.save);
+    rl_sched_post(s, e, when + RL_NDS_TICK_HZ);
+}
+
+/** @brief The clock's start: the rtc.time setting ("YYYY-MM-DD HH:MM:SS") or the host's local time. */
+static void start_clock(rl_nds *m)
+{
+    rl_nds_time t = {2000, 1, 1, 0, 0, 0};
+    unsigned y, mo, d, h, mi, s;
+    const char *pin = rl_setting_str("rtc.time");
+    if (*pin && sscanf(pin, "%u-%u-%u %u:%u:%u", &y, &mo, &d, &h, &mi, &s) == 6) {
+        t = (rl_nds_time){(uint16_t)y, (uint8_t)mo, (uint8_t)d, (uint8_t)h, (uint8_t)mi, (uint8_t)s};
+    } else {
+        time_t now = time(NULL);
+        const struct tm *lt = localtime(&now);
+        if (lt)
+            t = (rl_nds_time){(uint16_t)(lt->tm_year + 1900), (uint8_t)(lt->tm_mon + 1), (uint8_t)lt->tm_mday,
+                              (uint8_t)lt->tm_hour, (uint8_t)lt->tm_min, (uint8_t)lt->tm_sec};
+    }
+    rl_nds_set_time(m, &t);
+}
+
 static void on_exit_code(uint32_t code)
 {
+    save_now();
     report();
     fflush(stderr);
     _Exit((int)code);
@@ -209,6 +247,14 @@ static int options(int argc, char **argv, int first, uint64_t *max_ticks)
         const char *a = argv[i];
         if (!strcmp(a, "--headless"))
             continue;
+        if (!strcmp(a, "--no-save")) {
+            H.no_save = true;
+            continue;
+        }
+        if (!strcmp(a, "--save")) {
+            snprintf(H.save, sizeof H.save, "%s", arg_value(argc, argv, &i));
+            continue;
+        }
         if (!strcmp(a, "--max-ticks"))
             *max_ticks = strtoull(arg_value(argc, argv, &i), NULL, 0);
         else if (!strcmp(a, "--peek")) {
@@ -251,6 +297,7 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
 {
     memset(&H, 0, sizeof H);
     uint64_t max_ticks = 0;
+    rl_nds_declare_settings();
     rl_settings_args(argc, argv);
     if (options((int)p->arg_count, (char **)p->args, 0, &max_ticks) != 0 || options(argc, argv, 1, &max_ticks) != 0)
         return 2;
@@ -266,9 +313,24 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
     H.run.max_ticks = max_ticks;
     if (H.png_every || H.png_frame_count || H.stop_frames)
         rl_nds_set_frame_hook(H.run.m, on_frame, NULL);
+    start_clock(H.run.m);
+    if (rl_nds_save_set(H.run.m, rl_setting_str("save.type")) != 0)
+        rl_log(RL_LOG_WARN, "nds", "unknown save.type %s; the chip is chosen from the game's commands", rl_setting_str("save.type"));
+    if (!H.no_save) {
+        const char *name = p->title;
+        if (!H.save[0] && name && *name && !rl_nds_save_path(H.save, sizeof H.save, name))
+            H.save[0] = 0;
+        if (H.save[0] && rl_nds_save_read(H.run.m, H.save) < 0)
+            rl_log(RL_LOG_WARN, "nds", "the save %s does not fit the backup chip; starting without it", H.save);
+    } else {
+        H.save[0] = 0;
+    }
+    H.save_ev = (rl_event){.fire = save_tick};
+    rl_sched_post(H.run.s, &H.save_ev, RL_NDS_TICK_HZ);
     rl_set_exit_hook(on_exit_code);
     int r = rl_nds_run_start(&H.run);
     rl_set_exit_hook(NULL);
+    save_now();
     report();
     rl_nds_run_free(&H.run);
     return r;
