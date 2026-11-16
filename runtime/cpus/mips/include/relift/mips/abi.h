@@ -476,9 +476,9 @@ RL_RUNTIME_API uint32_t rl_mips_count(rl_ctx *c);
 
 /**
  * @brief The slow path of a guard of the block at pc with code (EXC + ExcCode
- * or FP_SLOW, plus IN_DELAY) whose instruction words are w0 and, for a
- * branch, w1 (its delay slot): runs the instruction the guard left at,
- * which may raise an exception (a TLB-mapped access that hits is done here).
+ * or FP_SLOW) whose instruction word is w0: runs the instruction the guard
+ * left at, which may raise an exception (a TLB-mapped access that hits is
+ * done here).
  * Returns RL_OK when the lifted code goes on after the block, or RL_PENDING
  * with a redirect to the exception vector. A guard in a delay slot leaves
  * through rl_mips_guard_exit instead.
