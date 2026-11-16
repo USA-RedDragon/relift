@@ -86,20 +86,42 @@ pub fn frame_dict_id(b: &[u8]) -> Result<u32> {
     Ok(s.iter().rev().fold(0u32, |a, &x| (a << 8) | u32::from(x)))
 }
 
-/// Decode the first frame of `b`, with its dictionary when it names one.
+/// Decode the first frame of `b`, with its dictionary when it names one,
+/// up to [`MAX_OUT`] bytes.
 ///
 /// # Errors
 ///
-/// [`Error::MissingDictionary`] for an unknown id, or a bad frame.
+/// [`Error::MissingDictionary`] for an unknown id, a bad frame, or a frame
+/// whose output passes [`MAX_OUT`].
 pub fn decode(b: &[u8], dicts: &Dicts) -> Result<Vec<u8>> {
+    decode_limited(b, dicts, MAX_OUT)
+}
+
+/// Decode the first frame of `b` into at most `limit` bytes. A frame
+/// whose header declares more is refused before decoding; one that
+/// declares nothing is decoded in a stream that stops one byte past
+/// `limit`, so memory stays within the limit either way.
+///
+/// # Errors
+///
+/// [`Error::MissingDictionary`] for an unknown id, a bad frame, or output
+/// past `limit`.
+pub fn decode_limited(b: &[u8], dicts: &Dicts, limit: u64) -> Result<Vec<u8>> {
     let id = frame_dict_id(b)?;
+    let over = || malformed(format!("zstd: a frame decodes to more than {limit} bytes"));
+    if let Ok(Some(n)) = zstd::zstd_safe::get_frame_content_size(b)
+        && n > limit
+    {
+        return over();
+    }
     let bad = |e: std::io::Error| Error::Format(format!("zstd: {e}"));
     let mut out = Vec::new();
+    let cap = limit.saturating_add(1);
     if id == 0 {
         let dec = zstd::stream::read::Decoder::new(b)
             .map_err(bad)?
             .single_frame();
-        dec.take(MAX_OUT).read_to_end(&mut out).map_err(bad)?;
+        dec.take(cap).read_to_end(&mut out).map_err(bad)?;
     } else {
         let Some(d) = dicts.by_id.get(&id) else {
             return Err(Error::MissingDictionary(id));
@@ -107,7 +129,10 @@ pub fn decode(b: &[u8], dicts: &Dicts) -> Result<Vec<u8>> {
         let dec = zstd::stream::read::Decoder::with_prepared_dictionary(b, d)
             .map_err(bad)?
             .single_frame();
-        dec.take(MAX_OUT).read_to_end(&mut out).map_err(bad)?;
+        dec.take(cap).read_to_end(&mut out).map_err(bad)?;
+    }
+    if out.len() as u64 > limit {
+        return over();
     }
     Ok(out)
 }

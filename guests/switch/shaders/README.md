@@ -13,7 +13,8 @@ relift-shaders scan game.nup --out shaders/ [--cache cache/] [-j 8] [--package 0
 `--out` gets `<sha256>.bin` per program, `manifest.json` (per program: `kind`
 `sph` (graphics) or `cs` (compute), `stage` from the SPH, `sph` header size,
 `size`, `n` times found, up to four `srcs`) and `summary.json` (counts, the
-containers seen, and errors such as a missing zstd dictionary). The cache
+containers seen, and errors such as a missing zstd dictionary or a zstd frame
+that decodes past 1 GiB, which is reported rather than cut short). The cache
 defaults to `<out>/.cache`.
 
 A program is the bytes of the 0x80-byte shader program header (graphics only)
