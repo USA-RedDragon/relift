@@ -129,6 +129,20 @@ pub fn runtime_settings() -> Vec<Setting> {
             },
         ),
         s(
+            "vi.follow_display",
+            "Follow the display's refresh",
+            "Keep the game's 60 Hz vsync in step with the display, where the host reports when it shows a frame, so no frame is shown twice or dropped when the display runs slightly off 60 Hz",
+            Value::Bool(true),
+            SettingKind::Bool,
+        ),
+        s(
+            "stats.trace",
+            "Frame trace",
+            "A file to write a trace of vsyncs, presents, acquires, scheduler hand-overs and slow svcs to, for finding why a vsync went without a new frame. Empty: off",
+            Value::String(String::new()),
+            SettingKind::String,
+        ),
+        s(
             "vk.keep_attachments",
             "Keep attachment contents",
             "Pass the game's DONT_CARE attachment load and store ops as LOAD and STORE, as the console keeps the contents. auto: only on host GPUs known to lose them (Apple)",
@@ -825,7 +839,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 13);
+        assert_eq!(section(Vec::new()).runtime.len(), 15);
     }
 
     #[test]
