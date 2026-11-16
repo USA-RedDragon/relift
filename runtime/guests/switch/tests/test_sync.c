@@ -72,6 +72,7 @@ static struct {
     uint64_t tls[8];
     uint64_t tpidr[8];
     uint32_t fpcr_seen[8];
+    uint32_t fpcr_ctx[8];
     int iters;
     int done;
 } S;
@@ -103,6 +104,7 @@ static int worker_tls(rl_ctx *c, uint8_t *mem)
     rl_host_yield();
     S.tpidr[i] = rl_mrs_tpidr_el0(c);
     S.fpcr_seen[i] = rl_host_get_fpcr();
+    S.fpcr_ctx[i] = (uint32_t)rl_mrs_fpcr(c);
     *word(c->tpidrro_el0) = 0xC0DE0000u + (uint32_t)i;
     return RL_OK;
 }
@@ -375,7 +377,10 @@ TEST(threads_tls_and_registers)
         CHECK(S.tls[i] != c->tpidrro_el0);
         CHECK_EQ(S.tls[i] & 0x1FF, 0);
         CHECK_EQ(S.tpidr[i], 0x1000u + (unsigned)i);
-        CHECK_EQ(S.fpcr_seen[i], 0);
+        CHECK_EQ(S.fpcr_ctx[i], 1u << 24);
+#if defined(__aarch64__)
+        CHECK_EQ(S.fpcr_seen[i], 1u << 24);
+#endif
         for (int k = 0; k < i; k++)
             CHECK(S.tls[i] != S.tls[k]);
         CHECK_EQ(rl_vm_query(&hos.vm, S.tls[i]).tag & 0xFF, MS_THREAD_LOCAL & 0xFF);

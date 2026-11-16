@@ -92,7 +92,8 @@ static bool core_ok(int32_t core)
     return core >= 0 && core < 64 && (hos.cfg.core_mask >> core) & 1;
 }
 
-rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_t stack_top, int32_t prio, int32_t core)
+rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_t stack_top, int32_t prio, int32_t core,
+                            uint32_t fpcr)
 {
     if (core == -2)
         core = hos.cfg.main_core;
@@ -114,6 +115,7 @@ rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_
     t->entry = entry;
     t->arg = arg;
     t->stack_top = stack_top;
+    t->rt->ctx->fpcr = (t->rt->ctx->fpcr & ~RL_FPCR_GUEST) | (fpcr & RL_FPCR_GUEST);
     hos.live_threads++;
     rc = hos_handle_add(&t->obj, out);
     if (rc != KR_SUCCESS)

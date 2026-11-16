@@ -306,7 +306,7 @@ static int dispatch(rl_ctx *c, uint32_t imm)
         return rl_pend_exit_process(c, 0);
     case 0x08: {
         uint32_t h = 0;
-        rc = hos_create_thread(&h, x[1], x[2], x[3], (int32_t)x[4], (int32_t)x[5]);
+        rc = hos_create_thread(&h, x[1], x[2], x[3], (int32_t)x[4], (int32_t)x[5], c->fpcr);
         x[1] = h;
         break;
     }

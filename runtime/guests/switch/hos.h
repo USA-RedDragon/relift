@@ -633,8 +633,12 @@ void hos_note_guest_range(uint64_t addr, uint64_t size);
 /** @brief Logs the compact layout counters. */
 void hos_layout_report(void);
 
-/** @brief Thread svcs. */
-rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_t stack_top, int32_t prio, int32_t core);
+/**
+ * @brief Thread svcs. A new thread starts with the creating thread's guest
+ * FPCR bits (@p fpcr), as svcCreateThread copies the creator's FPU control.
+ */
+rl_result hos_create_thread(uint32_t *out, uint64_t entry, uint64_t arg, uint64_t stack_top, int32_t prio, int32_t core,
+                            uint32_t fpcr);
 rl_result hos_start_thread(uint32_t h);
 void hos_sleep_thread(int64_t ns);
 rl_result hos_get_thread_priority(uint32_t h, int32_t *out);
