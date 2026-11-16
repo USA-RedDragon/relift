@@ -424,8 +424,8 @@ TEST(audren_update_frames_and_mixing)
     int16_t *wave = (int16_t *)(void *)(t_mem() + heap + 0x10000);
     for (int i = 0; i < 480; i++)
         wave[i] = 1000;
-    uint64_t sink = heap + 0x20000;
-    uint32_t sink_size = 480 * 50;
+    uint64_t sink = heap + 0x100000;
+    uint32_t sink_size = 480 * 2000;
     upd *u = calloc(1, sizeof *u);
     build_update(u, true, heap + 0x10000, sink, sink_size, true);
     memcpy(t_mem() + heap + 0x30000, u->in, u->size);
