@@ -1323,3 +1323,34 @@ fn f2i_nan_and_saturation() {
         }
     }
 }
+
+/// On a host that flushes like SM86 (rounding before the tininess check),
+/// `.FTZ` instructions take the host result directly and keep a product
+/// that rounds up to `2^-126`; without `.FTZ` the same product is a
+/// denormal built by the translator.
+#[test]
+fn flush_hosts_round_before_the_tininess_check() {
+    let o = host(HostProfile::nvidia());
+    let p = program(fmul(RN.ftz()), 0, 0, 0);
+    let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.host.check_flush);
+    assert_eq!(s.interface.host.denorm_fixups, 0);
+    let cases = [
+        (0x3f7f_fffe, 0x0080_0001, 0, 0x0080_0000),
+        (0x3f7f_ffff, 0x0080_0000, 0, 0),
+        (0xbf7f_fffe, 0x0080_0001, 0, 0x8080_0000),
+    ];
+    check("FMUL.FTZ", &o, &[FLUSH], fmul(RN.ftz()), &cases);
+    let cases = [
+        (0x3f7f_fffe, 0x0080_0001, 0, 0x0080_0000),
+        (0x3f7f_ffff, 0x0080_0000, 0, 0x0080_0000),
+        (0x3f00_0000, 0x0080_0001, 0, 0x0040_0000),
+    ];
+    check(
+        "FMUL",
+        &o,
+        &devices(&HostProfile::nvidia()),
+        fmul(RN),
+        &cases,
+    );
+}

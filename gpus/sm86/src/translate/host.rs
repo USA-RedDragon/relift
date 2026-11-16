@@ -119,9 +119,16 @@ impl Default for HostProfile {
 }
 
 impl HostProfile {
-    /// NVIDIA proprietary driver, Ampere and later. Neither denormal mode
-    /// can be requested; the driver flushes as SM86 `.FTZ` does, which the
-    /// runtime checks at start-up.
+    /// NVIDIA proprietary driver, Ampere and later. The driver reports
+    /// neither `shaderDenormFlushToZeroFloat32` nor
+    /// `shaderDenormPreserveFloat32` (with independence `ALL`), so no
+    /// denormal mode can be requested; without one it flushes as SM86 `.FTZ`
+    /// does, rounding to 24 bits before the tininess check (an exact
+    /// `2^-126 (1 - 2^-46)` from FMUL.FTZ gives `2^-126`, not zero). That was
+    /// measured on an SM86 device for FMUL, FFMA and FADD `.FTZ` in all four
+    /// roundings on 4096 operand pairs around `2^-126`, bit-exact against
+    /// CUDA; the runtime checks it at start-up (`HostReport::check_flush`).
+    /// It reports `shaderFmaFloat32` and `shaderSignedZeroInfNanPreserveFloat32`.
     pub fn nvidia() -> HostProfile {
         HostProfile {
             name: "nvidia",

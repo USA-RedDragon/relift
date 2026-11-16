@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Debug)]
 pub struct Device {
     /// Denormal inputs and results of float operations read and write as
-    /// signed zero (results rounded first).
+    /// signed zero, results rounded to 24 bits first as SM86 `.FTZ` does.
     pub flush: bool,
     /// With `flush`, `Ldexp` flushes a denormal result too (an
     /// implementation by multiplication) rather than building it from bits.
@@ -122,6 +122,24 @@ impl Ex<'_> {
             0x7fc0_0000
         } else {
             fb(x)
+        }
+    }
+
+    /// With `flush`, the result `r` of an operation as a flushing device
+    /// gives it: rounded to 24 bits with an unbounded exponent, then zero if
+    /// below `2^-126`. `scaled` is the same operation with its result scaled
+    /// by `2^64`.
+    fn tiny(&self, r: f32, scaled: impl FnOnce() -> f32) -> f32 {
+        if !self.dev.flush || r == 0.0 || r.is_nan() || r.abs() > f32::MIN_POSITIVE {
+            return r;
+        }
+        let s = scaled();
+        if s == 0.0 {
+            r
+        } else if s.abs() < f32::MIN_POSITIVE * 2f32.powi(64) {
+            0.0f32.copysign(s)
+        } else {
+            s * 2f32.powi(-64)
         }
     }
 
@@ -239,11 +257,13 @@ impl Ex<'_> {
             45 => u64::from(si(a[0]).max(si(a[1])).min(si(a[2])) as u32),
             50 => {
                 let (x, y, z) = (fi(a[0]), fi(a[1]), fi(a[2]));
+                let k = 2f32.powi(64);
                 if self.dev.fused {
-                    self.fout(x.mul_add(y, z))
+                    self.fout(self.tiny(x.mul_add(y, z), || (x * k).mul_add(y, z * k)))
                 } else {
-                    let p = self.fin(x * y);
-                    self.fout(p + z)
+                    let p = self.tiny(x * y, || (x * k) * y);
+                    let p = self.fin(p);
+                    self.fout(self.tiny(p + z, || p * k + z * k))
                 }
             }
             53 => {
@@ -505,10 +525,26 @@ impl Ex<'_> {
             132 => a[0].wrapping_mul(a[1]) & m,
             134 => a[0].checked_div(a[1]).unwrap_or(m),
             137 => a[0].checked_rem(a[1]).unwrap_or(0),
-            4427 => self.fout(fi(a[0]).mul_add(fi(a[1]), fi(a[2]))),
-            129 => self.fout(fi(a[0]) + fi(a[1])),
-            131 => self.fout(fi(a[0]) - fi(a[1])),
-            133 => self.fout(fi(a[0]) * fi(a[1])),
+            4427 => {
+                let (x, y, z) = (fi(a[0]), fi(a[1]), fi(a[2]));
+                let k = 2f32.powi(64);
+                self.fout(self.tiny(x.mul_add(y, z), || (x * k).mul_add(y, z * k)))
+            }
+            129 => {
+                let (x, y) = (fi(a[0]), fi(a[1]));
+                let k = 2f32.powi(64);
+                self.fout(self.tiny(x + y, || x * k + y * k))
+            }
+            131 => {
+                let (x, y) = (fi(a[0]), fi(a[1]));
+                let k = 2f32.powi(64);
+                self.fout(self.tiny(x - y, || x * k - y * k))
+            }
+            133 => {
+                let (x, y) = (fi(a[0]), fi(a[1]));
+                let k = 2f32.powi(64);
+                self.fout(self.tiny(x * y, || (x * k) * y))
+            }
             136 => self.fout(fi(a[0]) / fi(a[1])),
             149 | 150 => {
                 let (x, y) = (a[0] as u32, a[1] as u32);
