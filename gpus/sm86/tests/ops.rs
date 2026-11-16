@@ -99,3 +99,23 @@ fn suquery_compression_status() {
         &["SUQUERY.2D_ARRAY R7, [R4], COMP_STATUS, 0x0, 0x58"],
     );
 }
+
+#[test]
+fn ldgsts() {
+    check(
+        &[
+            w(0x0003_e800_0810_1c44, 0x0000_0000_0213_7fae),
+            w(0x0003_e800_0b92_1a44, 0x0002_0008_0213_7fae),
+            w(0x0003_e800_0b92_1844, 0x0002_8014_0213_7fae),
+            w(0x000f_e800_0894_1c44, 0x0003_0000_1013_7fae),
+            w(0x000e_2200_0000_0000, 0x0000_0000_0000_79af),
+        ],
+        &[
+            "LDGSTS.E.BYPASS.128 [R19], [R2.64], P0",
+            "LDGSTS.E.64 [R19+0x20], [R2.64+0x8]",
+            "LDGSTS.E [R19+0x28], [R2.64+0x14]",
+            "LDGSTS.E.BYPASS.128.ZFILL [R19+0x30], [R16.64], P1",
+            "LDGDEPBAR",
+        ],
+    );
+}

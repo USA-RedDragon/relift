@@ -7,7 +7,8 @@
 //! Generic `LD`/`ST`/`ATOM` are treated as global: the shared and local
 //! windows of the generic address space are not modeled, so they are
 //! listed in `HostReport::inexact`. How global accesses are ordered is in
-//! [`order`].
+//! [`order`]. The asynchronous copy LDGSTS is a load and a store done at
+//! once, so its barriers (LDGDEPBAR, DEPBAR) have nothing to wait for.
 //!
 //! The submodules own the other spaces: [`scratch`] (shared and local
 //! memory), [`atomic`] (ATOM, ATOMG, ATOMS, RED) and [`warp`] (SHFL, VOTE,
@@ -77,6 +78,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
         "LDG" | "LD" => ldg(c, i),
         "STG" | "ST" => stg(c, i),
+        "LDGSTS" => ldgsts(c, i),
         _ => return None,
     })
 }
@@ -444,5 +446,110 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     };
     let p = c.global_ptr(addr, ty);
     c.m.emit_void(op::STORE, &[p, v, ALIGNED, 4 * n]);
+    Ok(())
+}
+
+/// LDGSTS: copy 4, 8 or 16 bytes from global to shared memory. With the
+/// predicate false the shared bytes become zero; with `.ZFILL` the low four
+/// bits of the source address say how many bytes at the end of the 16 are
+/// zero, the rest coming from the 16-byte aligned address below it.
+fn ldgsts(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let mut n = 1;
+    let mut zfill = false;
+    for m in &i.mods {
+        match *m {
+            "E" | "BYPASS" | "LTC128B" => {}
+            "64" => n = 2,
+            "128" => n = 4,
+            "ZFILL" => zfill = true,
+            m => return bad(format!("LDGSTS.{m}")),
+        }
+    }
+    if zfill && n != 4 {
+        return bad("LDGSTS.ZFILL size");
+    }
+    let (Some(Operand::Sym(ds)), Some(Operand::Sym(gs))) = (i.ops.first(), i.ops.get(1)) else {
+        return bad("LDGSTS operands");
+    };
+    let da = parse_addr(ds, false)?;
+    let ga = parse_addr(gs, true)?;
+    let sa = c.scratch_address(&da, 4 * n, scratch::Space::Shared)?;
+    let mut ga_addr = c.global_address(&ga)?;
+    let pred = match i.ops.get(2) {
+        Some(o) => Some(c.pred_operand(o)?),
+        None => None,
+    };
+    let u = c.u32t();
+    let zero = c.m.c_u32(0);
+    let slots: Vec<u32> = (0..n)
+        .map(|k| c.scratch_word(scratch::Space::Shared, sa, k))
+        .collect();
+    if pred.is_some() {
+        for &p in &slots {
+            c.m.emit_void(op::STORE, &[p, zero]);
+        }
+    }
+    let merge = pred.map(|p| {
+        let then = c.m.id();
+        let merge = c.m.id();
+        c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+        c.m.emit_void(op::BRANCH_CONDITIONAL, &[p, then, merge]);
+        c.m.emit_void(op::LABEL, &[then]);
+        merge
+    });
+    let keep = if zfill {
+        let t = c.m.t_u64();
+        let lo = c.m.emit(op::U_CONVERT, u, &[ga_addr]);
+        let k15 = c.m.c_u32(15);
+        let cut = c.m.emit(op::BITWISE_AND, u, &[lo, k15]);
+        let k16 = c.m.c_u32(16);
+        let mask = c.m.c_u64(!15);
+        ga_addr = c.m.emit(op::BITWISE_AND, t, &[ga_addr, mask]);
+        Some(c.m.emit(op::I_SUB, u, &[k16, cut]))
+    } else {
+        None
+    };
+    let words = match c.access_scope(i, Order::Weak, n) {
+        Some(s) => c.atomic_load_words(ga_addr, n, Order::Weak, s),
+        None => {
+            let ty = vec_ty(c, n);
+            let gp = c.global_ptr(ga_addr, ty);
+            let v = c.m.emit(op::LOAD, ty, &[gp, ALIGNED, 4 * n]);
+            (0..n)
+                .map(|k| {
+                    if n == 1 {
+                        v
+                    } else {
+                        c.m.emit(op::COMPOSITE_EXTRACT, u, &[v, k])
+                    }
+                })
+                .collect()
+        }
+    };
+    for (k, (&p, &w)) in slots.iter().zip(&words).enumerate() {
+        let mut w = w;
+        if let Some(keep) = keep {
+            let base = c.m.c_u32(4 * k as u32);
+            let b = c.boolt();
+            let past = c.m.emit(op::U_LESS_THAN_EQUAL, b, &[keep, base]);
+            let left = c.m.emit(op::I_SUB, u, &[keep, base]);
+            let k4 = c.m.c_u32(4);
+            let whole = c.m.emit(op::U_GREATER_THAN_EQUAL, b, &[left, k4]);
+            let k8 = c.m.c_u32(8);
+            let bits = c.m.emit(op::I_MUL, u, &[left, k8]);
+            let one = c.m.c_u32(1);
+            let top = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[one, bits]);
+            let mask = c.m.emit(op::I_SUB, u, &[top, one]);
+            let all = c.m.c_u32(!0);
+            let mask = c.select(u, whole, all, mask);
+            let mask = c.select(u, past, zero, mask);
+            w = c.m.emit(op::BITWISE_AND, u, &[w, mask]);
+        }
+        c.m.emit_void(op::STORE, &[p, w]);
+    }
+    if let Some(merge) = merge {
+        c.m.emit_void(op::BRANCH, &[merge]);
+        c.m.emit_void(op::LABEL, &[merge]);
+    }
     Ok(())
 }
