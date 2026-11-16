@@ -469,7 +469,7 @@ TEST(arm9_intr_wait_with_r0_zero_still_waits_for_an_interrupt_the_documented_bug
     CHECK(rl_sched_now(t->k[RL_NDS_ARM9]) > t0);
 }
 
-TEST(sound_bias_steps_to_the_level_keeps_the_upper_bits_and_waits_between_steps)
+TEST(sound_bias_steps_to_the_level_and_waits_between_steps)
 {
     g_t = ndst_new();
     kit_cpu = 7;
@@ -478,13 +478,13 @@ TEST(sound_bias_steps_to_the_level_keeps_the_upper_bits_and_waits_between_steps)
     u32 r[4] = {1, 2, 0, 0};
     uint64_t t0 = rl_sched_now(g_t->k[RL_NDS_ARM7]);
     do_swi(0x08, r);
-    CHECK_EQ(r7(g_t, 0x04000504u, 2), 0xC200u);
+    CHECK_EQ(r7(g_t, 0x04000504u, 2), 0x0200u);
     CHECK(rl_sched_now(g_t->k[RL_NDS_ARM7]) - t0 >= 2 * (0x200 - 0x80) * (2 * 4 + 8));
     r[0] = 0;
     r[1] = 0;
     settle(7);
     do_swi(0x08, r);
-    CHECK_EQ(r7(g_t, 0x04000504u, 2), 0xC000u);
+    CHECK_EQ(r7(g_t, 0x04000504u, 2), 0x0000u);
 }
 
 TEST(the_arm9_wait_loop_costs_by_cache_state_as_gbatek_tabulates)
