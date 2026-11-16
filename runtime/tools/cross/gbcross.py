@@ -229,7 +229,7 @@ def compile_all(args, tool, ninjas):
                 failures.append((j[0], r.stderr))
     if failures:
         for src, err in failures[:5]:
-            print(f"compile failed: {src}\n{err[-1500:]}", file=sys.stderr)
+            print(f"compile failed: {src}\n" + "\n".join(diagnostics(err, head=10, tail=5)), file=sys.stderr)
         sys.exit(f"{len(failures)} of {len(jobs)} files failed to compile for {args.target}")
     return [j[2] for j in jobs], len(jobs)
 
@@ -310,8 +310,26 @@ def runtime_libs(args, tool):
     goal = ["libs"] + (["portable"] if t["kind"] == "windows" else ["all"])
     r = run(cmd + goal)
     if r.returncode:
-        errs = [l for l in r.stdout.splitlines() + r.stderr.splitlines() if "error" in l][:10]
-        sys.exit(f"make {' '.join(goal)} failed for {args.target}:\n" + "\n".join(errs))
+        sys.exit(f"make {' '.join(goal)} failed for {args.target}:\n" + "\n".join(diagnostics(r.stdout + "\n" + r.stderr)))
+
+
+DIAGNOSTIC = re.compile(r'^error:|: (fatal )?error:|undefined (symbol|reference)|^ld: |^Undefined symbols|^\s+"\S+", referenced from:|\*\*\* .*Error \d')
+
+
+def diagnostics(text, head=10, tail=30):
+    """Returns the compiler, linker and make diagnostics in a build log: the first `head` and the last `tail`.
+
+    Compiler command lines carry -Werror, so a plain search for "error" would
+    keep the commands and miss the diagnostics. Without any match it returns
+    the tail of the log instead.
+    """
+    lines = text.splitlines()
+    hits = [l for l in lines if DIAGNOSTIC.search(l)]
+    if not hits:
+        return lines[-tail:]
+    if len(hits) <= head + tail:
+        return hits
+    return hits[:head] + [f"... {len(hits) - head - tail} more ..."] + hits[-tail:]
 
 
 def main():
