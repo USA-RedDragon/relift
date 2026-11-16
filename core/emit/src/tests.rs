@@ -1561,3 +1561,67 @@ fn values_of_128_bits_are_vectors_unless_a_use_needs_an_integer() {
     );
     assert_eq!(value::reg_ty(Width::W128), "rl_e_vq");
 }
+
+#[test]
+fn lane_operations_are_vectors_through_the_prelude_helpers() {
+    use relift_ir::{BinOp, Builder, IoMap, LaneKind, LaneWidth};
+    let regs = RegFile::new("vec", &VREGS);
+    let (q, x) = (Reg(0), Reg(1));
+    let mut b = Builder::new(regs, Width::W64, 0x100);
+    let v = b.get(q);
+    let sum = b.lane2(LaneKind::AddSatS, LaneWidth::L16, v, v);
+    let shifted = b.lane_imm(LaneKind::AShrImm, LaneWidth::L32, 7, &[sum]);
+    let lane = b.lane_imm(LaneKind::Extract, LaneWidth::L16, 5, &[shifted]);
+    let ins = b.lane_imm(LaneKind::Insert, LaneWidth::L16, 2, &[shifted, lane]);
+    let one = b.permute(
+        ins,
+        std::array::from_fn(|i| if i == 3 { 40 } else { 15 - i as u8 }),
+    );
+    let two = b.permute2(
+        one,
+        v,
+        std::array::from_fn(|i| if i == 0 { 99 } else { 2 * i as u8 }),
+    );
+    let from_b = b.permute2(one, v, [17; 16]);
+    let wide = b.bin(BinOp::Add, two, from_b);
+    let low = b.trunc(wide, Width::W64);
+    b.set(x, low);
+    b.set(q, two);
+    let blk = b.jump(4, 0x104);
+    let vec = value::vectors(&blk, true);
+    let inl = value::inlined(&blk, &vec);
+    let c = |i: usize| match value::emit_op(
+        &Toy,
+        &blk,
+        i,
+        &value::Lowering {
+            inl: &inl,
+            vec: &vec,
+            vregs: true,
+        },
+        &[],
+        &IoMap::default(),
+    ) {
+        Ok(value::Emitted::Value(e) | value::Emitted::Set(_, e)) => e,
+        _ => panic!("value"),
+    };
+    assert!(vec[sum.index()] && vec[two.index()] && !vec[lane.index()] && !vec[wide.index()]);
+    assert_eq!(c(sum.index()), "rl_lane_add_sat_s16(v0, v0)");
+    assert_eq!(c(shifted.index()), "rl_lane_ashri32(v1, 7u)");
+    assert_eq!(c(lane.index()), "rl_e_lane16(v2, 5)");
+    assert_eq!(c(ins.index()), "rl_lane_insert16(v2, 2u, v3)");
+    assert_eq!(
+        c(one.index()),
+        "RL_LANE_PERM1(v4, (15, 14, 13, 16, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))"
+    );
+    assert_eq!(
+        c(two.index()),
+        "RL_LANE_PERM2(v5, v0, (-1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30), \
+         (16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))"
+    );
+    assert_eq!(
+        c(from_b.index()),
+        "RL_LANE_PERM1(v0, (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1))"
+    );
+    assert_eq!(c(wide.index()), "rl_e_v2u(v6) + rl_e_v2u(v7)");
+}

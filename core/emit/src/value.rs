@@ -6,10 +6,12 @@
 //! A 128-bit register, and most 128-bit values ([`vectors`]), live in a
 //! vector of two 64-bit lanes instead, so they stay in the host's vector
 //! registers and their lanes are read and built with vector operations;
-//! the context keeps `rl_u128` fields.
+//! the context keeps `rl_u128` fields. Lane operations ([`lane_op`],
+//! [`permute`]) work on and give that vector type.
 
 use relift_ir::{
-    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, IoMap, Op, Order, Reg, UnOp, Value, Width,
+    AtomicOp, BinOp, Block, CmpOp, Endian, ExtKind, FpOp, IoMap, LaneKind, LaneOp, Op, Order,
+    Permute, Reg, UnOp, Value, Width,
 };
 
 use relift_guest::Frontend;
@@ -98,8 +100,8 @@ pub(crate) fn reg_ty(w: Width) -> &'static str {
 }
 
 /// Which 128-bit values of `b` live in the vector type ([`VQ`]) instead of
-/// `rl_u128`: register reads, 16-byte loads and 64-bit lane concatenations
-/// always do; constants, zero extensions and bitwise operations do unless
+/// `rl_u128`: register reads, 16-byte loads, 64-bit lane concatenations and
+/// lane operations always do; constants, zero extensions and bitwise operations do unless
 /// a use needs the integer form (an add, a shift, a compare and other
 /// operations without a vector form, which then convert). With `regs`
 /// false the registers keep `rl_u128` ([`crate::Options::regs_in_context`])
@@ -123,6 +125,7 @@ pub(crate) fn vectors(b: &Block, regs: bool) -> Vec<bool> {
                     Op::Concat(h, l) => (wv(*h) == 64 || zero(*h)) && wv(*l) <= 64,
                     Op::Ext(ExtKind::Zero, x) => wv(*x) <= 64,
                     Op::Bin(BinOp::And | BinOp::Or | BinOp::Xor, ..) | Op::Un(UnOp::Not, _) => true,
+                    Op::Lane(..) | Op::Permute(_) => true,
                     _ => false,
                 }
         })
@@ -131,11 +134,17 @@ pub(crate) fn vectors(b: &Block, regs: bool) -> Vec<bool> {
         let mut changed = false;
         for i in 0..b.insts.len() {
             let flexible = |vec: &[bool], v: Value| match b.insts[v.index()].op {
-                Op::Get(_) | Op::Load { .. } | Op::Concat(..) => false,
+                Op::Get(_) | Op::Load { .. } | Op::Concat(..) | Op::Lane(..) | Op::Permute(_) => {
+                    false
+                }
                 _ => vec[v.index()],
             };
             let scalar_use: Vec<Value> = match &b.insts[i].op {
-                Op::Set(..) | Op::Store { .. } | Op::Extract(..) => Vec::new(),
+                Op::Set(..)
+                | Op::Store { .. }
+                | Op::Extract(..)
+                | Op::Lane(..)
+                | Op::Permute(_) => Vec::new(),
                 Op::Bin(BinOp::And | BinOp::Or | BinOp::Xor, ..)
                 | Op::Un(UnOp::Not, _)
                 | Op::Select(..)
@@ -296,6 +305,8 @@ pub(crate) fn emit_op(
             Op::Concat(_, l) if wv(*l).bits() < 64 => format!("RL_E_VQ({}, 0)", val(*l)),
             Op::Concat(h, l) => format!("RL_E_VQ({}, {})", val(*l), val(*h)),
             Op::Load { addr, .. } => format!("rl_e_u2v(rl_ld128(mem, {}))", val(*addr)),
+            Op::Lane(op, args) => lane_op(*op, &lane_args(*op, args, &vv, &val)),
+            Op::Permute(p) => permute(p, &vv(p.a), p.b.map(vv).as_deref()),
             op => return Err(format!("no vector form of {op:?}")),
         };
         return Ok(Emitted::Value(e));
@@ -546,7 +557,11 @@ pub(crate) fn emit_op(
         Op::Tick(_) | Op::TickIf(..) | Op::IoLoad { .. } | Op::IoStore { .. } | Op::Sync => {
             return crate::time::emit(fe, b, i, &val, io);
         }
-        Op::Lane(..) | Op::Permute(_) => return Err(format!("lane operation {:?}", inst.op)),
+        Op::Lane(op, args) => {
+            let e = lane_op(*op, &lane_args(*op, args, &vv, &val));
+            return Ok(Emitted::Value(conv(e, op.kind != LaneKind::Extract, false)));
+        }
+        Op::Permute(p) => conv(permute(p, &vv(p.a), p.b.map(vv).as_deref()), true, false),
         Op::Crypto(op, x) => fe
             .crypto(*op, &val(*x))
             .ok_or_else(|| format!("cipher step {op:?}"))?,
@@ -637,6 +652,142 @@ fn carry_test(b: &Block, a: Value, s: Value) -> Option<(ExtKind, Value, Value, b
         (0, _) => Some((k, x, y, false, n)),
         (1, Op::Un(UnOp::Not, z)) if width(*z) == n => Some((k, x, *z, true, n)),
         _ => None,
+    }
+}
+
+/// The C operands of a lane operation: the vector form of the 128-bit
+/// ones, the scalar of `Insert` and `Splat` as is.
+fn lane_args(
+    op: LaneOp,
+    args: &[Value],
+    vv: &dyn Fn(Value) -> String,
+    val: &dyn Fn(Value) -> String,
+) -> Vec<String> {
+    args.iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            if op.operand_width(i) == Width::W128 {
+                vv(v)
+            } else {
+                val(v)
+            }
+        })
+        .collect()
+}
+
+/// The C of lane operation `op` on `args` ([`lane_args`]): a call of the
+/// prelude's `rl_lane_KINDn` helper, a vector ([`VQ`]), or for `Extract`
+/// a lane read of the lane's C type.
+pub(crate) fn lane_op(op: LaneOp, args: &[String]) -> String {
+    use LaneKind::*;
+    let bits = op.lane.bits();
+    let name = match op.kind {
+        Add => "add",
+        Sub => "sub",
+        AddSatS => "add_sat_s",
+        AddSatU => "add_sat_u",
+        SubSatS => "sub_sat_s",
+        SubSatU => "sub_sat_u",
+        MulLo => "mul_lo",
+        MulHiS => "mul_hi_s",
+        MulHiU => "mul_hi_u",
+        MulHiSU => "mul_hi_su",
+        And => "and",
+        Or => "or",
+        Xor => "xor",
+        AndNot => "and_not",
+        Not => "not",
+        MinS => "min_s",
+        MinU => "min_u",
+        MaxS => "max_s",
+        MaxU => "max_u",
+        Abs => "abs",
+        Neg => "neg",
+        Eq => "eq",
+        Ne => "ne",
+        Slt => "slt",
+        Sle => "sle",
+        Ult => "ult",
+        Ule => "ule",
+        ShlImm => "shli",
+        LShrImm => "lshri",
+        AShrImm => "ashri",
+        Shl => "shl",
+        LShr => "lshr",
+        AShr => "ashr",
+        Select => "select",
+        WidenLoS => "widen_lo_s",
+        WidenLoU => "widen_lo_u",
+        WidenHiS => "widen_hi_s",
+        WidenHiU => "widen_hi_u",
+        NarrowTrunc => "narrow_trunc",
+        NarrowSS => "narrow_ss",
+        NarrowUU => "narrow_uu",
+        NarrowSU => "narrow_su",
+        MulWideLoSS => "mul_wide_lo_ss",
+        MulWideLoUU => "mul_wide_lo_uu",
+        MulWideLoSU => "mul_wide_lo_su",
+        MulWideHiSS => "mul_wide_hi_ss",
+        MulWideHiUU => "mul_wide_hi_uu",
+        MulWideHiSU => "mul_wide_hi_su",
+        Broadcast => "broadcast",
+        Extract => return format!("rl_e_lane{bits}({}, {})", args[0], op.imm),
+        Insert => {
+            return format!(
+                "rl_lane_insert{bits}({}, {}u, {})",
+                args[0], op.imm, args[1]
+            );
+        }
+        Splat => "splat",
+    };
+    let width = if op.kind.bitwise() {
+        String::new()
+    } else {
+        bits.to_string()
+    };
+    let mut list = args.join(", ");
+    if op.kind.has_imm() {
+        list = format!("{list}, {}u", op.imm);
+    }
+    format!("rl_lane_{name}{width}({list})")
+}
+
+/// The C of byte permutation `p` of the vectors `a` and `b`: the prelude's
+/// `RL_LANE_PERM1` on the one source the pattern reads (16 for a zero
+/// byte), or `RL_LANE_PERM2` on both, whose first list picks each byte (-1
+/// for a zero byte) and whose second keeps a picked byte (its index) or
+/// puts a zero byte (16). Without `b`, indices 16 to 31 give 0.
+pub(crate) fn permute(p: &Permute, a: &str, b: Option<&str>) -> String {
+    let limit = if b.is_some() { 32 } else { 16 };
+    let picks: Vec<Option<u8>> = p
+        .pattern
+        .iter()
+        .map(|&x| (x < limit).then_some(x))
+        .collect();
+    let from_a = picks.iter().flatten().any(|&x| x < 16);
+    let from_b = picks.iter().flatten().any(|&x| x >= 16);
+    let list = |f: &dyn Fn(usize, Option<u8>) -> String| -> String {
+        let items: Vec<String> = picks.iter().enumerate().map(|(i, &x)| f(i, x)).collect();
+        items.join(", ")
+    };
+    match b {
+        Some(b) if from_a && from_b => format!(
+            "RL_LANE_PERM2({a}, {b}, ({}), ({}))",
+            list(&|_, x| x.map_or("-1".into(), |x| x.to_string())),
+            list(&|i, x| if x.is_some() {
+                i.to_string()
+            } else {
+                "16".into()
+            })
+        ),
+        Some(b) if from_b => format!(
+            "RL_LANE_PERM1({b}, ({}))",
+            list(&|_, x| x.map_or("16".into(), |x| (x - 16).to_string()))
+        ),
+        _ => format!(
+            "RL_LANE_PERM1({a}, ({}))",
+            list(&|_, x| x.map_or("16".into(), |x| x.to_string()))
+        ),
     }
 }
 
