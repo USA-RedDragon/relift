@@ -91,6 +91,8 @@ typedef struct vkf_swap {
     uint32_t cap_img;
     vkf_overlay *ov;
     VkSemaphore again;
+    /** @brief The id of the last host present (VK_KHR_present_id). */
+    uint64_t present_id;
     pthread_mutex_t lock;
 } vkf_swap;
 
@@ -486,8 +488,10 @@ static VkResult host_create(vkf_swap *s)
         vkf_overlay_free(s->ov);
         s->ov = NULL;
     }
-    if (s->host)
+    if (s->host) {
+        vkf_flip_forget(s->host);
         DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
+    }
     retire_semaphores(s);
     s->host = sw;
     uint32_t n = 0;
@@ -553,8 +557,10 @@ static void swap_free(vkf_swap *s)
     vkf_overlay_free(s->ov);
     if (s->again)
         DFN(s, vkDestroySemaphore)(s->dev, s->again, NULL);
-    if (s->host)
+    if (s->host) {
+        vkf_flip_forget(s->host);
         DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
+    }
     if (s->offscreen)
         offscreen_destroy(s);
     retire_semaphores(s);
@@ -1059,9 +1065,8 @@ static void record(vkf_swap *s, uint32_t i, uint32_t hi)
 
 static void show(vkf_swap *s, uint32_t i)
 {
-    int64_t at = vi_vsync_after(now_ns());
-    if (at < s->last_shown + VI_VSYNC_NS)
-        at = s->last_shown + VI_VSYNC_NS;
+    int64_t now = now_ns();
+    int64_t at = vi_vsync_after(now > s->last_shown ? now : s->last_shown);
     if (vi_trace_on())
         vi_trace('P', (uint64_t)at, (uint64_t)s->last_shown, i | (uint64_t)s->n << 8);
     s->last_shown = at;
@@ -1222,8 +1227,10 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     if (vkf_capture_due(&frame))
         capture(s, q, i, frame);
     vkf_decode_stats_frame(frame + 1);
+    vkf_present_id pid;
     VkPresentInfoKHR pi = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext = vkf_flip_chain(d, &pid, NULL, ++s->present_id),
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &s->ready[hi],
         .swapchainCount = 1,
@@ -1232,6 +1239,8 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     };
     int64_t t_x = vi_trace_now();
     r = s->offscreen ? VK_SUCCESS : DFN(s, vkQueuePresentKHR)(q, &pi);
+    if (!s->offscreen && r >= 0)
+        vkf_flip_presented(d, s->dev, s->host, s->present_id);
     if (t_s)
         vi_trace('H', (uint64_t)(t_h - t_s), (uint64_t)(t_x - t_h), (uint64_t)(vi_trace_now() - t_x));
     show(s, i);

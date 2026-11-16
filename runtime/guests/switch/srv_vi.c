@@ -10,6 +10,8 @@
 
 #include "srv_link.h"
 
+#include <relift/settings.h>
+
 #include <stdlib.h>
 #include <time.h>
 
@@ -26,7 +28,9 @@ static uint32_t res_w = 1280, res_h = 720;
 static pthread_mutex_t vsync_lock = PTHREAD_MUTEX_INITIALIZER;
 static hos_revent *vsync_ev;
 static pthread_t vsync_thread;
-static int64_t vsync_epoch;
+static pthread_mutex_t clock_lock = PTHREAD_MUTEX_INITIALIZER;
+static vi_clock vsync_clock;
+static bool clock_ready;
 static bool vsync_running;
 static bool vsync_quit;
 
@@ -59,16 +63,32 @@ static int64_t mono_ns(void)
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
 }
 
+static void clock_start(void)
+{
+    if (!clock_ready) {
+        vi_clock_init(&vsync_clock, mono_ns(), rl_setting_bool("vi.follow_display"));
+        clock_ready = true;
+    }
+}
+
 int64_t vi_vsync_after(int64_t t)
 {
-    int64_t e = __atomic_load_n(&vsync_epoch, __ATOMIC_ACQUIRE);
-    if (!e) {
-        int64_t mine = mono_ns();
-        e = __atomic_compare_exchange_n(&vsync_epoch, &e, mine, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) ? mine : e;
-    }
-    if (t < e)
-        return e;
-    return e + ((t - e) / VI_VSYNC_NS + 1) * VI_VSYNC_NS;
+    pthread_mutex_lock(&clock_lock);
+    clock_start();
+    int64_t r = vi_clock_after(&vsync_clock, t);
+    pthread_mutex_unlock(&clock_lock);
+    return r;
+}
+
+void vi_host_flip(int64_t t)
+{
+    pthread_mutex_lock(&clock_lock);
+    clock_start();
+    int64_t shift = vi_clock_flip(&vsync_clock, t);
+    int64_t phase = vsync_clock.phase;
+    bool locked = vi_clock_locked(&vsync_clock);
+    pthread_mutex_unlock(&clock_lock);
+    vi_trace('F', (uint64_t)phase, (uint64_t)shift, locked);
 }
 
 static void *vsync_main(void *arg)

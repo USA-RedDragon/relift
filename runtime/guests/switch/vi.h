@@ -368,6 +368,36 @@ hos_revent *vi_vsync_event(bool start);
  */
 int64_t vi_vsync_after(int64_t t);
 
+/** @brief The vi vsync grid and its lock to the host display (vi_clock.c). */
+typedef struct vi_clock {
+    /** @brief A vsync of the grid; the others are VI_VSYNC_NS apart. */
+    int64_t epoch;
+    /** @brief Filtered offset of host flips from the grid (ns). */
+    int64_t phase;
+    /** @brief Flips seen, flips in this window, flips in it far off the filtered phase. */
+    uint32_t flips, seen, wild;
+    /** @brief Steering stays off until flips reaches this (the host followed the grid). */
+    uint32_t free_until;
+    /** @brief How far the grid moved in this window, and the phase when it began. */
+    int64_t window_moved, window_phase;
+    bool have_phase;
+    /** @brief The last window of flips lined up, so the grid is steered. */
+    bool steady;
+    /** @brief Steer the grid toward the host's flips; false only measures. */
+    bool lock;
+} vi_clock;
+
+/** @brief A grid through epoch, steered when lock is set. */
+void vi_clock_init(vi_clock *c, int64_t epoch, bool lock);
+/** @brief The first vsync of the grid strictly after t. */
+int64_t vi_clock_after(const vi_clock *c, int64_t t);
+/** @brief Takes a time the host showed a present; returns how far the grid moved (ns). */
+int64_t vi_clock_flip(vi_clock *c, int64_t t);
+/** @brief Whether the grid follows the host now. */
+bool vi_clock_locked(const vi_clock *c);
+/** @brief A time the host display showed a present of the guest (CLOCK_MONOTONIC ns): steers the vi vsync grid. */
+void vi_host_flip(int64_t t);
+
 /** @brief Whether stats.trace names a frame trace file (frame_trace.c); read once. */
 bool vi_trace_on(void);
 /** @brief CLOCK_MONOTONIC nanoseconds while the frame trace is on, else 0. */

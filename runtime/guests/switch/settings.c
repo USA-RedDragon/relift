@@ -42,6 +42,15 @@ static const rl_setting_def g_defs[] = {
         .max_int = 1000000,
     },
     {
+        .key = "vi.follow_display",
+        .type = RL_SETTING_BOOL,
+        .label = "Follow the display's refresh",
+        .description = "Keep the game's 60 Hz vsync in step with the display, where the host reports when it shows a "
+                       "frame, so no frame is shown twice or dropped when the display runs slightly off 60 Hz",
+        .env = "RELIFT_VI_FOLLOW_DISPLAY",
+        .def_int = 1,
+    },
+    {
         .key = "stats.trace",
         .type = RL_SETTING_STRING,
         .label = "Frame trace",

@@ -7,6 +7,8 @@
 #include "vi.h"
 #include "srv_link.h"
 
+#include <math.h>
+#include <stdlib.h>
 #include <time.h>
 
 #define PARCEL_IN 0x10000u
@@ -857,6 +859,112 @@ TEST(vi_vsync_timeline)
     CHECK_EQ(vi_vsync_after(a - 1), a);
     CHECK_EQ(vi_vsync_after(a), a + VI_VSYNC_NS);
     CHECK_EQ(vi_vsync_after(a + 10 * VI_VSYNC_NS + 5), a + 11 * VI_VSYNC_NS);
+}
+
+typedef struct sim_display {
+    double period_ns;
+    uint32_t every;
+    uint64_t rng;
+} sim_display;
+
+static double sim_rand(sim_display *d)
+{
+    d->rng = d->rng * 6364136223846793005ull + 1442695040888963407ull;
+    return (double)(d->rng >> 11) / (double)(1ull << 53);
+}
+
+/**
+ * @brief Ten minutes of a guest that renders one frame per vi vsync (5-7 ms
+ * of work) on a FIFO host display of the given refresh, which shows each
+ * frame at the first refresh 2 ms after it is ready and reports the flip up
+ * to a few ms late. Returns the frames the display showed for other than
+ * one refresh (`every` refreshes for a 120 Hz panel at 60 frames/s).
+ */
+static uint32_t sim_slips(double host_hz, uint32_t every, bool lock, int64_t *last_phase)
+{
+    sim_display d = { 1e9 / host_hz, every, 7 };
+    vi_clock c;
+    vi_clock_init(&c, 0, lock);
+    double step = d.period_ns * every, prev = -1;
+    int64_t vs = 0;
+    uint32_t slips = 0;
+    for (uint32_t i = 0; i < 600u * 60u; i++) {
+        vs = vi_clock_after(&c, vs);
+        double ready = (double)vs + 5e6 + sim_rand(&d) * 2e6 + 2e6;
+        double shown = ceil(ready / step) * step;
+        if (prev >= 0 && shown <= prev)
+            shown = prev + step;
+        if (prev >= 0 && llround((shown - prev) / step) != 1)
+            slips++;
+        if (shown - (double)vs > 3.0 * VI_VSYNC_NS)
+            vs = (int64_t)(shown - 3.0 * VI_VSYNC_NS);
+        prev = shown;
+        double late = -log(1.0 - sim_rand(&d)) * 5e5;
+        if (sim_rand(&d) < 0.01)
+            late += sim_rand(&d) * 1e7;
+        vi_clock_flip(&c, (int64_t)(shown + late));
+    }
+    *last_phase = c.phase;
+    return slips;
+}
+
+TEST(vi_vsync_follows_a_display_off_60_hz)
+{
+    static const struct {
+        double hz;
+        uint32_t every;
+    } displays[] = { { 60.0 * (1 - 68e-6), 1 }, { 59.94, 1 }, { 60.02, 1 }, { 120.0 * (1 - 68e-6), 2 } };
+    for (size_t i = 0; i < sizeof displays / sizeof displays[0]; i++) {
+        int64_t phase = 0;
+        uint32_t free_slips = sim_slips(displays[i].hz, displays[i].every, false, &phase);
+        uint32_t locked_slips = sim_slips(displays[i].hz, displays[i].every, true, &phase);
+        fprintf(stderr, "  %.4f Hz: %u slips free, %u locked (phase %lld us)\n", displays[i].hz, free_slips,
+                locked_slips, (long long)(phase / 1000));
+        CHECK(free_slips >= 1);
+        CHECK_EQ(locked_slips, 0);
+        CHECK(llabs(phase) < 1000000);
+    }
+}
+
+TEST(vi_vsync_runs_free_on_a_display_not_near_60_hz)
+{
+    vi_clock c;
+    vi_clock_init(&c, 0, true);
+    double step = 1e9 / 144.0;
+    int64_t moved = 0;
+    for (uint32_t i = 0; i < 6000; i++) {
+        int64_t vs = vi_clock_after(&c, (int64_t)i * VI_VSYNC_NS);
+        int64_t t = (int64_t)(ceil(((double)vs + 6e6) / step) * step);
+        int64_t m = vi_clock_flip(&c, t);
+        moved += m < 0 ? -m : m;
+    }
+    CHECK(!vi_clock_locked(&c));
+    CHECK_EQ(moved, 0);
+}
+
+TEST(vi_vsync_is_not_dragged_by_a_host_that_shows_on_arrival)
+{
+    vi_clock c;
+    vi_clock_init(&c, 0, true);
+    int64_t vs = 0, moved = 0;
+    for (uint32_t i = 0; i < 600u * 60u; i++) {
+        vs = vi_clock_after(&c, vs);
+        int64_t m = vi_clock_flip(&c, vs + 6000000 + (int64_t)(i % 7) * 100000);
+        moved += m;
+    }
+    fprintf(stderr, "  grid moved %lld us in 10 minutes\n", (long long)(moved / 1000));
+    CHECK(llabs(moved) < 60ll * 1000000);
+}
+
+TEST(vi_vsync_grid_after)
+{
+    vi_clock c;
+    vi_clock_init(&c, 1000, false);
+    CHECK_EQ(vi_clock_after(&c, 999), 1000);
+    CHECK_EQ(vi_clock_after(&c, 1000), 1000 + VI_VSYNC_NS);
+    CHECK_EQ(vi_clock_after(&c, 1000 - VI_VSYNC_NS), 1000);
+    CHECK_EQ(vi_clock_after(&c, 1000 - VI_VSYNC_NS - 1), 1000 - VI_VSYNC_NS);
+    CHECK_EQ(vi_clock_after(&c, 1000 + 5 * VI_VSYNC_NS + 3), 1000 + 6 * VI_VSYNC_NS);
 }
 
 TEST(vi_vsync_signal)

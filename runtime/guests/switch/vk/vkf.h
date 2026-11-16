@@ -142,6 +142,8 @@ struct vkf_dev {
     pthread_mutex_t dpool_lock;
     /** @brief Live secondary command buffers. */
     uint32_t secondaries;
+    /** @brief The host's vkWaitForPresentKHR when VK_KHR_present_wait is on (vk_flip.c), else NULL. */
+    void (*wait_present)(void);
     /** @brief Pool of the primaries that run submitted secondaries (vk_submit.c), created on first use. */
     VkCommandPool wrap_pool;
     /** @brief Those primaries, keyed by the secondary's host handle. */
@@ -466,6 +468,25 @@ bool vkf_capture_due(uint64_t *frame);
 /** @brief Writes a w x h image of 4-byte RGBA (or BGRA) pixels, rows stride bytes apart, as the PNG of frame. */
 bool vkf_capture_write(uint64_t frame, uint64_t guest_ns, uint32_t w, uint32_t h, const uint8_t *px, size_t stride,
                        bool bgra);
+
+/** @brief VkPresentIdKHR for one swapchain, with the id it points at. */
+typedef struct vkf_present_id {
+    VkStructureType sType;
+    const void *pNext;
+    uint32_t swapchainCount;
+    const uint64_t *pPresentIds;
+    uint64_t id;
+} vkf_present_id;
+/** @brief Adds VK_KHR_present_id and VK_KHR_present_wait to a host device that has both (vk_flip.c). */
+void vkf_flip_device_setup(vkf_call *k, void *phys, const char ***exts, uint32_t *n_exts, void **pnext);
+/** @brief Looks up vkWaitForPresentKHR once the device exists, when setup enabled the extensions. */
+void vkf_flip_device_ready(vkf_dev *d, VkDevice dev, bool enabled);
+/** @brief Puts present id into p chained before next when the device waits for presents; else returns next. */
+const void *vkf_flip_chain(const vkf_dev *d, vkf_present_id *p, const void *next, uint64_t id);
+/** @brief Hands a host present with this id to the watcher, which reports to vi_host_flip when it is shown. */
+void vkf_flip_presented(const vkf_dev *d, VkDevice dev, VkSwapchainKHR sw, uint64_t id);
+/** @brief Drops queued waits on sw and waits out one in progress; call before destroying sw. */
+void vkf_flip_forget(VkSwapchainKHR sw);
 
 /** @brief One capture for the writer thread: the pixels, and the calls around their use. */
 typedef struct vkf_capture_job {

@@ -883,6 +883,27 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     }
     vkf_mem_types_setup(&k, d, pd);
     vkf_mem_device_setup(&k, d, pd, &extra, &n_extra, &chain);
+    const char **flip_exts = NULL;
+    uint32_t n_flip = 0;
+    void *flip_chain = NULL;
+    vkf_flip_device_setup(&k, pd, &flip_exts, &n_flip, &flip_chain);
+    if (n_flip) {
+        const char **all = vkf_alloc(&k, (n_extra + n_flip) * sizeof *all);
+        for (uint32_t j = 0; j < n_extra; j++)
+            all[j] = extra[j];
+        for (uint32_t j = 0; j < n_flip; j++)
+            all[n_extra + j] = flip_exts[j];
+        extra = all;
+        n_extra += n_flip;
+        if (chain) {
+            VkBaseOutStructure *last = chain;
+            while (last->pNext)
+                last = last->pNext;
+            last->pNext = flip_chain;
+        } else {
+            chain = flip_chain;
+        }
+    }
     vkf_decode_device_setup(&k, d, pd);
     vkf_decode_device_features(&k, pd, ci);
     const char **exts = vkf_alloc(&k, (ci->enabledExtensionCount + n_extra + 2) * sizeof *exts);
@@ -925,6 +946,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
+    vkf_flip_device_ready(d, dev, n_flip != 0);
     VkPhysicalDeviceProperties props = { 0 };
     VKF_FN(k.fns, vkGetPhysicalDeviceProperties)(pd, &props);
     d->keep_attachments = vkf_keep_attachments(props.vendorID);
