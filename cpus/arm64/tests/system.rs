@@ -93,6 +93,51 @@ fn hints_without_the_feature_are_nops() {
 }
 
 #[test]
+fn on_the_cortex_a57_pac_hints_are_nops_and_other_pac_forms_undefined() {
+    let a57 = Cpu::new(Features::CORTEX_A57, Va::BITS39);
+    for w in [
+        0xd503_233f,
+        0xd503_237f,
+        0xd503_23bf,
+        0xd503_23ff,
+        0xd503_231f,
+        0xd503_235f,
+        0xd503_239f,
+        0xd503_23df,
+        0xd503_211f,
+        0xd503_215f,
+        0xd503_219f,
+        0xd503_21df,
+        0xd503_20ff,
+    ] {
+        let b = lift(w, PC, &a57).expect("lifts");
+        assert!(b.insts.is_empty(), "{w:#x}");
+        assert_eq!(b.exit.next, Next::Const(PC + 4), "{w:#x}");
+    }
+    for w in [
+        0xd65f_0bff,
+        0xd65f_0fff,
+        0xdac1_0041,
+        0xdac1_0441,
+        0xdac1_1041,
+        0xdac1_1441,
+        0xdac1_43e1,
+        0xd71f_0822,
+        0xd73f_0c22,
+        0xd61f_083f,
+        0xd63f_0c3f,
+        0xf820_1441,
+        0xf8ff_ec41,
+        0x9ac3_3041,
+    ] {
+        assert!(
+            matches!(lift(w, PC, &a57), Err(LiftError::Unallocated(_))),
+            "{w:#x}"
+        );
+    }
+}
+
+#[test]
 fn pointer_authentication_lifts_only_for_the_template_address_layout() {
     let a78c = |va| Cpu::new(Features::CORTEX_A78C, va);
     for w in [0xd503_237f, 0xd503_23ff, 0xd65f_0fff, 0xdac1_43e0] {
