@@ -11,6 +11,7 @@ mod cfg;
 mod denorm;
 mod float;
 mod fma;
+mod fp64;
 mod host;
 mod int;
 mod io;
@@ -577,6 +578,7 @@ impl Ctx {
         }
         for f in [
             mem::inst,
+            fp64::inst,
             float::inst,
             int::inst,
             io::inst,

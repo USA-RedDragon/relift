@@ -176,3 +176,29 @@ fn ldc_segmented_reads_the_next_bank() {
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     assert!(s.interface.cbufs.contains(&2) && s.interface.cbufs.contains(&3));
 }
+
+#[test]
+fn double_precision() {
+    check(
+        &[
+            w(0x040e_2200_0390_f000, 0x0000_0004_1e00_722a),
+            w(0x1c0e_a200_0000_8006, 0x0000_0004_1e1c_722b),
+            w(0x000f_e200_03f0_6200, 0x0000_0008_0600_722a),
+            w(0x001f_e200_0030_5000, 0x0000_0006_0022_7310),
+            w(0x010e_6200_0020_1800, 0x0000_0004_001c_7310),
+            w(0x000f_e200_0000_0000, 0x4690_0000_1e10_7828),
+            w(0x000f_c600_0000_4808, 0x0000_0000_0624_7229),
+            w(0x001e_0600_0000_0306, 0x0000_0008_1e1e_722b),
+        ],
+        &[
+            "DSETP.MAX.AND P0, P1, R30, R4, PT",
+            "DFMA.RP R28, R30, R4, R6",
+            "DSETP.GE.AND P0, PT, |R6|, R8, PT",
+            "F2F.F32.F64.RM R34, R6",
+            "F2F.F64.F32 R28, R4",
+            "DMUL R16, R30, 8.11296384146066816958e+31",
+            "DADD.RM R36, R6, -R8",
+            "DFMA R30, -|R30|, R8, R6",
+        ],
+    );
+}
