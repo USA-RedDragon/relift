@@ -20,6 +20,30 @@ use std::collections::{HashMap, HashSet};
 /// yet. Their vectors stay for when it learns them.
 const REJECTED: &[&str] = &[];
 
+/// How a known mismatch may differ from the device.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Known {
+    /// Only where both are NaN: the device writes 0x7fffffff for every NaN
+    /// result, the translation keeps a host NaN.
+    NanBits,
+}
+
+/// Variants that translate but still differ from the device in a way a fix
+/// in flight addresses. Every other difference fails, and so does an entry
+/// that no longer differs, so each goes away with its fix.
+const KNOWN: &[(&str, &[&str], Known)] = &[];
+
+fn known(family: &str, label: &str) -> Option<Known> {
+    KNOWN
+        .iter()
+        .find(|k| k.0 == family && k.1.contains(&label))
+        .map(|k| k.2)
+}
+
+fn is_nan(x: u32) -> bool {
+    x & 0x7fff_ffff > 0x7f80_0000
+}
+
 const CBUF: u64 = 0x1_0000_0000;
 const IN: u64 = 0x2_0000_0000;
 const OUT: u64 = 0x3_0000_0000;
@@ -86,6 +110,8 @@ fn check_family(name: &str) {
         let p = Program::parse(&v.code);
         let mut seen = HashSet::new();
         let mut rejected = None;
+        let known = known(name, &v.label);
+        let mut any_known = false;
         for host in hosts() {
             let o = Options {
                 host: host.clone(),
@@ -111,6 +137,14 @@ fn check_family(name: &str) {
                     if got == want {
                         continue;
                     }
+                    let nan_only = got
+                        .iter()
+                        .zip(want)
+                        .all(|(g, w)| g == w || is_nan(*g) && is_nan(*w));
+                    if known == Some(Known::NanBits) && nan_only {
+                        any_known = true;
+                        continue;
+                    }
                     bad += 1;
                     if bad <= 3 {
                         failures.push(format!(
@@ -132,6 +166,12 @@ fn check_family(name: &str) {
                     ));
                 }
             }
+        }
+        if known.is_some() && !any_known && rejected.is_none() {
+            failures.push(format!(
+                "{name}: {} now matches: drop it from KNOWN",
+                v.label
+            ));
         }
         match (rejected, REJECTED.contains(&v.label.as_str())) {
             (Some(e), false) => failures.push(format!("{name}: {} rejected: {e}", v.label)),
@@ -164,4 +204,4 @@ macro_rules! families {
     };
 }
 
-families!(shf);
+families!(shf, fadd, fmul, ffma, fcmp);
