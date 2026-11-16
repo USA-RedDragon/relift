@@ -3652,6 +3652,174 @@ TEST(vk_bc_a_host_without_bc_shows_the_switch_features)
     rl_settings_reset();
 }
 
+static PFN_vkGetPhysicalDeviceFormatProperties g_real_depth_props;
+
+/** @brief The host's format features, none for D24S8 and X8D24 (an AMD GPU). */
+static void no_d24_format_props(VkPhysicalDevice pd, VkFormat f, VkFormatProperties *p)
+{
+    g_real_depth_props(pd, f, p);
+    if (f == VK_FORMAT_D24_UNORM_S8_UINT || f == VK_FORMAT_X8_D24_UNORM_PACK32)
+        memset(p, 0, sizeof *p);
+}
+
+static void *no_d24_gipa(void *inst, const char *name)
+{
+    void *r = g_real_gipa(inst, name);
+    if (r && inst && !strcmp(name, "vkGetPhysicalDeviceFormatProperties")) {
+        memcpy(&g_real_depth_props, &r, sizeof r);
+        void (*f)(void) = (void (*)(void))no_d24_format_props;
+        memcpy(&r, &f, sizeof r);
+    }
+    return r;
+}
+
+/**
+ * @brief On a host without 24-bit depth the guest still sees D24S8 and
+ * X8D24 as sampleable depth attachments (The Forge stops otherwise), and a
+ * D24S8 image, its view and a render pass that uses it reach the host as
+ * D32S8; the image clears and the render pass begins and ends.
+ */
+TEST(vk_d24_on_a_host_without_it_is_d32)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    void *(*fg)(void *, const char *) = no_d24_gipa;
+    void *gipa;
+    memcpy(&gipa, &fg, sizeof gipa);
+    CHECK_EQ(boot_with(NULL, gipa), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK(physical_devices(&pd, 1) == 1);
+    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    VkFormat fmts[2] = { VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_X8_D24_UNORM_PACK32 };
+    for (int i = 0; i < 2; i++) {
+        uint64_t gfp = galloc(sizeof(VkFormatProperties));
+        G("vkGetPhysicalDeviceFormatProperties", pd, fmts[i], gfp);
+        VkFormatProperties fp;
+        memcpy(&fp, g_mem + gfp, sizeof fp);
+        CHECK_EQ(fp.optimalTilingFeatures & need, need);
+        uint64_t gip = galloc(sizeof(VkImageFormatProperties));
+        CHECK_EQ(VKR(G("vkGetPhysicalDeviceImageFormatProperties", pd, fmts[i], VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, gip)),
+                 VK_SUCCESS);
+    }
+    uint64_t dev = make_device(pd, queue_family(pd, 0), NULL, 0);
+    CHECK(dev != 0);
+    vkf_dev *d = vkf_obj_of(dev, VKG_KIND_VkDevice)->dev;
+    CHECK(d->depth24);
+    CHECK_EQ(vkf_depth_format(d, VK_FORMAT_D24_UNORM_S8_UINT), VK_FORMAT_D32_SFLOAT_S8_UINT);
+    CHECK_EQ(vkf_depth_format(d, VK_FORMAT_X8_D24_UNORM_PACK32), VK_FORMAT_D32_SFLOAT);
+    CHECK_EQ(vkf_depth_format(d, VK_FORMAT_D16_UNORM), VK_FORMAT_D16_UNORM);
+
+    VkFormat list[2] = { VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT };
+    VkImageFormatListCreateInfo fl = { .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO, .viewFormatCount = 2,
+                                       .pViewFormats = GP(gput(list, sizeof list)) };
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = GP(gput(&fl, sizeof fl)),
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_D24_UNORM_S8_UINT,
+        .extent = { 16, 16, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    };
+    uint64_t gici = gput(&ici, sizeof ici);
+    uint64_t gi = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImage", dev, gici, 0, gi)), VK_SUCCESS);
+    CHECK_EQ(g32(gici + offsetof(VkImageCreateInfo, format)), VK_FORMAT_D24_UNORM_S8_UINT);
+    uint64_t img = g64(gi);
+    VkMemoryRequirements req;
+    uint64_t imem = bind_image(pd, dev, img, &req);
+    CHECK(imem != 0);
+    VkImageViewCreateInfo vci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = (VkImage)GP(img),
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_D24_UNORM_S8_UINT,
+        .subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 },
+    };
+    uint64_t gv = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gv)), VK_SUCCESS);
+    vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    uint64_t gva = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gva)), VK_SUCCESS);
+    VkAttachmentDescription a = {
+        .format = VK_FORMAT_D24_UNORM_S8_UINT,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+    VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription sub = { .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .pDepthStencilAttachment = GP(gput(&ref, sizeof ref)) };
+    VkRenderPassCreateInfo rci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = GP(gput(&a, sizeof a)),
+        .subpassCount = 1,
+        .pSubpasses = GP(gput(&sub, sizeof sub)),
+    };
+    uint64_t grp = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateRenderPass", dev, gput(&rci, sizeof rci), 0, grp)), VK_SUCCESS);
+    VkFramebufferCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = (VkRenderPass)GP(g64(grp)),
+        .attachmentCount = 1,
+        .pAttachments = GP(gva),
+        .width = 16,
+        .height = 16,
+        .layers = 1,
+    };
+    uint64_t gfb = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFramebuffer", dev, gput(&fci, sizeof fci), 0, gfb)), VK_SUCCESS);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, 0, 0, gq);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo cbbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&cbbi, sizeof cbbi))), VK_SUCCESS);
+    VkClearValue cv = { .depthStencil = { 0.25f, 7 } };
+    VkRenderPassBeginInfo rbi = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = (VkRenderPass)GP(g64(grp)),
+        .framebuffer = (VkFramebuffer)GP(g64(gfb)),
+        .renderArea = { { 0, 0 }, { 16, 16 } },
+        .clearValueCount = 1,
+        .pClearValues = GP(gput(&cv, sizeof cv)),
+    };
+    G("vkCmdBeginRenderPass", cb, gput(&rbi, sizeof rbi), VK_SUBPASS_CONTENTS_INLINE);
+    G("vkCmdEndRenderPass", cb);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", g64(gq), 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", g64(gq))), VK_SUCCESS);
+
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyFramebuffer", dev, g64(gfb), 0);
+    G("vkDestroyRenderPass", dev, g64(grp), 0);
+    G("vkDestroyImageView", dev, g64(gva), 0);
+    G("vkDestroyImageView", dev, g64(gv), 0);
+    G("vkDestroyImage", dev, img, 0);
+    G("vkFreeMemory", dev, imem, 0);
+    finish(dev);
+}
+
 /**
  * @brief SPIR-V (glslc -O) of a compute shader whose storage images declare
  * rg32f: binding 1 is read into the buffer at binding 2 and binding 0 gets

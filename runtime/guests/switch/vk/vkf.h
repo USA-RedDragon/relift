@@ -166,6 +166,8 @@ struct vkf_dev {
     pthread_mutex_t wrap_lock;
     /** @brief Attachment DONT_CARE load and store ops reach the host as LOAD and STORE (vk_pass.c). */
     bool keep_attachments;
+    /** @brief The host has no 24-bit depth: D24S8 and X8D24 reach it as D32S8 and D32 (vk_format.c). */
+    bool depth24;
     /** @brief The host format of each format the layer can decode (vkf_decode_index), the format itself when the host takes it. */
     VkFormat decode_host[VKF_DECODE_FORMATS];
     /** @brief Some format is decoded: images, uploads and buffer bindings are tracked (vk_image.c). */
@@ -411,8 +413,16 @@ extern const vkf_switch_profile vkf_switch;
 
 /** @brief The Switch's properties of a format; all zero for one it does not list. */
 VkFormatProperties vkf_switch_format_props(VkFormat format);
-/** @brief The format the host driver uses for format f: on MoltenVK without 24-bit depth, the D32 format it makes D24 images as (vk_format.c). */
+/** @brief The format images of format f use on the host: on a host without 24-bit depth, the D32 format that stands in for D24 (vk_format.c). */
 VkFormat vkf_host_format(const vkf_fns *fns, VkPhysicalDevice pd, VkFormat f);
+/** @brief Sets d->depth24 from the host's depth formats. */
+void vkf_depth_device_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd);
+/** @brief The format a guest format reaches the host as on device d: f, or its 32-bit depth stand-in. */
+VkFormat vkf_depth_format(const vkf_dev *d, VkFormat f);
+/** @brief Whether f reaches the host as another depth format on device d. */
+bool vkf_depth_substituted(const vkf_dev *d, VkFormat f);
+/** @brief Replaces the 24-bit depth formats in the image format lists and rendering format infos of a host pNext chain. */
+void vkf_depth_format_list(vkf_call *k, const vkf_dev *d, const void *chain);
 /** @brief The Switch's extension entry of that name, NULL when it has none. */
 const VkExtensionProperties *vkf_switch_ext(const VkExtensionProperties *list, uint32_t n, const char *name);
 

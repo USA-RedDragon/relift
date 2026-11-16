@@ -110,6 +110,7 @@ hand_commands = [
     "vkCreateRenderPass",
     "vkCreateRenderPass2",
     "vkCmdBeginRendering",
+    "vkCreateGraphicsPipelines",
     "vkAllocateCommandBuffers",
     "vkFreeCommandBuffers",
     "vkDestroyCommandPool",

@@ -235,6 +235,8 @@ int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
             bi->pInheritanceInfo = inh;
         }
     }
+    if (bi && bi->pInheritanceInfo)
+        vkf_depth_format_list(&k, o->dev, bi->pInheritanceInfo->pNext);
     vkf_decode_cb_reset(k.fns, o->parent->host, o->dev, cb, false);
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBeginCommandBuffer, VKF_FN(k.fns, vkBeginCommandBuffer)(cb, bi));
     return vkf_end(&k);

@@ -50,10 +50,14 @@ int vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
     if (!dev)
         return vkf_bad_handle(&k, VKG_vkCreateRenderPass, c->x[0]);
     VkRenderPassCreateInfo *ci = vkg_ain_VkRenderPassCreateInfo(&k, c->x[1], 1);
-    if (ci && ci->attachmentCount && k.obj->dev->keep_attachments) {
+    const vkf_dev *d = k.obj->dev;
+    if (ci && ci->attachmentCount && (d->keep_attachments || d->depth24)) {
         VkAttachmentDescription *a = vkf_alloc(&k, ci->attachmentCount * sizeof *a);
         memcpy(a, ci->pAttachments, ci->attachmentCount * sizeof *a);
         for (uint32_t i = 0; i < ci->attachmentCount; i++) {
+            a[i].format = vkf_depth_format(d, a[i].format);
+            if (!d->keep_attachments)
+                continue;
             keep_load(&a[i].loadOp);
             keep_load(&a[i].stencilLoadOp);
             keep_store(&a[i].storeOp);
@@ -75,9 +79,13 @@ int vkh_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem)
     if (!dev)
         return vkf_bad_handle(&k, VKG_vkCreateRenderPass2, c->x[0]);
     VkRenderPassCreateInfo2 *ci = vkg_ain_VkRenderPassCreateInfo2(&k, c->x[1], 1);
-    if (ci && k.obj->dev->keep_attachments) {
+    const vkf_dev *d = k.obj->dev;
+    if (ci && (d->keep_attachments || d->depth24)) {
         VkAttachmentDescription2 *a = (VkAttachmentDescription2 *)ci->pAttachments;
         for (uint32_t i = 0; a && i < ci->attachmentCount; i++) {
+            a[i].format = vkf_depth_format(d, a[i].format);
+            if (!d->keep_attachments)
+                continue;
             keep_load(&a[i].loadOp);
             keep_load(&a[i].stencilLoadOp);
             keep_store(&a[i].storeOp);
@@ -114,5 +122,22 @@ int vkh_vkCmdBeginRendering(rl_ctx *restrict c, uint8_t *mem)
         keep_rendering((VkRenderingAttachmentInfo *)ri->pStencilAttachment);
     }
     VKF_FN(k.fns, vkCmdBeginRendering)(cb, ri);
+    return vkf_end(&k);
+}
+
+int vkh_vkCreateGraphicsPipelines(rl_ctx *restrict c, uint8_t *mem)
+{
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    VkDevice dev = vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
+    if (!dev)
+        return vkf_bad_handle(&k, VKG_vkCreateGraphicsPipelines, c->x[0]);
+    uint32_t n = (uint32_t)c->x[2];
+    VkGraphicsPipelineCreateInfo *ci = vkg_ain_VkGraphicsPipelineCreateInfo(&k, c->x[3], n);
+    for (uint32_t i = 0; ci && i < n; i++)
+        vkf_depth_format_list(&k, k.obj->dev, ci[i].pNext);
+    VkPipeline *out = vkf_ptr(&k, c->x[5]);
+    VkResult r = VKF_FN(k.fns, vkCreateGraphicsPipelines)(dev, (VkPipelineCache)(uintptr_t)c->x[1], n, ci, NULL, out);
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateGraphicsPipelines, r);
     return vkf_end(&k);
 }

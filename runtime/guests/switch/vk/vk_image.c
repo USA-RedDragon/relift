@@ -138,6 +138,10 @@ int vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_dev *d = k.obj->dev;
+    if (ci && vkf_depth_substituted(d, ci->format)) {
+        ci->format = vkf_depth_format(d, ci->format);
+        vkf_depth_format_list(&k, d, ci->pNext);
+    }
     const vkf_decode_format *f = ci ? vkf_decode_for(d, ci->format) : NULL;
     if (f && ci->tiling != VK_IMAGE_TILING_OPTIMAL) {
         if (rl_once(0x4C494E4541520000ull | (uint64_t)ci->format))
@@ -320,6 +324,8 @@ int vkh_vkCreateImageView(rl_ctx *restrict c, uint8_t *mem)
         }
         ci->format = f->host;
     }
+    if (ci)
+        ci->format = vkf_depth_format(k.obj->dev, ci->format);
     VkImageView v = NULL;
     VkResult r = VKF_FN(k.fns, vkCreateImageView)(dev, ci, NULL, &v);
     if (r >= 0 && c->x[3])
