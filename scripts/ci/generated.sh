@@ -19,12 +19,14 @@ cpus/z80/gen/regen.sh "$CI_WORK/sail/lib"
 cpus/arm32/gen/regen.sh "$CI_WORK/sail-arm32/lib" "$CI_WORK/sail-arm32/model"
 [ -d "$CI_WORK/sail-mips/lib" ] || cpus/mips/gen/fetch-sail.sh "$CI_WORK/sail-mips"
 cpus/mips/gen/regen.sh "$CI_WORK/sail-mips/lib" "$CI_WORK/sail-mips/model"
+cpus/rsp/gen/regen.sh "$CI_WORK/sail-mips/lib" "$CI_WORK/sail-mips/model"
 
 fail=0
 for p in cpus/arm64/src/lift/sail/generated cpus/sm83/src/lift/sail/generated.rs \
   cpus/arm32/src/decode/generated.rs cpus/arm32/src/lift/generated \
   cpus/mips/src/vr4300/decode/generated.rs cpus/mips/src/vr4300/lift/generated \
   cpus/mips/src/r3000a/decode/generated.rs cpus/mips/src/r3000a/lift/generated \
+  cpus/rsp/src/decode/generated.rs cpus/rsp/src/lift/generated \
   cpus/z80/src/lift/generated.rs; do
   diff -r -u "$ROOT/$p" "$src/$p" || fail=1
 done
