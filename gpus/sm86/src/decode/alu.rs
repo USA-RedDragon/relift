@@ -364,6 +364,11 @@ fn lea(d: &mut D, uni: bool) -> Result<()> {
     d.op(dst);
     pdst_opt(d, uni, 81);
     let a = src(d, uni, Slot::A, Num::Int, false)?;
+    let a = if x {
+        D::not_mods(a, d.bit(72))
+    } else {
+        D::with_mods(a, d.bit(72), false, true)
+    };
     d.op(a);
     let b = src(d, uni, Slot::B, Num::UInt, true)?;
     d.op(b);

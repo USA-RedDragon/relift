@@ -370,7 +370,10 @@ fn lea(c: &mut Ctx, i: &Inst) -> Res<()> {
     if sh > 31 {
         return bad("LEA shift");
     }
-    let a = c.usrc(&i.ops[sh_at - ops_in])?;
+    let (a, am) = c.raw(&i.ops[sh_at - ops_in])?;
+    if am.abs || am.swz != Swz::None {
+        return bad(format!("int operand mods {}", i.ops[sh_at - ops_in]));
+    }
     let (bv, plus) = c.term(&i.ops[sh_at - ops_in + 1])?;
     let shifted = if hi {
         let cv = if sx {
@@ -386,8 +389,13 @@ fn lea(c: &mut Ctx, i: &Inst) -> Res<()> {
         let k = c.kc(sh);
         c.ib(op::SHIFT_LEFT_LOGICAL, a, k)
     };
+    let shifted = if am.neg || am.not {
+        c.inot(shifted)
+    } else {
+        shifted
+    };
     let mut terms = vec![shifted, bv];
-    if plus {
+    for _ in 0..u32::from(plus) + u32::from(am.neg) {
         terms.push(c.kc(1));
     }
     if x {

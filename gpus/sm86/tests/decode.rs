@@ -274,6 +274,27 @@ fn integer_conversion_alu() {
         .f(80, 1, 0x1)
         .f(87, 3, 0x7);
     assert_eq!(t.text(0), "LEA.HI R44, P0, R44, R53, RZ, 0x11");
+    let t = B::op(0x011, 1)
+        .f(16, 8, 0xc)
+        .f(24, 8, 0x4)
+        .f(32, 8, 0x5)
+        .f(64, 8, 0xff)
+        .f(72, 1, 0x1)
+        .f(75, 5, 0x2)
+        .f(81, 3, 0x7)
+        .f(87, 3, 0x7);
+    assert_eq!(t.text(0), "LEA R12, -R4, R5, 0x2");
+    let t = B::op(0x011, 1)
+        .f(16, 8, 0xc)
+        .f(24, 8, 0x4)
+        .f(32, 8, 0x5)
+        .f(64, 8, 0x6)
+        .f(72, 1, 0x1)
+        .f(74, 1, 0x1)
+        .f(75, 5, 0x7)
+        .f(80, 1, 0x1)
+        .f(81, 3, 0x7);
+    assert_eq!(t.text(0), "LEA.HI.X R12, ~R4, R5, R6, 0x7, P0");
     let t = B::op(0x019, 4)
         .f(16, 8, 0x8)
         .f(24, 8, 0x2)
