@@ -214,7 +214,7 @@ static bool anyone_ready(void)
 {
     if (hos.sched.token)
         return true;
-    for (int32_t c = 0; c < HOS_CORES; c++) {
+    for (int32_t c = 0; c < hos_cores(); c++) {
         hos_thread *t = hos.sched.cores[c].selected;
         if (t && t->runnable)
             return true;

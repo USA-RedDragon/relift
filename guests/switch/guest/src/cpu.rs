@@ -100,8 +100,16 @@ pub fn va(npdm: Option<&Npdm>) -> Result<Va, String> {
 ///
 /// As [`va`].
 pub fn cpu(npdm: Option<&Npdm>, console: Option<Console>) -> Result<Cpu, String> {
-    let console = console.unwrap_or_else(|| npdm.map_or(Console::Switch, Console::of));
-    Ok(Cpu::new(console.features(), va(npdm)?))
+    Ok(Cpu::new(
+        program_console(npdm, console).features(),
+        va(npdm)?,
+    ))
+}
+
+/// The console a program with the NPDM `npdm` runs on: `console` when the
+/// project names one, else [`Console::of`] the NPDM, else the Switch.
+pub fn program_console(npdm: Option<&Npdm>, console: Option<Console>) -> Console {
+    console.unwrap_or_else(|| npdm.map_or(Console::Switch, Console::of))
 }
 
 #[cfg(test)]

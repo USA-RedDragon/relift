@@ -283,7 +283,7 @@ rl_result hos_set_thread_core_mask(uint32_t h, int32_t core, uint64_t mask)
             return KR_INVALID_CPU_CORE;
         if (mask == 0)
             return KR_INVALID_COMBINATION;
-        if (core < 0 || core >= HOS_CORES) {
+        if (core < 0 || core >= hos_cores()) {
             if (core != -1 && core != -3)
                 return KR_INVALID_CPU_CORE;
         } else if (!((mask >> core) & 1)) {

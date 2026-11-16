@@ -215,17 +215,17 @@ enum hos_wait_kind {
 
 typedef struct hos_thread hos_thread;
 
-/** @brief Horizon's CPU cores (applications get the ones in rl_hos_config.core_mask). */
-#define HOS_CORES 4
+/** @brief The most CPU cores of a console: the Switch has 4, the Switch 2 has 8 (hos_cores). */
+#define HOS_MAX_CORES 8
 /** @brief Horizon's thread priorities, 0 (highest) to 63. */
 #define HOS_PRIOS 64
 
 /** @brief Per-core, per-priority FIFO lists of threads (KPriorityQueue). */
 typedef struct hos_runq {
-    hos_thread *head[HOS_CORES][HOS_PRIOS];
-    hos_thread *tail[HOS_CORES][HOS_PRIOS];
+    hos_thread *head[HOS_MAX_CORES][HOS_PRIOS];
+    hos_thread *tail[HOS_MAX_CORES][HOS_PRIOS];
     /** @brief Per core, bit p set when the priority p list is not empty. */
-    uint64_t mask[HOS_CORES];
+    uint64_t mask[HOS_MAX_CORES];
 } hos_runq;
 
 /** @brief One emulated core: the thread chosen to run there and the thread that runs there. */
@@ -246,7 +246,7 @@ typedef struct hos_sched {
     hos_runq scheduled;
     /** @brief Threads in the queues of the other cores of their affinity mask. */
     hos_runq suggested;
-    hos_core cores[HOS_CORES];
+    hos_core cores[HOS_MAX_CORES];
     /** @brief A queue changed since the last selection. */
     bool reselect;
     /** @brief RELIFT_SCHED=free: guest threads run freely on host threads, a debug comparison. */
@@ -302,7 +302,7 @@ struct hos_thread {
     /** @brief Fixed step: the current wait timed out. */
     bool expired;
     /** @brief Neighbors in the one scheduled or suggested queue of each core the thread is in. */
-    hos_thread *qnext[HOS_CORES], *qprev[HOS_CORES];
+    hos_thread *qnext[HOS_MAX_CORES], *qprev[HOS_MAX_CORES];
     /** @brief Guest address of the 0x200-byte TLS slot (tpidrro_el0). */
     uint64_t tls;
     /** @brief Entry, argument and stack top from svcCreateThread. */
@@ -402,8 +402,13 @@ typedef struct hos_reslimit {
     hos_kobj obj;
 } hos_reslimit;
 
+/** @brief The console a program runs on: its kernel, services and memory. */
+enum rl_switch_console { RL_CONSOLE_SWITCH = 0, RL_CONSOLE_SWITCH2 = 1 };
+
 /** @brief Process start-up configuration, from the NPDM and the manifest. */
 typedef struct rl_hos_config {
+    /** @brief The console (enum rl_switch_console). */
+    uint32_t console;
     /** @brief NPDM address space type: 0 32-bit, 1 36-bit, 2 32-bit without alias, 3 39-bit. */
     uint32_t address_space_type;
     /** @brief Start of the code region (where modules load). */
@@ -449,6 +454,8 @@ typedef struct hos_layout {
     uint64_t stack_start, stack_end;
     /** @brief TLS and IO region. */
     uint64_t tlsio_start, tlsio_end;
+    /** @brief Switch 2 remote region (svcGetInfo 29, 30) for svcMapRemoteMemory; empty on the Switch. */
+    uint64_t remote_start, remote_end;
 } hos_layout;
 
 /** @brief Most TLS pages (8 slots each). */
@@ -516,6 +523,8 @@ extern hos_process hos;
 
 /** @brief Fills cfg with defaults for an application with a 39-bit address space. */
 RL_RUNTIME_API void rl_hos_default_config(rl_hos_config *cfg);
+/** @brief Turns cfg into a Switch 2 application's: its cores, memory and console. */
+RL_RUNTIME_API void rl_hos_switch2_config(rl_hos_config *cfg);
 /**
  * @brief Brings up the process: config, address space (falls back to the
  * 36-bit layout when the host cannot reserve 2^39), fault handler, services.
@@ -607,6 +616,10 @@ void hos_sched_kick(void);
 
 /** @brief True in fixed-step mode (clock.fixed_step). */
 static inline bool hos_fixed(void) { return hos.sched.fixed; }
+/** @brief The process runs on the Switch 2's kernel and services. */
+static inline bool hos_switch2(void) { return hos.cfg.console == RL_CONSOLE_SWITCH2; }
+/** @brief The console's CPU cores (applications get the ones in rl_hos_config.core_mask). */
+static inline int32_t hos_cores(void) { return hos_switch2() ? 8 : 4; }
 /** @brief The guest's clock in nanoseconds: the fixed-step clock in fixed-step mode, else the host's monotonic clock. */
 uint64_t hos_clock_ns(void);
 /** @brief Fixed step: the guest's wall clock in seconds since 1970 (a fixed date plus the guest clock). */

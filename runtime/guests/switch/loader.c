@@ -464,6 +464,8 @@ static int run_program(void *arg)
         }
     }
     rl_hos_default_config(&cfg);
+    if (p->console == RL_CONSOLE_SWITCH2)
+        rl_hos_switch2_config(&cfg);
     cfg.address_space_type = p->address_space_type;
     cfg.code_start = align_down(p->modules[0].base);
     if (hi - cfg.code_start > cfg.code_size)

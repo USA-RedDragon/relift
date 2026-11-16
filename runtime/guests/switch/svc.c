@@ -214,11 +214,26 @@ static rl_result get_info(uint64_t *out, uint32_t id, uint32_t handle, uint64_t 
     case 26:
         *out = 1;
         return KR_SUCCESS;
+    case 29: case 30: case 31: case 32: case 33:
+        if (hos.cfg.console != RL_CONSOLE_SWITCH2)
+            break;
+        if (sub != 0)
+            return KR_INVALID_COMBINATION;
+        if (handle != HOS_CUR_PROCESS)
+            return KR_INVALID_HANDLE;
+        if (id == 29)
+            *out = l->remote_start;
+        else if (id == 30)
+            *out = l->remote_end - l->remote_start;
+        else if (id == 33)
+            *out = 0x1000;
+        return KR_SUCCESS;
     default:
-        (void)rl_report_unknown(0x474554494E464F00ull ^ id, "svc", "GetInfo: unknown id %u (handle 0x%x, sub 0x%llx)", id,
-                                handle, (unsigned long long)sub);
-        return KR_INVALID_ENUM_VALUE;
+        break;
     }
+    (void)rl_report_unknown(0x474554494E464F00ull ^ id, "svc", "GetInfo: unknown id %u (handle 0x%x, sub 0x%llx)", id,
+                            handle, (unsigned long long)sub);
+    return KR_INVALID_ENUM_VALUE;
 }
 
 static void debug_string(uint64_t addr, uint64_t size)
@@ -505,6 +520,13 @@ void rl_hos_default_config(rl_hos_config *cfg)
     cfg->main_prio = 44;
     cfg->main_core = 0;
     cfg->main_stack_size = 0x100000;
+}
+
+void rl_hos_switch2_config(rl_hos_config *cfg)
+{
+    cfg->console = RL_CONSOLE_SWITCH2;
+    cfg->core_mask = 0x3f;
+    cfg->total_memory = 9809ull << 20;
 }
 
 static void fill_entropy(void)

@@ -9,6 +9,8 @@ use relift_guest::{Module, Root, RootKind, Section, SectionKind};
 use relift_switch_formats::npdm::{AddressSpace, Npdm};
 use relift_switch_formats::nso::Nso;
 
+use crate::cpu::Console;
+
 /// Where the first module loads: the start of the code region of the 39-bit
 /// and 36-bit address spaces, the runtime's default.
 pub const CODE_START: u64 = 0x800_0000;
@@ -705,6 +707,16 @@ pub struct Fp {
     pub fpcr_const: bool,
 }
 
+/// What the runtime's loader is told about the process: the NPDM's
+/// parameters and the console it runs on.
+#[derive(Clone, Copy, Debug)]
+pub struct Process<'a> {
+    /// The program's NPDM, if it has one.
+    pub npdm: Option<&'a Npdm>,
+    /// The console whose kernel, services and memory the runtime gives it.
+    pub console: Console,
+}
+
 /// The files that describe the placed modules to the runtime's loader and
 /// hold their images, with the process parameters from `npdm` and the
 /// lifted unit tables `units` (C symbols of `const rl_unit`) to register:
@@ -717,7 +729,7 @@ pub struct Fp {
 /// carry the id.
 pub fn program_files(
     placed: &[Placed],
-    npdm: Option<&Npdm>,
+    process: Process<'_>,
     units: &[String],
     code_maps: &[String],
     fp: Fp,
@@ -737,7 +749,7 @@ pub fn program_files(
     }
     out.push(ProgramFile {
         name: "program.c".into(),
-        bytes: program_c(placed, npdm, units, code_maps, fp, mods, with_image_id).into_bytes(),
+        bytes: program_c(placed, process, units, code_maps, fp, mods, with_image_id).into_bytes(),
     });
     out
 }
@@ -811,7 +823,7 @@ int main(int argc, char **argv)
 /// images live in the `image<i>.c` files [`program_files`] adds.
 fn program_c(
     placed: &[Placed],
-    npdm: Option<&Npdm>,
+    Process { npdm, console }: Process<'_>,
     units: &[String],
     code_maps: &[String],
     fp: Fp,
@@ -889,7 +901,7 @@ fn program_c(
         .unwrap_or(CODE_START);
     let _ = write!(
         t,
-        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u }};\n",
+        "}};\nconst rl_switch_program rl_program = {{ modules, {}u, UINT64_C({entry:#x}), {space}u, {prio}, {core}, UINT64_C({stack:#x}), UINT64_C({pid:#x}), static_units, {}u, {}, {}, {}, {}u, {}u }};\n",
         placed.len(),
         units.len(),
         mods.map_or_else(|| "0".to_string(), |m| format!("&{m}")),
@@ -899,7 +911,11 @@ fn program_c(
         } else {
             "code_maps"
         },
-        code_maps.len()
+        code_maps.len(),
+        match console {
+            Console::Switch => 0,
+            Console::Switch2 => 1,
+        }
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
     if fp.flags || fp.fpcr_const {
@@ -1141,7 +1157,10 @@ mod tests {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
         let files = program_files(
             &p,
-            None,
+            Process {
+                npdm: None,
+                console: Console::Switch,
+            },
             &["rl_unit_main".into()],
             &[],
             Fp::default(),
@@ -1164,13 +1183,16 @@ mod tests {
         ));
         assert!(c.contains("rl_switch_main(&rl_program, argc, argv)"));
         assert!(
-            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u };"),
+            c.contains("static_units, 1u, 0, rl_image_id, 0, 0u, 0u };"),
             "{c}"
         );
         assert!(c.contains("extern const uint8_t rl_image_id[];"));
         let files = program_files(
             &p,
-            None,
+            Process {
+                npdm: None,
+                console: Console::Switch,
+            },
             &["rl_unit_main".into(), "rl_cold_main".into()],
             &["rl_code_main".into()],
             Fp {
@@ -1190,12 +1212,15 @@ mod tests {
             "{c}"
         );
         assert!(
-            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u };"),
+            c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u, 0u };"),
             "{c}"
         );
         let files = program_files(
             &p,
-            None,
+            Process {
+                npdm: None,
+                console: Console::Switch,
+            },
             &[],
             &[],
             Fp::default(),
@@ -1205,7 +1230,7 @@ mod tests {
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("extern const rl_mods rl_mods_bundled;"), "{c}");
         assert!(
-            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u };"),
+            c.contains("static_units, 0u, &rl_mods_bundled, 0, 0, 0u, 0u };"),
             "{c}"
         );
     }

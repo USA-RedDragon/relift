@@ -104,7 +104,24 @@ fn read_npdm(import: &Path) -> Option<Npdm> {
 /// (`switch` or `switch2`): the choice for a program without an NPDM, or
 /// with one that does not tell.
 pub(crate) fn program_cpu(npdm: Option<&Npdm>, game: &toml::Table) -> Result<Cpu, BoxError> {
-    let console = match game.get("game").and_then(|g| g.get("console")) {
+    Ok(relift_switch::cpu::cpu(npdm, game_console(game)?)?)
+}
+
+/// The console of a program with the NPDM `npdm`
+/// ([`relift_switch::cpu::program_console`]), with `game.console` of `game`.
+pub(crate) fn program_console(
+    npdm: Option<&Npdm>,
+    game: &toml::Table,
+) -> Result<relift_switch::cpu::Console, BoxError> {
+    Ok(relift_switch::cpu::program_console(
+        npdm,
+        game_console(game)?,
+    ))
+}
+
+/// The console `game.console` of `game` names, if any.
+fn game_console(game: &toml::Table) -> Result<Option<relift_switch::cpu::Console>, BoxError> {
+    Ok(match game.get("game").and_then(|g| g.get("console")) {
         None => None,
         Some(v) => {
             let name = v.as_str().unwrap_or_default();
@@ -112,8 +129,7 @@ pub(crate) fn program_cpu(npdm: Option<&Npdm>, game: &toml::Table) -> Result<Cpu
                 format!("game.toml: game.console is {v}, not \"switch\" or \"switch2\"")
             })?)
         }
-    };
-    Ok(relift_switch::cpu::cpu(npdm, console)?)
+    })
 }
 
 /// The CPU of the project's program ([`program_cpu`]), from the import
@@ -1270,7 +1286,10 @@ fn lift_and_emit(
     prog.push(ports_c);
     for f in program::program_files(
         &placed,
-        npdm.as_ref(),
+        program::Process {
+            npdm: npdm.as_ref(),
+            console: program_console(npdm.as_ref(), &game)?,
+        },
         &units,
         &emitted.code_maps,
         program::Fp {

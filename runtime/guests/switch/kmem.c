@@ -17,6 +17,14 @@
 #define COMPACT_ALIAS 0x180000000ull
 #define COMPACT_TLSIO 0x80000000ull
 #define COMPACT_ROOM_39 (16ull << 30)
+#define COMPACT_REMOTE (4ull << 30)
+/**
+ * @brief The Switch's SetHeapSize refuses 8 GiB and more. Switch 2 programs
+ * ask for more (9.5 GiB seen); there the heap region is the limit.
+ */
+#define SWITCH_MAIN_MEMORY (8ull << 30)
+/** @brief A Switch 2 application's heap region: more than its 9809 MiB of memory. */
+#define SWITCH2_HEAP (12ull << 30)
 #define COMPACT_ROOM_36 (4ull << 30)
 #define COMPACT_NEAR_END (1ull << 30)
 
@@ -95,6 +103,16 @@ static void layout_39(hos_layout *l, uint64_t code_start, uint64_t code_size)
     l->stack_end = l->stack_start + 0x80000000ull;
     l->tlsio_start = l->stack_end;
     l->tlsio_end = l->tlsio_start + 0x1000000000ull;
+    l->remote_start = l->remote_end = l->tlsio_end;
+    if (hos.cfg.console == RL_CONSOLE_SWITCH2) {
+        l->heap_end = l->heap_start + SWITCH2_HEAP;
+        l->stack_start = l->heap_end;
+        l->stack_end = l->stack_start + 0x80000000ull;
+        l->tlsio_start = l->stack_end;
+        l->tlsio_end = l->tlsio_start + 0x1000000000ull;
+        l->remote_start = l->tlsio_end;
+        l->remote_end = l->remote_start + 0x1000000000ull;
+    }
 }
 
 static void layout_36(hos_layout *l)
@@ -120,15 +138,19 @@ static void compact(hos_layout *l)
 {
     uint64_t end;
     if (l->bits == 39) {
+        uint64_t heap = hos.cfg.console == RL_CONSOLE_SWITCH2 ? SWITCH2_HEAP : 0x180000000ull;
         l->alias_start = l->code_end;
-        l->alias_end = l->alias_start + COMPACT_ALIAS;
+        l->alias_end = l->alias_start + (heap > COMPACT_ALIAS ? heap : COMPACT_ALIAS);
         l->heap_start = l->alias_end;
-        l->heap_end = l->heap_start + 0x180000000ull;
+        l->heap_end = l->heap_start + heap;
         l->stack_start = l->heap_end;
         l->stack_end = l->stack_start + 0x80000000ull;
         l->tlsio_start = l->stack_end;
         l->tlsio_end = l->tlsio_start + COMPACT_TLSIO;
-        end = l->tlsio_end + COMPACT_ROOM_39;
+        l->remote_start = l->remote_end = l->tlsio_end;
+        if (hos.cfg.console == RL_CONSOLE_SWITCH2)
+            l->remote_end = l->remote_start + COMPACT_REMOTE;
+        end = l->remote_end + COMPACT_ROOM_39;
     } else {
         end = l->heap_end + COMPACT_ROOM_36;
     }
@@ -238,9 +260,9 @@ rl_result rl_hos_reserve_at(uint64_t addr, uint64_t size)
 rl_result rl_hos_reserve(uint64_t size, uint64_t align, uint64_t *addr)
 {
     const hos_layout *l = &hos.lay;
-    uint64_t ends[5] = { l->code_end, l->heap_end, l->alias_end, l->stack_end, l->tlsio_end };
+    uint64_t ends[6] = { l->code_end, l->heap_end, l->alias_end, l->stack_end, l->tlsio_end, l->remote_end };
     uint64_t start = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 6; i++)
         if (ends[i] > start)
             start = ends[i];
     if (align < HOS_PAGE)
@@ -329,7 +351,7 @@ uint64_t hos_used_memory(void)
 rl_result hos_set_heap_size(uint64_t size, uint64_t *out)
 {
     rl_result rc = KR_SUCCESS;
-    if (size & 0xfffffffe001fffffull)
+    if ((!hos_switch2() && size >= SWITCH_MAIN_MEMORY) || (size & 0x1fffffull))
         return KR_INVALID_SIZE;
     hos_lock();
     uint64_t start = hos.lay.heap_start, cur = hos.heap_size;

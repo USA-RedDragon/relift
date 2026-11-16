@@ -34,7 +34,7 @@
 #define LATE_LOG_NS 1000000ull
 #define STATS_NS 1000000000ull
 
-static int32_t rr_prio(int32_t core) { return core == HOS_CORES - 1 ? 63 : 59; }
+static int32_t rr_prio(int32_t core) { return core == hos_cores() - 1 ? 63 : 59; }
 
 static void q_add(hos_runq *q, int32_t c, int32_t p, hos_thread *t, bool front)
 {
@@ -126,7 +126,7 @@ static void enqueue(hos_thread *t, bool front)
     hos_sched *s = &hos.sched;
     if (t->active_core >= 0)
         q_add(&s->scheduled, t->active_core, t->prio, t, front);
-    for (int32_t c = 0; c < HOS_CORES; c++)
+    for (int32_t c = 0; c < hos_cores(); c++)
         if (c != t->active_core && in_mask(t->affinity, c))
             q_add(&s->suggested, c, t->prio, t, true);
     s->reselect = true;
@@ -137,7 +137,7 @@ static void dequeue(hos_thread *t)
     hos_sched *s = &hos.sched;
     if (t->active_core >= 0)
         q_del(&s->scheduled, t->active_core, t->prio, t);
-    for (int32_t c = 0; c < HOS_CORES; c++)
+    for (int32_t c = 0; c < hos_cores(); c++)
         if (c != t->active_core && in_mask(t->affinity, c))
             q_del(&s->suggested, c, t->prio, t);
     s->reselect = true;
@@ -159,12 +159,12 @@ static void select_threads(void)
     if (!s->reselect)
         return;
     s->reselect = false;
-    for (int32_t c = 0; c < HOS_CORES; c++)
+    for (int32_t c = 0; c < hos_cores(); c++)
         set_selected(c, q_first(&s->scheduled, c));
-    for (int32_t c = 0; c < HOS_CORES; c++) {
+    for (int32_t c = 0; c < hos_cores(); c++) {
         if (q_first(&s->scheduled, c))
             continue;
-        int32_t src[HOS_CORES];
+        int32_t src[HOS_MAX_CORES];
         int n = 0;
         hos_thread *dst = NULL;
         for (hos_thread *t = q_first(&s->suggested, c); t; t = q_next(&s->suggested, c, t)) {
@@ -172,7 +172,7 @@ static void select_threads(void)
                 dst = t;
                 break;
             }
-            if (n < HOS_CORES)
+            if (n < HOS_MAX_CORES)
                 src[n++] = t->active_core;
         }
         if (dst) {
@@ -274,8 +274,8 @@ static void fs_update(void)
     }
     if (s->clock_busy)
         return;
-    for (int32_t i = 0; i < HOS_CORES; i++) {
-        int32_t c = (s->next_core + i) % HOS_CORES;
+    for (int32_t i = 0; i < hos_cores(); i++) {
+        int32_t c = (s->next_core + i) % hos_cores();
         hos_thread *sel = s->cores[c].selected;
         if (sel && sel->runnable && sel->cur_core < 0) {
             grant(c, sel);
@@ -294,7 +294,7 @@ static void update(void)
     if (hos.sched.free)
         return;
     select_threads();
-    for (int32_t c = 0; c < HOS_CORES; c++)
+    for (int32_t c = 0; c < hos_cores(); c++)
         kick(c);
 }
 
@@ -313,7 +313,7 @@ static void release(hos_thread *t)
     rl_preempt_clear(t->rt->ctx);
     if (s->fixed) {
         s->token = NULL;
-        s->next_core = (c + 1) % HOS_CORES;
+        s->next_core = (c + 1) % hos_cores();
         fs_update();
         return;
     }
@@ -467,7 +467,7 @@ static void rotate(int32_t c, int32_t p)
 static bool fs_other_waits(const hos_thread *t)
 {
     hos_sched *s = &hos.sched;
-    for (int32_t c = 0; c < HOS_CORES; c++) {
+    for (int32_t c = 0; c < hos_cores(); c++) {
         hos_thread *sel = s->cores[c].selected;
         if (sel && sel != t && sel->runnable && sel->cur_core < 0)
             return true;
@@ -685,14 +685,14 @@ rl_result hos_sched_set_affinity(hos_thread *t, int32_t core, uint64_t mask)
         t->active_core = core < 0 ? 63 - __builtin_clzll(mask) : core;
     if (!t->runnable)
         return KR_SUCCESS;
-    for (int32_t c = 0; c < HOS_CORES; c++)
+    for (int32_t c = 0; c < hos_cores(); c++)
         if (in_mask(old_mask, c)) {
             if (c == old_core)
                 q_del(&s->scheduled, c, t->prio, t);
             else
                 q_del(&s->suggested, c, t->prio, t);
         }
-    for (int32_t c = 0; c < HOS_CORES; c++)
+    for (int32_t c = 0; c < hos_cores(); c++)
         if (in_mask(mask, c)) {
             if (c == t->active_core)
                 q_add(&s->scheduled, c, t->prio, t, false);

@@ -61,6 +61,9 @@ typedef struct rl_switch_program {
     const rl_code_map *const *code_maps;
     /** @brief Number of entries in code_maps. */
     uint32_t code_map_count;
+    /** @brief The console the program was built for (enum rl_switch_console). */
+    uint32_t console;
+    /** @brief NPDM system resource size in bytes. */
 } rl_switch_program;
 
 /**
