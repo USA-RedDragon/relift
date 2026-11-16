@@ -80,11 +80,30 @@ fn handhelds_have_one_pad() {
         assert_eq!(s.ports()[0].controls.len(), controls, "{platform}");
     }
     assert_eq!(native_ports("nds").unwrap().ports()[1].id, "touch");
-    assert!(native_ports("n64").is_err());
+    assert!(native_ports("ps1").is_err());
+}
+
+#[test]
+fn the_n64_has_one_controller_with_a_stick_and_c_buttons() {
+    let s = native_ports("n64").unwrap();
+    assert_eq!(s.ports().len(), 1);
+    let p = s.port("p1").unwrap();
+    assert_eq!(p.kind, "Nintendo 64 controller");
+    assert_eq!(p.controls.len(), 16);
+    let b = Bindings::defaults(&s);
+    assert_eq!(
+        b.get("p1", "c_up").unwrap()[0].to_string(),
+        "gamepad:right_y+"
+    );
+    assert_eq!(b.get("p1", "stick_x").unwrap().len(), 3);
 }
 
 #[test]
 fn generated_c_files_are_current() {
+    check_file(
+        "n64/ports_gen.c",
+        native_c_file("n64", "rl_n64_ports").unwrap(),
+    );
     check_file(
         "switch/ports_gen.c",
         native_c_file("switch", "rl_switch_ports").unwrap(),

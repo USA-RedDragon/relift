@@ -175,9 +175,38 @@ const XY: &[(&str, &str, &str)] = &[
     ("y", "Y", "gamepad:west,key:a"),
 ];
 
+const N64_PAD: &[Row] = &[
+    ("a", B, "A", "gamepad:south,key:x"),
+    ("b", B, "B", "gamepad:west,key:z"),
+    ("z", B, "Z", "gamepad:left_trigger,key:c"),
+    ("start", B, "Start", "gamepad:start,key:enter"),
+    ("l", B, "L", "gamepad:left_shoulder,key:q"),
+    ("r", B, "R", "gamepad:right_shoulder,key:e"),
+    ("up", B, "D-pad up", "gamepad:dpad_up,key:w"),
+    ("down", B, "D-pad down", "gamepad:dpad_down,key:s"),
+    ("left", B, "D-pad left", "gamepad:dpad_left,key:a"),
+    ("right", B, "D-pad right", "gamepad:dpad_right,key:d"),
+    ("c_up", B, "C up", "gamepad:right_y+,key:i"),
+    ("c_down", B, "C down", "gamepad:right_y-,key:k"),
+    ("c_left", B, "C left", "gamepad:right_x-,key:j"),
+    ("c_right", B, "C right", "gamepad:right_x+,key:l"),
+    (
+        "stick_x",
+        X,
+        "Stick horizontal",
+        "gamepad:left_x,key:right+,key:left-",
+    ),
+    (
+        "stick_y",
+        X,
+        "Stick vertical",
+        "gamepad:left_y,key:up+,key:down-",
+    ),
+];
+
 /// The platform's native ports. Platforms: `switch` (eight players, each a
-/// Pro Controller, plus touch), `gb`, `gbc`, `gba` (one pad) and `nds` (one
-/// pad plus touch).
+/// Pro Controller, plus touch), `gb`, `gbc`, `gba` (one pad), `nds` (one
+/// pad plus touch) and `n64` (one controller).
 pub fn native_ports(platform: &str) -> Result<PortSet, Error> {
     let ports = match platform {
         "switch" => {
@@ -191,6 +220,10 @@ pub fn native_ports(platform: &str) -> Result<PortSet, Error> {
         "gbc" => vec![handheld_pad("Game Boy Color pad", AB, false, &[])],
         "gba" => vec![handheld_pad("Game Boy Advance pad", AB, true, &[])],
         "nds" => vec![handheld_pad("Nintendo DS pad", AB, true, XY), touch()],
+        "n64" => vec![
+            Port::new("p1", "Nintendo 64 controller", controls(&[N64_PAD], true))
+                .labeled("Player 1"),
+        ],
         other => {
             return Err(Error::BadDeclaration {
                 source: "native ports".to_string(),
