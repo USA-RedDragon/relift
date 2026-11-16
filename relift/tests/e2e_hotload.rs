@@ -271,4 +271,22 @@ fn a_shipped_build_reports_the_site_of_a_computed_jump_that_missed() {
         assert!(report.contains(&want), "{want:?} in\n{report}");
     }
     assert!(!report.contains("\ncaller function:"), "{report}");
+    let files: Vec<_> = std::fs::read_dir(root.join("reports"))
+        .unwrap()
+        .map(|e| e.unwrap().path().display().to_string())
+        .collect();
+    let out = tiny::relift(
+        &project,
+        &["--cache-dir", &cache, "report", "--no-hint", &files[0]],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.contains("\nwhat analysis says about the site:\n  analysis left this computed jump unresolved: reason "),
+        "{text}"
+    );
 }

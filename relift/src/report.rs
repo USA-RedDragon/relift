@@ -410,6 +410,124 @@ fn analysis_state(out: &Path, addr: u64) -> Vec<String> {
     notes
 }
 
+/// The lines of the build's `unresolved.txt` (the transfers analysis left
+/// to the dispatcher, written by the GBA and Game Boy builds as `<location>
+/// <kind> <detail>`) whose location is the instruction at `addr`.
+fn unresolved_at(out: &Path, addr: u64) -> Vec<String> {
+    let Ok(t) = std::fs::read_to_string(out.join("unresolved.txt")) else {
+        return Vec::new();
+    };
+    t.lines()
+        .filter(|l| {
+            l.split_whitespace().next().is_some_and(|loc| {
+                let hexpart = loc.rsplit(':').next().unwrap_or(loc);
+                let hexpart = hexpart.split('@').next().unwrap_or(hexpart);
+                u64::from_str_radix(hexpart.trim_start_matches("0x"), 16).ok() == Some(addr & !1)
+            })
+        })
+        .map(|l| {
+            format!(
+                "unresolved at the site: {}",
+                l.split_whitespace().collect::<Vec<_>>().join(" ")
+            )
+        })
+        .collect()
+}
+
+/// What Switch analysis says about the transfer at `site`: the function
+/// that holds it is lifted again from the build's cached outline
+/// (`analysis/<module>.zst`) and its unresolved transfers are classified
+/// as `relift coverage` does. Empty when the project, its import or the
+/// outline is missing.
+fn switch_site(settings: &Settings, out: &Path, site: &Place) -> Vec<String> {
+    let Some((module, _)) = &site.module else {
+        return Vec::new();
+    };
+    let Ok(import) = crate::build::import_dir(settings) else {
+        return Vec::new();
+    };
+    let Ok((mods, _)) = crate::build::load(&import) else {
+        return Vec::new();
+    };
+    let placed = relift_switch::program::place(mods);
+    let Some(i) = placed.iter().position(|p| &p.name == module) else {
+        return Vec::new();
+    };
+    let Some(layout) = std::fs::read(out.join("analysis").join(format!("{i}.zst")))
+        .ok()
+        .and_then(|z| zstd::decode_all(z.as_slice()).ok())
+        .and_then(|b| relift_analyze::from_bytes(&b).ok())
+        .map(|(_, l)| l)
+    else {
+        return vec![format!(
+            "the build keeps no outline of {module} (analysis/{i}.zst), so the transfer is not classified"
+        )];
+    };
+    let Some(outline) = layout.functions.values().find(|o| {
+        o.runs
+            .iter()
+            .any(|&(first, n)| site.addr >= first && site.addr < first + 4 * u64::from(n))
+    }) else {
+        return vec![format!(
+            "no function the build lifted holds 0x{:x}: discovery never reached the site",
+            site.addr
+        )];
+    };
+    let hints = crate::hints::read(Path::new("game.toml")).unwrap_or_default();
+    let p = &placed[i];
+    let m = crate::build::module_with_hints(p, &hints);
+    let linkages: Vec<_> = placed.iter().map(relift_switch::program::linkage).collect();
+    let exported: std::collections::BTreeSet<String> = linkages
+        .iter()
+        .flat_map(|l| l.exports.iter().map(|(n, _)| n.clone()))
+        .collect();
+    let slots: std::collections::BTreeMap<u64, String> = linkages[i]
+        .slots
+        .iter()
+        .map(|s| (s.addr, s.name.clone()))
+        .collect();
+    let addrs: std::collections::BTreeSet<u64> = slots.keys().copied().collect();
+    let cpu = relift_cpu_arm64::frontend::Arm64 {
+        features: relift_switch::CPU_FEATURES,
+    };
+    let preserved = relift_guest::Frontend::preserved(&cpu);
+    let at = site.addr;
+    relift_analyze::each_lifted(&cpu, &m, &[outline], |_, f| {
+        if let Some(t) = f.tables.get(&at) {
+            return vec![format!(
+                "analysis resolved the site as a jump table of {} targets; the target is none of them",
+                t.len()
+            )];
+        }
+        let Some(t) = relift_analyze::unresolved_transfers(f, &preserved)
+            .into_iter()
+            .find(|t| t.pc == at)
+        else {
+            return vec!["analysis found no unresolved transfer at the site".to_string()];
+        };
+        let via = if addrs.is_empty() {
+            None
+        } else {
+            relift_analyze::slot_uses(f, &addrs, 8)
+                .transfers
+                .get(&at)
+                .and_then(|s| slots.get(s))
+                .cloned()
+        };
+        let reason = crate::coverage::classify(&t, via.as_deref(), &|s| exported.contains(s));
+        vec![format!(
+            "analysis left this computed {} unresolved: reason {}, target {}{}",
+            crate::coverage::kind_name(t.kind),
+            reason.map_or("loader slot (exported)", crate::coverage::Reason::name),
+            crate::coverage::source_name(t.source),
+            via.map_or_else(String::new, |s| format!(", through the slot of {s}"))
+        )]
+    })
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 /// What `relift report` does after printing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HintMode {
@@ -511,6 +629,15 @@ pub fn explain(r: &Report, out: Option<&Path>) -> String {
                         "\nthe build in {} has no lifted code at the site",
                         out.display()
                     );
+                }
+            }
+        }
+        if let Some(site) = r.site() {
+            let notes = unresolved_at(out, site.addr);
+            if !notes.is_empty() {
+                let _ = writeln!(t, "\nwhat the build knew about the site:");
+                for n in notes {
+                    let _ = writeln!(t, "  {n}");
                 }
             }
         }
@@ -725,6 +852,18 @@ pub fn run(
         None => None,
     };
     print!("{}", explain(&r, out.as_deref()));
+    if r.guest() == Some("switch")
+        && project
+        && let (Some(out), Some(site)) = (out.as_deref(), r.site())
+    {
+        let notes = switch_site(settings, out, &site);
+        if !notes.is_empty() {
+            println!("\nwhat analysis says about the site:");
+            for n in notes {
+                println!("  {n}");
+            }
+        }
+    }
     if hint == HintMode::Add && project {
         println!("\n{}", add_hint(&r, Path::new("."), out.as_deref())?);
     }

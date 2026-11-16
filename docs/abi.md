@@ -1723,6 +1723,17 @@ and adds the target as a root for the next build: a `[hints]` entry in
 which `relift-gba-analyze` takes as roots of origin `hint`). `--no-hint`
 only prints.
 
+It also says why analysis left the site unresolved, at no cost to the
+build: for a GBA or Game Boy project the build's `unresolved.txt` already
+lists every transfer analysis did not follow with its kind and detail, and
+the lines at the site are printed; for a Switch project, the function that
+holds the site is lifted again from the build's cached outline
+(`analysis/<module index>.zst`) and its unresolved transfers are
+classified as `relift coverage` does (the reason, where the target came
+from, and the loader slot it goes through), or the report says that no
+lifted function holds the site or that the site was a jump table the target
+is not in.
+
 ### Still to come
 
 - The host-offset to guest-address line map (`rl_line_entry`), produced by

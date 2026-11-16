@@ -188,6 +188,12 @@ fn a_jump_no_analysis_follows_stops_with_a_report_naming_its_site() {
     if relift_build::find_tool("llvm-mc").is_some() {
         assert!(text.contains("=> 0x80000d0: bx\tr1\n"), "{text}");
     }
+    assert!(
+        text.contains(
+            "\nwhat the build knew about the site:\n  unresolved at the site: A:080000D0 "
+        ),
+        "{text}"
+    );
     let out = tiny::relift(&project, &["--cache-dir", &cache, "report", &file]);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
