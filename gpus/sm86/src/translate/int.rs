@@ -7,6 +7,11 @@ use crate::{Inst, Operand};
 
 use super::Ctx;
 
+mod arith;
+mod bits;
+mod conv;
+mod half;
+
 const BUILTIN_WORKGROUP_ID: u32 = 26;
 const BUILTIN_LOCAL_INVOCATION_ID: u32 = 27;
 const WORKGROUP_SIZE_KEY: u32 = 0x1_0000;
@@ -16,12 +21,14 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "MOV" | "UMOV" => mov(c, i),
         "S2R" | "S2UR" => s2r(c, i),
         "CS2R" => cs2r(c, i),
-        "IMAD" => imad(c, i),
-        "ISETP" | "UISETP" => isetp(c, i),
-        "IADD3" | "UIADD3" => iadd3(c, i),
         "ULDC" | "LDC" => ldc(c, i),
-        "SEL" | "USEL" => sel(c, i),
-        _ => return None,
+        "R2UR" => r2ur(c, i),
+        _ => {
+            return arith::inst(c, i)
+                .or_else(|| bits::inst(c, i))
+                .or_else(|| conv::inst(c, i))
+                .or_else(|| half::inst(c, i));
+        }
     })
 }
 
@@ -136,125 +143,6 @@ fn cs2r(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
 }
 
-fn imad(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let u = c.u32t();
-    let signed = !i.has("U32");
-    for m in &i.mods {
-        if !matches!(*m, "U32" | "WIDE" | "MOV" | "IADD" | "SHL") {
-            return bad(format!("IMAD.{m}"));
-        }
-    }
-    if i.ops.len() != 4 {
-        return bad("IMAD with carry");
-    }
-    let a = c.usrc(&i.ops[1])?;
-    let b = c.usrc(&i.ops[2])?;
-    if i.has("WIDE") {
-        let (clo, chi) = c.src_pair(&i.ops[3])?;
-        let st = c.m.t_struct_cached(&[u, u]);
-        let opc = if signed {
-            op::S_MUL_EXTENDED
-        } else {
-            op::U_MUL_EXTENDED
-        };
-        let r = c.m.emit(opc, st, &[a, b]);
-        let lo = c.m.emit(op::COMPOSITE_EXTRACT, u, &[r, 0]);
-        let hi = c.m.emit(op::COMPOSITE_EXTRACT, u, &[r, 1]);
-        let s = c.m.emit(op::I_ADD_CARRY, st, &[lo, clo]);
-        let slo = c.m.emit(op::COMPOSITE_EXTRACT, u, &[s, 0]);
-        let carry = c.m.emit(op::COMPOSITE_EXTRACT, u, &[s, 1]);
-        let h1 = c.m.emit(op::I_ADD, u, &[hi, chi]);
-        let shi = c.m.emit(op::I_ADD, u, &[h1, carry]);
-        return c.store_pair(&i.ops[0], slo, shi);
-    }
-    let cc = c.isrc_neg(&i.ops[3])?;
-    let p = c.m.emit(op::I_MUL, u, &[a, b]);
-    let r = c.m.emit(op::I_ADD, u, &[p, cc]);
-    c.store_dst(&i.ops[0], r)
-}
-
-impl Ctx {
-    /// An integer operand that may carry a negation (two's complement).
-    pub(crate) fn isrc_neg(&mut self, o: &Operand) -> Res<u32> {
-        let (v, m) = self.raw(o)?;
-        if m.abs || m.swz != crate::Swz::None {
-            return bad(format!("int operand mods {o}"));
-        }
-        let u = self.u32t();
-        let mut v = v;
-        if m.not {
-            v = self.m.emit(op::NOT, u, &[v]);
-        }
-        if m.neg {
-            v = self.m.emit(op::S_NEGATE, u, &[v]);
-        }
-        Ok(v)
-    }
-}
-
-fn icmp(c: &mut Ctx, cmp: &str, signed: bool, a: u32, b: u32) -> Res<u32> {
-    let opc = match (cmp, signed) {
-        ("F", _) => return Ok(c.m.c_bool(false)),
-        ("T", _) => return Ok(c.m.c_bool(true)),
-        ("EQ", _) => op::I_EQUAL,
-        ("NE", _) => op::I_NOT_EQUAL,
-        ("LT", true) => op::S_LESS_THAN,
-        ("LE", true) => op::S_LESS_THAN_EQUAL,
-        ("GT", true) => op::S_GREATER_THAN,
-        ("GE", true) => op::S_GREATER_THAN_EQUAL,
-        ("LT", false) => op::U_LESS_THAN,
-        ("LE", false) => op::U_LESS_THAN_EQUAL,
-        ("GT", false) => op::U_GREATER_THAN,
-        ("GE", false) => op::U_GREATER_THAN_EQUAL,
-        (c, _) => return bad(format!("int comparison {c}")),
-    };
-    let t = c.boolt();
-    Ok(c.m.emit(opc, t, &[a, b]))
-}
-
-fn isetp(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let mut cmp = None;
-    let mut bop = None;
-    let mut signed = true;
-    for m in &i.mods {
-        match *m {
-            "U32" => signed = false,
-            "AND" | "OR" | "XOR" => bop = Some(*m),
-            "EX" => return bad("ISETP.EX"),
-            m => cmp = Some(m),
-        }
-    }
-    let (Some(cmp), Some(bop)) = (cmp, bop) else {
-        return bad("ISETP form");
-    };
-    if i.ops.len() != 5 {
-        return bad("ISETP operands");
-    }
-    let a = c.usrc(&i.ops[2])?;
-    let b = c.usrc(&i.ops[3])?;
-    let pc = c.pred_operand(&i.ops[4])?;
-    let r = icmp(c, cmp, signed, a, b)?;
-    let t = c.boolt();
-    let nr = c.m.emit(op::LOGICAL_NOT, t, &[r]);
-    let p = c.bool_op(bop, r, pc)?;
-    let q = c.bool_op(bop, nr, pc)?;
-    c.store_pdst(&i.ops[0], p)?;
-    c.store_pdst(&i.ops[1], q)
-}
-
-fn iadd3(c: &mut Ctx, i: &Inst) -> Res<()> {
-    if !i.mods.is_empty() || i.ops.len() != 4 {
-        return bad(format!("{} form", i.mnemonic));
-    }
-    let u = c.u32t();
-    let a = c.isrc_neg(&i.ops[1])?;
-    let b = c.isrc_neg(&i.ops[2])?;
-    let cc = c.isrc_neg(&i.ops[3])?;
-    let s = c.m.emit(op::I_ADD, u, &[a, b]);
-    let s = c.m.emit(op::I_ADD, u, &[s, cc]);
-    c.store_dst(&i.ops[0], s)
-}
-
 fn cbuf_words(i: &Inst) -> Res<(u32, Option<(u32, bool)>)> {
     let mut n = 1;
     let mut sub = None;
@@ -346,11 +234,10 @@ fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ok(())
 }
 
-fn sel(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let a = c.usrc(&i.ops[1])?;
-    let b = c.usrc(&i.ops[2])?;
-    let p = c.pred_operand(&i.ops[3])?;
-    let u = c.u32t();
-    let r = c.select(u, p, a, b);
-    c.store_dst(&i.ops[0], r)
+fn r2ur(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.has("OR") || i.ops.len() != 2 {
+        return bad("R2UR with a predicate");
+    }
+    let v = c.usrc(&i.ops[1])?;
+    c.store_dst(&i.ops[0], v)
 }
