@@ -22,7 +22,8 @@ cpus/mips/gen/regen.sh "$CI_WORK/sail-mips/lib" "$CI_WORK/sail-mips/model"
 fail=0
 for p in cpus/arm64/src/lift/sail/generated cpus/sm83/src/lift/sail/generated.rs \
   cpus/arm32/src/decode/generated.rs cpus/arm32/src/lift/generated \
-  cpus/mips/src/vr4300/decode/generated.rs cpus/mips/src/vr4300/lift/generated; do
+  cpus/mips/src/vr4300/decode/generated.rs cpus/mips/src/vr4300/lift/generated \
+  cpus/mips/src/r3000a/decode/generated.rs cpus/mips/src/r3000a/lift/generated; do
   diff -r -u "$ROOT/$p" "$src/$p" || fail=1
 done
 exit "$fail"

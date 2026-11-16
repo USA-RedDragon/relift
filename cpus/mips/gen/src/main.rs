@@ -1,12 +1,15 @@
-//! `relift-cpu-mips-gen`: generates the VR4300 decode table and lifting
-//! templates from sail-cheri-mips's MIPS model plus the VR4300 overlay, with
-//! the shared Sail frontend (`relift-sail`).
+//! `relift-cpu-mips-gen`: generates a MIPS profile's decode table and
+//! lifting templates from sail-cheri-mips's MIPS model plus the profile's
+//! overlay (`vr4300.sail`, `r3000a.sail`), with the shared Sail frontend
+//! (`relift-sail`).
 //!
 //! Usage: `relift-cpu-mips-gen gen SAIL_LIB MODEL_SRC OVERLAY OUT`, where
-//! OUT is `decode` or a template class (`int`, `ldst`, `branch`, `system`,
-//! `cop1`), or `try SAIL_LIB MODEL_SRC OVERLAY NAME...`.
+//! OUT is `decode` or one of the profile's template classes (`int`, `ldst`,
+//! `branch`, `system`, `cop1` for the VR4300), or `try SAIL_LIB MODEL_SRC
+//! OVERLAY NAME...`.
 
 mod cut;
+mod profile;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -16,6 +19,7 @@ use relift_sail::model::Model;
 use relift_sail::stage::{self, Form};
 
 use cut::Mips;
+use profile::Profile;
 
 /// The model files the generator reads, in load order.
 const SRC_FILES: &[&str] = &[
@@ -36,127 +40,6 @@ const DEFINES: &[&str] = &["FEATURE_IMPLICITS"];
 
 /// The decode group the generator builds from the model's `decode` clauses.
 const GROUP: &str = "__DecodeMIPS";
-
-/// The template classes, one generated file each.
-const CLASSES: &[&str] = &["int", "ldst", "branch", "system", "cop1"];
-
-/// The VR4300 mnemonic of every decode clause, by the clause's AST
-/// constructor and in clause order, with the class of its template. A
-/// `COP1.fmt` encoding is every arithmetic, conversion and compare
-/// operation of one format.
-const MNEMONICS: &[(&str, &[&str], &str)] = &[
-    (
-        "COP1_Move",
-        &["MFC1", "DMFC1", "CFC1", "MTC1", "DMTC1", "CTC1"],
-        "cop1",
-    ),
-    ("COP1_BC", &["BC1F", "BC1T", "BC1FL", "BC1TL"], "branch"),
-    (
-        "COP1_Arith",
-        &["COP1.S", "COP1.D", "COP1.W", "COP1.L"],
-        "cop1",
-    ),
-    ("COP1_Mem", &["LWC1", "LDC1", "SWC1", "SDC1"], "cop1"),
-    ("DADDIU", &["DADDIU"], "int"),
-    ("DADDU", &["DADDU"], "int"),
-    ("DADDI", &["DADDI"], "int"),
-    ("DADD", &["DADD"], "int"),
-    ("ADD", &["ADD"], "int"),
-    ("ADDI", &["ADDI"], "int"),
-    ("ADDU", &["ADDU"], "int"),
-    ("ADDIU", &["ADDIU"], "int"),
-    ("DSUBU", &["DSUBU"], "int"),
-    ("DSUB", &["DSUB"], "int"),
-    ("SUB", &["SUB"], "int"),
-    ("SUBU", &["SUBU"], "int"),
-    ("AND", &["AND"], "int"),
-    ("ANDI", &["ANDI"], "int"),
-    ("OR", &["OR"], "int"),
-    ("ORI", &["ORI"], "int"),
-    ("NOR", &["NOR"], "int"),
-    ("XOR", &["XOR"], "int"),
-    ("XORI", &["XORI"], "int"),
-    ("LUI", &["LUI"], "int"),
-    ("DSLL", &["DSLL"], "int"),
-    ("DSLL32", &["DSLL32"], "int"),
-    ("DSLLV", &["DSLLV"], "int"),
-    ("DSRA", &["DSRA"], "int"),
-    ("DSRA32", &["DSRA32"], "int"),
-    ("DSRAV", &["DSRAV"], "int"),
-    ("DSRL", &["DSRL"], "int"),
-    ("DSRL32", &["DSRL32"], "int"),
-    ("DSRLV", &["DSRLV"], "int"),
-    ("SLL", &["SLL"], "int"),
-    ("SLLV", &["SLLV"], "int"),
-    ("SRA", &["SRA"], "int"),
-    ("SRAV", &["SRAV"], "int"),
-    ("SRL", &["SRL"], "int"),
-    ("SRLV", &["SRLV"], "int"),
-    ("SLT", &["SLT"], "int"),
-    ("SLTI", &["SLTI"], "int"),
-    ("SLTU", &["SLTU"], "int"),
-    ("SLTIU", &["SLTIU"], "int"),
-    ("MFHI", &["MFHI"], "int"),
-    ("MFLO", &["MFLO"], "int"),
-    ("MTHI", &["MTHI"], "int"),
-    ("MTLO", &["MTLO"], "int"),
-    ("MULT", &["MULT"], "int"),
-    ("MULTU", &["MULTU"], "int"),
-    ("DMULT", &["DMULT"], "int"),
-    ("DMULTU", &["DMULTU"], "int"),
-    ("DIV", &["DIV"], "int"),
-    ("DIVU", &["DIVU"], "int"),
-    ("DDIV", &["DDIV"], "int"),
-    ("DDIVU", &["DDIVU"], "int"),
-    ("J", &["J"], "branch"),
-    ("JAL", &["JAL"], "branch"),
-    ("JR", &["JR"], "branch"),
-    ("JALR", &["JALR"], "branch"),
-    ("BEQ", &["BEQ", "BEQL", "BNE", "BNEL"], "branch"),
-    (
-        "BCMPZ",
-        &[
-            "BLTZ", "BLTZAL", "BLTZL", "BLTZALL", "BGEZ", "BGEZAL", "BGEZL", "BGEZALL", "BGTZ",
-            "BGTZL", "BLEZ", "BLEZL",
-        ],
-        "branch",
-    ),
-    ("SYSCALL", &["SYSCALL"], "system"),
-    ("BREAK", &["BREAK"], "system"),
-    (
-        "TRAPREG",
-        &["TGE", "TGEU", "TLT", "TLTU", "TEQ", "TNE"],
-        "system",
-    ),
-    (
-        "TRAPIMM",
-        &["TEQI", "TNEI", "TGEI", "TGEIU", "TLTI", "TLTIU"],
-        "system",
-    ),
-    (
-        "Load",
-        &["LB", "LBU", "LH", "LHU", "LW", "LWU", "LD", "LL", "LLD"],
-        "ldst",
-    ),
-    ("Store", &["SB", "SH", "SW", "SD", "SC", "SCD"], "ldst"),
-    ("LWL", &["LWL"], "ldst"),
-    ("LWR", &["LWR"], "ldst"),
-    ("SWL", &["SWL"], "ldst"),
-    ("SWR", &["SWR"], "ldst"),
-    ("LDL", &["LDL"], "ldst"),
-    ("LDR", &["LDR"], "ldst"),
-    ("SDL", &["SDL"], "ldst"),
-    ("SDR", &["SDR"], "ldst"),
-    ("CACHE", &["CACHE"], "system"),
-    ("SYNC", &["SYNC"], "system"),
-    ("MFC0", &["MFC0", "DMFC0"], "system"),
-    ("MTC0", &["MTC0", "DMTC0"], "system"),
-    ("TLBWI", &["TLBWI"], "system"),
-    ("TLBWR", &["TLBWR"], "system"),
-    ("TLBR", &["TLBR"], "system"),
-    ("TLBP", &["TLBP"], "system"),
-    ("ERET", &["ERET"], "system"),
-];
 
 /// One encoding: a decode clause with a bit pattern.
 struct Enc {
@@ -257,6 +140,7 @@ fn build_group(m: &mut Model) -> Vec<String> {
 }
 
 fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String> {
+    let profile = cut::profile();
     let mut m = Model::load_defined(lib.as_ref(), src.as_ref(), SRC_FILES, DEFINES)
         .map_err(|e| e.to_string())?;
     let replaced = m
@@ -280,7 +164,8 @@ fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String
     for p in stage::clauses(&m, GROUP, 32) {
         let ctor = ctors.get(p.index).cloned().unwrap_or_default();
         let k = seen.entry(ctor.clone()).or_default();
-        let (mnemonic, class) = MNEMONICS
+        let (mnemonic, class) = profile
+            .mnemonics
             .iter()
             .find(|(c, _, _)| *c == ctor)
             .and_then(|(_, ns, class)| ns.get(*k).map(|n| (*n, *class)))
@@ -300,7 +185,7 @@ fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String
             value: p.value,
         });
     }
-    for (ctor, ns, _) in MNEMONICS {
+    for (ctor, ns, _) in profile.mnemonics {
         if seen.get(*ctor).copied().unwrap_or(0) != ns.len() {
             return Err(format!(
                 "{ctor}: the model's clauses and the mnemonics differ"
@@ -310,11 +195,25 @@ fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String
     Ok((m, encs))
 }
 
-const HEADER: &str = "//! Generated by relift-cpu-mips-gen from sail-cheri-mips 13a9c3fb0c3f8d320d4f4650a63d23d3a8b12724,\n//! the Sail library at c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456 and the VR4300 overlay\n//! `cpus/mips/gen/vr4300.sail`. Do not edit; see `cpus/mips/gen/README.md` to regenerate.\n//! Derived from sail-cheri-mips (BSD-2-Clause, see `NOTICE-sail-cheri-mips` next to this\n//! crate's manifest); the Sail library parts are BSD-2-Clause.\n";
+/// The header of every generated file.
+fn header(p: &Profile) -> String {
+    format!(
+        "//! Generated by relift-cpu-mips-gen from sail-cheri-mips 13a9c3fb0c3f8d320d4f4650a63d23d3a8b12724,\n\
+         //! the Sail library at c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456 and the {} overlay\n\
+         //! `cpus/mips/gen/{}.sail`. Do not edit; see `cpus/mips/gen/README.md` to regenerate.\n\
+         //! Derived from sail-cheri-mips (BSD-2-Clause, see `NOTICE-sail-cheri-mips` next to this\n\
+         //! crate's manifest); the Sail library parts are BSD-2-Clause.\n",
+        p.title, p.name
+    )
+}
 
-fn write_table(encs: &[Enc]) -> String {
-    let mut s = String::from(HEADER);
-    s.push_str("\n/// A VR4300 encoding: a decode clause of sail-cheri-mips or the overlay.\n");
+fn write_table(p: &Profile, encs: &[Enc]) -> String {
+    let mut s = header(p);
+    let _ = writeln!(
+        s,
+        "\n/// A {} encoding: a decode clause of sail-cheri-mips or the overlay.",
+        p.title
+    );
     s.push_str("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\npub enum Encoding {\n");
     for e in encs {
         let _ = writeln!(s, "    /// `{}`.", e.mnemonic);
@@ -338,11 +237,21 @@ fn write_table(encs: &[Enc]) -> String {
     s
 }
 
-fn write_class(m: &Model, encs: &[Enc], class: &str, fails: &mut Vec<(String, String)>) -> String {
-    let mut s = String::from(HEADER);
+fn write_class(
+    p: &Profile,
+    m: &Model,
+    encs: &[Enc],
+    class: &str,
+    fails: &mut Vec<(String, String)>,
+) -> String {
+    let mut s = header(p);
     s.push_str("\n#![allow(non_snake_case, unused, clippy::all)]\n\n");
     s.push_str("use relift_ir::{BinOp, Builder, CmpOp, UnOp, Width};\n\n");
-    s.push_str("use crate::decode::Encoding;\nuse crate::lift::rt::{self, Access, Exc, St, Target};\nuse crate::lift::{GenFn, LiftError};\n\n");
+    let r = p.module;
+    let _ = write!(
+        s,
+        "use {r}::decode::Encoding;\nuse {r}::lift::rt::{{self, Access, Exc, St, Target}};\nuse {r}::lift::{{GenFn, LiftError}};\n\n"
+    );
     let mut ok = Vec::new();
     for e in encs.iter().filter(|e| e.class == class) {
         match stage::template::<Mips>(m, e) {
@@ -370,6 +279,17 @@ fn real_main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    let p = match std::fs::read_to_string(&args[3])
+        .map_err(|e| e.to_string())
+        .and_then(|t| profile::of_overlay(&t))
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}: {e}", args[3]);
+            return ExitCode::FAILURE;
+        }
+    };
+    cut::set_profile(p);
     let (m, encs) = match load(&args[1], &args[2], &args[3]) {
         Ok(x) => x,
         Err(e) => {
@@ -381,7 +301,7 @@ fn real_main() -> ExitCode {
         "try" => {
             for n in &args[4..] {
                 match encs.iter().find(|e| &e.name == n || e.mnemonic == n) {
-                    None => println!("// {n}: no such VR4300 encoding"),
+                    None => println!("// {n}: no such {} encoding", p.title),
                     Some(e) => match stage::template::<Mips>(&m, e) {
                         Ok(t) => println!("{}", t.code),
                         Err(err) => println!("// {n}: {err}"),
@@ -393,8 +313,8 @@ fn real_main() -> ExitCode {
         "gen" => {
             let mut fails = Vec::new();
             let text = match args[4].as_str() {
-                "decode" => write_table(&encs),
-                c if CLASSES.contains(&c) => write_class(&m, &encs, c, &mut fails),
+                "decode" => write_table(p, &encs),
+                c if p.classes.contains(&c) => write_class(p, &m, &encs, c, &mut fails),
                 _ => return ExitCode::from(2),
             };
             for (n, e) in &fails {

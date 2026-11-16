@@ -2,7 +2,7 @@
 //! or jump with its delay slot, ending in a tick of one cycle per
 //! instruction and the exit its branch state gives.
 
-use relift_ir::{Builder, Exit, Flow, Next, Width};
+use relift_ir::{Builder, Exit, Flow, Next};
 
 use super::rt::{Core, Target};
 
@@ -68,7 +68,10 @@ pub(crate) fn body<S: Profile>(
     b.tick(len / 4);
     let c = st.core();
     c.finish(b);
-    let after = pc.wrapping_add(u64::from(len));
+    let after = match b.addr_width().bits() {
+        64 => pc.wrapping_add(u64::from(len)),
+        n => pc.wrapping_add(u64::from(len)) & ((1 << n) - 1),
+    };
     let next = match c.branch_target() {
         Some((Target::Const(t), None)) => Next::Const(t),
         Some((Target::Const(t), Some(cond))) => Next::Select {
@@ -78,7 +81,7 @@ pub(crate) fn body<S: Profile>(
         },
         Some((Target::Dynamic(v), None)) => Next::Dynamic(v),
         Some((Target::Dynamic(v), Some(cond))) => {
-            let k = b.konst(Width::W64, u128::from(after));
+            let k = b.konst(b.addr_width(), u128::from(after));
             Next::Dynamic(b.select(cond, v, k))
         }
         None => match c.jump() {

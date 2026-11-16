@@ -1,8 +1,12 @@
-//! The VR4300 cut line: the Sail functions and registers the generator
-//! replaces with calls on the lifter's `St` (`cpus/mips/src/vr4300/lift/rt.rs`).
-//! Everything VR4300-specific that can be said in Sail is in the overlay
-//! (`vr4300.sail`); what is here is guest state access, branches and delay
-//! slots, address translation, the bus, exceptions and the FPU.
+//! The MIPS cut line: the Sail functions and registers the generator
+//! replaces with calls on the profile lifter's `St` (the VR4300's is
+//! `cpus/mips/src/vr4300/lift/rt.rs`). Everything CPU-specific that can be
+//! said in Sail is in the profile's overlay (`vr4300.sail`, `r3000a.sail`);
+//! what is here is guest state access, branches and delay slots, address
+//! translation, the bus, exceptions and the FPU. A profile's `St` has the
+//! methods of the cuts its templates use; a cut a profile has no state for
+//! (the FPU on the R3000A) fails to compile there, so its overlay must not
+//! reach it.
 //!
 //! - GPR: `rGPR` and `wGPR` (`r0` reads 0 and drops writes, kept by `St`);
 //!   `rFPR` and `wFPR`, the 64-bit FPU registers as the FR=1 view.
@@ -24,14 +28,32 @@
 //! - CP0: `MIPS_Random`, `MIPS_Tlb`, `MIPS_Cache` and `MIPS_Cp0Sync`, state
 //!   and effects the runtime owns.
 
-use relift_cpu_mips::regs;
+use std::cell::Cell;
+
 use relift_sail::eval::{Cpu, E, Gen, R, fail};
 use relift_sail::stage::Stage;
 use relift_sail::value::{K, V};
 
-/// The VR4300 layer.
+use crate::profile::{self, Profile};
+
+/// The MIPS layer.
 #[derive(Default)]
 pub struct Mips;
+
+thread_local! {
+    /// The profile of the overlay being generated.
+    static PROFILE: Cell<&'static Profile> = const { Cell::new(&profile::VR4300) };
+}
+
+/// Generates for `p` from now on.
+pub fn set_profile(p: &'static Profile) {
+    PROFILE.with(|c| c.set(p));
+}
+
+/// The profile being generated.
+pub fn profile() -> &'static Profile {
+    PROFILE.with(Cell::get)
+}
 
 /// The model and overlay functions the cut replaces.
 const CUT: &[&str] = &[
@@ -78,9 +100,10 @@ fn sys_width(g: &Gen<'_, Mips>, name: &str) -> Option<u32> {
 
 /// Refuses a model register the lifter's register file has no slot for.
 fn has_slot(name: &str) -> R<()> {
-    match regs::slot(name) {
-        Some(_) => Ok(()),
-        None => fail(format!("the register file has no slot for {name}")),
+    if (profile().has_slot)(name) {
+        Ok(())
+    } else {
+        fail(format!("the register file has no slot for {name}"))
     }
 }
 
