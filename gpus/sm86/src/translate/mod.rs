@@ -7,20 +7,27 @@
 //! turn.
 
 mod cfg;
+mod denorm;
 mod float;
+mod host;
 mod int;
 mod io;
 mod mem;
 mod mufu;
 mod tex;
 
+pub use host::{
+    Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, GUEST_MEMORY_SET, GlobalPath,
+    HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC,
+    WarpPath,
+};
 pub use tex::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
     texture_binding,
 };
 
 use crate::program::{Program, Stage};
-use crate::spirv::{Module, glsl, op};
+use crate::spirv::{Module, op};
 use crate::{CBank, Inst, Operand, RegMods, Word};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -93,14 +100,19 @@ pub struct Interface {
     /// The fragment shader kills invocations (OpDemoteToHelperInvocation:
     /// the device needs shaderDemoteToHelperInvocation).
     pub kills: bool,
+    /// The fallbacks taken for the target host.
+    pub host: HostReport,
 }
 
 /// Translation options.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    /// The device the program is translated for.
+    pub host: HostProfile,
     /// Build MUFU RCP, RSQ, SQRT, EX2 and LG2 from the integer model of the
     /// SM86 unit instead of the GLSL operations, which only the NVIDIA driver
-    /// lowers to the same results (see the `mufu` module).
+    /// lowers to the same results (see the `mufu` module). Hosts other
+    /// than NVIDIA always use the model.
     pub exact_mufu: bool,
 }
 
@@ -163,6 +175,10 @@ pub(crate) struct Ctx {
     /// Function-scope `u32` variables beyond the registers, zeroed at entry.
     pub locals: Vec<u32>,
     pub exact_mufu: bool,
+    pub host: HostProfile,
+    pub denorm: denorm::State,
+    /// Helper functions, emitted after `main`.
+    pub funcs: Vec<u32>,
 }
 
 impl Ctx {
@@ -425,20 +441,25 @@ impl Ctx {
         })
     }
 
-    pub fn fsrc(&mut self, o: &Operand) -> Res<u32> {
+    /// The bits of a float operand with its sign modifiers applied as
+    /// integer operations, so that a denormal reaches the instruction
+    /// unchanged on a host that flushes float values.
+    pub fn fsrc_bits(&mut self, o: &Operand) -> Res<u32> {
         let (u, m) = self.raw(o)?;
         if m.not || m.swz != crate::Swz::None {
             return bad(format!("float operand mods {o}"));
         }
-        let mut f = self.as_float(u);
-        let t = self.f32t();
+        let ut = self.u32t();
+        let mut u = u;
         if m.abs {
-            f = self.ext(t, glsl::F_ABS, &[f]);
+            let k = self.m.c_u32(0x7fff_ffff);
+            u = self.m.emit(op::BITWISE_AND, ut, &[u, k]);
         }
         if m.neg {
-            f = self.m.emit(op::F_NEGATE, t, &[f]);
+            let k = self.m.c_u32(0x8000_0000);
+            u = self.m.emit(op::BITWISE_XOR, ut, &[u, k]);
         }
-        Ok(f)
+        Ok(u)
     }
 
     pub fn usrc(&mut self, o: &Operand) -> Res<u32> {
@@ -580,12 +601,12 @@ fn decode_all(p: &Program) -> Res<Code> {
 }
 
 /// Translates one program to a SPIR-V module with one entry point `main`,
-/// with the default [`Options`].
+/// for the default host.
 pub fn translate(p: &Program) -> Res<Shader> {
     translate_with(p, &Options::default())
 }
 
-/// Translates one program to a SPIR-V module with one entry point `main`.
+/// Translates one program for the device `o.host`.
 pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     let stage = p.stage();
     if !matches!(stage, Stage::Vertex | Stage::Fragment | Stage::Compute) {
@@ -618,8 +639,13 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
         tex: tex::Prep::new(&code.insts, &code.words),
         io: io::State::default(),
         locals: Vec::new(),
-        exact_mufu: o.exact_mufu,
+        exact_mufu: o.exact_mufu || !o.host.native_mufu(),
+        host: o.host.clone(),
+        denorm: denorm::State::default(),
+        funcs: Vec::new(),
     };
+    c.iface.host.host = o.host.name;
+    c.denorm_plan(&code.insts);
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);
     let main = c.m.id();
@@ -631,6 +657,8 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     c.m.emit_void(op::BRANCH, &[body]);
     cfg::emit(&mut c, &code, body)?;
     c.m.emit_void(op::FUNCTION_END, &[]);
+    let funcs = std::mem::take(&mut c.funcs);
+    c.m.body.extend(funcs);
     finish(c, main, entry, var_at)
 }
 
@@ -703,6 +731,7 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         }
         _ => {}
     }
+    c.denorm_mode(main);
     let iface = c.iface;
     Ok(Shader {
         stage,

@@ -52,7 +52,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
 }
 
 impl Ctx {
-    fn exact(&mut self, op: u16, a: u32, b: u32) -> u32 {
+    pub(crate) fn exact(&mut self, op: u16, a: u32, b: u32) -> u32 {
         let f = self.f32t();
         let r = self.m.emit(op, f, &[a, b]);
         self.m.deco(r, NO_CONTRACTION, &[]);
@@ -61,7 +61,7 @@ impl Ctx {
 
     /// Knuth's TwoSum: `(s, e)` with `s = a + b` rounded and `a + b = s + e`
     /// exactly.
-    fn two_sum(&mut self, a: u32, b: u32) -> (u32, u32) {
+    pub(crate) fn two_sum(&mut self, a: u32, b: u32) -> (u32, u32) {
         let s = self.exact(op::F_ADD, a, b);
         let bb = self.exact(op::F_SUB, s, a);
         let aa = self.exact(op::F_SUB, s, bb);
@@ -71,37 +71,41 @@ impl Ctx {
         (s, e)
     }
 
-    fn fma(&mut self, a: u32, b: u32, c: u32) -> u32 {
+    pub(crate) fn fma(&mut self, a: u32, b: u32, c: u32) -> u32 {
         let f = self.f32t();
         self.ext(f, glsl::FMA, &[a, b, c])
     }
 
-    fn fneg(&mut self, a: u32) -> u32 {
-        let f = self.f32t();
-        self.m.emit(op::F_NEGATE, f, &[a])
+    /// `-a` by its sign bit, which keeps a denormal on any host.
+    pub(crate) fn fneg(&mut self, a: u32) -> u32 {
+        let u = self.u32t();
+        let bits = self.as_bits(a);
+        let k = self.m.c_u32(0x8000_0000);
+        let n = self.m.emit(op::BITWISE_XOR, u, &[bits, k]);
+        self.as_float(n)
     }
 
-    fn is_inf(&mut self, a: u32) -> u32 {
+    pub(crate) fn is_inf(&mut self, a: u32) -> u32 {
         let b = self.boolt();
         self.m.emit(op::IS_INF, b, &[a])
     }
 
-    fn fcmp(&mut self, opc: u16, a: u32, b: u32) -> u32 {
+    pub(crate) fn fcmp(&mut self, opc: u16, a: u32, b: u32) -> u32 {
         let t = self.boolt();
         self.m.emit(opc, t, &[a, b])
     }
 
-    fn and(&mut self, a: u32, b: u32) -> u32 {
+    pub(crate) fn and(&mut self, a: u32, b: u32) -> u32 {
         let t = self.boolt();
         self.m.emit(op::LOGICAL_AND, t, &[a, b])
     }
 
-    fn or(&mut self, a: u32, b: u32) -> u32 {
+    pub(crate) fn or(&mut self, a: u32, b: u32) -> u32 {
         let t = self.boolt();
         self.m.emit(op::LOGICAL_OR, t, &[a, b])
     }
 
-    fn not(&mut self, a: u32) -> u32 {
+    pub(crate) fn not(&mut self, a: u32) -> u32 {
         let t = self.boolt();
         self.m.emit(op::LOGICAL_NOT, t, &[a])
     }
@@ -110,7 +114,7 @@ impl Ctx {
     /// the exact value lies above (`up`) or below (`down`) it. With `ftz` a
     /// zero stays zero and a step into the subnormal range gives a signed
     /// zero, as the hardware flushes after rounding.
-    fn directed(&mut self, s: u32, up: u32, down: u32, mode: Round, ftz: bool) -> u32 {
+    pub(crate) fn directed(&mut self, s: u32, up: u32, down: u32, mode: Round, ftz: bool) -> u32 {
         let u = self.u32t();
         let zero = self.m.c_f32(0);
         let pos = self.fcmp(op::F_ORD_GREATER_THAN, s, zero);
@@ -158,7 +162,7 @@ impl Ctx {
 
     /// `(above, below)`: whether the exact value lies above or below the
     /// rounded `s`, from the error term `e`, with the overflow case added.
-    fn error_sides(&mut self, s: u32, e: u32, finite_inputs: u32) -> (u32, u32) {
+    pub(crate) fn error_sides(&mut self, s: u32, e: u32, finite_inputs: u32) -> (u32, u32) {
         let zero = self.m.c_f32(0);
         let ep = self.fcmp(op::F_ORD_GREATER_THAN, e, zero);
         let en = self.fcmp(op::F_ORD_LESS_THAN, e, zero);
@@ -174,22 +178,26 @@ impl Ctx {
         (self.or(ep, ovf_up), self.or(en, ovf_down))
     }
 
-    fn all_finite(&mut self, xs: &[u32]) -> u32 {
+    /// None of `xs` is infinite or NaN.
+    pub(crate) fn all_finite(&mut self, xs: &[u32]) -> u32 {
         let mut acc = self.m.c_bool(true);
         for &x in xs {
             let i = self.is_inf(x);
+            let b = self.boolt();
+            let n = self.m.emit(op::IS_NAN, b, &[x]);
+            let i = self.or(i, n);
             let ni = self.not(i);
             acc = self.and(acc, ni);
         }
         acc
     }
 
-    fn i32t(&mut self) -> u32 {
+    pub(crate) fn i32t(&mut self) -> u32 {
         self.m.t_i32()
     }
 
     /// The unbiased exponent field of `x` as a signed integer.
-    fn fexp(&mut self, x: u32) -> u32 {
+    pub(crate) fn fexp(&mut self, x: u32) -> u32 {
         let u = self.u32t();
         let i = self.i32t();
         let bits = self.as_bits(x);
@@ -204,7 +212,7 @@ impl Ctx {
 
     /// `x * 2^k` in two steps, so an implementation that multiplies by
     /// `2^k` never overflows the power for `|k|` up to 254.
-    fn ldexp(&mut self, x: u32, k: u32) -> u32 {
+    pub(crate) fn ldexp(&mut self, x: u32, k: u32) -> u32 {
         let f = self.f32t();
         let i = self.i32t();
         let one = self.m.c_i32(1);
@@ -214,7 +222,7 @@ impl Ctx {
         self.ext(f, glsl::LDEXP, &[y, rest])
     }
 
-    fn ineg(&mut self, k: u32) -> u32 {
+    pub(crate) fn ineg(&mut self, k: u32) -> u32 {
         let i = self.i32t();
         self.m.emit(op::S_NEGATE, i, &[k])
     }
@@ -222,7 +230,7 @@ impl Ctx {
     /// `xs`, or a tiny normal value with the sign of `x` if scaling flushed a
     /// nonzero `x` to zero: it then only breaks ties, which keeps the sign
     /// of the error right.
-    fn keep_tiny(&mut self, xs: u32, x: u32) -> u32 {
+    pub(crate) fn keep_tiny(&mut self, xs: u32, x: u32) -> u32 {
         let u = self.u32t();
         let f = self.f32t();
         let zero = self.m.c_f32(0);
@@ -239,7 +247,7 @@ impl Ctx {
     }
 
     /// `x` is +0, counting a positive subnormal (flushed on input) as +0.
-    fn is_pos_zero(&mut self, x: u32) -> u32 {
+    pub(crate) fn is_pos_zero(&mut self, x: u32) -> u32 {
         let b = self.boolt();
         let u = self.u32t();
         let bits = self.as_bits(x);
@@ -253,7 +261,7 @@ impl Ctx {
     }
 
     /// Under RM an exact zero from operands that are not both +0 is -0.
-    fn rm_zero(&mut self, r: u32, exact_zero: u32, plus: u32) -> u32 {
+    pub(crate) fn rm_zero(&mut self, r: u32, exact_zero: u32, plus: u32) -> u32 {
         let f = self.f32t();
         let nplus = self.not(plus);
         let neg = self.and(exact_zero, nplus);
@@ -266,7 +274,15 @@ impl Ctx {
     /// zero, a directed rounding away from zero still reaches the smallest
     /// normal if the scaled nearest result `alt` (scaled by `2^-k`) is the
     /// largest 24-bit value below it and the exact value lies beyond `alt`.
-    fn ftz_tiny(&mut self, out: u32, r: u32, alt: u32, e: u32, k: u32, mode: Round) -> u32 {
+    pub(crate) fn ftz_tiny(
+        &mut self,
+        out: u32,
+        r: u32,
+        alt: u32,
+        e: u32,
+        k: u32,
+        mode: Round,
+    ) -> u32 {
         let f = self.f32t();
         let u = self.u32t();
         let zero = self.m.c_f32(0);
@@ -511,63 +527,52 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
     let mode = round_of(i);
     let ftz = i.has("FTZ");
-    let a = c.fsrc(&i.ops[1])?;
-    let b = c.fsrc(&i.ops[2])?;
+    let a = c.fsrc_bits(&i.ops[1])?;
+    let b = c.fsrc_bits(&i.ops[2])?;
     let r = match i.mnemonic {
-        "FADD" => c.fadd_round(a, b, mode, ftz),
+        "FADD" => c.fadd_exact(a, b, mode, ftz),
         "FMUL" => {
-            let r = c.fmul_round(a, b, mode, ftz);
             let scale = [
-                ("D2", 0.5f32),
-                ("D4", 0.25),
-                ("D8", 0.125),
-                ("M2", 2.0),
-                ("M4", 4.0),
-                ("M8", 8.0),
+                ("D2", -1),
+                ("D4", -2),
+                ("D8", -3),
+                ("M2", 1),
+                ("M4", 2),
+                ("M8", 3),
             ]
             .iter()
             .find(|(m, _)| i.has(m))
-            .map(|(_, s)| *s);
-            match scale {
-                Some(s) => {
-                    let k = c.m.c_f32(s.to_bits());
-                    c.exact(op::F_MUL, r, k)
-                }
-                None => r,
-            }
+            .map_or(0, |(_, s)| *s);
+            c.fmul_exact(a, b, mode, ftz, scale)
         }
         _ => {
-            let cc = c.fsrc(&i.ops[3])?;
-            c.ffma_round(a, b, cc, mode, ftz)
+            let cc = c.fsrc_bits(&i.ops[3])?;
+            c.ffma_exact(a, b, cc, mode, ftz)
         }
     };
-    let r = c.sat(r, i.has("SAT"));
-    let u = c.as_bits(r);
+    let u = c.sat_bits(r, i.has("SAT"));
     c.store_dst(&i.ops[0], u)
 }
 
 fn fmnmx(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ctx::mods_ok(i, &["FTZ"])?;
-    let f = c.f32t();
-    let a = c.fsrc(&i.ops[1])?;
-    let b = c.fsrc(&i.ops[2])?;
+    let u = c.u32t();
+    let a = c.fsrc_bits(&i.ops[1])?;
+    let b = c.fsrc_bits(&i.ops[2])?;
     let p = c.pred_operand(&i.ops[3])?;
-    let lo = c.ext(f, glsl::N_MIN, &[a, b]);
-    let hi = c.ext(f, glsl::N_MAX, &[a, b]);
-    let r = c.select(f, p, lo, hi);
-    let u = c.as_bits(r);
-    c.store_dst(&i.ops[0], u)
+    let (lo, hi) = c.fminmax(a, b, i.has("FTZ"));
+    let r = c.select(u, p, lo, hi);
+    c.store_dst(&i.ops[0], r)
 }
 
 fn fsel(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ctx::mods_ok(i, &["FTZ"])?;
-    let a = c.fsrc(&i.ops[1])?;
-    let b = c.fsrc(&i.ops[2])?;
+    let a = c.fsrc_bits(&i.ops[1])?;
+    let b = c.fsrc_bits(&i.ops[2])?;
     let p = c.pred_operand(&i.ops[3])?;
-    let f = c.f32t();
-    let r = c.select(f, p, a, b);
-    let u = c.as_bits(r);
-    c.store_dst(&i.ops[0], u)
+    let u = c.u32t();
+    let r = c.select(u, p, a, b);
+    c.store_dst(&i.ops[0], r)
 }
 
 fn cmp_parts(i: &Inst) -> Res<(&'static str, &'static str)> {
@@ -588,10 +593,10 @@ fn cmp_parts(i: &Inst) -> Res<(&'static str, &'static str)> {
 
 fn fsetp(c: &mut Ctx, i: &Inst) -> Res<()> {
     let (cmp, bop) = cmp_parts(i)?;
-    let a = c.fsrc(&i.ops[2])?;
-    let b = c.fsrc(&i.ops[3])?;
+    let a = c.fsrc_bits(&i.ops[2])?;
+    let b = c.fsrc_bits(&i.ops[3])?;
     let pc = c.pred_operand(&i.ops[4])?;
-    let r = c.fcompare(cmp, a, b)?;
+    let r = c.fcompare_exact(cmp, a, b, i.has("FTZ"))?;
     let nr = c.not(r);
     let p = c.bool_op(bop, r, pc)?;
     let q = c.bool_op(bop, nr, pc)?;
@@ -601,10 +606,10 @@ fn fsetp(c: &mut Ctx, i: &Inst) -> Res<()> {
 
 fn fset(c: &mut Ctx, i: &Inst) -> Res<()> {
     let (cmp, bop) = cmp_parts(i)?;
-    let a = c.fsrc(&i.ops[1])?;
-    let b = c.fsrc(&i.ops[2])?;
+    let a = c.fsrc_bits(&i.ops[1])?;
+    let b = c.fsrc_bits(&i.ops[2])?;
     let pc = c.pred_operand(&i.ops[3])?;
-    let r = c.fcompare(cmp, a, b)?;
+    let r = c.fcompare_exact(cmp, a, b, i.has("FTZ"))?;
     let p = c.bool_op(bop, r, pc)?;
     let one = if i.has("BF") {
         1.0f32.to_bits()
@@ -654,12 +659,11 @@ fn fswzadd(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ctx::mods_ok(i, &["FTZ", "NDV", "RZ", "RM", "RP"])?;
     let mode = round_of(i);
     let ftz = i.has("FTZ");
-    let a = c.fsrc(&i.ops[1])?;
-    let b = c.fsrc(&i.ops[2])?;
+    let a = c.fsrc_bits(&i.ops[1])?;
+    let b = c.fsrc_bits(&i.ops[2])?;
     let ctl = c.word.get(32, 8);
     let lane = quad_lane(c);
     let u = c.u32t();
-    let f = c.f32t();
     let two = c.m.c_u32(2);
     let three_l = c.m.c_u32(3);
     let rev = c.m.emit(op::I_SUB, u, &[three_l, lane]);
@@ -669,19 +673,19 @@ fn fswzadd(c: &mut Ctx, i: &Inst) -> Res<()> {
     let three = c.m.c_u32(3);
     let code = c.m.emit(op::BITWISE_AND, u, &[code, three]);
     let bt = c.boolt();
-    let na = c.fneg(a);
-    let nb = c.fneg(b);
-    let zero = c.m.c_f32(0);
+    let sign = c.m.c_u32(0x8000_0000);
+    let na = c.m.emit(op::BITWISE_XOR, u, &[a, sign]);
+    let nb = c.m.emit(op::BITWISE_XOR, u, &[b, sign]);
+    let zero = c.m.c_u32(0);
     let one_c = c.m.c_u32(1);
     let two_c = c.m.c_u32(2);
     let three_c = c.m.c_u32(3);
     let is1 = c.m.emit(op::I_EQUAL, bt, &[code, one_c]);
     let is2 = c.m.emit(op::I_EQUAL, bt, &[code, two_c]);
     let is3 = c.m.emit(op::I_EQUAL, bt, &[code, three_c]);
-    let x = c.select(f, is2, na, a);
-    let x = c.select(f, is3, zero, x);
-    let y = c.select(f, is1, nb, b);
-    let r = c.fadd_round(x, y, mode, ftz);
-    let bits = c.as_bits(r);
-    c.store_dst(&i.ops[0], bits)
+    let x = c.select(u, is2, na, a);
+    let x = c.select(u, is3, zero, x);
+    let y = c.select(u, is1, nb, b);
+    let r = c.fadd_exact(x, y, mode, ftz);
+    c.store_dst(&i.ops[0], r)
 }

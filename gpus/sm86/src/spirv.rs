@@ -271,6 +271,11 @@ impl Module {
     pub fn t_fn(&mut self, ret: u32) -> u32 {
         self.ty(op::TYPE_FUNCTION, &[ret])
     }
+    pub fn t_fn_args(&mut self, ret: u32, params: &[u32]) -> u32 {
+        let mut a = vec![ret];
+        a.extend_from_slice(params);
+        self.ty(op::TYPE_FUNCTION, &a)
+    }
     pub fn t_array(&mut self, t: u32, n: u32) -> u32 {
         let len = self.c_u32(n);
         self.ty(op::TYPE_ARRAY, &[t, len])

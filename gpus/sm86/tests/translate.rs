@@ -306,7 +306,13 @@ fn mufu_forms_translate_with_and_without_the_model() {
             let want = format!("MUFU.{name}{}", if half { ".F16" } else { "" });
             assert!(shown.starts_with(&want), "{shown}");
             for exact_mufu in [false, true] {
-                let r = translate_with(&p, &Options { exact_mufu });
+                let r = translate_with(
+                    &p,
+                    &Options {
+                        exact_mufu,
+                        ..Options::default()
+                    },
+                );
                 if half && name.ends_with("64H") {
                     assert!(r.is_err(), "{want}");
                     continue;
