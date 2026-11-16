@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Process;
 import android.util.Log;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
@@ -20,7 +21,8 @@ import org.libsdl.app.SDLActivity;
 /**
  * SDL's activity plus launch arguments and environment variables from the
  * intent, the haptic tick of the on-screen controller, the game's settings
- * pages over the pause sheet and the GPU driver the game starts with.
+ * pages over the pause sheet, the GPU driver the game starts with, and the
+ * game data import when the start-up check finds the data missing.
  */
 public class MainActivity extends SDLActivity implements Runnable, OnBackInvokedCallback, Ui.Host {
     static final int NEXT_PAUSE = 0;
@@ -139,6 +141,43 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Called by the runtime on its main thread with the start-up check of the
+     * game data: "ok", or "bad", the count of bad files and the first one,
+     * tab-separated. On "bad" the game closes and the import opens; the
+     * runtime does not start the game.
+     */
+    public void reliftDataChecked(String report) {
+        String[] f = report.split("\t", -1);
+        GameData.Status s = new GameData.Status();
+        s.source = GameData.Status.START;
+        s.ok = "ok".equals(f[0]);
+        if (!s.ok) {
+            s.bad = f.length > 1 ? Integer.parseInt(f[1]) : 1;
+            s.first = f.length > 2 ? f[2].replaceFirst("^romfs/", "") : "";
+        }
+        GameData.Status old = DataPages.status(this);
+        if (s.ok || old == null || !DataPages.deleted(old)) {
+            s.write(DataPages.statusFile(this));
+        }
+        if (!s.ok) {
+            Log.i(Drivers.TAG, "game data: " + report.replace('\t', ' ') + "; opening the import");
+            leaveFor(null);
+        }
+    }
+
+    /** Opens the game data import with action and ends the game's process. */
+    private void leaveFor(String action) {
+        DataActivity.open(this, action);
+        finishAndRemoveTask();
+        Process.killProcess(Process.myPid());
+    }
+
+    @Override
+    public void openData(String action) {
+        leaveFor(action);
     }
 
     @Override

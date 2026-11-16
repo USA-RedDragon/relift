@@ -9,7 +9,8 @@ import android.window.OnBackInvokedDispatcher;
 /**
  * Game settings, opened from the app's Game settings shortcut (a long press
  * on the game's icon) while the game is not running: the same pages, without
- * the restart banner; a choice applies at the next start.
+ * the restart banner; a choice applies at the next start. Import again opens
+ * the import (DataActivity) at once, with no game to close.
  */
 public class SettingsActivity extends Activity implements Ui.Host {
     private Ui ui;
@@ -51,5 +52,14 @@ public class SettingsActivity extends Activity implements Ui.Host {
     @Override
     public String loaded() {
         return null;
+    }
+
+    @Override
+    public void openData(String action) {
+        if (DataActivity.ACTION_DELETE.equals(action)) {
+            DataPages.delete(this, ui::render);
+            return;
+        }
+        DataActivity.open(this, action);
     }
 }

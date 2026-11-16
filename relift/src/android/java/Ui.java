@@ -32,9 +32,10 @@ import java.util.Locale;
 
 /**
  * The settings pages of a game: Settings, Graphics, GPU driver, Manage GPU
- * drivers, Get drivers and their messages, drawn over the paused game, or,
- * from the Game settings shortcut, on their own (launcher mode, no game
- * running). Sizes are the mockups' pixels at 2.625 pixels per dp.
+ * drivers, Get drivers, Game data and their messages, drawn over the paused
+ * game, or, from the Game settings shortcut, on their own (launcher mode, no
+ * game running); and the game data import's own pages (DataActivity). Sizes
+ * are the mockups' pixels at 2.625 pixels per dp.
  */
 final class Ui {
     static final int BG = 0xff14161a;
@@ -60,9 +61,18 @@ final class Ui {
 
         /** The driver the running game loaded: "system", a package folder, or null (none yet, or no game running). */
         String loaded();
+
+        /**
+         * Opens the game data import with an action of DataActivity
+         * (ACTION_IMPORT or ACTION_DELETE); a running game closes first.
+         */
+        void openData(String action);
     }
 
-    enum Page { HOME, SETTINGS, GRAPHICS, DRIVER, MANAGE, GET }
+    enum Page {
+        HOME, SETTINGS, GRAPHICS, DRIVER, MANAGE, GET, DATA, DATA_CHECK,
+        NEEDED, CHOOSE, LOOKING, READY, SPACE, COPYING, STOPPED, DONE
+    }
 
     enum Style { PRIMARY, SECONDARY, DANGER, GHOST }
 
@@ -98,6 +108,7 @@ final class Ui {
     int percent;
     Catalog.Cancel cancel;
     boolean probing;
+    final DataPages data;
 
     Ui(Activity act, Drivers drivers, Host host, boolean launcher) {
         this.act = act;
@@ -108,6 +119,7 @@ final class Ui {
         CharSequence l = act.getApplicationInfo().loadLabel(act.getPackageManager());
         this.game = l == null ? "this game" : l.toString();
         this.k = act.getResources().getDisplayMetrics().density / 2.625f;
+        this.data = new DataPages(this);
         root = new FrameLayout(act);
         root.setClickable(true);
         root.setFocusable(true);
@@ -153,7 +165,9 @@ final class Ui {
         stack.add(first);
         scrolls.clear();
         root.setVisibility(View.VISIBLE);
-        checkSystem();
+        if (first.ordinal() < Page.DATA.ordinal()) {
+            checkSystem();
+        }
         render();
     }
 
@@ -230,6 +244,13 @@ final class Ui {
     }
 
 
+    /** Updates a page in progress in place, or renders the page again. */
+    void refresh() {
+        if (stack.isEmpty() || !data.refresh(stack.get(stack.size() - 1))) {
+            render();
+        }
+    }
+
     void render() {
         if (!showing()) {
             return;
@@ -269,7 +290,7 @@ final class Ui {
             if (launcher && !land) {
                 page.setPadding(0, px(70), 0, 0);
             }
-            page.addView(header(title(p), p == Page.DRIVER && land));
+            page.addView(header(title(p), p == Page.DRIVER && land, data.back(p)));
             build(page, p, land);
             sheet.addView(page, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT));
@@ -291,7 +312,8 @@ final class Ui {
             case GRAPHICS: return "Graphics";
             case DRIVER: return "GPU driver";
             case MANAGE: return "Manage GPU drivers";
-            default: return "Get drivers";
+            case GET: return "Get drivers";
+            default: return data.title(p);
         }
     }
 
@@ -305,7 +327,8 @@ final class Ui {
             case GRAPHICS: graphics(a); break;
             case DRIVER: driver(a, b, land); break;
             case MANAGE: manage(a, b, land); break;
-            default: get(a, b, land); break;
+            case GET: get(a, b, land); break;
+            default: data.build(p, a, b, land); break;
         }
         if (!land) {
             page.addView(scroll(a.box, px(40), px(40)), new LinearLayout.LayoutParams(
@@ -374,6 +397,18 @@ final class Ui {
 
 
     void home(Col a, Col b) {
+        a.add(hero(), 26);
+        b.label("Graphics");
+        driverRow(b);
+        if (data.has()) {
+            b.label("Data");
+            b.add(data.row(), 26);
+        }
+        b.note("Applies the next time you start this game.");
+    }
+
+    /** The game's card: its icon, title, platform and version. */
+    View hero() {
         LinearLayout card = new LinearLayout(act);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
@@ -396,16 +431,16 @@ final class Ui {
             t.addView(s);
         }
         card.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        a.add(card, 26);
-        b.label("Graphics");
-        driverRow(b);
-        b.note("Applies the next time you start this game.");
+        return card;
     }
 
     void settings(Col a, Col b) {
         a.add(row("Graphics", list("GPU driver"), Kind.NAV, false, null, () -> push(Page.GRAPHICS)), 26);
         b.add(row("On-screen controller", list("Opacity, size, layout"), Kind.NAV, false, null,
                 () -> close(MainActivity.NEXT_CONTROLLER)), 26);
+        if (data.has()) {
+            b.add(data.row(), 26);
+        }
     }
 
     void graphics(Col a) {
@@ -867,7 +902,11 @@ final class Ui {
         }
 
         void note(String s) {
-            TextView t = text(s, 30, SUB, false);
+            note(s, 30);
+        }
+
+        void note(String s, float size) {
+            TextView t = text(s, size, SUB, false);
             t.setPadding(px(20), 0, px(20), 0);
             t.setLineSpacing(px(12), 1f);
             add(t, 18);
@@ -972,11 +1011,16 @@ final class Ui {
     }
 
     View banner(String title, String body, Btn... buttons) {
+        return banner(ACC, title, body, buttons);
+    }
+
+    /** A banner in the color of its kind: ACC for information, AMBER for a warning, RED for an error. */
+    View banner(int color, String title, String body, Btn... buttons) {
         LinearLayout f = new LinearLayout(act);
         f.setOrientation(LinearLayout.HORIZONTAL);
-        f.setBackground(round(CARD, 28, ACC, 4));
+        f.setBackground(round(CARD, 28, color, 4));
         View bar = new View(act);
-        bar.setBackground(round(ACC, 6, 0, 0));
+        bar.setBackground(round(color, 6, 0, 0));
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(px(12), ViewGroup.LayoutParams.MATCH_PARENT);
         bl.topMargin = px(34);
         bl.bottomMargin = px(34);
@@ -1000,7 +1044,9 @@ final class Ui {
             v.setPadding(px(35), 0, px(35), 0);
             row.addView(v, lp);
         }
-        c.addView(row);
+        if (buttons.length > 0) {
+            c.addView(row);
+        }
         f.addView(c, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         return f;
     }
@@ -1071,22 +1117,24 @@ final class Ui {
         return t;
     }
 
-    View header(String title, boolean dots) {
+    View header(String title, boolean dots, boolean withBack) {
         LinearLayout v = vbox();
         FrameLayout bar = new FrameLayout(act);
-        TextView back = text("\u2039", 80, Color.WHITE, false);
-        back.setGravity(Gravity.CENTER);
-        back.setOnClickListener(x -> back());
-        back.setContentDescription("Back");
-        FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(px(100), ViewGroup.LayoutParams.MATCH_PARENT);
-        bar.addView(back, bl);
+        if (withBack) {
+            TextView back = text("\u2039", 80, Color.WHITE, false);
+            back.setGravity(Gravity.CENTER);
+            back.setOnClickListener(x -> back());
+            back.setContentDescription("Back");
+            FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(px(100), ViewGroup.LayoutParams.MATCH_PARENT);
+            bar.addView(back, bl);
+        }
         TextView t = text(title, 52, Color.WHITE, true);
         t.setGravity(Gravity.CENTER_VERTICAL);
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
-        tl.leftMargin = px(100);
+        tl.leftMargin = px(withBack ? 100 : 50);
         tl.rightMargin = px(dots ? 120 : 30);
         bar.addView(t, tl);
         if (dots) {

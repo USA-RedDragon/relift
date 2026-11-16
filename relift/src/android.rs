@@ -20,7 +20,8 @@ pub const MIN_API: u32 = 30;
 
 /// The activity class of the APK: SDL's activity plus launch arguments and
 /// environment variables from the intent, the haptic tick of the on-screen
-/// controller, the game's settings pages, and the manifest's landscape
+/// controller, the game's settings pages, the game data import when the
+/// start-up check fails, and the manifest's landscape
 /// orientation kept (SDL asks for any orientation the user allows when its
 /// window is resizable, which put the game in portrait on a device held
 /// upright).
@@ -28,7 +29,7 @@ const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 /// The Java sources of the app, compiled into `classes.dex` with SDL3's
 /// own classes.
-const JAVA: [(&str, &str); 7] = [
+const JAVA: [(&str, &str); 12] = [
     (
         "MainActivity",
         include_str!("android/java/MainActivity.java"),
@@ -42,6 +43,14 @@ const JAVA: [(&str, &str); 7] = [
     ("Catalog", include_str!("android/java/Catalog.java")),
     ("GpuProbe", include_str!("android/java/GpuProbe.java")),
     ("Restarter", include_str!("android/java/Restarter.java")),
+    ("GameData", include_str!("android/java/GameData.java")),
+    ("DataPages", include_str!("android/java/DataPages.java")),
+    ("DataImport", include_str!("android/java/DataImport.java")),
+    ("DataService", include_str!("android/java/DataService.java")),
+    (
+        "DataActivity",
+        include_str!("android/java/DataActivity.java"),
+    ),
 ];
 
 /// The drivers Get drivers offers, shipped as the asset `gpu_drivers.json`
@@ -503,7 +512,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
   <uses-feature android:glEsVersion="0x00020000"/>
   <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
   <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
-  {internet}<application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+  {internet}{data_permissions}<application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
     <meta-data android:name="relift.gpu_driver" android:value="{vulkan}"/>
     <meta-data android:name="relift.platform" android:value="{platform}"/>
     <meta-data android:name="relift.game_version" android:value="{version}"/>
@@ -517,7 +526,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
     <activity android:name="dev.relift.app.SettingsActivity" android:exported="false" android:taskAffinity="{package}.settings" android:excludeFromRecents="true" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
     <activity android:name="dev.relift.app.Restarter" android:exported="false" android:process=":restart" android:taskAffinity="{package}.restart" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
     <service android:name="dev.relift.app.GpuProbe" android:exported="false" android:process=":gpucheck"/>
-  </application>
+{data}  </application>
 </manifest>
 "#,
         package = a.package,
@@ -527,6 +536,16 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
         } else {
             ""
         },
+        data_permissions = if a.data_manifest.is_some() {
+            DATA_PERMISSIONS
+        } else {
+            ""
+        },
+        data = if a.data_manifest.is_some() {
+            data_components(a.package)
+        } else {
+            String::new()
+        },
         vulkan = a.about.vulkan,
         platform = xml(&a.about.platform),
         version = xml(&a.about.version),
@@ -535,6 +554,25 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
         } else {
             " android:icon=\"@mipmap/ic_launcher\""
         },
+    )
+}
+
+/// What the game data import needs: a foreground service that keeps copying
+/// when the player leaves the app, its notification and a wake lock.
+const DATA_PERMISSIONS: &str =
+    "<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>
+  <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_DATA_SYNC\"/>
+  <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>
+  <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>
+  ";
+
+/// The game data import's activity and service, in a process of their own
+/// so the copy outlives the game's.
+fn data_components(package: &str) -> String {
+    format!(
+        r#"    <activity android:name="dev.relift.app.DataActivity" android:exported="false" android:process=":data" android:launchMode="singleTask" android:taskAffinity="{package}.data" android:screenOrientation="behind" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
+    <service android:name="dev.relift.app.DataService" android:exported="false" android:process=":data" android:foregroundServiceType="dataSync"/>
+"#
     )
 }
 
@@ -1097,6 +1135,18 @@ mod tests {
         assert!(m.contains("android.permission.INTERNET"));
         assert!(m.contains("android:name=\"relift.gpu_driver\" android:value=\"true\""));
         assert!(m.contains("android:process=\":gpucheck\""));
+        assert!(!m.contains("DataService"));
+        let with_data = Apk {
+            data_manifest: Some(b""),
+            ..a
+        };
+        let m = manifest(&with_data, &sdk, true);
+        assert!(m.contains("android:name=\"dev.relift.app.DataService\" android:exported=\"false\" android:process=\":data\" android:foregroundServiceType=\"dataSync\""));
+        assert!(m.contains(
+            "android:taskAffinity=\"dev.relift.game.x.data\" android:screenOrientation=\"behind\""
+        ));
+        assert!(m.contains("android.permission.FOREGROUND_SERVICE_DATA_SYNC"));
+        assert!(m.contains("android.permission.POST_NOTIFICATIONS"));
     }
 
     #[test]
