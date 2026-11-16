@@ -60,6 +60,7 @@
 //! register handles, SUQUERY, SUATOM.CAS and wrapping INC and DEC are not
 //! translated; sparse fault predicates read as resident.
 
+use super::mem::tuple_reg;
 use super::{Ctx, Res, TEXTURE_SET, bad};
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
@@ -1616,9 +1617,7 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
             let u = c.u32t();
             for k in 0..n {
                 let x = c.m.emit(op::COMPOSITE_EXTRACT, u, &[v, k as u32]);
-                if rd != 255 {
-                    c.store_reg(rd + k as u8, x);
-                }
+                c.store_reg(tuple_reg(rd, k as u32)?, x);
             }
         }
         return Ok(());
@@ -1650,9 +1649,7 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
                     let s = c.m.emit(op::BIT_FIELD_S_EXTRACT, i, &[xi, o, wd]);
                     x = c.m.emit(op::BITCAST, u, &[s]);
                 }
-                if rd != 255 {
-                    c.store_reg(rd + k as u8, x);
-                }
+                c.store_reg(tuple_reg(rd, k as u32)?, x);
             }
         } else {
             c.cap(56);

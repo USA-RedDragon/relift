@@ -118,8 +118,7 @@ fn atom(c: &mut Ctx, i: &Inst) -> Res<()> {
     };
     let addr = c.global_address(&a)?;
     let old = global_rmw(c, addr, &s, x, y)?;
-    write_old(c, d, &s, old);
-    Ok(())
+    write_old(c, d, &s, old)
 }
 
 fn red(c: &mut Ctx, i: &Inst) -> Res<()> {
@@ -158,8 +157,7 @@ fn atoms(c: &mut Ctx, i: &Inst) -> Res<()> {
     let yv = y.map(|y| c.load_reg(y));
     let scope = c.m.c_u32(SCOPE_WORKGROUP);
     let old = rmw(c, ptr, scope, &s, u, xv, yv);
-    write_old(c, d, &s, old);
-    Ok(())
+    write_old(c, d, &s, old)
 }
 
 fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<u32> {
@@ -191,9 +189,9 @@ fn global_rmw(c: &mut Ctx, addr: u32, s: &Spec, x: u8, y: Option<u8>) -> Res<u32
     Ok(rmw(c, ptr, scope, s, t, xv, yv))
 }
 
-fn write_old(c: &mut Ctx, d: u8, s: &Spec, old: u32) {
+fn write_old(c: &mut Ctx, d: u8, s: &Spec, old: u32) -> Res<()> {
     if d == 255 {
-        return;
+        return Ok(());
     }
     if s.ty.wide() {
         let u = c.u32t();
@@ -201,9 +199,9 @@ fn write_old(c: &mut Ctx, d: u8, s: &Spec, old: u32) {
         let pair = c.m.emit(op::BITCAST, v2, &[old]);
         let lo = c.m.emit(op::COMPOSITE_EXTRACT, u, &[pair, 0]);
         let hi = c.m.emit(op::COMPOSITE_EXTRACT, u, &[pair, 1]);
-        store_words(c, d, &[lo, hi]);
+        store_words(c, d, &[lo, hi])
     } else {
-        store_words(c, d, &[old]);
+        store_words(c, d, &[old])
     }
 }
 

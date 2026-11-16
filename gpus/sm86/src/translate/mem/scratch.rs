@@ -10,7 +10,7 @@
 //! window in bytes (four times [`LOCAL_SPEC`]'s value). Sub-word stores are atomic AND/OR on the containing word so that
 //! lanes writing neighbouring bytes do not lose each other's updates.
 
-use super::{Addr, Size, addr_operand, mods_of, spv, store_words};
+use super::{Addr, Size, addr_operand, mods_of, reg_at, spv, store_words, tuple_reg};
 use crate::Inst;
 use crate::spirv::op;
 use crate::translate::{Ctx, Res, bad};
@@ -121,7 +121,7 @@ impl Ctx {
 
 fn load(c: &mut Ctx, i: &Inst, sp: Space) -> Res<()> {
     let m = mods_of(i)?;
-    let d = Ctx::dst_reg(&i.ops[0])?;
+    let d = reg_at(i, 2, 0)?;
     let a = addr_operand(i, 1)?;
     let addr = c.scratch_address(&a, m.size.bytes(), sp)?;
     if d == 255 {
@@ -132,22 +132,20 @@ fn load(c: &mut Ctx, i: &Inst, sp: Space) -> Res<()> {
         let p = c.scratch_word(sp, addr, 0);
         let w = c.m.emit(op::LOAD, u, &[p]);
         let v = c.extract_sub(w, addr, m.size);
-        store_words(c, d, &[v]);
-        return Ok(());
+        return store_words(c, d, &[v]);
     }
     let mut vals = Vec::new();
     for k in 0..m.size.words() {
         let p = c.scratch_word(sp, addr, k);
         vals.push(c.m.emit(op::LOAD, u, &[p]));
     }
-    store_words(c, d, &vals);
-    Ok(())
+    store_words(c, d, &vals)
 }
 
 fn store(c: &mut Ctx, i: &Inst, sp: Space) -> Res<()> {
     let m = mods_of(i)?;
+    let s = reg_at(i, 2, 1)?;
     let a = addr_operand(i, 0)?;
-    let s = Ctx::dst_reg(&i.ops[1])?;
     let addr = c.scratch_address(&a, m.size.bytes(), sp)?;
     let u = c.u32t();
     if m.size.sub() {
@@ -169,11 +167,7 @@ fn store(c: &mut Ctx, i: &Inst, sp: Space) -> Res<()> {
         return Ok(());
     }
     for k in 0..m.size.words() {
-        let v = if s == 255 {
-            c.m.c_u32(0)
-        } else {
-            c.load_reg(s + k as u8)
-        };
+        let v = c.load_reg(tuple_reg(s, k)?);
         let p = c.scratch_word(sp, addr, k);
         c.m.emit_void(op::STORE, &[p, v]);
     }
@@ -197,7 +191,7 @@ fn ldsm(c: &mut Ctx, i: &Inst) -> Res<()> {
             _ => return bad(format!("LDSM.{m}")),
         }
     }
-    let d = Ctx::dst_reg(&i.ops[0])?;
+    let d = reg_at(i, 2, 0)?;
     let a = addr_operand(i, 1)?;
     let addr = c.scratch_address(&a, 16, Space::Shared)?;
     let u = c.u32t();
@@ -237,6 +231,5 @@ fn ldsm(c: &mut Ctx, i: &Inst) -> Res<()> {
         };
         vals.push(v);
     }
-    store_words(c, d, &vals);
-    Ok(())
+    store_words(c, d, &vals)
 }

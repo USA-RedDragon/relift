@@ -371,8 +371,7 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
             })
             .collect()
     };
-    store_words(c, d, &vals);
-    Ok(())
+    store_words(c, d, &vals)
 }
 
 /// Register `k` of the register tuple that starts at `base`: every word of
@@ -385,28 +384,30 @@ pub(crate) fn tuple_reg(base: u8, k: u32) -> Res<u8> {
         .map_err(|_| super::Unsupported(format!("register tuple R{base} past RZ")))
 }
 
-pub(crate) fn store_words(c: &mut Ctx, d: u8, vals: &[u32]) {
-    if d == 255 {
-        return;
-    }
+pub(crate) fn store_words(c: &mut Ctx, d: u8, vals: &[u32]) -> Res<()> {
     for (k, &w) in vals.iter().enumerate() {
-        c.store_reg(d + k as u8, w);
+        c.store_reg(tuple_reg(d, k as u32)?, w);
     }
+    Ok(())
+}
+
+/// The register operand `k` of a memory instruction with `n` operands.
+pub(crate) fn reg_at(i: &Inst, n: usize, k: usize) -> Res<u8> {
+    if i.ops.len() != n {
+        return bad(format!("{} operands", i.mnemonic));
+    }
+    Ctx::dst_reg(&i.ops[k])
 }
 
 fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     let m = mods_of(i)?;
+    let s = reg_at(i, 2, 1)?;
     let a = addr_operand(i, 0)?;
-    let s = Ctx::dst_reg(&i.ops[1])?;
     let addr = c.global_address(&a)?;
     let n = m.size.words();
     let mut parts = Vec::new();
     for k in 0..n {
-        parts.push(if s == 255 {
-            c.m.c_u32(0)
-        } else {
-            c.load_reg(s + k as u8)
-        });
+        parts.push(c.load_reg(tuple_reg(s, k)?));
     }
     if m.size.sub() {
         let u = c.u32t();

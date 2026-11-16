@@ -293,3 +293,14 @@ fn wide_atomics_read_both_words_of_rz_as_zero() {
     }
     assert!(rz_pair, "the RZ pair is not zero in both words");
 }
+
+#[test]
+fn tuples_past_rz_are_rejected() {
+    for (d, ok) in [(252, true), (253, false)] {
+        let mut b: Vec<u8> = ldg(6, d, 4, 0).to_vec();
+        finish(&mut b);
+        let p = Program::parse(&b);
+        assert!(text(&p)[0].ends_with(&format!(".128 R{d}, [R4]")));
+        assert_eq!(translate(&p).is_ok(), ok, "R{d}");
+    }
+}
