@@ -32,7 +32,6 @@ const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const GAP: u64 = 256 << 10;
 const SPAN: u64 = 32 << 20;
-const CTRL: [u8; 4] = [0x34, 0x12, 0x76, 0x98];
 const CODE: [&str; 8] = [
     include_str!("scan.rs"),
     include_str!("carve.rs"),
@@ -274,7 +273,7 @@ fn sniff(head: &[u8]) -> Option<Class> {
         || head.starts_with(b"FSHA")
         || head.starts_with(b"BNSH")
         || head.starts_with(b"BAHS")
-        || head.get(0x10..0x14) == Some(&CTRL)
+        || head.get(0x10..0x14) == Some(&carve::PROGRAM_MAGIC)
     {
         return Some(Class::Container);
     }
@@ -343,7 +342,7 @@ impl Ctx<'_> {
             out.container("bfsha", 1);
         } else if b.starts_with(b"BAHS") {
             out.container("bahs", 1);
-        } else if b.get(0x10..0x14) == Some(&CTRL) {
+        } else if b.get(0x10..0x14) == Some(&carve::PROGRAM_MAGIC) {
             out.container("sead-bin", 1);
         }
         out.container("bnsh", find_all(b, b"BNSH").count() as u64);

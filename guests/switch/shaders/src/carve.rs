@@ -1,6 +1,12 @@
 //! Finding shader programs in raw bytes: the `BRA self` terminator every
 //! program ends with, a walk back over instructions, and for graphics
 //! programs the 0x80-byte shader program header (SPH) before the code.
+//!
+//! GLSLC writes each program after a header that starts with the magic
+//! 0x98761234 and holds, at 0x30, the offset of the code from the header.
+//! Part of that header is not zero, so the walk back can take its tail for
+//! instructions; where such a header sits before a compute find and names
+//! a code start inside it, the find starts there instead.
 
 use crate::sha256_hex;
 
@@ -15,6 +21,12 @@ const SPH_LEN: usize = 0x80;
 /// The longest walk back from a terminator, in 16-byte lines.
 pub const MAX_LINES: usize = 65536;
 const SPH_SLACK: usize = SPH_LEN + 16 * 8;
+/// The magic of a GLSLC program header.
+pub const PROGRAM_MAGIC: [u8; 4] = [0x34, 0x12, 0x76, 0x98];
+/// Where a GLSLC program header holds the code offset.
+const CODE_OFFSET_AT: usize = 0x30;
+/// The longest GLSLC program header looked for.
+const PROGRAM_HEADER_MAX: usize = 0x200;
 
 /// Which kind of program a carve found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -143,6 +155,24 @@ fn sph_before(b: &[u8], first: usize) -> Option<usize> {
         .find(|&q| sph_ok(b, q))
 }
 
+/// The code start a GLSLC program header before `first` names, when it
+/// lies after `first`, before `end` and on a line of the find: the header
+/// starts on a word boundary within [`PROGRAM_HEADER_MAX`] bytes before it
+/// (its code offset need not be a whole number of lines).
+fn header_code(b: &[u8], first: usize, end: usize) -> Option<usize> {
+    (4..=PROGRAM_HEADER_MAX)
+        .step_by(4)
+        .filter_map(|back| first.checked_sub(back))
+        .find_map(|r| {
+            if b.get(r..r + 4)? != PROGRAM_MAGIC {
+                return None;
+            }
+            let off = word0(b, r + CODE_OFFSET_AT)? as usize;
+            let code = r.checked_add(off)?;
+            (code > first && code < end && (code - first).is_multiple_of(LINE)).then_some(code)
+        })
+}
+
 /// Where the walk back from the instruction line at `p` over a run of
 /// NOP lines continues: a run that follows an instruction line and does
 /// not sit right after an SPH is alignment inside a program, so the walk
@@ -162,7 +192,8 @@ fn past_nops(b: &[u8], p: usize) -> Option<usize> {
 /// instruction lines (and over NOP lines inside a program) to the first
 /// line that is zero, a NOP run after a terminator or an SPH, another
 /// terminator or past the start; look for an SPH within 0x80 to 0x100
-/// bytes before that line; without one the program is compute. A walk
+/// bytes before that line; without one the program is compute, starting
+/// where a GLSLC program header before it says its code starts. A walk
 /// that reaches [`MAX_LINES`] marks the find [`Found::cut`].
 pub fn carve(b: &[u8]) -> Vec<Found> {
     let mut out = Vec::new();
@@ -194,6 +225,9 @@ pub fn carve(b: &[u8]) -> Vec<Found> {
             found.start = q;
             found.code = q + SPH_LEN;
             found.kind = Kind::Graphics;
+        } else if let Some(code) = header_code(b, first, found.end) {
+            found.start = code;
+            found.code = code;
         }
         out.push(found);
     }

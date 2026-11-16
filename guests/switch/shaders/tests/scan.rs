@@ -284,6 +284,42 @@ fn carve_stops_at_nops_after_an_sph() {
     assert_eq!(f[0].start, 0x100);
 }
 
+/// A GLSLC program header: magic, the code offset at 0x30, and lines that
+/// are not zero up to the code, as the walk back would take for code.
+fn with_program_header(c: &[u8], off: usize) -> Vec<u8> {
+    let mut h = vec![0u8; off];
+    assert!(off >= 0x40);
+    h[..4].copy_from_slice(&[0x34, 0x12, 0x76, 0x98]);
+    h[0x30..0x34].copy_from_slice(&(off as u32).to_le_bytes());
+    for l in (0x90..off - 8).step_by(16) {
+        h[l + 8] = 0xe0;
+    }
+    h.extend_from_slice(c);
+    h
+}
+
+#[test]
+fn carve_starts_a_compute_program_where_its_header_says() {
+    for (off, pad) in [(0xd8 + 8, 0), (0xe0, 0), (0xd8, 8)] {
+        let c = compute(9);
+        let mut b = vec![0u8; pad];
+        b.extend(blob(&[&with_program_header(&c, off)]));
+        let f = carve(&b);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].kind, Kind::Compute);
+        assert_eq!(&b[f[0].start..f[0].end], &c[..], "code offset {off:#x}");
+        assert_eq!(f[0].code, f[0].start);
+    }
+    let mut h = with_program_header(&compute(9), 0xe0);
+    h[0x30] = 0x10;
+    let b = blob(&[&h]);
+    assert_eq!(
+        carve(&b)[0].start,
+        0x100 + 0x90,
+        "an offset before the find is ignored"
+    );
+}
+
 #[test]
 fn carve_ignores_a_header_that_is_not_one() {
     let mut g = graphics(1, 1);
