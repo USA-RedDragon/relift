@@ -184,6 +184,9 @@ pub(crate) struct Ctx {
     pub funcs: Vec<u32>,
     /// The last clock value read, low and high words.
     pub clock_vars: Option<(u32, u32)>,
+    /// Per instruction, whether control flow may reach it with only part
+    /// of the warp (see `mem::lanes::divergent`).
+    pub divergent: Vec<bool>,
 }
 
 impl Ctx {
@@ -533,7 +536,7 @@ impl Ctx {
 
     fn inst(&mut self, i: &Inst) -> Res<()> {
         match i.mnemonic {
-            "NOP" | "BSSY" | "BSYNC" | "BREAK" | "WARPSYNC" | "DEPBAR" | "YIELD" | "BMOV" => {
+            "NOP" | "BSSY" | "BSYNC" | "BREAK" | "DEPBAR" | "YIELD" => {
                 return Ok(());
             }
             _ => {}
@@ -656,6 +659,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
         denorm: denorm::State::default(),
         funcs: Vec::new(),
         clock_vars: None,
+        divergent: Vec::new(),
     };
     c.iface.host.host = o.host.name;
     c.denorm_plan(&code.insts);

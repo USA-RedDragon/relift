@@ -6,8 +6,15 @@
 //! breaks. A loop with several exits stores which one it took in a variable
 //! and breaks; the code after the loop dispatches on it. EXIT is not a
 //! block: every edge to it returns (after the epilogue) in place. KILL is
-//! not control flow at all (see the io module). BSSY/BSYNC only mark the reconvergence that the structure already
-//! gives, so they emit nothing.
+//! not control flow at all (see the io module).
+//!
+//! BSSY/BSYNC mark where the guest's lanes come together again. They emit
+//! nothing: where a program asks for maximal reconvergence (see the lanes
+//! module), lanes come together at the merges this structure picks, so
+//! each BSSY's target must lie on the chain of merges that starts at its
+//! block, no BREAK may let lanes run warp operations before their BSYNC,
+//! and no BMOV may change a barrier; anything else is rejected. Elsewhere
+//! which lanes run together cannot be observed.
 //!
 //! `CALL.REL` subroutines are inlined at every call site: a block is a pair
 //! of the call stack and its first instruction, and `RET` continues after
@@ -979,11 +986,177 @@ impl Emit<'_> {
     }
 }
 
+impl Graph {
+    /// The innermost loop that holds `b`.
+    fn innermost(&self, b: usize) -> Option<usize> {
+        self.headers
+            .iter()
+            .filter(|(_, (body, _))| body[b])
+            .min_by_key(|(_, (body, _))| body.iter().filter(|x| **x).count())
+            .map(|(h, _)| *h)
+    }
+
+    /// Where the lanes that run loop `h` come together after it.
+    fn after_loop(&mut self, h: usize) -> Option<usize> {
+        let (body, exits) = self.headers[&h].clone();
+        match exits.as_slice() {
+            [] => None,
+            [e] => Some(*e),
+            _ => {
+                let outer = self
+                    .headers
+                    .iter()
+                    .filter(|(o, (b, _))| **o != h && b[h])
+                    .min_by_key(|(_, (b, _))| b.iter().filter(|x| **x).count())
+                    .map(|(o, _)| *o);
+                let mut p = self.ipdom(outer, h);
+                for _ in 0..self.blocks.len() {
+                    match p {
+                        Some(x) if body[x] => p = self.ipdom(outer, x),
+                        _ => break,
+                    }
+                }
+                p
+            }
+        }
+    }
+
+    /// The next block where the lanes that run `b` are together again.
+    fn next_merge(&mut self, b: usize, entering: bool) -> Option<usize> {
+        if entering && self.headers.contains_key(&b) {
+            return self.after_loop(b);
+        }
+        match &self.blocks[b].term {
+            Term::Jump(t) => (!terminal(*t)).then_some(*t),
+            _ => {
+                let ctx = self.innermost(b);
+                match self.ipdom(ctx, b) {
+                    Some(p) => Some(p),
+                    None => ctx,
+                }
+            }
+        }
+    }
+
+    fn holds(&self, b: usize, k: usize) -> bool {
+        self.blocks[b].first <= k && k <= self.blocks[b].end
+    }
+
+    /// The instructions run after block `b` and before instruction `t`:
+    /// the blocks reached from the successors of `b` without passing `t`,
+    /// as ranges of instructions.
+    fn reach_before(&self, b: usize, t: usize) -> Vec<std::ops::Range<usize>> {
+        let mut seen = vec![false; self.blocks.len()];
+        let mut work = self.succs[b].clone();
+        let mut out = Vec::new();
+        while let Some(u) = work.pop() {
+            if seen[u] {
+                continue;
+            }
+            seen[u] = true;
+            let blk = &self.blocks[u];
+            if self.holds(u, t) {
+                out.push(blk.first..t);
+                continue;
+            }
+            out.push(blk.first..blk.end);
+            work.extend(self.succs[u].iter().copied());
+        }
+        out
+    }
+
+    /// Checks that the structure reconverges the guest's lanes where its
+    /// BSSY/BSYNC regions do (see the module documentation).
+    fn check_reconvergence(&mut self, code: &Code) -> Res<()> {
+        let insts = &code.insts;
+        for b in 0..self.blocks.len() {
+            let blk = self.blocks[b].clone();
+            for k in blk.first..blk.end {
+                let i = &insts[k];
+                if super::mem::lanes::writes_barrier(i) {
+                    return bad(format!(
+                        "BMOV changes a convergence barrier at {:#x}",
+                        16 * k
+                    ));
+                }
+                match i.mnemonic {
+                    "BSSY" => {
+                        let Some(Operand::Target(t)) = i.ops.last() else {
+                            return bad("BSSY without a target");
+                        };
+                        let t = (*t / 16) as usize;
+                        if !self.merges_at(b, t) {
+                            return bad(format!(
+                                "BSSY at {:#x} reconverges at {:#x}, not at a merge",
+                                16 * k,
+                                16 * t
+                            ));
+                        }
+                    }
+                    "BREAK" => {
+                        let Some(n) = i.ops.last().and_then(super::mem::lanes::barrier_name) else {
+                            return bad("BREAK without a barrier");
+                        };
+                        let bssy = (0..k).rev().find(|&j| {
+                            insts[j].mnemonic == "BSSY"
+                                && insts[j]
+                                    .ops
+                                    .first()
+                                    .and_then(super::mem::lanes::barrier_name)
+                                    == Some(n)
+                        });
+                        let Some(Operand::Target(t)) = bssy.and_then(|j| insts[j].ops.last())
+                        else {
+                            return bad("BREAK without its BSSY");
+                        };
+                        let t = (*t / 16) as usize;
+                        let after =
+                            (k + 1..blk.end).chain(self.reach_before(b, t).into_iter().flatten());
+                        let warp = after
+                            .into_iter()
+                            .find(|&j| super::mem::lanes::reads_lanes(&insts[j]));
+                        if let Some(j) = warp {
+                            return bad(format!(
+                                "warp operation at {:#x} between BREAK and its BSYNC",
+                                16 * j
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Instruction `t` lies on the chain of merges that starts at `b`, or
+    /// the lanes of `b` never reach it.
+    fn merges_at(&mut self, b: usize, t: usize) -> bool {
+        let mut cur = Some(b);
+        let mut entering = false;
+        for _ in 0..2 * self.blocks.len() + 2 {
+            let Some(x) = cur else { break };
+            if self.holds(x, t) {
+                return true;
+            }
+            cur = self.next_merge(x, entering);
+            entering = true;
+        }
+        !self
+            .reach_before(b, usize::MAX)
+            .iter()
+            .any(|r| r.contains(&t) || r.end == t)
+    }
+}
+
 /// Emits the program's body, starting with label `first`.
 pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32) -> Res<()> {
     super::io::prescan(c, &code.insts);
     let blocks = build(code)?;
-    let g = Graph::new(blocks)?;
+    let mut g = Graph::new(blocks)?;
+    if c.iface.host.max_reconvergence {
+        g.check_reconvergence(code)?;
+    }
     let mut e = Emit {
         g,
         code,

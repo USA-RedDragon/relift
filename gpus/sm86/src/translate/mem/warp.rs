@@ -13,6 +13,7 @@ use crate::{Inst, Operand};
 
 const SCOPE_DEVICE: u32 = 1;
 const SCOPE_WORKGROUP: u32 = 2;
+const SCOPE_SUBGROUP: u32 = 3;
 const SEM_ACQUIRE_RELEASE: u32 = 0x8;
 const SEM_UNIFORM: u32 = 0x40;
 const SEM_WORKGROUP: u32 = 0x100;
@@ -27,6 +28,8 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "REDUX" => redux(c, i),
         "MATCH" => match_(c, i),
         "BAR" => bar(c, i),
+        "BMOV" => bmov(c, i),
+        "WARPSYNC" => warpsync(c, i),
         "MEMBAR" => membar(c, i),
         "ERRBAR" | "CCTL" | "CCTLL" | "CCTLT" | "LDGDEPBAR" => Ok(()),
         _ => return None,
@@ -310,6 +313,59 @@ fn match_(c: &mut Ctx, i: &Inst) -> Res<()> {
         let u = c.u32t();
         let m = c.select(u, eq, all, zero);
         c.store_dst(&i.ops[1], m)?;
+    }
+    Ok(())
+}
+
+/// BMOV. Moves between convergence barriers, and from a register or an
+/// immediate into one, change only where lanes wait at BSYNC; the control
+/// flow module rejects them where that matters. `MACTIVE` reads the active
+/// lanes. Every other thread state (exited and killed lanes, the trap and
+/// at-exit state, the barrier stack) and a barrier read into a register
+/// are not modeled.
+fn bmov(c: &mut Ctx, i: &Inst) -> Res<()> {
+    use super::lanes::barrier_name;
+    let [d, s] = i.ops.as_slice() else {
+        return bad(format!("BMOV {i}"));
+    };
+    let plain = matches!(
+        s,
+        Operand::Reg(..) | Operand::UReg(..) | Operand::Hex(_) | Operand::Int(_)
+    );
+    let active = matches!(s, Operand::Sym(x) if x == "MACTIVE");
+    match d {
+        Operand::Reg(255, _) if barrier_name(s).is_some() => Ok(()),
+        d if barrier_name(d).is_some() && (barrier_name(s).is_some() || plain || active) => Ok(()),
+        Operand::Reg(..) if active => {
+            let m = c.active();
+            c.store_dst(d, m)
+        }
+        _ => bad(format!("BMOV {d}, {s}")),
+    }
+}
+
+/// WARPSYNC waits for the lanes of its mask to reach it and orders their
+/// memory accesses. Where the warp has not diverged the lanes are already
+/// together; in compute a subgroup barrier orders their shared memory. In
+/// divergent flow the wait can take lanes from another path, which no host
+/// can do, so it is reported.
+fn warpsync(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let k = (c.pc / 16) as usize;
+    let guarded = matches!(
+        i.guard,
+        Some(Operand::Pred(p, _)) | Some(Operand::UPred(p, _)) if p != 7
+    );
+    if guarded || c.divergent.get(k).copied().unwrap_or(true) {
+        let why = "WARPSYNC in divergent control flow";
+        if !c.iface.host.inexact.iter().any(|s| s == why) {
+            c.iface.host.inexact.push(why.into());
+        }
+        return Ok(());
+    }
+    if c.stage == crate::program::Stage::Compute {
+        let exec = c.m.c_u32(SCOPE_SUBGROUP);
+        let sem = c.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_WORKGROUP);
+        c.m.emit_void(op::CONTROL_BARRIER, &[exec, exec, sem]);
     }
     Ok(())
 }

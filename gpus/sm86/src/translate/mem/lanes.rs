@@ -69,6 +69,7 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
     match i.mnemonic {
         "SHFL" => Some(shfl_is_quad(i)),
         "VOTE" | "VOTEU" | "REDUX" | "MATCH" => Some(false),
+        "BMOV" if reads_active(i) => Some(false),
         "S2R" | "S2UR" | "CS2R" => match i.ops.get(1) {
             Some(Operand::Sym(s))
                 if matches!(
@@ -91,7 +92,30 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
 
 /// A warp operation whose result depends on which lanes are active.
 pub(crate) fn reads_lanes(i: &Inst) -> bool {
-    matches!(i.mnemonic, "SHFL" | "VOTE" | "VOTEU" | "REDUX" | "MATCH")
+    matches!(i.mnemonic, "SHFL" | "VOTE" | "VOTEU" | "REDUX" | "MATCH") || reads_active(i)
+}
+
+/// `BMOV R, MACTIVE`: the mask of the active lanes.
+pub(crate) fn reads_active(i: &Inst) -> bool {
+    i.mnemonic == "BMOV"
+        && matches!(i.ops.as_slice(), [Operand::Reg(r, _), Operand::Sym(s)] if *r != 255 && s == "MACTIVE")
+}
+
+/// `Bn`, a convergence barrier register, as BMOV names it.
+pub(crate) fn barrier_name(o: &Operand) -> Option<u8> {
+    match o {
+        Operand::Sym(s) => s.strip_prefix('B')?.parse().ok().filter(|n| *n < 16),
+        Operand::Barrier(n) => Some(*n),
+        _ => None,
+    }
+}
+
+/// A BMOV that changes a convergence barrier: a write to `Bn`, or a
+/// `.CLEAR` read of one.
+pub(crate) fn writes_barrier(i: &Inst) -> bool {
+    i.mnemonic == "BMOV"
+        && (i.ops.first().and_then(barrier_name).is_some()
+            || (i.has("CLEAR") && i.ops.get(1).and_then(barrier_name).is_some()))
 }
 
 fn branch_target(i: &Inst) -> Option<usize> {
@@ -135,6 +159,7 @@ impl Ctx {
     /// subgroups and where the operations sit. `fast_paths` counts the
     /// BRA.DIV and BRA.CONV taken as converged.
     pub(crate) fn warp_plan(&mut self, insts: &[Inst], fast_paths: usize) {
+        self.divergent = divergent(insts);
         let ops: Vec<(usize, bool)> = insts
             .iter()
             .enumerate()
@@ -199,7 +224,7 @@ impl Ctx {
     /// that invocations which split come together again where the guest's
     /// lanes do, so on a host without it the program is inexact.
     fn reconvergence_plan(&mut self, insts: &[Inst], fast_paths: usize) {
-        let div = divergent(insts);
+        let div = &self.divergent;
         let first = (0..insts.len()).find(|&k| {
             div[k]
                 || matches!(

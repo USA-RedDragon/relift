@@ -248,6 +248,150 @@ fn compute_loop_is_structured() {
     assert!(spirv_has(&s.spirv, 246), "no OpLoopMerge");
 }
 
+fn bssy(n: u64, at: usize, to: usize) -> [u8; 16] {
+    word(0x145, 4, &[(16, 4, n), (34, 48, rel(at, to))])
+}
+
+fn bsync(n: u64) -> [u8; 16] {
+    word(0x141, 4, &[(16, 4, n), (87, 3, 7)])
+}
+
+fn vote_any() -> [u8; 16] {
+    word(0x006, 1, &[(16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)])
+}
+
+/// `BSSY B0` to `to`, then `@P0 BRA 3` over a MOV, then a VOTE when
+/// `warp`.
+fn region(to: usize, warp: bool) -> Program {
+    let mut b = Vec::new();
+    b.extend(bssy(0, 0, to));
+    b.extend(bra(1, 3, Some(0)));
+    b.extend(mov_imm(1, 1));
+    b.extend(bsync(0));
+    if warp {
+        b.extend(vote_any());
+    }
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+#[test]
+fn bssy_must_reconverge_at_the_merge() {
+    let p = region(3, true);
+    assert_eq!(text(&p)[0], "BSSY B0, 0x30");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("bssy_region", &s.spirv);
+    assert!(s.interface.host.max_reconvergence);
+    let p = region(2, true);
+    let e = translate(&p).err().map(|e| e.0);
+    assert_eq!(
+        e.as_deref(),
+        Some("BSSY at 0x0 reconverges at 0x20, not at a merge")
+    );
+    translate(&region(2, false)).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// A loop left through `@P0 BREAK B0; @P0 BRA 4`, with a VOTE after the
+/// loop and before (`early`) or after the BSYNC.
+fn break_loop(early: bool) -> Program {
+    let mut b = Vec::new();
+    b.extend(bssy(0, 0, if early { 5 } else { 4 }));
+    b.extend(word(0x142, 4, &[(12, 3, 0), (16, 4, 0), (87, 3, 7)]));
+    b.extend(bra(2, 4, Some(0)));
+    b.extend(bra(3, 1, None));
+    if early {
+        b.extend(vote_any());
+        b.extend(bsync(0));
+    } else {
+        b.extend(bsync(0));
+        b.extend(vote_any());
+    }
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+#[test]
+fn break_must_not_skip_warp_operations() {
+    let p = break_loop(false);
+    assert_eq!(text(&p)[1], "@P0 BREAK B0");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("break_loop", &s.spirv);
+    assert!(s.interface.host.max_reconvergence);
+    let e = translate(&break_loop(true)).err().map(|e| e.0);
+    assert_eq!(
+        e.as_deref(),
+        Some("warp operation at 0x40 between BREAK and its BSYNC")
+    );
+}
+
+fn bmov_from(dst: u64, state: u64) -> [u8; 16] {
+    word(0x155, 1, &[(16, 8, dst), (24, 6, state), (87, 3, 7)])
+}
+
+#[test]
+fn bmov_reads_the_active_mask_and_rejects_other_state() {
+    let mut b = Vec::new();
+    b.extend(bmov_from(2, 26));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "BMOV.32 R2, MACTIVE");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("bmov_active", &s.spirv);
+    assert_eq!(s.interface.host.warp_ops, 1);
+    assert!(spirv_has(&s.spirv, 339), "no OpGroupNonUniformBallot");
+    for (state, name) in [(24, "MEXITED"), (16, "THREAD_STATE_ENUM.0"), (1, "B1")] {
+        let mut b = Vec::new();
+        b.extend(bmov_from(2, state));
+        exit_and_halt(&mut b);
+        let e = translate(&Program::parse(&b)).err().map(|e| e.0);
+        assert_eq!(e, Some(format!("BMOV R2, {name}")));
+    }
+    let mut b = Vec::new();
+    b.extend(word(0x156, 1, &[(24, 6, 1), (32, 8, 2), (87, 3, 7)]));
+    b.extend(word(
+        0x006,
+        1,
+        &[(12, 3, 0), (16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)],
+    ));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "BMOV.32 B1, R2");
+    let e = translate(&p).err().map(|e| e.0);
+    assert_eq!(
+        e.as_deref(),
+        Some("BMOV changes a convergence barrier at 0x0")
+    );
+}
+
+#[test]
+fn warpsync_orders_lanes_or_is_reported() {
+    let sync = |guard: u64| {
+        word(
+            0x148,
+            4,
+            &[(12, 3, guard), (32, 32, 0xffff_ffff), (87, 3, 7)],
+        )
+    };
+    let mut b = Vec::new();
+    b.extend(sync(7));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "WARPSYNC 0xffffffff");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("warpsync", &s.spirv);
+    assert!(spirv_has(&s.spirv, 224), "no OpControlBarrier");
+    assert!(s.interface.host.inexact.is_empty());
+    let mut b = Vec::new();
+    b.extend(sync(0));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!spirv_has(&s.spirv, 224));
+    assert_eq!(
+        s.interface.host.inexact,
+        vec!["WARPSYNC in divergent control flow".to_string()]
+    );
+}
+
 #[test]
 fn guarded_exit_returns_in_place() {
     let mut b = Vec::new();
