@@ -116,11 +116,41 @@ fn zlib_stored(b: &[u8]) -> Vec<u8> {
     v
 }
 
-fn scratch(name: &str) -> PathBuf {
+/// A test's own directory under the target's temporary directory, removed
+/// when the test passes and kept for a look when it fails.
+struct Scratch(PathBuf);
+
+impl std::ops::Deref for Scratch {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
+fn scratch(name: &str) -> Scratch {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("shaders-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the scratch dir is creatable");
-    dir
+    Scratch(dir)
+}
+
+#[test]
+fn scratch_dirs_are_removed_after_a_test() {
+    let root = scratch("gone");
+    put(&root, &[("a/b".to_string(), vec![1])]);
+    let path = root.to_path_buf();
+    assert!(path.join("a/b").is_file());
+    drop(root);
+    assert!(!path.exists());
 }
 
 fn put(root: &Path, files: &[(String, Vec<u8>)]) {
