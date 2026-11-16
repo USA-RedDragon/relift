@@ -31,6 +31,10 @@ static void print_cpu(const rl_nds_arm *k)
             k->stopped == 1 ? "halted" : k->stopped == 2 ? "stopped" : "running", (unsigned long long)s->swis,
             (unsigned long long)s->unknown_swis, (unsigned long long)s->irqs, (unsigned long long)s->variants,
             (unsigned long long)s->unfound, (unsigned long long)s->compares);
+    const rl_ctx *c = k->c;
+    fprintf(stderr, "relift-nds: %s pc %08x (last sync), cpsr %08x, r0 %08x r1 %08x r2 %08x r3 %08x r4 %08x r5 %08x sp %08x lr %08x\n",
+            k->id == RL_NDS_ARM9 ? "arm9" : "arm7", c->pc, rl_arm32_cpsr(c), c->r[0], c->r[1], c->r[2], c->r[3], c->r[4], c->r[5],
+            c->r[13], c->r[14]);
 }
 
 /** @brief The end of a run: the peeked words on stdout, the counters on stderr. */
