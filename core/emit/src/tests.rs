@@ -613,9 +613,63 @@ fn guards_that_leave_tail_call_the_function_the_frontend_gives() {
     let out = emit(&Leaving, &[f], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("if (RL_UNLIKELY(v2)) {\n        RL_STORE();\n        RL_MUSTTAIL return toy_other(c, UINT64_C(0x200), 0x55u)(c, mem);\n    }"),
+        s.contains("if (RL_UNLIKELY(v2)) {\n        RL_MUSTTAIL return toy_other(c, UINT64_C(0x200), 0x55u)(c, mem);\n    }"),
         "{s}"
     );
+    assert!(!s.contains("RL_STORE"), "{s}");
+}
+
+#[test]
+fn guards_that_leave_store_the_dirty_registers_first() {
+    let mut a = relift_ir::Builder::new(Toy.regs(), relift_ir::Width::W64, 0x1fc);
+    let one = a.konst(relift_ir::Width::W64, 1);
+    a.set(relift_ir::Reg(2), one);
+    let set = a.jump(4, 0x200);
+    let mut b = relift_ir::Builder::new(Toy.regs(), relift_ir::Width::W64, 0x200);
+    let x = b.get(relift_ir::Reg(1));
+    let z = b.konst(relift_ir::Width::W64, 0);
+    let ne = b.cmp(relift_ir::CmpOp::Ne, x, z);
+    b.guard(ne, 9);
+    let blk = b.jump(4, 0x204);
+    let ret = Toy.lift(&word(0x03, 0, 0), 0x204).expect("lifts");
+    let f = Function {
+        entry: 0x1fc,
+        name: "F_1fc".into(),
+        guest_name: None,
+        span: 12,
+        insts: BTreeMap::from([
+            (
+                0x1fc,
+                Insn::Lifted {
+                    block: &set,
+                    raw: 0x44,
+                },
+            ),
+            (
+                0x200,
+                Insn::Lifted {
+                    block: &blk,
+                    raw: 0x55,
+                },
+            ),
+            (
+                0x204,
+                Insn::Lifted {
+                    block: &ret,
+                    raw: 0,
+                },
+            ),
+        ]),
+        tables: BTreeMap::new(),
+        pads: BTreeSet::new(),
+    };
+    let out = emit(&Leaving, &[f], &[], &Options::default());
+    let s = shard(&out);
+    assert!(
+        s.contains("{\n        c->x[2] = r2;\n        RL_MUSTTAIL return toy_other(c, UINT64_C(0x200), 0x55u)(c, mem);\n    }"),
+        "{s}"
+    );
+    assert!(!s.contains("RL_STORE"), "{s}");
 }
 
 #[test]

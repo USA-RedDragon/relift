@@ -950,9 +950,11 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     _ => val(c),
                 };
                 if let Some(to) = cx.fe.guard_exit(code, b.pc, raw) {
+                    let st = cx.store(cx.plan.dirty_in(b.pc));
                     let _ = writeln!(
                         s,
-                        "    if (RL_UNLIKELY({cond})) {{\n        RL_STORE();\n        RL_MUSTTAIL return {to}(c, mem);\n    }}"
+                        "    if (RL_UNLIKELY({cond})) {{\n{}        RL_MUSTTAIL return {to}(c, mem);\n    }}",
+                        Ctx::line(&st, "        ")
                     );
                     continue;
                 }
