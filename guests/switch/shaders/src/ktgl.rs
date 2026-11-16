@@ -15,13 +15,16 @@ const FLAG_ZLIB_U16: u32 = 0x40_0000;
 const FLAG_LZ4: u32 = 0x50_0000;
 const MAX_INFLATED: usize = 1 << 30;
 
+const HEADER: usize = 0x30;
+const LOC_LEN: usize = 12;
+
 fn u64_at(b: &[u8], at: usize) -> Option<u64> {
-    let s = b.get(at..at + 8)?;
+    let s = b.get(at..at.checked_add(8)?)?;
     Some(u64::from_le_bytes(s.try_into().ok()?))
 }
 
 fn u32_at(b: &[u8], at: usize) -> Option<u32> {
-    let s = b.get(at..at + 4)?;
+    let s = b.get(at..at.checked_add(4)?)?;
     Some(u32::from_le_bytes(s.try_into().ok()?))
 }
 
@@ -51,18 +54,38 @@ pub struct Location {
     pub size: u32,
 }
 
-/// The locations of the shader entries of an `.rdb`.
-pub fn shader_locations(rdb: &[u8]) -> Vec<Location> {
-    let mut out = Vec::new();
+/// The shader entries of an `.rdb`, and where the walk stopped early.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Locations {
+    /// The shader entries found.
+    pub found: Vec<Location>,
+    /// Why the walk stopped before the end of the `.rdb`: an entry whose
+    /// length is shorter than its header or runs past the file.
+    pub bad: Option<&'static str>,
+}
+
+/// The locations of the shader entries of an `.rdb`. Every entry must
+/// hold its header and end inside the file; the walk stops at the first
+/// one that does not.
+pub fn shader_locations(rdb: &[u8]) -> Locations {
+    let mut out = Locations::default();
     let mut from = 0;
     while let Some(at) = find(rdb, MAGIC, from) {
         let (Some(elen), Some(stored)) = (u64_at(rdb, at + 8), u64_at(rdb, at + 16)) else {
+            out.bad = Some("KTGL: an .rdb entry header is cut off");
             break;
         };
-        let (Ok(elen), Ok(stored)) = (usize::try_from(elen), usize::try_from(stored)) else {
+        let end = usize::try_from(elen).ok().and_then(|e| at.checked_add(e));
+        let Some(end) = end.filter(|&e| e >= at + HEADER && e <= rdb.len()) else {
+            out.bad =
+                Some("KTGL: an .rdb entry length is shorter than its header or runs past the file");
             break;
         };
-        if let (Some(ty), Some(loc_at)) = (u32_at(rdb, at + 0x28), (at + elen).checked_sub(stored))
+        let loc_at = usize::try_from(stored)
+            .ok()
+            .and_then(|s| end.checked_sub(s))
+            .filter(|&l| l >= at + HEADER && l + LOC_LEN <= end);
+        if let (Some(ty), Some(loc_at)) = (u32_at(rdb, at + 0x28), loc_at)
             && matches!(ty, TYPE_S2G | TYPE_DOK)
             && let (Some(offset), Some(size), Some(idx)) = (
                 u32_at(rdb, loc_at + 2),
@@ -70,13 +93,13 @@ pub fn shader_locations(rdb: &[u8]) -> Vec<Location> {
                 rdb.get(loc_at + 10..loc_at + 12),
             )
         {
-            out.push(Location {
+            out.found.push(Location {
                 index: u16::from_le_bytes([idx[0], idx[1]]),
                 offset,
                 size,
             });
         }
-        from = at + elen.max(1);
+        from = end;
     }
     out
 }
@@ -138,7 +161,7 @@ pub fn inflate_entry(e: &[u8]) -> Result<Vec<u8>> {
             if n == 0 {
                 break;
             }
-            let Some(chunk) = data.get(p + 4..p + 4 + n) else {
+            let Some(chunk) = (p + 4).checked_add(n).and_then(|end| data.get(p + 4..end)) else {
                 return malformed("KTGL: a chunk runs past the entry");
             };
             out.extend_from_slice(&inflate::zlib(chunk, MAX_INFLATED - out.len())?.0);

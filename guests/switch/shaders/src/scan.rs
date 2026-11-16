@@ -23,7 +23,7 @@ use crate::sha256_hex;
 use crate::source::{SNIFF_WHOLE, Source, SourceFile};
 use crate::{ktgl, sarc, zst};
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const GAP: u64 = 256 << 10;
@@ -434,6 +434,7 @@ impl Ctx<'_> {
 struct Plan {
     rows: Vec<(u8, u32, u32, u32)>,
     unmapped: u64,
+    bad: Option<String>,
 }
 
 fn plan_rdb(cx: &Ctx, rdb: &SourceFile, rdx: &SourceFile) -> Result<Plan> {
@@ -456,11 +457,13 @@ fn plan_rdb(cx: &Ctx, rdb: &SourceFile, rdx: &SourceFile) -> Result<Plan> {
         .into_iter()
         .map(|(i, m, id)| (i, (m, id)))
         .collect();
+    let locs = ktgl::shader_locations(&cx.source.read(rdb)?);
     let mut plan = Plan {
         rows: Vec::new(),
         unmapped: 0,
+        bad: locs.bad.map(str::to_string),
     };
-    for l in ktgl::shader_locations(&cx.source.read(rdb)?) {
+    for l in locs.found {
         match map.get(&l.index) {
             Some(&(m, id)) => plan.rows.push((m, id, l.offset, l.size)),
             None => plan.unmapped += 1,
@@ -470,7 +473,7 @@ fn plan_rdb(cx: &Ctx, rdb: &SourceFile, rdx: &SourceFile) -> Result<Plan> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let v = json!({"v": CACHE_VERSION, "rows": plan.rows, "unmapped": plan.unmapped});
+        let v = json!({"v": CACHE_VERSION, "rows": plan.rows, "unmapped": plan.unmapped, "bad": plan.bad});
         let bytes = serde_json::to_vec(&v).map_err(|e| Error::Format(e.to_string()))?;
         relift_cache::write_if_changed(&path, &bytes)?;
     }
@@ -494,6 +497,10 @@ fn plan_from_json(v: &Value) -> Option<Plan> {
     Some(Plan {
         rows,
         unmapped: v.get("unmapped")?.as_u64()?,
+        bad: match v.get("bad")? {
+            Value::Null => None,
+            b => Some(b.as_str()?.to_string()),
+        },
     })
 }
 
@@ -666,6 +673,9 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         } else {
             format!("{dir}/")
         };
+        if let Some(bad) = plan.bad {
+            extra.push((bad, rdb.path.clone()));
+        }
         for _ in 0..plan.unmapped {
             extra.push((
                 "KTGL: an entry names an index the .rdx lacks".into(),

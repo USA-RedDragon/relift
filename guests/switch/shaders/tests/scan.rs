@@ -527,6 +527,30 @@ fn ktgl_entries_whole_and_in_zlib_chunks() {
 }
 
 #[test]
+fn a_ktgl_entry_length_that_wraps_is_reported() {
+    let (mut files, expected) = ktgl_files();
+    let mut bad = ktgl::build_entry(ktgl::TYPE_S2G, 0, &[0u8; 12]);
+    let at = files[0].1.len() as u64;
+    bad[8..16].copy_from_slice(&(u64::MAX - at + 1).to_le_bytes());
+    files[0].1.extend(bad);
+    let root = scratch("ktgl-wrap");
+    put(&root.join("tree"), &files);
+    let r = scan(
+        &DirSource::new(&root.join("tree")),
+        &root.join("out"),
+        &opts(&root.join("cache")),
+    )
+    .expect("scans");
+    assert_eq!(found(&r), expected);
+    let e = r
+        .errors
+        .iter()
+        .find(|(m, _)| m.contains(".rdb entry length"))
+        .expect("the bad entry is reported");
+    assert_eq!(e.1.count, 1);
+}
+
+#[test]
 fn ktgl_through_a_nup_reads_the_same_entries() {
     let (files, expected) = ktgl_files();
     let list: Vec<(&str, &[u8])> = files
