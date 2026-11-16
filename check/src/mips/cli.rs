@@ -9,6 +9,7 @@ use relift_cpu_mips::lift::has_template;
 
 use super::cases::{self, Case, Rng};
 use super::compare::{SLOW, compare};
+use super::cslow;
 use super::fprule::slow_check;
 use super::oracle;
 use super::run::{self, Out};
@@ -16,13 +17,15 @@ use crate::mutate;
 
 pub const USAGE: &str = "\
 usage: relift-check --oracle ares lift [-n N] [--seed S] [--mutate] [--fp-corpus] [--bin FILE]
-                    [--rom FILE] [--work DIR] [KIND...]
+                    [--rom FILE] [--work DIR] [--c-slow-path FILE] [KIND...]
 Runs each kind of VR4300 instruction (see `lift --list`) on N random machine states, or with
 --fp-corpus the FP special-value corpus, lifted by relift-cpu-mips on the IR interpreter and on
 the ares oracle (n64-oracle, built by check/oracle/ares/build.sh; --bin, RELIFT_ARES_ORACLE or
 ~/.cache/relift/n64-ares/bin/n64-oracle). --mutate breaks the first live operation of each
 lifted block and expects the comparison to catch it. --rom runs the oracle's boot code from
 a ROM first; without it the oracle starts at once. --work keeps the oracle's input and output.
+--c-slow-path also runs every COP1 case through the runtime's C FPU slow path (FILE is
+mips_fpu_cases from the runtime Makefile) and compares it with ares on all of them.
        relift-check --oracle ares lift --list    the kinds, and the encodings without one";
 
 struct Opts {
@@ -34,6 +37,7 @@ struct Opts {
     bin: Option<PathBuf>,
     rom: Option<PathBuf>,
     work: Option<PathBuf>,
+    c_slow: Option<PathBuf>,
     kinds: Vec<String>,
 }
 
@@ -47,6 +51,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         bin: None,
         rom: None,
         work: None,
+        c_slow: None,
         kinds: Vec::new(),
     };
     let mut i = 0;
@@ -67,12 +72,13 @@ fn parse(args: &[String]) -> Result<Opts, String> {
                 }
                 i += 1;
             }
-            "--bin" | "--rom" | "--work" => {
+            "--bin" | "--rom" | "--work" | "--c-slow-path" => {
                 let p = PathBuf::from(v()?);
                 match a {
                     "--bin" => o.bin = Some(p),
                     "--rom" => o.rom = Some(p),
-                    _ => o.work = Some(p),
+                    "--work" => o.work = Some(p),
+                    _ => o.c_slow = Some(p),
                 }
                 i += 1;
             }
@@ -165,6 +171,7 @@ fn dispatch_run(o: &Opts) -> Result<bool, String> {
     let mut slow_exc: BTreeMap<String, u32> = BTreeMap::new();
     let mut rules: BTreeMap<String, (u32, u32, u32, Vec<String>)> = BTreeMap::new();
     let mut caught: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut fp_cases: Vec<(&Case, &Out, bool)> = Vec::new();
     for (c, or) in cs.iter().zip(&ors) {
         let kind = kind_of(c).to_string();
         let t = per.entry(kind.clone()).or_default();
@@ -186,6 +193,9 @@ fn dispatch_run(o: &Opts) -> Result<bool, String> {
             }
         };
         let d = compare(c, &ir, or);
+        if cslow::is_fp(c) {
+            fp_cases.push((c, or, d.len() == 1 && d[0] == SLOW));
+        }
         if o.mutate {
             let e = caught.entry(kind).or_default();
             if d.is_empty() {
@@ -284,12 +294,37 @@ fn dispatch_run(o: &Opts) -> Result<bool, String> {
     println!(
         "slow path (FP guard to the runtime, not compared): {slow} {slow_kinds:?}; oracle exceptions there: {slow_exc:?}"
     );
+    let mut c_ok = true;
+    if let Some(bin) = &o.c_slow {
+        for slow_only in [true, false] {
+            let sel: Vec<(&Case, &Out)> = fp_cases
+                .iter()
+                .filter(|(.., s)| *s || !slow_only)
+                .map(|(c, or, _)| (*c, *or))
+                .collect();
+            let t = cslow::check(bin, &sel)?;
+            let what = if slow_only {
+                "slow-path cases"
+            } else {
+                "all COP1 cases"
+            };
+            println!(
+                "C SLOW PATH {what}: {} match ares, {} differ",
+                t.cases - t.differ,
+                t.differ
+            );
+            for m in &t.msgs {
+                println!("    {m}");
+            }
+            c_ok &= t.differ == 0;
+        }
+    }
     let clean = per.values().filter(|t| t.fail == 0 && t.pass > 0).count();
     println!(
         "TOTAL: {} kinds ({clean} all-pass), {pass} cases pass, {fail} fail, {kn} known divergence, {slow} slow path",
         per.len()
     );
-    Ok(fail == 0)
+    Ok(fail == 0 && c_ok)
 }
 
 /// Handles the command line when it selects the ares oracle. Returns `None`
