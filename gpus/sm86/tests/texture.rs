@@ -3,8 +3,8 @@ mod common;
 use common::translate;
 use relift_gpu_sm86::program::{Program, Stage};
 use relift_gpu_sm86::translate::{
-    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
-    texture_binding,
+    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_KIND_SPEC,
+    image_binding, texture_binding,
 };
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
@@ -414,11 +414,59 @@ fn txq_takes_the_dimension_the_handle_is_sampled_with() {
             tex(0x16f, &[(62, 2, 0)]),
         ],
     ] {
-        let e = translate(&program(Vec::new(), &body))
-            .err()
-            .map(|e| e.to_string());
-        assert!(e.is_some_and(|e| e.contains("TXQ")));
+        let s = translate(&program(Vec::new(), &body)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            s.interface.texture_dims.get(&(3, 16)),
+            Some(&TEXTURE_DIM_SPEC),
+            "the runtime gives the dimension"
+        );
+        assert_eq!(insts(&s.spirv, SWITCH).len(), 1);
+        assert_eq!(
+            insts(&s.spirv, 103).len(),
+            7,
+            "a size query per mipmapped dimension"
+        );
     }
+    let mut w = tex(0x170, &[(62, 2, 0)]);
+    w[1] = (w[1] & !0x0e) | (1 << 1);
+    let e = translate(&program(Vec::new(), &[w]))
+        .err()
+        .map(|e| e.to_string());
+    assert!(
+        e.is_some_and(|e| e.contains("TXQ")),
+        "a handle from a register"
+    );
+}
+
+const SWITCH: u32 = 251;
+
+/// NVIDIA's compiler queries the LOD of a 2D array texture with `TMML 2D`
+/// (`textureQueryLod` of a `sampler2DArray`), so TMML's dimension does not
+/// conflict with the array the handle is sampled as, and the query reads
+/// the array view.
+#[test]
+fn tmml_takes_the_array_view_the_handle_is_sampled_with() {
+    let mut b = sph_fragment();
+    b.extend(tex(0x169, &[(61, 3, 1), (72, 4, 3)]));
+    b.extend(tex(0x160, &[(61, 3, 5), (87, 3, 2)]));
+    b.extend(tex(0x16f, &[(62, 2, 0)]));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(insts(&s.spirv, 105).len(), 1);
+    assert!(!insts(&s.spirv, 103).is_empty());
+    let float = &s.interface.texture_bindings;
+    assert!(float.contains(&texture_binding(Kind::Float, Dim::Array2)));
+    assert!(!float.contains(&texture_binding(Kind::Float, Dim::D2)));
+    let mut b = sph_fragment();
+    b.extend(tex(0x169, &[(61, 3, 2), (72, 4, 3)]));
+    b.extend(tex(0x160, &[(61, 3, 5), (87, 3, 2)]));
+    b.extend(tex(0x16f, &[(62, 2, 0)]));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        s.interface.texture_dims.contains_key(&(3, 16)),
+        "a 3D TMML on a 2D array leaves the dimension to the runtime"
+    );
 }
 
 const EXECUTION_MODE: u32 = 16;

@@ -33,8 +33,8 @@ pub use io::mesh::{
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use tex::{
-    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
-    texture_binding,
+    Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_DIM_SPEC, TEXTURE_KIND_SPEC,
+    image_binding, texture_binding,
 };
 
 use crate::program::{Program, Stage};
@@ -99,6 +99,9 @@ pub struct Interface {
     /// Specialization constant id per bound handle whose texture's numeric
     /// kind the runtime picks (see [`Kind`]).
     pub texture_kinds: BTreeMap<(u32, u32), u32>,
+    /// Specialization constant id per bound handle whose texture's
+    /// dimension the runtime gives (see [`tex::TEXTURE_DIM_SPEC`]).
+    pub texture_dims: BTreeMap<(u32, u32), u32>,
     /// SPIR-V BuiltIn numbers of the built-in inputs and outputs used.
     pub builtins: BTreeSet<u32>,
     /// Length of the ClipDistance output (the highest clip distance the SPH

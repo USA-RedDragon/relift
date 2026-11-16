@@ -62,8 +62,13 @@
 //! other offsets are rejected. Implicit LODs, biases and TMML take derivatives
 //! across quads of lanes in fragment and compute programs (see
 //! [`Ctx::quad_derivatives`]) and are rejected in vertex programs. TXQ
-//! needs the handle to be sampled elsewhere in the program with one
-//! dimension. Buffer textures, TLD.CL, TXD.LC, TXQ sample positions,
+//! takes the dimension its bound handle is sampled with elsewhere in the
+//! program; without one, the runtime gives the bound texture's dimension in
+//! a specialization constant ([`TEXTURE_DIM_SPEC`] onwards, listed in
+//! `Interface::texture_dims`), and TXQ of a handle from a register is
+//! rejected. TMML names only the base dimension (2D for a 2D array, as
+//! NVIDIA's compiler emits it), so its handle's array view is used when the
+//! sampling instructions name the array dimension. Buffer textures, TLD.CL, TXD.LC, TXQ sample positions,
 //! uniform register handles with an offset, SUQUERY other than the
 //! compression status, SUATOM.CAS and wrapping INC and DEC are not
 //! translated; sparse fault predicates read as resident. Host images are
@@ -88,6 +93,11 @@ pub const SAMPLER_BINDING: u32 = 0;
 
 /// First specialization constant id of the per-handle numeric kinds.
 pub const TEXTURE_KIND_SPEC: u32 = 0x100;
+
+/// First specialization constant id of the per-handle dimensions (a [`Dim`]
+/// value) of textures that TXQ queries and no instruction samples with one
+/// dimension.
+pub const TEXTURE_DIM_SPEC: u32 = 0x300;
 
 /// How a texture's texels read: the sampled type of its array.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +179,16 @@ impl Dim {
     fn cube(self) -> bool {
         matches!(self, Dim::Cube | Dim::ArrayCube)
     }
+    /// The arrayed dimension of the same base (itself when arrayed or 3D).
+    fn array_of(self) -> Dim {
+        match self {
+            Dim::D1 => Dim::Array1,
+            Dim::D2 => Dim::Array2,
+            Dim::Cube => Dim::ArrayCube,
+            Dim::Ms2 => Dim::ArrayMs2,
+            d => d,
+        }
+    }
     /// Coordinates besides the array index.
     fn coords(self) -> usize {
         match self {
@@ -209,6 +229,10 @@ const TEX_DIMS: [Option<Dim>; 8] = [
 pub(crate) struct Prep {
     /// `None` when instructions name the handle with different dimensions.
     dims: BTreeMap<(u32, u32), Option<Dim>>,
+    /// The dimensions TMML names the handle with. NVIDIA's compiler gives
+    /// TMML the dimension without the array (a 2D array texture's LOD
+    /// query is `TMML 2D`), so these only say the base dimension.
+    tmml_dims: BTreeMap<(u32, u32), Option<Dim>>,
     starts: Vec<bool>,
     imm: Vec<Option<(u8, u32)>>,
     writes: Vec<Vec<(u8, u8)>>,
@@ -441,6 +465,11 @@ impl Prep {
             let opc = w.get(0, 9);
             if w.get(9, 3) == 5 && matches!(opc, 0x160 | 0x163 | 0x166 | 0x169 | 0x16c) {
                 let key = (w.get(54, 5), 4 * w.get(40, 14));
+                let map = if opc == 0x169 {
+                    &mut p.tmml_dims
+                } else {
+                    &mut p.dims
+                };
                 let dim = match opc {
                     0x166 if w.bit(78) => match w.get(61, 3) {
                         1 => Some(Dim::Ms2),
@@ -450,7 +479,7 @@ impl Prep {
                     _ => TEX_DIMS[w.get(61, 3) as usize],
                 };
                 if let Some(d) = dim {
-                    let e = p.dims.entry(key).or_insert(Some(d));
+                    let e = map.entry(key).or_insert(Some(d));
                     if *e != Some(d) {
                         *e = None;
                     }
@@ -458,6 +487,23 @@ impl Prep {
             }
         }
         p
+    }
+
+    /// The dimension of the texture bound at `key`, from the instructions
+    /// that name it: the one dimension the sampling instructions use, which
+    /// TMML's base dimension (if any) must match; without sampling
+    /// instructions, TMML's dimension.
+    pub(crate) fn dim(&self, key: (u32, u32)) -> Option<Dim> {
+        let t = self.tmml_dims.get(&key).copied();
+        match self.dims.get(&key).copied() {
+            Some(Some(d)) => match t {
+                None => Some(d),
+                Some(Some(b)) if b == d || b.array_of() == d => Some(d),
+                _ => None,
+            },
+            Some(None) => None,
+            None => t.flatten(),
+        }
     }
 
     /// The value register `r` holds before instruction `k`: the immediate
@@ -1477,7 +1523,11 @@ fn tmml(c: &mut Ctx) -> Res<()> {
     c.quad_derivatives("TMML")?;
     let v = {
         c.cap(50);
-        let (si, _) = c.sampled(Kind::Float, d, h, nu);
+        let view = match key.and_then(|k| c.tex.dim(k)) {
+            Some(a) if !d.arrayed() && a == d.array_of() => a,
+            _ => d,
+        };
+        let (si, _) = c.sampled(Kind::Float, view, h, nu);
         let coords = float_coords(c, &s, d)?;
         let coord = c.tx_fvec(&coords);
         let f = c.f32t();
@@ -1585,18 +1635,66 @@ fn txq(c: &mut Ctx) -> Res<()> {
     }
     let s = sources(c, &g0, &[], false)?;
     let (h, nu) = handle(c, key, &s)?;
-    let Some(d) = key.and_then(|k| c.tex.dims.get(&k).copied().flatten()) else {
-        return bad("TXQ of a texture of unknown dimension");
+    let lod = if query == 0 {
+        Some(s.get(Slot::Lod)?)
+    } else {
+        None
     };
     c.cap(50);
+    let v = match key.map(|k| (k, c.tex.dim(k))) {
+        Some((_, Some(d))) => txq_of(c, d, h, nu, lod),
+        Some((k, None)) => {
+            let next = TEXTURE_DIM_SPEC + c.iface.texture_dims.len() as u32;
+            let id = *c.iface.texture_dims.entry(k).or_insert(next);
+            let sel = c.m.spec_u32(Dim::D2 as u32, id);
+            let t = c.tx_uvec4();
+            let merge = c.m.id();
+            let labels: Vec<u32> = ALL_DIMS.iter().map(|_| c.m.id()).collect();
+            let mut sw = vec![sel, labels[Dim::D2 as usize]];
+            for (d, l) in ALL_DIMS.iter().zip(&labels) {
+                sw.extend([*d as u32, *l]);
+            }
+            c.m.emit_void(op::SELECTION_MERGE, &[merge, 0]);
+            c.m.emit_void(op::SWITCH, &sw);
+            let mut phi = Vec::new();
+            for (d, l) in ALL_DIMS.iter().zip(&labels) {
+                c.m.emit_void(op::LABEL, &[*l]);
+                let v = txq_of(c, *d, h, nu, lod);
+                phi.extend([v, *l]);
+                c.m.emit_void(op::BRANCH, &[merge]);
+            }
+            c.m.emit_void(op::LABEL, &[merge]);
+            c.m.emit(op::PHI, t, &phi)
+        }
+        None => return bad("TXQ of a texture of unknown dimension"),
+    };
+    c.tex_result(v, w.get(72, 4), 0);
+    Ok(())
+}
+
+/// Every texture dimension, in [`Dim`]'s order.
+const ALL_DIMS: [Dim; 9] = [
+    Dim::D1,
+    Dim::D2,
+    Dim::D3,
+    Dim::Cube,
+    Dim::Array1,
+    Dim::Array2,
+    Dim::ArrayCube,
+    Dim::Ms2,
+    Dim::ArrayMs2,
+];
+
+/// TXQ of the texture at `h` viewed as `d`: the size at `lod` (TEX_HEADER_DIMENSION)
+/// or the sample count without one.
+fn txq_of(c: &mut Ctx, d: Dim, h: u32, nu: bool, lod: Option<u32>) -> u32 {
     let img = c.texture(Kind::Float, d, h, nu);
     let u = c.u32t();
     let i = c.tx_i32();
     let b = c.boolt();
     let zero = c.m.c_u32(0);
     let one = c.m.c_u32(1);
-    let v = if query == 0 {
-        let lod = s.get(Slot::Lod)?;
+    if let Some(lod) = lod {
         let n = d.size_len();
         let st = if n == 1 { i } else { c.m.t_vec(i, n as u32) };
         let (size, levels) = if d.ms() {
@@ -1635,9 +1733,7 @@ fn txq(c: &mut Ctx) -> Res<()> {
             one
         };
         c.tx_uvec4_of([zero, zero, samples, zero])
-    };
-    c.tex_result(v, w.get(72, 4), 0);
-    Ok(())
+    }
 }
 
 const SURF_DIMS: [ImageDim; 6] = [
