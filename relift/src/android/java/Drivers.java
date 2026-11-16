@@ -409,7 +409,12 @@ final class Drivers {
      */
     boolean isSystem(String probe) {
         String sys = prefs.getString("system." + Build.FINGERPRINT, null);
-        return sys != null && sys.startsWith("ok\n") && sys.equals(probe);
+        if (sys == null || probe == null || !sys.startsWith("ok\n") || !probe.startsWith("ok\n")) {
+            return false;
+        }
+        String[] a = sys.split("\n", -1);
+        String[] b = probe.split("\n", -1);
+        return a.length > 5 && b.length > 5 && a[3].trim().equals(b[3].trim()) && a[5].trim().equals(b[5].trim());
     }
 
     static SystemDriver parseSystem(String probe) {
