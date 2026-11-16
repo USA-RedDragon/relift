@@ -1836,15 +1836,26 @@ pub fn run_build(
     mods: &[PathBuf],
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
-    if crate::gb::is_project() {
+    let handheld = if crate::gb::is_project() {
+        Some("Game Boy")
+    } else if crate::gba::is_project() {
+        Some("Game Boy Advance")
+    } else {
+        None
+    };
+    if let Some(what) = handheld {
         if targets.len() > 1 {
-            return Err("one target at a time for a Game Boy build".into());
+            return Err(format!("one target at a time for a {what} build").into());
         }
         let target = match targets.first() {
             Some(t) => crate::cross::target(t)?,
             None => None,
         };
-        let built = crate::gb::build(settings, mods, true, target, ui)?;
+        let built = if crate::gb::is_project() {
+            crate::gb::build(settings, mods, true, target, ui)?
+        } else {
+            crate::gba::build(settings, mods, true, target, ui)?
+        };
         let (name, _) = project_out(settings)?;
         let request = PackageRequest {
             name: &name,
@@ -1861,12 +1872,6 @@ pub fn run_build(
             },
         };
         return package(settings, &request, ui);
-    }
-    if crate::gba::is_project() {
-        if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
-            return Err(format!("target {t}: only the host target builds so far").into());
-        }
-        return crate::gba::build(settings, mods, ui).map(|_| ());
     }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
     let (name, _) = project_out(settings)?;

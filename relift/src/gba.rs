@@ -4,14 +4,18 @@
 //! The import copies the ROM into the project's import directory and writes
 //! `game.toml` with `guest = "gba"`. The build finds the code
 //! (`relift-gba-analyze`), lifts it into one unit (`relift-gba`), and links
-//! it with the runtime's core, ARMv4T and GBA layers. `relift run` opens
-//! the program's window.
+//! it with the runtime's core, ARMv4T and GBA layers, for this host or for
+//! another target (`relift build --target`), where it enters from the app
+//! glue and shows the on-screen controller on a touch screen. `relift run`
+//! opens the program's window.
 
 use std::path::{Path, PathBuf};
 
 use relift_build::{Compile, Plan};
 use relift_progress::{Line, Paint, duration, noun};
 
+use crate::cross;
+use crate::gb::Built;
 use crate::import::{BoxError, cache_root};
 use crate::settings::Settings;
 use crate::ui::Ui;
@@ -147,26 +151,43 @@ fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
     Ok(v)
 }
 
-/// `relift build` of the Game Boy Advance project in the working directory.
-/// Returns the program's path.
+/// `relift build` of the Game Boy Advance project in the working directory,
+/// for this host or for `target`; a `release` build for this host takes the
+/// release compiler.
 ///
 /// # Errors
 ///
-/// No import, or a failed compile or link.
-pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathBuf, BoxError> {
+/// No import, a target whose tools are missing, or a failed compile or
+/// link.
+pub fn build(
+    settings: &Settings,
+    mods: &[PathBuf],
+    release: bool,
+    target: Option<cross::Target>,
+    ui: &mut Ui,
+) -> Result<Built, BoxError> {
     if !mods.is_empty() {
         return Err("mods are not supported for Game Boy Advance ROMs yet".into());
     }
     let (rom, project_title, rom_path) = project_rom()?;
-    let (name, out) = crate::build::project_out(settings)?;
+    let (name, host_out) = crate::build::project_out(settings)?;
+    let cross = target
+        .map(|t| cross::Build::prepare(settings, t, &name))
+        .transpose()?;
+    let out = match &cross {
+        Some(c) => host_out.with_file_name(c.name()),
+        None => host_out,
+    };
     let cdir = out.join("c");
     std::fs::create_dir_all(&cdir)?;
     ui.title(&format!(
-        "relift build: {name} ({}, {} KiB, {}-{})",
+        "relift build: {name} ({}, {} KiB, {})",
         title(&rom),
         rom.len() / 1024,
-        std::env::consts::OS,
-        std::env::consts::ARCH
+        cross.as_ref().map_or_else(
+            || format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+            |c| c.name().to_string()
+        )
     ));
     let row = ui.row("rom");
     ui.begin(row, "analyze");
@@ -240,13 +261,23 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     } else {
         project_title
     };
+    let entry = cross
+        .as_ref()
+        .map_or(relift_guest::Entry::Main, cross::Build::entry);
+    let (rom_path, save) = if cross.is_some() {
+        ("", "battery.sav")
+    } else {
+        (rom_path.as_str(), "")
+    };
     for (n, text) in [
-        ("rom.c", relift_gba::program::rom_c()),
+        ("rom.c", relift_gba::program::rom_c(&rom)),
         (
             "program.c",
             relift_gba::program::program_c(&relift_gba::program::Program {
                 title: &title,
-                rom_path: &rom_path,
+                rom_path,
+                save,
+                entry,
                 variant_units: lifted.variants.len(),
                 ram: &lifted.ram,
             }),
@@ -256,7 +287,12 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         relift_cache::write_if_changed(&path, text.as_bytes())?;
         prog.push(path);
     }
-    let ports = relift_input::native_ports("gba")?;
+    let mut ports = relift_input::native_ports("gba")?;
+    if cross.is_some()
+        && let Some(t) = relift_input::touchpad_port("gba")
+    {
+        ports.add_port(t)?;
+    }
     let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
     let doc = crate::info::handheld_document(
         &title,
@@ -270,14 +306,31 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
+    let label = doc.identity.title(&[]).unwrap_or(&title).to_string();
+    prog.extend(crate::winres::write(
+        &cdir,
+        &label,
+        doc.identity.icon.as_ref(),
+    )?);
     let settings_c = cdir.join("game_settings.c");
     relift_cache::write_if_changed(
         &settings_c,
         crate::game_settings::generate_c(&game_settings).as_bytes(),
     )?;
     prog.push(settings_c);
-    compile(settings, &out, &cdir, &files, &prog, ui)?;
-    let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    compile(
+        settings,
+        &out,
+        &cdir,
+        &files,
+        &prog,
+        (release, cross.as_ref()),
+        ui,
+    )?;
+    let exe = match &cross {
+        Some(c) => out.join(c.program()),
+        None => out.join(format!("game{}", std::env::consts::EXE_SUFFIX)),
+    };
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {}, {} instructions not lifted, {} in all",
         noun(lifted.functions as u64, "function"),
@@ -285,7 +338,12 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         duration(ui.elapsed())
     )));
     ui.summary(&Line::new().text(format!("  output: {}", exe.display())));
-    Ok(exe)
+    Ok(Built {
+        exe,
+        source: PathBuf::from(rom_path),
+        title: label,
+        cross,
+    })
 }
 
 fn compile(
@@ -294,18 +352,25 @@ fn compile(
     cdir: &Path,
     lifted: &[PathBuf],
     prog: &[PathBuf],
+    (release, cross): (bool, Option<&cross::Build>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
     let rt = crate::build::runtime_dir(settings);
+    let croot = crate::paths::canonical(cache_root(settings)?)?;
     let inc = |p: &str| format!("-I{}", rt.join(p).display());
-    let cc = crate::build::c_compiler(&settings.toolchain)?;
+    let cc = match cross {
+        Some(c) => c.cc(),
+        None if release => crate::build::release_compiler(settings)?,
+        None => crate::build::c_compiler(&settings.toolchain)?,
+    };
     let zig = cc.len() > 1;
     let base: Vec<String> = ["-std=c11", "-O2", "-ffp-contract=off"]
         .iter()
         .map(|s| s.to_string())
         .chain(zig.then_some("-fno-sanitize=undefined".to_string()))
+        .chain(cross.filter(|c| c.pic()).map(|_| "-fPIC".to_string()))
         .collect();
-    let static_rt = cfg!(windows).then_some("-DRL_STATIC_RUNTIME".to_string());
+    let static_rt = (cross.is_none() && cfg!(windows)).then_some("-DRL_STATIC_RUNTIME".to_string());
     let lifted_flags: Vec<String> = base
         .iter()
         .map(|f| {
@@ -323,7 +388,10 @@ fn compile(
         ])
         .chain(static_rt.clone())
         .collect();
-    let mut extras = crate::runtime_link::extras(&rt, &cache_root(settings)?)?;
+    let mut extras = match cross {
+        Some(c) => c.extras(&rt, false)?,
+        None => crate::runtime_link::extras(&rt, &croot)?,
+    };
     extras.vk.clear();
     ui.note(&Line::new().text(extras.note()));
     let rt_flags: Vec<String> = base
@@ -373,25 +441,30 @@ fn compile(
     for layer in LAYERS {
         rt_compiles.extend(c_files(&rt.join(layer))?);
     }
-    for s in prog {
+    let (prog, resources) = crate::winres::split(prog);
+    for s in &prog {
         compiles.push(Compile {
             src: s.clone(),
             obj: obj(s, "prog"),
-            flags: rt_flags.clone(),
+            flags: rt_flags
+                .iter()
+                .cloned()
+                .chain([crate::build::build_dir_flag(out)])
+                .collect(),
             pool: None,
             stage: 0,
         });
     }
     let jobs = relift_build::job_count(settings.jobs);
     let ninja = crate::build::tool(&settings.toolchain.ninja, "ninja");
-    let shared = !cfg!(windows);
+    let shared = cross.is_some() || !cfg!(windows);
     let key: String =
         relift_switch_formats::sha256(format!("{cc:?}\n{rt_flags:?}\n{}", rt.display()).as_bytes())
             [..8]
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-    let rt_dir = cache_root(settings)?.join("gba-runtime").join(&key);
+    let rt_dir = croot.join("gba-runtime").join(&key);
     let rt_obj = |s: &Path| {
         let stem = s.strip_prefix(&rt).unwrap_or(s);
         rt_dir.join("obj").join(stem).with_extension("o")
@@ -413,7 +486,10 @@ fn compile(
     ui.begin(row, "compile");
     let mut link: Vec<String> = Vec::new();
     let mut n = 0;
-    let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
+    let exe = out.join(match cross {
+        Some(c) => c.program().to_string(),
+        None => format!("game{}", std::env::consts::EXE_SUFFIX),
+    });
     if shared {
         std::fs::create_dir_all(&rt_dir)?;
         let lock_path = rt_dir.join("lock");
@@ -448,7 +524,9 @@ fn compile(
         compiles.extend(rt_plan_compiles);
     }
     let pools = crate::build::memory_pools(&mut compiles, jobs);
-    let libs: Vec<String> = if cfg!(windows) {
+    let libs: Vec<String> = if let Some(c) = cross {
+        c.libs()
+    } else if cfg!(windows) {
         [
             "-lpthread",
             "-lm",
@@ -460,13 +538,22 @@ fn compile(
         .map(String::from)
         .into()
     } else {
-        ["-lpthread", "-lm", "-ldl"].map(String::from).into()
+        let mut l: Vec<String> = ["-lpthread", "-lm", "-ldl"].map(String::from).into();
+        if zig && cfg!(target_os = "linux") {
+            l.push("-lunwind".into());
+        }
+        l
     };
     let plan = Plan {
         cc: cc.clone(),
         compiles,
-        output: exe.clone(),
-        link_flags: link.into_iter().chain(libs).chain(extras.libs()).collect(),
+        output: exe,
+        link_flags: link
+            .into_iter()
+            .chain(resources)
+            .chain(libs)
+            .chain(extras.libs())
+            .collect(),
         pools,
         root: None,
     };
@@ -489,8 +576,8 @@ fn compile(
 ///
 /// As [`build`], or the program cannot start.
 pub fn run(settings: &Settings, ui: &mut Ui) -> Result<i32, BoxError> {
-    let exe = build(settings, &[], ui)?;
-    let status = relift_proc::command(&exe).status()?;
+    let built = build(settings, &[], false, None, ui)?;
+    let status = relift_proc::command(&built.exe).status()?;
     Ok(status.code().unwrap_or(128))
 }
 

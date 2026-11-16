@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 
 use relift_emit::{Function, Insn, Options, Output};
 use relift_gba_analyze::{CopyKind, EdgeKind, Loc, Report};
-use relift_guest::LiftFailure;
+use relift_guest::{Entry, LiftFailure};
 use relift_ir::{Block, Flow, Next};
 
 use crate::frontend::{Gba, RAW_THUMB, device_map};
@@ -337,6 +337,12 @@ pub struct Program<'a> {
     pub title: &'a str,
     /// The path of the imported ROM, which names the save; empty for none.
     pub rom_path: &'a str,
+    /// The save file the program reads and writes unless told otherwise,
+    /// before the one `rom_path` names: a path for [`Entry::Main`], a file
+    /// name in the app's own folder otherwise; empty for none.
+    pub save: &'a str,
+    /// How the program enters.
+    pub entry: Entry,
     /// The units of the other functions in RAM ([`Lifted::variants`]).
     pub variant_units: usize,
     /// Every function in RAM ([`Lifted::ram`]).
@@ -361,8 +367,11 @@ fn c_string(s: &str) -> String {
 
 /// `rom.c`, which embeds `rom.bin` (the ROM as the program runs it).
 #[must_use]
-pub fn rom_c() -> String {
-    "#include <stddef.h>\n#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_gba_rom[];\nconst uint8_t rl_gba_rom[] = {\n#embed \"rom.bin\"\n};\nextern const size_t rl_gba_rom_len;\nconst size_t rl_gba_rom_len = sizeof rl_gba_rom;\n".into()
+pub fn rom_c(rom: &[u8]) -> String {
+    let mut t = relift_guest::blob::blob_c("rl_gba_rom", "c/rom.bin", rom);
+    t.push_str("#include <stddef.h>\nextern const size_t rl_gba_rom_len;\n");
+    let _ = writeln!(t, "const size_t rl_gba_rom_len = {}u;", rom.len());
+    t
 }
 
 /// `program.c`: the unit list and `main`.
@@ -393,13 +402,50 @@ pub fn program_c(p: &Program<'_>) -> String {
     if p.ram.is_empty() {
         s.push_str("    { 0u, 0u, NULL },\n");
     }
+    s.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
+    let mobile = |s: &mut String, header: &str, sig: &str, init: &str, dir: &str| {
+        let _ = write!(
+            s,
+            "#include <stdio.h>\n#include <relift/{header}>\n#include <relift/settings.h>\n{sig}\n{{\n    {init}();\n    rl_settings_set_app(\"relift\");\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    const char *dir = {dir}();\n    char save[4096];\n    snprintf(save, sizeof save, \"%s/%s\", dir ? dir : \".\", {});\n",
+            c_string(p.save)
+        );
+    };
+    match p.entry {
+        Entry::Android => mobile(
+            &mut s,
+            "android.h",
+            "__attribute__((visibility(\"default\"))) int SDL_main(int argc, char **argv)",
+            "rl_android_init",
+            "rl_android_files_dir",
+        ),
+        Entry::Ios => mobile(
+            &mut s,
+            "ios.h",
+            "int rl_ios_main(int argc, char **argv)",
+            "rl_ios_init",
+            "rl_ios_documents_dir",
+        ),
+        Entry::Main => s.push_str(
+            "int main(int argc, char **argv)\n{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
+        ),
+    }
     let _ = write!(
         s,
-        "}};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_gba_program prog = {{ rl_gba_rom, rl_gba_rom_len, units, {}u, {}, {}, ram, {}u }};\n    return rl_gba_main(&prog, argc, argv);\n}}\n",
+        "    rl_gba_program prog = {{ rl_gba_rom, rl_gba_rom_len, units, {}u, {}, {}, {}, ram, {}u }};\n    int status = rl_gba_main(&prog, argc, argv);\n{}    return status;\n}}\n",
         symbols.len(),
         c_string(p.title),
         c_string(p.rom_path),
-        p.ram.len()
+        match (p.entry, p.save.is_empty()) {
+            (_, true) => "\"\"".into(),
+            (Entry::Main, false) => c_string(p.save),
+            _ => "save".into(),
+        },
+        p.ram.len(),
+        match p.entry {
+            Entry::Android => "    rl_android_flush();\n",
+            Entry::Ios => "    rl_ios_flush();\n",
+            Entry::Main => "",
+        }
     );
     s
 }
@@ -468,14 +514,55 @@ mod tests {
         let c = program_c(&Program {
             title: "T\"",
             rom_path: "/r/a.gba",
+            save: "",
+            entry: Entry::Main,
             variant_units: 0,
             ram: &[],
         });
         assert!(c.contains("units[] = { &rl_unit_gba_rom }"), "{c}");
         assert!(
-            c.contains("units, 1u, \"T\\\"\", \"/r/a.gba\", ram, 0u"),
+            c.contains("units, 1u, \"T\\\"\", \"/r/a.gba\", \"\", ram, 0u"),
             "{c}"
         );
+        assert!(c.contains("int main(int argc, char **argv)"), "{c}");
+    }
+
+    #[test]
+    fn an_app_program_enters_from_the_glue_with_its_save_in_the_app_folder() {
+        let android = program_c(&Program {
+            title: "T",
+            rom_path: "",
+            save: "battery.sav",
+            entry: Entry::Android,
+            variant_units: 0,
+            ram: &[],
+        });
+        assert!(
+            android.contains("int SDL_main(int argc, char **argv)"),
+            "{android}"
+        );
+        assert!(android.contains("rl_android_init();"), "{android}");
+        assert!(
+            android.contains("\"%s/%s\", dir ? dir : \".\", \"battery.sav\")"),
+            "{android}"
+        );
+        assert!(android.contains("\"T\", \"\", save, ram, 0u"), "{android}");
+        assert!(android.contains("rl_android_flush();"), "{android}");
+        assert!(!android.contains("int main("), "{android}");
+        let ios = program_c(&Program {
+            title: "T",
+            rom_path: "",
+            save: "battery.sav",
+            entry: Entry::Ios,
+            variant_units: 0,
+            ram: &[],
+        });
+        assert!(
+            ios.contains("int rl_ios_main(int argc, char **argv)"),
+            "{ios}"
+        );
+        assert!(ios.contains("rl_ios_documents_dir()"), "{ios}");
+        assert!(ios.contains("rl_ios_flush();"), "{ios}");
     }
 
     #[test]
@@ -495,6 +582,8 @@ mod tests {
         let c = program_c(&Program {
             title: "",
             rom_path: "",
+            save: "",
+            entry: Entry::Main,
             variant_units: 1,
             ram: &ram,
         });
@@ -507,6 +596,6 @@ mod tests {
             c.contains("    { 0x3000000u, 0xe12fff1eu, gba_a_03000000_c1 },"),
             "{c}"
         );
-        assert!(c.contains("units, 2u, \"\", \"\", ram, 2u"), "{c}");
+        assert!(c.contains("units, 2u, \"\", \"\", \"\", ram, 2u"), "{c}");
     }
 }
