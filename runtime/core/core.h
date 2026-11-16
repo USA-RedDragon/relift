@@ -582,6 +582,8 @@ RL_RUNTIME_API int rl_code_class(uint64_t a, const char **module);
 RL_RUNTIME_API rl_fn rl_core_cold(uint64_t target);
 /** @brief Widens the dispatch table to cover guest code [lo, hi), so units loaded later fit without moving it. Call before any guest thread starts. Returns 0 or -1. */
 RL_RUNTIME_API int rl_dispatch_reserve(uint64_t lo, uint64_t hi);
+/** @brief Sets the dispatch slot of guest address a to fn (NULL: a miss), for guest layers that bind code at run time. Returns 0, or -1 when a is outside the table or misaligned. */
+RL_RUNTIME_API int rl_dispatch_set(uint64_t a, rl_fn fn);
 /**
  * @brief Registers a hot-loaded unit (docs/abi.md section 6, step 5): checks
  * its ABI version, context size, image id and entries, adds its function

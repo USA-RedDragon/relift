@@ -148,6 +148,18 @@ static int grow(uint64_t lo, uint64_t hi)
     return 0;
 }
 
+int rl_dispatch_set(uint64_t a, rl_fn fn)
+{
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    if (!g_table || !cpu || a < g_lo || (a & ((1ull << cpu->code_shift) - 1)))
+        return -1;
+    uint64_t i = (a - g_lo) >> cpu->code_shift;
+    if (i >= g_count)
+        return -1;
+    __atomic_store_n(&g_table[i], fn, __ATOMIC_RELEASE);
+    return 0;
+}
+
 int rl_dispatch_reserve(uint64_t lo, uint64_t hi)
 {
     const rl_cpu_desc *cpu = rl_core_cpu();

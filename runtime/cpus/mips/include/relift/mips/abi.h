@@ -388,6 +388,119 @@ static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v)
     rl_st32(mem, a + 4, (uint32_t)v);
 }
 
+/*
+ * The FPU fast path (relift-cpu-mips's FpOp): the host's IEEE operations in
+ * round to nearest. The lifted code takes it only for normal operands whose
+ * result is normal and with no enable set, so no host flag or special value
+ * matters. Operands and results are bit patterns.
+ */
+static inline float rl_mips_f32(uint32_t b)
+{
+    float f;
+    memcpy(&f, &b, sizeof f);
+    return f;
+}
+static inline uint32_t rl_mips_b32(float f)
+{
+    uint32_t b;
+    memcpy(&b, &f, sizeof b);
+    return b;
+}
+static inline double rl_mips_f64(uint64_t b)
+{
+    double f;
+    memcpy(&f, &b, sizeof f);
+    return f;
+}
+static inline uint64_t rl_mips_b64(double f)
+{
+    uint64_t b;
+    memcpy(&b, &f, sizeof b);
+    return b;
+}
+/** @brief a + b, binary32. */
+static inline uint32_t rl_mips_fadd32(uint32_t a, uint32_t b) { return rl_mips_b32(rl_mips_f32(a) + rl_mips_f32(b)); }
+/** @brief a - b, binary32. */
+static inline uint32_t rl_mips_fsub32(uint32_t a, uint32_t b) { return rl_mips_b32(rl_mips_f32(a) - rl_mips_f32(b)); }
+/** @brief a * b, binary32. */
+static inline uint32_t rl_mips_fmul32(uint32_t a, uint32_t b) { return rl_mips_b32(rl_mips_f32(a) * rl_mips_f32(b)); }
+/** @brief a / b, binary32. */
+static inline uint32_t rl_mips_fdiv32(uint32_t a, uint32_t b) { return rl_mips_b32(rl_mips_f32(a) / rl_mips_f32(b)); }
+/** @brief The square root of a, binary32. */
+static inline uint32_t rl_mips_fsqrt32(uint32_t a) { return rl_mips_b32(__builtin_sqrtf(rl_mips_f32(a))); }
+/** @brief a + b, binary64. */
+static inline uint64_t rl_mips_fadd64(uint64_t a, uint64_t b) { return rl_mips_b64(rl_mips_f64(a) + rl_mips_f64(b)); }
+/** @brief a - b, binary64. */
+static inline uint64_t rl_mips_fsub64(uint64_t a, uint64_t b) { return rl_mips_b64(rl_mips_f64(a) - rl_mips_f64(b)); }
+/** @brief a * b, binary64. */
+static inline uint64_t rl_mips_fmul64(uint64_t a, uint64_t b) { return rl_mips_b64(rl_mips_f64(a) * rl_mips_f64(b)); }
+/** @brief a / b, binary64. */
+static inline uint64_t rl_mips_fdiv64(uint64_t a, uint64_t b) { return rl_mips_b64(rl_mips_f64(a) / rl_mips_f64(b)); }
+/** @brief The square root of a, binary64. */
+static inline uint64_t rl_mips_fsqrt64(uint64_t a) { return rl_mips_b64(__builtin_sqrt(rl_mips_f64(a))); }
+
+/** @brief The float x of fbits (32 or 64) bits as a double. */
+static inline double rl_mips_fval(uint64_t x, unsigned fbits)
+{
+    return fbits == 32 ? (double)rl_mips_f32((uint32_t)x) : rl_mips_f64(x);
+}
+
+/**
+ * @brief The float x of fbits bits rounded to a signed integer of ibits (32
+ * or 64) bits by rm (0 nearest even, 1 nearest away, 2 floor, 3 ceil, 4
+ * toward zero), saturating; NaN gives 0. The result is the integer's bits.
+ */
+static inline uint64_t rl_mips_f2i(uint64_t x, unsigned fbits, unsigned ibits, unsigned rm)
+{
+    double v = rl_mips_fval(x, fbits);
+    if (v != v)
+        return 0;
+    switch (rm) {
+    case 1:
+        v = __builtin_round(v);
+        break;
+    case 2:
+        v = __builtin_floor(v);
+        break;
+    case 3:
+        v = __builtin_ceil(v);
+        break;
+    case 4:
+        v = __builtin_trunc(v);
+        break;
+    default:
+        v = __builtin_rint(v);
+        break;
+    }
+    if (ibits == 32) {
+        if (v >= 2147483648.0)
+            return 0x7FFFFFFFu;
+        if (v < -2147483648.0)
+            return 0x80000000u;
+        return (uint32_t)(int32_t)v;
+    }
+    if (v >= 9223372036854775808.0)
+        return UINT64_C(0x7FFFFFFFFFFFFFFF);
+    if (v < -9223372036854775808.0)
+        return UINT64_C(0x8000000000000000);
+    return (uint64_t)(int64_t)v;
+}
+
+/** @brief The signed integer x of ibits (32 or 64) bits as a float of fbits bits, rounded to nearest even. */
+static inline uint64_t rl_mips_i2f(uint64_t x, unsigned ibits, unsigned fbits)
+{
+    int64_t v = ibits == 32 ? (int64_t)(int32_t)(uint32_t)x : (int64_t)x;
+    return fbits == 32 ? rl_mips_b32((float)v) : rl_mips_b64((double)v);
+}
+
+/** @brief The float x of from bits in the other format (to bits), rounded to nearest even. */
+static inline uint64_t rl_mips_fcvt(uint64_t x, unsigned from, unsigned to)
+{
+    if (from == to)
+        return x;
+    return to == 32 ? rl_mips_b32((float)rl_mips_f64(x)) : rl_mips_b64((double)rl_mips_f32((uint32_t)x));
+}
+
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
 RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 /** @brief Closes the innermost host frame: the target of rl_indirect for a return. */

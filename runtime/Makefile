@@ -2,7 +2,8 @@
 # OS, no guest CPU), cpus/arm64 (the ARM64 lifted-code ABI), cpus/sm83 (the
 # SM83 lifted-code ABI), cpus/z80 (the Z80 lifted-code ABI), cpus/arm32 (the ARMv4T lifted-code ABI), cpus/mips (the VR4300 lifted-code ABI), guests/switch (Horizon), guests/gb (the Game Boy
 # memory map, over the core only), guests/gba (the Game Boy Advance machine and BIOS, over the core only) and
-# guests/gba/run (the GBA program: the machine under the ARMv4T layer). Each layer compiles with only its own include paths and those of
+# guests/gba/run (the GBA program: the machine under the ARMv4T layer), guests/n64 (the Nintendo 64 machine, over the core
+# only) and guests/n64/run (the N64 program: the machine under the VR4300 layer). Each layer compiles with only its own include paths and those of
 # the layers below it, so core cannot include a CPU or guest header. relift
 # drives real builds later; this is for development and CI.
 #
@@ -108,6 +109,7 @@ SWITCH_INC := $(ARM64_INC) -Iguests/switch
 GB_INC := $(CORE_INC) -Iguests/gb
 GBA_INC := $(CORE_INC) -Iguests/gba
 SMS_INC := $(CORE_INC) -Iguests/sms
+N64_INC := $(CORE_INC) -Iguests/n64
 SM83_INC := $(CORE_INC) -Icpus/sm83/include -Icpus/sm83
 Z80_INC := $(CORE_INC) -Icpus/z80/include -Icpus/z80
 ARM32_INC := $(CORE_INC) -Icpus/arm32/include -Icpus/arm32
@@ -143,6 +145,11 @@ GBAR_SRCS := $(wildcard guests/gba/run/*.c)
 GBAR_HDRS := $(ARM32_HDRS) $(GBA_HDRS) $(wildcard guests/gba/run/*.h guests/gba/run/include/relift/gba/*.h)
 SMS_SRCS := $(wildcard guests/sms/*.c)
 SMS_HDRS := $(CORE_HDRS) $(wildcard guests/sms/*.h)
+N64_SRCS := $(wildcard guests/n64/*.c)
+N64_HDRS := $(CORE_HDRS) $(wildcard guests/n64/*.h)
+N64R_INC := $(MIPS_INC) -Iguests/n64 -Iguests/n64/run -Iguests/n64/run/include
+N64R_SRCS := $(wildcard guests/n64/run/*.c)
+N64R_HDRS := $(MIPS_HDRS) $(N64_HDRS) $(wildcard guests/n64/run/*.h guests/n64/run/include/relift/n64/*.h)
 VK_SRCS := $(wildcard guests/switch/vk/*.c guests/switch/vk/gen/*.c)
 VK_HDRS := $(SWITCH_HDRS) $(wildcard guests/switch/vk/*.h guests/switch/vk/gen/*.h)
 
@@ -168,6 +175,8 @@ GBA_TEST_HDRS := $(wildcard guests/gba/tests/*.h)
 GBAR_TEST_SRCS := $(wildcard guests/gba/run/tests/*.c)
 SMS_TEST_SRCS := $(wildcard guests/sms/tests/*.c)
 SMS_TOOL_SRCS := $(wildcard guests/sms/tests/tool/*.c)
+N64_TEST_SRCS := $(wildcard guests/n64/tests/*.c)
+N64R_TEST_SRCS := $(wildcard guests/n64/run/tests/*.c)
 VK_TEST_SRCS := $(wildcard guests/switch/vk/tests/*.c)
 VK_DEMO_SRCS := guests/switch/vk/demo/vk_present.c
 
@@ -194,6 +203,10 @@ GBAR_TEST_OBJS := $(call obj,$(GBAR_TEST_SRCS))
 SMS_OBJS := $(call obj,$(SMS_SRCS))
 SMS_TEST_OBJS := $(call obj,$(SMS_TEST_SRCS))
 SMS_TOOL_OBJS := $(call obj,$(SMS_TOOL_SRCS))
+N64_OBJS := $(call obj,$(N64_SRCS))
+N64_TEST_OBJS := $(call obj,$(N64_TEST_SRCS))
+N64R_OBJS := $(call obj,$(N64R_SRCS))
+N64R_TEST_OBJS := $(call obj,$(N64R_TEST_SRCS))
 RUNNER_OBJS := $(call obj,$(RUNNER_SRCS))
 CORE_TEST_OBJS := $(call obj,$(CORE_TEST_SRCS))
 ARM64_TEST_OBJS := $(call obj,$(ARM64_TEST_SRCS))
@@ -221,6 +234,8 @@ GBA_LIB := $(BUILD)/librelift_gba.a
 GBX_LIB := $(BUILD)/librelift_gb_exact.a
 GBAR_LIB := $(BUILD)/librelift_gba_run.a
 SMS_LIB := $(BUILD)/librelift_sms.a
+N64_LIB := $(BUILD)/librelift_n64.a
+N64R_LIB := $(BUILD)/librelift_n64_run.a
 STATIC := $(BUILD)/librelift_rt.a
 SHARED := $(BUILD)/librelift_rt.$(SHLIB_EXT)
 CORE_TESTS := $(BUILD)/core_tests
@@ -237,8 +252,10 @@ GBA_TESTS := $(BUILD)/gba_tests
 GBAR_TESTS := $(BUILD)/gba_run_tests
 SMS_TESTS := $(BUILD)/sms_tests
 SMS_PSG_SCRIPT := $(BUILD)/sms_psg_script
+N64_TESTS := $(BUILD)/n64_tests
+N64R_TESTS := $(BUILD)/n64_run_tests
 VK_PRESENT := $(BUILD)/vk_present
-TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(SMS_PSG_SCRIPT) $(VK_PRESENT)
+TESTS := $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(SWITCH_TESTS) $(VK_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS) $(SMS_PSG_SCRIPT) $(VK_PRESENT)
 CRASH_OBJS := $(call obj,core/crash.c core/crash_posix.c core/crash_win.c) $(FIBER_OBJS)
 CRASH_TEST_OBJS := $(call obj,core/tests/crash/crash_test.c)
 CRASH_TEST := $(BUILD)/crash_test$(EXE)
@@ -257,8 +274,8 @@ GBDEV_FRAMES ?= 60
 GBDEV_LOCKSTEP := $(BUILD)/gb_lockstep
 
 .PHONY: all libs test portable gbdev-lockstep test-portable charter gdb-test sched-bench vk-present clean
-all: $(MIPS_FPU_CASES) $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
-libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(STATIC) $(SHARED)
+all: $(MIPS_FPU_CASES) $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(N64_LIB) $(N64R_LIB) $(STATIC) $(SHARED) $(TESTS) $(PORTABLE)
+libs: $(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(N64_LIB) $(N64R_LIB) $(STATIC) $(SHARED)
 portable: $(PORTABLE)
 
 $(filter-out $(CORE_ASM_OBJS),$(CORE_OBJS)): $(BUILD)/obj/%.o: %.c $(CORE_HDRS)
@@ -347,6 +364,22 @@ $(GBAR_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(GBAR_HDRS) $(RUNNER_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(GBAR_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
 
+$(N64_OBJS): $(BUILD)/obj/%.o: %.c $(N64_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(N64_INC) $(CFLAGS) -c $< -o $@
+
+$(N64_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(N64_HDRS) $(RUNNER_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(N64_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
+
+$(N64R_OBJS): $(BUILD)/obj/%.o: %.c $(N64R_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(N64R_INC) $(CFLAGS) -c $< -o $@
+
+$(N64R_TEST_OBJS): $(BUILD)/obj/%.o: %.c $(N64R_HDRS) $(RUNNER_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_BASE) $(N64R_INC) $(RUNNER_INC) $(CFLAGS) -c $< -o $@
+
 $(GBDEV_OBJS): $(BUILD)/obj/%.o: %.c $(GB_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_BASE) $(GB_INC) $(CFLAGS) -c $< -o $@
@@ -388,8 +421,10 @@ $(GBA_LIB): $(GBA_OBJS)
 $(GBX_LIB): $(GBX_OBJS)
 $(GBAR_LIB): $(GBAR_OBJS)
 $(SMS_LIB): $(SMS_OBJS)
+$(N64_LIB): $(N64_OBJS)
+$(N64R_LIB): $(N64R_OBJS)
 $(STATIC): $(RT_OBJS)
-$(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(STATIC):
+$(CORE_LIB) $(ARM64_LIB) $(SM83_LIB) $(Z80_LIB) $(ARM32_LIB) $(MIPS_LIB) $(SWITCH_LIB) $(VK_LIB) $(GB_LIB) $(GBA_LIB) $(GBX_LIB) $(GBAR_LIB) $(SMS_LIB) $(N64_LIB) $(N64R_LIB) $(STATIC):
 	@rm -f $@
 	$(AR) rcs $@ $^
 
@@ -410,6 +445,8 @@ $(GBA_TESTS): $(GBA_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(GBA_OBJS)
 $(SMS_TESTS): $(SMS_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(SMS_OBJS)
 $(SMS_PSG_SCRIPT): $(SMS_TOOL_OBJS) $(SMS_OBJS)
 $(GBAR_TESTS): $(GBAR_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(ARM32_OBJS) $(GBA_OBJS) $(GBAR_OBJS)
+$(N64_TESTS): $(N64_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(N64_OBJS)
+$(N64R_TESTS): $(N64R_TEST_OBJS) $(RUNNER_OBJS) $(CORE_OBJS) $(MIPS_OBJS) $(N64_OBJS) $(N64R_OBJS)
 $(GBDEV_LOCKSTEP): $(GBDEV_OBJS) $(CORE_OBJS) $(GB_OBJS)
 	$(if $(GBDEV_LIB),,$(error set GBDEV_LIB to librelift_gb_devices.a))
 	$(CC) $(TARGET_FLAGS) $^ $(GBDEV_LIB) -o $@ $(LDLIBS) -lm -ldl
@@ -453,7 +490,7 @@ test-portable: $(PORTABLE)
 	$(abspath $(CRASH_TEST))
 	$(abspath $(FIBER_TESTS))
 
-TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS)
+TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(Z80_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS) $(SMS_TESTS) $(N64_TESTS) $(N64R_TESTS)
 
 test: export RELIFT_VIDEO := headless
 test: export RELIFT_REPORT_DIR := $(abspath $(BUILD))/reports

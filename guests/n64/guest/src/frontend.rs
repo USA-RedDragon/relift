@@ -14,9 +14,13 @@
 //!   frame (`rl_mips_call`); `JR` to the address on top of the frame stack
 //!   returns from it;
 //! - a read of Count asks the runtime for Count now (`rl_mips_count`);
-//! - a write of Status, Cause or Compare and the TLB instructions end in a
-//!   trap that runs after the block's register writes
-//!   (`rl_n64_cp0_sync`, `rl_n64_tlb`);
+//! - after a write of Status, Cause, Compare, Count or Wired the block ends
+//!   its budget (`rl_n64_cp0_break`), so its sync point runs, and that sync
+//!   point first applies the write (`rl_n64_cp0_sync`): the interrupt mask,
+//!   the timer and an interrupt that is now due, with the block's register
+//!   writes done;
+//! - a TLB instruction outside a delay slot ends in a trap that runs after
+//!   the block's register writes (`rl_n64_tlb`);
 //! - `ERET` leaves before any effect to the runtime's return
 //!   (`rl_mips_eret_to`), which closes an interrupt entry's host frame;
 //! - a guard runs its instruction in the runtime (`rl_mips_guard`), and one
@@ -38,13 +42,12 @@ pub const RDRAM_END: u64 = 0x80_0000;
 pub const CALL: &str = "n64.call";
 /// The intrinsic of a read of Count.
 pub const COUNT: &str = "n64.count";
-/// The intrinsic of a CP0 sync in a delay slot, where no trap can follow.
+/// The intrinsic that ends the budget after a CP0 write the runtime must
+/// see; the block's sync point then calls `rl_n64_cp0_sync`.
 pub const CP0_SYNC: &str = "n64.cp0_sync";
 
 /// The guard code of `ERET`.
 pub const ERET_GUARD: u32 = 0x4000;
-/// The trap code after a write of Status, Cause or Compare.
-pub const TRAP_CP0_SYNC: u32 = 0x100;
 /// The trap code of a TLB instruction is this plus its operation (TLBR 0,
 /// TLBWI 1, TLBWR 2, TLBP 3).
 pub const TRAP_TLB: u32 = 0x200;
@@ -215,16 +218,18 @@ impl N64 {
                 ret: pc.wrapping_add(8),
             };
         }
-        let sync = l.sys.contains(&Sys::Cp0Sync);
+        let sync = l.sys.contains(&Sys::Cp0Sync)
+            || b.insts.iter().any(
+                |i| matches!(i.op, Op::Set(r, _) if r == regs::CP0_COUNT || r == regs::CP0_WIRED),
+            );
         reshape(&mut b, &shape);
         if let Some(op) = shape.tlb_trap {
             b.exit = Exit {
                 next: Next::Const(after),
                 flow: Flow::Trap(TRAP_TLB + op),
             };
-        } else if sync && plain {
-            b.exit.flow = Flow::Trap(TRAP_CP0_SYNC);
-        } else if sync {
+        }
+        if sync {
             let at = b.insts.len() - 1;
             b.insts.insert(
                 at,
@@ -302,17 +307,20 @@ impl Frontend for N64 {
             }
             (COUNT, []) => "rl_mips_count(c)".into(),
             (CALL, [ret]) => format!("rl_mips_call(c, (uint64_t)({ret}))"),
-            (CP0_SYNC, []) => "rl_mips_cp0_sync(c)".into(),
+            (CP0_SYNC, []) => "rl_n64_cp0_break(c)".into(),
             _ => return None,
         })
     }
 
     fn trap(&self, code: u32) -> String {
-        if code == TRAP_CP0_SYNC {
-            "rl_n64_cp0_sync(c, mem)".into()
-        } else {
-            format!("rl_n64_tlb(c, mem, {}u)", code.wrapping_sub(TRAP_TLB))
-        }
+        format!("rl_n64_tlb(c, mem, {}u)", code.wrapping_sub(TRAP_TLB))
+    }
+
+    fn sync_call(&self, b: &Block, next: &str) -> Option<String> {
+        b.insts
+            .iter()
+            .any(|i| matches!(&i.op, Op::Intrinsic(c) if c.name == CP0_SYNC))
+            .then(|| format!("rl_n64_cp0_sync(c, mem, {next})"))
     }
 
     fn undefined(&self, pc: u64, insn: u64) -> String {
@@ -448,8 +456,16 @@ mod tests {
         let mtc0_status = 0x4082_6000;
         let b = N64.lift_at(PC, mtc0_status, 0).expect("lifts");
         b.verify().expect("verifies");
-        assert_eq!(b.exit.flow, Flow::Trap(TRAP_CP0_SYNC));
-        assert_eq!(b.exit.next, Next::Const(PC + 4));
+        assert!(intrinsics(&b).contains(&CP0_SYNC));
+        assert_eq!(
+            N64.sync_call(&b, "n").as_deref(),
+            Some("rl_n64_cp0_sync(c, mem, n)")
+        );
+        let mtc0_count = 0x4082_4800;
+        let b = N64.lift_at(PC, mtc0_count, 0).expect("lifts");
+        assert!(intrinsics(&b).contains(&CP0_SYNC));
+        let lw = N64.lift_at(PC, 0x8C22_0000, 0).expect("lifts");
+        assert!(N64.sync_call(&lw, "n").is_none());
         let tlbwi = 0x4200_0002;
         let b = N64.lift_at(PC, tlbwi, 0).expect("lifts");
         b.verify().expect("verifies");
