@@ -26,6 +26,14 @@ typedef struct n64_sp_dma {
     uint32_t skip;
 } n64_sp_dma;
 
+/** @brief One joybus controller port: whether a standard controller is plugged in, its buttons (RL_N64_PAD_*) and stick. */
+typedef struct n64_pad {
+    bool present;
+    uint16_t buttons;
+    int8_t x;
+    int8_t y;
+} n64_pad;
+
 /** @brief Where a code run is: not loaded, loaded and not checked, or checked and in dispatch. */
 enum { CODE_OUT, CODE_LOADED, CODE_LIVE };
 
@@ -106,10 +114,26 @@ struct rl_n64 {
 
     struct {
         uint32_t dram;
-        uint32_t pif_rd;
-        uint32_t pif_wr;
+        uint32_t rd_addr;
+        uint32_t wr_addr;
+        uint32_t latch;
+        bool dma_busy;
+        bool io_busy;
         bool interrupt;
+        uint8_t pch_state;
+        uint8_t dma_state;
+        rl_event dma_read;
+        rl_event dma_write;
+        rl_event bus_write;
     } si;
+
+    struct {
+        uint8_t joy_at[5];
+        bool joy_skip[5];
+        bool joy_reset[5];
+        n64_pad pad[4];
+        bool pad_ports;
+    } pif;
 
     struct {
         uint32_t control;
@@ -164,6 +188,35 @@ void rl_n64_pi_write(rl_n64 *m, unsigned index, uint32_t value);
 uint32_t rl_n64_cart_read(rl_n64 *m, uint32_t paddr);
 /** @brief Sets up PI's events. */
 void rl_n64_pi_attach(rl_n64 *m);
+
+/** @brief SI register read at physical address a (0x04800000 to 0x048FFFFF). */
+uint32_t rl_n64_si_read(rl_n64 *m, uint32_t a);
+/** @brief SI register write. */
+void rl_n64_si_write(rl_n64 *m, uint32_t a, uint32_t v);
+/** @brief A read of PIF RAM or ROM at address a (ROM reads 0). */
+uint32_t rl_n64_pif_read(rl_n64 *m, uint32_t a);
+/** @brief A write of PIF RAM at address a; a command block flagged for the joybus is parsed. */
+void rl_n64_pif_write(rl_n64 *m, uint32_t a, uint32_t v);
+/** @brief A CPU word read of the PIF's address space over the SI bus: the latch while a write is still going. */
+uint32_t rl_n64_si_bus_read(rl_n64 *m, uint32_t a);
+/** @brief A CPU word write of the PIF's address space over the SI bus: ignored while a write is still going. */
+void rl_n64_si_bus_write(rl_n64 *m, uint32_t a, uint32_t v);
+/** @brief Reads the controller state from the port table when the machine was told to (before the joybus commands run). */
+void rl_n64_pad_refresh(rl_n64 *m);
+/** @brief Sets up SI's events. */
+void rl_n64_si_attach(rl_n64 *m);
+/** @brief Removes SI's events from the scheduler. */
+void rl_n64_si_detach(rl_n64 *m);
+/** @brief The PIF resets its joybus channels: every one skipped. */
+void rl_n64_pif_init(rl_n64 *m);
+/** @brief A PIF to RDRAM transfer from the PIF address a: runs the joybus commands in PIF RAM (a read of the command block), then copies 64 bytes to RDRAM at dram. */
+void rl_n64_pif_dma_read(rl_n64 *m, uint32_t a, uint32_t dram);
+/** @brief An RDRAM to PIF transfer of 64 bytes to the PIF address a; a command block with its flag set is parsed. */
+void rl_n64_pif_dma_write(rl_n64 *m, uint32_t a, uint32_t dram);
+/** @brief The cycles the command block in PIF RAM takes on the joybus. */
+uint32_t rl_n64_pif_estimate(const rl_n64 *m);
+/** @brief One standard controller's joybus command: send bytes in input, recv expected back in output. Returns bit 0 valid, bit 1 over. */
+unsigned rl_n64_pad_comm(rl_n64 *m, unsigned port, unsigned send, unsigned recv, const uint8_t *input, uint8_t *output);
 
 /** @brief VI register read (index 0 to 13), with the line counter brought up to now. */
 uint32_t rl_n64_vi_read(rl_n64 *m, unsigned index);

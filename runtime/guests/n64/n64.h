@@ -121,6 +121,43 @@ RL_RUNTIME_API void rl_n64_set_frame_hook(rl_n64 *m, rl_n64_frame_hook *hook, vo
 /** @brief A VI register (0 to 13) as a read would see it. */
 RL_RUNTIME_API uint32_t rl_n64_vi_reg(rl_n64 *m, unsigned index);
 
+/** @brief The bits of a controller's button word, as the joybus reports them. */
+enum {
+    RL_N64_PAD_A = 0x8000,
+    RL_N64_PAD_B = 0x4000,
+    RL_N64_PAD_Z = 0x2000,
+    RL_N64_PAD_START = 0x1000,
+    RL_N64_PAD_UP = 0x0800,
+    RL_N64_PAD_DOWN = 0x0400,
+    RL_N64_PAD_LEFT = 0x0200,
+    RL_N64_PAD_RIGHT = 0x0100,
+    RL_N64_PAD_RESET = 0x0080,
+    RL_N64_PAD_L = 0x0020,
+    RL_N64_PAD_R = 0x0010,
+    RL_N64_PAD_C_UP = 0x0008,
+    RL_N64_PAD_C_DOWN = 0x0004,
+    RL_N64_PAD_C_LEFT = 0x0002,
+    RL_N64_PAD_C_RIGHT = 0x0001,
+};
+
+/**
+ * @brief Plugs a standard controller into port (0 to 3) with the buttons
+ * (RL_N64_PAD_*) and the stick (x right and y up, -85 to 85) the joybus
+ * reports from now on. Opposite directions cancel and L, R and Start
+ * together read as the reset button with the stick centered, as on the
+ * console. A port with no controller answers the joybus as an empty port.
+ */
+RL_RUNTIME_API void rl_n64_set_pad(rl_n64 *m, unsigned port, uint16_t buttons, int8_t x, int8_t y);
+/** @brief Unplugs the controller of port. */
+RL_RUNTIME_API void rl_n64_pad_remove(rl_n64 *m, unsigned port);
+/**
+ * @brief Makes controller 1 follow the port table's p1 port (declared with
+ * rl_n64_ports, a, b, z, start, up, down, left, right, l, r, c_up, c_down,
+ * c_left, c_right and the axes stick_x and stick_y), read each time the
+ * joybus commands run. Off: the controller is unplugged.
+ */
+RL_RUNTIME_API void rl_n64_pad_use_ports(rl_n64 *m, bool on);
+
 /**
  * @brief The framebuffer VI scans out, read raw from RDRAM with the VI
  * registers (origin, width, the visible size from the video and scale

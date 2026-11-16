@@ -1,8 +1,8 @@
 /**
  * @file machine.c
  * @brief The physical memory map and the registers of MI, RI, the RDRAM
- * modules, AI, SI and PIF RAM, and the high-level boot (the SP and DP
- * registers are sp.c's).
+ * modules and AI, and the high-level boot (the SP and DP registers are
+ * sp.c's, SI and the PIF are si.c's and pif.c's).
  *
  * Every register is a word; a narrower access reads the word and takes its
  * bytes, and a narrower write writes its bytes shifted into the word as the
@@ -53,6 +53,7 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     m->rom = rom;
     m->rom_len = rom_len;
     rl_n64_sp_init(m);
+    rl_n64_pif_init(m);
     return m;
 }
 
@@ -65,6 +66,7 @@ void rl_n64_destroy(rl_n64 *m)
         rl_sched_cancel(m->s, &m->vi.line);
         rl_sched_cancel(m->s, &m->sp.slice);
         rl_sched_cancel(m->s, &m->sp.dma_event);
+        rl_n64_si_detach(m);
     }
     free(m->code.state);
     free(m->code.order);
@@ -82,6 +84,7 @@ int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k)
     rl_n64_pi_attach(m);
     rl_n64_vi_attach(m);
     rl_n64_sp_attach(m);
+    rl_n64_si_attach(m);
     mi_update(m);
     return 0;
 }
@@ -186,58 +189,6 @@ static void ai_write(rl_n64 *m, unsigned i, uint32_t v)
     }
 }
 
-static void si_dma(rl_n64 *m, bool to_pif)
-{
-    uint32_t d = m->si.dram & (RL_N64_RDRAM_SIZE - 64u) & ~7u;
-    if (to_pif)
-        memcpy(m->pif_ram, m->rdram + d, 64);
-    else {
-        memcpy(m->rdram + d, m->pif_ram, 64);
-        rl_n64_code_written(m, d, 64);
-    }
-    m->si.interrupt = true;
-    rl_n64_mi_raise(m, RL_N64_IRQ_SI);
-}
-
-static uint32_t si_read(rl_n64 *m, unsigned i)
-{
-    switch (i) {
-    case 0:
-        return m->si.dram;
-    case 1:
-        return m->si.pif_rd;
-    case 4:
-        return m->si.pif_wr;
-    case 6:
-        return m->si.interrupt ? 0x1000u : 0u;
-    default:
-        return 0;
-    }
-}
-
-static void si_write(rl_n64 *m, unsigned i, uint32_t v)
-{
-    switch (i) {
-    case 0:
-        m->si.dram = v & 0xFFFFF8u;
-        break;
-    case 1:
-        m->si.pif_rd = v;
-        si_dma(m, false);
-        break;
-    case 4:
-        m->si.pif_wr = v;
-        si_dma(m, true);
-        break;
-    case 6:
-        m->si.interrupt = false;
-        rl_n64_mi_lower(m, RL_N64_IRQ_SI);
-        break;
-    default:
-        break;
-    }
-}
-
 /** @brief A word read at a word-aligned physical address outside RDRAM. */
 static uint32_t read_word(rl_n64 *m, uint32_t a)
 {
@@ -262,14 +213,14 @@ static uint32_t read_word(rl_n64 *m, uint32_t a)
     case 0x047:
         return m->ri.regs[r & 7u];
     case 0x048:
-        return si_read(m, r);
+        return rl_n64_si_read(m, a);
     default:
         break;
     }
     if (a >= 0x05000000u && a < 0x1FC00000u)
         return rl_n64_cart_read(m, a);
-    if (a >= 0x1FC007C0u && a < 0x1FC00800u)
-        return ld32(m->pif_ram + (a & 0x3Cu));
+    if (a >= 0x1FC00000u)
+        return rl_n64_si_bus_read(m, a);
     return 0;
 }
 
@@ -309,13 +260,13 @@ static void write_word(rl_n64 *m, uint32_t a, uint32_t v)
         m->ri.regs[r & 7u] = v;
         return;
     case 0x048:
-        si_write(m, r, v);
+        rl_n64_si_write(m, a, v);
         return;
     default:
         break;
     }
-    if (a >= 0x1FC007C0u && a < 0x1FC00800u)
-        st32(m->pif_ram + (a & 0x3Cu), v);
+    if (a >= 0x1FC00000u)
+        rl_n64_si_bus_write(m, a, v);
 }
 
 uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size)
