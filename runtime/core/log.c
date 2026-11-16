@@ -11,9 +11,13 @@
 #include <time.h>
 #if defined(_WIN32)
 #include <windows.h>
+#include <psapi.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
 #endif
 
 static rl_config g_cfg = { false, false, RL_LOG_INFO, 0, 0, false };
@@ -148,6 +152,26 @@ uint64_t rl_ns_to_ticks(uint64_t ns)
 uint64_t rl_ticks_to_ns(uint64_t ticks)
 {
     return (uint64_t)(((rl_u128)ticks * 1000000000u) / rl_core_guest()->tick_hz);
+}
+
+uint64_t rl_os_memory_bytes(void)
+{
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    return K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pmc, sizeof pmc) ? pmc.PrivateUsage : 0;
+#elif defined(__APPLE__)
+    task_vm_info_data_t info;
+    mach_msg_type_number_t n = TASK_VM_INFO_COUNT;
+    return task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &n) == KERN_SUCCESS ? info.phys_footprint : 0;
+#else
+    unsigned long long pages = 0, resident = 0;
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (!f)
+        return 0;
+    int got = fscanf(f, "%llu %llu", &pages, &resident);
+    fclose(f);
+    return got == 2 ? resident * rl_os_page_size() : 0;
+#endif
 }
 
 uint32_t rl_os_page_size(void)

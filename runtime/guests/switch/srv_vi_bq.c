@@ -397,9 +397,10 @@ static void frame_stats(uint64_t frame)
     uint64_t t = rl_clock_ns(), p = cpu_ns(CLOCK_PROCESS_CPUTIME_ID), h = cpu_ns(CLOCK_THREAD_CPUTIME_ID);
     if (f0 && frame - f0 >= every && t > t0) {
         double s = (double)(t - t0) / 1e9, n = (double)(frame - f0);
-        rl_log(RL_LOG_INFO, "stats", "frames %llu-%llu: %.2f frames/s, process %.2f cores, presenting thread %.3f ms per frame",
+        rl_log(RL_LOG_INFO, "stats",
+               "frames %llu-%llu: %.2f frames/s, process %.2f cores, presenting thread %.3f ms per frame, memory %llu MiB",
                (unsigned long long)f0, (unsigned long long)frame, n / s, (double)(p - p0) / 1e9 / s,
-               (double)(h - h0) / 1e6 / n);
+               (double)(h - h0) / 1e6 / n, (unsigned long long)(rl_os_memory_bytes() >> 20));
     }
     if (!f0 || frame - f0 >= every) {
         t0 = t;

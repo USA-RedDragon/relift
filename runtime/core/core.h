@@ -165,6 +165,8 @@ RL_RUNTIME_API uint64_t rl_ns_to_ticks(uint64_t ns);
 RL_RUNTIME_API uint64_t rl_ticks_to_ns(uint64_t ticks);
 /** @brief Real host page size from the OS. */
 RL_RUNTIME_API uint32_t rl_os_page_size(void);
+/** @brief The process's memory: the physical footprint on Apple hosts, the resident set on Linux and Android, private bytes on Windows; 0 when unknown. */
+RL_RUNTIME_API uint64_t rl_os_memory_bytes(void);
 
 /**
  * @brief Guest page permission bits: the core's own encoding, not any guest
