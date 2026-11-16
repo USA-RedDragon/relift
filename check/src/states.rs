@@ -638,7 +638,8 @@ fn eor_bit(reg: u32, bit: u32) -> u32 {
 /// The setup of a pointer authentication instruction: the pointer register
 /// (and the modifier) set to values that exercise the interesting paths, and
 /// the words that sign the pointer, with the key and modifier of the
-/// instruction or others, and tamper with it. `None` for any other form.
+/// instruction or others, and tamper with it; unsigned on a CPU whose
+/// signing words do not lift. `None` for any other form.
 fn pauth_prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<Vec<u32>> {
     let name = insn.encoding.name();
     let is = ["PAC", "AUT", "XPAC", "BRA", "BLRA", "RETA", "LDRA"]
@@ -655,7 +656,7 @@ fn pauth_prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<Vec<u32>> {
     };
     let align = if f.branches { !3u64 } else { !0u64 };
     let signer = name.starts_with("PAC");
-    let scenario = if signer {
+    let scenario = if signer || lift(pac_word(&f, insn, f.key), CODE).is_err() {
         Scenario::Unsigned
     } else {
         Scenario::pick(r)
