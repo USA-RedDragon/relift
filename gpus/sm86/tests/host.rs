@@ -197,6 +197,71 @@ fn divergent_warp_operations_are_reported() {
     assert!(s.interface.host.inexact.is_empty());
 }
 
+fn execution_modes(words: &[u32]) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        if words[k] & 0xffff == EXECUTION_MODE {
+            out.push(words[k + 2]);
+        }
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    out
+}
+
+const MAXIMALLY_RECONVERGES: u32 = 6023;
+
+/// BRA.DIV over a SHFL to a VOTE: the fast path a compiler emits for a
+/// shuffle that may run in a diverged warp.
+fn fast_path_program() -> Program {
+    let mut b = Vec::new();
+    b.extend(word(0x147, 4, &[(32, 2, 2), (34, 48, 4), (87, 3, 7)]));
+    b.extend(word(
+        0x189,
+        1,
+        &[
+            (16, 8, 2),
+            (24, 8, 3),
+            (32, 8, 4),
+            (58, 2, 3),
+            (64, 8, 5),
+            (81, 3, 7),
+        ],
+    ));
+    b.extend(word(
+        0x006,
+        1,
+        &[(16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)],
+    ));
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+#[test]
+fn fast_paths_ask_for_maximal_reconvergence() {
+    let p = fast_path_program();
+    assert!(text_of(&p)[0].starts_with("BRA.DIV"), "{:?}", text_of(&p));
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    assert!(s.interface.host.max_reconvergence);
+    assert!(execution_modes(&s.spirv).contains(&MAXIMALLY_RECONVERGES));
+    assert!(s.interface.host.inexact.is_empty());
+    let lacking = HostProfile {
+        maximal_reconvergence: false,
+        ..HostProfile::nvidia()
+    };
+    let s = on(&p, lacking);
+    assert!(!s.interface.host.max_reconvergence);
+    assert!(!execution_modes(&s.spirv).contains(&MAXIMALLY_RECONVERGES));
+    assert_eq!(s.interface.host.inexact.len(), 1);
+    assert!(s.interface.host.inexact[0].contains("reconvergence"));
+    let s = on(&warp_program(true), HostProfile::nvidia());
+    assert!(s.interface.host.max_reconvergence);
+    let s = on(&warp_program(false), HostProfile::nvidia());
+    assert!(!s.interface.host.max_reconvergence);
+    assert!(!execution_modes(&s.spirv).contains(&MAXIMALLY_RECONVERGES));
+}
+
 fn capabilities(words: &[u32]) -> Vec<u32> {
     let mut out = Vec::new();
     let mut k = 5;

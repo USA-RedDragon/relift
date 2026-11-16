@@ -65,6 +65,10 @@ pub struct HostProfile {
     pub warp_graphics: Warp,
     /// Subgroup quad operations in the fragment stage.
     pub quad_fragment: bool,
+    /// `shaderMaximalReconvergence` (VK_KHR_shader_maximal_reconvergence):
+    /// invocations that diverge come together again at the merge of the
+    /// construct, as guest lanes do at their reconvergence point.
+    pub maximal_reconvergence: bool,
     /// `OpDemoteToHelperInvocation` keeps a demoted invocation running as a
     /// helper (false where it maps to a terminating discard).
     pub demote: bool,
@@ -117,6 +121,7 @@ impl HostProfile {
             warp_fragment: Warp::Fixed32,
             warp_graphics: Warp::Fixed32,
             quad_fragment: true,
+            maximal_reconvergence: true,
             demote: true,
             bda: true,
             int64_atomics_buffer: true,
@@ -192,6 +197,7 @@ impl HostProfile {
             warp_fragment: Warp::Unchecked32,
             warp_graphics: Warp::Absent,
             quad_fragment: true,
+            maximal_reconvergence: true,
             demote: false,
             bda: true,
             int64_atomics_buffer: false,
@@ -220,6 +226,7 @@ impl HostProfile {
             warp_fragment: Warp::Wide,
             warp_graphics: Warp::Absent,
             quad_fragment: true,
+            maximal_reconvergence: true,
             demote: true,
             bda: true,
             int64_atomics_buffer: true,
@@ -283,6 +290,7 @@ impl HostProfile {
             warp_fragment: Warp::Narrow(8),
             warp_graphics: Warp::Absent,
             quad_fragment: true,
+            maximal_reconvergence: true,
             demote: true,
             bda: true,
             int64_atomics_buffer: true,
@@ -339,6 +347,7 @@ impl HostProfile {
             warp_fragment: Warp::Absent,
             warp_graphics: Warp::Absent,
             quad_fragment: false,
+            maximal_reconvergence: false,
             demote: false,
             bda: false,
             int64_atomics_buffer: false,
@@ -458,6 +467,9 @@ pub struct HostReport {
     /// The runtime must check at start-up that the stage really runs with
     /// 32-wide subgroups.
     pub check_warp32: bool,
+    /// The program asks for maximal reconvergence (the MaximallyReconvergesKHR
+    /// execution mode): the runtime must enable `shaderMaximalReconvergence`.
+    pub max_reconvergence: bool,
     /// The runtime must check at start-up that the device flushes
     /// denormals as SM86 does (see [`Denorm::Flush`]).
     pub check_flush: bool,

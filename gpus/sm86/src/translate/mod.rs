@@ -37,6 +37,7 @@ pub(crate) const OUTPUT: u32 = 3;
 pub(crate) const FUNCTION: u32 = 7;
 pub(crate) const PHYSICAL_STORAGE_BUFFER: u32 = 5349;
 const CBUF_VEC4S: u32 = 4096;
+const EXECUTION_MODE_MAXIMALLY_RECONVERGES: u32 = 6023;
 
 /// Why a program could not be translated: the first construct the
 /// translator does not handle.
@@ -147,6 +148,8 @@ pub fn cbuf_binding(bank: u32) -> (u32, u32) {
 pub(crate) struct Code {
     pub insts: Vec<Inst>,
     pub words: Vec<Word>,
+    /// BRA.DIV and BRA.CONV folded to their fast paths.
+    pub fast_paths: usize,
 }
 
 pub(crate) struct Ctx {
@@ -574,8 +577,10 @@ impl Ctx {
 /// BRA.DIV and BRA.CONV pick between a fast path that needs the warp
 /// converged and a slow path that makes it so before calling a helper.
 /// Subgroup operations are already defined for any set of active lanes,
-/// so the fast path is always right: BRA.DIV never branches and BRA.CONV
-/// always does.
+/// so the fast path is taken: BRA.DIV never branches and BRA.CONV always
+/// does. That keeps the guest's lanes together only where the host
+/// reconverges as the guest does, so a program with a fast path asks for
+/// maximal reconvergence (see `warp_plan`).
 fn converged(mut i: Inst) -> Inst {
     if i.mnemonic != "BRA" {
         return i;
@@ -592,13 +597,18 @@ fn converged(mut i: Inst) -> Inst {
 
 fn decode_all(p: &Program) -> Res<Code> {
     let mut insts = Vec::new();
+    let mut fast_paths = 0;
     for (n, d) in p.decode().into_iter().enumerate() {
         let i = d.map_err(|e| Unsupported(format!("decode at {:#x}: {e}", 16 * n)))?;
+        if i.mnemonic == "BRA" && (i.has("DIV") || i.has("CONV")) {
+            fast_paths += 1;
+        }
         insts.push(converged(i));
     }
     Ok(Code {
         insts,
         words: p.words.clone(),
+        fast_paths,
     })
 }
 
@@ -649,7 +659,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     };
     c.iface.host.host = o.host.name;
     c.denorm_plan(&code.insts);
-    c.warp_plan(&code.insts);
+    c.warp_plan(&code.insts, code.fast_paths);
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);
     let main = c.m.id();
@@ -736,6 +746,18 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         _ => {}
     }
     c.denorm_mode(main);
+    if c.iface.host.max_reconvergence {
+        crate::spirv::inst(
+            &mut c.m.caps,
+            op::EXTENSION,
+            &crate::spirv::str_words("SPV_KHR_maximal_reconvergence"),
+        );
+        crate::spirv::inst(
+            &mut c.m.modes,
+            op::EXECUTION_MODE,
+            &[main, EXECUTION_MODE_MAXIMALLY_RECONVERGES],
+        );
+    }
     let iface = c.iface;
     Ok(Shader {
         stage,

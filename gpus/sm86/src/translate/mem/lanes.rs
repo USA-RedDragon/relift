@@ -89,6 +89,11 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
     }
 }
 
+/// A warp operation whose result depends on which lanes are active.
+pub(crate) fn reads_lanes(i: &Inst) -> bool {
+    matches!(i.mnemonic, "SHFL" | "VOTE" | "VOTEU" | "REDUX" | "MATCH")
+}
+
 fn branch_target(i: &Inst) -> Option<usize> {
     i.ops.iter().find_map(|o| match o {
         Operand::Target(t) if *t >= 0 => Some((*t / 16) as usize),
@@ -127,8 +132,9 @@ pub(crate) fn divergent(insts: &[Inst]) -> Vec<bool> {
 
 impl Ctx {
     /// Picks how warp operations are carried out, from the stage's
-    /// subgroups and where the operations sit.
-    pub(crate) fn warp_plan(&mut self, insts: &[Inst]) {
+    /// subgroups and where the operations sit. `fast_paths` counts the
+    /// BRA.DIV and BRA.CONV taken as converged.
+    pub(crate) fn warp_plan(&mut self, insts: &[Inst], fast_paths: usize) {
         let ops: Vec<(usize, bool)> = insts
             .iter()
             .enumerate()
@@ -181,6 +187,42 @@ impl Ctx {
             }
         };
         self.iface.host.warp = path;
+        if path != WarpPath::Shared {
+            self.reconvergence_plan(insts, fast_paths);
+        }
+    }
+
+    /// Asks for maximal reconvergence when a warp operation that reads
+    /// other lanes may follow divergent control flow (a guarded instruction,
+    /// a BSSY region, a guarded branch or EXIT) or the program takes a
+    /// BRA.DIV or BRA.CONV fast path. Without it SPIR-V does not promise
+    /// that invocations which split come together again where the guest's
+    /// lanes do, so on a host without it the program is inexact.
+    fn reconvergence_plan(&mut self, insts: &[Inst], fast_paths: usize) {
+        let div = divergent(insts);
+        let first = (0..insts.len()).find(|&k| {
+            div[k]
+                || matches!(
+                    insts[k].guard,
+                    Some(Operand::Pred(p, _)) | Some(Operand::UPred(p, _)) if p != 7
+                )
+        });
+        let n = insts
+            .iter()
+            .enumerate()
+            .filter(|(k, i)| reads_lanes(i) && (fast_paths > 0 || first.is_some_and(|f| *k >= f)))
+            .count();
+        if n == 0 {
+            return;
+        }
+        if self.host.maximal_reconvergence {
+            self.iface.host.max_reconvergence = true;
+        } else {
+            self.iface.host.inexact.push(format!(
+                "{n} warp operations after divergent control flow on {}: no maximal reconvergence",
+                self.host.name
+            ));
+        }
     }
 
     fn warp_path(&self) -> WarpPath {
