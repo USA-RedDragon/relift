@@ -7,7 +7,10 @@ The program is lifted from a generated 32 KiB ROM that loads the Mooneye pass
 registers and stops at `ld b,b`. `relift build` runs on this host and leaves
 the generated C and its compile commands in its cache; this script compiles
 those sources, the runtime and the Rust device library again for TARGET and
-links them without the SDL3 window. With --run the program runs in the
+links them without the SDL3 window, sound, libopus or a linked MoltenVK: the
+host build is made headless by pointing RELIFT_SDL3_DIR, RELIFT_OPUS_DIR and
+RELIFT_MOLTENVK_DIR at nothing, so the host's own libraries never reach the
+cross build. With --run the program runs in the
 mooneye protocol (on this machine for the host target, through adb for the
 Android targets). A missing tool stops the run with what to install.
 Standard library only.
@@ -301,8 +304,16 @@ def host_run(exe, work):
 
 
 def runtime_libs(args, tool):
+    """Builds the runtime libraries and tests with the runtime Makefile for the target.
+
+    Apple targets build without MoltenVK: the Makefile would otherwise link
+    the host's Homebrew MoltenVK, which is built for macOS on this machine's
+    architecture only.
+    """
     t = TARGETS[args.target]
     cmd = ["make", "-C", os.path.join(ROOT, "runtime"), f"-j{args.jobs}", "CC=" + " ".join(map(shlex.quote, tool.cc)), "AR=" + " ".join(map(shlex.quote, tool.ar)), f"BUILD={os.path.join(args.work, 'rt-' + args.target)}"]
+    if t["kind"] == "apple":
+        cmd.append("MOLTENVK_DIR=")
     if t["kind"] == "apple" and platform.system() == "Darwin":
         cmd.append("TARGET_FLAGS=" + " ".join(tool.cc[1:]))
     elif t["kind"] != "android" and len(tool.cc) > 1:
@@ -349,7 +360,9 @@ def main():
     try:
         tool = tool_for(args.target)
         print(f"{args.target}: {tool.note}")
-        env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS=str(args.jobs), RELIFT_PACKAGE_APPIMAGE="never")
+        none = os.path.join(args.work, "no-host-libraries")
+        env = dict(os.environ, RELIFT_CACHE_DIR=os.path.join(args.work, "cache"), RELIFT_JOBS=str(args.jobs), RELIFT_PACKAGE_APPIMAGE="never",
+                   RELIFT_SDL3_DIR=none, RELIFT_OPUS_DIR=none, RELIFT_MOLTENVK_DIR=none)
         game, rt = host_build(args, env)
         runtime_libs(args, tool)
         print("runtime libraries build")
