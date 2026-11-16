@@ -63,7 +63,7 @@
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
 #define RL_ABI_VERSION 8u
 
-/** @brief Lifted function return on a CPU without a link register: normal return to the caller. An A64 function returns where its return went instead (docs/abi.md section 5.4). */
+/** @brief Lifted function return on a CPU without a link register: normal return to the caller. A CPU with one returns where its return went instead (docs/abi.md section 5.4). */
 #define RL_OK 0
 /** @brief Lifted function return: a pending record is set in the context (pend.kind is not RL_PEND_NONE); return 1 up the host stack. */
 #define RL_PENDING 1
@@ -116,7 +116,7 @@ typedef struct rl_ctx rl_ctx;
 /**
  * @brief Type of every lifted function, host override with the lifted ABI, and
  * dispatch target. Returns RL_OK or RL_PENDING, or on a CPU with a link
- * register (A64) the guest address its return went to, or RL_PENDING with a
+ * register the guest address its return went to, or RL_PENDING with a
  * pending record set (docs/abi.md section 5.4).
  */
 typedef uint64_t rl_fn_t(rl_ctx *c, uint8_t *mem);
