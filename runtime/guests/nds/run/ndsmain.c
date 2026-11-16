@@ -23,6 +23,7 @@
 typedef struct host {
     rl_nds_run run;
     rl_event save_ev;
+    rl_event max_ev;
     char save[4096];
     bool stats;
     bool no_save;
@@ -198,6 +199,18 @@ static void save_now(void)
 }
 
 /** @brief Once per emulated second: writes a save that has been quiet for a second. */
+/**
+ * @brief The --max-ticks bound as an event, so that it ends a run whose
+ * CPUs sit in halts and never reach a sync point's tick check.
+ */
+static void max_tick(rl_sched *s, rl_event *e, uint64_t when)
+{
+    (void)s;
+    (void)e;
+    fprintf(stderr, "relift-nds: the run passed tick %llu (--max-ticks)\n", (unsigned long long)when);
+    rl_process_exit(RL_EXIT_SOFTWARE);
+}
+
 static void save_tick(rl_sched *s, rl_event *e, uint64_t when)
 {
     if (H.save[0] && rl_nds_save_poll(H.run.m, H.save, RL_NDS_TICK_HZ) < 0)
@@ -327,6 +340,10 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
     }
     H.save_ev = (rl_event){.fire = save_tick};
     rl_sched_post(H.run.s, &H.save_ev, RL_NDS_TICK_HZ);
+    if (max_ticks) {
+        H.max_ev = (rl_event){.fire = max_tick};
+        rl_sched_post(H.run.s, &H.max_ev, max_ticks + 1);
+    }
     rl_set_exit_hook(on_exit_code);
     int r = rl_nds_run_start(&H.run);
     rl_set_exit_hook(NULL);
