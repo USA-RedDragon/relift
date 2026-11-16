@@ -95,7 +95,8 @@ def bad_includes(rel, text, above_names, above_paths, search):
         kind, name = m.group(1), m.group(2)
         line = text.count("\n", 0, m.start()) + 1
         lowered = name.lower()
-        if "cpus/" in lowered or "guests/" in lowered or name in above_paths or os.path.basename(name) in above_names:
+        by_name = kind == '"' or "/" not in name
+        if "cpus/" in lowered or "guests/" in lowered or name in above_paths or (by_name and os.path.basename(name) in above_names):
             bad.append((line, name, "names a header of a CPU or guest layer"))
             continue
         dirs = ([here] if kind == '"' else []) + search
