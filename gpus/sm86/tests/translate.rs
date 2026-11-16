@@ -568,3 +568,27 @@ fn kill_demotes_and_goes_on() {
     assert!(spirv_has(&s.spirv, 5380), "no OpDemoteToHelperInvocation");
     assert!(!spirv_has(&s.spirv, 252), "OpKill");
 }
+
+#[test]
+fn indexed_ipa_selects_among_the_sph_inputs() {
+    let mut b = sph(2, 5, &[(6, 0x00aa_aaaa), (18, 0x1)]);
+    b.extend(word(
+        0x126,
+        2,
+        &[
+            (16, 8, 0),
+            (64, 8, 0x84 >> 2),
+            (24, 6, 4),
+            (91, 1, 1),
+            (32, 8, 255),
+            (81, 3, 7),
+        ],
+    ));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "IPA.PASS R0, a[UR4+0x84]");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("indexed_ipa", &s.spirv);
+    assert_eq!(s.interface.inputs.len(), 3);
+    assert_eq!(count_op(&s.spirv, 169), 12, "one select per component");
+}

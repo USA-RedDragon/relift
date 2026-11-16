@@ -490,6 +490,56 @@ fn ast(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ok(())
 }
 
+/// IPA of `a[index + offset]`: every generic component the SPH input map
+/// names is interpolated and the one the address picks is selected. The
+/// components must share one interpolation mode.
+fn ipa_indexed(c: &mut Ctx, i: &Inst, ix: &Operand, offset: u32) -> Res<u32> {
+    let index = match ix {
+        Operand::Reg(n, m) if !m.neg && !m.abs => c.load_reg(*n),
+        Operand::UReg(n, m) if !m.neg && !m.abs => c.load_ureg(*n),
+        o => return bad(format!("attribute index {o}")),
+    };
+    if i.has("CENTROID") {
+        return bad("indexed IPA.CENTROID");
+    }
+    let u = c.u32t();
+    let o = c.m.c_u32(offset);
+    let addr = c.m.emit(op::I_ADD, u, &[index, o]);
+    let f = c.f32t();
+    let b = c.boolt();
+    let mut acc = c.m.c_u32(0);
+    let mut mode = None;
+    for loc in 0..32 {
+        for comp in 0..4 {
+            let m = c.imap(loc, comp);
+            if m == 0 {
+                continue;
+            }
+            if mode.is_some_and(|x| x != m) {
+                return bad("mixed interpolation in an indexed IPA");
+            }
+            mode = Some(m);
+            c.location_interp(loc, i.has("CONSTANT"))?;
+            let var = c.input_var(loc);
+            let p = c.component_ptr(var, INPUT, comp);
+            let v = c.m.emit(op::LOAD, f, &[p]);
+            let bits = c.as_bits(v);
+            let k = c.m.c_u32(0x80 + 16 * loc + 4 * comp);
+            let hit = c.m.emit(op::I_EQUAL, b, &[addr, k]);
+            acc = c.m.emit(op::SELECT, u, &[hit, bits, acc]);
+        }
+    }
+    if mode == Some(2) {
+        let fc = c.vec_builtin(B_FRAG_COORD, INPUT, 4);
+        let wp = c.component_ptr(fc, INPUT, 3);
+        let w = c.m.emit(op::LOAD, f, &[wp]);
+        let v = c.as_float(acc);
+        let v = c.m.emit(op::F_MUL, f, &[v, w]);
+        acc = c.as_bits(v);
+    }
+    Ok(acc)
+}
+
 /// KILL demotes the invocation to a helper and execution goes on, as the
 /// hardware does (NAK lowers both demote and terminate to it): the quad
 /// keeps its derivatives and the outputs and stores of the killed
@@ -542,6 +592,16 @@ fn ipa(c: &mut Ctx, i: &Inst) -> Res<()> {
         return bad(format!("IPA form {i}"));
     }
     let d = Ctx::dst_reg(&i.ops[0])?;
+    if let Operand::Attr {
+        index: Some(ix),
+        offset,
+        patch: false,
+    } = &i.ops[1]
+    {
+        let v = ipa_indexed(c, i, ix, *offset)?;
+        c.store_reg(d, v);
+        return Ok(());
+    }
     let off = attr_operand(&i.ops[1])?;
     let constant = i.has("CONSTANT");
     let centroid = i.has("CENTROID");
