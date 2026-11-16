@@ -442,6 +442,12 @@ pub const SEGMENT_SHIFT_SPEC: u32 = 5;
 /// Default segment size: 128 MiB, the smallest `maxStorageBufferRange`
 /// among the presets.
 pub const SEGMENT_SHIFT_DEFAULT: u32 = 27;
+/// Specialization constant id of the number of guest segments the runtime
+/// binds; binding 0 holds one more descriptor, a trap segment that every
+/// address past them reaches.
+pub const SEGMENT_COUNT_SPEC: u32 = 6;
+/// Default segment count: 256 segments of the default size, 32 GiB.
+pub const SEGMENT_COUNT_DEFAULT: u32 = 256;
 /// Byte offset in driver constant bank 0 where the runtime puts a 32-bit
 /// clock seed for [`ClockPath::Counter`].
 pub const CLOCK_SEED_OFFSET: u32 = 0x1f0;

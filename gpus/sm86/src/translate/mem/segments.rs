@@ -8,13 +8,20 @@
 //! and covers guest addresses `k << shift` to `(k + 1) << shift`. The
 //! runtime binds, for each segment a program may reach, a buffer holding
 //! that window of guest memory, and puts guest addresses in the constant
-//! banks unchanged. An access is naturally aligned, so it never crosses a
-//! segment. Each access type has its own view of the binding: a block with a
-//! runtime array of that type.
+//! banks unchanged. An access is naturally aligned (the guest faults on a
+//! misaligned one), and a segment is a power of two of at least 16 bytes,
+//! so no access crosses a segment. Each access type has its own view of the
+//! binding: a block with a runtime array of that type.
+//!
+//! The runtime binds [`SEGMENT_COUNT_SPEC`] segments (default
+//! [`SEGMENT_COUNT_DEFAULT`]) and one more descriptor after them, a trap
+//! segment: an address past the bound segments, which on the guest faults,
+//! reaches the trap segment instead of indexing past the descriptor array.
 
 use crate::spirv::op;
 use crate::translate::{
-    Ctx, GUEST_MEMORY_SET, GlobalPath, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC,
+    Ctx, GUEST_MEMORY_SET, GlobalPath, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC,
+    SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC,
 };
 
 const STORAGE_BUFFER: u32 = 12;
@@ -83,6 +90,11 @@ impl Ctx {
         let shift = self.m.spec_u32(SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC);
         let sh64 = self.m.emit(op::U_CONVERT, t, &[shift]);
         let seg = self.m.emit(op::SHIFT_RIGHT_LOGICAL, t, &[addr, sh64]);
+        let count = self.m.spec_u32(SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC);
+        let count64 = self.m.emit(op::U_CONVERT, t, &[count]);
+        let b = self.boolt();
+        let inside = self.m.emit(op::U_LESS_THAN, b, &[seg, count64]);
+        let seg = self.select(t, inside, seg, count64);
         let seg = self.m.emit(op::U_CONVERT, u, &[seg]);
         self.m.deco(seg, DECO_NON_UNIFORM, &[]);
         let one = self.m.c_u64(1);

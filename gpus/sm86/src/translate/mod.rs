@@ -18,8 +18,8 @@ mod tex;
 
 pub use host::{
     Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, GUEST_MEMORY_SET, GlobalPath,
-    HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC,
-    Warp, WarpPath,
+    HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC,
+    SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp, WarpPath,
 };
 pub use tex::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,

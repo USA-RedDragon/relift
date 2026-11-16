@@ -493,3 +493,18 @@ fn generic_accesses_are_listed_inexact() {
             .any(|l| l.contains("generic"))
     );
 }
+
+/// Without buffer device addresses, the segment index stops at the bound
+/// segment count, where the runtime puts a trap segment.
+#[test]
+fn segment_index_is_bounded() {
+    let s = on(&[ldg(SIZE_32, 2, 4, 0)], HostProfile::minimal());
+    let spec = insts(&s.spirv, 50);
+    let count = spec.iter().find(|i| {
+        insts(&s.spirv, 71)
+            .iter()
+            .any(|d| d[1] == i[2] && d[2] == 1 && d[3] == 6)
+    });
+    assert!(count.is_some(), "no segment count constant");
+    assert!(!insts(&s.spirv, 169).is_empty(), "no select");
+}
