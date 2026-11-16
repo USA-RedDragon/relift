@@ -34,11 +34,16 @@ const ROM_FILE: &str = "rom.gb";
 /// locations it ran without lifted code; the next build lifts them.
 const LEARNED_FILE: &str = "learned.txt";
 
+/// The largest cartridge image (the format's 8 MiB, with room for oddities):
+/// a larger file is not read to check, so a many-GB game dump is not loaded
+/// into memory.
+const MAX_ROM: u64 = 64 << 20;
+
 /// Whether `path` is a Game Boy cartridge image: a file whose header
 /// decodes, with the Nintendo logo or a `.gb`, `.gbc` or `.sgb` name.
 #[must_use]
 pub fn is_rom(path: &Path) -> bool {
-    if !path.is_file() {
+    if !path.is_file() || std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_ROM) {
         return false;
     }
     let named = path

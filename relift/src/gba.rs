@@ -39,12 +39,17 @@ const LAYERS: [&str; 6] = [
     "guests/gba/run",
 ];
 
+/// The largest cartridge image (the format's 32 MiB, with room for
+/// oddities): a larger file is not read to check, so a many-GB game dump is
+/// not loaded into memory.
+const MAX_ROM: u64 = 64 << 20;
+
 /// Whether `path` is a Game Boy Advance cartridge image: a file whose
 /// header has the fixed byte and a branch at the entry, with the logo or a
 /// `.gba` name.
 #[must_use]
 pub fn is_rom(path: &Path) -> bool {
-    if !path.is_file() {
+    if !path.is_file() || std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_ROM) {
         return false;
     }
     let named = path
