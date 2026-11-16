@@ -801,7 +801,17 @@ impl Run<'_> {
             return;
         };
         let mut s = Summary::new(false, 0x7FFF);
-        for callee in self.targets(site, v as u32, thumb) {
+        let callees = self.targets(site, v as u32, thumb);
+        if callees.is_empty() {
+            // A callee the run cannot reach is not proof that the call
+            // never returns.
+            s = if self.env.image.platform.external(v as u32) {
+                Summary::new(true, AAPCS_KEEP)
+            } else {
+                Summary::opaque()
+            };
+        }
+        for callee in callees {
             self.out.edges.push(Edge {
                 site,
                 target: callee,
@@ -837,12 +847,6 @@ impl Run<'_> {
             s.returns |= cs.returns;
             s.keep &= cs.keep;
             s.psr &= cs.psr;
-        }
-        if !s.returns
-            && self.env.image.platform.external(v as u32)
-            && locs(self.env.image, site, v as u32, thumb).is_err()
-        {
-            s = Summary::new(true, AAPCS_KEEP);
         }
         self.resume(site, st, s);
     }
@@ -951,8 +955,10 @@ impl Run<'_> {
             return Summary::opaque();
         }
         let mut s = Summary::new(false, 0x7FFF);
+        let mut reached = false;
         for (addr, th) in es {
             for t in self.targets(site, addr, th) {
+                reached = true;
                 self.out.edges.push(Edge {
                     site,
                     target: t,
@@ -964,6 +970,9 @@ impl Run<'_> {
                 s.keep &= ts.keep;
                 s.psr &= ts.psr;
             }
+        }
+        if !reached {
+            s = Summary::opaque();
         }
         if linked {
             self.resume(site, st, s.clone());
@@ -1146,7 +1155,11 @@ impl Run<'_> {
                 let addr = if thumb { x & !1 } else { x & !3 };
                 let mut s = Summary::new(cs.returns, cs.keep);
                 s.psr = cs.psr;
-                for t in self.targets(site, addr, thumb) {
+                let ts = self.targets(site, addr, thumb);
+                if ts.is_empty() {
+                    return Summary::opaque();
+                }
+                for t in ts {
                     self.out.edges.push(Edge {
                         site,
                         target: t,
@@ -1237,10 +1250,12 @@ impl Run<'_> {
             return Summary::opaque();
         }
         let mut s = Summary::new(false, 0x7FFF);
+        let mut reached = false;
         for v in vals {
             let th = thumb.unwrap_or(v & 1 == 1);
             let addr = if th { v & !1 } else { v & !3 };
             for t in self.targets(site, addr, th) {
+                reached = true;
                 self.out.edges.push(Edge {
                     site,
                     target: t,
@@ -1252,6 +1267,9 @@ impl Run<'_> {
                 s.keep &= ts.keep;
                 s.psr &= ts.psr;
             }
+        }
+        if !reached {
+            s = Summary::opaque();
         }
         if linked {
             self.resume(site, st, s.clone());

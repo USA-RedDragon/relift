@@ -123,6 +123,7 @@ fn a_bl(at: u32, to: u32) -> u32 {
 }
 
 const A_BX_LR: u32 = 0xE12F_FF1E;
+const A_BLX_R1: u32 = 0xE12F_FF31;
 const A_MOV_R0_1: u32 = 0xE3A0_0001;
 const A_MOVEQ_R0_1: u32 = 0x03A0_0001;
 const A_PUSH_R4_LR: u32 = 0xE92D_4010;
@@ -343,10 +344,6 @@ fn calls_into_another_unit_seed_its_run() {
     );
     let alone = a.run(Options::default(), arm(BASE));
     assert!(alone.outside.contains(&arm(OTHER)));
-    assert!(
-        !found(&alone, arm(BASE + 8)),
-        "control: a call to code not known does not return"
-    );
     a.external = Some((OTHER, OTHER + 0x1000));
     let linked = a.run(Options::default(), arm(BASE));
     assert!(
@@ -403,4 +400,35 @@ fn a_call_may_clear_a_flag_it_was_given_the_address_of() {
     );
     assert!(found(&on, arm(BASE + 0x24)));
     assert!(on.functions[&arm(BASE)].returns);
+}
+
+#[test]
+fn a_call_is_noreturn_only_when_its_callee_is() {
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            a_bl(BASE + 4, 0x0100_0000),
+            A_MOV_R0_1,
+            a_ldr_lit(1, BASE + 0xC, BASE + 0x100),
+            A_BLX_R1,
+            A_MOV_R0_1,
+            a_bl(BASE + 0x18, BASE + 0x200),
+            A_MOV_R0_1,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(BASE + 0x100, &[0x0300_0000]);
+    m.arm(BASE + 0x200, &[a_b(BASE + 0x200, BASE + 0x200)]);
+    let r = m.run(Options::default(), arm(BASE));
+    assert!(found(&r, arm(BASE + 8)), "a call outside code may return");
+    assert!(
+        found(&r, arm(BASE + 0x14)),
+        "a call through a register to no code may return"
+    );
+    assert!(
+        !found(&r, arm(BASE + 0x1C)),
+        "control: a call to a loop that never leaves does not return"
+    );
 }
