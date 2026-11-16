@@ -137,7 +137,7 @@ bool rl_nds_ordered(const rl_nds *m, unsigned cpu, uint32_t addr);
  * current tick (before rl_nds_attach, at tick 0), nothing charged.
  */
 uint32_t rl_nds_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size);
-/** @brief The write twin of rl_nds_read. */
+/** @brief The write twin of rl_nds_read (a HALTCNT write does not halt). */
 void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_t value);
 
 /** @brief The backing store of a region and its length. */

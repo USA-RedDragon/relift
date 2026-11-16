@@ -271,3 +271,14 @@ TEST(main_ram_serves_one_cpu_at_a_time)
     rl_nds_store(m, RL_NDS_ARM9, 0x02000000u, 2, 1, true);
     CHECK_EQ(rl_nds_now(m, RL_NDS_ARM9), 102);
 }
+
+TEST(an_untimed_haltcnt_write_does_not_halt_a_later_store)
+{
+    ndst *t = ndst_new();
+    rl_nds *m = t->m;
+    w7(t, 0x04000301u, 1, 0x80);
+    ndst_to(t, RL_NDS_ARM9, 1000);
+    rl_nds_store(m, RL_NDS_ARM7, 0x03800000u, 4, 1, false);
+    CHECK_EQ(rl_nds_now(m, RL_NDS_ARM7), 2);
+    CHECK_EQ(r7(t, 0x03800000u, 4), 1);
+}

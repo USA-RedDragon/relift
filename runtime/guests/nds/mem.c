@@ -288,8 +288,10 @@ void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     nds_where w = nds_decode(m, cpu, addr, false, true);
     if (w.kind == NDS_K_MEM && w.p)
         nds_st(w.p, size, value);
-    else if (w.kind == NDS_K_IO)
+    else if (w.kind == NDS_K_IO) {
         io_untimed_write(m, cpu, addr, size, value);
+        m->halt_req = false;
+    }
 }
 
 uint8_t *rl_nds_mem(rl_nds *m, rl_nds_region r, size_t *len)
