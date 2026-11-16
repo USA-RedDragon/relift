@@ -76,7 +76,7 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
         {
             Some(true)
         }
-        "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM" => Some(false),
+        "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM" | "MOVM" => Some(false),
         "BMOV" if reads_active(i) => Some(false),
         "S2R" | "S2UR" | "CS2R" => match i.ops.get(1) {
             Some(Operand::Sym(s))

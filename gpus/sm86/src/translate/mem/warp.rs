@@ -1,5 +1,5 @@
-//! Warp and block level operations: SHFL, VOTE, VOTEU, REDUX, MATCH, the
-//! barriers and fences, and the special registers that describe a lane.
+//! Warp and block level operations: SHFL, VOTE, VOTEU, REDUX, MATCH, MOVM,
+//! the barriers and fences, and the special registers that describe a lane.
 //!
 //! The lanes of a warp come from [`super::lanes`], which maps them to the
 //! host's subgroups or to workgroup memory as the host profile allows.
@@ -28,6 +28,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "VOTE" | "VOTEU" => vote(c, i),
         "REDUX" => redux(c, i),
         "MATCH" => match_(c, i),
+        "MOVM" => movm(c, i),
         "BAR" => bar(c, i),
         "BMOV" => bmov(c, i),
         "WARPSYNC" => warpsync(c, i),
@@ -370,6 +371,41 @@ fn warpsync(c: &mut Ctx, i: &Inst) -> Res<()> {
         let sem = c.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_WORKGROUP);
         c.m.emit_void(op::CONTROL_BARRIER, &[exec, exec, sem]);
     }
+    Ok(())
+}
+
+/// MOVM.16.MT88: transposes an 8x8 matrix of 16-bit elements held as
+/// LDSM leaves it (lane `t` has row `t / 4`, columns `2 * (t % 4)` and the
+/// next): lane `t` gets the elements of rows `2 * (t % 4)` and the next at
+/// column `t / 4`.
+fn movm(c: &mut Ctx, i: &Inst) -> Res<()> {
+    Ctx::mods_ok(i, &["16", "MT88"])?;
+    let d = Ctx::dst_reg(&i.ops[0])?;
+    let v = c.usrc(&i.ops[1])?;
+    let lane = c.lane_id();
+    let k2 = c.m.c_u32(2);
+    let k3 = c.m.c_u32(3);
+    let k1 = c.m.c_u32(1);
+    let k16 = c.m.c_u32(16);
+    let col = c.bin(op::SHIFT_RIGHT_LOGICAL, lane, k2);
+    let q = c.bin(op::BITWISE_AND, lane, k3);
+    let row = c.bin(op::SHIFT_LEFT_LOGICAL, q, k1);
+    let half = c.bin(op::BITWISE_AND, col, k1);
+    let pos = c.bin(op::I_MUL, half, k16);
+    let part = c.bin(op::SHIFT_RIGHT_LOGICAL, col, k1);
+    let mut h = [0; 2];
+    for (k, h) in h.iter_mut().enumerate() {
+        let kk = c.m.c_u32(k as u32);
+        let r = c.bin(op::I_ADD, row, kk);
+        let base = c.bin(op::SHIFT_LEFT_LOGICAL, r, k2);
+        let src = c.bin(op::BITWISE_OR, base, part);
+        let w = c.shuffle(v, src);
+        let u = c.u32t();
+        *h = c.m.emit(op::BIT_FIELD_U_EXTRACT, u, &[w, pos, k16]);
+    }
+    let hi = c.bin(op::SHIFT_LEFT_LOGICAL, h[1], k16);
+    let r = c.bin(op::BITWISE_OR, h[0], hi);
+    c.store_reg(d, r);
     Ok(())
 }
 

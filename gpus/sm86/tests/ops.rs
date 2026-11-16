@@ -2,7 +2,7 @@
 //! to the expected text and its program translates.
 
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::translate;
+use relift_gpu_sm86::translate::{HostProfile, Options, WarpPath, translate, translate_with};
 
 const EXIT: u128 = 0x000f_ea00_0380_0000_0000_0000_0000_794d;
 const BRA_SELF: u128 = 0x000f_c000_0383_ffff_ffff_fff0_0000_7947;
@@ -118,4 +118,22 @@ fn ldgsts() {
             "LDGDEPBAR",
         ],
     );
+}
+
+/// The warp path a warp-wide program takes on an 8-wide host.
+fn narrow_warp_path(words: &[u128]) -> WarpPath {
+    let opts = Options {
+        host: HostProfile::lavapipe(),
+        ..Options::default()
+    };
+    let s = translate_with(&program(words), &opts).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.host.inexact.is_empty());
+    s.interface.host.warp
+}
+
+#[test]
+fn movm_plans_the_warp() {
+    let movm = w(0x0040_6200_0000_0000, 0x0000_0000_020d_723a);
+    check(&[movm], &["MOVM.16.MT88 R13, R2"]);
+    assert_eq!(narrow_warp_path(&[movm]), WarpPath::Shared);
 }
