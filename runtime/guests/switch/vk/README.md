@@ -100,11 +100,16 @@ and takes the paths it takes on the console. Where it can do less:
   `vkCreateDevice` with a log line naming it.
 
 Each Switch memory type stands for one host type: the host-access bits it
-needs, then a heap at least as large as the Switch's, then device-local memory
-for the device-only types and system memory for the mapped ones (they are
-mapped into guest memory, which placed and imported memory needs).
-`memoryTypeBits` in memory requirements are rewritten to Switch type indices
-and `vkAllocateMemory` takes them back to the host's.
+needs, then a type the device's buffers and images may use (a probe buffer
+and image made right after `vkCreateDevice` tell which; the Adreno 740 driver
+has host-visible types no buffer or image may use), then a heap at least as
+large as the Switch's, then device-local memory for the device-only types and
+system memory for the mapped ones (they are mapped into guest memory, which
+placed and imported memory needs). `memoryTypeBits` in memory requirements
+are rewritten to Switch type indices and `vkAllocateMemory` takes them back to
+the host's; requirements that keep no Switch type are logged as an error.
+A command's failing result is logged once per command and result, with the
+guest address it returns to.
 
 ## Queue families
 

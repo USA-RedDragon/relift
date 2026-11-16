@@ -1002,6 +1002,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
+    vkf_mem_types_device(d, dev);
     vkf_flip_device_ready(d, dev, n_flip != 0);
     VkPhysicalDeviceProperties props = { 0 };
     VKF_FN(k.fns, vkGetPhysicalDeviceProperties)(pd, &props);

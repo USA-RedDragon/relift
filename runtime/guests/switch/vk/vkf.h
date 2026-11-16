@@ -136,6 +136,8 @@ struct vkf_dev {
     char host_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     /** @brief The host memory type behind each Switch memory type. */
     uint8_t host_type[VK_MAX_MEMORY_TYPES];
+    /** @brief The host device's memory types and heaps. */
+    VkPhysicalDeviceMemoryProperties host_memory;
     /** @brief Descriptor pool records (vk_desc.c), keyed by VkDescriptorPool. */
     struct vkf_map *dpools;
     /** @brief Protects dpools. */
@@ -405,6 +407,18 @@ VkResult vkf_props_device_check(vkf_call *k, VkPhysicalDevice pd, const VkDevice
 
 /** @brief Picks the host memory type behind each of the Switch's for a new device. */
 void vkf_mem_types_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd);
+/**
+ * @brief Picks again, once the host device exists, the host memory types behind the Switch's: one the device's
+ * buffers and images may use comes first, since a type no resource may use leaves the guest no memory to bind.
+ */
+void vkf_mem_types_device(vkf_dev *d, VkDevice dev);
+/**
+ * @brief Writes into out the host memory type of h behind each memory type of the Switch's s: the needed host-access
+ * bits, then a type in buffer_bits, then in image_bits, then a heap as large as the Switch's, then device-local only
+ * for the Switch's device-only types.
+ */
+void vkf_mem_pick(const VkPhysicalDeviceMemoryProperties *h, const VkPhysicalDeviceMemoryProperties *s, uint32_t buffer_bits,
+                  uint32_t image_bits, uint8_t *out);
 /** @brief The Switch memory types whose host types are in host_bits. */
 uint32_t vkf_guest_type_bits(const vkf_dev *d, uint32_t host_bits);
 

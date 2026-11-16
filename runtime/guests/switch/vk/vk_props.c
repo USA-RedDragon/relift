@@ -1128,12 +1128,9 @@ VkResult vkf_check_framebuffer(vkf_call *k)
 }
 
 
-/** @brief Picks the host memory type behind each Switch type: the needed host-access bits, then a heap at least as large as the Switch's, then device-local for the Switch's device-only types and system memory for its mapped ones (the layer maps those into guest memory). */
-void vkf_mem_types_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd)
+void vkf_mem_pick(const VkPhysicalDeviceMemoryProperties *h, const VkPhysicalDeviceMemoryProperties *s, uint32_t buffer_bits,
+                  uint32_t image_bits, uint8_t *out)
 {
-    VkPhysicalDeviceMemoryProperties h;
-    VKF_FN(k->fns, vkGetPhysicalDeviceMemoryProperties)(pd, &h);
-    const VkPhysicalDeviceMemoryProperties *s = &vkf_switch.memory;
     const uint32_t access = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     const uint32_t odd = VK_MEMORY_PROPERTY_PROTECTED_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT | 0xc0u;
     for (uint32_t i = 0; i < s->memoryTypeCount; i++) {
@@ -1145,12 +1142,16 @@ void vkf_mem_types_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd)
             uint32_t need = want & access;
             if (pass)
                 need &= ~VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-            for (uint32_t t = 0; t < h.memoryTypeCount; t++) {
-                uint32_t f = h.memoryTypes[t].propertyFlags;
+            for (uint32_t t = 0; t < h->memoryTypeCount; t++) {
+                uint32_t f = h->memoryTypes[t].propertyFlags;
                 if ((f & need) != need || (f & odd & ~want))
                     continue;
                 int score = 0;
-                if (h.memoryHeaps[h.memoryTypes[t].heapIndex].size >= size)
+                if (buffer_bits & (1u << t))
+                    score += 16;
+                if (image_bits & (1u << t))
+                    score += 8;
+                if (h->memoryHeaps[h->memoryTypes[t].heapIndex].size >= size)
                     score += 4;
                 if ((f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == local)
                     score += 2;
@@ -1160,9 +1161,74 @@ void vkf_mem_types_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd)
                     best = (int)t, best_score = score;
             }
         }
-        d->host_type[i] = (uint8_t)(best < 0 ? 0 : best);
-        rl_log(RL_LOG_INFO, "vk", "Switch memory type %u (0x%x) is host type %d (0x%x)", i, want, best,
-               best < 0 ? 0u : h.memoryTypes[best].propertyFlags);
+        out[i] = (uint8_t)(best < 0 ? 0 : best);
+    }
+}
+
+/**
+ * @brief Picks the host memory type behind each Switch type: the needed host-access bits, then a type the device's
+ * buffers and images may use, then a heap at least as large as the Switch's, then device-local for the Switch's
+ * device-only types and system memory for its mapped ones (the layer maps those into guest memory).
+ */
+void vkf_mem_types_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd)
+{
+    VKF_FN(k->fns, vkGetPhysicalDeviceMemoryProperties)(pd, &d->host_memory);
+    vkf_mem_pick(&d->host_memory, &vkf_switch.memory, ~0u, ~0u, d->host_type);
+}
+
+/** @brief The host memory types a probe buffer and image of the device may use, as bit masks. */
+static void resource_type_bits(const vkf_fns *fns, VkDevice dev, uint32_t *buffer_bits, uint32_t *image_bits)
+{
+    *buffer_bits = *image_bits = ~0u;
+    VkBufferCreateInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 65536,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                 VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    VkBuffer b = NULL;
+    if (VKF_FN(fns, vkCreateBuffer)(dev, &bi, NULL, &b) >= 0) {
+        VkMemoryRequirements r = { 0 };
+        VKF_FN(fns, vkGetBufferMemoryRequirements)(dev, b, &r);
+        VKF_FN(fns, vkDestroyBuffer)(dev, b, NULL);
+        *buffer_bits = r.memoryTypeBits;
+    }
+    VkImageCreateInfo ii = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = { 64, 64, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    VkImage im = NULL;
+    if (VKF_FN(fns, vkCreateImage)(dev, &ii, NULL, &im) >= 0) {
+        VkMemoryRequirements r = { 0 };
+        VKF_FN(fns, vkGetImageMemoryRequirements)(dev, im, &r);
+        VKF_FN(fns, vkDestroyImage)(dev, im, NULL);
+        *image_bits = r.memoryTypeBits;
+    }
+}
+
+void vkf_mem_types_device(vkf_dev *d, VkDevice dev)
+{
+    uint32_t buffer_bits, image_bits;
+    resource_type_bits(&d->fns, dev, &buffer_bits, &image_bits);
+    vkf_mem_pick(&d->host_memory, &vkf_switch.memory, buffer_bits, image_bits, d->host_type);
+    const VkPhysicalDeviceMemoryProperties *h = &d->host_memory;
+    for (uint32_t i = 0; i < vkf_switch.memory.memoryTypeCount; i++) {
+        uint32_t t = d->host_type[i];
+        rl_log(RL_LOG_INFO, "vk", "Switch memory type %u (0x%x) is host type %u (0x%x)%s%s", i, vkf_switch.memory.memoryTypes[i].propertyFlags,
+               t, t < h->memoryTypeCount ? h->memoryTypes[t].propertyFlags : 0u, buffer_bits & (1u << t) ? ", buffers" : "",
+               image_bits & (1u << t) ? ", images" : "");
     }
 }
 
@@ -1180,7 +1246,10 @@ static void type_bits_out(vkf_call *k, uint64_t g)
     if (!g || !k->obj || !k->obj->dev)
         return;
     uint32_t h = vkf_g32(k, g);
-    rl_st32(k->mem, g, vkf_guest_type_bits(k->obj->dev, h));
+    uint32_t guest = vkf_guest_type_bits(k->obj->dev, h);
+    if (h && !guest && rl_once(0x766b6d7400000000ull | h))
+        rl_log(RL_LOG_ERROR, "vk", "a resource may use host memory types 0x%x, none behind a Switch memory type", h);
+    rl_st32(k->mem, g, guest);
 }
 
 void vkf_mem_reqs_out(vkf_call *k)

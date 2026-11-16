@@ -1456,6 +1456,43 @@ static bool limits_are_the_switch(const VkPhysicalDeviceLimits *l)
     return !memcmp(&a, &b, sizeof a);
 }
 
+TEST(vk_memory_types_are_ones_buffers_and_images_may_use)
+{
+    VkPhysicalDeviceMemoryProperties h = { .memoryTypeCount = 7, .memoryHeapCount = 1 };
+    h.memoryHeaps[0] = (VkMemoryHeap){ .size = 8ull << 30, .flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT };
+    const uint32_t dl = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, hv = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    const uint32_t coh = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, cached = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    const uint32_t flags[7] = { dl, dl, dl, dl | hv | cached, dl | hv | coh, dl | hv | coh | cached, dl | hv | coh | cached };
+    for (uint32_t t = 0; t < 7; t++)
+        h.memoryTypes[t] = (VkMemoryType){ .propertyFlags = flags[t], .heapIndex = 0 };
+    const VkPhysicalDeviceMemoryProperties *s = &vkf_switch.memory;
+    uint8_t any[VK_MAX_MEMORY_TYPES], used[VK_MAX_MEMORY_TYPES];
+    vkf_mem_pick(&h, s, ~0u, ~0u, any);
+    vkf_mem_pick(&h, s, 0x41u, 0x1u, used);
+    vkf_dev d;
+    memset(&d, 0, sizeof d);
+    memcpy(d.host_type, used, sizeof used);
+    for (uint32_t i = 0; i < s->memoryTypeCount; i++) {
+        uint32_t want = s->memoryTypes[i].propertyFlags & (hv | coh | cached);
+        CHECK_EQ(h.memoryTypes[used[i]].propertyFlags & want, want);
+        CHECK(0x41u & (1u << used[i]));
+        if (s->memoryTypes[i].propertyFlags & hv)
+            CHECK_EQ(used[i], 6);
+        else
+            CHECK_EQ(used[i], 0);
+    }
+    bool moved = false;
+    for (uint32_t i = 0; i < s->memoryTypeCount; i++)
+        moved = moved || any[i] != used[i];
+    CHECK(moved);
+    CHECK_EQ(vkf_guest_type_bits(&d, 0x41u), (1u << s->memoryTypeCount) - 1u);
+    uint32_t local = 0;
+    for (uint32_t i = 0; i < s->memoryTypeCount; i++)
+        if (!(s->memoryTypes[i].propertyFlags & hv))
+            local |= 1u << i;
+    CHECK_EQ(vkf_guest_type_bits(&d, 0x1u), local);
+}
+
 TEST(vk_a_failing_result_is_logged_once_with_its_caller)
 {
     static rl_ctx c;
