@@ -64,6 +64,34 @@ pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
 ///
 /// As [`analyze`].
 pub fn analyze_with(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
+    let mut seen = seen.to_vec();
+    for _ in 0..MAX_CONFLICT_ROUNDS {
+        let report = analyze_once(rom, &seen)?;
+        let code: FxSet<Loc> = report
+            .functions
+            .values()
+            .flat_map(|f| f.body.keys().copied())
+            .collect();
+        let more: Vec<Loc> = report
+            .ram_ops
+            .roots
+            .iter()
+            .filter(|l| !code.contains(l) && !seen.contains(l))
+            .copied()
+            .collect();
+        if more.is_empty() {
+            return Ok(report);
+        }
+        seen.extend(more);
+    }
+    analyze_once(rom, &seen)
+}
+
+/// Rounds of [`analyze_with`] that add the ROM locations the CPU may run
+/// from after it ran bytes an OAM DMA put on the bus, found by the last.
+const MAX_CONFLICT_ROUNDS: usize = 4;
+
+fn analyze_once(rom: &[u8], seen: &[Loc]) -> Result<Report, AnalyzeError> {
     let banks = rom.len().div_ceil(ROM_BANK_SIZE).max(1);
     let (name, model) = match Cartridge::parse(rom) {
         Ok(cart) => {
@@ -755,7 +783,13 @@ impl Driver<'_> {
             .values()
             .flat_map(|f| f.body.keys().copied())
             .collect();
-        let ram_ops = crate::ramcode::predict(rom, &self.model, &roots, &code, &targets);
+        let mut ram_ops =
+            crate::ramcode::predict(rom, &self.model, &roots, &code, &lift_banks, &targets);
+        ram_ops.live.extend(stop_forms(rom, &code));
+        let edge = edge_forms(rom, &code, &ram_ops.ops);
+        ram_ops.live.extend(edge);
+        ram_ops.live.sort_unstable();
+        ram_ops.live.dedup();
         Report {
             unreached_pointers,
             mapper,
@@ -772,4 +806,57 @@ impl Driver<'_> {
             lift_banks,
         }
     }
+}
+
+/// The HALT-bug forms at `$8000` after a `HALT` or `STOP` in `code` at a
+/// window's last address, as live forms (an opcode plus 0x100) of each
+/// opcode `ops` predicts at `$8000`: the RAM table, where the HALT bug
+/// after a `HALT` in RAM finds its form, starts at `$8000`.
+fn edge_forms(rom: &[u8], code: &FxSet<Loc>, ops: &[crate::RamOp]) -> Vec<(u16, u16, u16)> {
+    let keys: Vec<u16> = ops
+        .iter()
+        .filter(|o| o.addr == 0x8000 && o.key < 0x100 && o.key != 0xCB)
+        .map(|o| 0x100 | o.key)
+        .collect();
+    let mut out = Vec::new();
+    for l in code.iter().filter(|l| l.addr == 0x7FFF) {
+        let at = relift_gb_formats::banks::rom_offset(usize::from(l.bank), l.addr);
+        if at
+            .and_then(|o| rom.get(o))
+            .is_some_and(|&b| b == 0x76 || b == 0x10)
+        {
+            out.extend(keys.iter().map(|&k| (l.bank, 0x8000, k)));
+        }
+    }
+    out
+}
+
+/// The live ROM forms after the `STOP` instructions in `code`: a `STOP`
+/// that switches the CGB's speed may leave its second byte on the bus as
+/// the opcode fetched at the address after it, so that byte runs there
+/// with the operands that follow, read from after it or, when the fetch
+/// did not move the program counter, from it.
+fn stop_forms(rom: &[u8], code: &FxSet<Loc>) -> Vec<(u16, u16, u16)> {
+    let byte = |bank: u16, addr: u16| {
+        relift_gb_formats::banks::rom_offset(usize::from(bank), addr)
+            .and_then(|o| rom.get(o).copied())
+    };
+    let mut out = Vec::new();
+    for l in code {
+        if byte(l.bank, l.addr) != Some(0x10) {
+            continue;
+        }
+        let at = l.addr.wrapping_add(2);
+        if (at < 0x4000) != (l.addr < 0x4000) || at >= 0x8000 {
+            continue;
+        }
+        if let (Some(op), Some(own)) = (byte(l.bank, l.addr.wrapping_add(1)), byte(l.bank, at))
+            && op != own
+            && op != 0xCB
+        {
+            out.push((l.bank, at, u16::from(op)));
+            out.push((l.bank, at, 0x100 | u16::from(op)));
+        }
+    }
+    out
 }

@@ -5,9 +5,14 @@ use relift_gb_formats::banks::ROM_BANK_SIZE;
 use relift_gb_formats::synth::{self, Spec};
 
 fn predict(parts: &[(u16, &[u8])]) -> RamOps {
+    predict_on(0, parts)
+}
+
+fn predict_on(cgb: u8, parts: &[(u16, &[u8])]) -> RamOps {
     let mut rom = synth::rom(&Spec {
         cart_type: 0x19,
         rom_size: 0x02,
+        cgb,
         ..Spec::default()
     });
     rom[..0x100].fill(0xFF);
@@ -264,9 +269,48 @@ fn oam_dma_copies_code_into_oam() {
         ops(&r),
         [
             (0xFE00, 0x3E, RamClass::Generated),
+            (0xFE00, 0xFF, RamClass::Generated),
             (0xFE02, 0xC9, RamClass::Generated),
+            (0xFE02, 0xFF, RamClass::Generated),
         ]
     );
+}
+
+#[test]
+fn a_call_whose_target_is_read_from_oam_during_its_dma_reads_ff() {
+    let r = predict(&[(
+        0x150,
+        &[
+            0x3E, 0xCD, 0xEA, 0xFE, 0xDD, 0x3E, 0x90, 0xEA, 0xFF, 0xDD, 0x3E, 0xC9, 0xE0, 0x90,
+            0x3E, 0x80, 0xE0, 0x46, 0xC3, 0xFE, 0xFD,
+        ],
+    )]);
+    assert!(r.entries.contains(&0xFF90), "{:x?}", r.entries);
+    assert!(
+        ops(&r).contains(&(0xFF90, 0xC9, RamClass::Generated)),
+        "{:x?}",
+        ops(&r)
+    );
+}
+
+#[test]
+fn a_vram_dma_copies_code_into_vram() {
+    let r = predict_on(
+        0x80,
+        &[
+            (
+                0x150,
+                &[
+                    0x3E, 0x03, 0xE0, 0x51, 0xAF, 0xE0, 0x52, 0x3E, 0x80, 0xE0, 0x53, 0xAF, 0xE0,
+                    0x54, 0xE0, 0x55, 0xC3, 0x00, 0x80,
+                ],
+            ),
+            (0x300, &[0x3E, 0x05, 0xC9]),
+        ],
+    );
+    let o = ops(&r);
+    assert!(o.contains(&(0x8000, 0x3E, RamClass::Copied)), "{o:x?}");
+    assert!(o.contains(&(0x8002, 0xC9, RamClass::Copied)), "{o:x?}");
 }
 
 #[test]

@@ -185,6 +185,9 @@ fn to_json(report: &Report, summary: bool, instructions: bool) -> Value {
         "ram_ops": {
             "entries": report.ram_ops.entries,
             "wide": report.ram_ops.wide,
+            "live": report.ram_ops.live,
+            "conflict_roots": report.ram_ops.roots.iter().map(|l| [l.bank, l.addr]).collect::<Vec<_>>(),
+            "unbounded": report.ram_ops.unbounded,
             "max_keys": MAX_KEYS,
             "ops": report.ram_ops.ops.iter().map(|o| json!({
                 "addr": o.addr, "key": o.key, "class": o.class.name(),
@@ -330,12 +333,15 @@ fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
     let count = |c: RamClass| ops.ops.iter().filter(|o| o.class == c).count();
     writeln!(
         out,
-        "instructions predicted in RAM: {} ({} copied, {} generated) from {} entries, {} addresses over {MAX_KEYS} keys",
+        "instructions predicted in RAM: {} ({} copied, {} generated) from {} entries, {} addresses over {MAX_KEYS} keys; {} live ROM forms, {} DMA roots, {} unbounded",
         ops.ops.len(),
         count(RamClass::Copied),
         count(RamClass::Generated),
         ops.entries.len(),
-        ops.wide.len()
+        ops.wide.len(),
+        ops.live.len(),
+        ops.roots.len(),
+        ops.unbounded.len()
     )?;
     if !summary {
         for o in &ops.ops {

@@ -24,11 +24,20 @@
 //! control to a test it copied there, gets a budget of its own for that
 //! code; when the path ends there it goes on, with its memory but unknown
 //! registers, at the ROM targets of the jumps that code holds, so the
-//! driver's next round copies its next test. A `halt` or `ei` with the
+//! driver's next round copies its next test. After a `halt` in RAM the
+//! decoding also goes on where the HALT bug ends the instruction after it,
+//! which reads its own opcode again as its first operand byte and so ends
+//! one byte early. A `halt` or `ei` with the
 //! interrupt master enable set and known enabled interrupts calls the
-//! handler of the first and forks into the others, and a write to `$FF46`
-//! copies the OAM DMA source. A path that runs more than 256 NOPs in a row
-//! the program made, a sweep through cleared memory, ends.
+//! handler of the first and forks into the others, a write to `$FF46`
+//! copies the OAM DMA source, and one to `$FF55` the CGB's VRAM DMA source.
+//! A return that pops OAM while the OAM DMA may
+//! hold it, which then reads `$FF`, forks to the addresses that gives.
+//! While that DMA may still hold the bus, an instruction the path runs in
+//! RAM below OAM may fetch the DMA's byte instead of its own, so every byte
+//! the DMA copies is also predicted there (a CB with the byte after it). A
+//! path that runs more than 256 NOPs in a row the program made, a sweep
+//! through cleared memory, ends.
 //!
 //! Every instruction a path runs in RAM is predicted, and so is the code
 //! decoded from the bytes a path holds where it jumps into RAM from ROM.
@@ -47,11 +56,43 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use relift_cpu_sm83::BASE;
+use relift_cpu_sm83::{BASE, CB};
 
 use crate::bankmodel::{BankModel, BankReg};
 use crate::fx::{FxMap, FxSet};
 use crate::loc::Loc;
+
+/// M-cycles after the write that starts an OAM DMA in which a CPU read may
+/// still meet it: its 160 transfers and its start-up.
+const DMA_CYCLES: i32 = 162;
+
+/// M-cycles by which a walk ([`Machine::walk`]) widens the DMA byte the
+/// path's count of M-cycles names, on each side: the start-up and the
+/// cycle of the write are not modelled to the M-cycle.
+const DMA_PHASE: i32 = 2;
+
+/// Most M-cycles a path's count may miss (conditions it did not know,
+/// HALT) for a walk to follow the DMA's bytes in order; past it the walk
+/// takes every byte the DMA moves at every fetch.
+const DMA_SLACK: i32 = 32;
+
+/// Most (address, DMA byte) states one walk of the instructions run during
+/// an OAM DMA visits before it gives up.
+const CONFLICT_STATES: usize = 1 << 16;
+
+/// Most times one root's main path, stuck in a jump to itself with no
+/// interrupt to leave it, goes on as the path forked last.
+const MAX_PROMOTIONS: usize = 64;
+
+/// Most distinct bytes one fetch of a walk of the instructions run during
+/// an OAM DMA ([`Machine::walk`]) may see from the DMA, the bytes it moves
+/// in the M-cycles the fetch may fall in: past it the source is not known
+/// well enough to bound what the CPU fetches outside OAM (which reads
+/// `$FF`).
+const CONFLICT_BYTES: u32 = 32;
+
+/// Most targets one jump or call run during an OAM DMA may have.
+const CONFLICT_TARGETS: usize = 256;
 
 /// Most opcode keys decoded from one RAM address's value set; an address
 /// with more is listed in [`RamOps::wide`] instead.
@@ -147,6 +188,27 @@ pub struct RamOps {
     /// Addresses on a decoded path whose value set holds more than
     /// [`MAX_KEYS`] opcode keys; nothing past them is predicted.
     pub wide: Vec<u16>,
+    /// ROM instructions a path ran while its OAM DMA may hold the bus, as
+    /// (bank, address, opcode): the CPU fetches the DMA's byte there rather
+    /// than the ROM's, so each opcode the DMA copies is listed (CB prefixes
+    /// left out), and the address after a `STOP`, where a speed switch may
+    /// fetch the `STOP`'s second byte. An opcode plus 0x100 is one the CPU
+    /// fetched there without moving its program counter, as the HALT bug
+    /// does.
+    pub live: Vec<(u16, u16, u16)>,
+    /// ROM locations the CPU may run from after it ran bytes an OAM DMA
+    /// put on the bus: roots the functions must cover.
+    pub roots: Vec<Loc>,
+    /// Addresses where the instructions the CPU may run during an OAM DMA
+    /// could not be bounded (a computed jump, too many targets, an unknown
+    /// bank): nothing past them is predicted.
+    pub unbounded: Vec<u16>,
+    /// Runs of VRAM, as [start, end), that a transfer goes to and no path
+    /// stored into: the boot ROM leaves VRAM cleared (on a colour
+    /// cartridge, where it leaves no logo there), so they run as `NOP`s.
+    /// One that reaches cart RAM goes on there, which reads `$FF` while it
+    /// is disabled or missing, whatever was stored there.
+    pub sleds: Vec<(u16, u16)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -243,6 +305,29 @@ struct Path {
     launch: Option<Launch>,
     nops: u32,
     ram_fork: bool,
+    dma: Option<Dma>,
+    /// The CGB's VRAM DMA source and destination registers, `$FF51` to
+    /// `$FF54`.
+    hdma: [Option<u8>; 4],
+}
+
+/// An OAM DMA a path started.
+#[derive(Clone)]
+struct Dma {
+    src: u16,
+    /// M-cycles the path counted since the write that started it, at the
+    /// least cost of what it did not know.
+    elapsed: i32,
+    /// M-cycles the count may miss.
+    slack: i32,
+    /// The source bytes the path knows, in transfer order.
+    seq: std::sync::Arc<[Option<u8>]>,
+    /// Whether the instructions the CPU may run while it holds the bus
+    /// were walked ([`Machine::walk`]): once covers every later step.
+    walked: bool,
+    /// Whether the instruction that started it is the one running: its
+    /// M-cycles come before the count.
+    fresh: bool,
 }
 
 #[derive(Clone)]
@@ -334,10 +419,31 @@ struct Found {
     stores: FxMap<(u16, u8), Cell>,
     entries: FxSet<(u16, u8)>,
     ran: FxMap<(u16, u16), RamClass>,
+    live: FxSet<(u16, u16, u16)>,
+    roots: FxSet<Loc>,
+    unbounded: FxSet<u16>,
+    walks: FxSet<Walk>,
+}
+
+/// A walk [`Machine::walk`] is asked for: the DMA a path started and where
+/// the CPU first may meet it, at `at` M-cycles after the write.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Walk {
+    start: u16,
+    bank: Option<u16>,
+    bucket: u8,
+    src: u16,
+    at: i32,
+    slack: i32,
+    seq: std::sync::Arc<[Option<u8>]>,
 }
 
 impl Found {
     fn join(&mut self, o: Found) {
+        self.live.extend(o.live);
+        self.roots.extend(o.roots);
+        self.unbounded.extend(o.unbounded);
+        self.walks.extend(o.walks);
         for (k, c) in o.stores {
             self.stores.entry(k).or_default().join(&c);
         }
@@ -355,6 +461,7 @@ struct Machine<'a> {
     cgb: bool,
     nibbles: bool,
     code: &'a FxSet<Loc>,
+    whole: &'a BTreeSet<u16>,
 }
 
 fn norm(a: u16) -> u16 {
@@ -369,6 +476,10 @@ fn is_ram(a: u16) -> bool {
     a >= 0x8000 && !(0xFEA0..0xFF80).contains(&a) && a != 0xFFFF
 }
 
+fn is_oam(a: u16) -> bool {
+    (0xFE00..0xFEA0).contains(&a)
+}
+
 fn banked(a: u16) -> bool {
     (0xD000..0xE000).contains(&a)
 }
@@ -378,15 +489,259 @@ impl Machine<'_> {
         if p.pc >= 0x8000 || p.free {
             return true;
         }
-        let at = if p.pc < 0x4000 {
-            Loc::fixed(p.pc)
-        } else {
-            match self.bank(p) {
-                Some(bank) => Loc { bank, addr: p.pc },
-                None => return false,
+        if p.pc < 0x4000 {
+            return true;
+        }
+        self.bank(p).is_some_and(|bank| {
+            self.whole.contains(&bank) || self.code.contains(&Loc { bank, addr: p.pc })
+        })
+    }
+
+    /// Whether a CPU read of `addr` may meet an OAM DMA from `src`: OAM,
+    /// which reads `$FF` while the DMA writes it, and the 4 KiB blocks on
+    /// the bus of the source, which on the CGB leaves work RAM out for a
+    /// cartridge source and in for a work RAM one.
+    fn dma_conflicts(&self, src: u16, addr: u16) -> bool {
+        if is_oam(addr) {
+            return true;
+        }
+        if addr >= 0xFE00 {
+            return false;
+        }
+        let top = if self.cgb { 0xE000 } else { 0x1_0000 };
+        let mask: u16 = match u32::from(src) {
+            0x8000..0xA000 => 0x0300,
+            s if s < 0xC000 => 0xFCFF,
+            s if s < top => {
+                if self.cgb {
+                    0xF000
+                } else {
+                    0xFCFF
+                }
+            }
+            _ => {
+                if self.cgb {
+                    0xFCFF
+                } else {
+                    0
+                }
             }
         };
-        self.code.contains(&at)
+        (mask >> (addr >> 12)) & 1 != 0
+    }
+
+    /// Asks for a walk of the instructions the CPU may run from `start`
+    /// while the OAM DMA `d` may hold the bus ([`Machine::walk`]), once all
+    /// paths ran.
+    fn conflict(&self, p: &Path, f: &mut Found, d: &Dma, start: u16) {
+        f.walks.insert(Walk {
+            start,
+            bank: self.bank(p),
+            bucket: self.bucket(p, 0xD000),
+            src: d.src,
+            at: d.elapsed,
+            slack: d.slack,
+            seq: d.seq.clone(),
+        });
+    }
+
+    /// What memory may hold at `a` during the walk `w`, as a bit set.
+    fn walk_memory(&self, stores: &FxMap<(u16, u8), Cell>, w: &Walk, a: u16) -> [u64; 4] {
+        let mut set = [0u64; 4];
+        if a < 0x8000 {
+            let off = if a < 0x4000 {
+                Some(usize::from(a))
+            } else {
+                w.bank
+                    .map(|b| usize::from(b) * 0x4000 + usize::from(a - 0x4000))
+            };
+            if let Some(v) = off.and_then(|o| self.rom.get(o)) {
+                set[usize::from(v >> 6)] |= 1 << (v & 63);
+            }
+        } else if is_ram(a) {
+            set = cell_at(stores, a, w.bucket, self.cgb).known;
+        }
+        set
+    }
+
+    /// Every instruction the CPU may run from the walk's start while its
+    /// OAM DMA may still hold the bus: a fetch from an address on the DMA's
+    /// bus sees the byte the DMA moves in that M-cycle (from OAM, `$FF`), the byte at the
+    /// path's count of M-cycles give or take [`DMA_PHASE`] and the count's
+    /// slack, and memory's byte before and after the transfer. Records the
+    /// lifted variants those need (live ROM forms and RAM keys by fetched
+    /// opcode), the ROM addresses the CPU may go on from as roots, and the
+    /// RAM addresses as entries.
+    fn walk(&self, w: &Walk, stores: &FxMap<(u16, u8), Cell>, f: &mut Found) {
+        let by: Vec<[u64; 4]> = (0..0xA0u16)
+            .map(|i| match w.seq.get(usize::from(i)).copied().flatten() {
+                Some(v) => {
+                    let mut s = [0u64; 4];
+                    s[usize::from(v >> 6)] |= 1 << (v & 63);
+                    s
+                }
+                None => {
+                    let a = w.src | i;
+                    let c = cell_at(stores, a, w.bucket, self.cgb);
+                    if is_ram(a) && c.count() > 0 {
+                        c.known
+                    } else {
+                        [u64::MAX; 4]
+                    }
+                }
+            })
+            .collect();
+        let width = if w.slack > DMA_SLACK {
+            DMA_CYCLES + DMA_PHASE
+        } else {
+            w.slack + 2 * DMA_PHASE
+        };
+        let span = usize::try_from(width).unwrap_or(0) + 1;
+        let widest = (0..by.len())
+            .map(|i| {
+                let mut set = [0u64; 4];
+                for b in &by[i.saturating_sub(span - 1)..=i] {
+                    for k in 0..4 {
+                        set[k] |= b[k];
+                    }
+                }
+                set.iter().map(|b| b.count_ones()).sum::<u32>()
+            })
+            .max()
+            .unwrap_or(0);
+        let wide = widest > CONFLICT_BYTES;
+        let fetch = |a: u16, lo: i32| -> [u64; 4] {
+            let mut set = [0u64; 4];
+            let mut mem = !self.dma_conflicts(w.src, a);
+            if !mem {
+                for j in lo..=lo + width {
+                    match usize::try_from(j).ok().and_then(|j| by.get(j)) {
+                        Some(_) if is_oam(a) => set[3] |= 1 << 63,
+                        Some(b) => {
+                            for k in 0..4 {
+                                set[k] |= b[k];
+                            }
+                        }
+                        None => mem = true,
+                    }
+                }
+            }
+            if mem {
+                let m = self.walk_memory(stores, w, a);
+                for k in 0..4 {
+                    set[k] |= m[k];
+                }
+            }
+            set
+        };
+        let bits =
+            |s: [u64; 4]| (0..=255u8).filter(move |&v| s[usize::from(v >> 6)] >> (v & 63) & 1 != 0);
+        let count = |s: [u64; 4]| s.iter().map(|b| b.count_ones() as usize).sum::<usize>();
+        let mut seen: FxSet<(u16, i32)> = FxSet::default();
+        let mut todo = vec![(w.start, w.at - DMA_PHASE)];
+        while let Some((pc, lo)) = todo.pop() {
+            if !seen.insert((pc, lo)) {
+                continue;
+            }
+            if seen.len() > CONFLICT_STATES {
+                f.unbounded.insert(w.start);
+                return;
+            }
+            let at_bank = if pc < 0x4000 { Some(0) } else { w.bank };
+            if pc < 0x8000 {
+                match at_bank {
+                    Some(b) => {
+                        f.roots.insert(Loc { bank: b, addr: pc });
+                    }
+                    None => {
+                        f.unbounded.insert(pc);
+                        continue;
+                    }
+                }
+            } else if is_ram(pc) {
+                f.entries.insert((norm(pc), w.bucket));
+            }
+            if lo > DMA_CYCLES || !(0..3).any(|i| self.dma_conflicts(w.src, pc.wrapping_add(i))) {
+                continue;
+            }
+            if wide
+                && (0..3).any(|i| {
+                    let a = pc.wrapping_add(i);
+                    self.dma_conflicts(w.src, a) && !is_oam(a)
+                })
+            {
+                f.unbounded.insert(w.start);
+                return;
+            }
+            let o1 = fetch(pc.wrapping_add(1), lo + 1);
+            let o2 = fetch(pc.wrapping_add(2), lo + 2);
+            for v in bits(fetch(pc, lo)) {
+                let info = &BASE[usize::from(v)];
+                let len = if v == 0xCB { 2 } else { u16::from(info.length) };
+                if (0..len).any(|i| self.dma_conflicts(w.src, pc.wrapping_add(i))) {
+                    if pc >= 0x8000 {
+                        if v == 0xCB {
+                            for c in bits(o1) {
+                                f.ran
+                                    .entry((pc, 0x100 | u16::from(c)))
+                                    .or_insert(RamClass::Generated);
+                            }
+                        } else {
+                            f.ran
+                                .entry((pc, u16::from(v)))
+                                .or_insert(RamClass::Generated);
+                        }
+                    } else if v != 0xCB
+                        && let Some(b) = at_bank
+                    {
+                        f.live.insert((b, pc, u16::from(v)));
+                    }
+                }
+                let fall = pc.wrapping_add(len);
+                let cost = |c: u8| lo + i32::from(c.max(1));
+                let plain = if v == 0xCB {
+                    lo + 2
+                } else {
+                    cost(info.cycles.not_taken)
+                };
+                let taken = cost(info.cycles.taken);
+                let rel = |e: u8| fall.wrapping_add_signed(i16::from(e as i8));
+                let mut abs = |todo: &mut Vec<(u16, i32)>| {
+                    if count(o1) * count(o2) > CONFLICT_TARGETS {
+                        f.unbounded.insert(pc);
+                        return;
+                    }
+                    for l in bits(o1) {
+                        for h in bits(o2) {
+                            todo.push((u16::from_le_bytes([l, h]), taken));
+                        }
+                    }
+                };
+                match v {
+                    0x18 => todo.extend(bits(o1).map(|e| (rel(e), taken))),
+                    0x20 | 0x28 | 0x30 | 0x38 => {
+                        todo.push((fall, plain));
+                        todo.extend(bits(o1).map(|e| (rel(e), taken)));
+                    }
+                    0xC3 => abs(&mut todo),
+                    0xC2 | 0xCA | 0xD2 | 0xDA | 0xCD | 0xC4 | 0xCC | 0xD4 | 0xDC => {
+                        todo.push((fall, plain));
+                        abs(&mut todo);
+                    }
+                    0xC9 | 0xD9 | 0xD3 | 0xDB | 0xDD | 0xE3 | 0xE4 | 0xEB | 0xEC | 0xED | 0xF4
+                    | 0xFC | 0xFD => {}
+                    0xE9 => {
+                        f.unbounded.insert(pc);
+                    }
+                    0x76 => todo.push((fall, plain + DMA_CYCLES)),
+                    _ if v & 0xC7 == 0xC7 => {
+                        todo.push((fall, plain));
+                        todo.push((u16::from(v & 0x38), plain));
+                    }
+                    _ => todo.push((fall, plain)),
+                }
+            }
+        }
     }
 
     fn bank(&self, p: &Path) -> Option<u16> {
@@ -394,6 +749,11 @@ impl Machine<'_> {
             Some(Ok(b)) => Some(b),
             _ => None,
         }
+    }
+
+    fn rom_at(&self, l: Loc) -> Option<u8> {
+        let o = relift_gb_formats::banks::rom_offset(usize::from(l.bank), l.addr)?;
+        self.rom.get(o).copied()
     }
 
     fn rom_byte(&self, p: &Path, a: u16) -> Option<u8> {
@@ -465,9 +825,27 @@ impl Machine<'_> {
             p.ie = b.v;
             return;
         }
+        if self.cgb && (0xFF51..0xFF55).contains(&a) {
+            p.hdma[usize::from(a - 0xFF51)] = b.v;
+            return;
+        }
+        if self.cgb && a == 0xFF55 {
+            self.vram_dma(p, f, b.v);
+            return;
+        }
         if a == 0xFF46 {
             if let Some(v) = b.v {
                 let src = u16::from(v) << 8;
+                let seq: std::sync::Arc<[Option<u8>]> =
+                    (0..0xA0).map(|i| self.read(p, Some(src | i)).v).collect();
+                p.dma = Some(Dma {
+                    src,
+                    elapsed: 0,
+                    slack: 0,
+                    seq,
+                    walked: false,
+                    fresh: true,
+                });
                 for i in 0..0xA0 {
                     let b = self.read(p, Some(src | i));
                     self.write(p, f, Some(0xFE00 | i), b);
@@ -486,6 +864,40 @@ impl Machine<'_> {
         if let Some(v) = b.v {
             cell.add(v, b.s == Src::Rom);
         }
+    }
+
+    /// A write of `v` to `$FF55`, which starts a VRAM DMA: its blocks are
+    /// copied at once, a general DMA's as the hardware does and an HBlank
+    /// DMA's as it will by the end, and the registers move past them. The
+    /// opcode of the next instruction may be fetched before the copy, so a
+    /// next instruction in VRAM is predicted with the byte it held too, and
+    /// the code after that one.
+    fn vram_dma(&self, p: &mut Path, f: &mut Found, v: Option<u8>) {
+        let regs = (p.hdma[0], p.hdma[1], p.hdma[2], p.hdma[3]);
+        let (Some(v), (Some(sh), Some(sl), Some(dh), Some(dl))) = (v, regs) else {
+            return;
+        };
+        if (0x8000..0xA000).contains(&p.pc)
+            && let Some(op) = self.read(p, Some(p.pc)).v.filter(|&op| op != 0xCB)
+        {
+            f.ran
+                .entry((p.pc, u16::from(op)))
+                .or_insert(RamClass::Generated);
+            let next = p.pc.wrapping_add(u16::from(BASE[usize::from(op)].length));
+            if is_ram(next) {
+                f.entries.insert((next, self.bucket(p, next)));
+            }
+        }
+        let src = u16::from_be_bytes([sh, sl]) & 0xFFF0;
+        let dst = 0x8000 | (u16::from_be_bytes([dh, dl]) & 0x1FF0);
+        let len = (u16::from(v & 0x7F) + 1) * 16;
+        for i in 0..len {
+            let b = self.read(p, Some(src.wrapping_add(i)));
+            self.write(p, f, Some(0x8000 | (dst.wrapping_add(i) & 0x1FFF)), b);
+        }
+        let [sh, sl] = src.wrapping_add(len).to_be_bytes();
+        let [dh, dl] = dst.wrapping_add(len).to_be_bytes();
+        p.hdma = [Some(sh), Some(sl), Some(dh & 0x1F), Some(dl)];
     }
 
     fn push(&self, p: &mut Path, f: &mut Found, hi: B, lo: B) {
@@ -695,6 +1107,15 @@ impl Machine<'_> {
     fn step(&self, p: &mut Path, f: &mut Found) -> Option<Flow> {
         let pc = p.pc;
         let opb = self.read(p, Some(pc));
+        if opb.v.is_none()
+            && let Some(d) = p
+                .dma
+                .as_ref()
+                .filter(|d| d.elapsed <= DMA_CYCLES + DMA_PHASE && !d.walked)
+            && (0..3).any(|i| self.dma_conflicts(d.src, pc.wrapping_add(i)))
+        {
+            self.conflict(p, f, &d.clone(), pc);
+        }
         let op = opb.v?;
         if pc >= 0x8000 && !is_ram(pc) {
             return None;
@@ -711,12 +1132,31 @@ impl Machine<'_> {
             s: Src::Imm,
         };
         let imm16 = i1.v.zip(i2.v).map(|(l, h)| u16::from_le_bytes([l, h]));
+        let dma = p
+            .dma
+            .as_ref()
+            .filter(|d| d.elapsed <= DMA_CYCLES + DMA_PHASE)
+            .cloned();
         if pc >= 0x8000 {
             let key = if op == 0xCB {
                 i1.v.map(|c| 0x100 | u16::from(c))
             } else {
                 Some(u16::from(op))
             };
+            if op == 0x76
+                && let Some(v) = i1.v
+            {
+                let len = if v == 0xCB {
+                    2
+                } else {
+                    u16::from(BASE[usize::from(v)].length)
+                };
+                let t = norm(pc.wrapping_add(len));
+                if is_ram(t) {
+                    let b = self.bucket(p, t);
+                    f.entries.insert((t, b));
+                }
+            }
             if let Some(key) = key {
                 let class = if opb.s == Src::Rom {
                     RamClass::Copied
@@ -737,6 +1177,15 @@ impl Machine<'_> {
         } else {
             p.nops = 0;
         }
+        if let Some(d) = dma
+            && !d.walked
+            && (0..u16::from(len)).any(|i| self.dma_conflicts(d.src, pc.wrapping_add(i)))
+        {
+            self.conflict(p, f, &d, pc);
+            if let Some(d) = &mut p.dma {
+                d.walked = true;
+            }
+        }
         p.pc = pc.wrapping_add(u16::from(len));
         let next = p.pc;
         let hl = pair(p, RH, RL);
@@ -750,7 +1199,8 @@ impl Machine<'_> {
             }
         };
         let flow = match op {
-            0x00 | 0x10 => Flow::Next,
+            0x00 => Flow::Next,
+            0x10 => Flow::Branch(None, Some(pc.wrapping_add(1))),
             0x76 => Flow::Halt,
             0xF3 => {
                 p.ime = Some(false);
@@ -1070,6 +1520,41 @@ impl Machine<'_> {
         p.pc = t;
     }
 
+    /// The return addresses a return may take besides the one memory
+    /// holds, when it pops from OAM while an OAM DMA may hold it, as OAM
+    /// then reads `$FF`.
+    fn oam_returns(&self, p: &Path) -> Vec<u16> {
+        let Sp::Abs(s) = p.sp else {
+            return Vec::new();
+        };
+        let busy = p
+            .dma
+            .as_ref()
+            .is_some_and(|d| d.elapsed <= DMA_CYCLES + DMA_PHASE);
+        let hi = s.wrapping_add(1);
+        if !busy || !(is_oam(s) || is_oam(hi)) {
+            return Vec::new();
+        }
+        let byte = |a: u16| {
+            let mem = self.read(p, Some(a)).v;
+            let mut v: Vec<u8> = mem.into_iter().collect();
+            if is_oam(a) && mem != Some(0xFF) {
+                v.push(0xFF);
+            }
+            (mem, v)
+        };
+        let ((ml, ls), (mh, hs)) = (byte(s), byte(hi));
+        let mut out = Vec::new();
+        for &l in &ls {
+            for &h in &hs {
+                if (Some(l), Some(h)) != (ml, mh) {
+                    out.push(u16::from_le_bytes([l, h]));
+                }
+            }
+        }
+        out
+    }
+
     fn enter(&self, p: &Path, f: &mut Found, from: u16, to: u16) {
         if from < 0x8000 && to >= 0x8000 && is_ram(to) && self.read(p, Some(from)).v != Some(0xE9) {
             f.entries.insert((norm(to), self.bucket(p, norm(to))));
@@ -1088,6 +1573,7 @@ impl Machine<'_> {
             q
         };
         let mut launches = 0usize;
+        let mut promoted = 0usize;
         let again = |seen: &mut FxSet<u64>, p: &Path| {
             if seen.len() >= MAX_SEEN {
                 seen.clear();
@@ -1101,6 +1587,7 @@ impl Machine<'_> {
             work.push_back(q);
         };
         while let Some(mut p) = work.pop_back() {
+            let mut stuck = false;
             loop {
                 if p.steps >= p.limit
                     || p.launch
@@ -1130,12 +1617,41 @@ impl Machine<'_> {
                 let pc = p.pc;
                 let op = self.read(&p, Some(pc)).v;
                 let ime = p.ime == Some(true);
+                let cb = self.read(&p, Some(pc.wrapping_add(1))).v;
                 let Some(flow) = self.step(&mut p, f) else {
                     if p.resume() {
                         continue;
                     }
                     break;
                 };
+                if p.dma.is_some()
+                    && let Some(op) = op
+                {
+                    let c = if op == 0xCB {
+                        cb.map_or(2, |c| CB[usize::from(c)].cycles.not_taken)
+                    } else {
+                        BASE[usize::from(op)].cycles.not_taken
+                    };
+                    let t = BASE[usize::from(op)].cycles.taken;
+                    let (cost, miss) = match flow {
+                        Flow::Branch(Some(true), _)
+                        | Flow::Call(Some(true), _)
+                        | Flow::Ret(Some(true)) => (t, 0),
+                        Flow::Branch(None, _) | Flow::Call(None, _) | Flow::Ret(None) => {
+                            (c, i32::from(t - c))
+                        }
+                        Flow::Halt => (c, DMA_SLACK + 1),
+                        _ => (c, 0),
+                    };
+                    if let Some(d) = &mut p.dma {
+                        if d.fresh {
+                            d.fresh = false;
+                        } else {
+                            d.elapsed += i32::from(cost.max(1));
+                            d.slack += miss;
+                        }
+                    }
+                }
                 let goto = |p: &mut Path, t: u16, f: &mut Found| {
                     self.enter(p, f, pc, t);
                     p.pc = t;
@@ -1182,6 +1698,8 @@ impl Machine<'_> {
                         goto(&mut p, t, f);
                         jumped(&mut p, t, f);
                         if t <= pc && again(&mut seen, &p) {
+                            stuck = t == pc
+                                && (p.ime == Some(false) || p.ie.is_some_and(|ie| ie & 0x1F == 0));
                             break;
                         }
                         false
@@ -1231,7 +1749,23 @@ impl Machine<'_> {
                             }
                             queue(&mut work, fork(&p));
                         }
+                        let alts = self.oam_returns(&p);
                         let (h, l) = self.pop(&mut p);
+                        for t in alts {
+                            let mut q = fork(&p);
+                            self.enter(&q, f, pc, t);
+                            if t < 0x8000 {
+                                if let Some(bank) = if t < 0x4000 { Some(0) } else { self.bank(&q) }
+                                {
+                                    f.roots.insert(Loc { bank, addr: t });
+                                }
+                                if pc >= 0x8000 {
+                                    q.free = true;
+                                }
+                            }
+                            q.pc = t;
+                            queue(&mut work, q);
+                        }
                         match h.v.zip(l.v).map(|(h, l)| u16::from_be_bytes([h, l])) {
                             Some(t) => {
                                 let popped = |fr: &Frame| match (fr.sp, p.sp) {
@@ -1274,7 +1808,14 @@ impl Machine<'_> {
                 }
             }
             if p.main && p.launch.is_none() && p.steps < p.limit {
-                let next = work.iter().rposition(|q| q.ram_fork);
+                let next = if stuck {
+                    promoted += 1;
+                    work.len()
+                        .checked_sub(1)
+                        .filter(|_| promoted <= MAX_PROMOTIONS)
+                } else {
+                    work.iter().rposition(|q| q.ram_fork)
+                };
                 if let Some(mut q) = next.and_then(|i| work.remove(i)) {
                     q.limit = q.steps.saturating_add(p.limit - p.steps);
                     q.main = true;
@@ -1399,21 +1940,31 @@ impl Machine<'_> {
             launch: None,
             nops: 0,
             ram_fork: false,
+            dma: None,
+            hdma: [None; 4],
         }
     }
 }
 
 /// The instructions `rom` will run from RAM: every function in `roots` is
 /// run as the module documentation says, and the code is decoded from the
-/// RAM transfer targets in `targets` and those the runs reached. A path
+/// RAM transfer targets in `targets` and those the runs reached. An
+/// instruction in VRAM or OAM may also fetch `$FF`, as the PPU locks them
+/// in some modes, so `RST $38` is predicted there too, and on a colour
+/// cartridge an instruction in VRAM may fetch the 0 the boot ROM cleared it
+/// to, before a store or DMA reached it. A `HALT` or `STOP` at the window's
+/// last address, after which the CPU may fetch whatever the bus holds at
+/// `$8000`, gets every opcode there. A path
 /// ends at a ROM location that is not in `code`, the instructions the
-/// analysis decoded, as it has gone astray.
+/// analysis decoded, nor in the fixed region or a bank of `whole`, the
+/// banks lifted at every address, as it has gone astray.
 #[must_use]
 pub(crate) fn predict(
     rom: &[u8],
     model: &BankModel,
     roots: &[Loc],
     code: &FxSet<Loc>,
+    whole: &BTreeSet<u16>,
     targets: &[u16],
 ) -> RamOps {
     let m = Machine {
@@ -1422,9 +1973,10 @@ pub(crate) fn predict(
         cgb: rom.get(0x143).is_some_and(|c| c & 0x80 != 0),
         nibbles: model.kind() == Some(relift_gb_formats::MapperKind::Mbc2),
         code,
+        whole,
     };
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let found = relift_proc::workers::run(relift_proc::workers::jobs().min(8), || {
+    let mut found = relift_proc::workers::run(relift_proc::workers::jobs().min(8), || {
         let mut f = Found::default();
         while let Some(&r) = roots.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
             m.run_root(m.start(r), &mut f);
@@ -1436,6 +1988,11 @@ pub(crate) fn predict(
         all.join(f);
         all
     });
+    let mut walked = Found::default();
+    for w in std::mem::take(&mut found.walks) {
+        m.walk(&w, &found.stores, &mut walked);
+    }
+    found.join(walked);
     let mut entries: BTreeSet<(u16, u8)> = found.entries.iter().copied().collect();
     for &t in targets {
         let t = norm(t);
@@ -1450,16 +2007,101 @@ pub(crate) fn predict(
         ran.entry(norm(a)).or_default().push(k);
     }
     let mut ops = decode(&found.stores, &entries, m.cgb, &ran);
+    let cleared = boot_sleds(&found.stores, &entries, &ops.ops, m.cgb);
     let mut all: BTreeMap<(u16, u16), RamClass> =
         ops.ops.iter().map(|o| ((o.addr, o.key), o.class)).collect();
     for (&k, &c) in &found.ran {
         all.entry(k).or_insert(c);
     }
+    let edge = code
+        .iter()
+        .any(|l| l.addr == 0x7FFF && m.rom_at(*l).is_some_and(|b| b == 0x76 || b == 0x10));
+    if edge {
+        for k in 0..0x200 {
+            all.entry((0x8000, k)).or_insert(RamClass::Generated);
+        }
+    }
+    let vram: BTreeSet<u16> = all
+        .keys()
+        .map(|&(a, _)| a)
+        .filter(|a| (0x8000..0xA000).contains(a))
+        .collect();
+    if m.cgb {
+        for &a in &vram {
+            all.entry((a, 0x00)).or_insert(RamClass::Generated);
+        }
+    }
+    let locked: BTreeSet<u16> = all
+        .keys()
+        .map(|&(a, _)| a)
+        .filter(|&a| (0x8000..0xA000).contains(&a) || is_oam(a))
+        .collect();
+    if !locked.is_empty() {
+        found.roots.insert(Loc::fixed(0x38));
+    }
+    for a in locked {
+        all.entry((a, 0xFF)).or_insert(RamClass::Generated);
+    }
+    if cleared.iter().any(|&(_, e)| e == 0xA000) {
+        all.entry((0xA000, 0xFF)).or_insert(RamClass::Generated);
+        found.roots.insert(Loc::fixed(0x38));
+    }
+    ops.sleds = cleared;
     ops.ops = all
         .into_iter()
         .map(|((addr, key), class)| RamOp { addr, key, class })
         .collect();
+    ops.live = found
+        .live
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    ops.roots = found
+        .roots
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    ops.unbounded = found
+        .unbounded
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     ops
+}
+
+/// The [`RamOps::sleds`] from `entries`: on a colour cartridge, each entry
+/// in VRAM that no path stored into and `ops` predicts nothing at runs to
+/// the next address a path stored into, or to the end of VRAM.
+fn boot_sleds(
+    stores: &FxMap<(u16, u8), Cell>,
+    entries: &BTreeSet<(u16, u8)>,
+    ops: &[RamOp],
+    cgb: bool,
+) -> Vec<(u16, u16)> {
+    if !cgb {
+        return Vec::new();
+    }
+    let stored: BTreeSet<u16> = stores
+        .keys()
+        .map(|&(a, _)| a)
+        .filter(|a| (0x8000..0xA000).contains(a))
+        .collect();
+    let mut out: Vec<(u16, u16)> = Vec::new();
+    for &(a, _) in entries {
+        if !(0x8000..0xA000).contains(&a) || stored.contains(&a) || ops.iter().any(|o| o.addr == a)
+        {
+            continue;
+        }
+        let end = stored.range(a..).next().copied().unwrap_or(0xA000);
+        if !out.iter().any(|&(s, e)| (s..e).contains(&a)) {
+            out.push((a, end));
+        }
+    }
+    out.sort_unstable();
+    out
 }
 
 /// The RAM targets of calls and jumps copied to RAM: an address whose value
@@ -1626,6 +2268,16 @@ fn decode(
                     }
                     _ => true,
                 };
+                if op == 0x76 {
+                    for v in at(1).values() {
+                        let len = if v == 0xCB {
+                            2
+                        } else {
+                            u16::from(BASE[usize::from(v)].length)
+                        };
+                        todo.push((a.wrapping_add(len), 0, true));
+                    }
+                }
                 if falls && (!matches!(op, 0x00 | 0xFF) || cell.count() == 1) {
                     let run = if op == 0 { nops + 1 } else { 0 };
                     let most = if class == RamClass::Generated {
@@ -1652,5 +2304,9 @@ fn decode(
             .into_iter()
             .collect(),
         wide: wide.into_iter().collect(),
+        live: Vec::new(),
+        roots: Vec::new(),
+        unbounded: Vec::new(),
+        sleds: Vec::new(),
     }
 }
