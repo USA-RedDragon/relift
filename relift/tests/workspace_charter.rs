@@ -506,9 +506,10 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-n64",
         band: 2,
-        why: "the Nintendo 64 guest: the VR4300 frontend for the runtime's N64 layer and a ROM lifted and emitted as one unit per segment, over discovery and the C emitter",
+        why: "the Nintendo 64 guest: the VR4300 and RSP frontends for the runtime's N64 and RSP layers and a ROM lifted and emitted as one unit per segment and per RSP image, over discovery and the C emitter",
         normal: &[
             "relift-cpu-mips",
+            "relift-cpu-rsp",
             "relift-emit",
             "relift-guest",
             "relift-ir",

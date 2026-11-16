@@ -3,7 +3,9 @@
 //! there goes through `relift import`, `relift build` (analysis, the
 //! per-segment lift, the C emitter, clang and the runtime) and runs
 //! headless. The routine is bound by its hash when the DMA brings it in, so
-//! the run shows its store with no missed code. Skipped with a note when
+//! the run shows its store with no missed code. A second ROM loads a
+//! microcode routine into IMEM with an SP DMA and starts the RSP, whose
+//! lifted code stores a word in DMEM and breaks. Skipped with a note when
 //! clang is not on `PATH`.
 
 mod tiny;
@@ -15,6 +17,7 @@ const T1: u32 = 9;
 const T2: u32 = 10;
 const T4: u32 = 12;
 const T5: u32 = 13;
+const T6: u32 = 14;
 const RA: u32 = 31;
 
 fn i(op: u32, rs: u32, rt: u32, imm: u16) -> u32 {
@@ -37,6 +40,9 @@ fn lw(rt: u32, off: u16, base: u32) -> u32 {
 }
 fn bne(rs: u32, rt: u32, off: i16) -> u32 {
     i(0x05, rs, rt, off as u16)
+}
+fn beq(rs: u32, rt: u32, off: i16) -> u32 {
+    i(0x04, rs, rt, off as u16)
 }
 fn jal(t: u32) -> u32 {
     3 << 26 | (t >> 2 & 0x03FF_FFFF)
@@ -87,17 +93,18 @@ fn rom() -> Vec<u8> {
     rom
 }
 
-#[test]
-fn code_loaded_by_pi_dma_builds_binds_and_runs() {
+/// Imports, builds and runs `rom` headless for 3 frames with `--stats` and
+/// `--dump`; the scratch root and the run's stderr, or `None` without clang.
+fn build_and_run(name: &str, rom: &[u8]) -> Option<(std::path::PathBuf, String)> {
     if relift_build::find_tool("clang").is_none() {
         eprintln!("skipped: no clang on PATH");
-        return;
+        return None;
     }
-    let root = tiny::scratch("e2e-n64-dma");
+    let root = tiny::scratch(name);
     let project = root.join("game");
     std::fs::create_dir_all(&project).expect("the project dir is creatable");
-    let image = root.join("dma.z64");
-    relift_cache::write_if_changed(&image, &rom()).expect("the ROM is writable");
+    let image = root.join("rom.z64");
+    relift_cache::write_if_changed(&image, rom).expect("the ROM is writable");
     let cache = root.join("cache").display().to_string();
     let image = image.display().to_string();
     let out = tiny::relift(&project, &["--cache-dir", &cache, "import", &image]);
@@ -119,13 +126,21 @@ fn code_loaded_by_pi_dma_builds_binds_and_runs() {
         .output()
         .expect("the game runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let err = String::from_utf8_lossy(&out.stderr);
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "{stdout}{err}");
+    Some((root, format!("{stdout}{err}")))
+}
+
+#[test]
+fn code_loaded_by_pi_dma_builds_binds_and_runs() {
+    let Some((root, err)) = build_and_run("e2e-n64-dma", &rom()) else {
+        return;
+    };
     assert!(
         err.contains("interpreted 0, pi dmas 1,")
             && err.contains("mismatches 0")
             && err.contains("misses 0"),
-        "{stdout}{err}"
+        "{err}"
     );
     let rdram = std::fs::read(root.join("dump.rdram")).expect("the RDRAM dump");
     assert_eq!(&rdram[0x20_0000..0x20_0004], &lui(T4, 0x8030).to_be_bytes());
@@ -133,5 +148,71 @@ fn code_loaded_by_pi_dma_builds_binds_and_runs() {
         &rdram[0x30_0000..0x30_0004],
         &0x42u32.to_be_bytes(),
         "the routine the DMA loaded ran"
+    );
+}
+
+/// The boot code at `0x80001000` (an SP DMA of the 16-byte routine at
+/// RDRAM `0x1800` to IMEM 0, a wait for it, the RSP's start, a wait for its
+/// halt, then DMEM word 0 copied to `0x80300000`, a loop) and the routine,
+/// which stores `0x1234` at DMEM 0 and breaks.
+fn rsp_rom() -> Vec<u8> {
+    let mut rom = synth::rom(&synth::Spec {
+        entry: 0x8000_1000,
+        ..synth::Spec::default()
+    });
+    let boot = [
+        lui(T0, 0xA404),
+        ori(T1, 0, 0x1000),
+        sw(T1, 0, T0),
+        ori(T1, 0, 0x1800),
+        sw(T1, 4, T0),
+        ori(T1, 0, 0xF),
+        sw(T1, 8, T0),
+        lw(T2, 0x18, T0),
+        bne(T2, 0, -2),
+        NOP,
+        ori(T1, 0, 0x5),
+        sw(T1, 0x10, T0),
+        lw(T2, 0x10, T0),
+        andi(T2, T2, 1),
+        beq(T2, 0, -3),
+        NOP,
+        lui(T4, 0xA400),
+        lw(T5, 0, T4),
+        lui(T6, 0x8030),
+        sw(T5, 0, T6),
+        bne(0, T0, -1),
+        NOP,
+    ];
+    let ucode = [ori(1, 0, 0x1234), sw(1, 0, 0), 0x0000_000D, NOP];
+    for (k, w) in boot.iter().enumerate() {
+        rom[0x1000 + 4 * k..0x1004 + 4 * k].copy_from_slice(&w.to_be_bytes());
+    }
+    rom[0x1058..0x3000].fill(0);
+    for (k, w) in ucode.iter().enumerate() {
+        rom[0x1800 + 4 * k..0x1804 + 4 * k].copy_from_slice(&w.to_be_bytes());
+    }
+    rom
+}
+
+#[test]
+fn microcode_loaded_by_sp_dma_runs_lifted_on_the_rsp() {
+    let Some((root, err)) = build_and_run("e2e-n64-rsp", &rsp_rom()) else {
+        return;
+    };
+    assert!(
+        err.contains("rsp interpreted 0,")
+            && err.contains("breaks 1,")
+            && err.contains("misses 0, dp")
+            && err.contains("sp dmas 1,"),
+        "{err}"
+    );
+    let dmem = std::fs::read(root.join("dump.dmem")).expect("the DMEM dump");
+    assert_eq!(&dmem[0..4], &0x1234u32.to_be_bytes());
+    let rdram = std::fs::read(root.join("dump.rdram")).expect("the RDRAM dump");
+    assert_eq!(
+        &rdram[0x30_0000..0x30_0004],
+        &0x1234u32.to_be_bytes(),
+        "the CPU read what the RSP stored"
     );
 }

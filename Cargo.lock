@@ -1178,6 +1178,7 @@ name = "relift-n64"
 version = "0.1.0"
 dependencies = [
  "relift-cpu-mips",
+ "relift-cpu-rsp",
  "relift-emit",
  "relift-guest",
  "relift-ir",

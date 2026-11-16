@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 relift-cpu-mips = { workspace = true }
+relift-cpu-rsp = { workspace = true }
 relift-emit = { workspace = true }
 relift-guest = { workspace = true }
 relift-ir = { workspace = true }

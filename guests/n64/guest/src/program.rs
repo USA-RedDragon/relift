@@ -367,7 +367,8 @@ pub fn rom_c() -> String {
     "#include <stddef.h>\n#include <stdint.h>\n#pragma clang diagnostic ignored \"-Wc23-extensions\"\nextern const uint8_t rl_n64_rom[];\nconst uint8_t rl_n64_rom[] = {\n#embed \"rom.bin\"\n};\nextern const size_t rl_n64_rom_len;\nconst size_t rl_n64_rom_len = sizeof rl_n64_rom;\n".into()
 }
 
-/// `program.c`: the units, the code runs and `main`.
+/// `program.c`: the units, the code runs and `main`, which takes the RSP
+/// images from `rsp_images.c` ([`crate::rsp::images_c`]).
 #[must_use]
 pub fn program_c(p: &Program<'_>) -> String {
     let mut s = String::from(
@@ -399,7 +400,7 @@ pub fn program_c(p: &Program<'_>) -> String {
     }
     let _ = write!(
         s,
-        "}};\nextern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, {}, {}u, {:#x}u }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
+        "}};\nextern const uint8_t rl_n64_rom[];\nextern const size_t rl_n64_rom_len;\nextern const rl_rsp_image *const rl_n64_rsp_images[];\nextern const uint32_t rl_n64_rsp_count;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_n64_program prog = {{ rl_n64_rom, rl_n64_rom_len, units, {}u, code, {}u, rl_n64_rsp_images, rl_n64_rsp_count, {}, {}u, {:#x}u }};\n    return rl_n64_main(&prog, argc, argv);\n}}\n",
         p.units.len(),
         p.code.len(),
         c_string(p.title),

@@ -26,7 +26,13 @@ const LIFTED_OPT: &str = "-O0";
 const ROM_FILE: &str = "rom.z64";
 
 /// The runtime directories the program compiles, below the runtime root.
-const LAYERS: [&str; 4] = ["core", "cpus/mips", "guests/n64", "guests/n64/run"];
+const LAYERS: [&str; 5] = [
+    "core",
+    "cpus/mips",
+    "cpus/rsp",
+    "guests/n64",
+    "guests/n64/run",
+];
 
 /// Whether `path` is a Nintendo 64 cartridge image in one of the three byte
 /// orders.
@@ -211,7 +217,35 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
             relift_emit::PRELUDE.as_bytes(),
         )?;
     }
+    let rrow = ui.row("rsp");
+    ui.begin(rrow, "lift");
+    let rsp = relift_n64::rsp::lift(
+        &rom.bytes,
+        &report,
+        relift_switch_formats::sha256(&rom.bytes),
+    );
+    for im in &rsp.images {
+        let udir = cdir.join(&im.dir);
+        std::fs::create_dir_all(&udir)?;
+        for f in &im.output.files {
+            let path = udir.join(&f.name);
+            relift_cache::write_if_changed(&path, f.text.as_bytes())?;
+            if f.name.ends_with(".c") {
+                files.push(path);
+            }
+        }
+        relift_cache::write_if_changed(
+            &udir.join(relift_emit::PRELUDE_NAME),
+            relift_emit::PRELUDE.as_bytes(),
+        )?;
+    }
     let mut list = String::new();
+    for u in &rsp.unlifted {
+        list.push_str(&format!(
+            "rsp{}  {:03x}  {:08x}  {}\n",
+            u.image, u.pc as u32, u.failure.insn as u32, u.failure.message
+        ));
+    }
     for u in &lifted.unlifted {
         list.push_str(&format!(
             "seg{}  {:08x}  {:08x}  {}\n",
@@ -229,6 +263,16 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
             lifted.unlifted.len()
         )),
     );
+    ui.done(
+        rrow,
+        Line::new().text(format!(
+            "{} in {}, {} instructions, {} not lifted",
+            noun(rsp.functions() as u64, "function"),
+            noun(rsp.images.len() as u64, "image"),
+            rsp.instructions,
+            rsp.unlifted.len()
+        )),
+    );
     relift_cache::write_if_changed(&cdir.join("rom.bin"), &rom.bytes)?;
     let title = if project_title.is_empty() {
         title_of(&rom)
@@ -239,6 +283,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     let mut prog = Vec::new();
     for (n, text) in [
         ("rom.c", relift_n64::program::rom_c()),
+        ("rsp_images.c", relift_n64::rsp::images_c(&rsp.images)),
         (
             "program.c",
             relift_n64::program::program_c(&relift_n64::program::Program {
@@ -269,8 +314,8 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     let exe = out.join(format!("game{}", std::env::consts::EXE_SUFFIX));
     ui.summary(&Line::new().paint(Paint::Green, "built").text(format!(
         " {}, {} instructions not lifted, {} in all",
-        noun(lifted.functions() as u64, "function"),
-        lifted.unlifted.len(),
+        noun((lifted.functions() + rsp.functions()) as u64, "function"),
+        lifted.unlifted.len() + rsp.unlifted.len(),
         duration(ui.elapsed())
     )));
     ui.summary(&Line::new().text(format!("  output: {}", exe.display())));
@@ -308,6 +353,7 @@ fn compile(
         .chain([
             inc("core/include"),
             inc("cpus/mips/include"),
+            inc("cpus/rsp/include"),
             inc("guests/n64/run/include"),
         ])
         .chain(static_rt.clone())
@@ -334,6 +380,8 @@ fn compile(
             inc("core"),
             inc("cpus/mips/include"),
             inc("cpus/mips"),
+            inc("cpus/rsp/include"),
+            inc("cpus/rsp"),
             inc("guests/n64"),
             inc("guests/n64/run"),
             inc("guests/n64/run/include"),
