@@ -1622,3 +1622,35 @@ fn lane_operations_are_vectors_through_the_prelude_helpers() {
     );
     assert_eq!(c(wide.index()), "rl_e_v2u(v6) + rl_e_v2u(v7)");
 }
+
+#[test]
+fn word_layout_ram_takes_bytes_at_xor_3_halves_at_xor_2_and_words_as_they_are() {
+    use crate::time::{words_load, words_store};
+    assert_eq!(words_load(1, "a_"), "(uint64_t)rl_ld8(mem, a_ ^ 3)");
+    assert_eq!(words_load(2, "a_"), "(uint64_t)rl_ld16(mem, a_ ^ 2)");
+    assert_eq!(words_load(4, "a_"), "(uint64_t)rl_ld32(mem, a_)");
+    assert_eq!(words_load(8, "a_"), "rl_e_rot32(rl_ld64(mem, a_))");
+    let three = words_load(3, "a_");
+    for k in 0..3 {
+        assert!(
+            three.contains(&format!("rl_ld8(mem, (a_ + {k}) ^ 3)")),
+            "{three}"
+        );
+    }
+    assert_eq!(
+        words_store(1, "a_", "v_"),
+        "rl_st8(mem, a_ ^ 3, (uint8_t)(v_));"
+    );
+    assert_eq!(
+        words_store(4, "a_", "v_"),
+        "rl_st32(mem, a_, (uint32_t)(v_));"
+    );
+    assert_eq!(
+        words_store(8, "a_", "v_"),
+        "rl_st64(mem, a_, rl_e_rot32((uint64_t)(v_)));"
+    );
+    assert_eq!(
+        words_store(3, "a_", "v_"),
+        "rl_st8(mem, (a_ + 0) ^ 3, (uint8_t)((v_) >> 16)); rl_st8(mem, (a_ + 1) ^ 3, (uint8_t)((v_) >> 8)); rl_st8(mem, (a_ + 2) ^ 3, (uint8_t)((v_) >> 0));"
+    );
+}

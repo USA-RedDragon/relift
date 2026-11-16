@@ -450,6 +450,18 @@ pub(crate) fn emit_op(
         } => {
             let n = bytes(w)?;
             let ad = val(*addr);
+            if fe.ram_words() {
+                if *endian != Endian::Big || *order != Order::Plain {
+                    return Err("a little-endian or ordered access to word-layout RAM".into());
+                }
+                return Ok(Emitted::Value(fit(
+                    &format!(
+                        "({{ uint64_t a_ = (uint64_t)({ad}); {}; }})",
+                        crate::time::words_load(n, "a_")
+                    ),
+                    w,
+                )));
+            }
             let raw = match order {
                 Order::Plain => format!("rl_ld{}(mem, {ad})", n * 8),
                 _ if n <= 8 => format!("rl_ldar(mem, {ad}, {n})"),
@@ -465,6 +477,19 @@ pub(crate) fn emit_op(
         } => {
             let wv = wv(*value);
             let n = bytes(wv)?;
+            if fe.ram_words() {
+                if *endian != Endian::Big || *order != Order::Plain {
+                    return Err("a little-endian or ordered access to word-layout RAM".into());
+                }
+                let st = crate::time::words_store(n, "a_", "v_");
+                return Ok(Emitted::Stmt(format!(
+                    "({{ uint64_t a_ = (uint64_t)({}); {} v_ = ({}){}; {st} (void)0; }})",
+                    val(*addr),
+                    crate::time::ty_of(n),
+                    crate::time::ty_of(n),
+                    val(*value)
+                )));
+            }
             let v = swap(&val(*value), wv, *endian)?;
             let ad = val(*addr);
             return Ok(Emitted::Stmt(match order {

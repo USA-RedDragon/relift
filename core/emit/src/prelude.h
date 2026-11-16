@@ -77,6 +77,9 @@ static inline rl_e_vq rl_e_u2v(rl_u128 u) { return u; }
 static inline rl_u128 rl_e_v2u(rl_e_vq v) { return v; }
 #endif
 
+/* A doubleword of word-layout RAM: its two host-order words swapped into one value. */
+static inline uint64_t rl_e_rot32(uint64_t x) { return x << 32 | x >> 32; }
+
 /*
  * The carry (cf) and overflow (vf) of x + y and x - y, as A64 sets C and V:
  * a subtract carries when it does not borrow.

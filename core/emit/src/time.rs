@@ -48,6 +48,11 @@ fn bytes(w: Width) -> Result<u32, String> {
     }
 }
 
+/// The C type of an access of `n` bytes.
+pub(crate) fn ty_of(n: u32) -> &'static str {
+    ty(n)
+}
+
 fn ty(n: u32) -> &'static str {
     if n <= 8 { "uint64_t" } else { "rl_u128" }
 }
@@ -104,6 +109,45 @@ fn device_cond(
     (!parts.is_empty()).then(|| parts.join(" || "))
 }
 
+/// A big-endian load of `n` bytes at `a` (a `uint64_t`) from RAM in the
+/// word layout of [`Frontend::ram_words`], as a value of type `ty(n)`.
+pub(crate) fn words_load(n: u32, a: &str) -> String {
+    match n {
+        1 => format!("(uint64_t)rl_ld8(mem, {a} ^ 3)"),
+        2 => format!("(uint64_t)rl_ld16(mem, {a} ^ 2)"),
+        4 => format!("(uint64_t)rl_ld32(mem, {a})"),
+        8 => format!("rl_e_rot32(rl_ld64(mem, {a}))"),
+        _ => {
+            let t = ty(n);
+            let mut e = format!("({t})0");
+            for k in 0..n {
+                e = format!("(({e}) << 8 | ({t})rl_ld8(mem, ({a} + {k}) ^ 3))");
+            }
+            e
+        }
+    }
+}
+
+/// The statement of a big-endian store of the `n` low bytes of `v` at `a`
+/// to RAM in the word layout of [`Frontend::ram_words`].
+pub(crate) fn words_store(n: u32, a: &str, v: &str) -> String {
+    match n {
+        1 => format!("rl_st8(mem, {a} ^ 3, (uint8_t)({v}));"),
+        2 => format!("rl_st16(mem, {a} ^ 2, (uint16_t)({v}));"),
+        4 => format!("rl_st32(mem, {a}, (uint32_t)({v}));"),
+        8 => format!("rl_st64(mem, {a}, rl_e_rot32((uint64_t)({v})));"),
+        _ => (0..n)
+            .map(|k| {
+                format!(
+                    "rl_st8(mem, ({a} + {k}) ^ 3, (uint8_t)(({v}) >> {}));",
+                    8 * (n - 1 - k)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
 /// The C for a tick, I/O access or sync point `b.insts[i]`.
 pub(crate) fn emit(
     fe: &dyn Frontend,
@@ -131,7 +175,12 @@ pub(crate) fn emit(
         Op::IoLoad { addr, endian, kind } => {
             let n = bytes(inst.width.unwrap_or(Width::W8))?;
             let t = ty(n);
+            let words = fe.ram_words();
+            if words && *endian != Endian::Big {
+                return Err("a little-endian access to word-layout RAM".into());
+            }
             let plain = match n {
+                _ if words => format!("r_ = ({t})({});", words_load(n, "a_")),
                 1 | 2 | 4 | 8 | 16 => format!("r_ = rl_ld{}(mem, a_);", 8 * n),
                 _ => format!("r_ = 0; memcpy(&r_, mem + a_, {n});"),
             };
@@ -146,6 +195,9 @@ pub(crate) fn emit(
                         s.push_str(&format!(" r_ |= (({t})({call})) << {};", 8 * off));
                     }
                     s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                    if words {
+                        s.push_str(&format!(" r_ = ({t})({});", bswap("r_", n)));
+                    }
                 }
                 Some(cond) => {
                     s.push_str(&format!(
@@ -156,12 +208,14 @@ pub(crate) fn emit(
                             format!("{read_call}(c, mem, a_ + {off}, {size}) & {}", mask(size));
                         s.push_str(&format!(" r_ |= (({t})({call})) << {};", 8 * off));
                     }
-                    s.push_str(&format!(
-                        " {BUDGET} = {clk}.{BUDGET}; }} else {{ {plain} }}"
-                    ));
+                    s.push_str(&format!(" {BUDGET} = {clk}.{BUDGET};"));
+                    if words {
+                        s.push_str(&format!(" r_ = ({t})({});", bswap("r_", n)));
+                    }
+                    s.push_str(&format!(" }} else {{ {plain} }}"));
                 }
             }
-            let r = if *endian == Endian::Big {
+            let r = if *endian == Endian::Big && !words {
                 bswap("r_", n)
             } else {
                 "r_".into()
@@ -177,18 +231,23 @@ pub(crate) fn emit(
         } => {
             let n = bytes(wv(*value))?;
             let t = ty(n);
+            let words = fe.ram_words();
+            if words && *endian != Endian::Big {
+                return Err("a little-endian access to word-layout RAM".into());
+            }
             let v = format!("({t}){}", val(*value));
             let d = if *endian == Endian::Big {
-                bswap(&v, n)
+                bswap("v_", n)
             } else {
-                v
+                "v_".into()
             };
             let plain = match n {
+                _ if words => words_store(n, "a_", "v_"),
                 1 | 2 | 4 | 8 | 16 => format!("rl_st{}(mem, a_, d_);", 8 * n),
                 _ => format!("memcpy(mem + a_, &d_, {n});"),
             };
             let mut s = format!(
-                "({{ uint64_t a_ = (uint64_t){}; {t} d_ = ({t})({d});",
+                "({{ uint64_t a_ = (uint64_t){}; {t} v_ = {v}; {t} d_ = ({t})({d}); (void)v_; (void)d_;",
                 val(*addr)
             );
             match device_cond(io, bits, n, *kind, true, "a_") {

@@ -194,6 +194,17 @@ pub trait Frontend {
         ("rl_io_read", "rl_io_write")
     }
 
+    /// Whether guest RAM holds the guest's big-endian data as host-order
+    /// 32-bit words, the layout N64 emulators and parallel-rdp give RDRAM:
+    /// a byte at its address XOR 3, a halfword at its address XOR 2, a
+    /// doubleword as its two words in address order. A big-endian access of
+    /// 2, 4 or 8 bytes is then naturally aligned and needs no byte swap; one
+    /// of another size goes byte by byte. Device accesses keep the guest's
+    /// addresses and byte order.
+    fn ram_words(&self) -> bool {
+        false
+    }
+
     /// The `int` C call of the sync point of `b`, whose exit goes to the
     /// guest address `next` (a C expression); `None` keeps
     /// `rl_sync(c, mem, next)`. The call returns `RL_OK` or `RL_PENDING`
