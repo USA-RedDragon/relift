@@ -159,6 +159,7 @@ fn attributes() {
         .f(40, 11, 0xec)
         .f(64, 8, 255);
     assert_eq!(t.text(0), "AST a[0xec], R3");
+    assert_eq!(t.f(64, 8, 0).text(0), "AST a[0xec], R3, R0");
 }
 
 #[test]
@@ -631,4 +632,243 @@ fn integer_conversion_alu() {
         .f(74, 1, 0x1)
         .f(87, 3, 0x7);
     assert_eq!(t.text(0), "DFMA R1, R2, R3, |R4|");
+}
+
+#[test]
+fn memory() {
+    let t = B::op(0x181, 4)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(40, 6, 0x20)
+        .f(72, 1, 0x1)
+        .f(73, 3, 0x6)
+        .f(77, 3, 0x7)
+        .f(84, 1, 0x1)
+        .f(90, 1, 0x0)
+        .f(91, 1, 0x1)
+        .f(81, 3, 0x7);
+    assert_eq!(t.text(0), "LDG.E.128.STRONG.GPU R4, [R5.U32+UR6+0x20]");
+    let t = B::op(0x186, 4)
+        .f(24, 3, 0x5)
+        .f(32, 4, 0x8)
+        .f(40, 24, 0xfffff0)
+        .f(64, 4, 0xa)
+        .f(72, 1, 0x1)
+        .f(73, 3, 0x5)
+        .f(77, 3, 0x5)
+        .f(84, 1, 0x1)
+        .f(90, 1, 0x1)
+        .f(91, 1, 0x1);
+    assert_eq!(t.text(0), "STG.E.64.STRONG.SM [R5.64+UR10+-0x10], R8");
+    let t = B::op(0x181, 1)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(40, 5, 0x10)
+        .f(72, 1, 0x1)
+        .f(73, 2, 0x2)
+        .f(77, 3, 0x4)
+        .f(84, 1, 0x1)
+        .f(81, 3, 0x7);
+    assert_eq!(t.text(0), "LDG.E.U16.CONSTANT R4, [R5+0x10]");
+    let t = B::op(0x184, 4)
+        .f(16, 3, 0x4)
+        .f(24, 8, 0xff)
+        .f(40, 11, 0x400)
+        .f(73, 3, 0x6);
+    assert_eq!(t.text(0), "LDS.128 R4, [0x400]");
+    let t = B::op(0x184, 4)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(40, 4, 0xc)
+        .f(73, 3, 0x4)
+        .f(78, 2, 0x2)
+        .f(91, 1, 0x1)
+        .f(32, 6, 0x3f);
+    assert_eq!(t.text(0), "LDS R4, [R5.X8+URZ+0xc]");
+    let t = B::op(0x188, 4)
+        .f(24, 3, 0x5)
+        .f(32, 4, 0x8)
+        .f(40, 5, 0x10)
+        .f(73, 3, 0x6)
+        .f(78, 2, 0x3)
+        .f(91, 1, 0x1)
+        .f(64, 2, 0x3);
+    assert_eq!(t.text(0), "STS.128 [R5.X16+UR3+0x10], R8");
+    let t = B::op(0x187, 1)
+        .f(24, 3, 0x5)
+        .f(32, 4, 0x8)
+        .f(40, 5, 0x10)
+        .f(73, 3, 0x5)
+        .f(84, 1, 0x1);
+    assert_eq!(t.text(0), "STL.64 [R5+0x10], R8");
+    let t = B::op(0x182, 5)
+        .f(16, 3, 0x4)
+        .f(24, 4, 0x8)
+        .f(38, 5, 0x10)
+        .f(54, 3, 0x5)
+        .f(73, 3, 0x5);
+    assert_eq!(t.text(0), "LDC.64 R4, c[0x5][R8+0x10]");
+    let t = B::op(0x182, 2)
+        .f(16, 3, 0x4)
+        .f(24, 2, 0x3)
+        .f(64, 4, 0x8)
+        .f(38, 16, 0xfff0)
+        .f(91, 1, 0x1)
+        .f(73, 2, 0x2);
+    assert_eq!(t.text(0), "LDC.U16 R4, cx[UR3][R8+-0x10]");
+    let t = B::op(0x0b9, 5)
+        .f(16, 3, 0x4)
+        .f(38, 9, 0x130)
+        .f(54, 1, 0x0)
+        .f(73, 3, 0x5);
+    assert_eq!(t.text(0), "ULDC.64 UR4, c[0x0][0x130]");
+    let t = B::op(0x0bb, 5)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x4)
+        .f(38, 5, 0x10)
+        .f(54, 3, 0x5)
+        .f(73, 3, 0x5)
+        .f(91, 1, 0x1);
+    assert_eq!(t.text(0), "ULDC.64 UR4, c[0x5][UR4+0x10]");
+    let t = B::op(0x18e, 4)
+        .f(24, 3, 0x5)
+        .f(32, 4, 0x8)
+        .f(72, 1, 0x1)
+        .f(87, 1, 0x1)
+        .f(73, 1, 0x0)
+        .f(77, 3, 0x7)
+        .f(84, 1, 0x1);
+    assert_eq!(t.text(0), "RED.E.MIN.STRONG.GPU [R5], R8");
+    let t = B::op(0x1a8, 4)
+        .f(16, 3, 0x4)
+        .f(24, 8, 0xff)
+        .f(32, 3, 0x5)
+        .f(64, 3, 0x4)
+        .f(72, 1, 0x1)
+        .f(91, 1, 0x1)
+        .f(87, 1, 0x0)
+        .f(77, 3, 0x7)
+        .f(81, 3, 0x7)
+        .f(84, 1, 0x1);
+    assert_eq!(t.text(0), "ATOMG.E.ADD.STRONG.GPU PT, R4, [UR4], R5");
+    let t = B::op(0x1a9, 1)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(64, 3, 0x7)
+        .f(72, 1, 0x1)
+        .f(81, 3, 0x7)
+        .f(84, 1, 0x1);
+    assert_eq!(t.text(0), "ATOMG.E.CAS PT, R4, [R5], R6, R7");
+    let t = B::op(0x189, 1)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(64, 3, 0x7)
+        .f(58, 2, 0x3)
+        .f(81, 3, 0x7);
+    assert_eq!(t.text(0), "SHFL.BFLY PT, R4, R5, R6, R7");
+    let t = B::op(0x189, 2)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(40, 13, 0x1c03)
+        .f(58, 1, 0x0)
+        .f(81, 2, 0x3);
+    assert_eq!(t.text(0), "SHFL.IDX P3, R4, R5, R6, 0x1c03");
+    let t = B::op(0x189, 4)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(53, 1, 0x1)
+        .f(64, 3, 0x7)
+        .f(58, 2, 0x3)
+        .f(81, 3, 0x7);
+    assert_eq!(t.text(0), "SHFL.BFLY PT, R4, R5, 0x1, R7");
+    let t = B::op(0x192, 4).f(76, 2, 0x2).f(79, 1, 0x0);
+    assert_eq!(t.text(0), "MEMBAR.SC.GPU");
+    let t = B::op(0x1ab, 4);
+    assert_eq!(t.text(0), "ERRBAR");
+    let t = B::op(0x18f, 4)
+        .f(24, 2, 0x2)
+        .f(32, 5, 0x10)
+        .f(72, 1, 0x1)
+        .f(87, 2, 0x2)
+        .f(78, 2, 0x2);
+    assert_eq!(t.text(0), "CCTL.E.C.WB [R2+0x10]");
+    let t = B::op(0x126, 1)
+        .f(16, 2, 0x2)
+        .f(64, 6, 0x24)
+        .f(76, 1, 0x1)
+        .f(78, 1, 0x1)
+        .f(81, 3, 0x7);
+    assert_eq!(t.text(0), "IPA.CONSTANT.CENTROID R2, a[0x90]");
+    let t = B::op(0x126, 2)
+        .f(16, 2, 0x2)
+        .f(24, 3, 0x4)
+        .f(64, 6, 0x21)
+        .f(81, 2, 0x2)
+        .f(91, 1, 0x1);
+    assert_eq!(t.text(0), "IPA.PASS R2, P2, a[UR4+0x84]");
+    let t = B::op(0x123, 4)
+        .f(16, 3, 0x5)
+        .f(24, 8, 0xff)
+        .f(40, 1, 0x0)
+        .f(74, 2, 0x2)
+        .f(76, 2, 0x3)
+        .f(78, 1, 0x1);
+    assert_eq!(t.text(0), "ISBERD.ATTR.SKEW.32 R5, [RZ]");
+    let t = B::op(0x127, 4)
+        .f(24, 1, 0x1)
+        .f(32, 2, 0x2)
+        .f(40, 5, 0x10)
+        .f(74, 2, 0x2)
+        .f(76, 2, 0x3)
+        .f(79, 1, 0x1);
+    assert_eq!(t.text(0), "ISBEWR.O.ATTR.32 [R1+0x10], R2");
+    let t = B::op(0x120, 4)
+        .f(16, 2, 0x2)
+        .f(24, 2, 0x3)
+        .f(40, 3, 0x5)
+        .f(74, 2, 0x2)
+        .f(79, 1, 0x1);
+    assert_eq!(t.text(0), "AL2P.O.96 R2, R3, 0x5");
+    let t = B::op(0x124, 1)
+        .f(16, 2, 0x2)
+        .f(24, 2, 0x3)
+        .f(32, 3, 0x4)
+        .f(78, 1, 0x1);
+    assert_eq!(t.text(0), "OUT.EMIT R2, R3, R4");
+    let t = B::op(0x125, 4).f(16, 2, 0x2).f(78, 2, 0x2).f(81, 3, 0x7);
+    assert_eq!(t.text(0), "PIXLD.CENTROID_OFFSET R2");
+    let t = B::op(0x1ad, 1)
+        .f(16, 2, 0x2)
+        .f(24, 6, 0x3f)
+        .f(64, 4, 0x8)
+        .f(91, 1, 0x1);
+    assert_eq!(t.text(0), "LDTRAM.AB R2, a[0x20]");
+    let t = B::op(0x18d, 1)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(64, 3, 0x7)
+        .f(78, 2, 0x3)
+        .f(73, 1, 0x1);
+    assert_eq!(t.text(0), "ATOMS.CAS.S32 R4, [R5.X16], R6, R7");
+    let t = B::op(0x18c, 4)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(64, 2, 0x3)
+        .f(91, 1, 0x1)
+        .f(87, 3, 0x5);
+    assert_eq!(t.text(0), "ATOMS.AND R4, [R5+UR3], R6");
+    let t = B::op(0x18b, 1)
+        .f(16, 3, 0x4)
+        .f(24, 3, 0x5)
+        .f(32, 3, 0x6)
+        .f(64, 3, 0x7)
+        .f(81, 3, 0x7)
+        .f(87, 2, 0x3);
+    assert_eq!(t.text(0), "ATOM.CAST.SPIN.EF PT, R4, [R5], R6, R7");
 }
