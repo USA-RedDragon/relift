@@ -19,12 +19,15 @@ use relift_progress::Line;
 pub const MIN_API: u32 = 30;
 
 /// The activity class of the APK: SDL's activity plus launch arguments and
-/// environment variables from the intent, and the haptic tick of the
-/// on-screen controller.
+/// environment variables from the intent, the haptic tick of the on-screen
+/// controller, and the manifest's landscape orientation kept (SDL asks for
+/// any orientation the user allows when its window is resizable, which put
+/// the game in portrait on a device held upright).
 const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
 const ACTIVITY_JAVA: &str = r#"package dev.relift.app;
 
+import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -52,6 +55,11 @@ public class MainActivity extends SDLActivity implements Runnable, OnBackInvoked
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this);
         }
+    }
+
+    @Override
+    public void setOrientationBis(int w, int h, boolean resizable, String hint) {
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
     }
 
     @Override
@@ -953,6 +961,13 @@ mod tests {
         );
         assert_eq!(target("android-x64").unwrap().abi, "x86_64");
         assert!(target("host").is_none());
+    }
+
+    #[test]
+    fn the_activity_keeps_the_landscape_orientation() {
+        assert!(ACTIVITY_JAVA.contains(
+            "public void setOrientationBis(int w, int h, boolean resizable, String hint) {\n        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);"
+        ));
     }
 
     #[test]
