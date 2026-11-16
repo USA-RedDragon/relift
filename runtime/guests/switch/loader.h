@@ -106,6 +106,17 @@ typedef struct rl_switch_hook {
  */
 RL_RUNTIME_API int rl_switch_register_auto_hook(const rl_switch_hook *h);
 
+/** @brief Modules rl_switch_hooked has a flag for. */
+#define RL_SWITCH_HOOKED_MODULES 32
+
+/**
+ * @brief Per module, by its index in the program: 1 once a hook replaced
+ * one of its functions. Lifted code takes a build-time guess of a computed
+ * transfer into a module (a PLT stub's bound target) only while its flag is
+ * 0, so a hook still sees every transfer dispatch gives it.
+ */
+RL_RUNTIME_API extern uint8_t rl_switch_hooked[RL_SWITCH_HOOKED_MODULES];
+
 /** @brief Most hooks rl_switch_add_hook takes. */
 #define RL_SWITCH_HOOKS 8
 

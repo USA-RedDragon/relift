@@ -26,6 +26,8 @@
 static const rl_switch_hook *g_hooks[RL_SWITCH_HOOKS];
 static uint32_t g_nhooks;
 
+uint8_t rl_switch_hooked[RL_SWITCH_HOOKED_MODULES];
+
 static const rl_switch_hook *g_auto[RL_SWITCH_HOOKS];
 static uint32_t g_nauto;
 
@@ -337,8 +339,9 @@ static int resolve_imports(const rl_switch_program *p, const rl_switch_module *m
     return n;
 }
 
-static int link_module(const rl_switch_program *p, const rl_switch_module *m)
+static int link_module(const rl_switch_program *p, uint32_t i)
 {
+    const rl_switch_module *m = &p->modules[i];
     dyn_info d;
     if (!g_nhooks || !dyn_of(m, &d))
         return 0;
@@ -347,6 +350,8 @@ static int link_module(const rl_switch_program *p, const rl_switch_module *m)
         rl_log(RL_LOG_ERROR, "loader", "module %s: replacing its functions failed", m->name);
         return -1;
     }
+    if (replaced && i < RL_SWITCH_HOOKED_MODULES)
+        rl_switch_hooked[i] = 1;
     int imported = resolve_imports(p, m, &d);
     if (replaced || imported)
         rl_log(RL_LOG_INFO, "loader", "module %s: hooks replaced functions: %d, resolved imports: %d", m->name,
@@ -509,7 +514,7 @@ static int run_program(void *arg)
         if (load_module(&p->modules[i]) != 0)
             return 1;
     for (uint32_t i = 0; i < p->module_count; i++)
-        if (link_module(p, &p->modules[i]) != 0)
+        if (link_module(p, i) != 0)
             return 1;
     attach_mods(p);
     report_program(p);

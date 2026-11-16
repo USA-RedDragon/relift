@@ -277,6 +277,18 @@ fn emit_modules(
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
     let mut fpcr = crate::fpcr::Fpcr::default();
     let cpu = Arm64 { cpu };
+    let bound = program::bound_slots(placed);
+    let guess_ranges: Vec<relift_emit::GuessRange> = placed
+        .iter()
+        .enumerate()
+        .take(HOOKED_MODULES)
+        .map(|(j, p)| relift_emit::GuessRange {
+            lo: p.base,
+            hi: p.base + p.nso.image.len() as u64,
+            cond: format!("!rl_switch_hooked[{j}]"),
+        })
+        .collect();
+    let mut analyses = Vec::with_capacity(placed.len());
     for (i, (p, &row)) in placed.iter().zip(&rows).enumerate() {
         let module = module_with_hints(p, hints);
         ui.begin(row, "discover");
@@ -351,6 +363,31 @@ fn emit_modules(
             ui.done(row, Line::new().text(noun(found as u64, "function")));
             ui.begin(row, "lift");
         }
+        analyses.push((module, layout, visits));
+    }
+    let names: Vec<BTreeMap<u64, relift_emit::Override>> = placed
+        .iter()
+        .zip(&analyses)
+        .enumerate()
+        .map(|(j, (p, (module, layout, _)))| {
+            if stage.needs_plan(j) {
+                return BTreeMap::new();
+            }
+            callable(p, module, layout)
+        })
+        .collect();
+    for (i, ((p, &row), (module, layout, visits))) in
+        placed.iter().zip(&rows).zip(analyses).enumerate()
+    {
+        let slots = &bound[i];
+        let slot_set: BTreeSet<u64> = slots.keys().copied().collect();
+        let calls: Vec<relift_emit::Override> = slots
+            .values()
+            .filter(|&&t| !(p.base..p.base + p.nso.image.len() as u64).contains(&t))
+            .filter_map(|t| names.iter().find_map(|n| n.get(t)).map(|o| (*t, o.clone())))
+            .collect::<BTreeMap<u64, relift_emit::Override>>()
+            .into_values()
+            .collect();
         let mut failed = BTreeMap::new();
         for o in layout.functions.values() {
             for (pc, e) in &o.failed {
@@ -467,7 +504,8 @@ fn emit_modules(
             relift_analyze::lift_each(&cpu, &module, &group, &mut |_, f| {
                 let k = ks[n];
                 n += 1;
-                let e = emit_function(f, &heads[k], &raw);
+                let mut e = emit_function(f, &heads[k], &raw);
+                e.guesses = guesses(f, slots, &slot_set);
                 let first = !summarized[k].swap(true, std::sync::atomic::Ordering::Relaxed);
                 if first && let Some(s) = fpsr_now.function(&flags, &module, all[keep[k]], f) {
                     summaries
@@ -510,6 +548,9 @@ fn emit_modules(
                     parts,
                     test_fault: test_fault(),
                     window,
+                    calls: calls.clone(),
+                    guess_ranges: guess_ranges.clone(),
+                    guess_decl: GUESS_DECL.into(),
                     ..relift_emit::Options::default()
                 },
                 &mut |d, total| {
@@ -618,6 +659,63 @@ fn emit_modules(
     Ok(done)
 }
 
+/// The functions of module `p` (outlined as `layout`) by entry, as its own
+/// emit names them for a call from another module: the host override the
+/// frontend declares for it, or its lifted function.
+fn callable(
+    p: &Placed,
+    module: &relift_guest::Module,
+    layout: &relift_analyze::Layout,
+) -> BTreeMap<u64, relift_emit::Override> {
+    layout
+        .functions
+        .values()
+        .map(|o| {
+            let ov = match module.bytes_at(o.entry).and_then(program::known) {
+                Some(k) => relift_emit::Override {
+                    entry: o.entry,
+                    host_fn: k.host_fn.into(),
+                    may_unwind: k.may_unwind,
+                    resume_point: k.resume_point,
+                    declare: false,
+                },
+                None => relift_emit::Override {
+                    entry: o.entry,
+                    host_fn: program::host_name(p, o.name.as_deref(), o.entry),
+                    may_unwind: true,
+                    resume_point: false,
+                    declare: true,
+                },
+            };
+            (o.entry, ov)
+        })
+        .collect()
+}
+
+/// The modules whose hooked flag lifted code reads
+/// (`RL_SWITCH_HOOKED_MODULES`, `runtime/guests/switch/loader.h`).
+const HOOKED_MODULES: usize = 32;
+
+/// The declaration of the flags [`HOOKED_MODULES`] counts.
+const GUESS_DECL: &str = "RL_RUNTIME_API extern uint8_t rl_switch_hooked[];\n";
+
+/// The computed transfers of `f` through a slot of `slots` (each slot with
+/// the function its symbol is bound to), with that function as the guess.
+fn guesses(
+    f: &relift_analyze::Function,
+    slots: &BTreeMap<u64, u64>,
+    set: &BTreeSet<u64>,
+) -> BTreeMap<u64, u64> {
+    if set.is_empty() {
+        return BTreeMap::new();
+    }
+    relift_analyze::slot_uses(f, set, 8)
+        .transfers
+        .into_iter()
+        .filter_map(|(at, slot)| Some((at, *slots.get(&slot)?)))
+        .collect()
+}
+
 /// The C function of the lifted function `f`, under the name and span of
 /// `head`; `raw` gives the raw instruction at an address.
 fn emit_function<'a>(
@@ -646,6 +744,7 @@ fn emit_function<'a>(
             .collect::<BTreeMap<_, _>>(),
         tables: f.tables.clone(),
         pads: f.pads.clone(),
+        guesses: BTreeMap::new(),
     }
 }
 

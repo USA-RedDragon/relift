@@ -367,8 +367,20 @@ no one function or file grows past what clang can compile in a few GB.
 
 - **Direct (BL):** store per the boundary rule, set x30 to the guest return
   address, call `F_<target>(c, mem)` by name, then the pending check.
-  PLT stubs are resolved at build time to direct calls when the target is
-  known. Each shard declares only the callees it uses. [inferred]
+  Each shard declares only the callees it uses. [inferred]
+- **Guessed targets (PLT stubs, GOT calls):** a computed call or jump whose
+  target is a word the loader fills (a GOT or PLT slot, found by
+  `relift_analyze::slot_uses`) is guessed as the function the slot's symbol
+  is bound to: its first definition in load order. The emitter compares the
+  target with the guess and, when they are equal and no hook replaced a
+  function of the guess's module (`rl_switch_hooked[module]`, set by the
+  loader before the program starts), calls or tail-calls the guess by name;
+  otherwise it goes through `rl_indirect` as before. Both paths store the
+  same registers, and dispatch would reach the same function, so the guess
+  changes no behaviour, only the cost: a hit skips the table lookup and
+  the indirect transfer. A guessed jump to a higher address skips the
+  preemption check, as a direct jump forward has none (section 14.1).
+  [verified: a commercial game, libnx corpus]
 - **Indirect (BLR):** `rc = rl_indirect(c, target)(c, mem);`
   `rl_indirect` stores `target` in `c->pc` and calls `rl_lookup`:
   `off = target - disp_lo`, `i = rotate_right(off, 2)`, then
@@ -434,9 +446,10 @@ build time. [decided]
   name; doing that in relift would copy behavior the guest already
   carries, and it would have to match the guest's lookup order exactly.
   Lifting it costs only the loader's few functions. Cross-module calls stay
-  indirect (one table load each, section 5); build-time rewriting of PLT
-  stubs to direct calls remains possible later as an optimization when the
-  winning definition is known.
+  computed; the emitter only guesses where a slot points (section 5,
+  guessed targets) and checks the guess at run time, so a loader that binds
+  elsewhere, a lazy binding or a guest write to the slot still reaches the
+  right function through dispatch.
 - **Discovery:** exported functions are roots of their own module, so the
   targets the guest loader writes into GOT slots are lifted entries. A slot
   that resolves to a function no module exports goes to the miss path

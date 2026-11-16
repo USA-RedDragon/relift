@@ -3,6 +3,7 @@
 //! and the C that hands the loaded image to the runtime's loader
 //! (`runtime/guests/switch/loader.h`).
 
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 
 use relift_guest::{Module, Root, RootKind, Section, SectionKind};
@@ -432,6 +433,30 @@ pub fn linkage(p: &Placed) -> Linkage {
         }
     }
     out
+}
+
+/// Per module of `placed` (in load order), each GOT and PLT slot with the
+/// function the loader binds it to when its symbol is defined in the
+/// program: the first definition in load order. A guess, since the loader
+/// may bind elsewhere and the guest may write the slot.
+pub fn bound_slots(placed: &[Placed]) -> Vec<BTreeMap<u64, u64>> {
+    let links: Vec<Linkage> = placed.iter().map(linkage).collect();
+    let mut defs: HashMap<&str, u64> = HashMap::new();
+    for l in &links {
+        for (n, a) in &l.exports {
+            defs.entry(n.as_str()).or_insert(*a);
+        }
+    }
+    links
+        .iter()
+        .map(|l| {
+            l.slots
+                .iter()
+                .filter(|s| s.kind != SlotKind::Data)
+                .filter_map(|s| Some((s.addr, *defs.get(s.name.as_str())?)))
+                .collect()
+        })
+        .collect()
 }
 
 /// The values the packed relative relocations (`DT_RELR`) at image offset
