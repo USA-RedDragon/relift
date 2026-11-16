@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use relift_cpu_arm32::decode::Encoding;
-use relift_cpu_arm32::lift::{self, LiftError};
+use relift_cpu_arm32::lift::{self, COND_FAIL, LiftError};
 use relift_cpu_arm32::regs;
 use relift_ir::{Block, Flow, Next, Op, Value};
 
@@ -297,6 +297,10 @@ fn refine(st: &State, c: u32, holds: bool) -> Option<State> {
 
 /// The most entries a table without a bound check is read for.
 const MAX_TABLE: u32 = 4096;
+
+/// The most instructions that leave the flags between the compare that
+/// bounds a jump table and the conditional instruction on it.
+const MAX_COMPARE_GAP: usize = 8;
 
 /// Whether `b` takes the state from bit 0 of the address it jumps to
 /// (`BX`; on ARMv5 also `BLX` with a register and the loads of the PC):
@@ -1351,6 +1355,7 @@ impl Run<'_> {
                 }
                 self.pointer(site, a, thumb, st, link);
             }
+            _ if !link && self.env.image.options.switches && self.unbounded_index(site, st) => {}
             _ => {
                 let detail = format!("{} target not constant", enc.name());
                 if link {
@@ -1375,6 +1380,92 @@ impl Run<'_> {
             }
             _ => None,
         }
+    }
+
+    /// Whether the instruction at `l` leaves the flags as they are and goes
+    /// on to the next one.
+    fn passes_flags(&self, l: Loc) -> bool {
+        let Some(w) = self.env.image.fetch(l) else {
+            return false;
+        };
+        let Ok(lifted) = self.env.lift(l, w) else {
+            return false;
+        };
+        let b = &lifted.1;
+        b.exit.flow == Flow::Jump
+            && b.exit.next == Next::Const(u64::from(Self::fall_loc(l).addr))
+            && !b
+                .insts
+                .iter()
+                .any(|i| matches!(i.op, Op::Set(r, _) if FLAG_REGS.contains(&r)))
+    }
+
+    /// The jump at `site` as an index into the code right after the address
+    /// it reads as the program counter: that address and how far the
+    /// target moves per index, when the target is that address plus an
+    /// index the run does not bound (`add pc, pc, rX, lsl #n`) and reads
+    /// no memory.
+    fn index_jump(&self, site: Loc) -> Option<(u32, u32)> {
+        let w = self.env.image.fetch(site)?;
+        let lifted = self.env.lift(site, w).ok()?;
+        let at = |k: u32| {
+            let mut st = State::entry(site.thumb);
+            for r in 0..15 {
+                st.regs[r] = Abs::K(u128::from(k));
+            }
+            let out = eval::eval(&lifted.1, site, &st, self.env.image, false, None);
+            match (out.targets.first(), out.data.is_empty() && !out.ptr_load) {
+                (Some(Abs::K(t)), true) => u32::try_from(*t).ok(),
+                _ => None,
+            }
+        };
+        let base = site.addr.wrapping_add(2 * site.size());
+        let (t0, t1) = (at(0)?, at(2)?);
+        (t0 == base && t1 > t0).then_some((base, (t1 - t0) / 2))
+    }
+
+    /// An instruction at `l` that always branches to a constant address
+    /// within the function (`B`).
+    fn is_branch(&self, l: Loc) -> bool {
+        let Some(w) = self.env.image.fetch(l) else {
+            return false;
+        };
+        let Ok(lifted) = self.env.lift(l, w) else {
+            return false;
+        };
+        let b = &lifted.1;
+        let guarded = b
+            .insts
+            .iter()
+            .any(|i| matches!(i.op, Op::Guard(_, COND_FAIL)));
+        !guarded
+            && b.exit.flow == Flow::Jump
+            && matches!(b.exit.next, Next::Const(t) if t != u64::from(Self::fall_loc(l).addr))
+    }
+
+    /// A jump into the code after it by an index with no bound: every
+    /// branch of a table of them there, or else the code there from its
+    /// first instruction (an unrolled loop entered part way).
+    fn unbounded_index(&mut self, site: Loc, st: &State) -> bool {
+        let Some((base, _)) = self.index_jump(site) else {
+            return false;
+        };
+        let mut n = 0;
+        while n < MAX_TABLE {
+            let l = Loc {
+                addr: base.wrapping_add(n * site.size()),
+                ..site
+            };
+            if !self.is_branch(l) {
+                break;
+            }
+            self.succ(site, l, st.clone());
+            n += 1;
+        }
+        if n == 0 {
+            self.succ(site, Loc { addr: base, ..site }, st.clone());
+        }
+        true
     }
 
     /// The condition field of a conditional instruction at `l`.
@@ -1466,11 +1557,25 @@ impl Run<'_> {
         let Some(cmp_addr) = cond_at.addr.checked_sub(site.size()) else {
             return false;
         };
-        let cmp_at = Loc {
+        let mut cmp_at = Loc {
             addr: cmp_addr,
             ..site
         };
-        let Some((r, max)) = self.compare(cmp_at) else {
+        let mut cmp = self.compare(cmp_at);
+        if self.env.image.options.switches {
+            for _ in 0..MAX_COMPARE_GAP {
+                if cmp.is_some() || !self.merged.contains_key(&cmp_at) || !self.passes_flags(cmp_at)
+                {
+                    break;
+                }
+                let Some(a) = cmp_at.addr.checked_sub(site.size()) else {
+                    break;
+                };
+                cmp_at = Loc { addr: a, ..site };
+                cmp = self.compare(cmp_at);
+            }
+        }
+        let Some((r, max)) = cmp else {
             return false;
         };
         if max > 1024 || !self.merged.contains_key(&cmp_at) {

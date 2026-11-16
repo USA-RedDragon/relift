@@ -114,11 +114,19 @@ fn a_ldr_lit(rd: u32, at: u32, pool: u32) -> u32 {
     0xE59F_0000 | rd << 12 | (pool - (at + 8))
 }
 
+fn a_b(at: u32, to: u32) -> u32 {
+    0xEA00_0000 | (to.wrapping_sub(at + 8) >> 2 & 0x00FF_FFFF)
+}
+
 const A_BX_LR: u32 = 0xE12F_FF1E;
 const A_MOV_R0_1: u32 = 0xE3A0_0001;
 const A_MOVEQ_R0_1: u32 = 0x03A0_0001;
 const A_PUSH_R4_LR: u32 = 0xE92D_4010;
 const A_POP_R4_PC: u32 = 0xE8BD_8010;
+const A_CMP_R0_2: u32 = 0xE350_0002;
+const A_MOV_R1_R1: u32 = 0xE1A0_1001;
+const A_ADDLS_PC_R0_LSL2: u32 = 0x908F_F100;
+const A_ADD_PC_R0_LSL2: u32 = 0xE08F_F100;
 const A_AND_R0_R0: u32 = 0xE000_0000;
 const T_MOVS_R0_1: u16 = 0x2001;
 const T_BX_LR: u16 = 0x4770;
@@ -235,4 +243,88 @@ fn a_scanned_thumb_candidate_over_arm_code_is_rejected() {
         found(&taken, thumb(BASE + 0x400)),
         "the rule is the scan's: a word code reads stays a candidate"
     );
+}
+
+fn switch(m: &mut Machine) {
+    m.arm(
+        BASE,
+        &[
+            A_CMP_R0_2,
+            A_MOV_R1_R1,
+            A_ADDLS_PC_R0_LSL2,
+            a_b(BASE + 0xC, BASE + 0x100),
+            a_b(BASE + 0x10, BASE + 0x200),
+            a_b(BASE + 0x14, BASE + 0x300),
+            a_b(BASE + 0x18, BASE + 0x400),
+        ],
+    );
+    for a in [0x100, 0x200, 0x300, 0x400] {
+        m.arm(BASE + a, &[A_MOV_R0_1, A_BX_LR]);
+    }
+}
+
+#[test]
+fn a_compare_further_back_bounds_a_switch() {
+    let mut m = Machine::new(Profile::V5te);
+    switch(&mut m);
+    let off = m.run(Options::default(), arm(BASE));
+    assert!(found(&off, arm(BASE + 0x100)), "control: the default");
+    assert!(!found(&off, arm(BASE + 0x200)));
+    let on = m.run(
+        Options {
+            switches: true,
+            ..Options::default()
+        },
+        arm(BASE),
+    );
+    for a in [0x100, 0x200, 0x300, 0x400] {
+        assert!(found(&on, arm(BASE + a)), "{a:#x}");
+    }
+    assert_eq!(on.functions[&arm(BASE)].tables.len(), 1);
+}
+
+#[test]
+fn an_unbounded_add_pc_enters_a_branch_table_or_unrolled_code() {
+    let opts = Options {
+        switches: true,
+        ..Options::default()
+    };
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            A_ADD_PC_R0_LSL2,
+            A_MOV_R0_1,
+            a_b(BASE + 8, BASE + 0x100),
+            a_b(BASE + 0xC, BASE + 0x200),
+            A_MOV_R0_1,
+            A_BX_LR,
+        ],
+    );
+    m.arm(BASE + 0x100, &[A_MOV_R0_1, A_BX_LR]);
+    m.arm(BASE + 0x200, &[A_MOV_R0_1, A_BX_LR]);
+    let off = m.run(Options::default(), arm(BASE));
+    assert!(!found(&off, arm(BASE + 0x100)));
+    let on = m.run(opts, arm(BASE));
+    assert!(found(&on, arm(BASE + 0x100)));
+    assert!(found(&on, arm(BASE + 0x200)));
+    assert!(
+        !found(&on, arm(BASE + 0x10)),
+        "the table ends at the first instruction that is no branch"
+    );
+    let mut u = Machine::new(Profile::V5te);
+    u.arm(
+        BASE,
+        &[
+            A_ADD_PC_R0_LSL2,
+            A_MOV_R0_1,
+            A_MOV_R0_1,
+            A_MOV_R0_1,
+            A_BX_LR,
+        ],
+    );
+    let unrolled = u.run(opts, arm(BASE));
+    assert!(found(&unrolled, arm(BASE + 8)));
+    assert!(found(&unrolled, arm(BASE + 0x10)));
+    assert!(!found(&unrolled, arm(BASE + 4)));
 }
