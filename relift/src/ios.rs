@@ -70,7 +70,7 @@ pub fn target(name: &str) -> Option<Target> {
 }
 
 /// Xcode's compiler and the SDK of one target.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Xcode {
     pub clang: PathBuf,
     pub sysroot: PathBuf,
@@ -108,7 +108,7 @@ impl Xcode {
 }
 
 /// SDL3, libopus and MoltenVK for one iOS target, as static libraries.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Deps {
     pub sdl3_include: PathBuf,
     pub sdl3_lib: PathBuf,
@@ -175,6 +175,9 @@ pub struct Profile {
     /// The profile's entitlements as an XML property list, with the
     /// application identifier made the bundle's own.
     pub entitlements: String,
+    /// Its creation date as the profile gives it (ISO 8601, so newer sorts
+    /// later).
+    pub created: String,
 }
 
 /// How the bundle is signed.
@@ -196,6 +199,9 @@ pub struct IosBuild {
     pub deps: Deps,
     pub bundle_id: String,
     pub signing: Signing,
+    /// Every unexpired profile that covers the bundle, the one `signing`
+    /// uses first.
+    pub profiles: Vec<Profile>,
 }
 
 /// Whether `s` is a bundle identifier: dot-separated parts of letters,
@@ -256,8 +262,8 @@ impl IosBuild {
         }
         let xcode = Xcode::find(target)?;
         let deps = Deps::find(&cache, target)?;
-        let signing = if target.simulator() {
-            Signing::AdHoc
+        let (signing, profiles) = if target.simulator() {
+            (Signing::AdHoc, Vec::new())
         } else {
             find_signing(settings, &bundle_id, &cache.join("ios"))?
         };
@@ -267,7 +273,30 @@ impl IosBuild {
             deps,
             bundle_id,
             signing,
+            profiles,
         })
+    }
+
+    /// Signs a device build of a Switch game with the newest covering
+    /// profile that grants [`EXTENDED_VA`], and refuses the build when none
+    /// does: without it iOS lets the app reserve far less than the guest
+    /// address space (the compact layout needs about 37 GiB), and the game
+    /// stops at start-up.
+    ///
+    /// # Errors
+    ///
+    /// No covering profile grants the entitlement.
+    pub fn for_switch(&mut self) -> Result<(), BoxError> {
+        let Signing::Identity { profile, .. } = &mut self.signing else {
+            return Ok(());
+        };
+        match switch_profile(&self.profiles) {
+            Some(p) => {
+                *profile = p.clone();
+                Ok(())
+            }
+            None => switch_profile_ok(profile, &self.bundle_id),
+        }
     }
 
     /// The compiler command for the target.
@@ -452,10 +481,63 @@ fn read_profile(path: &Path, bundle: &str, work: &Path) -> Result<Option<Profile
         team,
         wildcard: pattern.ends_with('*'),
         entitlements: std::fs::read_to_string(&ent)?,
+        created: plist_raw(&decoded, "CreationDate").unwrap_or_default(),
     }))
 }
 
-fn find_signing(settings: &Settings, bundle: &str, work: &Path) -> Result<Signing, BoxError> {
+/// The entitlement a Switch game needs on an iOS device to reserve its
+/// guest address space.
+pub const EXTENDED_VA: &str = "com.apple.developer.kernel.extended-virtual-addressing";
+
+/// The entitlement that lets a Switch game use more memory than iOS gives
+/// an app by default.
+pub const INCREASED_MEMORY: &str = "com.apple.developer.kernel.increased-memory-limit";
+
+/// Whether the entitlements property list `xml` sets `key` to true.
+fn entitled(xml: &str, key: &str) -> bool {
+    let needle = format!("<key>{key}</key>");
+    xml.split_once(&needle)
+        .is_some_and(|(_, rest)| rest.trim_start().starts_with("<true/>"))
+}
+
+/// The newest of `profiles` that grants [`EXTENDED_VA`].
+fn switch_profile(profiles: &[Profile]) -> Option<&Profile> {
+    profiles
+        .iter()
+        .filter(|p| entitled(&p.entitlements, EXTENDED_VA))
+        .max_by(|a, b| a.created.cmp(&b.created))
+}
+
+/// The profile to sign with among `profiles`: the newest explicit one,
+/// else the newest wildcard one.
+fn default_profile(profiles: &[Profile]) -> Option<&Profile> {
+    profiles
+        .iter()
+        .max_by(|a, b| (!a.wildcard, &a.created).cmp(&(!b.wildcard, &b.created)))
+}
+
+fn switch_profile_ok(profile: &Profile, bundle: &str) -> Result<(), BoxError> {
+    if entitled(&profile.entitlements, EXTENDED_VA) {
+        return Ok(());
+    }
+    Err(format!(
+        "the provisioning profile {} for {bundle} does not grant {EXTENDED_VA}, which a Switch game needs to reserve its address space on an iOS device{}; on developer.apple.com create an explicit App ID {bundle} with the capabilities Extended Virtual Addressing ({EXTENDED_VA}) and Increased Memory Limit ({INCREASED_MEMORY}), then a development profile for it, and set package.ios-profile to it or install it",
+        profile.path.display(),
+        if profile.wildcard {
+            " (a wildcard App ID cannot carry it)"
+        } else {
+            ""
+        }
+    )
+    .into())
+}
+
+/// How to sign the bundle, with every unexpired profile that covers it.
+fn find_signing(
+    settings: &Settings,
+    bundle: &str,
+    work: &Path,
+) -> Result<(Signing, Vec<Profile>), BoxError> {
     let identity = if settings.package.ios_identity.is_empty() {
         let listing = relift_proc::command("security")
             .args(["find-identity", "-v", "-p", "codesigning"])
@@ -467,8 +549,11 @@ fn find_signing(settings: &Settings, bundle: &str, work: &Path) -> Result<Signin
         Some(settings.package.ios_identity.clone())
     };
     let Some(identity) = identity else {
-        return Ok(Signing::Unsigned(
-            "no Apple Development identity in the keychain (Xcode > Settings > Accounts > Manage Certificates)".into(),
+        return Ok((
+            Signing::Unsigned(
+                "no Apple Development identity in the keychain (Xcode > Settings > Accounts > Manage Certificates)".into(),
+            ),
+            Vec::new(),
         ));
     };
     let candidates: Vec<PathBuf> = if settings.package.ios_profile.as_os_str().is_empty() {
@@ -484,24 +569,24 @@ fn find_signing(settings: &Settings, bundle: &str, work: &Path) -> Result<Signin
     } else {
         vec![settings.package.ios_profile.clone()]
     };
-    let mut wildcard = None;
+    let mut profiles = Vec::new();
     for c in &candidates {
         if let Some(p) = read_profile(c, bundle, work)? {
-            if !p.wildcard {
-                return Ok(Signing::Identity {
-                    identity,
-                    profile: p,
-                });
-            }
-            wildcard.get_or_insert(p);
+            profiles.push(p);
         }
     }
-    Ok(match wildcard {
-        Some(profile) => Signing::Identity { identity, profile },
-        None => Signing::Unsigned(format!(
-            "no provisioning profile for {bundle} (set package.ios-profile, or make one in Xcode or on developer.apple.com)"
-        )),
-    })
+    Ok((
+        match default_profile(&profiles) {
+            Some(profile) => Signing::Identity {
+                identity,
+                profile: profile.clone(),
+            },
+            None => Signing::Unsigned(format!(
+                "no provisioning profile for {bundle} (set package.ios-profile, or make one in Xcode or on developer.apple.com)"
+            )),
+        },
+        profiles,
+    ))
 }
 
 fn xml(s: &str) -> String {
@@ -706,6 +791,86 @@ fn sign(b: &IosBuild, app: &Path, work: &Path) -> Result<String, BoxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn profile(name: &str, entitlements: &str, wildcard: bool, created: &str) -> Profile {
+        Profile {
+            path: PathBuf::from(format!("/p/{name}.mobileprovision")),
+            team: "T".into(),
+            wildcard,
+            entitlements: entitlements.to_string(),
+            created: created.into(),
+        }
+    }
+
+    const WITH_VA: &str = "<dict>\n\t<key>application-identifier</key>\n\t<string>T.dev.relift.game.test</string>\n\t<key>com.apple.developer.kernel.extended-virtual-addressing</key>\n\t<true/>\n</dict>";
+    const WITHOUT_VA: &str = "<dict>\n\t<key>application-identifier</key>\n\t<string>T.dev.relift.*</string>\n\t<key>get-task-allow</key>\n\t<true/>\n</dict>";
+
+    #[test]
+    fn a_switch_build_needs_the_extended_address_space_entitlement() {
+        let off = WITH_VA.replace("<true/>", "<false/>");
+        assert!(
+            switch_profile_ok(&profile("a", WITH_VA, false, ""), "dev.relift.game.test").is_ok()
+        );
+        let e = switch_profile_ok(
+            &profile("test", WITHOUT_VA, true, ""),
+            "dev.relift.game.test",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains(EXTENDED_VA), "{e}");
+        assert!(e.contains("/p/test.mobileprovision"), "{e}");
+        assert!(e.contains("a wildcard App ID cannot carry it"), "{e}");
+        assert!(e.contains("explicit App ID dev.relift.game.test"), "{e}");
+        assert!(e.contains(INCREASED_MEMORY), "{e}");
+        assert!(switch_profile_ok(&profile("b", &off, false, ""), "x.y").is_err());
+    }
+
+    #[test]
+    fn a_switch_build_takes_the_newest_profile_that_grants_extended_addressing() {
+        let ps = vec![
+            profile("00-old", WITHOUT_VA, false, "2026-01-01T00:00:00Z"),
+            profile("11-va", WITH_VA, false, "2026-03-01T00:00:00Z"),
+            profile("22-va-newer", WITH_VA, false, "2026-06-01T00:00:00Z"),
+            profile("33-newest", WITHOUT_VA, false, "2026-09-01T00:00:00Z"),
+            profile("44-wild", WITHOUT_VA, true, "2026-10-01T00:00:00Z"),
+        ];
+        let name = |p: Option<&Profile>| p.map(|p| p.path.display().to_string());
+        assert_eq!(
+            name(default_profile(&ps)).as_deref(),
+            Some("/p/33-newest.mobileprovision")
+        );
+        assert_eq!(
+            name(switch_profile(&ps)).as_deref(),
+            Some("/p/22-va-newer.mobileprovision")
+        );
+        assert_eq!(switch_profile(&ps[3..]).map(|p| p.created.clone()), None);
+        let mut b = IosBuild {
+            target: target("ios-arm64").expect("target"),
+            xcode: Xcode::default(),
+            deps: Deps::default(),
+            bundle_id: "dev.relift.game.test".into(),
+            signing: Signing::Identity {
+                identity: "id".into(),
+                profile: ps[3].clone(),
+            },
+            profiles: ps.clone(),
+        };
+        b.for_switch().expect("a profile grants it");
+        let Signing::Identity { profile, .. } = &b.signing else {
+            panic!("signed")
+        };
+        assert_eq!(
+            profile.path,
+            PathBuf::from("/p/22-va-newer.mobileprovision")
+        );
+        b.profiles.truncate(1);
+        assert!(b.for_switch().is_ok());
+        b.signing = Signing::Identity {
+            identity: "id".into(),
+            profile: ps[0].clone(),
+        };
+        assert!(b.for_switch().is_err());
+    }
 
     #[test]
     fn target_names_map_to_sdks() {

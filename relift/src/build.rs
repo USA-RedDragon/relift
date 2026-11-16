@@ -1452,7 +1452,11 @@ pub(crate) fn build_project(
         [t] => match crate::cross::target(t)? {
             None => None,
             Some(c) if mode == Mode::Shipped => {
-                Some(crate::cross::Build::prepare(settings, c, &name)?)
+                let mut b = crate::cross::Build::prepare(settings, c, &name)?;
+                if let crate::cross::Build::Ios(i) = &mut b {
+                    i.for_switch()?;
+                }
+                Some(b)
             }
             Some(_) => return Err(format!("relift run does not run on {t} yet").into()),
         },
