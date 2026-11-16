@@ -2295,7 +2295,9 @@ and audio layers through `runtime/guests/n64/run`.
   cartridge header region code of D, F, H, I, L, P, S, U, W, X, Y or Z); the
   frame rate is whatever the registers make it (about 59.83 Hz for the
   usual NTSC values) and a VI that is off makes a frame every 200 lines of
-  0x800 clocks.
+  0x800 clocks. The counter starts with a line at cycle 0, and a line is
+  seen from the cycle after the one it starts at (ares runs its VI up to the
+  CPU's clock before an access, not including it).
 - Scan-out (`rl_n64_scanout`) is ares' software path, with no RDP: the
   output is 640 by 480 (NTSC) or 640 by 576 (PAL) RGB; the lines and columns
   inside `VI_V_VIDEO` and `VI_H_VIDEO` are drawn (clamped to the output

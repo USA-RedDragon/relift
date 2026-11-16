@@ -7,7 +7,9 @@
  * does, no filters) and the raw framebuffer.
  *
  * The line counter runs in closed form: a read, a write or the line event
- * catch it up to the CPU's tick. The line rules (the duration of each line,
+ * catch it up to the CPU's tick, running the lines that started before it
+ * (ares' VI runs up to the CPU's clock, not including it). The first line
+ * starts at the CPU's first cycle. The line rules (the duration of each line,
  * the field toggle, the interrupt in progressive and interlaced modes, the
  * frame at the start line, a VI that is off counting 0x800-clock lines, the
  * scan-out's window, guard band, scaling and field lines) are ported from
@@ -116,10 +118,10 @@ static void line(rl_n64 *m)
     m->vi.next += cycles_of(m, duration);
 }
 
-/** @brief Runs every line that started by tick now. */
+/** @brief Runs every line that started before tick now. */
 static void catch_up(rl_n64 *m, uint64_t now)
 {
-    while (m->vi.next <= now)
+    while (m->vi.next < now)
         line(m);
 }
 
@@ -127,15 +129,15 @@ static void line_event(rl_sched *s, rl_event *e, uint64_t when)
 {
     rl_n64 *m = e->opaque;
     catch_up(m, when);
-    rl_sched_post(s, e, m->vi.next);
+    rl_sched_post(s, e, m->vi.next + 1u);
 }
 
 void rl_n64_vi_attach(rl_n64 *m)
 {
     m->vi.line.fire = line_event;
     m->vi.line.opaque = m;
-    m->vi.next = rl_n64_now(m) + cycles_of(m, 0x800u);
-    rl_sched_post(m->s, &m->vi.line, m->vi.next);
+    m->vi.next = rl_n64_now(m);
+    rl_sched_post(m->s, &m->vi.line, m->vi.next + 1u);
 }
 
 void rl_n64_set_frame_hook(rl_n64 *m, rl_n64_frame_hook *hook, void *user)
