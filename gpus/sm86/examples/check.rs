@@ -16,6 +16,7 @@ fn main() {
     );
     let mut per: BTreeMap<u32, (u64, u64, u64, Vec<String>)> = BTreeMap::new();
     let mut total = (0u64, 0u64);
+    let mut invalid = 0u64;
     for line in f.lines() {
         let line = line.unwrap_or_default();
         let mut it = line.splitn(3, '\t');
@@ -33,6 +34,10 @@ fn main() {
         let w = Word::from_bytes(&a);
         let op = w.get(0, 9);
         if filter.is_some_and(|f| f != op) {
+            continue;
+        }
+        if text == "?" {
+            invalid += 1;
             continue;
         }
         let pc: u64 = pc.parse().unwrap_or(0);
@@ -71,6 +76,7 @@ fn main() {
             println!("   {x}");
         }
     }
+    println!("nvdisasm-invalid {invalid}");
     println!(
         "TOTAL {} ok {} ({:.3}%)",
         total.0,

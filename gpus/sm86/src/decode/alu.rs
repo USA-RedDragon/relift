@@ -613,6 +613,15 @@ fn himm(d: &D) -> Operand {
     Operand::F16x2((v >> 16) as u16, (v & 0xffff) as u16)
 }
 
+fn hswz_at(d: &D, sw: u32, slot_b: bool) -> Result<Swz> {
+    let v = d.get(sw, 2) | if slot_b { u32::from(d.bit(86)) << 2 } else { 0 };
+    match v {
+        4 => Ok(Swz::H0NH1),
+        0..=3 => Ok(hswz(v)),
+        _ => d.err("half swizzle"),
+    }
+}
+
 fn hswz(v: u32) -> Swz {
     match v {
         1 => Swz::F32,
@@ -637,7 +646,7 @@ fn hsrc(d: &D, s: Slot, uni: bool) -> Result<Operand> {
     };
     let _ = uni;
     let o = D::with_mods(o, d.bit(nb), d.bit(ab), false);
-    Ok(space(D::swz(o, hswz(d.get(sw, 2)))))
+    Ok(space(D::swz(o, hswz_at(d, sw, s == Slot::B)?)))
 }
 
 fn hsrc2(d: &D, reuse: Slot) -> Result<Operand> {
@@ -656,7 +665,7 @@ fn hsrc2(d: &D, reuse: Slot) -> Result<Operand> {
         _ => return d.err(format!("form {}", d.form())),
     };
     let o = D::with_mods(o, d.bit(nb), d.bit(ab), false);
-    Ok(space(D::swz(o, hswz(d.get(sw, 2)))))
+    Ok(space(D::swz(o, hswz_at(d, sw, s == Slot::B)?)))
 }
 
 fn hmods(d: &mut D, f32: bool, fmz: bool, relu: bool, ftz: bool, sat: bool) {
@@ -886,7 +895,33 @@ fn cvt(d: &mut D, op: u32) -> Result<bool> {
             let b = d.src(Slot::B, Num::UInt, false)?;
             d.op(b);
         }
-        0x105 => {
+        0x043 => {
+            d.i.mnemonic = "F2IP";
+            if d.get(76, 2) > 1 {
+                return d.err("f2ip type");
+            }
+            d.m(if d.bit(76) { "S8" } else { "U8" });
+            d.m("F32");
+            match d.get(78, 2) {
+                0 => {}
+                3 => d.m("TRUNC"),
+                _ => return d.err("f2ip rounding"),
+            }
+            d.m_if(d.bit(74), "NTZ");
+            d.m_if(d.bit(75), "RELU");
+            let dst = d.dst();
+            d.op(dst);
+            let a = d.reg_plain(24);
+            d.op(a);
+            let b = d.src(Slot::B, Num::UInt, false)?;
+            d.op(b);
+            let mut c = d.reg_plain(64);
+            if d.bit(72) {
+                c = D::swz(c, Swz::H(1));
+            }
+            d.op(c);
+        }
+        0x105 | 0x111 => {
             d.i.mnemonic = "F2I";
             d.m_if(d.bit(80), "FTZ");
             let Some(t) = ity(d.bit(72), d.get(75, 2), false) else {
@@ -898,6 +933,7 @@ fn cvt(d: &mut D, op: u32) -> Result<bool> {
             match d.get(84, 3) {
                 2 => {}
                 1 => d.m("F16"),
+                3 if op == 0x111 => d.m("F64"),
                 _ => return d.err("f2i source type"),
             }
             d.m(["", "FLOOR", "CEIL", "TRUNC"][d.get(78, 2) as usize]);
@@ -908,11 +944,12 @@ fn cvt(d: &mut D, op: u32) -> Result<bool> {
             let b = cvt_src(d, true)?;
             d.op(b);
         }
-        0x106 => {
+        0x106 | 0x112 => {
             d.i.mnemonic = "I2F";
             match d.get(75, 3) {
                 1 => d.m("F16"),
                 2 => {}
+                3 if op == 0x112 => d.m("F64"),
                 _ => return d.err("i2f type"),
             }
             let Some(t) = ity(d.bit(74), d.get(84, 2), false) else {
@@ -944,7 +981,7 @@ fn cvt(d: &mut D, op: u32) -> Result<bool> {
             let b = cvt_src(d, true)?;
             d.op(b);
         }
-        0x104 => {
+        0x104 | 0x110 => {
             d.i.mnemonic = "F2F";
             d.m_if(d.bit(80), "FTZ");
             let (Some(dt), Some(st)) = (fty(d.get(75, 3)), fty(d.get(84, 3))) else {

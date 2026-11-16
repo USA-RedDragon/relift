@@ -1198,3 +1198,50 @@ fn control_special_tensor() {
     let t = cop(0x23a, 1).f(16, 8, 10).f(24, 8, 12).f(78, 2, 2);
     assert_eq!(t.text(0), "MOVM.16.M864 R10, R12");
 }
+
+#[test]
+fn texture_forms() {
+    let t = B::op(0x161, 1)
+        .f(16, 8, 16)
+        .f(24, 8, 8)
+        .f(32, 8, 12)
+        .f(64, 8, 13)
+        .f(59, 1, 1)
+        .f(61, 3, 3)
+        .f(72, 4, 7)
+        .f(81, 3, 7)
+        .f(84, 3, 1)
+        .f(87, 3, 1);
+    assert_eq!(t.text(0), "TEX.B.LZ R13, R16, R8, R12, CUBE, 0x7");
+    let t = B::op(0x160, 7)
+        .f(16, 8, 9)
+        .f(24, 8, 9)
+        .f(32, 8, 38)
+        .f(40, 6, 4)
+        .f(61, 3, 1)
+        .f(64, 8, 255)
+        .f(72, 4, 1)
+        .f(81, 3, 7)
+        .f(84, 3, 1);
+    assert_eq!(t.text(0), "TEX RZ, R9, R9, R38, UR4, 0x0, 2D, 0x1");
+}
+
+#[test]
+fn misc_control_and_conversion() {
+    let t = B::op(0x11c, 1).f(16, 8, 6).f(54, 4, 5);
+    assert_eq!(t.text(0), "B2R R6, 0x5");
+    let t = B::op(0x102, 1).f(24, 8, 4).f(32, 8, 2).f(81, 3, 0);
+    assert_eq!(t.text(0), "FCHK P0, R4, R2");
+    let t = B::op(0x14e, 1).f(16, 8, 20);
+    assert_eq!(t.text(0), "LEPC R20");
+    let t = B::op(0x11d, 5).f(77, 3, 4);
+    assert_eq!(t.text(0), "BAR.SYNCALL");
+    let t = B::op(0x111, 1)
+        .f(16, 8, 4)
+        .f(32, 8, 4)
+        .f(75, 2, 3)
+        .f(78, 2, 3)
+        .f(80, 1, 1)
+        .f(84, 3, 2);
+    assert_eq!(t.text(0), "F2I.FTZ.U64.TRUNC R4, R4");
+}

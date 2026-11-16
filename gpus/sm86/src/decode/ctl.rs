@@ -470,7 +470,7 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             push_guard_pred(d);
         }
         0x143 => {
-            if d.form() != 4 {
+            if !matches!(d.form(), 1 | 4) {
                 return d.err("call form");
             }
             d.i.mnemonic = "CALL";
@@ -478,7 +478,14 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             d.m_if(d.bit(86), "NOINC");
             push_guard_pred(d);
             let t = abs_target(d);
-            if d.bit(91) {
+            if d.form() == 1 {
+                let r = d.reg_plain(24);
+                if t == 0 {
+                    d.op(r);
+                } else {
+                    d.op(sym(format!("{r} {}", crate::inst::fmt_hex(t))));
+                }
+            } else if d.bit(91) {
                 let r = d.ureg_at(24);
                 d.op(sym(format!("{r} {}", crate::inst::fmt_hex(t))));
             } else {
@@ -486,7 +493,7 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             }
         }
         0x14a => {
-            if d.form() != 4 {
+            if !matches!(d.form(), 4 | 5) {
                 return d.err("jmp form");
             }
             d.i.mnemonic = "JMP";
@@ -504,7 +511,100 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             if ur {
                 d.op(d.ureg_at(24));
             }
-            d.op(Operand::Target(d.w.get64(34, 47) as i64 * 4));
+            if d.form() == 5 {
+                let off = d.get(40, 14);
+                let off = (i64::from(off << 18) >> 18) * 4;
+                d.op(sym(format!(
+                    "c[{:#x}][{}]",
+                    d.get(54, 5),
+                    crate::inst::fmt_hex(off)
+                )));
+            } else {
+                d.op(Operand::Target(d.w.get64(34, 47) as i64 * 4));
+            }
+        }
+        0x14e => {
+            d.i.mnemonic = "LEPC";
+            let dst = d.dst();
+            d.op(dst);
+        }
+        0x14f => d.i.mnemonic = "__HIR0X1E0",
+        0x11e => {
+            d.i.mnemonic = "__HIR0X1F0";
+            match d.get(78, 2) {
+                0 => {}
+                1 => d.m("INVALID1"),
+                2 => d.m("WARP"),
+                _ => d.m("INVALID3"),
+            }
+            d.op(Operand::Hex(u64::from(d.get(54, 4))));
+            let r = d.reg_plain(32);
+            d.op(r);
+        }
+        0x152 | 0x153 => {
+            d.i.mnemonic = "RPCMOV";
+            d.m("32");
+            let rpc = sym(if d.bit(31) { "Rpc.HI" } else { "Rpc.LO" });
+            if op == 0x152 {
+                let r = d.reg_plain(32);
+                d.op(rpc);
+                d.op(r);
+            } else {
+                let r = d.dst();
+                d.op(r);
+                d.op(rpc);
+            }
+        }
+        0x157 => {
+            d.i.mnemonic = "BMOV";
+            d.m("64");
+            d.op(sym("ATEXIT_PC"));
+            let b = d.src(Slot::B, Num::UInt, false)?;
+            d.op(b);
+        }
+        0x15c => {
+            d.i.mnemonic = "BPT";
+            let name = match d.get(84, 3) {
+                3 => "TRAP",
+                4 => "INT",
+                5 => "DRAIN",
+                6 => "PAUSE_QUIET",
+                _ => return d.err("bpt mode"),
+            };
+            d.m(name);
+            if name == "TRAP" {
+                d.op(Operand::Hex(u64::from(d.get(34, 30))));
+            }
+        }
+        0x11c => {
+            d.i.mnemonic = "B2R";
+            let mode = d.get(78, 2);
+            match mode {
+                0 => {}
+                1 => d.m("RESULT"),
+                2 => d.m("WARP"),
+                _ => return d.err("b2r mode"),
+            }
+            let dst = d.dst();
+            d.op(dst);
+            match mode {
+                0 => d.op(Operand::Hex(u64::from(d.get(54, 4)))),
+                1 if d.get(81, 3) != 7 => {
+                    let p = d.pred_at(81);
+                    d.op(p);
+                }
+                _ => {}
+            }
+        }
+        0x11d => bar(d)?,
+        0x102 => {
+            d.i.mnemonic = "FCHK";
+            let p = d.pred_at(81);
+            d.op(p);
+            let a = d.src(Slot::A, Num::F32, true)?;
+            d.op(a);
+            let b = d.src(Slot::B, Num::F32, true)?;
+            d.op(b);
         }
         0x03c => hmma(d)?,
         0x037 => imma(d)?,
@@ -694,5 +794,46 @@ fn movm(d: &mut D) -> Result<()> {
     }
     d.op(d.dst());
     d.op(d.reg_plain(24));
+    Ok(())
+}
+
+fn bar(d: &mut D) -> Result<()> {
+    d.i.mnemonic = "BAR";
+    let mode = d.get(77, 3);
+    match mode {
+        0 => d.m("SYNC"),
+        1 => d.m("ARV"),
+        2 => d.m("RED.POPC"),
+        3 => d.m("SCAN"),
+        4 => d.m("SYNCALL"),
+        _ => return d.err("bar mode"),
+    }
+    d.m_if(d.bit(80), "DEFER_BLOCKING");
+    if mode == 4 {
+        return Ok(());
+    }
+    let form = d.form();
+    let id = if form == 1 {
+        d.reg_plain(24)
+    } else {
+        Operand::Hex(u64::from(d.get(54, 4)))
+    };
+    d.op(id);
+    if mode == 3 {
+        let r = d.reg_plain(32);
+        d.op(r);
+    } else if form == 5 {
+        let c = d.get(42, 12);
+        if c != 0 {
+            d.op(Operand::Hex(u64::from(c)));
+        }
+    } else {
+        let r = d.reg_plain(32);
+        d.op(r);
+    }
+    if mode == 2 || mode == 3 {
+        let p = d.pred_src(87, 90);
+        d.op(p);
+    }
     Ok(())
 }

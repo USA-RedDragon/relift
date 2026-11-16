@@ -47,7 +47,7 @@ fn push_f16(d: &mut D, f16: u32) {
     }
 }
 
-fn decode_tex(d: &mut D, k: Kind, name: &'static str) -> Result<()> {
+fn decode_tex(d: &mut D, k: Kind, name: &'static str, form: u32) -> Result<()> {
     d.i.mnemonic = name;
     let uses = !matches!(k, Kind::Tmml | Kind::Txq);
     let f16 = d.get(79, 2);
@@ -157,8 +157,18 @@ fn decode_tex(d: &mut D, k: Kind, name: &'static str) -> Result<()> {
         }
         d.op(Operand::Sym(q.to_string()));
     }
-    d.op(Operand::Hex(d.get(54, 5) as u64));
-    d.op(Operand::Hex(d.get(40, 14) as u64));
+    match form {
+        5 => {
+            d.op(Operand::Hex(d.get(54, 5) as u64));
+            d.op(Operand::Hex(d.get(40, 14) as u64));
+        }
+        7 => {
+            let u = d.ureg_at(40);
+            d.op(u);
+            d.op(Operand::Hex(d.get(54, 5) as u64));
+        }
+        _ => {}
+    }
     if k != Kind::Txq {
         let n = dims[d.get(61, 3) as usize];
         if n.is_empty() {
@@ -416,10 +426,12 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
         decode_surf(d, k, h)?;
         return Ok(true);
     }
-    if d.form() != 5 {
+    let form = d.form();
+    let bindless = form == 1 && matches!(op, 0x161 | 0x164 | 0x167 | 0x16a | 0x16d | 0x170);
+    if !bindless && !matches!(form, 5 | 7) {
         return Ok(false);
     }
-    let (k, name) = match op {
+    let (k, name) = match if bindless { op - 1 } else { op } {
         0x160 => (Kind::Tex, "TEX"),
         0x163 => (Kind::Tld4, "TLD4"),
         0x166 => (Kind::Tld, "TLD"),
@@ -428,6 +440,6 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
         0x16f => (Kind::Txq, "TXQ"),
         _ => return Ok(false),
     };
-    decode_tex(d, k, name)?;
+    decode_tex(d, k, name, form)?;
     Ok(true)
 }

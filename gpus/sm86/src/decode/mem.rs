@@ -4,6 +4,9 @@ use crate::inst::{Operand, RegMods, fmt_hex};
 const ASIZE: [&str; 4] = ["", "64", "96", "128"];
 const EVICT: [&str; 6] = ["EF", "", "EL", "LU", "EU", "NA"];
 const SIZE: [&str; 7] = ["U8", "S8", "U16", "S16", "", "64", "128"];
+const LDGSTS_SIZE: [&str; 8] = [
+    "INVALID0", "INVALID1", "INVALID2", "INVALID3", "", "64", "128", "INVALID7",
+];
 const LTC: [&str; 4] = ["", "LTC64B", "LTC128B", "LTC256B"];
 const ORDER_LOAD: [&str; 16] = [
     "",
@@ -397,6 +400,8 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
     match op {
         0x121 => {
             d.i.mnemonic = "ALD";
+            d.m_if(d.bit(79), "O");
+            d.m_if(d.bit(76), "P");
             let s = ASIZE[d.get(74, 2) as usize];
             if !s.is_empty() {
                 d.m(s);
@@ -417,6 +422,7 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
         }
         0x122 => {
             d.i.mnemonic = "AST";
+            d.m_if(d.bit(76), "P");
             let s = ASIZE[d.get(74, 2) as usize];
             if !s.is_empty() {
                 d.m(s);
@@ -721,27 +727,122 @@ pub(crate) fn decode(d: &mut D, op: u32) -> Result<bool> {
             }
         }
         0x1ab => d.i.mnemonic = "ERRBAR",
-        0x18f => {
-            d.i.mnemonic = "CCTL";
-            d.m_if(d.bit(72), "E");
-            let cls = ["", "U", "C", "I"];
-            let Some(cls) = cls.get(d.get(78, 3) as usize) else {
-                return d.err("cctl class");
+        0x18f..=0x191 => {
+            d.i.mnemonic = match op {
+                0x18f => "CCTL",
+                0x190 => "CCTLL",
+                _ => "CCTLT",
             };
-            d.mm(cls);
+            if op == 0x18f {
+                d.m_if(d.bit(72), "E");
+                let cls = ["", "U", "C", "I"];
+                let Some(cls) = cls.get(d.get(78, 3) as usize) else {
+                    return d.err("cctl class");
+                };
+                d.mm(cls);
+            }
             let names = [
-                "PF1", "PF2", "WB", "IV", "", "RS", "", "", "", "PML2", "DML2", "RML2",
+                "PF1", "PF2", "WB", "IV", "IVALL", "RS", "IVALLP", "", "", "PML2", "DML2", "RML2",
             ];
-            match names.get(d.get(87, 4) as usize) {
-                Some(s) if !s.is_empty() => d.m(s),
+            let idx = if op == 0x191 {
+                match d.get(85, 2) {
+                    2 => 4,
+                    _ => return d.err("cctlt op"),
+                }
+            } else {
+                d.get(87, 4)
+            };
+            let name = match names.get(idx as usize) {
+                Some(s) if !s.is_empty() => *s,
                 _ => return d.err("cctl op"),
+            };
+            d.m(name);
+            if name != "IVALL" && name != "IVALLP" {
+                let mut parts = Vec::new();
+                if d.get(24, 8) != 255 {
+                    parts.push(rn(d.get(24, 8)));
+                }
+                let s = if op == 0x18f {
+                    bracket(&parts, d.get(32, 32), 32)
+                } else {
+                    bracket(&parts, d.get(40, 24), 24)
+                };
+                d.sym(s);
             }
-            let mut parts = Vec::new();
-            if d.get(24, 8) != 255 {
-                parts.push(rn(d.get(24, 8)));
+        }
+        0x1aa => {
+            if d.form() != 1 {
+                return d.err("qspc form");
             }
-            let s = bracket(&parts, d.get(32, 32), 32);
+            d.i.mnemonic = "QSPC";
+            d.m_if(d.bit(72), "E");
+            match d.get(74, 2) {
+                1 => d.m("S"),
+                0 => d.m("G"),
+                _ => return d.err("qspc space"),
+            }
+            let p = d.pred_at(81);
+            d.op(p);
+            let dst = d.dst();
+            d.op(dst);
+            let off = sext(d.get(40, 24), 24);
+            let r = rn(d.get(24, 8));
+            let s = if off == 0 {
+                format!("[{r}]")
+            } else {
+                format!("[{r}+{}]", fmt_hex(off))
+            };
             d.sym(s);
+        }
+        0x1ae => {
+            if !matches!(d.form(), 7) {
+                return d.err("ldgsts form");
+            }
+            d.i.mnemonic = "LDGSTS";
+            d.m("E");
+            d.m_if(!d.bit(81), "BYPASS");
+            let ev = d.table(&EVICT, 84, 3)?;
+            d.mm(ev);
+            d.m_if(d.bit(72), "LTC128B");
+            let sz = d.table(&LDGSTS_SIZE, 73, 3)?;
+            d.mm(sz);
+            let ord = d.table(&ORDER_LOAD, 77, 4)?;
+            d.mm(ord);
+            d.m_if(d.bit(82), "ZFILL");
+            let dst = format!(
+                "[{}{}]",
+                rn(d.get(16, 8)),
+                match sext(d.get(44, 20), 20) {
+                    0 => String::new(),
+                    v => format!("+{}", fmt_hex(v)),
+                }
+            );
+            d.sym(dst);
+            let off = sext(d.get(32, 12), 12);
+            let mut src = format!("[{}.64", rn(d.get(24, 8)));
+            if !d.bit(76) {
+                src.push_str(&format!("+{}", un(d.get(64, 6))));
+            }
+            if off != 0 {
+                src.push_str(&format!("+{}", fmt_hex(off)));
+            }
+            src.push(']');
+            d.sym(src);
+            if d.get(87, 3) != 7 || d.bit(90) {
+                let p = d.pred_src(87, 90);
+                d.op(p);
+            }
+        }
+        0x1af => d.i.mnemonic = "LDGDEPBAR",
+        0x1c0 => {
+            d.i.mnemonic = "GETLMEMBASE";
+            let dst = d.dst();
+            d.op(dst);
+        }
+        0x1c1 => {
+            d.i.mnemonic = "SETLMEMBASE";
+            let a = d.reg_plain(24);
+            d.op(a);
         }
         0x120 => {
             d.i.mnemonic = "AL2P";
