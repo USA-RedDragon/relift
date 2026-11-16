@@ -77,6 +77,7 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
             Some(true)
         }
         "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM" | "MOVM" | "HMMA" => Some(false),
+        "R2UR" if r2ur_votes(i) => Some(false),
         "BMOV" if reads_active(i) => Some(false),
         "S2R" | "S2UR" | "CS2R" => match i.ops.get(1) {
             Some(Operand::Sym(s))
@@ -100,7 +101,15 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
 
 /// A warp operation whose result depends on which lanes are active.
 pub(crate) fn reads_lanes(i: &Inst) -> bool {
-    matches!(i.mnemonic, "SHFL" | "VOTE" | "VOTEU" | "REDUX" | "MATCH") || reads_active(i)
+    matches!(i.mnemonic, "SHFL" | "VOTE" | "VOTEU" | "REDUX" | "MATCH")
+        || reads_active(i)
+        || r2ur_votes(i)
+}
+
+/// `R2UR P, UR, R`: the predicate says whether every active lane holds the
+/// same value.
+pub(crate) fn r2ur_votes(i: &Inst) -> bool {
+    i.mnemonic == "R2UR" && matches!(i.ops.first(), Some(Operand::Pred(..)))
 }
 
 /// `BMOV R, MACTIVE`: the mask of the active lanes.

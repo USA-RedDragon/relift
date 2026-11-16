@@ -287,10 +287,23 @@ fn load_cbuf_segmented(c: &mut Ctx, bank: u32, a: u32) -> Res<u32> {
     Ok(r)
 }
 
+/// R2UR; the form with a predicate destination also says whether every
+/// active lane holds the same value.
 fn r2ur(c: &mut Ctx, i: &Inst) -> Res<()> {
-    if i.has("OR") || i.ops.len() != 2 {
-        return bad("R2UR with a predicate");
+    if i.has("OR") {
+        return bad("R2UR.OR");
     }
-    let v = c.usrc(&i.ops[1])?;
-    c.store_dst(&i.ops[0], v)
+    match i.ops.as_slice() {
+        [d, s] => {
+            let v = c.usrc(s)?;
+            c.store_dst(d, v)
+        }
+        [p @ Operand::Pred(..), d, s] => {
+            let v = c.usrc(s)?;
+            let same = c.all_equal(v);
+            c.store_pdst(p, same)?;
+            c.store_dst(d, v)
+        }
+        _ => bad("R2UR operands"),
+    }
 }

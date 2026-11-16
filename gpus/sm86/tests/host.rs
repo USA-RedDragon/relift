@@ -157,6 +157,7 @@ fn on(p: &Program, host: HostProfile) -> relift_gpu_sm86::translate::Shader {
 const CONTROL_BARRIER: u32 = 224;
 const GROUP_SHUFFLE: u32 = 345;
 const GROUP_BALLOT: u32 = 339;
+const GROUP_ALL_EQUAL: u32 = 336;
 const VECTOR_EXTRACT_DYNAMIC: u32 = 77;
 const READ_CLOCK: u32 = 5056;
 
@@ -186,6 +187,21 @@ fn warp_paths_follow_the_host() {
         assert!(!ops.contains(&GROUP_BALLOT));
         assert!(ops.iter().filter(|&&o| o == CONTROL_BARRIER).count() >= 6);
     }
+}
+
+#[test]
+fn r2ur_with_a_predicate_plans_a_warp_path() {
+    let mut b = Vec::new();
+    b.extend(word(0x1c2, 1, &[(16, 6, 4), (24, 8, 5), (81, 3, 0)]));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text_of(&p)[0], "R2UR P0, UR4, R5");
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    assert_eq!(s.interface.host.warp_ops, 1);
+    let s = on(&p, HostProfile::minimal());
+    assert_eq!(s.interface.host.warp, WarpPath::Shared);
+    assert!(!spirv_ops(&s.spirv).contains(&GROUP_ALL_EQUAL));
 }
 
 #[test]
