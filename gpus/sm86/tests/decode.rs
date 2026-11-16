@@ -163,6 +163,21 @@ fn attributes() {
 }
 
 #[test]
+fn control_modifiers() {
+    let t = B::op(0x14d, 4).f(87, 3, 7);
+    assert_eq!(t.text(0), "EXIT");
+    assert_eq!(t.f(85, 2, 3).text(0), "EXIT.PREEMPTED.NO_ATEXIT");
+    let t = B::op(0x147, 4)
+        .f(87, 3, 7)
+        .f(91, 1, 1)
+        .f(24, 6, 4)
+        .f(33, 1, 1);
+    assert_eq!(t.text(0), "BRA.DIV UR4, 0x10");
+    let t = B::op(0x149, 4).f(87, 3, 7).f(24, 8, 4);
+    assert_eq!(t.text(0), "BRX R4");
+}
+
+#[test]
 fn integer_conversion_alu() {
     let t = B::op(0x024, 1)
         .f(16, 8, 0x6)
@@ -1124,4 +1139,62 @@ fn texture_and_surface() {
         }
         assert_eq!(b.text(0), *want);
     }
+}
+
+fn cop(op: u32, form: u32) -> B {
+    B::op(op, form).f(87, 3, 7)
+}
+
+#[test]
+fn control_special_tensor() {
+    let t = cop(0x144, 4).f(34, 48, 4).f(86, 1, 1);
+    assert_eq!(t.text(0x100), "CALL.REL.NOINC 0x120");
+    let t = cop(0x150, 4)
+        .f(24, 8, 16)
+        .f(34, 48, 0xffff_ffff_fffc)
+        .f(86, 1, 1);
+    assert_eq!(t.text(0x40), "RET.REL.NODEC R16 0x40");
+    let t = cop(0x149, 4).f(24, 8, 4).f(34, 48, 0xffff_ffff_ffa4);
+    assert_eq!(t.text(0), "BRX R4 -0x170");
+    let t = cop(0x119, 0).f(16, 8, 3).f(72, 8, 0x21);
+    assert_eq!(t.text(0), "S2R R3, SR_TID.X");
+    let t = cop(0x1c3, 0).f(16, 6, 4).f(72, 8, 0x25);
+    assert_eq!(t.text(0), "S2UR UR4, SR_CTAID.X");
+    let t = cop(0x11a, 4).f(44, 3, 5).f(38, 6, 1).f(47, 1, 1);
+    assert_eq!(t.text(0), "DEPBAR.LE SB5, 0x1");
+    let t = cop(0x1c4, 0).f(16, 6, 5).f(24, 8, 3).f(78, 3, 3);
+    assert_eq!(t.text(0), "REDUX.SUM UR5, R3");
+    let t = cop(0x006, 0)
+        .f(16, 8, 1)
+        .f(81, 3, 7)
+        .f(87, 3, 7)
+        .f(72, 2, 1);
+    assert_eq!(t.text(0), "VOTE.ANY R1, PT, PT");
+    let t = cop(0x15d, 1).f(32, 8, 14).f(85, 1, 1);
+    assert_eq!(t.text(0), "NANOSLEEP.WARP R14");
+    let t = cop(0x23c, 1)
+        .f(16, 8, 10)
+        .f(24, 8, 12)
+        .f(32, 8, 14)
+        .f(64, 8, 16)
+        .f(76, 1, 1)
+        .f(87, 3, 7);
+    assert_eq!(t.text(0), "HMMA.1688.F32 R10, R12, R14, R16, UP0");
+    let t = cop(0x237, 1)
+        .f(16, 8, 10)
+        .f(24, 8, 12)
+        .f(32, 8, 14)
+        .f(64, 8, 16)
+        .f(74, 1, 1)
+        .f(76, 1, 1)
+        .f(87, 3, 0);
+    assert_eq!(t.text(0), "IMMA.8816.S8.U8 R10, R12.ROW, R14.COL, R16");
+    let t = cop(0x83b, 4)
+        .f(16, 8, 10)
+        .f(24, 8, 12)
+        .f(72, 2, 2)
+        .f(78, 2, 1);
+    assert_eq!(t.text(0), "LDSM.16.MT88.4 R10, [R12]");
+    let t = cop(0x23a, 1).f(16, 8, 10).f(24, 8, 12).f(78, 2, 2);
+    assert_eq!(t.text(0), "MOVM.16.M864 R10, R12");
 }
