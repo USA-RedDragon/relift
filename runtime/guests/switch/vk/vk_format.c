@@ -26,10 +26,20 @@
 #include "vkf.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 /** @brief The resolution of a 24-bit depth format: its constant depth bias unit. */
 #define D24_UNIT (1.0f / 16777216.0f)
+
+/** @brief An image whose 24-bit depth format reaches the host as D32. */
+typedef struct depth_image {
+    VkFormat guest;
+    VkExtent3D extent;
+    uint32_t mips, layers;
+} depth_image;
+
+static vkf_map *g_images;
 
 /** @brief Render passes with a substituted depth attachment (mask of their subpasses that use one, bit 63 set) and substituted image views, by host handle. */
 static vkf_map *g_passes, *g_views;
@@ -169,6 +179,46 @@ void vkf_depth_forget_view(vkf_call *k)
 {
     if (g_views && k->c->x[1])
         note(&g_views, k->c->x[1], 0);
+}
+
+void vkf_depth_note_image(const vkf_dev *d, uint64_t image, const VkImageCreateInfo *guest)
+{
+    if (!image || !guest || !vkf_depth_substituted(d, guest->format))
+        return;
+    depth_image *im = malloc(sizeof *im);
+    if (!im)
+        abort();
+    *im = (depth_image){ guest->format, guest->extent, guest->mipLevels, guest->arrayLayers };
+    pthread_mutex_lock(&g_lock);
+    if (!g_images)
+        g_images = vkf_map_new();
+    free(vkf_map_get(g_images, image));
+    vkf_map_put(g_images, image, im);
+    pthread_mutex_unlock(&g_lock);
+}
+
+void vkf_depth_forget_image(uint64_t image)
+{
+    pthread_mutex_lock(&g_lock);
+    if (g_images && image) {
+        free(vkf_map_get(g_images, image));
+        vkf_map_put(g_images, image, NULL);
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+bool vkf_depth_image_of(uint64_t image, VkFormat *guest, VkExtent3D *extent, uint32_t *mips, uint32_t *layers)
+{
+    pthread_mutex_lock(&g_lock);
+    const depth_image *im = g_images && image ? vkf_map_get(g_images, image) : NULL;
+    if (im) {
+        *guest = im->guest;
+        *extent = im->extent;
+        *mips = im->mips;
+        *layers = im->layers;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return im != NULL;
 }
 
 bool vkf_depth_pass_uses(uint64_t pass, uint32_t subpass) { return subpass < 63 && (lookup(&g_passes, pass) >> subpass) & 1; }

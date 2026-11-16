@@ -138,6 +138,7 @@ int vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     vkf_dev *d = k.obj->dev;
+    VkImageCreateInfo guest = ci ? *ci : (VkImageCreateInfo){ 0 };
     if (ci && vkf_depth_substituted(d, ci->format)) {
         ci->format = vkf_depth_format(d, ci->format);
         vkf_depth_format_list(&k, d, ci->pNext);
@@ -161,6 +162,8 @@ int vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
     r = VKF_FN(k.fns, vkCreateImage)(dev, ci, NULL, &img);
     if (r >= 0 && c->x[3])
         vkf_s64(&k, c->x[3], (uint64_t)(uintptr_t)img);
+    if (r >= 0)
+        vkf_depth_note_image(d, (uint64_t)(uintptr_t)img, &guest);
     if (r >= 0 && im) {
         pthread_mutex_lock(&d->decode_lock);
         vkf_map_put(d->images, (uint64_t)(uintptr_t)img, im);
@@ -175,6 +178,8 @@ void vkf_image_destroyed(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
     uint64_t h = k->c->x[1];
+    if (d->depth24)
+        vkf_depth_forget_image(h);
     if (!d->decoding || !h)
         return;
     pthread_mutex_lock(&d->decode_lock);
@@ -480,6 +485,40 @@ static VkBuffer record_uploads(vkf_call *k, VkCommandBuffer cb, uint64_t buffer,
     return p ? buf : NULL;
 }
 
+/**
+ * @brief Splits buffer-to-image regions for an image whose 24-bit depth
+ * format reaches the host as D32: the depth-aspect ones are recorded as
+ * uploads decoded to D32 float at submit (*dm regions from staging buffer
+ * *stg into dout), the others (stencil) stay as they are (*pm into pout).
+ * False, with nothing written, when the image is not such an image.
+ */
+static bool depth_uploads(vkf_call *k, VkCommandBuffer cb, uint64_t buffer, uint64_t img, const VkBufferImageCopy *in, uint32_t n,
+                          VkBuffer *stg, VkBufferImageCopy *dout, uint32_t *dm, VkBufferImageCopy *pout, uint32_t *pm)
+{
+    vkf_image tmp = { 0 };
+    VkFormat guest;
+    if (!k->obj->dev->depth24 || !vkf_depth_image_of(img, &guest, &tmp.extent, &tmp.mips, &tmp.layers))
+        return false;
+    tmp.f = vkf_decode_depth_format(guest);
+    VkBufferImageCopy *din = vkf_alloc(k, (n + 1) * sizeof *din);
+    uint32_t nd = 0;
+    *dm = *pm = 0;
+    *stg = NULL;
+    for (uint32_t i = 0; i < n; i++) {
+        if ((in[i].imageSubresource.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) && tmp.f)
+            din[nd++] = in[i];
+        else
+            pout[(*pm)++] = in[i];
+    }
+    if (nd) {
+        if (rl_once(0x4432345550000000ull))
+            rl_log(RL_LOG_INFO, "vk", "depth uploads to format %d images are converted to D32 float at submit", (int)guest);
+        __atomic_store_n(&k->obj->dev->decoding, true, __ATOMIC_RELAXED);
+        *stg = record_uploads(k, cb, buffer, &tmp, din, nd, dout, dm);
+    }
+    return true;
+}
+
 int vkh_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -492,6 +531,17 @@ int vkh_vkCmdCopyBufferToImage(rl_ctx *restrict c, uint8_t *mem)
     const VkBufferImageCopy *rg = vkf_ptr(&k, c->x[5]);
     vkf_image *im = image_of(k.obj->dev, c->x[2]);
     VkBuffer src = (VkBuffer)(uintptr_t)c->x[1];
+    if (!im && rg && k.obj->dev->depth24) {
+        VkBufferImageCopy *dout = vkf_alloc(&k, (n + 1) * sizeof *dout), *pout = vkf_alloc(&k, (n + 1) * sizeof *pout);
+        uint32_t dm = 0, pm = 0;
+        VkBuffer stg = NULL;
+        if (depth_uploads(&k, cb, c->x[1], c->x[2], rg, n, &stg, dout, &dm, pout, &pm)) {
+            if (stg && dm)
+                VKF_FN(k.fns, vkCmdCopyBufferToImage)(cb, stg, img, (VkImageLayout)(uint32_t)c->x[3], dm, dout);
+            rg = pout;
+            n = pm;
+        }
+    }
     if (im && rg) {
         VkBufferImageCopy *out = vkf_alloc(&k, (n + 1) * sizeof *out);
         src = record_uploads(&k, cb, c->x[1], im, rg, n, out, &n);
@@ -514,6 +564,41 @@ int vkh_vkCmdCopyBufferToImage2(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkCmdCopyBufferToImage2);
     VkCopyBufferToImageInfo2 *info = vkg_ain_VkCopyBufferToImageInfo2(&k, c->x[1], 1);
     vkf_image *im = info ? image_of(k.obj->dev, (uint64_t)(uintptr_t)info->dstImage) : NULL;
+    if (!im && info && info->pRegions && k.obj->dev->depth24) {
+        uint32_t n = info->regionCount, dm = 0, pm = 0;
+        VkBufferImageCopy *in = vkf_alloc(&k, (n + 1) * sizeof *in), *dout = vkf_alloc(&k, (n + 1) * sizeof *dout),
+                          *pout = vkf_alloc(&k, (n + 1) * sizeof *pout);
+        for (uint32_t i = 0; i < n; i++) {
+            const VkBufferImageCopy2 *r = &info->pRegions[i];
+            in[i] = (VkBufferImageCopy){ r->bufferOffset, r->bufferRowLength, r->bufferImageHeight, r->imageSubresource, r->imageOffset,
+                                         r->imageExtent };
+        }
+        VkBuffer stg = NULL;
+        if (depth_uploads(&k, cb, (uint64_t)(uintptr_t)info->srcBuffer, (uint64_t)(uintptr_t)info->dstImage, in, n, &stg, dout, &dm, pout,
+                          &pm)) {
+            VkCopyBufferToImageInfo2 parts[2] = { *info, *info };
+            const VkBufferImageCopy *src[2] = { dout, pout };
+            uint32_t cnt[2] = { stg ? dm : 0, pm };
+            parts[0].srcBuffer = stg;
+            for (int p = 0; p < 2; p++) {
+                if (!cnt[p])
+                    continue;
+                VkBufferImageCopy2 *r2 = vkf_alloc(&k, cnt[p] * sizeof *r2);
+                for (uint32_t i = 0; i < cnt[p]; i++)
+                    r2[i] = (VkBufferImageCopy2){ .sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+                                                  .bufferOffset = src[p][i].bufferOffset,
+                                                  .bufferRowLength = src[p][i].bufferRowLength,
+                                                  .bufferImageHeight = src[p][i].bufferImageHeight,
+                                                  .imageSubresource = src[p][i].imageSubresource,
+                                                  .imageOffset = src[p][i].imageOffset,
+                                                  .imageExtent = src[p][i].imageExtent };
+                parts[p].pRegions = r2;
+                parts[p].regionCount = cnt[p];
+                fn(cb, &parts[p]);
+            }
+            return vkf_end(&k);
+        }
+    }
     if (im && info->pRegions) {
         uint32_t n = info->regionCount, m = 0;
         VkBufferImageCopy *in = vkf_alloc(&k, (n + 1) * sizeof *in), *out = vkf_alloc(&k, (n + 1) * sizeof *out);
@@ -629,6 +714,17 @@ int vkh_vkCmdCopyImage2(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
+/** @brief Logs once a depth-aspect read back of an image whose 24-bit depth reaches the host as D32 (its texels go out as D32 float). */
+static void depth_readback(vkf_call *k, uint64_t img, const VkImageSubresourceLayers *s)
+{
+    VkFormat guest;
+    VkExtent3D e;
+    uint32_t mips, layers;
+    if (k->obj->dev->depth24 && (s->aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) && vkf_depth_image_of(img, &guest, &e, &mips, &layers) &&
+        rl_once(0x4433325244000000ull))
+        rl_log(RL_LOG_WARN, "vk", "a depth read back of a format %d image gives D32 float texels, not the console's 24-bit ones", (int)guest);
+}
+
 int vkh_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -640,6 +736,9 @@ int vkh_vkCmdCopyImageToBuffer(rl_ctx *restrict c, uint8_t *mem)
         drop_once("vkCmdCopyImageToBuffer", 3, "reading an image in a decoded format back would need an encoder");
         return vkf_end(&k);
     }
+    const VkBufferImageCopy *rg = vkf_ptr(&k, c->x[5]);
+    for (uint32_t i = 0; rg && i < (uint32_t)c->x[4]; i++)
+        depth_readback(&k, c->x[1], &rg[i].imageSubresource);
     VKF_FN(k.fns, vkCmdCopyImageToBuffer)(cb, (VkImage)(uintptr_t)c->x[1], (VkImageLayout)(uint32_t)c->x[2],
                                           (VkBuffer)(uintptr_t)c->x[3], (uint32_t)c->x[4], vkf_ptr(&k, c->x[5]));
     return vkf_end(&k);
@@ -660,6 +759,8 @@ int vkh_vkCmdCopyImageToBuffer2(rl_ctx *restrict c, uint8_t *mem)
         drop_once("vkCmdCopyImageToBuffer2", 3, "reading an image in a decoded format back would need an encoder");
         return vkf_end(&k);
     }
+    for (uint32_t i = 0; info && info->pRegions && i < info->regionCount; i++)
+        depth_readback(&k, (uint64_t)(uintptr_t)info->srcImage, &info->pRegions[i].imageSubresource);
     if (info)
         fn(cb, info);
     return vkf_end(&k);
@@ -839,7 +940,7 @@ static void put_binding(vkf_dev *d, uint64_t buffer, uint64_t memory, uint64_t o
 void vkf_buffer_bound(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
-    if (d->decoding && (int32_t)(uint32_t)k->c->x[0] >= 0 && k->c->x[1])
+    if ((d->decoding || d->depth24) && (int32_t)(uint32_t)k->c->x[0] >= 0 && k->c->x[1])
         put_binding(d, k->c->x[1], k->c->x[2], k->c->x[3]);
 }
 
@@ -848,7 +949,7 @@ void vkf_buffers_bound(vkf_call *k)
     vkf_dev *d = k->obj->dev;
     uint32_t n = (uint32_t)k->c->x[1];
     uint64_t g = k->c->x[2];
-    if (!d->decoding || (int32_t)(uint32_t)k->c->x[0] < 0 || !g)
+    if (!(d->decoding || d->depth24) || (int32_t)(uint32_t)k->c->x[0] < 0 || !g)
         return;
     for (uint32_t i = 0; i < n; i++) {
         uint64_t e = g + i * (uint64_t)sizeof(VkBindBufferMemoryInfo);
@@ -860,7 +961,7 @@ void vkf_buffers_bound(vkf_call *k)
 void vkf_buffer_destroyed(vkf_call *k)
 {
     vkf_dev *d = k->obj->dev;
-    if (!d->decoding || !k->c->x[1])
+    if (!(d->decoding || d->depth24) || !k->c->x[1])
         return;
     pthread_mutex_lock(&d->decode_lock);
     free(vkf_map_get(d->buffers, k->c->x[1]));

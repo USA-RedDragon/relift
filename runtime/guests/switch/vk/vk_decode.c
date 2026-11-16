@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { D_R4G4, D_BC1_RGB, D_BC1, D_BC2, D_BC3, D_BC4, D_BC4S, D_BC5, D_BC5S, D_BC6, D_BC6S, D_BC7 };
+enum { D_R4G4, D_BC1_RGB, D_BC1, D_BC2, D_BC3, D_BC4, D_BC4S, D_BC5, D_BC5S, D_BC6, D_BC6S, D_BC7, D_D24 };
 
 static const vkf_decode_format g_formats[] = {
     { VK_FORMAT_R4G4_UNORM_PACK8, VK_FORMAT_R8G8_UNORM, 1, 1, 1, 2, D_R4G4 },
@@ -56,6 +56,17 @@ const vkf_decode_format *vkf_decode_format_of(VkFormat f)
 {
     int i = vkf_decode_index(f);
     return i < 0 ? NULL : &g_formats[i];
+}
+
+/** @brief The depth aspect of a 24-bit depth format in a buffer (a 32-bit word, depth in its low 24 bits) as D32 float texels. */
+static const vkf_decode_format g_depth[] = {
+    { VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT, 1, 1, 4, 4, D_D24 },
+    { VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D32_SFLOAT, 1, 1, 4, 4, D_D24 },
+};
+
+const vkf_decode_format *vkf_decode_depth_format(VkFormat f)
+{
+    return f == VK_FORMAT_D24_UNORM_S8_UINT ? &g_depth[0] : f == VK_FORMAT_X8_D24_UNORM_PACK32 ? &g_depth[1] : NULL;
 }
 
 uint32_t vkf_decode_mode(void) { return rl_setting_enum("vk.decode_bc"); }
@@ -116,6 +127,12 @@ void vkf_decode_block(const vkf_decode_format *f, const uint8_t *src, uint8_t *o
 {
     int pitch = 4 * f->texel_bytes;
     switch (f->kind) {
+    case D_D24: {
+        uint32_t v = (uint32_t)src[0] | (uint32_t)src[1] << 8 | (uint32_t)src[2] << 16;
+        float z = (float)((double)v / 16777215.0);
+        memcpy(out, &z, 4);
+        break;
+    }
     case D_R4G4:
         out[0] = (uint8_t)((src[0] >> 4) * 17);
         out[1] = (uint8_t)((src[0] & 15) * 17);

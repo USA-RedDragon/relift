@@ -3856,6 +3856,109 @@ TEST(vk_d24_on_a_host_without_it_is_d32)
 }
 
 /**
+ * @brief On a host without 24-bit depth, a buffer-to-image copy of the depth
+ * aspect of a D24S8 image (24-bit words, written after the copy is
+ * recorded) lands as their D32 float values, and a stencil copy lands as is.
+ */
+TEST(vk_d24_depth_upload_on_d32_is_converted)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    void *(*fg)(void *, const char *) = no_d24_gipa;
+    void *gipa;
+    memcpy(&gipa, &fg, sizeof gipa);
+    CHECK_EQ(boot_with(NULL, gipa), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK(physical_devices(&pd, 1) == 1);
+    uint64_t dev = make_device(pd, queue_family(pd, 0), NULL, 0);
+    CHECK(dev != 0);
+    CHECK(vkf_obj_of(dev, VKG_KIND_VkDevice)->dev->depth24);
+    enum { N = 4 };
+    mapped_buf up, rb;
+    CHECK_EQ(make_mapped(pd, dev, N * N * 5, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &up), 0);
+    CHECK_EQ(make_mapped(pd, dev, N * N * 5, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rb), 0);
+    VkImageCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_D24_UNORM_S8_UINT,
+                              .extent = { N, N, 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+                              .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT };
+    uint64_t gi = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)), VK_SUCCESS);
+    uint64_t img = g64(gi);
+    VkMemoryRequirements req;
+    uint64_t imem = bind_image(pd, dev, img, &req);
+    CHECK(imem != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, 0, 0, gq);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = (VkCommandPool)GP(g64(gpool)),
+                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo cbbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&cbbi, sizeof cbbi))), VK_SUCCESS);
+    VkImageMemoryBarrier ib = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                .image = (VkImage)GP(img),
+                                .subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 } };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, gput(&ib, sizeof ib));
+    VkBufferImageCopy r[2] = {
+        { .bufferOffset = 0, .imageSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 }, .imageExtent = { N, N, 1 } },
+        { .bufferOffset = N * N * 4, .imageSubresource = { VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, 1 }, .imageExtent = { N, N, 1 } },
+    };
+    G("vkCmdCopyBufferToImage", cb, up.buf, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 2, gput(r, sizeof r));
+    ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    ib.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, gput(&ib, sizeof ib));
+    vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
+    ((PFN_vkCmdCopyImageToBuffer)o->fns->f[VKG_vkCmdCopyImageToBuffer])(o->host, (VkImage)GP(img), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                                        (VkBuffer)GP(rb.buf), 2, r);
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    uint32_t want[N * N];
+    for (uint32_t i = 0; i < N * N; i++) {
+        uint32_t v = (i * 1048573u + 7u) & 0xFFFFFFu;
+        if (i == 0)
+            v = 0xFFFFFF;
+        if (i == 1)
+            v = 0;
+        want[i] = v;
+        uint32_t word = v | 0xAB000000u;
+        memcpy(g_mem + up.ptr + i * 4, &word, 4);
+        g_mem[up.ptr + N * N * 4 + i] = (uint8_t)(i * 13);
+    }
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", g64(gq), 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", g64(gq))), VK_SUCCESS);
+    unsigned bad = 0;
+    for (uint32_t i = 0; i < N * N; i++) {
+        float got;
+        memcpy(&got, g_mem + rb.ptr + i * 4, 4);
+        float exp = (float)((double)want[i] / 16777215.0);
+        bad += got != exp;
+        bad += g_mem[rb.ptr + N * N * 4 + i] != (uint8_t)(i * 13);
+    }
+    float one;
+    memcpy(&one, g_mem + rb.ptr, 4);
+    fprintf(stderr, "  %u of %u texels differ; 0xffffff reads %.9g\n", bad, 2 * N * N, one);
+    CHECK_EQ(bad, 0);
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyImage", dev, img, 0);
+    G("vkFreeMemory", dev, imem, 0);
+    G("vkDestroyBuffer", dev, up.buf, 0);
+    G("vkFreeMemory", dev, up.mem, 0);
+    G("vkDestroyBuffer", dev, rb.buf, 0);
+    G("vkFreeMemory", dev, rb.mem, 0);
+    finish(dev);
+}
+
+/**
  * @brief SPIR-V (glslc -O) of a vertex shader that draws a triangle over the
  * whole viewport at depth 0.1:
  *

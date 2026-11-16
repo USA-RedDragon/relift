@@ -215,6 +215,8 @@ typedef struct vkf_decode_format {
 int vkf_decode_index(VkFormat f);
 /** @brief The decodable format f, NULL for another. */
 const vkf_decode_format *vkf_decode_format_of(VkFormat f);
+/** @brief The upload decoder of the depth aspect of 24-bit depth format f into its D32 stand-in, NULL for another format. */
+const vkf_decode_format *vkf_decode_depth_format(VkFormat f);
 /** @brief The vk.decode_bc setting. */
 uint32_t vkf_decode_mode(void);
 /** @brief The format the host makes optimal images of guest format f in: a substitute when the layer decodes f there. */
@@ -439,6 +441,12 @@ uint64_t vkf_depth_pass_mask2(const vkf_dev *d, const VkRenderPassCreateInfo2 *c
 void vkf_depth_note_pass(uint64_t pass, uint64_t mask);
 /** @brief Records a host image view whose guest format is substituted. */
 void vkf_depth_note_view(const vkf_dev *d, uint64_t view, VkFormat guest);
+/** @brief Records a host image created for a guest image of a substituted depth format (guest: the guest's create info, its format unchanged). */
+void vkf_depth_note_image(const vkf_dev *d, uint64_t image, const VkImageCreateInfo *guest);
+/** @brief Forgets a destroyed host image. */
+void vkf_depth_forget_image(uint64_t image);
+/** @brief Whether a host image has a substituted depth format; gives its guest format, extent, mips and layers. */
+bool vkf_depth_image_of(uint64_t image, VkFormat *guest, VkExtent3D *extent, uint32_t *mips, uint32_t *layers);
 /** @brief Hooks after vkDestroyRenderPass and vkDestroyImageView. */
 void vkf_depth_forget_pass(vkf_call *k);
 void vkf_depth_forget_view(vkf_call *k);
