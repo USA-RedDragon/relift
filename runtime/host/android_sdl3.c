@@ -125,8 +125,7 @@ const char *rl_android_files_dir(void) { return SDL_GetAndroidInternalStoragePat
 
 const char *rl_android_external_dir(void) { return SDL_GetAndroidExternalStoragePath(); }
 
-JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeSettingsDone(JNIEnv *env, jclass cls,
-                                                                          jboolean controller);
+JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeSettingsDone(JNIEnv *env, jclass cls, jint next);
 JNIEXPORT jstring JNICALL Java_dev_relift_app_MainActivity_nativeGpuDriverLoaded(JNIEnv *env, jclass cls);
 JNIEXPORT jstring JNICALL Java_dev_relift_app_GpuProbe_nativeProbe(JNIEnv *env, jclass cls, jstring dir,
                                                                   jstring library);
@@ -136,15 +135,14 @@ void rl_android_haptic(void) { call_activity("reliftHaptic", NULL); }
 void rl_android_settings(void)
 {
     if (!call_activity("reliftOpenSettings", NULL))
-        rl_touchpad_host_settings_done(false);
+        rl_touchpad_host_settings_done(RL_TOUCHPAD_HOST_PAUSE);
 }
 
-JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeSettingsDone(JNIEnv *env, jclass cls,
-                                                                          jboolean controller)
+JNIEXPORT void JNICALL Java_dev_relift_app_MainActivity_nativeSettingsDone(JNIEnv *env, jclass cls, jint next)
 {
     (void)env;
     (void)cls;
-    rl_touchpad_host_settings_done(controller);
+    rl_touchpad_host_settings_done(next);
 }
 
 JNIEXPORT jstring JNICALL Java_dev_relift_app_MainActivity_nativeGpuDriverLoaded(JNIEnv *env, jclass cls)

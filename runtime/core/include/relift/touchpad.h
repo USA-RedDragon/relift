@@ -149,11 +149,18 @@ RL_RUNTIME_API void rl_touchpad_gamepad(bool connected, const char *name, uint32
 RL_RUNTIME_API void rl_touchpad_finger(uint64_t id, int phase, float x, float y);
 /** @brief The system back gesture: opens the pause sheet, or steps back out of a sheet. */
 RL_RUNTIME_API void rl_touchpad_back(void);
-/**
- * @brief The host's settings page closed: with controller, the player chose the on-screen controller settings (the
- * module's settings sheet opens, and its back returns to the host page); otherwise the pause sheet opens again.
- */
-RL_RUNTIME_API void rl_touchpad_host_settings_done(bool controller);
+/** @brief Where the player goes from the host's settings page. */
+enum rl_touchpad_host_next {
+    /** @brief Back to the pause sheet. */
+    RL_TOUCHPAD_HOST_PAUSE = 0,
+    /** @brief The module's on-screen controller settings sheet; its back returns to the host page. */
+    RL_TOUCHPAD_HOST_CONTROLLER = 1,
+    /** @brief Back to the game. */
+    RL_TOUCHPAD_HOST_RESUME = 2
+};
+
+/** @brief The host's settings page closed; next is an rl_touchpad_host_next. */
+RL_RUNTIME_API void rl_touchpad_host_settings_done(int next);
 /** @brief Moves time on (fades, toasts, long presses); returns true while something animates or waits. */
 RL_RUNTIME_API bool rl_touchpad_tick(uint64_t now_ns);
 

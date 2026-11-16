@@ -1365,16 +1365,16 @@ void rl_touchpad_back(void)
     after();
 }
 
-void rl_touchpad_host_settings_done(bool controller)
+void rl_touchpad_host_settings_done(int next)
 {
     pthread_mutex_lock(&g.lock);
     if (g.ui == UI_HOST) {
         g.now = rl_clock_ns();
-        if (controller) {
+        if (next == RL_TOUCHPAD_HOST_CONTROLLER) {
             open_ui(UI_SETTINGS);
             g.from_host = true;
         } else {
-            open_ui(UI_PAUSE);
+            open_ui(next == RL_TOUCHPAD_HOST_RESUME ? UI_NONE : UI_PAUSE);
         }
     }
     after();
