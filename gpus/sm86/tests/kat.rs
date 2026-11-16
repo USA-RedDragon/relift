@@ -24,6 +24,11 @@ const REJECTED: &[&str] = &[
     "F2FP.BF16.PACK_AB.RZ",
     "F2FP.RELU.BF16.PACK_AB.RZ",
     "F2FP.SATFINITE.BF16.PACK_AB.RZ",
+    "HADD2 bit 85",
+    "HMUL2 bit 85",
+    "HMUL2.FMZ",
+    "HFMA2.FMZ",
+    "HFMA2.BF16_V2",
 ];
 
 /// How a known mismatch may differ from the device.
@@ -37,7 +42,17 @@ enum Known {
 /// Variants that translate but still differ from the device in a way a fix
 /// in flight addresses. Every other difference fails, and so does an entry
 /// that no longer differs, so each goes away with its fix.
-const KNOWN: &[(&str, &[&str], Known)] = &[];
+const KNOWN: &[(&str, &[&str], Known)] = &[(
+    "half",
+    &[
+        "HADD2.F32 -RZ, b",
+        "HADD2.F32 -RZ, b.H0_H0",
+        "HADD2.F32 -RZ, b.H1_H1",
+        "HADD2.F32 -RZ, -|b|.H1_H1",
+        "HADD2.F32.FTZ -RZ, b.H1_H1",
+    ],
+    Known::NanBits,
+)];
 
 fn known(family: &str, label: &str) -> Option<Known> {
     KNOWN
@@ -211,5 +226,5 @@ macro_rules! families {
 }
 
 families!(
-    shf, fadd, fmul, ffma, fcmp, f2i, f2i_f16, i2f, f2f, frnd, f2fp
+    shf, fadd, fmul, ffma, fcmp, f2i, f2i_f16, i2f, f2f, frnd, f2fp, half
 );
