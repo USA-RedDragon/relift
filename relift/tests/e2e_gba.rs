@@ -188,6 +188,35 @@ fn a_jump_no_analysis_follows_stops_with_a_report_naming_its_site() {
     if relift_build::find_tool("llvm-mc").is_some() {
         assert!(text.contains("=> 0x80000d0: bx\tr1\n"), "{text}");
     }
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "report", &file]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.contains("added rom+0x100 to the hints in game.toml; the next relift build lifts it"),
+        "{text}"
+    );
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let reports = root.join("reports-2");
+    let out = relift_proc::command(host.join("game"))
+        .args(["--headless", "--no-save", "--frames", "5"])
+        .env("RELIFT_REPORT_DIR", &reports)
+        .output()
+        .expect("the game runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!reports.exists());
 }
 
 #[test]

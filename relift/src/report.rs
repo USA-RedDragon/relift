@@ -528,7 +528,8 @@ pub fn explain(r: &Report, out: Option<&Path>) -> String {
 }
 
 /// Adds the report's target as a root for the next build: a hint in
-/// `game.toml` (Switch). Returns what it did, for the user.
+/// `game.toml` (Switch, and GBA for the cartridge ROM). Returns what it
+/// did, for the user.
 ///
 /// # Errors
 ///
@@ -575,6 +576,16 @@ pub fn add_hint(r: &Report, project: &Path, out: Option<&Path>) -> Result<String
             let Some((module, offset)) = target.module else {
                 return Ok(format!(
                     "0x{:x} lies in no module; no hint added",
+                    target.addr
+                ));
+            };
+            hint(project, Hint { module, offset })?
+        }
+        Some("gba") => {
+            let Some((module, offset)) = target.module.filter(|(m, _)| m == crate::gba::ROM_MODULE)
+            else {
+                return Ok(format!(
+                    "0x{:x} is not in the cartridge ROM; code in RAM is lifted from its copy, so no hint is added",
                     target.addr
                 ));
             };

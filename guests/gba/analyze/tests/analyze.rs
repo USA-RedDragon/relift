@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 use relift_gba_analyze::{
     CopyKind, EdgeKind, Loc, Origin, Report, UnresolvedKind, analyze, analyze_multiboot,
+    analyze_with,
 };
 use relift_gba_formats::synth::{self, Spec};
 
@@ -1134,4 +1135,21 @@ fn an_arm_return_popped_with_a_post_indexed_load_returns() {
     let callee = r.functions.get(&Loc::rom(f, false)).expect("callee");
     assert!(callee.returns);
     assert!(r.unresolved.is_empty(), "{:?}", r.unresolved);
+}
+
+#[test]
+fn a_hint_is_a_root_of_its_own() {
+    let mut a = Asm::new();
+    a.arm(BASE + 0xC0, &[0xE59F_0004, a_bx(0), 0, 0x0800_0201]);
+    a.thumb(BASE + 0x200, &[0x2001, t_bx(14)]);
+    a.entry_to(BASE + 0xC0);
+    let plain = analyze(&a.rom).expect("analyzes");
+    assert!(!plain.functions.contains_key(&Loc::rom(BASE + 0x300, false)));
+    a.arm(BASE + 0x300, &[0xE3A0_0002, A_BX_LR]);
+    synth::fix_complement(&mut a.rom);
+    let hint = Loc::rom(BASE + 0x300, false);
+    let r = analyze_with(&a.rom, &[hint]).expect("analyzes");
+    let f = r.functions.get(&hint).expect("the hint is a function");
+    assert_eq!(f.origin, Origin::Hint);
+    assert!(f.instructions.contains_key(&Loc::rom(BASE + 0x304, false)));
 }

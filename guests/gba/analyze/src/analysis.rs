@@ -57,11 +57,21 @@ const MAX_RUNS_PER_FUNCTION: usize = 1024;
 ///
 /// The header does not parse, or the image is larger than 32 MiB.
 pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
+    analyze_with(rom, &[])
+}
+
+/// As [`analyze`], with `hints` as roots too: code addresses a run reached
+/// that discovery did not (the hints of a stop report, [`Origin::Hint`]).
+///
+/// # Errors
+///
+/// As [`analyze`].
+pub fn analyze_with(rom: &[u8], hints: &[Loc]) -> Result<Report, AnalyzeError> {
     if rom.len() > MAX_ROM {
         return Err(AnalyzeError::TooLarge(rom.len()));
     }
     Header::parse(rom).map_err(AnalyzeError::Format)?;
-    Ok(discover(Image::new(rom), Loc::rom(RESET, false)))
+    Ok(discover(Image::new(rom), Loc::rom(RESET, false), hints))
 }
 
 /// Find the functions of the multiboot image `rom` as the BIOS runs it:
@@ -91,7 +101,7 @@ pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
         dst: MULTIBOOT_BASE,
         bytes: Rc::from(rom),
     });
-    Ok(discover(image, site))
+    Ok(discover(image, site, &[]))
 }
 
 /// Runs discovery to its fixed point with the table stops known so far.
@@ -104,13 +114,16 @@ pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
 /// the bits kept and each store's address and source word.
 type FieldGroup = (Loc, u32, Vec<(u32, u32)>);
 
-fn discover(image: Image<'_>, entry: Loc) -> Report {
+fn discover(image: Image<'_>, entry: Loc, hints: &[Loc]) -> Report {
     let mut stops = BTreeSet::new();
     let mut cache = RefCell::new(HashMap::new());
     let mut conc = RefCell::new(HashMap::new());
     for _ in 0..MAX_ROUNDS {
         let mut d = Driver::new(image.clone(), stops, cache, conc);
         d.add_root(entry, Origin::Entry);
+        for &h in hints {
+            d.add_root(h, Origin::Hint);
+        }
         d.settle();
         let found = d.found_stops();
         let cut = d
@@ -133,6 +146,9 @@ fn discover(image: Image<'_>, entry: Loc) -> Report {
     }
     let mut d = Driver::new(image, stops, cache, conc);
     d.add_root(entry, Origin::Entry);
+    for &h in hints {
+        d.add_root(h, Origin::Hint);
+    }
     d.settle();
     d.report()
 }

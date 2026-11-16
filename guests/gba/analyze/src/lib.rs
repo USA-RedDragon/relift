@@ -96,7 +96,7 @@ mod loc;
 mod report;
 mod val;
 
-pub use analysis::{AnalyzeError, RESET, analyze, analyze_multiboot};
+pub use analysis::{AnalyzeError, RESET, analyze, analyze_multiboot, analyze_with};
 pub use loc::{Loc, Region};
 pub use report::{
     CopyKind, Edge, EdgeKind, Function, Origin, RamCopy, RegionCoverage, Report, Swi, Table,

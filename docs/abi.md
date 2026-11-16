@@ -1718,7 +1718,9 @@ the target (llvm-mc for A64 and arm32 when it is on `PATH`, the opcode
 table for SM83), the guest backtrace, the site's lifted C from the build's
 `c/` folder and what `entries.txt` and `unlifted.txt` say about the target,
 and adds the target as a root for the next build: a `[hints]` entry in
-`game.toml` (Switch, as `relift run` does for hot-loaded code). `--no-hint`
+`game.toml` (Switch, as `relift run` does for hot-loaded code, and GBA,
+`rom+0x<offset>` for a cartridge ROM target, an odd offset for Thumb code,
+which `relift-gba-analyze` takes as roots of origin `hint`). `--no-hint`
 only prints.
 
 ### Still to come

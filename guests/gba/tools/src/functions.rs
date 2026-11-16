@@ -68,6 +68,7 @@ fn origin_name(o: Origin) -> &'static str {
         Origin::Jumped => "jumped",
         Origin::AddressTaken => "address-taken",
         Origin::Rewritten => "rewritten",
+        Origin::Hint => "hint",
     }
 }
 

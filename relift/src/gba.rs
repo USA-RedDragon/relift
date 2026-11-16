@@ -62,6 +62,25 @@ pub fn is_rom_image(rom: &[u8], named: bool) -> bool {
         .is_ok_and(|h| h.entry_target().is_some() && (named || h.checks().logo))
 }
 
+/// The module name of the cartridge ROM in hints and stop reports.
+pub const ROM_MODULE: &str = "rom";
+
+/// The roots of the hints that name the ROM (`rom+0x<offset>`, the offset
+/// from `0x08000000`; an odd offset is Thumb code).
+#[must_use]
+pub fn rom_hints(
+    hints: &std::collections::BTreeSet<crate::hints::Hint>,
+) -> Vec<relift_gba_analyze::Loc> {
+    hints
+        .iter()
+        .filter(|h| h.module == ROM_MODULE)
+        .filter_map(|h| {
+            let a = u32::try_from(0x0800_0000 + h.offset).ok()?;
+            Some(relift_gba_analyze::Loc::rom(a & !1, a & 1 == 1))
+        })
+        .collect()
+}
+
 /// Whether the project's `game.toml` names the Game Boy Advance guest.
 #[must_use]
 pub fn is_project() -> bool {
@@ -191,7 +210,9 @@ pub fn build(
     ));
     let row = ui.row("rom");
     ui.begin(row, "analyze");
-    let report = relift_gba_analyze::analyze(&rom).map_err(|e| format!("analyze: {e}"))?;
+    let hints = rom_hints(&crate::hints::read(Path::new("game.toml"))?);
+    let report =
+        relift_gba_analyze::analyze_with(&rom, &hints).map_err(|e| format!("analyze: {e}"))?;
     ui.done(
         row,
         Line::new().text(format!(

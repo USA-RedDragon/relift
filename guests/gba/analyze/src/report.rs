@@ -85,6 +85,9 @@ pub enum Origin {
     /// An instruction in RAM that the program may rewrite, in each copy
     /// that may hold it: code that finds other bytes there goes on here.
     Rewritten,
+    /// A code address the project's hints name: a run reached it and
+    /// discovery did not (`relift report` adds it from a stop report).
+    Hint,
 }
 
 /// How control reaches another function.
