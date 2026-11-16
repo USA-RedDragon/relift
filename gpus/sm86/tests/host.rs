@@ -229,16 +229,102 @@ fn ldsm_alone_plans_a_warp_path() {
     assert!(!spirv_ops(&s.spirv).contains(&GROUP_SHUFFLE));
 }
 
+const LOOP_MERGE: u32 = 246;
+const CAPABILITY: u32 = 17;
+const CAP_GROUP_NON_UNIFORM: u32 = 61;
+const DECORATE: u32 = 71;
+
+fn has_cap(words: &[u32], cap: u32) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let len = ((words[k] >> 16) as usize).max(1);
+        if words[k] & 0xffff == CAPABILITY && words.get(k + 1) == Some(&cap) {
+            return true;
+        }
+        k += len;
+    }
+    false
+}
+
+/// The id decorated as the `WorkgroupSize` built-in.
+fn workgroup_size_id(words: &[u32]) -> Option<u32> {
+    let mut k = 5;
+    while k < words.len() {
+        let len = ((words[k] >> 16) as usize).max(1);
+        if words[k] & 0xffff == DECORATE && words[k + 2] == 11 && words[k + 3] == 25 {
+            return Some(words[k + 1]);
+        }
+        k += len;
+    }
+    None
+}
+
 #[test]
-fn divergent_warp_operations_are_reported() {
+fn divergent_warp_operations_run_in_software() {
     let p = warp_program(true);
     assert!(p.decode()[0].as_ref().is_ok_and(|i| i.guard.is_some()));
-    let s = on(&p, HostProfile::lavapipe());
-    assert_eq!(s.interface.host.warp, WarpPath::Host);
-    assert_eq!(s.interface.host.inexact.len(), 1);
+    for h in [
+        HostProfile::lavapipe(),
+        HostProfile::mali(),
+        HostProfile::minimal(),
+    ] {
+        let s = on(&p, h);
+        assert_eq!(s.interface.host.warp, WarpPath::Simt);
+        assert!(s.interface.host.inexact.is_empty());
+        let ops = spirv_ops(&s.spirv);
+        assert!(!ops.contains(&GROUP_SHUFFLE));
+        assert!(!ops.contains(&GROUP_BALLOT));
+        assert!(!ops.contains(&CONTROL_BARRIER));
+        assert!(!has_cap(&s.spirv, CAP_GROUP_NON_UNIFORM));
+        assert!(workgroup_size_id(&s.spirv).is_some());
+    }
     let s = on(&p, HostProfile::nvidia());
     assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
     assert!(s.interface.host.inexact.is_empty());
+}
+
+/// A shuffle, then a vote that only some lanes reach, in a loop that some
+/// lanes go round: `@P0 BRA` over the vote and `@P1 BRA` back to the top.
+fn divergent_loop() -> Program {
+    let mut b = Vec::new();
+    b.extend(word(
+        0x189,
+        1,
+        &[
+            (16, 8, 2),
+            (24, 8, 3),
+            (32, 8, 4),
+            (58, 2, 3),
+            (64, 8, 5),
+            (81, 3, 7),
+        ],
+    ));
+    b.extend(word(0x147, 4, &[(12, 3, 0), (34, 48, 4), (87, 3, 7)]));
+    b.extend(word(
+        0x006,
+        1,
+        &[(16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)],
+    ));
+    b.extend(word(
+        0x147,
+        4,
+        &[(12, 3, 1), (34, 48, 0xffff_ffff_fff0), (87, 3, 7)],
+    ));
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+#[test]
+fn warp_operations_in_a_divergent_loop() {
+    let p = divergent_loop();
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    let s = on(&p, HostProfile::lavapipe());
+    assert_eq!(s.interface.host.warp, WarpPath::Simt);
+    assert!(s.interface.host.inexact.is_empty());
+    let ops = spirv_ops(&s.spirv);
+    assert!(!ops.contains(&GROUP_SHUFFLE));
+    assert!(ops.iter().filter(|&&o| o == LOOP_MERGE).count() >= 4);
 }
 
 fn execution_modes(words: &[u32]) -> Vec<u32> {

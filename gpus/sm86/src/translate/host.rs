@@ -412,6 +412,14 @@ pub enum WarpPath {
     /// The host's own subgroups, which are not 32 wide: not exact (listed
     /// in [`HostReport::inexact`]).
     Host,
+    /// Compute only: one invocation runs a whole guest warp, with each
+    /// register an array of 32 lanes and the divergence in software.
+    /// Exact on any device and needs no subgroup operations. The runtime
+    /// sets the workgroup size specialization constants to the guest's
+    /// size as on every path; the shader's `WorkgroupSize` is that size
+    /// divided by 32, rounded up, so the dispatch is unchanged. Local
+    /// memory is 32 lanes' worth per invocation.
+    Simt,
 }
 
 /// How global memory is addressed.

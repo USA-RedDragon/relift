@@ -905,6 +905,9 @@ impl Ctx {
     fn quad_derivatives(&mut self, what: &str) -> Res<()> {
         match self.stage {
             Stage::Fragment => Ok(()),
+            Stage::Compute if self.simt.is_some() => bad(format!(
+                "{what} with an implicit LOD on the software warp path"
+            )),
             Stage::Compute => {
                 self.cap(CAP_COMPUTE_DERIVATIVE_GROUP_LINEAR);
                 self.exts.insert("SPV_KHR_compute_shader_derivatives");

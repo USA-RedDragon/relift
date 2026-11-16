@@ -30,8 +30,10 @@ impl Ctx {
         }
         let lo = self.m.id();
         let hi = self.m.id();
-        self.locals.push(lo);
-        self.locals.push(hi);
+        match &mut self.simt {
+            Some(st) => st.words.extend([lo, hi]),
+            None => self.locals.extend([lo, hi]),
+        }
         self.clock_vars = Some((lo, hi));
         (lo, hi)
     }
@@ -59,6 +61,11 @@ impl Ctx {
         let u = self.u32t();
         let t = self.m.t_u64();
         let (vlo, vhi) = self.clock_last();
+        let (vlo, vhi) = if self.simt.is_some() {
+            (self.lane_ptr(vlo, u), self.lane_ptr(vhi, u))
+        } else {
+            (vlo, vhi)
+        };
         let llo = self.m.emit(op::LOAD, u, &[vlo]);
         let lhi = self.m.emit(op::LOAD, u, &[vhi]);
         let last = self.pair64(llo, lhi);

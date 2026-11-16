@@ -18,6 +18,7 @@ mod io;
 mod mem;
 mod mma;
 mod mufu;
+mod simt;
 mod tex;
 
 pub use host::{
@@ -212,6 +213,8 @@ pub(crate) struct Ctx {
     pub divergent: Vec<bool>,
     /// Which global accesses must be coherent (see `mem::order`).
     pub mem: mem::order::Plan,
+    /// The warp emulation state on [`WarpPath::Simt`].
+    pub simt: Option<simt::State>,
 }
 
 impl Ctx {
@@ -241,15 +244,34 @@ impl Ctx {
         }
         let v = Ctx::var_in(&mut self.regs, &mut self.m, n);
         let t = self.u32t();
+        let v = self.lane_var(v, t);
         self.m.emit(op::LOAD, t, &[v])
     }
 
     pub fn store_reg(&mut self, n: u8, val: u32) {
-        if n == 255 {
+        if n == 255 || self.collecting() {
             return;
         }
         let v = Ctx::var_in(&mut self.regs, &mut self.m, n);
+        let t = self.u32t();
+        let v = self.lane_var(v, t);
         self.m.emit_void(op::STORE, &[v, val]);
+    }
+
+    /// The variable itself, or on [`WarpPath::Simt`] the current lane's
+    /// entry of it.
+    fn lane_var(&mut self, var: u32, ty: u32) -> u32 {
+        if self.simt.is_some() {
+            self.lane_ptr(var, ty)
+        } else {
+            var
+        }
+    }
+
+    /// The first pass of a warp operation on [`WarpPath::Simt`], which
+    /// writes nothing.
+    fn collecting(&self) -> bool {
+        self.simt_pass() == Some(simt::Pass::Collect)
     }
 
     pub fn load_ureg(&mut self, n: u8) -> u32 {
@@ -262,7 +284,7 @@ impl Ctx {
     }
 
     pub fn store_ureg(&mut self, n: u8, val: u32) {
-        if n == 63 {
+        if n == 63 || self.collecting() {
             return;
         }
         let v = Ctx::var_in(&mut self.uregs, &mut self.m, n);
@@ -275,16 +297,19 @@ impl Ctx {
         } else {
             let var = Ctx::var_in(&mut self.preds, &mut self.m, n);
             let t = self.m.t_bool();
+            let var = self.lane_var(var, t);
             self.m.emit(op::LOAD, t, &[var])
         };
         self.not_if(v, not)
     }
 
     pub fn store_pred(&mut self, n: u8, val: u32) {
-        if n == 7 {
+        if n == 7 || self.collecting() {
             return;
         }
         let v = Ctx::var_in(&mut self.preds, &mut self.m, n);
+        let t = self.m.t_bool();
+        let v = self.lane_var(v, t);
         self.m.emit_void(op::STORE, &[v, val]);
     }
 
@@ -300,7 +325,7 @@ impl Ctx {
     }
 
     pub fn store_upred(&mut self, n: u8, val: u32) {
-        if n == 7 {
+        if n == 7 || self.collecting() {
             return;
         }
         let v = Ctx::var_in(&mut self.upreds, &mut self.m, n);
@@ -596,6 +621,18 @@ impl Ctx {
     pub(crate) fn guarded(&mut self, i: &Inst, w: Word, pc: u64) -> Res<()> {
         self.word = w;
         self.pc = pc;
+        match self.simt_pass() {
+            Some(simt::Pass::Collect) => {
+                let g = match &i.guard {
+                    Some(g) => Some(self.pred_operand(g)?),
+                    None => None,
+                };
+                self.simt_collect_guard(g);
+                return self.inst(i);
+            }
+            Some(simt::Pass::Replay) => return self.inst(i),
+            _ => {}
+        }
         let Some(g) = &i.guard else {
             return self.inst(i);
         };
@@ -710,6 +747,7 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
         clock_vars: None,
         divergent: Vec::new(),
         mem: mem::order::Plan::default(),
+        simt: None,
     };
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();
@@ -728,7 +766,11 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     c.tcs_prologue()?;
     let body = c.m.id();
     c.m.emit_void(op::BRANCH, &[body]);
-    cfg::emit(&mut c, &code, body, split)?;
+    if c.iface.host.warp == WarpPath::Simt {
+        simt::emit(&mut c, &code, body, split)?;
+    } else {
+        cfg::emit(&mut c, &code, body, split)?;
+    }
     c.m.emit_void(op::FUNCTION_END, &[]);
     let funcs = std::mem::take(&mut c.funcs);
     c.m.body.extend(funcs);
@@ -750,19 +792,34 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         .copied()
         .collect();
     let bools: Vec<u32> = c.preds.values().chain(c.upreds.values()).copied().collect();
-    for &v in &ints {
-        crate::spirv::inst(&mut decls, op::VARIABLE, &[pu, v, FUNCTION]);
-    }
-    for &v in &bools {
-        crate::spirv::inst(&mut decls, op::VARIABLE, &[pb, v, FUNCTION]);
-    }
     let zero = c.m.c_u32(0);
     let fals = c.m.c_bool(false);
-    for &v in &ints {
-        crate::spirv::inst(&mut decls, op::STORE, &[v, zero]);
+    let mut vars: Vec<(u32, u32, u32)> = Vec::new();
+    if let Some(st) = &c.simt {
+        let lane_words: Vec<u32> = c.regs.values().chain(st.words.iter()).copied().collect();
+        let lane_bools: Vec<u32> = c.preds.values().copied().collect();
+        let au = c.m.t_array(u, 32);
+        let ab = c.m.t_array(b, 32);
+        let (pau, pab) = (c.m.t_ptr(FUNCTION, au), c.m.t_ptr(FUNCTION, ab));
+        let (nu, nb) = (c.m.c_null(au), c.m.c_null(ab));
+        vars.extend(lane_words.iter().map(|&v| (pau, v, nu)));
+        vars.extend(lane_bools.iter().map(|&v| (pab, v, nb)));
+        vars.extend(
+            c.uregs
+                .values()
+                .chain(c.locals.iter())
+                .map(|&v| (pu, v, zero)),
+        );
+        vars.extend(c.upreds.values().map(|&v| (pb, v, fals)));
+    } else {
+        vars.extend(ints.iter().map(|&v| (pu, v, zero)));
+        vars.extend(bools.iter().map(|&v| (pb, v, fals)));
     }
-    for &v in &bools {
-        crate::spirv::inst(&mut decls, op::STORE, &[v, fals]);
+    for &(t, v, _) in &vars {
+        crate::spirv::inst(&mut decls, op::VARIABLE, &[t, v, FUNCTION]);
+    }
+    for &(_, v, z) in &vars {
+        crate::spirv::inst(&mut decls, op::STORE, &[v, z]);
     }
     c.m.body.splice(var_at..var_at, decls);
     io::finish(&mut c, main);
@@ -806,7 +863,11 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
             if c.iface.compute_derivatives {
                 crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[main, 5290]);
             }
-            let ws = c.workgroup_size();
+            let ws = if c.simt.is_some() {
+                c.simt_workgroup_size()
+            } else {
+                c.workgroup_size()
+            };
             c.m.deco(ws, 11, &[25]);
         }
         _ => {}

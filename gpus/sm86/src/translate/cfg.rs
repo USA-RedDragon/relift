@@ -66,19 +66,19 @@ use crate::Operand;
 use crate::spirv::op;
 use std::collections::{HashMap, HashSet};
 
-const EXIT: usize = usize::MAX;
+pub(crate) const EXIT: usize = usize::MAX;
 const MAX_CALL_DEPTH: usize = 8;
 pub(crate) const TOO_MUCH_DUPLICATION: &str = "control flow needs too much duplication";
 const MAX_BLOCKS: usize = 1 << 16;
 
 #[derive(Clone, Copy, Debug)]
-enum Sel {
+pub(crate) enum Sel {
     Reg(u8),
     UReg(u8),
 }
 
 #[derive(Clone, Debug)]
-enum Term {
+pub(crate) enum Term {
     Jump(usize),
     Branch(Vec<Operand>, usize, usize),
     /// Jump to `selector + base`: (address, block) cases.
@@ -121,10 +121,10 @@ impl Term {
 }
 
 #[derive(Clone, Debug)]
-struct Block {
-    first: usize,
-    end: usize,
-    term: Term,
+pub(crate) struct Block {
+    pub first: usize,
+    pub end: usize,
+    pub term: Term,
 }
 
 fn terminal(b: usize) -> bool {
@@ -140,10 +140,10 @@ struct Lp {
     var: u32,
 }
 
-struct Graph {
-    blocks: Vec<Block>,
+pub(crate) struct Graph {
+    pub blocks: Vec<Block>,
     succs: Vec<Vec<usize>>,
-    headers: HashMap<usize, (Vec<bool>, Vec<usize>)>,
+    pub headers: HashMap<usize, (Vec<bool>, Vec<usize>)>,
     pdoms: HashMap<Option<usize>, Vec<Option<usize>>>,
 }
 
@@ -322,7 +322,7 @@ impl Ids {
     }
 }
 
-fn build(code: &Code) -> Res<Vec<Block>> {
+pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
     let n = code.insts.len();
     let mut end = n;
     while end > 0 && code.insts[end - 1].mnemonic == "BRA" {
@@ -599,7 +599,7 @@ fn dominates(idom: &[Option<usize>], a: usize, mut b: usize) -> bool {
 }
 
 impl Graph {
-    fn new(blocks: Vec<Block>) -> Res<Graph> {
+    pub(crate) fn new(blocks: Vec<Block>) -> Res<Graph> {
         let n = blocks.len();
         let succs: Vec<Vec<usize>> = blocks
             .iter()
@@ -695,7 +695,7 @@ impl Graph {
     /// end the invocation are left out, except that a block that may end it
     /// and has no other way to the end (a loop left only through EXIT)
     /// ends its paths there.
-    fn ipdom(&mut self, ctx: Option<usize>, b: usize) -> Option<usize> {
+    pub(crate) fn ipdom(&mut self, ctx: Option<usize>, b: usize) -> Option<usize> {
         if !self.pdoms.contains_key(&ctx) {
             let n = self.blocks.len();
             let end = n;
@@ -1200,7 +1200,7 @@ impl Graph {
 
     /// Checks that the structure reconverges the guest's lanes where its
     /// BSSY/BSYNC regions do (see the module documentation).
-    fn check_reconvergence(&mut self, code: &Code) -> Res<()> {
+    pub(crate) fn check_reconvergence(&mut self, code: &Code) -> Res<()> {
         let insts = &code.insts;
         for b in 0..self.blocks.len() {
             let blk = self.blocks[b].clone();
@@ -1269,7 +1269,7 @@ impl Graph {
 
     /// Checks that every BAR runs where all the workgroup's invocations
     /// run it (see the module documentation).
-    fn check_barriers(&mut self, code: &Code) -> Res<()> {
+    pub(crate) fn check_barriers(&mut self, code: &Code) -> Res<()> {
         let insts = &code.insts;
         let n = self.blocks.len();
         let mut partial = vec![false; n];

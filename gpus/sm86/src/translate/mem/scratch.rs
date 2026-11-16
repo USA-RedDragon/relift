@@ -61,7 +61,11 @@ impl Ctx {
             (PRIVATE, LOCAL_SPEC, LOCAL_DEFAULT_WORDS)
         };
         let u = self.u32t();
-        let len = self.m.spec_u32(default, spec);
+        let mut len = self.m.spec_u32(default, spec);
+        if sp == Space::Local && self.simt.is_some() {
+            let k32 = self.m.c_u32(32);
+            len = self.m.spec_op(u, op::I_MUL, &[len, k32]);
+        }
         let arr = self.m.t_array_of(u, len);
         let p = self.m.t_ptr(class, arr);
         let var = self.m.global(p, class);
@@ -115,6 +119,14 @@ impl Ctx {
         if k != 0 {
             let kk = self.m.c_u32(k);
             idx = self.m.emit(op::I_ADD, u, &[idx, kk]);
+        }
+        if sp == Space::Local
+            && let Some(st) = &self.simt
+        {
+            let lane = st.lane;
+            let len = self.m.spec_u32(LOCAL_DEFAULT_WORDS, LOCAL_SPEC);
+            let base = self.m.emit(op::I_MUL, u, &[lane, len]);
+            idx = self.m.emit(op::I_ADD, u, &[idx, base]);
         }
         let p = self.m.t_ptr(class, u);
         self.m.emit(op::ACCESS_CHAIN, p, &[var, idx])

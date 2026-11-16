@@ -15,6 +15,9 @@
 //!   invocation of the workgroup, so the path is taken only when each warp
 //!   operation sits in workgroup-uniform control flow; all lanes that exist
 //!   are then active.
+//! - [`WarpPath::Simt`]: compute only, a guest warp is one invocation that
+//!   runs all 32 lanes (see the `simt` module); the primitives read the
+//!   other lanes' records directly.
 //! - [`WarpPath::Quad`] and [`WarpPath::Host`]: the host's own subgroups.
 //!   Shuffles that stay in a 2x2 quad are exact through the subgroup's
 //!   quads; anything wider is listed as inexact.
@@ -305,11 +308,11 @@ impl Ctx {
                     WarpPath::Shared
                 } else if wide == 0 && warp != Warp::Absent {
                     WarpPath::Quad
+                } else if self.stage == Stage::Compute {
+                    WarpPath::Simt
                 } else {
                     let why = if warp == Warp::Absent {
                         "the stage has no subgroup operations"
-                    } else if self.stage == Stage::Compute {
-                        "a warp operation is in divergent control flow"
                     } else {
                         "the stage cannot have 32-wide subgroups"
                     };
@@ -322,7 +325,7 @@ impl Ctx {
             }
         };
         self.iface.host.warp = path;
-        if path != WarpPath::Shared {
+        if !matches!(path, WarpPath::Shared | WarpPath::Simt) {
             self.reconvergence_plan(insts, fast_paths);
         }
     }
@@ -395,6 +398,7 @@ impl Ctx {
     /// The guest lane, 0 to 31.
     pub(crate) fn lane_id(&mut self) -> u32 {
         match self.warp_path() {
+            WarpPath::Simt => self.simt.as_ref().map_or(0, |s| s.lane),
             WarpPath::Shared => {
                 let i = self.local_index();
                 self.lk(op::BITWISE_AND, i, 31)
@@ -542,6 +546,9 @@ impl Ctx {
     /// that are active.
     pub(crate) fn ballot(&mut self, pred: u32) -> u32 {
         let u = self.u32t();
+        if self.warp_path() == WarpPath::Simt {
+            return self.simt_ballot(pred);
+        }
         if self.warp_path() == WarpPath::Shared {
             let lane = self.lane_id();
             let one = self.m.c_u32(1);
@@ -565,6 +572,9 @@ impl Ctx {
 
     /// The active lanes of the warp.
     pub(crate) fn active(&mut self) -> u32 {
+        if self.warp_path() == WarpPath::Simt {
+            return self.simt_active();
+        }
         if self.warp_path() == WarpPath::Shared {
             return self.shared_active();
         }
@@ -574,6 +584,9 @@ impl Ctx {
 
     /// `v` as guest lane `l` (0 to 31) of the warp holds it.
     pub(crate) fn shuffle(&mut self, v: u32, l: u32) -> u32 {
+        if self.warp_path() == WarpPath::Simt {
+            return self.simt_shuffle(v, l);
+        }
         if self.warp_path() == WarpPath::Shared {
             self.put(v);
             return self.get(l);
@@ -598,6 +611,9 @@ impl Ctx {
 
     /// `v` from each of the 32 lanes of the warp.
     pub(crate) fn gather(&mut self, v: u32) -> Vec<u32> {
+        if self.warp_path() == WarpPath::Simt {
+            return self.simt_gather(v);
+        }
         if self.warp_path() == WarpPath::Shared {
             self.put(v);
             return (0..32)
@@ -639,7 +655,7 @@ impl Ctx {
     pub(crate) fn vote(&mut self, o: u16, p: u32) -> u32 {
         let b = self.boolt();
         match self.warp_path() {
-            WarpPath::Shared | WarpPath::Cluster => {
+            WarpPath::Shared | WarpPath::Cluster | WarpPath::Simt => {
                 let m = self.ballot(p);
                 let act = self.active();
                 let z = self.m.c_u32(0);
@@ -666,6 +682,7 @@ impl Ctx {
     pub(crate) fn all_equal(&mut self, v: u32) -> u32 {
         let b = self.boolt();
         match self.warp_path() {
+            WarpPath::Simt => self.simt_all_equal(v),
             WarpPath::Shared | WarpPath::Cluster => {
                 let act = self.active();
                 let u = self.u32t();
@@ -689,6 +706,7 @@ impl Ctx {
     pub(crate) fn reduce(&mut self, o: u16, v: u32) -> u32 {
         let u = self.u32t();
         match self.warp_path() {
+            WarpPath::Simt => self.simt_reduce(o, v),
             WarpPath::Shared => {
                 let (atomic, init) = match o {
                     spv::GROUP_AND => (spv::ATOMIC_AND, !0),

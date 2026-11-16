@@ -138,6 +138,9 @@ fn s2r(c: &mut Ctx, i: &Inst) -> Res<()> {
     };
     let v = match name.as_str() {
         "SRZ" => c.m.c_u32(0),
+        "SR_TID.X" | "SR_TID.Y" | "SR_TID.Z" if c.simt.is_some() => {
+            c.simt_tid(u32::from(name.as_bytes()[7] - b'X'))
+        }
         "SR_TID.X" => c.uvec3_input(BUILTIN_LOCAL_INVOCATION_ID, 0),
         "SR_TID.Y" => c.uvec3_input(BUILTIN_LOCAL_INVOCATION_ID, 1),
         "SR_TID.Z" => c.uvec3_input(BUILTIN_LOCAL_INVOCATION_ID, 2),

@@ -16,6 +16,7 @@ pub mod op {
     pub const TYPE_POINTER: u16 = 32;
     pub const TYPE_FUNCTION: u16 = 33;
     pub const CONSTANT: u16 = 43;
+    pub const CONSTANT_NULL: u16 = 46;
     pub const FUNCTION: u16 = 54;
     pub const FUNCTION_END: u16 = 56;
     pub const VARIABLE: u16 = 59;
@@ -319,6 +320,10 @@ impl Module {
         let mut a = vec![u32::from(opcode)];
         a.extend_from_slice(args);
         self.konst(op::SPEC_CONSTANT_OP, ty, &a)
+    }
+    /// `OpConstantNull` of `ty`.
+    pub fn c_null(&mut self, ty: u32) -> u32 {
+        self.konst(op::CONSTANT_NULL, ty, &[])
     }
     pub fn c_u32(&mut self, v: u32) -> u32 {
         let t = self.t_u32();
