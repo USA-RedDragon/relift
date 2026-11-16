@@ -2,7 +2,7 @@
 
 The Nintendo 64 guest. State: `relift import`, `build` and `run` take a
 ROM in any byte order and run it with every CPU and RSP instruction lifted;
-the RDP, audio, controllers and saves are not there yet.
+the RDP and audio are not there yet; controller 1 and the cartridge saves (SRAM, Flash and EEPROM, found by behavior) are.
 
 | Crate | Folder | Does |
 |---|---|---|
@@ -56,6 +56,14 @@ invalidation makes the next entry check again. An entry that no lifted run
 matches is missed code: the program stops with a report (and an RDRAM dump
 with `--dump`). Nothing is interpreted; `--stats` prints `interpreted 0`
 with the binding counters.
+
+Controller 1 reads the `p1` port (`bind.p1.<control>` settings, a gamepad
+or the keyboard: arrows for the stick, X, Z and C for A, B and Z, I, J, K,
+L for the C buttons, WASD for the pad). Saves go in the user folder's `save` folder as `<rom name>.eep`, `.sra` and `.fla` (`save.dir` or
+`--save BASE` change the place, `--no-save` turns it off); only the stores
+the game changed are written. EEPROM is reported as 16 Kbit unless a 512-byte
+`.eep` exists; a game that only addresses blocks below 64 works the same
+either way. The Controller Pak is absent.
 
 Tests build their input with `synth`; no game data is used.
 `relift/tests/e2e_n64.rs` builds and runs a synthetic ROM that loads a

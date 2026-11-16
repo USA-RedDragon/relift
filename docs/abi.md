@@ -2193,6 +2193,46 @@ the machine's SP interface drives through `runtime/guests/n64/run`.
   `rl_rsp_enter` back in every slot. A word no image matches is missed
   code: a report, IMEM and DMEM with `--dump`, and the program stops.
 
+### SI, the PIF and the cartridge's saves
+
+`runtime/guests/n64` models the serial interface, the PIF's joybus and the
+cartridge's save memory (ported from ares, ISC; see its `NOTICE`).
+
+- SI: the registers, a 64-byte DMA each way with the durations ares uses
+  (the block's time on the wire for PIF to RDRAM, 4065 RCP cycles for the
+  other), `SI_STATUS` with its busy, state and interrupt bits, and the
+  interrupt at the end. A CPU word write to the PIF's address space keeps SI
+  busy for 2150 RCP cycles, ignores a second write, and a read in that
+  window ends it and gives the latch. The PIF to RDRAM DMA runs the joybus
+  commands when it ends, so the game sees the controller at that moment.
+- The PIF is the high-level boot's: PIF ROM reads are 0 and the cartridge
+  boot chip's challenge (the command bit 0x02 some boot variants use) is not
+  answered. A block written to PIF RAM with the flag in byte 63 set is
+  parsed (channels 0 to 4; 0xFF padding, 0x00 skip, 0xFD reset, 0xFE end);
+  a block is run channel 4 first and channel 0 last, an empty or failing
+  channel's receive byte gets 0x80 and a reply longer than the command
+  allows 0x40.
+- A controller (`rl_n64_set_pad`, or the `p1` port of the native table with
+  `rl_n64_pad_use_ports`) answers status (pak absent), state (the button
+  word, then the stick x right and y up) and the Controller Pak commands as
+  an empty slot (zero data with the inverted data CRC). A port with nothing
+  plugged in is an error reply. L, R and Start together read as the reset
+  button with the stick centered; opposite directions cancel.
+- Saves: no table names a game's save type. SRAM answers at 0x08000000
+  (32 KiB, mirrored) until the game writes the Flash command register at
+  0x08010000, from when the 128 KiB Flash chip answers (a Macronix MX29L1101
+  with its command set, status and silicon ID, erase and program times).
+  EEPROM answers on joybus channel 4 and reports 16 Kbit (2048 bytes); a
+  512-byte `.eep` file found at load makes it 4 Kbit. Every store the game
+  changes is kept as a raw image next to the others under one base path:
+  `.eep`, `.sra`, `.fla`. They are written atomically a second after the
+  last change and at exit, only for the stores that changed; a flash file at
+  load makes the chip answer from the start.
+- Cartridge bus accesses go halfword by halfword through the selected
+  device (ROM, SRAM, Flash or none); an access to nothing gives the bus
+  latch, which holds the address. A CPU word write to the bus keeps the PI
+  busy for 400 ares clocks and a PI DMA to domain 2 writes the save memory.
+
 ### The Z80 layer
 
 `runtime/cpus/z80` (`relift/z80/abi.h`) is the CPU layer of the Z80

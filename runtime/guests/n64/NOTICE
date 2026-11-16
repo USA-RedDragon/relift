@@ -27,7 +27,7 @@ vi.c      the VI registers, the line counter, field and leap pattern, the
           interrupt line rules, the frame edge
                                    n64/vi/vi.cpp, io.cpp
 
-machine.c (MI, RI, AI, the boot words) save.c and code.c are
+machine.c (MI, RI, AI, the boot words), save.c and code.c are
 relift's own, written from the public n64brew documentation.
 
 ----------------------------------------------------------------------

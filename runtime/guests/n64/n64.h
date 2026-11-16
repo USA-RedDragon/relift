@@ -8,9 +8,10 @@
  * status, semaphore and signals, the RSP's start, halt and BREAK, run in
  * slices by the run layer), the DP command registers, VI (the registers,
  * the line counter, the
- * interrupt at its line and the raw framebuffer scan-out), AI and SI
- * registers, PIF RAM, the high-level boot and the binding of lifted code to
- * the RDRAM ranges the machine loads it to.
+ * interrupt at its line and the raw framebuffer scan-out), SI (DMA with its
+ * timing), the PIF's joybus with standard controllers, the cartridge's SRAM,
+ * Flash and EEPROM, the AI registers, the high-level boot and the binding
+ * of lifted code to the RDRAM ranges the machine loads it to.
  *
  * One scheduler tick is one CPU cycle (93.75 MHz). The machine knows no
  * CPU: the run layer (run/) passes the CPU's accesses to rl_n64_read and
