@@ -26,9 +26,11 @@
  * the handler whose address the game stored in its slot (DTCM + 0x3FFC on
  * the ARM9, 0x0380FFFC on the ARM7) and, when the handler returns to the
  * BIOS, unstacks and returns from the exception. SWI runs the high-level
- * BIOS calls the tests need; the cycles of both are not measured yet.
+ * BIOS (guests/nds/bios.c); the cycles of both are not measured yet.
  */
 #include "cpu.h"
+
+#include "bios.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -255,6 +257,29 @@ static void check_ticks(rl_nds_arm *k)
     rl_process_exit(RL_EXIT_SOFTWARE);
 }
 
+/**
+ * @brief Enters IRQ mode with LR = next + 4, stacks r0 to r3, r12 and LR,
+ * loads the handler the game stored and makes r0 and LR what the BIOS's
+ * handler leaves. Returns the handler's address (bit 0 set: Thumb).
+ */
+static uint32_t irq_frame(rl_nds_arm *k, uint32_t next)
+{
+    rl_ctx *c = k->c;
+    k->stats.irqs++;
+    rl_arm32_exception(c, RL_ARM32_IRQ, next + 4u);
+    k->i = 1;
+    uint32_t sp = c->r[13] - 24u;
+    const uint32_t saved[6] = {c->r[0], c->r[1], c->r[2], c->r[3], c->r[12], c->r[14]};
+    for (unsigned n = 0; n < 6; n++)
+        st32(k, sp + 4u * n, saved[n]);
+    c->r[13] = sp;
+    uint32_t h = ld32(k, irq_slot(k));
+    c->r[0] = 0x04000000u;
+    c->r[14] = k->id == RL_NDS_ARM9 ? BIOS_IRQ_RETURN9 : BIOS_IRQ_RETURN7;
+    rl_sched_stall(k->k, BIOS_CYCLES);
+    return h;
+}
+
 static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
 {
     (void)mem;
@@ -270,20 +295,8 @@ static uint64_t irq_enter(rl_ctx *c, uint8_t *mem, uint64_t next)
         rl_process_exit(RL_EXIT_SOFTWARE);
         return RL_NO_IRQ;
     }
-    k->stats.irqs++;
-    rl_arm32_exception(c, RL_ARM32_IRQ, (uint32_t)next + 4u);
-    k->i = 1;
-    uint32_t sp = c->r[13] - 24u;
-    const uint32_t saved[6] = {c->r[0], c->r[1], c->r[2], c->r[3], c->r[12], c->r[14]};
-    for (unsigned n = 0; n < 6; n++)
-        st32(k, sp + 4u * n, saved[n]);
-    c->r[13] = sp;
-    uint32_t h = ld32(k, irq_slot(k));
-    uint32_t ret = k->id == RL_NDS_ARM9 ? BIOS_IRQ_RETURN9 : BIOS_IRQ_RETURN7;
-    c->r[0] = 0x04000000u;
-    c->r[14] = ret;
-    rl_sched_stall(k->k, BIOS_CYCLES);
-    rl_arm32_call(c, ret);
+    uint32_t h = irq_frame(k, (uint32_t)next);
+    rl_arm32_call(c, c->r[14]);
     c->t = (uint8_t)(h & 1u);
     return h & (c->t ? ~1u : ~3u);
 }
@@ -310,18 +323,96 @@ static uint64_t irq_return(rl_ctx *c, uint8_t *mem, uint64_t expected)
     return to;
 }
 
-static uint32_t isqrt(uint32_t v)
+/** @brief Where a callback of a BIOS call returns to (a BIOS address of each CPU no code is lifted at). */
+#define BIOS_CALL_RETURN9 0xFFFF0298u
+#define BIOS_CALL_RETURN7 0x00000298u
+
+/** @brief Runs the guest function at fn for a BIOS call and returns its r0; the caller's registers and mode are kept. */
+static uint32_t bios_call(void *user, uint32_t fn, const uint32_t args[4])
 {
-    uint32_t r = 0;
-    for (uint32_t bit = 1u << 30; bit; bit >>= 2) {
-        if (v >= r + bit) {
-            v -= r + bit;
-            r = (r >> 1) + bit;
-        } else {
-            r >>= 1;
-        }
+    rl_nds_arm *k = user;
+    rl_ctx *c = k->c;
+    uint32_t regs[15], cpsr = rl_arm32_cpsr(c), ret = k->id == RL_NDS_ARM9 ? BIOS_CALL_RETURN9 : BIOS_CALL_RETURN7;
+    memcpy(regs, c->r, sizeof regs);
+    memcpy(c->r, args, 4 * sizeof args[0]);
+    c->r[14] = ret;
+    c->t = (uint8_t)(fn & 1u);
+    rl_sched_stall(k->k, BIOS_CYCLES);
+    int rc = rl_arm32_call_guest(c, NULL, fn & (c->t ? ~1u : ~3u), ret);
+    uint32_t r0 = c->r[0];
+    if (rc != RL_OK) {
+        rl_guest_fatal(c, "nds", "a callback of a BIOS call at 0x%08x did not return", fn);
+        rl_process_exit(RL_EXIT_SOFTWARE);
     }
-    return r;
+    rl_arm32_set_cpsr(c, cpsr);
+    memcpy(c->r, regs, sizeof regs);
+    return r0;
+}
+
+/**
+ * @brief The interrupt window of IntrWait: the caller's I bit (its SPSR in the
+ * SWI's exception) decides; an interrupt taken runs the game's handler to its
+ * return inside the call, then the SWI's registers and mode are back.
+ */
+static bool bios_irq(void *user)
+{
+    rl_nds_arm *k = user;
+    rl_ctx *c = k->c;
+    check_ticks(k);
+    uint32_t spsr = c->spsr[2];
+    if ((spsr & 0x80u) || !rl_nds_irq_poll(k->run->m, k->id))
+        return false;
+    if (k->id == RL_NDS_ARM9 && k->vectors != 0xFFFF0000u) {
+        rl_guest_fatal(c, "nds", "an IRQ with the ARM9's vectors at 0x%08x: only the BIOS's high vectors are implemented", k->vectors);
+        rl_process_exit(RL_EXIT_SOFTWARE);
+        return false;
+    }
+    uint32_t regs[15], cpsr = rl_arm32_cpsr(c), lr = c->r[14];
+    uint8_t thumb = c->t;
+    memcpy(regs, c->r, sizeof regs);
+    rl_arm32_set_cpsr(c, spsr);
+    uint32_t h = irq_frame(k, lr);
+    uint32_t ret = c->r[14], sp = c->r[13];
+    c->t = (uint8_t)(h & 1u);
+    int rc = rl_arm32_call_guest(c, NULL, h & (c->t ? ~1u : ~3u), ret);
+    if (rc != RL_OK) {
+        rl_guest_fatal(c, "nds", "an interrupt handler inside a BIOS call did not return");
+        rl_process_exit(RL_EXIT_SOFTWARE);
+        return false;
+    }
+    for (unsigned n = 0; n < 6; n++)
+        (void)ld32(k, sp + 4u * n);
+    rl_arm32_set_cpsr(c, cpsr);
+    memcpy(c->r, regs, sizeof regs);
+    c->t = thumb;
+    k->i = c->i;
+    rl_sched_stall(k->k, BIOS_CYCLES);
+    return true;
+}
+
+/** @brief SoftReset's CPU state: the three stacks, system mode, r0 to r12 zero, LR the return address; the code restarts there. */
+static int soft_reset(rl_nds_arm *k, const rl_nds_bios_reset *rs)
+{
+    rl_ctx *c = k->c;
+    rl_arm32_set_cpsr(c, RL_ARM32_IRQ | 0xC0u);
+    c->r[13] = rs->sp_irq;
+    c->r[14] = 0;
+    c->spsr[1] = 0;
+    rl_arm32_set_mode(c, RL_ARM32_SVC);
+    c->r[13] = rs->sp_svc;
+    c->r[14] = 0;
+    c->spsr[2] = 0;
+    rl_arm32_set_cpsr(c, RL_ARM32_SYS);
+    for (unsigned n = 0; n < 13; n++)
+        c->r[n] = 0;
+    c->r[13] = rs->sp_sys;
+    c->r[14] = rs->pc;
+    c->t = (uint8_t)(rs->pc & 1u);
+    k->i = c->i;
+    if (rs->cp15)
+        rl_nds_cpu_cp_write(c, RL_CP15_KEY(0, 1, 0, 0), RL_NDS_BIOS_RESET_CONTROL, 1);
+    clip(k);
+    return rl_arm32_redirect(c, rs->pc & (c->t ? ~1u : ~3u));
 }
 
 int rl_nds_swi_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
@@ -330,31 +421,30 @@ int rl_nds_swi_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
     rl_nds_arm *k = cpu_of(c);
     unsigned number = code & 0xFFu;
     k->stats.swis++;
-    rl_sched_stall(k->k, BIOS_CYCLES);
-    switch (number) {
-    case 0x06:
-        halt(k);
+    uint32_t r[4] = {c->r[0], c->r[1], c->r[2], c->r[3]};
+    rl_nds_bios_hooks hooks = {.user = k, .call = bios_call, .irq = bios_irq};
+    rl_nds_bios_reset reset = {0};
+    switch (rl_nds_bios_swi(k->run->m, k->id, number, r, &hooks, &reset)) {
+    case RL_NDS_SWI_STOP:
+        stop_halted(k);
         break;
-    case 0x09: {
-        int32_t n = (int32_t)c->r[0], d = (int32_t)c->r[1];
-        if (d == 0)
-            return rl_guest_fatal(c, "nds", "SWI Div by zero never returns on the console");
-        int32_t q = (n == INT32_MIN && d == -1) ? INT32_MIN : n / d;
-        int32_t rem = (n == INT32_MIN && d == -1) ? 0 : n % d;
-        c->r[0] = (uint32_t)q;
-        c->r[1] = (uint32_t)rem;
-        c->r[3] = q < 0 ? 0u - (uint32_t)q : (uint32_t)q;
-        break;
-    }
-    case 0x0D:
-        c->r[0] = isqrt(c->r[0]);
-        break;
-    default:
+    case RL_NDS_SWI_HANG:
+        return rl_guest_fatal(c, "nds", "%s SWI 0x%02x never returns on the console (a division by zero, or Halt with IME clear)", cpu_name(k),
+                              number);
+    case RL_NDS_SWI_RESET:
+        return soft_reset(k, &reset);
+    case RL_NDS_SWI_INVALID:
         k->stats.unknown_swis++;
-        rl_report_unknown(0x5357490000ull | (uint64_t)k->id << 8 | number, "nds", "%s SWI 0x%02x is not implemented; it does nothing",
-                          cpu_name(k), number);
+        return rl_guest_fatal(c, "nds", "%s SWI 0x%02x is no BIOS function: the console jumps to address 0", cpu_name(k), number);
+    case RL_NDS_SWI_UNKNOWN_RESULT:
+        rl_report_unknown(0x5357490000ull | (uint64_t)k->id << 8 | number, "nds",
+                          "%s SWI 0x%02x returns addresses of the BIOS's boot code, which are not known; it returns 0", cpu_name(k), number);
+        k->stats.unknown_swis++;
+        break;
+    case RL_NDS_SWI_OK:
         break;
     }
+    memcpy(c->r, r, sizeof r);
     rl_arm32_restore(c);
     k->i = c->i;
     clip(k);
