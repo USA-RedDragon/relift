@@ -134,3 +134,51 @@ fn streams_lists_offsets_and_sizes() {
     let out = n64rom(&d, &["streams", path(&f)]);
     assert_eq!(String::from_utf8_lossy(&out.stdout), "00002000 Yaz0 300\n");
 }
+
+/// `jal 0x80000500`.
+const JAL_500: u32 = 0x0C00_0140;
+/// `jr ra`.
+const JR_RA: u32 = 0x03E0_0008;
+/// `addiu v0, zero, 7`.
+const LI_V0_7: u32 = 0x2402_0007;
+
+#[test]
+fn functions_lists_the_code_reached_from_the_entry() {
+    let d = dir("n64rom-functions");
+    let mut be = sample();
+    be[0x1000..].fill(0);
+    let words: [u32; 6] = [JAL_500, 0, JR_RA, 0, 0, 0];
+    for (k, w) in words.iter().enumerate() {
+        be[0x1000 + 4 * k..0x1004 + 4 * k].copy_from_slice(&w.to_be_bytes());
+    }
+    for (k, w) in [LI_V0_7, JR_RA, 0].iter().enumerate() {
+        be[0x1100 + 4 * k..0x1104 + 4 * k].copy_from_slice(&w.to_be_bytes());
+    }
+    let f = put(&d, "f.v64", &ByteOrder::V64.encode(&be).unwrap());
+    let v = json(&n64rom(
+        &d,
+        &["functions", path(&f), "--json", "--cic", "6102"],
+    ));
+    assert_eq!(v["entry"], "80000400");
+    assert_eq!(v["boot"]["variant"], "6102/7101");
+    let fs = v["functions"].as_array().unwrap();
+    assert!(
+        fs.iter()
+            .any(|f| f["addr"] == "80000400" && f["origin"] == "entry")
+    );
+    assert!(
+        fs.iter()
+            .any(|f| f["addr"] == "80000500" && f["origin"] == "call")
+    );
+    let units = v["units"].as_array().unwrap();
+    assert!(
+        units
+            .iter()
+            .any(|u| u["link"] == "80000400" && u["len"] == 16)
+    );
+    let out = n64rom(&d, &["functions", path(&f), "--cic", "6102"]);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(text.contains("80000500 rom 00001100 call"), "{text}");
+    let out = n64rom(&d, &["functions", path(&f), "--cic", "1234"]);
+    assert!(!out.status.success());
+}
