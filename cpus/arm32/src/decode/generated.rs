@@ -98,6 +98,7 @@ pub enum Encoding {
     STRBT_A2,
     STR_r_A1,
     STRT_A2,
+    STM_uw_A1,
     B_A1,
     BL_i_A1,
     LDM_A1,
@@ -294,6 +295,7 @@ pub(crate) const NAMES: &[&str] = &[
     "STRBT_A2",
     "STR_r_A1",
     "STRT_A2",
+    "STM_uw_A1",
     "B_A1",
     "BL_i_A1",
     "LDM_A1",
@@ -802,6 +804,12 @@ pub(crate) static A32_MEDIA: &[(u32, u32, Option<Encoding>, &str)] = &[
 ];
 
 pub(crate) static A32_BRANCHBLOCK: &[(u32, u32, Option<Encoding>, &str)] = &[
+    (
+        0x0e700000,
+        0x08600000,
+        Some(Encoding::STM_uw_A1),
+        "STM_uw_A1",
+    ),
     (0x0f000000, 0x0a000000, Some(Encoding::B_A1), "B_A1"),
     (0x0f000000, 0x0b000000, Some(Encoding::BL_i_A1), "BL_i_A1"),
     (0xfe000000, 0xfa000000, None, "BL_i_A2"),
@@ -1509,6 +1517,12 @@ pub(crate) static V5TE_A32_MEDIA: &[(u32, u32, Option<Encoding>, &str)] = &[
 ];
 
 pub(crate) static V5TE_A32_BRANCHBLOCK: &[(u32, u32, Option<Encoding>, &str)] = &[
+    (
+        0x0e700000,
+        0x08600000,
+        Some(Encoding::STM_uw_A1),
+        "STM_uw_A1",
+    ),
     (0x0f000000, 0x0a000000, Some(Encoding::B_A1), "B_A1"),
     (0x0f000000, 0x0b000000, Some(Encoding::BL_i_A1), "BL_i_A1"),
     (0xfe000000, 0xfa000000, Some(Encoding::BL_i_A2), "BL_i_A2"),
@@ -2605,6 +2619,13 @@ pub(crate) static FORMS: &[(Encoding, u32, u32, bool, &str)] = &[
         0xe6200000,
         false,
         "__DecodeA32_LoadStoreReg",
+    ),
+    (
+        Encoding::STM_uw_A1,
+        0xfe700000,
+        0xe8600000,
+        false,
+        "__DecodeA32_BranchBlock",
     ),
     (
         Encoding::B_A1,
@@ -3885,6 +3906,13 @@ pub(crate) static V5TE_FORMS: &[(Encoding, u32, u32, bool, &str)] = &[
         0xe6200000,
         false,
         "__DecodeA32_LoadStoreReg",
+    ),
+    (
+        Encoding::STM_uw_A1,
+        0xfe700000,
+        0xe8600000,
+        false,
+        "__DecodeA32_BranchBlock",
     ),
     (
         Encoding::B_A1,

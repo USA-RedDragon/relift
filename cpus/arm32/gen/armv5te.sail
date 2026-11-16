@@ -29,7 +29,7 @@ $relift allow MOV_i_A1 MOV_r_A1 MOV_rr_A1 MVN_i_A1 MVN_r_A1 MVN_rr_A1
 $relift allow B_A1 BL_i_A1 BX_A1 SVC_A1
 $relift allow MRS_A1 MSR_i_A1 MSR_r_A1
 $relift allow LDM_A1 LDMDA_A1 LDMDB_A1 LDMIB_A1 STM_A1 STMDA_A1 STMDB_A1 STMIB_A1
-$relift allow LDM_e_A1 LDM_u_A1 STM_u_A1
+$relift allow LDM_e_A1 LDM_u_A1 STM_u_A1 STM_uw_A1
 $relift allow LDR_i_A1 LDR_r_A1 LDRB_i_A1 LDRB_r_A1 LDRT_A1 LDRT_A2 LDRBT_A1 LDRBT_A2
 $relift allow STR_i_A1 STR_r_A1 STRB_i_A1 STRB_r_A1 STRT_A1 STRT_A2 STRBT_A1 STRBT_A2
 $relift allow LDRH_i_A1 LDRH_r_A1 STRH_i_A1 STRH_r_A1
@@ -508,6 +508,42 @@ function execute_aarch32_instrs_STM_u_Op_AS_txt (increment_name, n, registers, w
         __v4t_write(address[31 .. 2] @ 0b00, 4, PCStoreValue())
     };
     ()
+}
+
+/* STM with the S bit and base writeback: the user bank's registers, then
+ * the base of the current mode written back. Documented as "should not be
+ * used" (GBATEK) and unpredictable (ARM ARM), but the DS SDK's IRQ thread
+ * switch saves a thread's context with it and relies on the writeback. */
+val decode_aarch32_instrs_STM_uw_A1enc_AS_txt : (bits(4), bits(1), bits(1), bits(4), bits(16)) -> unit
+function decode_aarch32_instrs_STM_uw_A1enc_AS_txt (cond, P, U, Rn, register_list) = {
+    if ConditionPassed() then {
+        let 'n = UInt(Rn);
+        let 'c = __v4t_count(register_list);
+        let base : bits(32) = R_read(n);
+        let low : bits(32) = if U == 0b1 then base else base - 4 * c;
+        address : bits(32) = if P == U then low + 4 else low;
+        foreach (i from 0 to 14 by 1 in inc) {
+            if [register_list[i]] == 0b1 then {
+                __v4t_write(address[31 .. 2] @ 0b00, 4, Rmode_read(i, M32_User));
+                address = address + 4
+            };
+            ()
+        };
+        if [register_list[15]] == 0b1 then {
+            __v4t_write(address[31 .. 2] @ 0b00, 4, PCStoreValue())
+        };
+        R_set(n) = if U == 0b1 then base + 4 * c else base - 4 * c
+    };
+    ()
+}
+
+function clause __DecodeA32_BranchBlock ((pc, ([_, _, _, _, bitone, bitzero, bitzero, _, _, bitone, bitone, bitzero, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _] as __opcode)) if Slice(__opcode, 28, 4) != 0b1111) = {
+    let cond = Slice(__opcode, 28, 4);
+    let P = Slice(__opcode, 24, 1);
+    let U = Slice(__opcode, 23, 1);
+    let Rn = Slice(__opcode, 16, 4);
+    let register_list = Slice(__opcode, 0, 16);
+    decode_aarch32_instrs_STM_uw_A1enc_AS_txt(cond, P, U, Rn, register_list)
 }
 
 function execute_aarch32_instrs_LDM_Op_A_txt (n, registers, wback) = {
