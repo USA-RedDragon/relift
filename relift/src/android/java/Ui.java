@@ -112,6 +112,12 @@ final class Ui {
         root.setClickable(true);
         root.setFocusable(true);
         root.setVisibility(View.GONE);
+        root.setOnApplyWindowInsetsListener((v, in) -> {
+            android.graphics.Insets b = in.getInsets(android.view.WindowInsets.Type.systemBars()
+                    | android.view.WindowInsets.Type.displayCutout());
+            v.setPadding(b.left, b.top, b.right, b.bottom);
+            return in;
+        });
         root.addOnLayoutChangeListener((v, l0, t0, r0, b0, l1, t1, r1, b1) -> {
             if (r0 - l0 != r1 - l1 || b0 - t0 != b1 - t1) {
                 main.post(this::render);
@@ -1077,9 +1083,11 @@ final class Ui {
         TextView t = text(title, 52, Color.WHITE, true);
         t.setGravity(Gravity.CENTER_VERTICAL);
         t.setSingleLine(true);
-        FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
         tl.leftMargin = px(100);
+        tl.rightMargin = px(dots ? 120 : 30);
         bar.addView(t, tl);
         if (dots) {
             Dots d = new Dots();
