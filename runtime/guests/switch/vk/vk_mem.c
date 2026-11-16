@@ -248,6 +248,43 @@ static bool chain_has(const void *chain, VkStructureType s)
     return false;
 }
 
+/** @brief The host memory types the buffer or image of a dedicated allocation may use; all of them when it has none. */
+static uint32_t dedicated_type_bits(vkf_call *k, VkDevice dev, const VkMemoryAllocateInfo *ai)
+{
+    for (const VkBaseInStructure *b = ai->pNext; b; b = b->pNext) {
+        if (b->sType != VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO)
+            continue;
+        const VkMemoryDedicatedAllocateInfo *ded = (const VkMemoryDedicatedAllocateInfo *)b;
+        VkMemoryRequirements mr;
+        memset(&mr, 0, sizeof mr);
+        if (ded->buffer)
+            VKF_FN(k->fns, vkGetBufferMemoryRequirements)(dev, ded->buffer, &mr);
+        else if (ded->image)
+            VKF_FN(k->fns, vkGetImageMemoryRequirements)(dev, ded->image, &mr);
+        else
+            break;
+        return mr.memoryTypeBits;
+    }
+    return UINT32_MAX;
+}
+
+/**
+ * @brief A host type that takes imported host pointers in place of type t: one of
+ * accept with every property of t and no AMD device-coherence it lacks; t itself
+ * when t takes them, -1 when none does.
+ */
+static int import_type(const vkf_dev *d, uint32_t t, uint32_t accept)
+{
+    if (accept & (1u << t))
+        return (int)t;
+    const uint32_t amd = 0xc0u;
+    for (uint32_t i = 0; i < 32; i++)
+        if ((accept & (1u << i)) && (d->type_flags[i] & d->type_flags[t]) == d->type_flags[t] &&
+            !(d->type_flags[i] & amd & ~d->type_flags[t]))
+            return (int)i;
+    return -1;
+}
+
 static bool drop_optional_dedication(vkf_call *k, VkDevice dev, VkMemoryAllocateInfo *ai)
 {
     for (VkBaseOutStructure *prev = (VkBaseOutStructure *)ai; prev->pNext; prev = prev->pNext) {
@@ -297,6 +334,7 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
         ai->allocationSize = (ai->allocationSize + align - 1) & ~(align - 1);
     }
     if (visible && r->mode == RL_VK_MAP_IMPORT) {
+        uint32_t allowed = dedicated_type_bits(&k, dev, ai);
         bool plain = !chain_has(ai->pNext, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO) &&
                      drop_optional_dedication(&k, dev, ai);
         uint64_t align = d->import_align ? d->import_align : 4096;
@@ -306,8 +344,14 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
         bool ok = false;
         if (va && hpp && !vkf_vm_set(va, size, RL_VM_RW, RL_VM_FRESH)) {
             VkMemoryHostPointerPropertiesEXT props = { .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT };
-            ok = hpp(dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, mem + va, &props) >= 0 &&
-                 (props.memoryTypeBits & (1u << ai->memoryTypeIndex));
+            int t = hpp(dev, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, mem + va, &props) >= 0
+                        ? import_type(d, ai->memoryTypeIndex, props.memoryTypeBits & (allowed == UINT32_MAX ? 1u << ai->memoryTypeIndex : allowed))
+                        : -1;
+            ok = t >= 0;
+            if (ok && (uint32_t)t != ai->memoryTypeIndex) {
+                ai->memoryTypeIndex = (uint32_t)t;
+                r->flags = d->type_flags[t];
+            }
         }
         if (ok) {
             VkImportMemoryHostPointerInfoEXT *imp = vkf_alloc(&k, sizeof *imp);
