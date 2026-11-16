@@ -548,10 +548,30 @@ impl Ctx {
     }
 }
 
+/// BRA.DIV and BRA.CONV pick between a fast path that needs the warp
+/// converged and a slow path that makes it so before calling a helper.
+/// Subgroup operations are already defined for any set of active lanes,
+/// so the fast path is always right: BRA.DIV never branches and BRA.CONV
+/// always does.
+fn converged(mut i: Inst) -> Inst {
+    if i.mnemonic != "BRA" {
+        return i;
+    }
+    if i.has("DIV") {
+        return Inst::new("NOP");
+    }
+    if i.has("CONV") {
+        i.mods.retain(|m| *m != "CONV");
+        i.ops.retain(|o| matches!(o, Operand::Target(_)));
+    }
+    i
+}
+
 fn decode_all(p: &Program) -> Res<Code> {
     let mut insts = Vec::new();
     for (n, d) in p.decode().into_iter().enumerate() {
-        insts.push(d.map_err(|e| Unsupported(format!("decode at {:#x}: {e}", 16 * n)))?);
+        let i = d.map_err(|e| Unsupported(format!("decode at {:#x}: {e}", 16 * n)))?;
+        insts.push(converged(i));
     }
     Ok(Code {
         insts,

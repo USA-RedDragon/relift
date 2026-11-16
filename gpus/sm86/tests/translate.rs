@@ -141,6 +141,44 @@ fn bra(at: usize, to: usize, pred: Option<u64>) -> [u8; 16] {
     word(0x147, 4, &f)
 }
 
+fn bra_mode(at: usize, to: usize, mode: u64) -> [u8; 16] {
+    let rel = (to as i64 * 16 - (at as i64 * 16 + 16)) / 4;
+    word(
+        0x147,
+        4,
+        &[
+            (32, 2, mode),
+            (34, 48, (rel as u64) & 0xffff_ffff_ffff),
+            (87, 3, 7),
+        ],
+    )
+}
+
+fn unsupported() -> [u8; 16] {
+    word(0x150, 4, &[(24, 8, 4), (86, 1, 1), (87, 3, 7)])
+}
+
+#[test]
+fn divergent_branch_never_leaves_the_fast_path() {
+    let mut b = Vec::new();
+    b.extend(bra_mode(0, 3, 2));
+    b.extend(word(0x14d, 4, &[(87, 3, 7)]));
+    b.extend(word(0x14d, 4, &[(87, 3, 7)]));
+    b.extend(unsupported());
+    exit_and_halt(&mut b);
+    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+fn converged_branch_always_leaves_the_slow_path() {
+    let mut b = Vec::new();
+    b.extend(bra_mode(0, 2, 3));
+    b.extend(unsupported());
+    b.extend(word(0x14d, 4, &[(87, 3, 7)]));
+    exit_and_halt(&mut b);
+    translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+}
+
 fn spirv_has(words: &[u32], opcode: u32) -> bool {
     let mut k = 5;
     while k < words.len() {
