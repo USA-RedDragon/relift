@@ -405,6 +405,8 @@ struct rl_thread {
     uint64_t host_tid;
     /** @brief The scheduler clock of this thread's CPU (rl_sched_attach), or NULL. */
     struct rl_sched_cpu *clock;
+    /** @brief Set by rl_dispatch_own: the context's dispatch view is a table of its own. */
+    bool own_view;
 };
 
 /** @brief The calling host thread's runtime thread, NULL for a host-only thread. */
@@ -612,6 +614,14 @@ RL_RUNTIME_API void rl_units_reset(void);
 RL_RUNTIME_API void rl_dispatch_view(rl_ctx *c);
 /** @brief The registered function at guest address a, or NULL (host-side lookup; lifted code uses its CPU layer's inline one). */
 RL_RUNTIME_API rl_fn rl_dispatch_find(uint64_t a);
+/**
+ * @brief Gives c a dispatch table of its own: count slots, one per code
+ * granule from guest address lo, which stay the caller's. For a guest layer
+ * whose CPUs see different code at the same addresses.
+ */
+RL_RUNTIME_API void rl_dispatch_own(rl_ctx *c, rl_fn *table, uint64_t lo, uint64_t count);
+/** @brief The function at guest address a in c's own table (rl_dispatch_own), else as rl_dispatch_find; NULL for none. */
+RL_RUNTIME_API rl_fn rl_dispatch_find_ctx(rl_ctx *c, uint64_t a);
 
 /** @brief Guest memory base used by runtime entries that get only a context. */
 RL_RUNTIME_API uint8_t *rl_mem_base(void);

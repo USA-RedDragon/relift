@@ -11,6 +11,7 @@
 #include <stdio.h>
 
 static rl_arm32_stats g_stats;
+static rl_fn g_miss;
 static uint64_t g_irq_lines;
 static uint64_t g_other_lines;
 
@@ -202,7 +203,7 @@ int rl_arm32_redirect(rl_ctx *c, uint32_t pc)
 static int enter(rl_ctx *c, uint8_t *mem, uint32_t pc)
 {
     c->pc = pc;
-    rl_fn fn = rl_dispatch_find(pc);
+    rl_fn fn = rl_dispatch_find_ctx(c, pc);
     return fn ? fn(c, mem) : rl_dispatch_miss(c, mem);
 }
 
@@ -324,9 +325,13 @@ static const rl_cpu_desc g_arm32 = {
 
 const rl_cpu_desc *rl_arm32_cpu(void) { return &g_arm32; }
 
+void rl_arm32_set_miss(rl_fn miss) { g_miss = miss; }
+
 uint64_t rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     g_stats.misses++;
+    if (g_miss)
+        return g_miss(c, mem);
     return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
 }
 
@@ -335,6 +340,8 @@ uint64_t rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
     g_stats.misses++;
     rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
     c->pend.pc = 0;
+    if (g_miss)
+        return g_miss(c, mem);
     return rl_core_miss_at(c, mem, &m);
 }
 

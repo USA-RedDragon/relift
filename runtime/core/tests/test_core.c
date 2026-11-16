@@ -337,6 +337,15 @@ TEST(core_dispatch_uses_the_code_granule)
     CHECK_EQ(rl_units_register(list, 1), 0);
     CHECK(rl_dispatch_find(0x1002) == fn_a);
     CHECK(rl_dispatch_find(0x1000) == fn_a);
+    CHECK(rl_dispatch_find_ctx(t->ctx, 0x1000) == fn_a);
+    rl_fn own[2] = {fn_b, NULL};
+    rl_dispatch_own(t->ctx, own, 0x2000, 2);
+    CHECK(t->ctx->k.disp_table == own);
+    CHECK(rl_dispatch_find_ctx(t->ctx, 0x2000) == fn_b);
+    CHECK(rl_dispatch_find_ctx(t->ctx, 0x2002) == NULL);
+    CHECK(rl_dispatch_find_ctx(t->ctx, 0x2001) == NULL);
+    CHECK(rl_dispatch_find_ctx(t->ctx, 0x1000) == NULL);
+    CHECK(rl_dispatch_find(0x1000) == fn_a);
     rl_thread_free(t);
 }
 

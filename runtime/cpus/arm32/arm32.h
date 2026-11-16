@@ -67,6 +67,9 @@ RL_RUNTIME_API int rl_arm32_run(rl_ctx *c, uint8_t *mem, uint64_t pc);
  */
 RL_RUNTIME_API int rl_arm32_call_guest(rl_ctx *c, uint8_t *mem, uint32_t pc, uint32_t ret);
 
+/** @brief Sets what a dispatch miss runs instead of the core's report (the target is in c->pc), or NULL for the core's. */
+RL_RUNTIME_API void rl_arm32_set_miss(rl_fn miss);
+
 /** @brief Ends the run with a redirect to pc: the run loop goes on there with no open host frame. Returns RL_PENDING. */
 RL_RUNTIME_API int rl_arm32_redirect(rl_ctx *c, uint32_t pc);
 

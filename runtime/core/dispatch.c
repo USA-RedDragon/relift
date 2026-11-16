@@ -68,6 +68,28 @@ rl_fn rl_dispatch_find(uint64_t a)
     return i < g_count ? __atomic_load_n(&g_table[i], __ATOMIC_ACQUIRE) : NULL;
 }
 
+void rl_dispatch_own(rl_ctx *c, rl_fn *table, uint64_t lo, uint64_t count)
+{
+    rl_ctx_common *k = rl_common(c);
+    k->disp_table = table;
+    k->disp_lo = lo;
+    k->disp_count = count;
+    if (k->thread)
+        k->thread->own_view = true;
+}
+
+rl_fn rl_dispatch_find_ctx(rl_ctx *c, uint64_t a)
+{
+    const rl_ctx_common *k = rl_common(c);
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    if (!k->thread || !k->thread->own_view || !cpu)
+        return rl_dispatch_find(a);
+    if (!k->disp_table || a < k->disp_lo || (a & ((1ull << cpu->code_shift) - 1)))
+        return NULL;
+    uint64_t i = (a - k->disp_lo) >> cpu->code_shift;
+    return i < k->disp_count ? __atomic_load_n(&k->disp_table[i], __ATOMIC_ACQUIRE) : NULL;
+}
+
 const uint8_t *rl_dispatch_image(void) { return g_have_image ? g_image : NULL; }
 
 void rl_dispatch_set_image(const uint8_t *id)
