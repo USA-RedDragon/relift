@@ -58,3 +58,24 @@ which runs MUFU on every input of each table's range on the device (about
 80 million inputs, a few seconds) and solves each row, with numpy and scipy,
 in about fifteen seconds. The mufu_* vectors check the translated model
 against independent device outputs.
+
+## Task and mesh programs
+
+    CARGO_TARGET_DIR=<dir> python3 -I kat/mesh/kat.py <absolute work dir> [--record tests/kat/mesh.txt] [case ...]
+
+needs the NVIDIA device with `VK_EXT_mesh_shader` and `VK_NV_mesh_shader`,
+glslangValidator, spirv-val, zstd, the Vulkan headers and a release build of
+`relift-shaders` and the `mesh` example. Each case under `kat/mesh/cases`
+(GLSL task, mesh and fragment shaders and `case.json`: the pipeline state,
+the draw and the blend) is drawn by the driver, which also leaves its SASS
+in the pipeline cache; `relift-shaders` carves the programs from it, both
+back ends translate them, and `mrun.c` draws the native translation and the
+compute back end. All three images must agree word for word (blending makes
+the primitive order visible). `--record` writes the SASS and pipelines that
+`tests/mesh.rs` translates for every host.
+
+Cost on a 3090, for draws of 4000 and 16000 tasks of 2 or 3 meshes of 64
+triangles (culled, so the draw is geometry only): native task and mesh
+76 and 270 microseconds; compute back end task pass 10 and 18, task scan 17
+and 45, mesh pass 51 and 181, mesh scan 36 and 175, draw 90 and 332, in
+all about 2.7 and 2.8 times the native time.

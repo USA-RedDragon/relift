@@ -1,0 +1,14 @@
+#version 460
+#extension GL_NV_mesh_shader : require
+layout(local_size_x = 32) in;
+layout(points, max_vertices = 32, max_primitives = 32) out;
+layout(location = 0) out vec4 o[];
+void main() {
+    uint i = gl_LocalInvocationID.x;
+    uint w = gl_WorkGroupID.x;
+    gl_MeshVerticesNV[i].gl_Position = vec4(float(i % 8) / 4.0 - 0.9, float(i / 8) / 4.0 - 0.9 + float(w) * 0.1, 0.5, 1.0);
+    gl_MeshVerticesNV[i].gl_PointSize = 1.0 + float(i % 3);
+    o[i] = vec4(float(i), float(w), 1.0, 1.0);
+    gl_PrimitiveIndicesNV[i] = (i * 7u) % 32u;
+    if (i == 0) gl_PrimitiveCountNV = 30 - w;
+}

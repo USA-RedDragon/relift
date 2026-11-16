@@ -1,0 +1,16 @@
+{
+ "pipeline": {
+  "max_vertices": 40,
+  "max_primitives": 20,
+  "topology": "tri",
+  "task_lanes": 32,
+  "mesh_lanes": 32,
+  "payload_bytes": 128
+ },
+ "draw": [
+  3,
+  0
+ ],
+ "fragment_per_primitive": 2,
+ "primitive_id_location": 7
+}

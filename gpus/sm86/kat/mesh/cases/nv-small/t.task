@@ -1,0 +1,8 @@
+#version 460
+#extension GL_NV_mesh_shader : require
+layout(local_size_x = 16) in;
+taskNV out Task { uint a[4]; } t;
+void main() {
+    if (gl_LocalInvocationID.x < 4) t.a[gl_LocalInvocationID.x] = gl_WorkGroupID.x * 10u + gl_LocalInvocationID.x;
+    if (gl_LocalInvocationID.x == 0 && gl_WorkGroupID.x != 1u) gl_TaskCountNV = 2u;
+}

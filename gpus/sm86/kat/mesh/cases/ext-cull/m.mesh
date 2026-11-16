@@ -1,0 +1,26 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+layout(local_size_x = 32) in;
+layout(triangles, max_vertices = 48, max_primitives = 40) out;
+struct P { uint a[8]; };
+taskPayloadSharedEXT P p;
+layout(location = 0) out vec4 o[];
+layout(location = 2) perprimitiveEXT flat out uint r[];
+out gl_MeshPerVertexEXT { vec4 gl_Position; float gl_ClipDistance[2]; } gl_MeshVerticesEXT[];
+void main() {
+    uint i = gl_LocalInvocationIndex;
+    uint w = gl_WorkGroupID.x;
+    SetMeshOutputsEXT(48, 40 - w);
+    for (uint v = i; v < 48; v += 32) {
+        gl_MeshVerticesEXT[v].gl_Position = vec4(float(v % 8) / 4.0 - 1.0, float(v / 8) / 3.0 - 1.0 + float(w) * 0.05, 0.5, 1.0);
+        gl_MeshVerticesEXT[v].gl_ClipDistance[1] = float(v % 5) - 1.0;
+        gl_MeshVerticesEXT[v].gl_ClipDistance[0] = 1.0;
+        o[v] = vec4(float(p.a[v % 8u]), float(w), float(v), 1.0);
+    }
+    for (uint q = i; q < 40 - w; q += 32) {
+        gl_PrimitiveTriangleIndicesEXT[q] = uvec3(q, q + 1, q + 8);
+        gl_MeshPrimitivesEXT[q].gl_CullPrimitiveEXT = (q % 3u) == w % 3u;
+        gl_MeshPrimitivesEXT[q].gl_PrimitiveID = int(q * 3u + w);
+        r[q] = q + 9u;
+    }
+}

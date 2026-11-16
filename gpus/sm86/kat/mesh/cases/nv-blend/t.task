@@ -1,0 +1,11 @@
+#version 460
+#extension GL_NV_mesh_shader : require
+#extension GL_KHR_shader_subgroup_ballot : require
+layout(local_size_x = 32) in;
+taskNV out Task { uint a[8]; } t;
+void main() {
+    uint i = gl_LocalInvocationID.x;
+    uvec4 b = subgroupBallot(((i * 7u + gl_WorkGroupID.x) % 3u) != 0u);
+    if (i < 8) t.a[i] = b.x >> i;
+    if (i == 0) gl_TaskCountNV = 1u + (gl_WorkGroupID.x % 4u);
+}

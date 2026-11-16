@@ -1,0 +1,9 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+layout(local_size_x = 32) in;
+struct P { uint a[8]; };
+taskPayloadSharedEXT P p;
+void main() {
+    if (gl_LocalInvocationIndex < 8) p.a[gl_LocalInvocationIndex] = gl_WorkGroupID.x * 10u + gl_LocalInvocationIndex;
+    EmitMeshTasksEXT(2u + gl_WorkGroupID.x, 1u, 1u);
+}
