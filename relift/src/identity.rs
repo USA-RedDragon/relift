@@ -206,6 +206,36 @@ pub fn from_gba(rom: &[u8]) -> Result<(Identity, Save), Malformed> {
     Ok((id, save))
 }
 
+/// The identity of a Nintendo DS cartridge: the title, game code and
+/// version of its header. Saves are not read yet, so the save is `none`.
+///
+/// # Errors
+///
+/// The image is shorter than the header's first 0x20 bytes.
+pub fn from_nds(rom: &[u8]) -> Result<(Identity, Save), Malformed> {
+    if rom.len() < 0x20 {
+        return Err(Malformed(format!(
+            "a DS image of {} bytes; the header needs 0x20",
+            rom.len()
+        )));
+    }
+    let code = text(&rom[0x0C..0x10]);
+    let mut names = BTreeMap::new();
+    names.insert("default".to_string(), text(&rom[..0x0C]));
+    let id = Identity {
+        platform: "nds".into(),
+        title_id: (!code.is_empty()).then_some(code),
+        names,
+        version: Some(rom[0x1E].to_string()),
+        ..Identity::default()
+    };
+    let save = Save {
+        kind: "none".into(),
+        ..Save::default()
+    };
+    Ok((id, save))
+}
+
 /// The identity of a patched ROM: its own `patched` identity plus the
 /// original as `base`, the patch, and `base_mismatch` when the base the
 /// patch declared (`declared_base`, a hash) is not the base's `actual_base`

@@ -471,9 +471,10 @@ pub fn data_c(units: usize) -> String {
     s
 }
 
-/// `program.c`: the units with their entry checks and `main`.
+/// `program.c`: the units with their entry checks and `main`, which runs
+/// with the options `args` before the command line's.
 #[must_use]
-pub fn program_c(title: &str, units: &[LiftedUnit]) -> String {
+pub fn program_c(title: &str, units: &[LiftedUnit], args: &[String]) -> String {
     let mut s = String::from(
         "#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n#include \"ndsmain.h\"\n",
     );
@@ -512,11 +513,17 @@ pub fn program_c(title: &str, units: &[LiftedUnit]) -> String {
             c_string(&u.dir)
         );
     }
+    s.push_str("};\nstatic const char *const args[] = {\n");
+    for a in args {
+        let _ = writeln!(s, "    {},", c_string(a));
+    }
+    s.push_str("    NULL,\n};\n");
     let _ = write!(
         s,
-        "}};\nextern const uint8_t rl_nds_rom[];\nextern const size_t rl_nds_rom_len;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_nds_program prog = {{ rl_nds_rom, rl_nds_rom_len, units, {}u, {} }};\n    return rl_nds_main(&prog, argc, argv);\n}}\n",
+        "extern const uint8_t rl_nds_rom[];\nextern const size_t rl_nds_rom_len;\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\nint main(int argc, char **argv)\n{{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n    rl_nds_program prog = {{ rl_nds_rom, rl_nds_rom_len, units, {}u, {}, args, {}u }};\n    return rl_nds_main(&prog, argc, argv);\n}}\n",
         units.len(),
-        c_string(title)
+        c_string(title),
+        args.len()
     );
     s
 }
@@ -597,10 +604,14 @@ mod tests {
     fn the_program_lists_each_unit_with_its_checks() {
         let code9 = arm(&[0xEAFF_FFFE]);
         let l = lifted(&rom(&code9, &code9));
-        let c = program_c("T\"", &l.units);
+        let c = program_c("T\"", &l.units, &["--peek".into(), "0x10".into()]);
         assert!(c.contains("static const rl_nds_fn fns0[] = {\n    { 0x2000000u, 0x0u, 0x4u, nds9_static_a_02000000 },"), "{c}");
         assert!(c.contains("{ RL_NDS_ARM7, &rl_unit_nds_arm7_"), "{c}");
-        assert!(c.contains("units, 2u, \"T\\\"\" }"), "{c}");
+        assert!(c.contains("units, 2u, \"T\\\"\", args, 2u }"), "{c}");
+        assert!(
+            c.contains("    \"--peek\",\n    \"0x10\",\n    NULL,"),
+            "{c}"
+        );
         let d = data_c(2);
         assert!(d.contains("#embed \"unit1.bin\" if_empty(0)"), "{d}");
     }

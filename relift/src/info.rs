@@ -408,6 +408,23 @@ pub fn n64_document(
     info
 }
 
+/// The document of a Nintendo DS build: identity from the cartridge header,
+/// no save yet, no input ports yet.
+///
+/// # Errors
+///
+/// The header is too short.
+pub fn nds_document(name: &str, rom: &[u8], settings: Vec<Setting>) -> Result<Info, BoxError> {
+    let (id, save) = identity::from_nds(rom)?;
+    let mut info = Info::new(env!("CARGO_PKG_VERSION"));
+    info.identity = id;
+    info.identity.names = std::iter::once(("default".to_string(), name.to_string())).collect();
+    info.identity.default_language = info.identity.first_language();
+    info.save = save;
+    info.settings = game_settings::section(settings);
+    Ok(info)
+}
+
 /// The stored `mods` section with the run-time state a running binary
 /// reports (`rl_hos_mods_json`: `active` and `conflicts`), as one section.
 ///

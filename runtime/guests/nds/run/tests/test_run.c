@@ -140,7 +140,7 @@ static void make_program(void)
         g_fns[u] = (rl_nds_fn){at[u], 0, CODE_LEN, fns[u]};
         g_nds_units[u] = (rl_nds_unit){cpus[u], &g_units[u], blobs[u], &g_fns[u], 1, "test"};
     }
-    g_prog = (rl_nds_program){g_rom, sizeof g_rom, g_nds_units, 3, "test"};
+    g_prog = (rl_nds_program){g_rom, sizeof g_rom, g_nds_units, 3, "test", NULL, 0};
 }
 
 static int run_once(rl_nds_run *r, uint8_t first9)

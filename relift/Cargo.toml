@@ -26,6 +26,9 @@ relift-gb-formats = { workspace = true }
 relift-gba = { workspace = true }
 relift-gba-analyze = { workspace = true }
 relift-gba-formats = { workspace = true }
+relift-nds = { workspace = true }
+relift-nds-analyze = { workspace = true }
+relift-nds-formats = { workspace = true }
 relift-guest = { workspace = true }
 relift-host = { workspace = true }
 relift-info = { workspace = true }

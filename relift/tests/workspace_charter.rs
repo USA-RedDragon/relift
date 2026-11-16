@@ -68,7 +68,7 @@ struct Charter {
 const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries or are not wired into `relift` yet
-/// (`relift-emit-wasm` until a browser build uses it, `relift-nds-formats` and `relift-nds-analyze` until a guest uses them), so the reachability controls skip them; the
+/// (`relift-emit-wasm` until a browser build uses it), so the reachability controls skip them; the
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-cpu-arm32",
@@ -80,9 +80,6 @@ const STANDALONE: &[&str] = &[
     "relift-gb-tools",
     "relift-gba-tools",
     "relift-n64-tools",
-    "relift-nds",
-    "relift-nds-analyze",
-    "relift-nds-formats",
     "relift-nds-tools",
     "relift-sms-formats",
     "relift-sms-tools",
@@ -666,6 +663,9 @@ const CHARTERS: &[Charter] = &[
             "relift-n64",
             "relift-n64-analyze",
             "relift-n64-formats",
+            "relift-nds",
+            "relift-nds-analyze",
+            "relift-nds-formats",
             "relift-patch",
             "relift-proc",
             "relift-progress",

@@ -66,20 +66,20 @@ static const char *arg_value(int argc, char **argv, int *i)
     return argv[++*i];
 }
 
-int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
+/** @brief Reads the options of argv from index first on; returns 0, or 2 for an unknown one. */
+static int options(int argc, char **argv, int first, uint64_t *max_ticks)
 {
-    memset(&H, 0, sizeof H);
-    uint64_t max_ticks = 0;
-    rl_settings_args(argc, argv);
-    for (int i = 1; i < argc; i++) {
+    for (int i = first; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--headless"))
             continue;
         if (!strcmp(a, "--max-ticks"))
-            max_ticks = strtoull(arg_value(argc, argv, &i), NULL, 0);
-        else if (!strcmp(a, "--peek") && H.peeks < PEEKS)
-            H.peek[H.peeks++] = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 0);
-        else if (!strcmp(a, "--stats"))
+            *max_ticks = strtoull(arg_value(argc, argv, &i), NULL, 0);
+        else if (!strcmp(a, "--peek")) {
+            uint32_t at = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 0);
+            if (H.peeks < PEEKS)
+                H.peek[H.peeks++] = at;
+        } else if (!strcmp(a, "--stats"))
             H.stats = true;
         else if (!strncmp(a, "--relift-", 9))
             i += strchr(a, '=') ? 0 : 1;
@@ -88,6 +88,16 @@ int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
             return 2;
         }
     }
+    return 0;
+}
+
+int rl_nds_main(const rl_nds_program *p, int argc, char **argv)
+{
+    memset(&H, 0, sizeof H);
+    uint64_t max_ticks = 0;
+    rl_settings_args(argc, argv);
+    if (options((int)p->arg_count, (char **)p->args, 0, &max_ticks) != 0 || options(argc, argv, 1, &max_ticks) != 0)
+        return 2;
     static const rl_guest_desc guest = {.name = "nds", .page_size = 0x1000, .address_bits = 32, .tick_hz = RL_NDS_TICK_HZ};
     if (rl_core_init(&guest, rl_arm32_cpu()) != 0)
         return 1;

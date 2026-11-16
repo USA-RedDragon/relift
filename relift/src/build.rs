@@ -2084,6 +2084,12 @@ pub fn run_build(
         }
         return crate::n64::build(settings, mods, ui).map(|_| ());
     }
+    if crate::nds::is_project() {
+        if let Some(t) = targets.iter().find(|t| t.as_str() != "host") {
+            return Err(format!("target {t}: only the host target builds so far").into());
+        }
+        return crate::nds::build(settings, mods, ui).map(|_| ());
+    }
     let built = build_project(settings, targets, mods, Mode::Shipped, ui)?;
     let (name, _) = project_out(settings)?;
     let import = import_dir(settings)?;
@@ -2233,6 +2239,12 @@ pub fn run_run(
             return Err("only the host target runs so far".into());
         }
         return crate::n64::run(settings, ui);
+    }
+    if crate::nds::is_project() {
+        if target.is_some_and(|t| t != "host") {
+            return Err("only the host target runs so far".into());
+        }
+        return crate::nds::run(settings, ui);
     }
     let targets: Vec<String> = target.map(String::from).into_iter().collect();
     let built = build_project(settings, &targets, &[], Mode::Dev, ui)?;

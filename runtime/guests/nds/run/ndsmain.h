@@ -50,6 +50,9 @@ typedef struct rl_nds_program {
     uint32_t unit_count;
     /** @brief The title, for reports. */
     const char *title;
+    /** @brief Options taken before the command line's (game.toml's [nds]). */
+    const char *const *args;
+    uint32_t arg_count;
 } rl_nds_program;
 
 /**

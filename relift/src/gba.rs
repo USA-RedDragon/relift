@@ -367,12 +367,66 @@ pub fn build(
     })
 }
 
+/// What a handheld guest's program compiles: the runtime directories, the
+/// include directories of lifted code and of the runtime and program files
+/// (below the runtime root), the optimization of lifted code and the name
+/// of the shared runtime object's cache.
+pub(crate) struct Layers {
+    pub(crate) dirs: &'static [&'static str],
+    pub(crate) lifted_inc: &'static [&'static str],
+    pub(crate) rt_inc: &'static [&'static str],
+    pub(crate) lifted_opt: &'static str,
+    pub(crate) cache: &'static str,
+}
+
+const GBA_LAYERS: Layers = Layers {
+    dirs: &LAYERS,
+    lifted_inc: &[
+        "core/include",
+        "cpus/arm32/include",
+        "guests/gba/run/include",
+    ],
+    rt_inc: &[
+        "core/include",
+        "core",
+        "cpus/arm32/include",
+        "cpus/arm32",
+        "guests/gba",
+        "guests/gba/run",
+        "guests/gba/run/include",
+    ],
+    lifted_opt: LIFTED_OPT,
+    cache: "gba-runtime",
+};
+
 fn compile(
     settings: &Settings,
     out: &Path,
     cdir: &Path,
     lifted: &[PathBuf],
     prog: &[PathBuf],
+    (release, cross): (bool, Option<&cross::Build>),
+    ui: &mut Ui,
+) -> Result<(), BoxError> {
+    compile_layers(
+        settings,
+        out,
+        cdir,
+        (lifted, prog),
+        &GBA_LAYERS,
+        (release, cross),
+        ui,
+    )
+}
+
+/// Compiles the lifted files `lifted` and the program files `prog` of
+/// `cdir` with the runtime layers `layers` and links `game` in `out`.
+pub(crate) fn compile_layers(
+    settings: &Settings,
+    out: &Path,
+    cdir: &Path,
+    (lifted, prog): (&[PathBuf], &[PathBuf]),
+    layers: &Layers,
     (release, cross): (bool, Option<&cross::Build>),
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
@@ -396,17 +450,13 @@ fn compile(
         .iter()
         .map(|f| {
             if f == "-O2" {
-                LIFTED_OPT.into()
+                layers.lifted_opt.into()
             } else {
                 f.clone()
             }
         })
         .chain(["-gline-tables-only", "-fno-omit-frame-pointer"].map(String::from))
-        .chain([
-            inc("core/include"),
-            inc("cpus/arm32/include"),
-            inc("guests/gba/run/include"),
-        ])
+        .chain(layers.lifted_inc.iter().map(|p| inc(p)))
         .chain(static_rt.clone())
         .collect();
     let mut extras = match cross {
@@ -429,15 +479,7 @@ fn compile(
             ]
             .map(String::from),
         )
-        .chain([
-            inc("core/include"),
-            inc("core"),
-            inc("cpus/arm32/include"),
-            inc("cpus/arm32"),
-            inc("guests/gba"),
-            inc("guests/gba/run"),
-            inc("guests/gba/run/include"),
-        ])
+        .chain(layers.rt_inc.iter().map(|p| inc(p)))
         .chain(extras.defines())
         .chain(static_rt)
         .chain((!release && cross.is_none()).then(|| "-DRL_DEV_RUN".to_string()))
@@ -460,7 +502,7 @@ fn compile(
         })
         .collect();
     let mut rt_compiles = Vec::new();
-    for layer in LAYERS {
+    for layer in layers.dirs {
         rt_compiles.extend(c_files(&rt.join(layer))?);
     }
     let (prog, resources) = crate::winres::split(prog);
@@ -486,7 +528,7 @@ fn compile(
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-    let rt_dir = croot.join("gba-runtime").join(&key);
+    let rt_dir = croot.join(layers.cache).join(&key);
     let rt_obj = |s: &Path| {
         let stem = s.strip_prefix(&rt).unwrap_or(s);
         rt_dir.join("obj").join(stem).with_extension("o")
