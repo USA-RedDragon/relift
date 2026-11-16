@@ -105,7 +105,7 @@ pub fn with_hints(text: &str, hints: &BTreeSet<Hint>) -> String {
         return out;
     }
     out.push_str(
-        "\n[hints]\n# Code that relift run hot-loaded; relift build lifts it as roots.\ncode = [\n",
+        "\n[hints]\n# Code that relift run hot-loaded or relift report added; relift build lifts it as roots.\ncode = [\n",
     );
     for h in hints {
         out.push_str(&format!("    \"{}\",\n", h.text()));

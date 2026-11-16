@@ -55,6 +55,20 @@ pub const HIDDEN: u64 = 0x40;
 /// a multiply, which constant propagation does not evaluate, and calls it
 /// with `blr`. Nothing else names that function, so a build misses it.
 fn hidden_call() -> Vec<u8> {
+    hidden(blr(8))
+}
+
+/// The guest offset of the computed transfer of [`hidden_call`] and
+/// [`hidden_jump`].
+pub const HIDDEN_SITE: u64 = 0x1c;
+
+/// As [`hidden_call`], with a computed jump (`br x8`) instead of the call:
+/// a transfer that leaves no host frame behind.
+fn hidden_jump() -> Vec<u8> {
+    hidden(0xd61f_0000 | (8 << 5))
+}
+
+fn hidden(transfer: u32) -> Vec<u8> {
     let code = [
         movz(19, 3),
         adr(0, 0x1000 - 0x04),
@@ -63,7 +77,7 @@ fn hidden_call() -> Vec<u8> {
         mul(8, 8, 9),
         adr(10, -0x14),
         add(8, 10, 8),
-        blr(8),
+        transfer,
         svc(0x27),
         subs_imm(19, 19, 1),
         bne(-0x24),
@@ -217,6 +231,11 @@ pub fn dump_with(root: &Path, undefined: bool) -> PathBuf {
 /// As [`dump`], with the call to a hidden function of [`hidden_call`].
 pub fn dump_hidden(root: &Path) -> PathBuf {
     dump_text(root, hidden_call())
+}
+
+/// As [`dump`], with the computed jump of [`hidden_jump`].
+pub fn dump_hidden_jump(root: &Path) -> PathBuf {
+    dump_text(root, hidden_jump())
 }
 
 /// As [`dump`]; the called function also calls through a pointer it

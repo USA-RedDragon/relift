@@ -31,6 +31,7 @@ pub mod macapp;
 pub mod mods;
 pub mod paths;
 pub mod push;
+pub mod report;
 pub mod runtime_link;
 pub mod settings;
 pub mod total;

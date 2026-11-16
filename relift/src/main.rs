@@ -87,6 +87,20 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         },
         Command::Info { binary } => relift::build::run_info(&settings, binary.as_deref()),
+        Command::Report {
+            file,
+            build_dir,
+            no_hint,
+        } => relift::report::run(
+            &settings,
+            file,
+            build_dir.as_deref(),
+            if *no_hint {
+                relift::report::HintMode::None
+            } else {
+                relift::report::HintMode::Add
+            },
+        ),
         _ => Err("not implemented".into()),
     };
     match result {
