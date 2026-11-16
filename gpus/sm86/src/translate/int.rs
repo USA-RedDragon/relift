@@ -166,7 +166,11 @@ fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
     let w = c.word;
     let (n, sub) = cbuf_words(i)?;
     let op9 = w.get(0, 9);
-    if w.bit(91) {
+    let ur_bank = match i.mnemonic {
+        "ULDC" => op9 == 0xb9 && w.bit(91),
+        _ => w.bit(91),
+    };
+    if ur_bank {
         return bad(format!("{} with a bank in a uniform register", i.mnemonic));
     }
     let bank = w.get(54, 5);
