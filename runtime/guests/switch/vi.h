@@ -368,4 +368,13 @@ hos_revent *vi_vsync_event(bool start);
  */
 int64_t vi_vsync_after(int64_t t);
 
+/** @brief Whether stats.trace names a frame trace file (frame_trace.c); read once. */
+bool vi_trace_on(void);
+/** @brief CLOCK_MONOTONIC nanoseconds while the frame trace is on, else 0. */
+int64_t vi_trace_now(void);
+/** @brief Writes one frame trace line of this kind when the trace is on. */
+void vi_trace(char kind, uint64_t a, uint64_t b, uint64_t c);
+/** @brief Writes a frame trace line with a and the calling thread's CPU time. */
+void vi_trace_cpu(char kind, uint64_t a);
+
 #endif

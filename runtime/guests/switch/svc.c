@@ -467,7 +467,11 @@ int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm)
     rl_clrex(&c->excl);
     /* The guest's FP flags stay out of the runtime's own FP work. */
     uint32_t flags = rl_arm64_flags_enter();
+    int64_t t0 = vi_trace_now();
+    uint64_t a0 = c->x[0], a3 = c->x[3];
     int r = rl_cfg()->trace_os ? svc_traced(c, imm) : dispatch(c, imm);
+    if (t0 && (imm == 0x0B || imm == 0x18 || imm == 0x1C || imm == 0x34 || vi_trace_now() - t0 >= 50000))
+        vi_trace('S', imm, (uint64_t)t0, imm == 0x0B ? a0 : a3);
     hos_sched_point();
     rl_arm64_flags_leave(flags);
     return r;

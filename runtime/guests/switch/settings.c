@@ -42,6 +42,14 @@ static const rl_setting_def g_defs[] = {
         .max_int = 1000000,
     },
     {
+        .key = "stats.trace",
+        .type = RL_SETTING_STRING,
+        .label = "Frame trace",
+        .description = "A file to write a trace of vsyncs, presents, acquires, scheduler hand-overs and slow svcs to, for "
+                       "finding why a vsync went without a new frame. Empty: off",
+        .env = "RELIFT_FRAME_TRACE",
+    },
+    {
         .key = "vk.keep_attachments",
         .type = RL_SETTING_ENUM,
         .label = "Keep attachment contents",

@@ -82,6 +82,9 @@ struct vkf_call {
     struct vkf_call *outer;
     /** @brief The calling thread gave its core up for a host wait (vkf_wait_enter). */
     bool left;
+    /** @brief Frame trace: when the call began (0 when the trace is off) and the thunk that made it. */
+    int64_t trace_t0;
+    uintptr_t trace_site;
 };
 
 /** @brief Per-instance state. */

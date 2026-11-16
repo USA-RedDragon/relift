@@ -14,6 +14,7 @@
  * priorities 59 and 63 runs at the holder's svcs.
  */
 #include "hos.h"
+#include "vi.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -215,6 +216,9 @@ static void grant(int32_t c, hos_thread *t)
         k->last = t;
         s->handovers++;
     }
+    vi_trace('G', (uint64_t)c, t->id, 0);
+    if (t == hos_current())
+        vi_trace_cpu('c', t->id);
     stat_tick(now);
     pthread_cond_signal(&t->cv);
 }
@@ -255,6 +259,9 @@ static void release(hos_thread *t)
     hos_sched *s = &hos.sched;
     int32_t c = t->cur_core;
     hos_core *k = &s->cores[c];
+    vi_trace('L', (uint64_t)c, t->id, k->preempt_ns);
+    if (t == hos_current())
+        vi_trace_cpu('C', t->id);
     k->holder = NULL;
     t->cur_core = -1;
     rl_preempt_clear(t->rt->ctx);
@@ -294,6 +301,7 @@ void hos_sched_ready(hos_thread *t)
 {
     if (t->runnable)
         return;
+    vi_trace('R', t->id, 0, 0);
     t->runnable = true;
     enqueue(t, false);
     update();
@@ -315,18 +323,23 @@ void hos_sched_run(hos_thread *t)
     hos_sched *s = &hos.sched;
     if (s->free || !t->runnable)
         return;
+    bool waited = false;
     for (;;) {
         update();
         int32_t c = t->active_core;
         if (t->cur_core >= 0 && (t->cur_core != c || s->cores[t->cur_core].selected != t))
             release(t);
-        if (t->cur_core >= 0)
+        if (t->cur_core >= 0) {
+            if (waited)
+                vi_trace_cpu('c', t->id);
             return;
+        }
         if (c >= 0 && s->cores[c].selected == t && !s->cores[c].holder) {
             grant(c, t);
             return;
         }
         pthread_cond_wait(&t->cv, &hos.lock);
+        waited = true;
     }
 }
 

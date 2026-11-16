@@ -89,11 +89,14 @@ static void *vsync_main(void *arg)
         pthread_mutex_unlock(&vsync_lock);
         if (quit)
             return NULL;
+        int64_t woke = vi_trace_now();
         if (e) {
             rl_hos_event_signal(e);
             hos_kobj_unref(&e->obj);
         }
         int64_t done = mono_ns();
+        if (woke)
+            vi_trace('V', (uint64_t)next, (uint64_t)woke, (uint64_t)done);
         next = vi_vsync_after(done > next ? done : next);
     }
 }
