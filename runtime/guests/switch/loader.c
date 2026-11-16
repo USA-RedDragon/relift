@@ -535,6 +535,7 @@ int rl_switch_main(const rl_switch_program *p, int argc, char **argv)
         g_hooks[g_nhooks++] = h;
         rl_log(RL_LOG_INFO, "loader", "hook %s turned on by the program's symbols", h->name ? h->name : "?");
     }
+    rl_window_quit_on_signals();
     int ret = g_nhooks ? rl_window_main(run_program, &a) : run_program(&a);
     while (g_nhooks > base)
         g_hooks[--g_nhooks] = NULL;

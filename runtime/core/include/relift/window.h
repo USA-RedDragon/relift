@@ -93,6 +93,13 @@ RL_RUNTIME_API void rl_window_set_events(rl_window_event_fn *fn, void *user);
 /** @brief Delivers an event to the listener; backends call it. */
 RL_RUNTIME_API void rl_window_emit(rl_window *w, int event);
 /**
+ * @brief Makes SIGTERM and SIGINT reach the listener as RL_WINDOW_CLOSE (a second
+ * one asks it again), or end the process when no listener is set. Blocks both
+ * signals in the calling thread and the threads it starts afterwards, so call it
+ * before them; rl_window_main does. Once per process; does nothing on Windows.
+ */
+RL_RUNTIME_API void rl_window_quit_on_signals(void);
+/**
  * @brief Runs body(arg) and returns its result. With a backend (built in and
  * chosen as RL_WINDOW_ENV describes) that comes up, body runs on a new host
  * thread while the calling thread runs the backend's event loop; otherwise

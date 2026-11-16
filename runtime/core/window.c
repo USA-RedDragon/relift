@@ -10,6 +10,9 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#if !defined(_WIN32)
+#include <signal.h>
+#endif
 #include <string.h>
 
 #define BODY_STACK (16u << 20)
@@ -51,6 +54,53 @@ void rl_window_emit(rl_window *w, int event)
     if (fn)
         fn(user, w, event);
 }
+
+#if !defined(_WIN32)
+
+static void *quit_watch(void *p)
+{
+    const sigset_t *set = p;
+    for (;;) {
+        int sig;
+        if (sigwait(set, &sig) != 0)
+            continue;
+        pthread_mutex_lock(&g_lock);
+        bool listened = g_fn != NULL;
+        pthread_mutex_unlock(&g_lock);
+        if (listened)
+            rl_window_emit(NULL, RL_WINDOW_CLOSE);
+        else
+            rl_process_exit(128u + (uint32_t)sig);
+    }
+    return NULL;
+}
+
+static sigset_t g_quit_set;
+static pthread_once_t g_quit_once = PTHREAD_ONCE_INIT;
+
+static void quit_start(void)
+{
+    sigemptyset(&g_quit_set);
+    sigaddset(&g_quit_set, SIGTERM);
+    sigaddset(&g_quit_set, SIGINT);
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    sigset_t old;
+    pthread_sigmask(SIG_BLOCK, &g_quit_set, &old);
+    if (pthread_create(&t, &attr, quit_watch, &g_quit_set) != 0)
+        pthread_sigmask(SIG_SETMASK, &old, NULL);
+    pthread_attr_destroy(&attr);
+}
+
+void rl_window_quit_on_signals(void) { pthread_once(&g_quit_once, quit_start); }
+
+#else
+
+void rl_window_quit_on_signals(void) {}
+
+#endif
 
 static bool display_available(void)
 {
@@ -114,6 +164,7 @@ static bool body_done(void *p) { return __atomic_load_n(&((body_run *)p)->done, 
 
 int rl_window_main(int (*body)(void *arg), void *arg)
 {
+    rl_window_quit_on_signals();
     const rl_window_backend *b = wanted();
     if (b && b->init() != 0) {
         rl_log(RL_LOG_INFO, "window", "%s has no display; running headless", b->name);

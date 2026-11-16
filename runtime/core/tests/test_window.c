@@ -10,6 +10,8 @@
 
 #include <pthread.h>
 #include <sched.h>
+#include <signal.h>
+#include <unistd.h>
 #include <stdlib.h>
 
 static pthread_t g_loop_thread;
@@ -107,6 +109,41 @@ TEST(window_main_runs_the_loop_on_the_caller)
     CHECK_EQ(g_nevents, 1);
     rl_window_set_backend(NULL);
 }
+
+static int g_closes;
+
+static void on_close(void *user, rl_window *w, int event)
+{
+    (void)user;
+    (void)w;
+    if (event == RL_WINDOW_CLOSE)
+        __atomic_add_fetch(&g_closes, 1, __ATOMIC_RELEASE);
+}
+
+static int signal_body(void *arg)
+{
+    int sig = *(int *)arg;
+    kill(getpid(), sig);
+    for (int i = 0; i < 2000 && !__atomic_load_n(&g_closes, __ATOMIC_ACQUIRE); i++)
+        usleep(1000);
+    return __atomic_load_n(&g_closes, __ATOMIC_ACQUIRE);
+}
+
+#if !defined(_WIN32)
+TEST(window_headless_sigterm_and_sigint_close)
+{
+    reset();
+    setenv(RL_WINDOW_ENV, "headless", 1);
+    rl_window_set_events(on_close, NULL);
+    int sig = SIGTERM;
+    CHECK_EQ(rl_window_main(signal_body, &sig), 1);
+    __atomic_store_n(&g_closes, 0, __ATOMIC_RELEASE);
+    sig = SIGINT;
+    CHECK_EQ(rl_window_main(signal_body, &sig), 1);
+    rl_window_set_events(NULL, NULL);
+    reset();
+}
+#endif
 
 TEST(window_env_headless_and_sdl3_override)
 {
