@@ -69,6 +69,8 @@ struct rl_n64 {
     const uint8_t *rom;
     size_t rom_len;
     uint8_t *rdram;
+    /** @brief The allocation rdram lies in, aligned up to RL_N64_RDRAM_ALIGN so a GPU can import it. */
+    void *rdram_block;
     bool pal;
     uint8_t spmem[0x2000];
     uint8_t pif_ram[64];

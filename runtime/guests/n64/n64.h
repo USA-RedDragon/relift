@@ -36,6 +36,8 @@
 #define RL_N64_HZ 93750000u
 /** @brief Bytes of RDRAM (with the expansion pak). */
 #define RL_N64_RDRAM_SIZE 0x800000u
+/** @brief The alignment of RDRAM in host memory: the largest host-pointer import alignment a Vulkan device asks for. */
+#define RL_N64_RDRAM_ALIGN 0x10000u
 /** @brief The scheduler line of MI's interrupt output, which is the CPU's IP2. */
 #define RL_N64_LINE_MI 2u
 

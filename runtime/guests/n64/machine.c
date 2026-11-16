@@ -45,10 +45,12 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     rl_n64 *m = calloc(1, sizeof *m);
     if (!m)
         return NULL;
-    m->rdram = calloc(1, RL_N64_RDRAM_SIZE);
+    m->rdram_block = calloc(1, RL_N64_RDRAM_SIZE + RL_N64_RDRAM_ALIGN);
+    if (m->rdram_block)
+        m->rdram = (uint8_t *)(((uintptr_t)m->rdram_block + RL_N64_RDRAM_ALIGN - 1u) & ~(uintptr_t)(RL_N64_RDRAM_ALIGN - 1u));
     m->vi.screen = calloc(1, (size_t)640u * 576u * 3u);
     if (!m->rdram || !m->vi.screen) {
-        free(m->rdram);
+        free(m->rdram_block);
         free(m->vi.screen);
         free(m);
         return NULL;
@@ -80,7 +82,7 @@ void rl_n64_destroy(rl_n64 *m)
     free(m->code.sp_runs);
     free(m->code.order);
     free(m->code.filled);
-    free(m->rdram);
+    free(m->rdram_block);
     free(m->vi.screen);
     free(m->ai.ring);
     free(m);
