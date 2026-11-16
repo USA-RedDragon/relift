@@ -346,7 +346,8 @@ impl HostProfile {
     }
 
     /// The host's own transcendental operations give the SM86 MUFU results
-    /// (the NVIDIA driver lowers them to the same unit).
+    /// (the NVIDIA driver lowers them to the same unit; see the `mufu`
+    /// module for how that was proven).
     pub fn native_mufu(&self) -> bool {
         self.name == "nvidia"
     }

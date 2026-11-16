@@ -30,11 +30,18 @@
 //! - `.F16`: the single-precision result for the half input, cut toward zero
 //!   to half precision, infinite from a magnitude of 65536 up.
 //!
-//! With [`Options::exact_mufu`](super::Options) off, RCP, RSQ, SQRT, EX2 and
-//! LG2 use the GLSL operations, which the NVIDIA driver lowers to these same
-//! MUFU operations. SIN and COS always use the model (the driver scales the
-//! operand by 1/2pi itself). TANH has no model: it always uses the GLSL
-//! operation, which does not match the unit, and the program is reported
+//! With [`Options::exact_mufu`](super::Options) off, on the nvidia preset
+//! only, RCP, RSQ, SQRT, EX2 and LG2 use the GLSL operations (`1 / x`,
+//! InverseSqrt, Sqrt, Exp2, Log2), which that driver lowers to these same
+//! MUFU operations. That was proven per function over all 2^32 inputs: a
+//! one-instruction MUFU kernel built with CUDA for SM86 was translated, run
+//! through Vulkan on an SM86 device, and compared bit for bit with the same
+//! kernel run under CUDA on that device (driver 615.78), with no difference,
+//! NaN payloads included. Every other host uses the model; a new driver
+//! should be compared the same way. SIN and COS always use the
+//! model (the driver scales the operand by 1/2pi itself). TANH has no model:
+//! it always uses the GLSL operation, which does not match the unit (the same
+//! comparison differs on 6% of the inputs), and the program is reported
 //! inexact ([`HostReport::inexact`](super::HostReport)).
 
 use super::{Ctx, Res, bad};
