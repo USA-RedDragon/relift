@@ -88,6 +88,9 @@ static int sdl_init(void)
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    /* SDL's Android wait re-pushes the poll sentinel on every pump, and each push wakes the wait at once: with
+     * sentinels on, sdl_run would spin a core. */
+    SDL_SetHint(SDL_HINT_POLL_SENTINEL, "0");
 #endif
 #ifdef RL_MOBILE
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -339,11 +342,26 @@ static void handle(const SDL_Event *e)
         rl_window_emit(NULL, RL_WINDOW_BACKGROUND);
 }
 
+/**
+ * @brief How long sdl_run waits for an event, in ms. SDL polls HIDAPI
+ * controllers only when it pumps, and its Android wait does not wake for
+ * their reports (other hosts poll by themselves), so Android pumps every
+ * millisecond while a controller is connected, as SDL does elsewhere.
+ */
+static Sint32 wait_ms(void)
+{
+#ifdef __ANDROID__
+    if (SDL_HasJoystick())
+        return 1;
+#endif
+    return 100;
+}
+
 static void sdl_run(bool (*done)(void *user), void *user)
 {
     while (!done(user)) {
         SDL_Event e;
-        if (!SDL_WaitEventTimeout(&e, 100))
+        if (!SDL_WaitEventTimeout(&e, wait_ms()))
             continue;
         handle(&e);
         while (SDL_PollEvent(&e))
