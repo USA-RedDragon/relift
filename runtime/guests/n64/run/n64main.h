@@ -34,6 +34,8 @@ typedef struct rl_n64_program {
     uint32_t cic;
     /** @brief The entry point the boot jumps to. */
     uint32_t entry;
+    /** @brief The path of the ROM the project imported, which names the save files (rl_n64_save_path); "" for none. */
+    const char *rom_path;
 } rl_n64_program;
 
 /**
@@ -44,8 +46,9 @@ typedef struct rl_n64_program {
  * framebuffer at exit), --png-dir DIR with --png-every N (every Nth frame),
  * --dump PREFIX (PREFIX.rdram, .dmem and .imem at the stop; RDRAM when CPU
  * code is missed, IMEM and DMEM when RSP code is),
- * --stats (counters on stderr) and the runtime's --relift-set and
- * --relift-settings.
+ * --save BASE (the save files BASE.eep, BASE.sra and BASE.fla instead of
+ * the ones rl_n64_save_path names), --no-save, --stats (counters on stderr)
+ * and the runtime's --relift-set and --relift-settings.
  */
 RL_RUNTIME_API int rl_n64_main(const rl_n64_program *p, int argc, char **argv);
 

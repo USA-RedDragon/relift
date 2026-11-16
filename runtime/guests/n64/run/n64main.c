@@ -7,6 +7,7 @@
 #include "n64main.h"
 #include "cpu.h"
 
+#include <relift/ports.h>
 #include <relift/settings.h>
 #include <relift/window.h>
 
@@ -36,6 +37,7 @@ typedef struct host {
     uint8_t rgb[MAX_W * MAX_H * 3];
     uint32_t w, h;
     bool have;
+    char save[4096];
 } host;
 
 static uint64_t now_ns(void)
@@ -135,6 +137,12 @@ static bool write_png(const char *path, const uint8_t *rgb, uint32_t w, uint32_t
 
 static void scan(host *H) { H->have = rl_n64_scanout(H->run.m, H->rgb, &H->w, &H->h); }
 
+static void save_now(host *H)
+{
+    if (H->save[0] && rl_n64_save_write(H->run.m, H->save) < 0)
+        rl_log(RL_LOG_WARN, "n64", "could not write the save %s", H->save);
+}
+
 static void print_stats(host *H)
 {
     const rl_n64_stats *s = rl_n64_get_stats(H->run.m);
@@ -195,9 +203,11 @@ static void report(host *H, rl_ctx *c)
 
 static void on_frame(void *user, rl_n64 *m)
 {
-    (void)m;
     host *H = user;
     H->frames++;
+    rl_ports_script_frame(H->frames);
+    if (H->save[0] && rl_n64_save_poll(m, H->save, RL_N64_HZ) < 0)
+        rl_log(RL_LOG_WARN, "n64", "could not write the save %s", H->save);
     if (H->png_dir && H->frames % H->png_every == 0) {
         scan(H);
         char path[4096];
@@ -229,6 +239,7 @@ static void finish(host *H)
         if (H->have && !write_png(H->png, H->rgb, H->w, H->h))
             fprintf(stderr, "relift-n64: could not write %s\n", H->png);
     }
+    save_now(H);
     if (H->stats)
         print_stats(H);
 }
@@ -280,7 +291,9 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     static host H;
     memset(&H, 0, sizeof H);
     H.p = p;
-    bool headless = false;
+    const char *save = NULL;
+    bool no_save = false, headless = false;
+    rl_n64_declare_settings();
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -296,6 +309,10 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
             H.png_every = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--dump"))
             H.dump = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--save"))
+            save = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--no-save"))
+            no_save = true;
         else if (!strcmp(a, "--stats"))
             H.stats = true;
         else if (!strncmp(a, "--relift-", 9))
@@ -310,6 +327,8 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
     static const rl_guest_desc guest = {.name = "n64", .page_size = 0x1000, .address_bits = 32, .tick_hz = RL_N64_HZ};
     if (rl_core_init(&guest, rl_mips_cpu()) != 0)
         return 1;
+    rl_ports_declare(rl_n64_ports, rl_n64_ports_count);
+    rl_ports_bind_defaults();
     rl_n64 *m = rl_n64_create(p->rom, p->rom_len);
     if (!m || rl_n64_code_init(m, p->units, p->unit_count, p->code, p->code_count) != 0) {
         fprintf(stderr, "relift-n64: the lifted units do not match this runtime\n");
@@ -325,6 +344,15 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
         fprintf(stderr, "relift-n64: %s\n", why);
         return 1;
     }
+    rl_n64_pad_use_ports(m, true);
+    if (!no_save) {
+        if (save)
+            snprintf(H.save, sizeof H.save, "%s", save);
+        else if (p->rom_path && *p->rom_path && !rl_n64_save_path(H.save, sizeof H.save, p->rom_path))
+            H.save[0] = 0;
+    }
+    if (H.save[0] && rl_n64_save_load(m, H.save) < 0)
+        rl_log(RL_LOG_WARN, "n64", "a save of %s does not fit this cartridge; it is ignored", H.save);
     rl_n64_set_frame_hook(m, on_frame, &H);
     H.run.check = on_check;
     H.run.check_user = &H;

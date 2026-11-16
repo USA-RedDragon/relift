@@ -378,9 +378,15 @@ pub fn handheld_document(
 }
 
 /// The document of a Nintendo 64 build: the identity from the cartridge
-/// header (title, game id, version); no save or input section yet.
+/// header (title, game id, version) and the input section of its ports; the
+/// save kind is not known before the game runs.
 #[must_use]
-pub fn n64_document(name: &str, rom: &relift_n64_formats::Rom, settings: Vec<Setting>) -> Info {
+pub fn n64_document(
+    name: &str,
+    rom: &relift_n64_formats::Rom,
+    settings: Vec<Setting>,
+    ports: &PortSet,
+) -> Info {
     let h = rom.header();
     let mut info = Info::new(env!("CARGO_PKG_VERSION"));
     info.identity.platform = "n64".into();
@@ -398,6 +404,7 @@ pub fn n64_document(name: &str, rom: &relift_n64_formats::Rom, settings: Vec<Set
         ..Save::default()
     };
     info.settings = game_settings::section(settings);
+    info.input = relift_input::input_section(ports);
     info
 }
 

@@ -24,6 +24,7 @@
 #define RELIFT_N64_H
 
 #include <relift/abi_core.h>
+#include <relift/ports.h>
 #include <relift/sched.h>
 
 #include <stdbool.h>
@@ -150,6 +151,10 @@ enum {
 RL_RUNTIME_API void rl_n64_set_pad(rl_n64 *m, unsigned port, uint16_t buttons, int8_t x, int8_t y);
 /** @brief Unplugs the controller of port. */
 RL_RUNTIME_API void rl_n64_pad_remove(rl_n64 *m, unsigned port);
+/** @brief The native ports of the Nintendo 64 (generated from relift-input): declare them with rl_ports_declare. */
+extern const rl_port_decl rl_n64_ports[];
+/** @brief Number of entries of rl_n64_ports. */
+extern const uint32_t rl_n64_ports_count;
 /**
  * @brief Makes controller 1 follow the port table's p1 port (declared with
  * rl_n64_ports, a, b, z, start, up, down, left, right, l, r, c_up, c_down,

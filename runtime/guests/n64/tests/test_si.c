@@ -369,3 +369,35 @@ TEST(n64_the_pad_cancels_opposite_directions_and_reads_the_reset_combination)
     CHECK_EQ(out[6], 0);
     mach_free(&t);
 }
+
+TEST(n64_the_first_controller_follows_the_port_table_when_asked)
+{
+    mach t;
+    mach_new(&t);
+    rl_ports_reset();
+    rl_ports_script_reset();
+    CHECK(rl_ports_declare(rl_n64_ports, rl_n64_ports_count));
+    rl_ports_bind_defaults();
+    CHECK(rl_ports_set_script("0+100:p1.a,0+100:p1.c_up,0+100:p1.stick_x=1,0+100:p1.stick_y=-0.5"));
+    rl_ports_script_frame(1);
+    rl_n64_pad_use_ports(t.m, true);
+    uint8_t b[64], out[64];
+    block_new(b);
+    b[0] = 0x01;
+    b[1] = 0x04;
+    b[2] = 0x01;
+    b[7] = 0xFE;
+    b[63] = 1;
+    send_block(&t, b);
+    read_block(&t, out);
+    CHECK_EQ(out[3], 0x80);
+    CHECK_EQ(out[4], 0x08);
+    CHECK_EQ(out[5], 85);
+    CHECK_EQ(out[6], 0xD9);
+    rl_n64_pad_use_ports(t.m, false);
+    read_block(&t, out);
+    CHECK_EQ(out[1], 0x84);
+    rl_ports_script_reset();
+    rl_ports_reset();
+    mach_free(&t);
+}

@@ -128,7 +128,7 @@ pub fn import(settings: &Settings, path: &Path, ui: &mut Ui) -> Result<(), BoxEr
     Ok(())
 }
 
-fn project_rom() -> Result<(Vec<u8>, String), BoxError> {
+fn project_rom() -> Result<(Vec<u8>, String, String), BoxError> {
     let text = std::fs::read_to_string("game.toml").map_err(|e| format!("game.toml: {e}"))?;
     let t: toml::Table = text.parse().map_err(|e| format!("game.toml: {e}"))?;
     let g = t.get("game").ok_or("game.toml has no [game]")?;
@@ -137,7 +137,11 @@ fn project_rom() -> Result<(Vec<u8>, String), BoxError> {
     let path = dir.join(ROM_FILE);
     let rom = std::fs::read(&path)
         .map_err(|e| format!("{}: {e}; run relift import again", path.display()))?;
-    Ok((rom, s("title").unwrap_or_default()))
+    Ok((
+        rom,
+        s("title").unwrap_or_default(),
+        s("rom").unwrap_or_default(),
+    ))
 }
 
 fn c_files(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
@@ -160,7 +164,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     if !mods.is_empty() {
         return Err("mods are not supported for Nintendo 64 ROMs yet".into());
     }
-    let (bytes, project_title) = project_rom()?;
+    let (bytes, project_title, rom_path) = project_rom()?;
     let rom = Rom::new(&bytes).map_err(|e| format!("{ROM_FILE}: {e}"))?;
     let (name, out) = crate::build::project_out(settings)?;
     let cdir = out.join("c");
@@ -288,6 +292,7 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
             "program.c",
             relift_n64::program::program_c(&relift_n64::program::Program {
                 title: &title,
+                rom_path: &rom_path,
                 units: &symbols,
                 code: &lifted.code,
                 cic: relift_n64::program::cic_number(report.boot),
@@ -300,7 +305,8 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
         prog.push(path);
     }
     let game_settings = crate::game_settings::read(Path::new("game.toml"))?;
-    let doc = crate::info::n64_document(&title, &rom, game_settings.clone());
+    let ports = relift_input::native_ports("n64")?;
+    let doc = crate::info::n64_document(&title, &rom, game_settings.clone(), &ports);
     let info_c = cdir.join(crate::info::C_FILE);
     relift_cache::write_if_changed(&info_c, crate::info::c_file(&doc).as_bytes())?;
     prog.push(info_c);
