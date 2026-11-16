@@ -580,9 +580,28 @@ whichever RET form it is (RET, RET Xn, RETAA, RETAB, AUTIBSP then RET).
   return rl_arm64_ret_far(c, rl_to, UINT64_C(<pc of the RET>));
   ```
 
-  `rl_ra` is a `const` local set from x30 at entry. In a function that
-  never writes x30 the compare folds away; otherwise it is one compare and
-  a branch that is not taken.
+  `rl_ra` is a `const` local set from x30 at entry with `RL_LOAD_LINK`.
+  `rl_arm64_ret_far` is inline and makes no call, so a function that
+  returns through it can still be inlined.
+- **Proven returns have no check.** The emitter drops the check of a RET
+  whose target is, by register dataflow inside the function, x30 as it was
+  at entry with no write between: no BL or BLR, no load into x30, no move
+  to it, no PAC or AUT on the way. Only registers are followed, never
+  memory: once x30 is spilled to the stack, any store (the function's own,
+  through a pointer, or a callee's) can rewrite the slot, and on the
+  console that changes the return, so a reload is never proven. That leaves
+  leaves and other functions that keep x30 in its register. A commercial game: 38.9%
+  of the returns in its hot shards are proven (49345 of 126888); a Switch 2
+  game's four modules, 50.1% (64449 of 128632). Neither proves any return
+  in its cold code (124652 and 125184). [open: why cold code proves none]
+- **The entry load is alone on AArch64 hosts.** `RL_LOAD_LINK` is a relaxed
+  atomic load there. As a plain load clang pairs it with the load of the
+  next context field (`ldp x22, x8, [x0, #240]`, x30 and sp), and the
+  caller has just written those two fields with separate stores: a load
+  pair spanning two stores misses store-to-load forwarding on the M2 and
+  stalls every call (0.2 to 0.4 ns per call with the pair split by hand,
+  against 1.9 ns). On other hosts it is a plain load, which clang forwards from the
+  caller's store once it inlines the callee, so the compare folds away.
 - **Tail transfers** (a `B` or `BR` that leaves the function) in a
   function that writes x30 check it first:
   `if (RL_UNLIKELY(x30 != rl_ra)) return rl_arm64_jump_far(c, mem, F);`
@@ -636,16 +655,20 @@ whichever RET form it is (RET, RET Xn, RETAA, RETAB, AUTIBSP then RET).
   save x30 and return, 100 million times (1.6 billion calls and returns),
   each function in a shard of its own so clang inlines none of them:
 
-  | host | before | after |
-  |---|---|---|
-  | Linux x86-64 (Ryzen 9 7950X, clang 23, loaded host) | 4.32e10 cycles | 4.61e10 cycles (+7%, +1.8 cycles per call) |
-  | macOS arm64 (Apple M2, Apple clang 21) | 5.1 s | 8.1 s (+60%, +1.9 ns per call) |
+  | host | no check | first design (paired entry load, far return a call) | now |
+  |---|---|---|---|
+  | Linux x86-64 (Ryzen 9 7950X, clang 23, loaded host), cycles | 3.77e10 | 3.93e10 | 3.90e10 (+3.3%) |
+  | macOS arm64 (Apple M2, Apple clang 21), user s | 4.8 to 5.4 | 8.5 | 5.4 to 5.8 (+6% to +12%, about 0.3 ns per call) |
 
-  With the chain in one shard clang inlines it; before the check it also
-  drops every pending check, since the inlined functions only return
-  `RL_OK`, and the M2 time goes from 0.8 s to 4.4 s. Code that calls
-  anything that can be pending (a system call, an indirect call) has those
-  checks anyway. [verified: measurements above; the cost on a whole game's
+  With the chain in one shard clang inlines it. On x86-64 the check then
+  folds away and the chain takes 2.14e9 cycles (1.22e10 with the atomic
+  load).
+  On the M2 the atomic entry load is not forwarded, so the inlined chain
+  keeps its checks and pending checks: 3.4 to 3.9 s against 0.7 to 0.8 s
+  without checks (the first design 4.6 s). Code that calls anything that
+  can be pending (a system call, an indirect call) has pending checks
+  anyway. [open: an AArch64 entry load that is neither paired nor opaque
+  to the inliner] [verified: measurements above; the cost on a whole game's
   run time is not measured yet]
 
 ## 6. Missed code
