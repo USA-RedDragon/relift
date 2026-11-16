@@ -3,6 +3,7 @@
 //! row was solved as the integer point of a linear feasibility problem over
 //! every input of its segment, from the outputs of an RTX 3090, and the
 //! constructions in [`super`] check against the device on all 2^32 inputs.
+//! Written by gpus/sm86/kat/mufu_tables.py; do not edit.
 //!
 //! Units: RCP `P >> 16`, RSQ and SQRT `P >> 18`, EX2 `P >> 16` give the
 //! 24-bit mantissa; LG2 has 38 fraction bits, SIN 37.

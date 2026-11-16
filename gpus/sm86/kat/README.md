@@ -47,3 +47,14 @@ add a new family to the `families!` list in `tests/kat.rs`.
 The file layout is in `tests/kat/file.rs`: the program words, the inputs,
 then each output column XORed with the closest earlier column and
 run-length coded, which keeps the whole set under 1 MB.
+
+## MUFU tables
+
+`src/translate/mufu/tables.rs` is written by
+
+    python3 -I kat/mufu_tables.py <absolute work dir> <absolute path of tables.rs>
+
+which runs MUFU on every input of each table's range on the device (about
+80 million inputs, a few seconds) and solves each row, with numpy and scipy,
+in about fifteen seconds. The mufu_* vectors check the translated model
+against independent device outputs.
