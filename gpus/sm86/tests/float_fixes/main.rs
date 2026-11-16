@@ -9,7 +9,8 @@ mod eval;
 use common::translate_with;
 use eval::{Device, FLUSH, PRESERVE};
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options};
+use relift_gpu_sm86::translate::{self, HostProfile, Options};
+use std::collections::HashSet;
 
 const OUT: u64 = 0x1000;
 
@@ -152,20 +153,42 @@ fn host(h: HostProfile) -> Options {
     }
 }
 
-fn eval(o: &Options, dev: Device, inst: u128, a: u32, b: u32, c: u32) -> u32 {
-    let p = program(inst, a, b, c);
-    let s = translate_with(&p, o).unwrap_or_else(|e| panic!("{e}"));
-    let r = eval::run(&s.spirv, dev);
-    *r.mem.get(&OUT).expect("no store")
+/// The module's words with the value operands of every `OpConstant` zeroed:
+/// two modules with the same key differ only in constant values.
+fn structure_key(spirv: &[u32]) -> Vec<u32> {
+    const OP_CONSTANT: u32 = 43;
+    let mut key = spirv.to_vec();
+    let mut k = 5;
+    while k < key.len() {
+        let n = (key[k] >> 16) as usize;
+        assert!(n > 0, "zero word count at word {k}");
+        if key[k] & 0xffff == OP_CONSTANT {
+            key[k + 3..k + n].fill(0);
+        }
+        k += n;
+    }
+    key
 }
 
 /// Checks `(a, b, c, want)` cases of `inst` for the host and the devices
-/// that may run it.
+/// that may run it. The operands are constants in the program, so each case
+/// is translated once for all devices. `spirv-val` runs on one module per
+/// distinct structure key, and every module's key is asserted validated.
 fn check(name: &str, o: &Options, devs: &[Device], inst: u128, cases: &[(u32, u32, u32, u32)]) {
     let mut bad = Vec::new();
-    for dev in devs {
-        for &(a, b, c, want) in cases {
-            let got = eval(o, *dev, inst, a, b, c);
+    let mut validated: HashSet<Vec<u32>> = HashSet::new();
+    for &(a, b, c, want) in cases {
+        let s =
+            translate::translate_with(&program(inst, a, b, c), o).unwrap_or_else(|e| panic!("{e}"));
+        let key = structure_key(&s.spirv);
+        if !validated.contains(&key) {
+            common::validate(&s.spirv);
+            validated.insert(key.clone());
+        }
+        assert!(validated.contains(&key), "{name}: module not validated");
+        for dev in devs {
+            let r = eval::run(&s.spirv, *dev);
+            let got = *r.mem.get(&OUT).expect("no store");
             if got != want {
                 bad.push(format!(
                     "{name} {} {dev:?}: a={a:08x} b={b:08x} c={c:08x} want {want:08x} got {got:08x}",
