@@ -64,9 +64,11 @@
 //! [`Ctx::quad_derivatives`]) and are rejected in vertex programs. TXQ
 //! needs the handle to be sampled elsewhere in the program with one
 //! dimension. Buffer textures, TLD.CL, TXD.LC, TXQ sample positions,
-//! uniform register handles with an offset, SUQUERY, SUATOM.CAS and
-//! wrapping INC and DEC are not translated; sparse fault predicates read as
-//! resident.
+//! uniform register handles with an offset, SUQUERY other than the
+//! compression status, SUATOM.CAS and wrapping INC and DEC are not
+//! translated; sparse fault predicates read as resident. Host images are
+//! never compressed, so SUQUERY `COMP_STATUS` reads 0, what the hardware
+//! returns for an uncompressed surface.
 
 use super::mem::tuple_reg;
 use super::{Ctx, Res, TEXTURE_SET, bad};
@@ -1042,9 +1044,18 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "TXD" => txd(c),
         "TXQ" => txq(c),
         "SULD" | "SUST" | "SUATOM" | "SURED" => surface(c, i),
-        "SUQUERY" => bad("opcode SUQUERY"),
+        "SUQUERY" => suquery(c, i),
         _ => return None,
     })
+}
+
+fn suquery(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let w = c.word;
+    if w.bit(87) || w.get(81, 3) != 7 {
+        return bad("SUQUERY form");
+    }
+    let z = c.m.c_u32(0);
+    c.store_dst(&i.ops[0], z)
 }
 
 fn dim_at(w: Word, table: &[Option<Dim>; 8]) -> Res<Dim> {

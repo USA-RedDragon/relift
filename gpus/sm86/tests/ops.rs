@@ -91,3 +91,11 @@ fn mov_quad_lane_mask() {
         &["MOV R9, R8, 0x5"],
     );
 }
+
+#[test]
+fn suquery_compression_status() {
+    check(
+        &[w(0x002f_6200_000e_0000, 0x8000_5800_0407_7bb3)],
+        &["SUQUERY.2D_ARRAY R7, [R4], COMP_STATUS, 0x0, 0x58"],
+    );
+}
