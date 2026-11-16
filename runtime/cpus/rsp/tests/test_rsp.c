@@ -267,3 +267,69 @@ TEST(rsp_one_image_runs_at_several_places_and_across_the_end_of_imem)
     CHECK_EQ(rl_rsp_get_stats(f.r)->binds, 3);
     rl_rsp_destroy(f.r);
 }
+
+/*
+ * A whole-IMEM image whose last word is a jump with its delay slot in the
+ * first word: 0xFF8 addiu r1, r1, 1; 0xFFC j 0xFF8 (slot at 0x0 addiu r2,
+ * r2, 1).
+ */
+static uint8_t g_wrap_bytes[0x1000];
+static uint16_t g_wrap_succ[3 * 0x400];
+
+static int wrap_fn(rl_ctx *c, uint8_t *mem)
+{
+    int rc;
+    if (c->pc == 0xFFC)
+        goto L_ffc;
+    c->r[1]++;
+    c->time.budget -= 1;
+    if (c->time.budget <= 0 && (rc = rl_rsp_sync(c, mem, 0xFFC)) != RL_OK)
+        return rc;
+L_ffc:
+    c->r[2]++;
+    c->time.budget -= 2;
+    if (c->time.budget <= 0 && (rc = rl_rsp_sync(c, mem, 0xFF8)) != RL_OK)
+        return rc;
+    return rl_indirect(c, 0xFF8)(c, mem);
+}
+
+static const rl_fn_entry g_wrap_fns[1] = {{0xFF8, 8, RL_FN_RANGE, wrap_fn}};
+
+static const rl_unit g_wrap_unit = {
+    .abi_version = RL_ABI_VERSION,
+    .ctx_size = sizeof(rl_ctx),
+    .fn_count = 1,
+    .fns = g_wrap_fns,
+    .name = "wrap",
+};
+
+static const rl_rsp_image g_wrap = {&g_wrap_unit, 0x1000, 0x9abc, g_wrap_bytes, g_wrap_succ};
+
+TEST(rsp_a_delay_slot_past_the_end_of_imem_is_checked_at_its_start)
+{
+    static const uint8_t words[3][4] = {{0x24, 0x21, 0x00, 0x01}, {0x08, 0x00, 0x03, 0xFE}, {0x24, 0x42, 0x00, 0x01}};
+    memcpy(g_wrap_bytes + 0xFF8, words[0], 4);
+    memcpy(g_wrap_bytes + 0xFFC, words[1], 4);
+    memcpy(g_wrap_bytes, words[2], 4);
+    for (uint32_t i = 0; i < 0x400; i++) {
+        g_wrap_succ[3 * i] = RL_RSP_NO_SUCC;
+        g_wrap_succ[3 * i + 1] = RL_RSP_NO_SUCC;
+        g_wrap_succ[3 * i + 2] = 0;
+    }
+    g_wrap_succ[3 * 0x3FE] = 0x3FF;
+    g_wrap_succ[3 * 0x3FF + 2] = RL_RSP_SUCC_SLOT;
+    const rl_rsp_image *imgs[1] = {&g_wrap};
+    fixture f;
+    setup(&f, imgs, 1);
+    memcpy(f.imem, g_wrap_bytes, sizeof f.imem);
+    uint32_t pc = 0xFFC;
+    uint64_t at = rl_rsp_run(f.r, &pc, 0, 2);
+    CHECK_EQ(at, 2);
+    CHECK_EQ(pc, 0xFF8);
+    CHECK_EQ(rl_rsp_gpr(f.r, 2), 1);
+    at = rl_rsp_run(f.r, &pc, at, at + 3);
+    CHECK_EQ(rl_rsp_gpr(f.r, 1), 1);
+    CHECK_EQ(rl_rsp_gpr(f.r, 2), 2);
+    CHECK_EQ(rl_rsp_get_stats(f.r)->binds, 2);
+    rl_rsp_destroy(f.r);
+}

@@ -2211,7 +2211,8 @@ the machine's SP interface drives through `runtime/guests/n64/run`.
   link of `JAL`, `JALR`, `BGEZAL` and `BLTZAL` adds it, and the absolute
   targets of `J`, `JAL`, `JR` and `JALR` subtract it. The build cuts each
   run of RSP code the analysis finds into images of at most 4 KiB that
-  overlap by 8 bytes.
+  overlap by 8 bytes. An image of all 4 KiB runs across the end of IMEM:
+  the delay slot of its last word is its first word.
 - Each instruction charges one cycle (a branch and its delay slot two) and
   every block ends in a sync point whose slow path is `rl_rsp_sync`: it goes
   on while the slice has cycles left and the RSP runs, and otherwise stores

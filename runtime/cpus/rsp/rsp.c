@@ -161,6 +161,8 @@ void rl_rsp_imem_written(rl_rsp *r, uint32_t offset, uint32_t len)
 /** @brief Whether IMEM word w holds the word of image im at word offset o. */
 static bool word_matches(const rl_rsp *r, const rl_rsp_image *im, uint32_t o, uint32_t w)
 {
+    if (im->len == RL_RSP_MEM_SIZE)
+        o %= RL_RSP_SLOTS_COUNT;
     if (o >= im->len / 4u)
         return false;
     return memcmp(r->imem + (w % RL_RSP_SLOTS_COUNT) * 4u, im->bytes + o * 4u, 4) == 0;

@@ -551,6 +551,8 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Images {
             let w = be32(bytes, off);
             let slot = if off + 8 <= len as usize {
                 be32(bytes, off + 4)
+            } else if len == IMEM_SIZE {
+                be32(bytes, 0)
             } else {
                 0
             };
