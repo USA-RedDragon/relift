@@ -611,3 +611,30 @@ fn a_root_that_reaches_an_undecodable_word_is_rejected() {
     assert_eq!(function(&rep, bad), None);
     assert!(rep.stats.rejected >= 1);
 }
+
+#[test]
+fn scalar_rsp_code_with_cop0_moves_is_found_by_the_scan() {
+    let mut b = rom(ENTRY, 0x10_2000);
+    put(&mut b, at(ENTRY), &[jr(RA), NOP]);
+    let loader = ENTRY + 0x2000;
+    let mtc0 = |rt: u32, rd: u32| 0x4080_0000 | rt << 16 | rd << 11;
+    let mfc0 = |rt: u32, rd: u32| 0x4000_0000 | rt << 16 | rd << 11;
+    let body: Vec<u32> = (0..48)
+        .map(|k| match k % 4 {
+            0 => mtc0(T0, k % 8),
+            1 => mfc0(T1, 6),
+            2 => addiu(T0, T0, 8),
+            _ => lw(T2, 0x10, T0),
+        })
+        .chain([0x0000_000D])
+        .collect();
+    put(&mut b, at(loader), &body);
+    let rep = run(&b);
+    assert!(
+        rep.rsp.iter().any(|i| i.origin == RspOrigin::Scan
+            && i.offset <= at(loader) as u32
+            && i.offset + i.len >= at(loader) as u32 + 4 * 49),
+        "{:?}",
+        rep.rsp
+    );
+}

@@ -321,22 +321,24 @@ pub(crate) fn reloc_masks(words: &[u32], link: u32) -> Vec<u32> {
 }
 
 /// RSP code regions of a source: windows of 32 words that all decode as
-/// RSP instructions, at least a quarter of them vector instructions that
-/// the VR4300 does not decode, merged across gaps up to 64 words and grown
+/// RSP instructions, at least a quarter of them RSP markers (vector
+/// instructions that the VR4300 does not decode, `MFC0`, `MTC0` and
+/// `BREAK`, so a scalar loader such as a boot microcode counts), merged across gaps up to 64 words and grown
 /// across the RSP words on both sides (crossing at most seven zero words;
 /// at the end, up to seven zero words are kept, since IMEM runs them as
 /// `NOP`s).
 pub(crate) fn rsp_regions(cpu: &Words) -> Vec<(usize, usize)> {
     let n = cpu.w.len();
     let mut good = vec![false; n];
-    let mut vec_op = vec![false; n];
+    let mut marker = vec![false; n];
     for i in 0..n {
         let x = cpu.w[i];
         match relift_cpu_rsp::decode::decode(x) {
             Some(e) => {
                 good[i] = true;
                 let c = e.class();
-                vec_op[i] = (c == "vector" || c == "vmem") && cpu.f[i] & VALID == 0;
+                marker[i] =
+                    ((c == "vector" || c == "vmem") && cpu.f[i] & VALID == 0) || c == "system";
             }
             None => good[i] = x == 0,
         }
@@ -346,7 +348,7 @@ pub(crate) fn rsp_regions(cpu: &Words) -> Vec<(usize, usize)> {
     while s + WIN <= n {
         let e = s + WIN;
         let all = good[s..e].iter().all(|g| *g);
-        let v = vec_op[s..e].iter().filter(|v| **v).count();
+        let v = marker[s..e].iter().filter(|v| **v).count();
         if all && v >= WIN / 4 {
             match out.last_mut() {
                 Some(l) if s <= l.1 + GAP => l.1 = l.1.max(e),

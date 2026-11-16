@@ -65,7 +65,8 @@
 //! the relocation fields cleared), the function entries, the transfers
 //! and DMAs left unknown, the constant PI DMAs, and the RSP images: those
 //! an SP DMA loads, and runs of words that decode as RSP code with vector
-//! instructions the VR4300 does not decode. A region linked outside RDRAM
+//! instructions the VR4300 does not decode or the RSP's COP0 moves and
+//! `BREAK`. A region linked outside RDRAM
 //! is code a loader moves: its `J`/`JAL` targets and `LUI`/low-half pairs
 //! that point into it are its relocation fields. Nothing here is
 //! interpreted at run time; the runtime binds units to the RDRAM ranges
