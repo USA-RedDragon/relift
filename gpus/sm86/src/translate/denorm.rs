@@ -11,7 +11,10 @@
 //!   flushes as the guest does.
 //! - A lane takes the exact path when its result is tiny (below `2^-125`,
 //!   zero included), or, for an instruction without `.FTZ` on a host that
-//!   may flush, when an input is a denormal. The exact path rebuilds each
+//!   may flush, when an input is a denormal. On a host that keeps denormals
+//!   only directed FMUL and FFMA take it: the host rounds a denormal
+//!   result to nearest, and the error found on the scaled operands misses
+//!   that rounding. The exact path rebuilds each
 //!   operand as a significand in `[1, 2)` and an exponent with integer
 //!   operations, does the arithmetic on copies scaled so that every value
 //!   stays normal (TwoSum and fused multiply-add error terms make the
@@ -270,7 +273,7 @@ impl Ctx {
         let native = scale == 0
             && match dm {
                 Denorm::Flush => ftz,
-                Denorm::Preserve => !ftz,
+                Denorm::Preserve => !ftz && (mode == Round::Nearest || k == Arith::Add),
                 Denorm::Unknown => false,
             };
         let fast_bits = self.as_bits(fast);
