@@ -59,6 +59,7 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     rl_n64_sp_init(m);
     rl_n64_pif_init(m);
     rl_n64_cart_init(m);
+    rl_n64_ai_init(m);
     return m;
 }
 
@@ -69,6 +70,7 @@ void rl_n64_destroy(rl_n64 *m)
     if (m->s) {
         rl_sched_cancel(m->s, &m->pi.done);
         rl_sched_cancel(m->s, &m->vi.line);
+        rl_n64_ai_detach(m);
         rl_sched_cancel(m->s, &m->sp.slice);
         rl_sched_cancel(m->s, &m->sp.dma_event);
         rl_n64_si_detach(m);
@@ -79,6 +81,7 @@ void rl_n64_destroy(rl_n64 *m)
     free(m->code.filled);
     free(m->rdram);
     free(m->vi.screen);
+    free(m->ai.ring);
     free(m);
 }
 
@@ -90,6 +93,7 @@ int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k)
     m->k = k;
     rl_n64_pi_attach(m);
     rl_n64_vi_attach(m);
+    rl_n64_ai_attach(m);
     rl_n64_sp_attach(m);
     rl_n64_si_attach(m);
     mi_update(m);
@@ -158,44 +162,6 @@ static void mi_write(rl_n64 *m, unsigned i, uint32_t v)
     }
 }
 
-static uint32_t ai_read(rl_n64 *m, unsigned i)
-{
-    switch (i) {
-    case 1:
-        return 0;
-    case 3:
-        return 0x00100000u;
-    default:
-        return m->ai.dram;
-    }
-}
-
-static void ai_write(rl_n64 *m, unsigned i, uint32_t v)
-{
-    switch (i) {
-    case 0:
-        m->ai.dram = v & 0xFFFFF8u;
-        break;
-    case 1:
-        m->ai.len = v & 0x3FFF8u;
-        break;
-    case 2:
-        m->ai.control = v & 1u;
-        break;
-    case 3:
-        rl_n64_mi_lower(m, RL_N64_IRQ_AI);
-        break;
-    case 4:
-        m->ai.dacrate = v & 0x3FFFu;
-        break;
-    case 5:
-        m->ai.bitrate = v & 0xFu;
-        break;
-    default:
-        break;
-    }
-}
-
 /** @brief A word read at a word-aligned physical address outside RDRAM. */
 static uint32_t read_word(rl_n64 *m, uint32_t a)
 {
@@ -214,7 +180,7 @@ static uint32_t read_word(rl_n64 *m, uint32_t a)
     case 0x044:
         return rl_n64_vi_read(m, r);
     case 0x045:
-        return ai_read(m, r);
+        return rl_n64_ai_read(m, r & 7u);
     case 0x046:
         return rl_n64_pi_read(m, r);
     case 0x047:
@@ -258,7 +224,7 @@ static void write_word(rl_n64 *m, uint32_t a, uint32_t v)
         rl_n64_vi_write(m, r, v);
         return;
     case 0x045:
-        ai_write(m, r, v);
+        rl_n64_ai_write(m, r & 7u, v);
         return;
     case 0x046:
         rl_n64_pi_write(m, r, v);

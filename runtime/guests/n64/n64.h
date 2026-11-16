@@ -131,6 +131,20 @@ RL_RUNTIME_API void rl_n64_set_frame_hook(rl_n64 *m, rl_n64_frame_hook *hook, vo
 /** @brief A VI register (0 to 13) as a read would see it. */
 RL_RUNTIME_API uint32_t rl_n64_vi_reg(rl_n64 *m, unsigned index);
 
+/** @brief Frames per second of the audio the machine hands out (the DAC's samples are resampled to it). */
+#define RL_N64_AUDIO_RATE 44100u
+/** @brief Frames the audio ring holds; the DAC's samples past it are dropped until the program takes some. */
+#define RL_N64_AUDIO_RING 16384u
+/**
+ * @brief Takes up to max_frames of audio, interleaved 16-bit stereo at
+ * RL_N64_AUDIO_RATE, after running the DAC up to the CPU's tick now. The DAC
+ * runs whether or not a buffer plays (silence after the level decays), so
+ * the frames add up to the time that has passed.
+ */
+RL_RUNTIME_API size_t rl_n64_audio_take(rl_n64 *m, int16_t *pcm, size_t max_frames);
+/** @brief The DAC's sample rate in Hz now: the video clock divided by AI_DACRATE + 1. */
+RL_RUNTIME_API uint32_t rl_n64_ai_rate(const rl_n64 *m);
+
 /** @brief The bits of a controller's button word, as the joybus reports them. */
 enum {
     RL_N64_PAD_A = 0x8000,

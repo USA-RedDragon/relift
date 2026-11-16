@@ -133,11 +133,28 @@ struct rl_n64 {
     } dp;
 
     struct {
-        uint32_t dram;
-        uint32_t len;
-        uint32_t control;
+        bool enable;
+        bool carry;
+        uint32_t addr[2];
+        uint32_t len[2];
+        uint32_t count;
         uint32_t dacrate;
         uint32_t bitrate;
+        /** @brief The DAC's rate in Hz and its sample period in half CPU cycles. */
+        uint32_t freq;
+        uint32_t period;
+        /** @brief The half cycle the next sample is due at. */
+        uint64_t next;
+        /** @brief The DAC's level (16-bit samples times 256) and its decay per sample (16.16). */
+        int32_t left, right;
+        uint32_t decay;
+        /** @brief The resampler: the next output frame's place after the last sample (32.32) and that sample. */
+        uint64_t pos;
+        int32_t prev_l, prev_r;
+        int16_t *ring;
+        uint32_t head, tail;
+        uint64_t dropped, samples;
+        rl_event done;
     } ai;
 
     struct {
@@ -294,6 +311,17 @@ void rl_n64_pif_dma_write(rl_n64 *m, uint32_t a, uint32_t dram);
 uint32_t rl_n64_pif_estimate(const rl_n64 *m);
 /** @brief One standard controller's joybus command: send bytes in input, recv expected back in output. Returns bit 0 valid, bit 1 over. */
 unsigned rl_n64_pad_comm(rl_n64 *m, unsigned port, unsigned send, unsigned recv, const uint8_t *input, uint8_t *output);
+
+/** @brief AI register read (index 0 to 7), with the DAC brought up to now. */
+uint32_t rl_n64_ai_read(rl_n64 *m, unsigned index);
+/** @brief AI register write. */
+void rl_n64_ai_write(rl_n64 *m, unsigned index, uint32_t value);
+/** @brief Allocates the audio ring and sets the DAC's power-on rate. */
+void rl_n64_ai_init(rl_n64 *m);
+/** @brief Starts the DAC's clock at the CPU's tick now. */
+void rl_n64_ai_attach(rl_n64 *m);
+/** @brief Removes the AI event from the scheduler. */
+void rl_n64_ai_detach(rl_n64 *m);
 
 /** @brief VI register read (index 0 to 13), with the line counter brought up to now. */
 uint32_t rl_n64_vi_read(rl_n64 *m, unsigned index);
