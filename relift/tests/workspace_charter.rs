@@ -255,8 +255,8 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-cpu-z80",
         band: 2,
-        why: "the Z80 decoder and lifter over the templates generated from our Sail model, over the IR only; no guest uses it yet",
-        normal: &["relift-ir"],
+        why: "the Z80 decoder, lifter and frontend over the templates generated from our Sail model; no guest uses it yet",
+        normal: &["relift-guest", "relift-ir"],
         dev: NONE,
         build: NONE,
     },

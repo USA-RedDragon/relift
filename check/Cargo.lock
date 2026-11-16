@@ -440,6 +440,7 @@ dependencies = [
 name = "relift-cpu-z80"
 version = "0.1.0"
 dependencies = [
+ "relift-guest",
  "relift-ir",
 ]
 

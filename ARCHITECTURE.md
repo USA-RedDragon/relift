@@ -107,7 +107,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 3 | `relift-cpu-mips-gen` | `cpus/mips/gen` | Generates each MIPS profile's decode table and lifting templates from sail-cheri-mips and the profile's overlay (`vr4300.sail`, `r3000a.sail`): the MIPS cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-z80-gen` | `cpus/z80/gen` | Generates the Z80 lifting templates (`cpus/z80/src/lift/generated.rs`) from our Sail model `cpus/z80/sail/z80.sail`: the Z80 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
-| 2 | `relift-cpu-z80` | `cpus/z80` | Z80 (NMOS) decoder and lifter to `relift-ir` over the templates generated from the Z80 Sail model: every page, the interrupt entries, port intrinsics and the T-state of every bus access; no guest uses it yet |
+| 2 | `relift-cpu-z80` | `cpus/z80` | Z80 (NMOS) decoder, lifter to `relift-ir` over the templates generated from the Z80 Sail model (every page, the interrupt entries, port intrinsics and the T-state of every bus access) and the `Frontend` for the C emitter; no guest uses it yet |
 | 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder, opcode table (length, M-cycles taken and not taken, flags, bus access per cycle) and lifter to `relift-ir`, with templates generated from the SM83 Sail model |
 | 2 | `relift-gpu-sm86` | `gpus/sm86` | NVIDIA SM86 (Ampere, Switch 2) SASS decoder with nvdisasm's text form, and a SASS to SPIR-V translator; field positions from Mesa NAK (MIT) |
 | 0 | `relift-info` | `core/info` | The self-description of a built binary: the `--relift-info` JSON document in sections (identity, needs, settings, input, mods, save), its embedding in the binary and its reader; read by `relift info` and by launchers |
@@ -201,6 +201,7 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 | CPU | `runtime/cpus/arm64` | The ARM64 lifted-code ABI and `rl_ctx`, FPCR, WFE, CNTPCT, `rl_undefined`, `rl_resume`, register summaries for reports |
 | guest | `runtime/guests/switch` | Horizon: kernel, `rl_svc`, IPC, `sm:` and the services, the scheduler, the NPDM layout, Horizon's page, clock and permission encodings; `switch/vk` forwards Vulkan to the host |
 | CPU | `runtime/cpus/sm83` | The SM83 lifted-code ABI and `rl_ctx`, interrupts, HALT and STOP, over a callback table |
+| CPU | `runtime/cpus/z80` | The Z80 lifted-code ABI and `rl_ctx`, NMI and maskable interrupts through the lifted entry blocks, HALT, ports, over a callback table |
 | guest | `runtime/guests/gb` | The Game Boy memory map, mappers and I/O routed to scheduler device slots; `gb/exact` is the program that runs lifted code with the device library |
 | CPU | `runtime/cpus/arm32` | The ARMv4T lifted-code ABI and `rl_ctx`, mode banks, exceptions, the I bit's mask, the return address stack |
 | guest | `runtime/guests/gba` | The Game Boy Advance machine, picture unit and high-level BIOS; `gba/run` is the program that runs lifted code on it |
