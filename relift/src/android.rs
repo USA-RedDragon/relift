@@ -514,7 +514,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
       </intent-filter>
       <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
     </activity>
-    <activity android:name="dev.relift.app.SettingsActivity" android:exported="false" android:taskAffinity="{package}.settings" android:excludeFromRecents="true" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
+    <activity android:name="dev.relift.app.SettingsActivity" android:exported="false" android:taskAffinity="{package}.settings" android:excludeFromRecents="true" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
     <activity android:name="dev.relift.app.Restarter" android:exported="false" android:process=":restart" android:taskAffinity="{package}.restart" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
     <service android:name="dev.relift.app.GpuProbe" android:exported="false" android:process=":gpucheck"/>
   </application>

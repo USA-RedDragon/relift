@@ -764,8 +764,9 @@ final class Ui {
                 }
             });
             LinearLayout.LayoutParams lp = stacked
-                    ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(90))
-                    : new LinearLayout.LayoutParams(0, px(90), 1);
+                    ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT)
+                    : new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
             if (i > 0) {
                 if (stacked) {
                     lp.topMargin = px(16);
@@ -964,16 +965,17 @@ final class Ui {
     }
 
     View banner(String title, String body, Btn... buttons) {
-        FrameLayout f = new FrameLayout(act);
+        LinearLayout f = new LinearLayout(act);
+        f.setOrientation(LinearLayout.HORIZONTAL);
         f.setBackground(round(CARD, 28, ACC, 4));
         View bar = new View(act);
         bar.setBackground(round(ACC, 6, 0, 0));
-        FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(px(12), ViewGroup.LayoutParams.MATCH_PARENT);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(px(12), ViewGroup.LayoutParams.MATCH_PARENT);
         bl.topMargin = px(34);
         bl.bottomMargin = px(34);
         f.addView(bar, bl);
         LinearLayout c = vbox();
-        c.setPadding(px(50), px(40), px(40), px(30));
+        c.setPadding(px(38), px(40), px(40), px(30));
         c.addView(text(title, 38, Color.WHITE, true));
         TextView b = text(body, 31, BODY, false);
         b.setPadding(0, px(6), 0, 0);
@@ -992,7 +994,7 @@ final class Ui {
             row.addView(v, lp);
         }
         c.addView(row);
-        f.addView(c);
+        f.addView(c, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         return f;
     }
 
@@ -1035,7 +1037,10 @@ final class Ui {
         }
         TextView t = text(label, size, fg, true);
         t.setGravity(Gravity.CENTER);
-        t.setSingleLine(true);
+        t.setMaxLines(2);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.setPadding(px(30), px(12), px(30), px(12));
+        t.setMinHeight(px(90));
         GradientDrawable g = new GradientDrawable();
         g.setColor(fill);
         g.setCornerRadius(px(60));
