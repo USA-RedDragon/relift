@@ -65,9 +65,32 @@ static const char *selected_name(void)
     return name && *name && strcmp(name, RL_GPU_DRIVER_SYSTEM) ? name : NULL;
 }
 
+#if defined(__ANDROID__)
+#include <vulkan/vulkan.h>
+
+static bool describe(PFN_vkGetInstanceProcAddr gipa, char *out, size_t size);
+
+#endif
+
 #if defined(__ANDROID__) && defined(RL_ADRENOTOOLS)
 #include <adrenotools/driver.h>
 #include <pthread.h>
+
+/** @brief The driverName line of a describe() answer. */
+static const char *driver_name(const char *d)
+{
+    for (int i = 0; i < 4 && d; i++) {
+        d = strchr(d, '\n');
+        d = d ? d + 1 : NULL;
+    }
+    return d ? d : "";
+}
+
+static size_t line_len(const char *s)
+{
+    const char *e = strchr(s, '\n');
+    return e ? (size_t)(e - s) : strlen(s);
+}
 
 static void *g_custom_gipa;
 
@@ -96,8 +119,28 @@ static void *open_custom(const rl_gpu_driver *d)
         return NULL;
     }
     void *gipa = rl_hostlib_sym(lib, "vkGetInstanceProcAddr");
-    rl_log(gipa ? RL_LOG_INFO : RL_LOG_ERROR, "hostlib", "Vulkan driver: package %s (%s)%s", d->name, d->library,
-           gipa ? "" : " has no vkGetInstanceProcAddr; using the system driver");
+    if (!gipa) {
+        rl_log(RL_LOG_ERROR, "hostlib", "Vulkan driver: package %s (%s) has no vkGetInstanceProcAddr; using the system driver",
+               d->name, d->library);
+        return NULL;
+    }
+    char got[1024], sys[1024];
+    if (!describe((PFN_vkGetInstanceProcAddr)gipa, got, sizeof got)) {
+        rl_log(RL_LOG_ERROR, "hostlib", "Vulkan driver: package %s (%s) did not start (%s); using the system driver",
+               d->name, d->library, got);
+        return NULL;
+    }
+    void *syslib = rl_hostlib_open(vulkan_names);
+    void *sysgipa = rl_hostlib_sym(syslib, "vkGetInstanceProcAddr");
+    const char *a = driver_name(got), *b = "";
+    if (sysgipa && describe((PFN_vkGetInstanceProcAddr)sysgipa, sys, sizeof sys) &&
+        (b = driver_name(sys), line_len(a) == line_len(b)) && !strncmp(a, b, line_len(a))) {
+        rl_log(RL_LOG_ERROR, "hostlib",
+               "Vulkan driver: package %s (%s) answered as the system driver; using the system driver", d->name,
+               d->library);
+        return NULL;
+    }
+    rl_log(RL_LOG_INFO, "hostlib", "Vulkan driver: package %s (%s), %.*s", d->name, d->library, (int)line_len(a), a);
     return gipa;
 }
 
