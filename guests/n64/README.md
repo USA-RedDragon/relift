@@ -1,14 +1,14 @@
 # guests/n64
 
 The Nintendo 64 guest. State: `relift import`, `build` and `run` take a
-ROM in any byte order and run it with every instruction lifted; the RSP,
+ROM in any byte order and run it with every CPU and RSP instruction lifted;
 the RDP, audio, controllers and saves are not there yet.
 
 | Crate | Folder | Does |
 |---|---|---|
 | `relift-n64-formats` | `formats` | Byte orders and normalization, the header, the boot variant by hash, CRC1/CRC2, Yay0, Yaz0 and MIO0 decoders and a stream scan |
 | `relift-n64-analyze` | `analyze` | Code discovery: the VR4300 IR over abstract values from the boot entry, the PI DMA fixed point, the ROM-wide region scan with the link address vote, relocation masks, the sweep and the RSP image list |
-| `relift-n64` | `guest` | The VR4300 frontend for the runtime's N64 layer and the build's lift: one unit per segment linked in RDRAM, `program.c` with every code run's source, link address and hash |
+| `relift-n64` | `guest` | The VR4300 frontend for the runtime's N64 layer, the RSP frontend for its RSP layer and the build's lift: one unit per segment linked in RDRAM and one per relocatable RSP image of at most 4 KiB, `program.c` with every code run's source, link address and hash, `rsp_images.c` with every RSP image's bytes and successors |
 | `relift-n64-tools` | `tools` | `relift-n64rom`: `info`, `streams`, `normalize`, `functions` |
 
 ```sh

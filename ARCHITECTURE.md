@@ -219,7 +219,8 @@ The C runtime sits outside Cargo, built and tested by `runtime/Makefile`
 | CPU | `runtime/cpus/arm32` | The ARMv4T lifted-code ABI and `rl_ctx`, mode banks, exceptions, the I bit's mask, the return address stack |
 | guest | `runtime/guests/gba` | The Game Boy Advance machine, picture unit and high-level BIOS; `gba/run` is the program that runs lifted code on it |
 | CPU | `runtime/cpus/mips` | The VR4300 lifted-code ABI and `rl_ctx`, CP0, exceptions and ERET, Count and Compare, the TLB, the FPU slow path, the guard slow paths, the return address stack |
-| guest | `runtime/guests/n64` | The Nintendo 64 machine (MI, RI, PI DMA, SP registers and DMA, VI with raw scan-out, AI and SI stubs), the high-level boot and the binding of lifted code runs to RDRAM by hash; `n64/run` is the program that runs lifted code on it |
+| CPU | `runtime/cpus/rsp` | The RSP lifted-code ABI and its own `rl_ctx`, the run of lifted microcode in slices out of IMEM, binding images by their bytes in IMEM, COP0 and BREAK over a bus |
+| guest | `runtime/guests/n64` | The Nintendo 64 machine (MI, RI, PI DMA, the SP interface with DMA, the RSP's start, halt and BREAK, the DP command registers, VI with raw scan-out, AI and SI stubs), the high-level boot and the binding of lifted code runs to RDRAM by hash; `n64/run` is the program that runs lifted code on it |
 
 The layers above tell the core their page size, address width, tick rate,
 context layout, code granule and byte order through two descriptor structs

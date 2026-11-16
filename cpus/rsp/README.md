@@ -18,5 +18,6 @@ The tests run every COP2 instruction's template on the IR interpreter
 against a per-element reference written from ares, on random and edge
 states, and replay hardware known answers from n64-systemtest.
 
-State: `relift-n64-analyze` uses its decoder to find RSP code in a ROM; no
-guest crate lifts it yet, and there is no runtime layer for the RSP (DMEM, the SP registers, the RDP interface).
+State: `relift-n64-analyze` uses its decoder to find RSP code in a ROM, and
+`relift-n64` lifts the RSP code it finds for the runtime's RSP layer
+(`runtime/cpus/rsp`).

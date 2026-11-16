@@ -2157,6 +2157,42 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   dump with `--dump`, and the program stops. Dev builds have no hot-load
   for this guest yet.
 
+### The RSP
+
+RSP microcode (`relift/rsp/abi.h`, lifted by relift-cpu-rsp through
+`guests/n64/guest/src/rsp.rs`) runs on the layer `runtime/cpus/rsp`, which
+the machine's SP interface drives through `runtime/guests/n64/run`.
+
+- `rl_ctx` is the RSP's own: relift-cpu-rsp's register slots in slot order
+  (`RL_RSP_SLOTS`, checked by the frontend's tests), then `pc`, the `rl_time`
+  clock in RSP cycles, the dispatch table and the layer's RSP. An RSP unit
+  includes no other CPU layer's header; it shares only `rl_unit` and
+  `rl_fn` with the VR4300 units, through pointers.
+- `mem` is DMEM. The lifter masks every address to 12 bits and the lifted
+  code swaps the big-endian data.
+- An image is lifted at its own offsets, so one unit runs wherever the
+  program loads its bytes. `c->pc` and the targets of transfers are offsets
+  in the running image; `c->base` is the IMEM address of its offset 0, and
+  `rl_rsp_base` gives it to the code where an IMEM address is a value: the
+  link of `JAL`, `JALR`, `BGEZAL` and `BLTZAL` adds it, and the absolute
+  targets of `J`, `JAL`, `JR` and `JALR` subtract it. The build cuts each
+  run of RSP code the analysis finds into images of at most 4 KiB that
+  overlap by 8 bytes.
+- Each instruction charges one cycle (a branch and its delay slot two) and
+  every block ends in a sync point whose slow path is `rl_rsp_sync`: it goes
+  on while the slice has cycles left and the RSP runs, and otherwise stores
+  the next pc and returns `RL_PENDING` to the layer's run loop.
+- `MFC0` calls `rl_rsp_mfc0`, `MTC0` `rl_rsp_mtc0` and `BREAK`
+  `rl_rsp_break`, each with the RSP cycle; a write and a `BREAK` end the
+  budget, so the block's sync point sees a halt.
+- Every transfer the function does not hold goes through `rl_indirect` to
+  the dispatch slot of the target word, which also gives the base of the
+  slot's image. A slot holds `rl_rsp_enter` until the layer has checked
+  that IMEM holds the bytes of an image, at some base, at every word the
+  lifted code there can reach without a computed jump; an IMEM write puts
+  `rl_rsp_enter` back in every slot. A word no image matches is missed
+  code: a report, IMEM and DMEM with `--dump`, and the program stops.
+
 ### The Z80 layer
 
 `runtime/cpus/z80` (`relift/z80/abi.h`) is the CPU layer of the Z80
