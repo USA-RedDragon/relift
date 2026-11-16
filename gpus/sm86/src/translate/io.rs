@@ -37,9 +37,14 @@
 //! Fragment outputs (SPH word 18, four bits per render target) leave in
 //! registers from R0: four per target that has any component, then the
 //! sample mask and depth when SPH word 19 bit 0 or bit 1 asks for either.
+//! The registers hold the bits the target's format takes: floats for float
+//! and normalized formats, integers for integer formats. A Vulkan fragment
+//! output must have the numeric type of its attachment, so each target's
+//! output is a vector of the kind `Options::color_kinds` names for it
+//! (float when it names none) and gets the register bits unchanged.
 
 use super::mem::tuple_reg;
-use super::{INPUT, Interp, OUTPUT, Res, bad};
+use super::{INPUT, Interp, Kind, OUTPUT, Res, bad};
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
 use crate::{Inst, Operand};
@@ -82,6 +87,8 @@ pub(crate) struct State {
     /// centroid).
     sites: BTreeMap<u32, (bool, bool)>,
     centroid: BTreeMap<u32, bool>,
+    /// Numeric kind of each render target's format (Options::color_kinds).
+    pub(crate) color_kinds: BTreeMap<u32, Kind>,
 }
 
 /// Records how each fragment input is sampled before any code is emitted.
@@ -395,17 +402,22 @@ impl Ctx {
     }
 
     pub(crate) fn fragment_outputs(&mut self, targets: u32) {
-        let f = self.f32t();
         let mut reg = 0u8;
         for t in 0..8 {
             let mask = (targets >> (4 * t)) & 0xf;
             if mask == 0 {
                 continue;
             }
+            let kind = self.io.color_kinds.get(&t).copied().unwrap_or(Kind::Float);
+            let elem = match kind {
+                Kind::Float => self.f32t(),
+                Kind::Sint => self.m.t_i32(),
+                Kind::Uint => self.u32t(),
+            };
             let var = match self.colors.get(&t) {
                 Some(&v) => v,
                 None => {
-                    let v4 = self.m.t_vec(f, 4);
+                    let v4 = self.m.t_vec(elem, 4);
                     let p = self.m.t_ptr(OUTPUT, v4);
                     let var = self.m.global(p, OUTPUT);
                     self.m.deco(var, 30, &[t]);
@@ -419,8 +431,13 @@ impl Ctx {
                     continue;
                 }
                 let u = self.load_reg(reg + c as u8);
-                let v = self.as_float(u);
-                let ptr = self.component_ptr(var, OUTPUT, c);
+                let v = match kind {
+                    Kind::Uint => u,
+                    _ => self.m.emit(op::BITCAST, elem, &[u]),
+                };
+                let pt = self.m.t_ptr(OUTPUT, elem);
+                let ci = self.m.c_u32(c);
+                let ptr = self.m.emit(op::ACCESS_CHAIN, pt, &[var, ci]);
                 self.m.emit_void(op::STORE, &[ptr, v]);
             }
             reg += 4;

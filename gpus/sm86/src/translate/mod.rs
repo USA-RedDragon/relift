@@ -120,6 +120,10 @@ pub struct Options {
     /// lowers to the same results (see the `mufu` module). Hosts other
     /// than NVIDIA always use the model.
     pub exact_mufu: bool,
+    /// Numeric kind of the format of each fragment render target the
+    /// pipeline binds (a target not named is float); the output variable of
+    /// a target has that type (see the `io` module).
+    pub color_kinds: BTreeMap<u32, Kind>,
 }
 
 /// A translated program.
@@ -667,6 +671,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
         divergent: Vec::new(),
     };
     c.iface.host.host = o.host.name;
+    c.io.color_kinds = o.color_kinds.clone();
     c.denorm_plan(&code.insts);
     c.warp_plan(&code.insts, code.fast_paths);
     let void = c.m.t_void();

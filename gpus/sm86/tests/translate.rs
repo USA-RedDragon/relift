@@ -1,5 +1,5 @@
 use relift_gpu_sm86::program::{Program, Stage};
-use relift_gpu_sm86::translate::{Interp, Options, translate, translate_with};
+use relift_gpu_sm86::translate::{Interp, Kind, Options, translate, translate_with};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -725,6 +725,57 @@ fn instance_id_leaves_out_the_base_instance() {
         s.spirv.windows(2).any(|w| w == [0x0002_0011, 4427]),
         "no DrawParameters"
     );
+}
+
+/// Each render target's output has the numeric type of its format and
+/// takes the register bits unchanged.
+#[test]
+fn integer_render_targets_get_integer_outputs() {
+    let mut b = sph(2, 5, &[(18, 0x111)]);
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    let o = Options {
+        color_kinds: [(1, Kind::Uint), (2, Kind::Sint)].into(),
+        ..Options::default()
+    };
+    let s = translate_with(&p, &o).unwrap_or_else(|e| panic!("{e}"));
+    dump("integer_targets", &s.spirv);
+    // OpTypeInt/OpTypeFloat ids, then the element type of each output
+    // variable's pointer, by Location.
+    let w = &s.spirv;
+    let mut ty = std::collections::BTreeMap::new();
+    let mut ptr = std::collections::BTreeMap::new();
+    let mut vec = std::collections::BTreeMap::new();
+    let mut var = std::collections::BTreeMap::new();
+    let mut loc = std::collections::BTreeMap::new();
+    let mut k = 5;
+    while k < w.len() {
+        let n = (w[k] >> 16) as usize;
+        match w[k] & 0xffff {
+            21 => {
+                ty.insert(w[k + 1], if w[k + 3] == 1 { "i32" } else { "u32" });
+            }
+            22 => {
+                ty.insert(w[k + 1], "f32");
+            }
+            23 => {
+                vec.insert(w[k + 1], w[k + 2]);
+            }
+            32 if w[k + 2] == 3 => {
+                ptr.insert(w[k + 1], w[k + 3]);
+            }
+            59 if w[k + 3] == 3 => {
+                var.insert(w[k + 2], w[k + 1]);
+            }
+            71 if w[k + 2] == 30 => {
+                loc.insert(w[k + 3], w[k + 1]);
+            }
+            _ => {}
+        }
+        k += n.max(1);
+    }
+    let kind = |t: u32| ty[&vec[&ptr[&var[&loc[&t]]]]];
+    assert_eq!([kind(0), kind(1), kind(2)], ["f32", "u32", "i32"]);
 }
 
 fn count_op(words: &[u32], opcode: u32) -> usize {
