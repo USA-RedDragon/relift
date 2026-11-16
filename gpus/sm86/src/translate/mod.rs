@@ -196,6 +196,8 @@ pub(crate) struct Ctx {
     /// Per instruction, whether control flow may reach it with only part
     /// of the warp (see `mem::lanes::divergent`).
     pub divergent: Vec<bool>,
+    /// Which global accesses must be coherent (see `mem::order`).
+    pub mem: mem::order::Plan,
 }
 
 impl Ctx {
@@ -669,11 +671,13 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
         funcs: Vec::new(),
         clock_vars: None,
         divergent: Vec::new(),
+        mem: mem::order::Plan::default(),
     };
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();
     c.denorm_plan(&code.insts);
     c.warp_plan(&code.insts, code.fast_paths);
+    c.mem_plan(&code.insts);
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);
     let main = c.m.id();

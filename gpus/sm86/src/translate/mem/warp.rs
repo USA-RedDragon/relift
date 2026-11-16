@@ -17,7 +17,7 @@ const SCOPE_SUBGROUP: u32 = 3;
 const SEM_ACQUIRE_RELEASE: u32 = 0x8;
 const SEM_UNIFORM: u32 = 0x40;
 const SEM_WORKGROUP: u32 = 0x100;
-const SEM_CROSS_WORKGROUP: u32 = 0x200;
+const SEM_IMAGE: u32 = 0x800;
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
@@ -384,23 +384,41 @@ fn bar(c: &mut Ctx, i: &Inst) -> Res<()> {
         return bad("BAR with a thread count");
     }
     let exec = c.m.c_u32(SCOPE_WORKGROUP);
-    let sem = c.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_UNIFORM | SEM_WORKGROUP);
+    let sem =
+        c.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_UNIFORM | SEM_WORKGROUP | SEM_IMAGE);
     c.m.emit_void(op::CONTROL_BARRIER, &[exec, exec, sem]);
     Ok(())
 }
 
-/// MEMBAR. Vulkan has no sequentially consistent fence, so MEMBAR.SC is
-/// an acquire-release fence too.
+/// MEMBAR: an acquire-release fence on buffer, workgroup and image memory
+/// at the fence's scope (`.CTA` and `.SM` the workgroup in a compute
+/// program, the device elsewhere; `.GPU` the device). Vulkan has no
+/// sequentially consistent fence and, without its memory model, no scope
+/// wider than the device, so `.SC` (an acquire-release fence then) and
+/// `.SYS` (a device fence then) are listed inexact. `.VC` is rejected.
+/// The accesses a fence orders are atomics where they must be coherent
+/// (see [`super::order`]).
 fn membar(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let scope = if i.has("CTA") {
-        SCOPE_WORKGROUP
-    } else {
-        SCOPE_DEVICE
+    let mut scope = None;
+    for m in &i.mods {
+        match *m {
+            "CTA" | "SM" => scope = Some(c.cta_scope()),
+            "GPU" => scope = Some(SCOPE_DEVICE),
+            "SYS" => {
+                c.inexact("MEMBAR.SYS: system scope as device scope".into());
+                scope = Some(SCOPE_DEVICE);
+            }
+            "SC" => c.inexact("MEMBAR.SC: acquire-release, not sequentially consistent".into()),
+            "ALL" | "MMIO" => {}
+            m => return bad(format!("MEMBAR.{m}")),
+        }
+    }
+    let Some(scope) = scope else {
+        return bad("MEMBAR scope");
     };
-    let order = SEM_ACQUIRE_RELEASE;
     let s = c.m.c_u32(scope);
     let sem =
-        c.m.c_u32(order | SEM_UNIFORM | SEM_WORKGROUP | SEM_CROSS_WORKGROUP);
+        c.m.c_u32(SEM_ACQUIRE_RELEASE | SEM_UNIFORM | SEM_WORKGROUP | SEM_IMAGE);
     c.m.emit_void(op::MEMORY_BARRIER, &[s, sem]);
     Ok(())
 }

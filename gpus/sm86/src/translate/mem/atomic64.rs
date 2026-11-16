@@ -5,12 +5,26 @@
 //! [`LOCK_BINDING`] (zeroed once by the runtime), picked by hashing the
 //! address, then reads the two words, writes the new value and releases the
 //! lock. The words are read and written with 32-bit atomics so that no
-//! cache between the lanes keeps a stale copy. The lock is taken and released in the same loop iteration, so lanes
-//! of one subgroup that contend for a lock cannot starve the lane that holds
-//! it. All 64-bit atomics of all programs on the device must go through the
-//! same table for the accesses to be atomic with each other; plain 64-bit
-//! loads and stores are not locked, as on the guest a plain access racing an
-//! atomic one has no ordering either.
+//! cache between the lanes keeps a stale copy.
+//!
+//! The lock is taken and released in the same loop iteration, with no
+//! branch between, so lanes of one subgroup that contend for a lock never
+//! wait on a lane of their own subgroup that holds it: the holder finishes
+//! in the iteration it won. A subgroup that spins on a lock another
+//! subgroup holds relies on the device to go on running the holder, which
+//! Vulkan does not promise; that is part of what [`Atomic64Path::Locked`]
+//! reports.
+//!
+//! All 64-bit atomics of all programs on the device must go through the
+//! same table for the accesses to be atomic with each other. Weak 64-bit
+//! loads and stores are not locked: on the guest a weak access racing an
+//! atomic one is a data race with no value guaranteed either. A 32-bit
+//! atomic on one half is not locked: it overlaps the 64-bit atomic only in
+//! part, so the two are not morally strong and the guest guarantees no
+//! atomicity between them. Strong 64-bit loads and stores are single-copy
+//! atomic on the guest but two 32-bit atomics here, which a locked
+//! read-modify-write can split; they are listed inexact (see
+//! [`super::order`]).
 
 use super::spv;
 use crate::spirv::op;

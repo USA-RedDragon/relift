@@ -25,6 +25,10 @@
 //! the other instructions on the same bound handle.
 //! Indices from a register are decorated `NonUniform`.
 //!
+//! Storage images are decorated Coherent in a program whose global
+//! accesses must be coherent (see `mem::order`), so that the surface
+//! accesses a fence or barrier orders are visible to other invocations.
+//!
 //! Binary (`.D`) surface accesses read and write unsigned texels of the
 //! access size (8 to 128 bits; `.BA` byte x coordinates are divided by it),
 //! so the runtime gives those arrays views of a size-compatible unsigned
@@ -73,6 +77,7 @@ use std::collections::BTreeMap;
 const UNIFORM_CONSTANT: u32 = 0;
 const IMAGE_CLASS: u32 = 11;
 const NON_UNIFORM: u32 = 5300;
+const COHERENT: u32 = 23;
 const CAP_COMPUTE_DERIVATIVE_GROUP_LINEAR: u32 = 5350;
 
 /// Binding of the sampler pool in set [`TEXTURE_SET`](super::TEXTURE_SET).
@@ -490,6 +495,9 @@ impl Ctx {
         let var = self.m.global(p, UNIFORM_CONSTANT);
         self.m.deco(var, 34, &[TEXTURE_SET]);
         self.m.deco(var, 33, &[binding]);
+        if binding >= image_binding(ImageKind::Float, ImageDim::D1) && self.mem.coherent() {
+            self.m.deco(var, COHERENT, &[]);
+        }
         self.globals.push(var);
         self.iface.texture_bindings.insert(binding);
         self.tex.vars.insert(binding, var);

@@ -5,7 +5,9 @@
 //! every guest memory pool a Vulkan buffer whose device address is the one
 //! the game sees, so LDG/STG become physical storage buffer accesses.
 //! Generic `LD`/`ST`/`ATOM` are treated as global: the shared and local
-//! windows of the generic address space are not modeled.
+//! windows of the generic address space are not modeled, so they are
+//! listed in `HostReport::inexact`. How global accesses are ordered is in
+//! [`order`].
 //!
 //! The submodules own the other spaces: [`scratch`] (shared and local
 //! memory), [`atomic`] (ATOM, ATOMG, ATOMS, RED) and [`warp`] (SHFL, VOTE,
@@ -15,6 +17,7 @@ mod atomic;
 mod atomic64;
 mod clock;
 pub(crate) mod lanes;
+pub(crate) mod order;
 mod scratch;
 mod segments;
 mod warp;
@@ -22,8 +25,8 @@ mod warp;
 use super::{Ctx, PHYSICAL_STORAGE_BUFFER, Res, bad};
 use crate::spirv::op;
 use crate::{Inst, Operand};
+use order::Order;
 
-const VOLATILE: u32 = 1;
 const ALIGNED: u32 = 2;
 const SCOPE_DEVICE: u32 = 1;
 
@@ -67,6 +70,9 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     }
     if let Some(r) = atomic::inst(c, i) {
         return Some(r);
+    }
+    if matches!(i.mnemonic, "LD" | "ST") {
+        c.generic(i);
     }
     Some(match i.mnemonic {
         "LDG" | "LD" => ldg(c, i),
@@ -153,6 +159,14 @@ pub(crate) fn parse_addr(s: &str, wide_default: bool) -> Res<Addr> {
 }
 
 impl Ctx {
+    /// A generic access, carried out as a global one.
+    pub(crate) fn generic(&mut self, i: &Inst) {
+        self.inexact(format!(
+            "{}: generic address as global (shared and local windows not modeled)",
+            i.mnemonic
+        ));
+    }
+
     fn u64_of(&mut self, lo: u32, hi: u32) -> u32 {
         let u = self.u32t();
         let v2 = self.m.t_vec(u, 2);
@@ -288,13 +302,13 @@ impl Size {
 /// What the modifiers of a memory instruction say.
 pub(crate) struct Mods {
     pub size: Size,
-    pub volatile: bool,
+    pub order: Order,
 }
 
 pub(crate) fn mods_of(i: &Inst) -> Res<Mods> {
     let mut r = Mods {
         size: Size::W32,
-        volatile: false,
+        order: Order::Weak,
     };
     for m in &i.mods {
         match *m {
@@ -305,14 +319,11 @@ pub(crate) fn mods_of(i: &Inst) -> Res<Mods> {
             "S16" => r.size = Size::S16,
             "64" => r.size = Size::W64,
             "128" => r.size = Size::W128,
-            m if m.starts_with("STRONG.GPU")
-                || m.starts_with("STRONG.SYS")
-                || m.starts_with("MMIO") =>
-            {
-                r.volatile = true;
-            }
-            m if m.starts_with("STRONG") || m.starts_with("CONSTANT") || m.starts_with("LTC") => {}
-            m => return bad(format!("{}.{m}", i.mnemonic)),
+            m if m.starts_with("LTC") => {}
+            m => match Order::of(m) {
+                Some(o) => r.order = o,
+                None => return bad(format!("{}.{m}", i.mnemonic)),
+            },
         }
     }
     Ok(r)
@@ -330,14 +341,6 @@ fn vec_ty(c: &mut Ctx, n: u32) -> u32 {
     if n == 1 { u } else { c.m.t_vec(u, n) }
 }
 
-fn mem_flags(volatile: bool) -> u32 {
-    if volatile {
-        VOLATILE | ALIGNED
-    } else {
-        ALIGNED
-    }
-}
-
 fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     let m = mods_of(i)?;
     if i.ops.len() != 2 || !matches!(i.ops[0], Operand::Reg(..)) {
@@ -346,20 +349,28 @@ fn ldg(c: &mut Ctx, i: &Inst) -> Res<()> {
     let d = Ctx::dst_reg(&i.ops[0])?;
     let a = addr_operand(i, 1)?;
     let addr = c.global_address(&a)?;
+    let scope = c.access_scope(i, m.order, m.size.words());
     let vals = if m.size.sub() {
         let u = c.u32t();
         let t = c.m.t_u64();
         let mask = c.m.c_u64(!3);
         let wa = c.m.emit(op::BITWISE_AND, t, &[addr, mask]);
-        let p = c.global_ptr(wa, u);
-        let w = c.m.emit(op::LOAD, u, &[p, mem_flags(m.volatile), 4]);
+        let w = match scope {
+            Some(s) => c.atomic_load_words(wa, 1, m.order, s)[0],
+            None => {
+                let p = c.global_ptr(wa, u);
+                c.m.emit(op::LOAD, u, &[p, ALIGNED, 4])
+            }
+        };
         let lo = c.m.emit(op::U_CONVERT, u, &[addr]);
         vec![c.extract_sub(w, lo, m.size)]
+    } else if let Some(s) = scope {
+        c.atomic_load_words(addr, m.size.words(), m.order, s)
     } else {
         let n = m.size.words();
         let ty = vec_ty(c, n);
         let p = c.global_ptr(addr, ty);
-        let v = c.m.emit(op::LOAD, ty, &[p, mem_flags(m.volatile), 4 * n]);
+        let v = c.m.emit(op::LOAD, ty, &[p, ALIGNED, 4 * n]);
         let u = c.u32t();
         (0..n)
             .map(|k| {
@@ -409,6 +420,7 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
     for k in 0..n {
         parts.push(c.load_reg(tuple_reg(s, k)?));
     }
+    let scope = c.access_scope(i, m.order, n);
     if m.size.sub() {
         let u = c.u32t();
         let t = c.m.t_u64();
@@ -417,10 +429,11 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
         let lo = c.m.emit(op::U_CONVERT, u, &[addr]);
         let (keep, bits) = c.insert_sub(parts[0], lo, m.size);
         let p = c.global_ptr(wa, u);
-        let scope = c.m.c_u32(SCOPE_DEVICE);
-        let sem = c.m.c_u32(0);
-        c.m.emit(spv::ATOMIC_AND, u, &[p, scope, sem, keep]);
-        c.m.emit(spv::ATOMIC_OR, u, &[p, scope, sem, bits]);
+        c.cas_insert(p, scope.unwrap_or(SCOPE_DEVICE), keep, bits);
+        return Ok(());
+    }
+    if let Some(s) = scope {
+        c.atomic_store_words(addr, &parts, m.order, s);
         return Ok(());
     }
     let ty = vec_ty(c, n);
@@ -430,6 +443,6 @@ fn stg(c: &mut Ctx, i: &Inst) -> Res<()> {
         c.m.emit(op::COMPOSITE_CONSTRUCT, ty, &parts)
     };
     let p = c.global_ptr(addr, ty);
-    c.m.emit_void(op::STORE, &[p, v, mem_flags(m.volatile), 4 * n]);
+    c.m.emit_void(op::STORE, &[p, v, ALIGNED, 4 * n]);
     Ok(())
 }

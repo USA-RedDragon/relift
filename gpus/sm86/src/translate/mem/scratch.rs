@@ -7,10 +7,12 @@
 //! local memory per invocation. The defaults are what a device must always
 //! provide. Local addresses are relative to the stack pointer the program
 //! loads from `c[0][0x28]`, so the runtime must set that word to the local
-//! window in bytes (four times [`LOCAL_SPEC`]'s value). Sub-word stores are atomic AND/OR on the containing word so that
-//! lanes writing neighbouring bytes do not lose each other's updates.
+//! window in bytes (four times [`LOCAL_SPEC`]'s value). A shared sub-word
+//! store replaces its bytes of the containing word in one compare-and-swap
+//! loop (see [`super::order`]), so that lanes writing neighboring bytes
+//! keep each other's updates and two writers of one byte leave one value.
 
-use super::{Addr, Size, addr_operand, mods_of, reg_at, spv, store_words, tuple_reg};
+use super::{Addr, Size, addr_operand, mods_of, reg_at, store_words, tuple_reg};
 use crate::Inst;
 use crate::spirv::op;
 use crate::translate::{Ctx, Res, bad};
@@ -159,10 +161,7 @@ fn store(c: &mut Ctx, i: &Inst, sp: Space) -> Res<()> {
             c.m.emit_void(op::STORE, &[p, n]);
         } else {
             let (keep, bits) = c.insert_sub(v, addr, m.size);
-            let scope = c.m.c_u32(SCOPE_WORKGROUP);
-            let sem = c.m.c_u32(0);
-            c.m.emit(spv::ATOMIC_AND, u, &[p, scope, sem, keep]);
-            c.m.emit(spv::ATOMIC_OR, u, &[p, scope, sem, bits]);
+            c.cas_insert(p, SCOPE_WORKGROUP, keep, bits);
         }
         return Ok(());
     }

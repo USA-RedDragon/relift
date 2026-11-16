@@ -2,7 +2,10 @@
 //! (the same without a result) and ATOMS (shared).
 //!
 //! Operations SPIR-V has no instruction for (INC, DEC, and the float ones)
-//! run as a compare-exchange loop. The generic `ATOM` is treated as global.
+//! run as a compare-exchange loop. The generic `ATOM` is treated as global
+//! and listed inexact. Global atomics run at Device scope, which covers a
+//! `.STRONG.SM` (CTA) atomic; a `.STRONG.SYS` one is listed inexact (Vulkan
+//! has no system scope without its memory model).
 //! Atomic floats are done on the bit pattern, so no device float atomic
 //! extension is needed, with the guest's flush-to-zero rounding on any
 //! host. 64-bit global atomics take a lock (see [`super::atomic64`]) on
@@ -57,6 +60,17 @@ struct Spec {
 }
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
+    if i.mnemonic == "ATOM" {
+        c.generic(i);
+    }
+    if matches!(i.mnemonic, "ATOMG" | "ATOM" | "RED")
+        && i.mods.iter().any(|m| m.starts_with("STRONG.SYS"))
+    {
+        c.inexact(format!(
+            "{}.STRONG.SYS: system scope as device scope",
+            i.mnemonic
+        ));
+    }
     Some(match i.mnemonic {
         "ATOMG" | "ATOM" => atom(c, i),
         "RED" => red(c, i),

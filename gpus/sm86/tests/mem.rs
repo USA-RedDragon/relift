@@ -85,7 +85,11 @@ fn sub_word_global_access() {
     assert!(s.interface.global_memory);
     let ops = spirv_ops(&s.spirv);
     assert!(ops.contains(&202), "no signed bit-field extract");
-    assert!(ops.contains(&240) && ops.contains(&241), "no atomic and/or");
+    assert!(
+        ops.contains(&230) && ops.contains(&246),
+        "no compare-and-swap loop"
+    );
+    assert!(!ops.contains(&240) && !ops.contains(&241), "atomic and/or");
 }
 
 #[test]
@@ -303,4 +307,189 @@ fn tuples_past_rz_are_rejected() {
         assert!(text(&p)[0].ends_with(&format!(".128 R{d}, [R4]")));
         assert_eq!(translate(&p).is_ok(), ok, "R{d}");
     }
+}
+
+use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
+
+const ORDER_STRONG_SM: u64 = 5;
+const ORDER_STRONG_GPU: u64 = 7;
+const ORDER_STRONG_SYS: u64 = 10;
+const SIZE_32: u64 = 4;
+const SIZE_64: u64 = 5;
+
+const OP_LOAD: u32 = 61;
+const OP_ATOMIC_LOAD: u32 = 227;
+const OP_ATOMIC_STORE: u32 = 228;
+const OP_MEMORY_BARRIER: u32 = 225;
+const OP_CONSTANT: u32 = 43;
+
+fn ordered(w: [u8; 16], order: u64) -> [u8; 16] {
+    let mut v = u128::from_le_bytes(w);
+    v = (v & !(0xf << 77)) | (u128::from(order) << 77);
+    v.to_le_bytes()
+}
+
+fn membar(scope: u64, kind: u64) -> [u8; 16] {
+    word(0x192, 4, &[(76, 3, scope), (79, 2, kind)])
+}
+
+fn bar() -> [u8; 16] {
+    word(0x11d, 5, &[(77, 3, 0), (54, 4, 0)])
+}
+
+fn on(words: &[[u8; 16]], host: HostProfile) -> relift_gpu_sm86::translate::Shader {
+    let mut b: Vec<u8> = words.iter().flatten().copied().collect();
+    finish(&mut b);
+    let o = Options {
+        host,
+        ..Options::default()
+    };
+    translate_with(&Program::parse(&b), &o).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The instructions with `opcode`, as whole words.
+fn insts(words: &[u32], opcode: u32) -> Vec<Vec<u32>> {
+    let mut v = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        let n = ((words[k] >> 16) as usize).max(1);
+        if words[k] & 0xffff == opcode {
+            v.push(words[k..k + n].to_vec());
+        }
+        k += n;
+    }
+    v
+}
+
+/// The value of the 32-bit OpConstant `id`.
+fn constant(words: &[u32], id: u32) -> Option<u32> {
+    insts(words, OP_CONSTANT)
+        .into_iter()
+        .find(|i| i[2] == id)
+        .map(|i| i[3])
+}
+
+/// The scopes of the atomic loads and stores (as constant values).
+fn atomic_scopes(words: &[u32]) -> Vec<u32> {
+    let mut s: Vec<u32> = insts(words, OP_ATOMIC_LOAD)
+        .iter()
+        .map(|i| i[4])
+        .chain(insts(words, OP_ATOMIC_STORE).iter().map(|i| i[2]))
+        .filter_map(|id| constant(words, id))
+        .collect();
+    s.sort();
+    s.dedup();
+    s
+}
+
+const SCOPE_DEVICE: u32 = 1;
+const SCOPE_WORKGROUP: u32 = 2;
+
+/// A CTA-strong load meets only writes of its own workgroup, so it is
+/// plain in a program that writes no global memory and a workgroup
+/// atomic in one that does.
+#[test]
+fn cta_strong_loads_are_atomic_only_beside_global_writes() {
+    let ld = ordered(ldg(SIZE_32, 2, 4, 0), ORDER_STRONG_SM);
+    let s = on(&[ld], HostProfile::nvidia());
+    assert!(insts(&s.spirv, OP_ATOMIC_LOAD).is_empty());
+    let aligned = |i: &Vec<u32>| i.len() > 4 && i[4] == 2;
+    assert_eq!(
+        insts(&s.spirv, OP_LOAD)
+            .iter()
+            .filter(|i| aligned(i))
+            .count(),
+        1
+    );
+    let st = ordered(stg(SIZE_32, 4, 8, 2), ORDER_STRONG_SM);
+    let s = on(&[ld, st], HostProfile::nvidia());
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_LOAD).len(), 1);
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_STORE).len(), 1);
+    assert_eq!(atomic_scopes(&s.spirv), [SCOPE_WORKGROUP]);
+    assert!(s.interface.host.inexact.is_empty());
+}
+
+/// GPU-strong accesses are device atomics; a strong 64-bit one is one
+/// 64-bit atomic where the host has them, and listed inexact elsewhere.
+#[test]
+fn gpu_strong_accesses_are_device_atomics() {
+    let ld = ordered(ldg(SIZE_32, 2, 4, 0), ORDER_STRONG_GPU);
+    let s = on(&[ld], HostProfile::nvidia());
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_LOAD).len(), 1);
+    assert_eq!(atomic_scopes(&s.spirv), [SCOPE_DEVICE]);
+    let ld64 = ordered(ldg(SIZE_64, 2, 4, 0), ORDER_STRONG_GPU);
+    let s = on(&[ld64], HostProfile::nvidia());
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_LOAD).len(), 1);
+    assert!(s.interface.host.inexact.is_empty());
+    let s = on(&[ld64], HostProfile::minimal());
+    assert_eq!(insts(&s.spirv, OP_ATOMIC_LOAD).len(), 2);
+    assert!(s.interface.host.inexact.iter().any(|l| l.contains(".64")));
+    let sys = ordered(ldg(SIZE_32, 2, 4, 0), ORDER_STRONG_SYS);
+    let s = on(&[sys], HostProfile::nvidia());
+    assert!(s.interface.host.inexact.iter().any(|l| l.contains("SYS")));
+}
+
+/// Weak accesses take part in synchronization through fences: with a
+/// device fence they are device atomics, with a barrier and global writes
+/// workgroup atomics, and plain otherwise.
+#[test]
+fn weak_accesses_are_coherent_where_a_fence_orders_them() {
+    let ld = ldg(SIZE_32, 2, 4, 0);
+    let st = stg(SIZE_32, 4, 8, 2);
+    let s = on(&[ld, st], HostProfile::nvidia());
+    assert!(insts(&s.spirv, OP_ATOMIC_LOAD).is_empty());
+    let s = on(&[ld, bar(), st], HostProfile::nvidia());
+    assert_eq!(atomic_scopes(&s.spirv), [SCOPE_WORKGROUP]);
+    let s = on(&[ld, bar()], HostProfile::nvidia());
+    assert!(insts(&s.spirv, OP_ATOMIC_LOAD).is_empty());
+    let s = on(&[ld, membar(2, 2), st], HostProfile::nvidia());
+    assert_eq!(atomic_scopes(&s.spirv), [SCOPE_DEVICE]);
+    assert!(s.interface.host.inexact.is_empty());
+}
+
+/// MEMBAR orders image memory too; SC and SYS fences are listed inexact,
+/// VC is rejected.
+#[test]
+fn fences_report_what_vulkan_cannot_order() {
+    let s = on(&[membar(2, 2)], HostProfile::nvidia());
+    let b = insts(&s.spirv, OP_MEMORY_BARRIER);
+    assert_eq!(b.len(), 1);
+    assert_eq!(constant(&s.spirv, b[0][1]), Some(SCOPE_DEVICE));
+    let sem = constant(&s.spirv, b[0][2]).unwrap_or(0);
+    assert_eq!(sem & 0x848, 0x848, "semantics {sem:#x}");
+    assert!(s.interface.host.inexact.is_empty());
+    let s = on(&[membar(2, 0)], HostProfile::nvidia());
+    assert!(
+        s.interface
+            .host
+            .inexact
+            .iter()
+            .any(|l| l.contains("MEMBAR.SC"))
+    );
+    let s = on(&[membar(3, 2)], HostProfile::nvidia());
+    assert!(
+        s.interface
+            .host
+            .inexact
+            .iter()
+            .any(|l| l.contains("MEMBAR.SYS"))
+    );
+    let mut b: Vec<u8> = membar(5, 2).to_vec();
+    finish(&mut b);
+    assert!(translate(&Program::parse(&b)).is_err());
+}
+
+/// Generic accesses are global ones, which misses the shared and local
+/// windows: listed inexact.
+#[test]
+fn generic_accesses_are_listed_inexact() {
+    let ld = word(0x180, 1, &[(16, 8, 2), (24, 8, 4), (72, 1, 1), (73, 3, 4)]);
+    let s = run(&[ld], &["LD.E"]);
+    assert!(
+        s.interface
+            .host
+            .inexact
+            .iter()
+            .any(|l| l.contains("generic"))
+    );
 }

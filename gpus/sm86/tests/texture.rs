@@ -194,6 +194,54 @@ fn half_results_pack_in_pairs() {
     assert!(!insts(&s.spirv, 196).is_empty());
 }
 
+fn surface_words() -> ([u8; 16], [u8; 16]) {
+    let sust = word(
+        0xb9b,
+        0,
+        &[
+            (24, 8, 8),
+            (32, 8, 4),
+            (40, 14, 0x12),
+            (54, 5, 2),
+            (59, 2, 0),
+            (61, 3, 3),
+            (72, 4, 0xf),
+            (84, 3, 1),
+        ],
+    );
+    let suld = word(
+        0xb99,
+        0,
+        &[
+            (16, 8, 0),
+            (24, 8, 8),
+            (40, 14, 0x13),
+            (54, 5, 2),
+            (59, 2, 0),
+            (61, 3, 3),
+            (72, 1, 1),
+            (73, 3, 4),
+            (81, 3, 7),
+            (84, 3, 1),
+        ],
+    );
+    (sust, suld)
+}
+
+/// A program that writes surfaces must see the other invocations' surface
+/// writes a barrier orders, so its storage images are Coherent; one that
+/// only reads them needs nothing.
+#[test]
+fn written_storage_images_are_coherent() {
+    const COHERENT: u32 = 23;
+    let (sust, suld) = surface_words();
+    let coherent = |s: &relift_gpu_sm86::translate::Shader| {
+        insts(&s.spirv, 71).iter().any(|d| d[2] == COHERENT)
+    };
+    assert!(coherent(&compute(&[sust, suld])));
+    assert!(!coherent(&compute(&[suld])));
+}
+
 #[test]
 fn surfaces_are_storage_images() {
     let sust = word(

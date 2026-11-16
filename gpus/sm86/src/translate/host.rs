@@ -411,6 +411,8 @@ pub enum Atomic64Path {
     None,
     Native,
     /// A spin lock per address in a lock table, around plain accesses.
+    /// A subgroup that waits for a lock another subgroup holds relies on
+    /// the device to keep running the holder, which Vulkan does not promise.
     Locked,
 }
 
