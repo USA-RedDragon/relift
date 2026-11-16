@@ -94,6 +94,14 @@ typedef void rl_mips_cache_hook(rl_ctx *c, uint32_t op, uint64_t vaddr);
 /** @brief Installs the CACHE hook (NULL: CACHE does nothing). */
 RL_RUNTIME_API void rl_mips_set_cache_hook(rl_mips_cache_hook *hook);
 
+/**
+ * @brief Finds the function for a guest address the dispatch table does not
+ * hold (code a guest layer binds outside the table), or NULL.
+ */
+typedef rl_fn rl_mips_lookup_hook(rl_ctx *c, uint64_t pc);
+/** @brief Installs the lookup a dispatch miss tries first (NULL: none). */
+RL_RUNTIME_API void rl_mips_set_lookup_hook(rl_mips_lookup_hook *hook);
+
 /** @brief The physical bus of the runtime's own accesses (TLB-mapped loads and stores in the guard slow paths). */
 typedef struct rl_mips_bus {
     /** @brief Reads size bytes (1, 2, 4 or 8) at paddr, big-endian, as a number. */

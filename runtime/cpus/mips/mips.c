@@ -14,6 +14,7 @@
 
 static rl_mips_stats g_stats;
 static rl_mips_cache_hook *g_cache_hook;
+static rl_mips_lookup_hook *g_lookup_hook;
 
 #ifdef RL_N64_TRACE
 void (*rl_mips_call_trace)(rl_ctx *c, uint64_t ret);
@@ -22,6 +23,8 @@ void (*rl_mips_call_trace)(rl_ctx *c, uint64_t ret);
 rl_mips_stats *rl_mips_get_stats(void) { return &g_stats; }
 
 void rl_mips_set_cache_hook(rl_mips_cache_hook *hook) { g_cache_hook = hook; }
+
+void rl_mips_set_lookup_hook(rl_mips_lookup_hook *hook) { g_lookup_hook = hook; }
 
 static uint64_t cycle(const rl_ctx *c) { return c->time.deadline - (uint64_t)c->time.budget; }
 
@@ -299,6 +302,9 @@ const rl_cpu_desc *rl_mips_cpu(void) { return &g_mips; }
 
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
+    rl_fn f = g_lookup_hook ? g_lookup_hook(c, c->pc) : NULL;
+    if (f)
+        RL_MUSTTAIL return f(c, mem);
     g_stats.misses++;
     return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
 }
