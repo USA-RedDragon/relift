@@ -13,5 +13,6 @@ pub mod regs;
 
 pub use decode::{DecodeError, Group, decode};
 pub use lift::{
-    ENTRY, Entry, HALF, HALT, LiftError, Lifted, Options, PORT_IN, PORT_OUT, SyncPolicy, lift_bytes,
+    ENTRY, Entry, HALF, HALT, IFF, LiftError, Lifted, Options, PORT_IN, PORT_OUT, SyncPolicy,
+    lift_bytes,
 };

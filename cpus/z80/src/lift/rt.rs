@@ -243,10 +243,14 @@ impl St {
         }
     }
 
-    /// `HALT`: the per-CPU layer waits for an interrupt.
+    /// `HALT`: the per-CPU layer waits for an interrupt and gives the R the
+    /// NOPs it ran leave.
     pub fn halt(&mut self, b: &mut Builder, g: Option<Value>) {
         if let Active::Always = self.active(g) {
-            b.intrinsic(HALT, &[], None);
+            let iff1 = self.get(b, regs::IFF1);
+            let r = self.get(b, regs::R);
+            let r = b.intrinsic(HALT, &[iff1, r], Some(Width::W8));
+            self.set(b, regs::R, r, None);
         }
     }
 

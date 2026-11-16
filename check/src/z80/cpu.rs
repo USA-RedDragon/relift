@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use relift_cpu_z80::{Entry, HALF, HALT, Options, PORT_IN, PORT_OUT, lift_bytes, regs};
+use relift_cpu_z80::{Entry, HALF, HALT, IFF, Options, PORT_IN, PORT_OUT, lift_bytes, regs};
 use relift_ir::interp::{self, Devices, Error, Fault, GuestMemory, Intrinsics, State};
 use relift_ir::{AddrClass, Block, IoMap, Reg};
 
@@ -146,7 +146,8 @@ impl Intrinsics for Intr<'_> {
                 b.push(args[0] as u16, args[1] as u8, b'o');
                 Ok(0)
             }
-            HALT => Ok(0),
+            HALT => Ok(args[1]),
+            IFF => Ok(0),
             _ => Err(Error::UnknownIntrinsic(name)),
         }
     }

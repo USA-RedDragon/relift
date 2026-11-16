@@ -19,15 +19,15 @@
 //! takes no maskable interrupt while it is set.
 //!
 //! Control transfers end in a sync point, and so do `HALT` and the
-//! instructions that set IFF1; other instructions follow the
-//! [`SyncPolicy`].
+//! instructions that set IFF1, which call [`IFF`] with the new value just
+//! before it; other instructions follow the [`SyncPolicy`].
 
 mod generated;
 mod rt;
 
 use core::fmt;
 
-use relift_ir::{Block, Builder, Exit, IoMap, Op, Width, classify_io};
+use relift_ir::{Block, Builder, Exit, Flow, IoMap, Op, Width, classify_io};
 
 use crate::decode::{DecodeError, Group, decode};
 use crate::regs;
@@ -48,10 +48,19 @@ pub const PORT_IN: &str = "z80_in";
 /// The intrinsic of an I/O port write: `(port, byte)`.
 pub const PORT_OUT: &str = "z80_out";
 
-/// The intrinsic `HALT` calls once its T-states are charged: the per-CPU
-/// layer waits until an interrupt is taken (the CPU runs NOPs, which count
-/// in R), and the block goes on to the instruction after `HALT`.
+/// The intrinsic `HALT` calls once its T-states are charged: `(iff1, r) -> r`.
+/// The per-CPU layer waits until an interrupt can be taken (`iff1` tells
+/// whether a maskable one can) while the CPU runs NOPs, which count in R,
+/// and gives the R after them; the block goes on to the instruction after
+/// `HALT`.
 pub const HALT: &str = "z80_halt";
+
+/// The intrinsic that tells the per-CPU layer the value an instruction gives
+/// IFF1 (`EI`, `DI`, `RETI`, `RETN` and the interrupt entries): `(iff1)`.
+/// It comes just before the sync point that ends such a block, so the layer
+/// can end the clock's budget when a maskable interrupt has become
+/// deliverable, and stop it from being ended by one that cannot be taken.
+pub const IFF: &str = "z80_iff";
 
 /// An interrupt entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,7 +199,11 @@ fn run(group: Group, code: u8, bytes: [u8; 4], pc: u16, taken: bool) -> Result<L
         u32::from(len),
         Exit {
             next: fin.next,
-            flow: fin.flow,
+            flow: if group == Group::Accept {
+                Flow::Jump
+            } else {
+                fin.flow
+            },
         },
     );
     if taken {
@@ -206,10 +219,11 @@ fn run(group: Group, code: u8, bytes: [u8; 4], pc: u16, taken: bool) -> Result<L
 /// Places the sync point of `block` and classifies its accesses.
 fn finish(mut l: Lifted, opts: &Options, half: bool, control: bool) -> Lifted {
     let mut block = relift_ir::dce(&classify_io(&l.block, &opts.map));
-    let sets_iff1 = block
-        .insts
-        .iter()
-        .any(|i| matches!(i.op, Op::Set(r, _) if r == regs::IFF1));
+    let iff1 = block.insts.iter().rev().find_map(|i| match i.op {
+        Op::Set(r, v) if r == regs::IFF1 => Some(v),
+        _ => None,
+    });
+    let sets_iff1 = iff1.is_some();
     let stores = || {
         block.insts.iter().any(|i| match &i.op {
             Op::IoStore { .. } => true,
@@ -225,6 +239,12 @@ fn finish(mut l: Lifted, opts: &Options, half: bool, control: bool) -> Lifted {
                 SyncPolicy::IoStores => stores(),
                 SyncPolicy::Every => true,
             });
+    if let Some(v) = iff1 {
+        block.insts.push(relift_ir::Inst {
+            op: Op::intrinsic(IFF, vec![v]),
+            width: None,
+        });
+    }
     if sync {
         block.insts.push(relift_ir::Inst {
             op: Op::Sync,

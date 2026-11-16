@@ -7,7 +7,7 @@
 use std::cell::{Cell, RefCell};
 
 use relift_cpu_z80::{
-    ENTRY, Entry, Group, HALF, HALT, Lifted, Options, PORT_IN, PORT_OUT, SyncPolicy, decode,
+    ENTRY, Entry, Group, HALF, HALT, IFF, Lifted, Options, PORT_IN, PORT_OUT, SyncPolicy, decode,
     lift_bytes, regs,
 };
 use relift_ir::interp::{self, Devices, Error, Fault, FlatMemory, GuestMemory, Intrinsics, State};
@@ -90,6 +90,7 @@ impl Intrinsics for Calls<'_> {
                     .push((t, 'o', args[0] as u16, args[1] as u8));
                 Ok(0)
             }
+            HALT => Ok(args[1]),
             _ => Ok(0),
         }
     }
@@ -199,6 +200,7 @@ fn every_template_lifts() {
         let l = lift_bytes(&[], e.addr(), &opts()).expect("lifts the entry");
         l.block.verify().expect("verifies");
         assert_eq!(l.len, 0);
+        assert_eq!(l.block.exit.flow, Flow::Jump);
     }
     assert_eq!(n, 256 * 7);
     assert!(lift_bytes(&[], ENTRY + 4, &opts()).is_err());
@@ -318,11 +320,26 @@ fn halt_calls_the_cpu_layer() {
     assert_eq!(cpu.step(0), 1);
     assert_eq!(*cpu.m.calls.borrow(), vec![HALT]);
     assert_eq!(cpu.clock(), 4);
+    assert_eq!(cpu.get(regs::R), 1);
     let l = lift_bytes(&[0x76], 0, &opts()).expect("lifts");
     assert!(matches!(
         l.block.insts.last().map(|i| &i.op),
         Some(Op::Sync)
     ));
+}
+
+#[test]
+fn iff1_changes_tell_the_cpu_layer_before_the_sync() {
+    for (bytes, value) in [(&[0xFB][..], 1), (&[0xF3][..], 0)] {
+        let mut cpu = Cpu::new(bytes);
+        cpu.step(0);
+        assert_eq!(*cpu.m.calls.borrow(), vec![IFF]);
+        assert_eq!(cpu.get(regs::IFF1), value);
+        let l = lift_bytes(bytes, 0, &opts()).expect("lifts");
+        let n = l.block.insts.len();
+        assert!(matches!(l.block.insts[n - 1].op, Op::Sync));
+        assert!(matches!(&l.block.insts[n - 2].op, Op::Intrinsic(c) if c.name == IFF));
+    }
 }
 
 #[test]
