@@ -37,7 +37,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [windows-x64, android-arm64]
+        include:
+          - target: windows-x64
+            rust: x86_64-pc-windows-gnullvm
+          - target: windows-arm64
+            rust: aarch64-pc-windows-gnullvm
+          - target: android-arm64
+            rust: aarch64-linux-android
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,8 +60,11 @@ jobs:
             .
             guests/gb/devices
 
-      - name: Install zig and the Rust std for Windows
-        if: matrix.target == 'windows-x64'
+      - name: Install the Rust std for the target
+        run: rustup target add ${{ matrix.rust }}
+
+      - name: Install zig
+        if: startsWith(matrix.target, 'windows-')
         run: |
           dir="$RUNNER_TEMP/zig"
           mkdir -p "$dir"
@@ -63,14 +72,16 @@ jobs:
           echo "$ZIG_SHA256  $dir/zig.tar.xz" | sha256sum -c -
           tar -xJf "$dir/zig.tar.xz" -C "$dir"
           echo "$dir/zig-x86_64-linux-$ZIG_VERSION" >> "$GITHUB_PATH"
-          rustup target add x86_64-pc-windows-gnullvm
+
+      - name: Install wine to run the Windows program
+        if: matrix.target == 'windows-x64'
+        run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y wine64
 
-      - name: Install the Rust std for Android
+      - name: Show the Android NDK
         if: matrix.target == 'android-arm64'
         run: |
-          rustup target add aarch64-linux-android
           echo "$ANDROID_NDK_HOME"
           cat "$ANDROID_NDK_HOME/source.properties"
 
