@@ -2,7 +2,10 @@
 """Runs the corpus cases of ci_cases.toml through relift: for each ROM,
 `relift import` and `relift build` in a project of its own, then the built
 program with `--case` (the case's pass protocol, graded by the device
-library's harness) and `--check` (lockstep against the library's own CPU).
+library's harness). The release build, which has no CPU interpreter and
+stops at the first instruction with no lifted code, must pass; then the
+`--dev` build runs each case again with `--check` (lockstep against the
+library's own CPU).
 
   python3 -I ci_corpus.py --relift BIN --roms DIR --work DIR [--jobs N]
 
@@ -106,31 +109,39 @@ def one_rom(args, index, rom, cases):
     proj = os.path.join(args.work, "projects", name)
     os.makedirs(proj, exist_ok=True)
     path = os.path.join(args.local, rom) if cases[0].get("local") else os.path.join(args.roms, rom)
-    t0 = time.monotonic()
     rc, so, se = run([args.relift, "-q", "import", path], env, proj, BUILD_CPU_SECONDS)
-    if rc == 0:
-        rc, so, se = run([args.relift, "-q", "build"], env, proj, BUILD_CPU_SECONDS)
-    built = time.monotonic() - t0
     game = os.path.join(args.work, "cache", "projects", name, "build", "host", "game")
-    out = []
-    for case in cases:
-        if rc != 0:
-            out.append((case["id"], "build", (se or so).strip()[-300:], ""))
-            continue
-        sp = os.path.join(proj, "case.txt")
-        with open(sp, "w") as f:
-            f.write(spec(case, args.roms))
-        hw = case.get("hardware", case["mode"])
-        t1 = time.monotonic()
-        crc, cso, cse = run([game, "--case", sp, "--model", hw, "--check", "--stats"], env)
-        print(f"{case['id']}: build {built:.0f}s run {time.monotonic() - t1:.0f}s", file=sys.stderr, flush=True)
-        m = VERDICT.search(cso)
-        verdict = m.group(1) if m else ("diverged" if crc == 70 else "crash")
-        detail = m.group(2) if m else (cse or cso).strip()[-300:]
-        if crc == 70:
-            verdict, detail = "diverged", cse.strip()[-300:]
-        s = STATS.search(cse)
-        out.append((case["id"], verdict, detail, s.group(1) if s else ""))
+    verdicts = {}
+    for dev in (False, True):
+        t0 = time.monotonic()
+        if rc == 0:
+            rc, so, se = run([args.relift, "-q", "build"] + (["--dev"] if dev else []), env, proj, BUILD_CPU_SECONDS)
+        built = time.monotonic() - t0
+        for case in cases:
+            if rc != 0:
+                verdicts[case["id"]] = ("build", (se or so).strip()[-300:], "")
+                continue
+            if case["id"] in verdicts and verdicts[case["id"]][0] != "pass":
+                continue
+            sp = os.path.join(proj, "case.txt")
+            with open(sp, "w") as f:
+                f.write(spec(case, args.roms))
+            hw = case.get("hardware", case["mode"])
+            t1 = time.monotonic()
+            crc, cso, cse = run([game, "--case", sp, "--model", hw, "--stats"] + (["--check"] if dev else []), env)
+            kind = "dev" if dev else "release"
+            print(f"{case['id']}: {kind} build {built:.0f}s run {time.monotonic() - t1:.0f}s", file=sys.stderr, flush=True)
+            m = VERDICT.search(cso)
+            verdict = m.group(1) if m else ("diverged" if crc == 70 else "crash")
+            detail = m.group(2) if m else (cse or cso).strip()[-300:]
+            if crc == 70:
+                stop = re.search(r"^summary: (.*)$", cse, re.M)
+                verdict, detail = ("diverged" if dev else "stopped"), stop.group(1) if stop else cse.strip()[-300:]
+            if not dev and verdict != "pass":
+                detail = f"release build: {detail}"
+            s = STATS.search(cse)
+            verdicts[case["id"]] = (verdict, detail, s.group(1) if s else "")
+    out = [(case["id"],) + verdicts[case["id"]] for case in cases]
     shutil.rmtree(proj, ignore_errors=True)
     return out
 
@@ -142,6 +153,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
+    ap.add_argument("--only", help="run only the cases whose id this regular expression finds")
     args = ap.parse_args()
     args.relift = os.path.abspath(args.relift)
     args.roms = os.path.abspath(args.roms)
@@ -152,6 +164,8 @@ def main():
     subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_roms.py"), args.local], check=True)
     with open(os.path.join(HERE, "ci_cases.toml"), "rb") as f:
         cases = tomllib.load(f)["case"]
+    if args.only:
+        cases = [c for c in cases if re.search(args.only, c["id"])]
     by_rom = {}
     for c in cases:
         by_rom.setdefault(c["rom"], []).append(c)
