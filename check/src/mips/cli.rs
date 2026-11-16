@@ -16,7 +16,7 @@ use super::run::{self, Out};
 use crate::mutate;
 
 pub const USAGE: &str = "\
-usage: relift-check --oracle ares lift [-n N] [--seed S] [--mutate] [--fp-corpus] [--bin FILE]
+usage: relift-check --oracle ares lift [-n N] [--seed S] [--mutate] [--fp-corpus [--fp-modes]] [--bin FILE]
                     [--rom FILE] [--work DIR] [--c-slow-path FILE] [KIND...]
 Runs each kind of VR4300 instruction (see `lift --list`) on N random machine states, or with
 --fp-corpus the FP special-value corpus, lifted by relift-cpu-mips on the IR interpreter and on
@@ -24,6 +24,7 @@ the ares oracle (n64-oracle, built by check/oracle/ares/build.sh; --bin, RELIFT_
 ~/.cache/relift/n64-ares/bin/n64-oracle). --mutate breaks the first live operation of each
 lifted block and expects the comparison to catch it. --rom runs the oracle's boot code from
 a ROM first; without it the oracle starts at once. --work keeps the oracle's input and output.
+--fp-modes runs the corpus under the directed rounding modes and the enable bits instead.
 --c-slow-path also runs every COP1 case through the runtime's C FPU slow path (FILE is
 mips_fpu_cases from the runtime Makefile) and compares it with ares on all of them.
        relift-check --oracle ares lift --list    the kinds, and the encodings without one";
@@ -33,6 +34,7 @@ struct Opts {
     seed: u64,
     mutate: bool,
     corpus: bool,
+    modes: bool,
     list: bool,
     bin: Option<PathBuf>,
     rom: Option<PathBuf>,
@@ -47,6 +49,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         seed: 0,
         mutate: false,
         corpus: false,
+        modes: false,
         list: false,
         bin: None,
         rom: None,
@@ -62,6 +65,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         match a {
             "--mutate" => o.mutate = true,
             "--fp-corpus" => o.corpus = true,
+            "--fp-modes" => o.modes = true,
             "--list" => o.list = true,
             "-n" | "--seed" => {
                 let x: u64 = v()?.parse().map_err(|_| format!("bad value for {a}"))?;
@@ -137,7 +141,11 @@ fn dispatch_run(o: &Opts) -> Result<bool, String> {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ o.seed);
     let mut cs: Vec<Case> = Vec::new();
     if o.corpus {
-        cs = cases::special_cases();
+        cs = if o.modes {
+            cases::mode_cases()
+        } else {
+            cases::special_cases()
+        };
         cs.retain(|c| o.kinds.is_empty() || o.kinds.iter().any(|k| k == kind_of(c)));
     } else {
         for (name, g) in &all {

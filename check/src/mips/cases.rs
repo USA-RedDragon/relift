@@ -495,6 +495,31 @@ pub fn state_json(c: &Case) -> String {
 /// The FP special-value corpus: every arithmetic and conversion operation over
 /// denormal, NaN, infinite and range-edge operands.
 pub fn special_cases() -> Vec<Case> {
+    corpus(false)
+}
+
+/// FCR31 values of the mode corpus: the three directed rounding modes, flush
+/// to zero with two of them, and each enable bit.
+const MODES: [u32; 9] = [
+    1,
+    2,
+    3,
+    1 << 24 | 2,
+    1 << 24 | 3,
+    1 << 7,
+    1 << 24 | 1 << 8,
+    1 << 9 | 1 << 10,
+    1 << 11,
+];
+
+/// The special-value corpus under the rounding modes and enable bits of
+/// [`MODES`] (all slow-path cases on the lifted side): the binary operations
+/// on the first ten values of each format, the other operations on all.
+pub fn mode_cases() -> Vec<Case> {
+    corpus(true)
+}
+
+fn corpus(modes: bool) -> Vec<Case> {
     let s32: Vec<u32> = vec![
         0,
         0x8000_0000,
@@ -572,8 +597,15 @@ pub fn special_cases() -> Vec<Case> {
         };
     let bin = [("ADD", 0u32), ("SUB", 1), ("MUL", 2), ("DIV", 3)];
     for (n, f) in bin {
-        for fcr in [0u32, 1 << 24] {
-            let k = if fcr == 0 { 24 } else { 14 };
+        let fcrs: &[u32] = if modes { &MODES } else { &[0, 1 << 24] };
+        for &fcr in fcrs {
+            let k = if modes {
+                10
+            } else if fcr == 0 {
+                24
+            } else {
+                14
+            };
             for &a in s32.iter().take(k) {
                 for &b in s32.iter().take(k) {
                     push(
@@ -594,8 +626,9 @@ pub fn special_cases() -> Vec<Case> {
             }
         }
     }
+    let fcrs: &[u32] = if modes { &MODES } else { &[0, 1 << 24] };
     for (n, f) in [("SQRT", 4u32), ("ABS", 5), ("NEG", 7)] {
-        for fcr in [0u32, 1 << 24] {
+        for &fcr in fcrs {
             for &a in &s32 {
                 push(&format!("{n}.S"), 0x10, f, u64::from(a), 0, fcr, &mut out);
             }
@@ -604,7 +637,7 @@ pub fn special_cases() -> Vec<Case> {
             }
         }
     }
-    for fcr in [0u32, 1 << 24] {
+    for &fcr in fcrs {
         for &a in &s64 {
             push("CVT.S.D", 0x11, 32, a, 0, fcr, &mut out);
         }
@@ -624,11 +657,14 @@ pub fn special_cases() -> Vec<Case> {
         ("CVT.W", 36),
         ("CVT.L", 37),
     ] {
-        for &a in &s32 {
-            push(&format!("{n}.S"), 0x10, f, u64::from(a), 0, 0, &mut out);
-        }
-        for &a in &s64 {
-            push(&format!("{n}.D"), 0x11, f, a, 0, 0, &mut out);
+        let fcrs: &[u32] = if modes { &MODES } else { &[0] };
+        for &fcr in fcrs {
+            for &a in &s32 {
+                push(&format!("{n}.S"), 0x10, f, u64::from(a), 0, fcr, &mut out);
+            }
+            for &a in &s64 {
+                push(&format!("{n}.D"), 0x11, f, a, 0, fcr, &mut out);
+            }
         }
     }
     out
