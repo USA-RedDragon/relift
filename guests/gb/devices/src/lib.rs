@@ -8,8 +8,12 @@
 //! [`rlgbd_read`], [`rlgbd_write`], [`rlgbd_internal`] and [`rlgbd_idu`] in the
 //! order and M-cycle placement of the hardware, and ends with [`rlgbd_end`].
 //! rustyboi keeps the boundary (interrupt dispatch, HALT, STOP, DMA stalls,
-//! the opcode fetch) and the epilogue, so every device observes each access at
-//! the exact dot. Time is rustyboi's: [`rlgbd_now`] is the CPU's position in
+//! the opcode fetch), the bodies of the control instructions that act on it
+//! ([`rlgbd_control`]: EI, DI, HALT, STOP, the unused opcodes) and the
+//! epilogue, so every device observes each access at the exact dot. With the
+//! default `interpreter` feature, rustyboi's CPU interpreter can also run
+//! any opcode (`rlgbd_exec_native`) or whole instructions
+//! (`rlgbd_step_native`); release programs are built without it. Time is rustyboi's: [`rlgbd_now`] is the CPU's position in
 //! dots of the 4194304 Hz master clock.
 //!
 //! Every function takes the handle [`rlgbd_new`] returned.
@@ -243,14 +247,42 @@ impl Rlgbd {
         self.mid = false;
     }
 
+    /// Runs the body of the control instruction `begin` returned (STOP,
+    /// HALT, DI, EI or an unused opcode, which locks the CPU) and ends it:
+    /// its dots, or `None`, with nothing done, for any other opcode.
+    pub fn control(&mut self, op: u8) -> Option<u32> {
+        let c = self.gb.ext_control(&mut self.st, op);
+        if c.is_some() {
+            self.mid = false;
+        }
+        c
+    }
+
+    /// Whether a CPU read of `addr` now may see the OAM DMA rather than
+    /// memory; false holds until the next write that starts a DMA.
+    pub fn dma_conflict(&self, addr: u16) -> bool {
+        self.gb.ext_dma_conflict(addr)
+    }
+
     /// Runs the opcode `begin` returned on rustyboi's own CPU.
+    #[cfg(feature = "interpreter")]
     pub fn exec_native(&mut self, op: u8) -> u32 {
         let c = self.gb.ext_exec_native(&mut self.st, op);
         self.mid = false;
         c
     }
 
+    /// Runs the CB-prefixed instruction `begin` returned on rustyboi's own
+    /// CPU, its second byte `cb` already read on the bus.
+    #[cfg(feature = "interpreter")]
+    pub fn exec_native_cb(&mut self, cb: u8) -> u32 {
+        let c = self.gb.ext_exec_native_cb(&mut self.st, cb);
+        self.mid = false;
+        c
+    }
+
     /// One whole instruction on rustyboi's own CPU (the reference run).
+    #[cfg(feature = "interpreter")]
     pub fn step_native(&mut self) -> u32 {
         self.gb.step_instruction(self.native_on).1
     }
@@ -663,14 +695,52 @@ pub unsafe extern "C" fn rlgbd_end(h: *mut Rlgbd, total: u32) {
     me(h).end(total);
 }
 
+/// Runs the body of the control instruction `rlgbd_begin` returned (STOP,
+/// HALT, DI, EI or an unused opcode, which locks the CPU); the instruction
+/// ends. Returns its dots, or -1, with nothing done, for any other opcode.
+///
+/// # Safety
+/// As `rlgbd_read`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_control(h: *mut Rlgbd, op: u8) -> i32 {
+    me(h)
+        .control(op)
+        .and_then(|c| i32::try_from(c).ok())
+        .unwrap_or(-1)
+}
+
+/// 1 when a CPU read of `addr` now may see the OAM DMA rather than memory
+/// (the DMA is armed or running and `addr` is on its source's bus), else 0;
+/// 0 holds until the next write that starts a DMA.
+///
+/// # Safety
+/// `h` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_dma_conflict(h: *mut Rlgbd, addr: u16) -> u8 {
+    u8::from(me(h).dma_conflict(addr))
+}
+
 /// Runs the opcode `rlgbd_begin` returned on rustyboi's own CPU (for forms the
 /// caller does not run itself); the instruction ends. Returns its dots.
 ///
 /// # Safety
 /// As `rlgbd_read`.
+#[cfg(feature = "interpreter")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rlgbd_exec_native(h: *mut Rlgbd, op: u8) -> u32 {
     me(h).exec_native(op)
+}
+
+/// Runs the CB-prefixed instruction `rlgbd_begin` returned on rustyboi's own
+/// CPU when the caller already read its second byte `cb` with `rlgbd_read`;
+/// the instruction ends. Returns its dots.
+///
+/// # Safety
+/// As `rlgbd_read`.
+#[cfg(feature = "interpreter")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rlgbd_exec_native_cb(h: *mut Rlgbd, cb: u8) -> u32 {
+    me(h).exec_native_cb(cb)
 }
 
 /// One whole instruction on rustyboi's own CPU, for the reference run of a
@@ -678,6 +748,7 @@ pub unsafe extern "C" fn rlgbd_exec_native(h: *mut Rlgbd, op: u8) -> u32 {
 ///
 /// # Safety
 /// `h` is a live handle between instructions.
+#[cfg(feature = "interpreter")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rlgbd_step_native(h: *mut Rlgbd) -> u32 {
     me(h).step_native()

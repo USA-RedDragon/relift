@@ -13,8 +13,31 @@ description = "rustyboi-core's Game Boy devices behind a C ABI, for the relift G
 name = "relift_gb_devices"
 crate-type = ["staticlib", "rlib"]
 
+[features]
+default = ["interpreter"]
+# rustyboi's CPU interpreter: rlgbd_exec_native and rlgbd_step_native, for
+# development builds (code not lifted yet, the lockstep check) and the tests.
+# Release programs leave it out: every instruction they run is lifted.
+interpreter = ["rustyboi-core/interpreter"]
+
+[[test]]
+name = "abi"
+required-features = ["interpreter"]
+
+[[test]]
+name = "case"
+required-features = ["interpreter"]
+
+[[test]]
+name = "ext_abi"
+required-features = ["interpreter"]
+
+[[example]]
+name = "corpus_case"
+required-features = ["interpreter"]
+
 [dependencies]
-rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "ca0f0a9da1c66a5805ccf64979dc4a3890b82380" }
+rustyboi-core = { git = "https://github.com/USA-RedDragon/rustyboi", rev = "b6687f38120bd81c2251519e54f1c40f6002c9ef", default-features = false }
 flate2 = "=1.1.9"
 
 [profile.release]

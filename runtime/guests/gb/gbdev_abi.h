@@ -59,7 +59,23 @@ void rlgbd_write(rlgbd *h, uint16_t addr, uint8_t value);
 void rlgbd_internal(rlgbd *h);
 void rlgbd_idu(rlgbd *h, uint16_t pre);
 void rlgbd_end(rlgbd *h, uint32_t total);
+/**
+ * @brief Runs the body of the control instruction rlgbd_begin returned (STOP,
+ * HALT, DI, EI or an unused opcode, which locks the CPU); the instruction
+ * ends. Returns its dots, or -1, with nothing done, for any other opcode.
+ */
+int32_t rlgbd_control(rlgbd *h, uint8_t op);
+/**
+ * @brief 1 when a CPU read of addr now may see the OAM DMA rather than memory
+ * (the DMA is armed or running and addr is on its source's bus), else 0: 0
+ * holds until the next write that starts a DMA.
+ */
+uint8_t rlgbd_dma_conflict(rlgbd *h, uint16_t addr);
+/** @brief Runs the opcode rlgbd_begin returned on the library's CPU interpreter; only in a library built with it. */
 uint32_t rlgbd_exec_native(rlgbd *h, uint8_t op);
+/** @brief Runs a CB-prefixed instruction rlgbd_begin returned whose second byte cb the caller already read with rlgbd_read; only in a library built with the interpreter. */
+uint32_t rlgbd_exec_native_cb(rlgbd *h, uint8_t cb);
+/** @brief One whole instruction on the library's CPU interpreter; only in a library built with it. */
 uint32_t rlgbd_step_native(rlgbd *h);
 void rlgbd_advance(rlgbd *h, uint64_t dots);
 uint64_t rlgbd_run_to(rlgbd *h, uint64_t when);
