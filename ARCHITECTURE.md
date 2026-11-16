@@ -303,6 +303,10 @@ sped up, never given more time.
   `runtime/guests/gb/devtests/ci_cases.toml` through `relift import`,
   `build` and the built program (`ci_corpus.py`; the ROMs are fetched from a
   pinned public release and are never in the repository).
+- **z80-sst**: builds `relift-check` and runs every Z80 template on the IR
+  interpreter against the 1,604,000 cases of the pinned SingleStepTests z80 v1
+  set (fetched by commit and SHA-256, never in the repository), then again
+  with every lifted block broken, which nearly every file must catch.
 - **generated**: fetches the pinned Sail sources, reruns the A64, SM83 and
   ARMv4T template generators and fails on any difference.
 - **macos** (macos-latest): all tests.

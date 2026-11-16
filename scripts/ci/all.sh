@@ -16,7 +16,7 @@ logs="$CI_WORK/logs"
 mkdir -p "$logs"
 rm -f "$logs"/*.status
 
-jobs=(checks gb-corpus generated workflows runtime-charter runtime-tests release-guard)
+jobs=(checks gb-corpus z80-sst generated workflows runtime-charter runtime-tests release-guard)
 image_targets=(x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm)
 if [ "$(uname -s)" = Linux ]; then
   jobs+=(appimage cross-windows-x64 cross-windows-arm64 cross-android-arm64)
