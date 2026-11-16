@@ -694,12 +694,23 @@ fn image_c(i: usize, image: &[u8]) -> String {
     relift_guest::blob::blob_c(&format!("rl_image{i}"), &format!("c/image{i}.bin"), image)
 }
 
+/// What the build decided about floating point, for `program.c`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Fp {
+    /// FPSR flags are produced (the build's FPSR census found a read that
+    /// can be used).
+    pub flags: bool,
+    /// Lifted code has no FPCR guards (the build proved every FPCR write
+    /// keeps the default mode).
+    pub fpcr_const: bool,
+}
+
 /// The files that describe the placed modules to the runtime's loader and
 /// hold their images, with the process parameters from `npdm` and the
 /// lifted unit tables `units` (C symbols of `const rl_unit`) to register:
 /// `program.c`, and per module `image<i>.c` with its `image<i>.bin`.
-/// `fp_flags` turns on FPSR flag production in the runtime before the
-/// program starts (the build's FPSR census found a read that can be used).
+/// `fp` says what the runtime is told about floating point before the
+/// program starts.
 /// `mods` is the C symbol of the bundled mods table (`const rl_mods`), when
 /// the build has bundled mods. `with_image_id` names the image id the
 /// build defines in `rl_image_id` (`relift_info.c`); without it the units
@@ -709,7 +720,7 @@ pub fn program_files(
     npdm: Option<&Npdm>,
     units: &[String],
     code_maps: &[String],
-    fp_flags: bool,
+    fp: Fp,
     mods: Option<&str>,
     with_image_id: bool,
 ) -> Vec<ProgramFile> {
@@ -726,16 +737,7 @@ pub fn program_files(
     }
     out.push(ProgramFile {
         name: "program.c".into(),
-        bytes: program_c(
-            placed,
-            npdm,
-            units,
-            code_maps,
-            fp_flags,
-            mods,
-            with_image_id,
-        )
-        .into_bytes(),
+        bytes: program_c(placed, npdm, units, code_maps, fp, mods, with_image_id).into_bytes(),
     });
     out
 }
@@ -812,7 +814,7 @@ fn program_c(
     npdm: Option<&Npdm>,
     units: &[String],
     code_maps: &[String],
-    fp_flags: bool,
+    fp: Fp,
     mods: Option<&str>,
     with_image_id: bool,
 ) -> String {
@@ -900,7 +902,7 @@ fn program_c(
         code_maps.len()
     );
     t.push_str("RL_TEXT_BOUNDS_DEFINE()\n");
-    if fp_flags {
+    if fp.flags || fp.fpcr_const {
         t.push_str("#include \"arm64.h\"\n");
     }
     t.push_str("#include <string.h>\nextern int relift_info_main(void);\n");
@@ -909,8 +911,11 @@ fn program_c(
         "{\n    if (argc > 1 && strcmp(argv[1], \"--relift-info\") == 0)\n        return relift_info_main();\n",
     );
     t.push_str("#ifdef RL_APP_FLUSH\n    set_app_dirs();\n    if (rl_app_check_data() != 0) {\n        RL_APP_FLUSH();\n        return 1;\n    }\n#endif\n");
-    if fp_flags {
+    if fp.flags {
         t.push_str("    rl_arm64_set_fp_flags(1);\n");
+    }
+    if fp.fpcr_const {
+        t.push_str("    rl_arm64_set_fpcr_const(1);\n");
     }
     t.push_str("    int status = rl_switch_main(&rl_program, argc, argv);\n#ifdef RL_APP_FLUSH\n    RL_APP_FLUSH();\n#endif\n    return status;\n}\n");
     t
@@ -1134,7 +1139,15 @@ mod tests {
     #[test]
     fn program_c_names_the_loader_contract() {
         let p = place(vec![("main".into(), nso(vec![1, 2, 3, 4]))]);
-        let files = program_files(&p, None, &["rl_unit_main".into()], &[], false, None, true);
+        let files = program_files(
+            &p,
+            None,
+            &["rl_unit_main".into()],
+            &[],
+            Fp::default(),
+            None,
+            true,
+        );
         let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["image0.bin", "image0.c", "program.c"]);
         assert_eq!(files[0].bytes, p[0].nso.image);
@@ -1160,12 +1173,17 @@ mod tests {
             None,
             &["rl_unit_main".into(), "rl_cold_main".into()],
             &["rl_code_main".into()],
-            false,
+            Fp {
+                flags: false,
+                fpcr_const: true,
+            },
             None,
             true,
         );
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("{ &rl_unit_main, &rl_cold_main, };"), "{c}");
+        assert!(c.contains("rl_arm64_set_fpcr_const(1);"), "{c}");
+        assert!(!c.contains("rl_arm64_set_fp_flags"), "{c}");
         assert!(c.contains("extern const rl_code_map rl_code_main;"), "{c}");
         assert!(
             c.contains("static const rl_code_map *const code_maps[] = { &rl_code_main, };"),
@@ -1175,7 +1193,15 @@ mod tests {
             c.contains("static_units, 2u, 0, rl_image_id, code_maps, 1u };"),
             "{c}"
         );
-        let files = program_files(&p, None, &[], &[], false, Some("rl_mods_bundled"), false);
+        let files = program_files(
+            &p,
+            None,
+            &[],
+            &[],
+            Fp::default(),
+            Some("rl_mods_bundled"),
+            false,
+        );
         let c = String::from_utf8_lossy(&files[2].bytes);
         assert!(c.contains("extern const rl_mods rl_mods_bundled;"), "{c}");
         assert!(

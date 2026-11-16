@@ -58,6 +58,9 @@ struct Named {
 pub struct Fpsr {
     /// Whether any module holds an `MRS FPSR`; without one nothing runs.
     on: bool,
+    /// Whether the linkage is kept, for this analysis or the FPCR proof
+    /// ([`crate::fpcr`]), which needs it when a module holds an `MSR FPCR`.
+    linkage: bool,
     /// Every definition of each exported name.
     defs: HashMap<String, Vec<u64>>,
     /// The symbol slots by address.
@@ -84,6 +87,14 @@ pub struct ModuleFlags {
     resume: BTreeSet<u64>,
     start: Option<u64>,
     entries: BTreeSet<u64>,
+}
+
+impl ModuleFlags {
+    /// The computed transfers that go through a loader-filled word, by the
+    /// transfer's address, with the word's address.
+    pub fn via(&self) -> &BTreeMap<u64, u64> {
+        &self.via
+    }
 }
 
 /// What [`Fpsr::visit`] keeps of one function: the addresses it takes and
@@ -137,12 +148,38 @@ fn words_have_mrs_fpsr(p: &Placed) -> bool {
         .any(|w| flags::mrs_fpsr(u32::from_le_bytes(*w)).is_some())
 }
 
+fn words_have_msr_fpcr(p: &Placed) -> bool {
+    p.nso
+        .image
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|w| relift_cpu_arm64::fpcr::msr_fpcr(u32::from_le_bytes(*w)))
+}
+
+/// What the program's loader resolves, for the FPCR proof: the
+/// definitions of each name, the PLT and GOT words by address, and the
+/// entries code the analysis cannot see may call.
+#[derive(Clone, Debug, Default)]
+pub struct Linkage {
+    /// Every definition of each exported name.
+    pub defs: HashMap<String, Vec<u64>>,
+    /// The PLT and GOT words by address, with their symbol's name.
+    pub words: BTreeMap<u64, String>,
+    /// Entries and addresses whose address escapes.
+    pub escaped: BTreeSet<u64>,
+    /// The program start.
+    pub starts: BTreeSet<u64>,
+}
+
 impl Fpsr {
     /// Starts the analysis of the program `placed`.
     pub fn new(placed: &[Placed]) -> Fpsr {
         let on = placed.iter().any(words_have_mrs_fpsr);
+        let linkage = on || placed.iter().any(words_have_msr_fpcr);
         let mut f = Fpsr {
             on,
+            linkage,
             defs: HashMap::new(),
             slots: BTreeMap::new(),
             escaped: BTreeSet::new(),
@@ -153,7 +190,7 @@ impl Fpsr {
             modules: placed.iter().map(|p| p.name.clone()).collect(),
             shards: Vec::new(),
         };
-        if !on {
+        if !linkage {
             return f;
         }
         for p in placed {
@@ -177,6 +214,36 @@ impl Fpsr {
         self.on
     }
 
+    /// Whether the linkage is kept ([`Fpsr::linkage`]).
+    pub fn has_linkage(&self) -> bool {
+        self.linkage
+    }
+
+    /// The program's linkage, once every module went through
+    /// [`Fpsr::begin_module`].
+    pub fn linkage(&mut self) -> Linkage {
+        self.resolve_escaped_names();
+        Linkage {
+            defs: self.defs.clone(),
+            words: self
+                .slots
+                .iter()
+                .filter(|(_, (_, k))| *k != SlotKind::Data)
+                .map(|(&a, (n, _))| (a, n.clone()))
+                .collect(),
+            escaped: self.escaped.clone(),
+            starts: self.starts.clone(),
+        }
+    }
+
+    fn resolve_escaped_names(&mut self) {
+        for n in std::mem::take(&mut self.escaped_names) {
+            if let Some(d) = self.defs.get(&n) {
+                self.escaped.extend(d);
+            }
+        }
+    }
+
     /// The loader-filled slots of module `p`, for [`Fpsr::visit`].
     pub fn slots_of(&self, p: &Placed) -> BTreeSet<u64> {
         let end = p.base + p.nso.image.len() as u64 + u64::from(p.nso.bss_size);
@@ -188,7 +255,7 @@ impl Fpsr {
     /// the module is known: give it to [`Fpsr::begin_module`] with the
     /// others, in entry order.
     pub fn visit(&self, module: &Module, mine: &BTreeSet<u64>, f: &Function) -> Visit {
-        if !self.on {
+        if !self.linkage {
             return (BTreeSet::new(), None);
         }
         let taken = relift_analyze::address_taken(module, 4, f);
@@ -222,7 +289,7 @@ impl Fpsr {
             start: None,
             entries: layout.functions.keys().copied().collect(),
         };
-        if !self.on {
+        if !self.linkage {
             return m;
         }
         let raw = |pc: u64| {
@@ -237,7 +304,7 @@ impl Fpsr {
             .filter(|o| o.pcs().any(|pc| flags::mrs_fpsr(raw(pc)).is_some()))
             .map(|o| o.entry)
             .collect();
-        if !sites.is_empty() {
+        if self.on && !sites.is_empty() {
             let mut callers: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
             for o in layout.functions.values() {
                 for &(t, _) in &o.calls {
@@ -405,11 +472,7 @@ impl Fpsr {
                 report: String::new(),
             });
         }
-        for n in std::mem::take(&mut self.escaped_names) {
-            if let Some(d) = self.defs.get(&n) {
-                self.escaped.extend(d);
-            }
-        }
+        self.resolve_escaped_names();
         let p = region::Program {
             fns: std::mem::take(&mut self.fns),
             escaped: std::mem::take(&mut self.escaped),

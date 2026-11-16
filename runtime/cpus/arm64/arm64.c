@@ -12,6 +12,7 @@
 #include <string.h>
 
 static int g_exact = -1;
+static int g_fpcr_const;
 int rl_arm64_fp_flags_on;
 
 int rl_arm64_exact_flags(void)
@@ -26,6 +27,17 @@ int rl_arm64_exact_flags(void)
 int rl_arm64_fp_flags(void) { return rl_arm64_fp_flags_on; }
 
 void rl_arm64_set_fp_flags(int on) { rl_arm64_fp_flags_on = on != 0; }
+
+void rl_arm64_set_fpcr_const(int on)
+{
+    g_fpcr_const = on != 0;
+    if (g_fpcr_const && rl_arm64_exact_flags())
+        rl_log(RL_LOG_WARN, "fpcr",
+               "RELIFT_FP_EXACT=1 has no effect: this build proved the FP mode constant and has no FPCR guards; "
+               "rebuild with emit.fpcr-guards = true");
+}
+
+int rl_arm64_fpcr_const(void) { return g_fpcr_const; }
 
 void rl_host_set_fpcr(uint32_t fpcr)
 {
@@ -141,8 +153,15 @@ void rl_msr_fpcr(rl_ctx *c, uint64_t v)
     c->fpcr = f;
     if (c->thread == rl_thread_current())
         rl_host_set_fpcr(f);
-    if ((f & RL_FPCR_MODE) != (RL_FPCR_DEFAULT & RL_FPCR_MODE) && rl_once(0x4650435200000000ull | (f & RL_FPCR_MODE)))
-        rl_log(RL_LOG_WARN, "fpcr", "guest set FPCR 0x%08x: a mode the lifted code was not generated for", f);
+    if ((f & RL_FPCR_MODE) != (RL_FPCR_DEFAULT & RL_FPCR_MODE) && rl_once(0x4650435200000000ull | (f & RL_FPCR_MODE))) {
+        if (g_fpcr_const)
+            rl_log(RL_LOG_ERROR, "fpcr",
+                   "guest set FPCR 0x%08x, which the build proved it never does: lifted code ignores the mode; "
+                   "rebuild with emit.fpcr-guards = true and report it",
+                   f);
+        else
+            rl_log(RL_LOG_WARN, "fpcr", "guest set FPCR 0x%08x: a mode the lifted code was not generated for", f);
+    }
 }
 
 void rl_wfe(rl_ctx *c)

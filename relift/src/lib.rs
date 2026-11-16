@@ -16,6 +16,7 @@ pub mod diff;
 pub mod diff_ir;
 pub mod elfdeps;
 pub mod emitstore;
+pub mod fpcr;
 pub mod fpflags;
 pub mod game_settings;
 pub mod gb;

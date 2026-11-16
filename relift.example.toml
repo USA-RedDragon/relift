@@ -19,6 +19,7 @@ piece-kib = 1024
 cold = true
 cold-piece-kib = 4
 cold-first = false
+fpcr-guards = false
 
 [package]
 appimage = "auto"

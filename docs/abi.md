@@ -1087,8 +1087,79 @@ are also call boundaries. [inferred]
   save and restore; library code such as a physics engine's FPU guard
   sets FPCR to 0 (round to nearest, no FZ, no DN) around scoped blocks.
   No per-mode function variants are needed while the default is 0.
-  [verified: static scan of SDK-based guest code; open: Horizon's initial
-  FPCR]
+  [verified: static scan of SDK-based guest code; Horizon's initial FPCR is
+  0: the kernel's thread context starts with FPCR and FPSR 0, and
+  `svcCreateThread` copies the creating thread's FPCR (Atmosphère's
+  `KThreadContext::Initialize` and `CloneFpuStatus`)]
+- **The FPCR proof drops the guards.** Each block whose semantics assume
+  FPCR zero starts with the FPCR guard (`sail::SLOW_FPCR`), tested once per
+  function entry, call return and FPCR write through the hoisted local
+  `g<fpcr>`, written as `RL_FPCR_GUARD(r)`. Once every module is lifted, the
+  build (`relift/src/fpcr.rs`) runs the proof of `cpus/arm64/src/fpcr.rs`:
+  when every `MSR FPCR` of the program writes the default mode, lifted
+  code (hot and cold copies, mod variants) is compiled with
+  `-DRL_FPCR_CONST`, which makes `RL_FPCR_GUARD` 0, so clang drops every
+  guard, its slow path and the stores the slow path needed. Any write it
+  cannot classify keeps every guard, as before.
+  - Soundness: the main thread starts with the default (the runtime's
+    `ctx_init` sets `RL_FPCR_DEFAULT`) and a created thread with its
+    creator's FPCR (`hos_create_thread`, as on the console); FPCR changes
+    only through `MSR FPCR` (no other runtime entry or system call writes
+    the guest bits of `c->fpcr`). So, by induction over the program's run,
+    the mode stays the default if every `MSR FPCR` writes the default
+    whenever every earlier `MRS FPCR` on its thread read it.
+  - The proof checks exactly that, by abstract interpretation with `MRS
+    FPCR` giving the default: values are known bits, pointers at a known
+    offset from the stack a root function runs on (or a stack it switches
+    to), and the function addresses PLT and GOT words hold. A root starts
+    with nothing known; callees are inlined (a few levels, the functions
+    the search climbed through at any depth); calls it does not follow
+    keep the callee-saved registers and sp (AAPCS64) and change only memory
+    whose address escaped; landing pads start from what each such call
+    leaves. A write whose value comes from the root's arguments, such as
+    `fesetround(mode)` or `fesetenv(env)`, is decided at the callers: the
+    search climbs from the function holding the write to every function
+    that may call it (direct branches, an extent holding the entry or the
+    instruction before it, PLT and GOT transfers, jump tables), up to six
+    levels, and stops at an escaped address (`relift/src/fpflags.rs` names
+    them) or the program start. A function with no callers whose address
+    does not escape is never entered, unless the program can look a
+    function up by name at run time (`nn::ro::LookupSymbol`,
+    `nn::ro::LookupModuleSymbol`, `dlsym` reachable): then every exported
+    function counts as escaped. The loader's binding, lazy PLT binding
+    included, only fills slots that name a symbol, which the climb
+    follows. A callee where the interpretation stops (a computed jump
+    without known targets, a return it cannot place) and that it need not
+    inline is treated as a call it does not follow and the root tried
+    again. A root then holds when every
+    write it reaches writes known zero guest bits. A scope guard that saves
+    the environment with `fegetenv` into its stack frame, sets the default
+    and later restores it with `fesetenv` proves because the saved bytes
+    are the default and nothing can reach them.
+  - The memory model: a program writes an object only through addresses
+    derived from that object's own address (C and C++ code follows it; a
+    stack buffer overflow does not). An object starts at an address the
+    code takes and ends at the next one; a load overlapping an object whose
+    address escaped (to memory, to a call the analysis does not follow, to
+    another thread) gives an unknown value, and an address computed from a
+    stack pointer with an unknown offset makes every object of that stack
+    escaped. A pointer stored to tracked stack memory escapes when that
+    memory does. A callee reads its callers' frame records (through x29)
+    only to unwind, so the frame pointer does not escape at a call.
+  - A computed jump without known targets, a call to a resume point
+    (`setjmp`) or to a mod variant, or too much code stops a root without a
+    result, and the guards stay. An `MSR FPCR` in no function keeps them
+    too (code that discovery missed is not covered).
+  - The build log names how many writes, roots and climbed functions it
+    took, or why the guards stay. In a commercial game the 3 writes
+    (`fesetround`, `fesetenv` and the user exception handler's save and
+    restore) prove through 46 call sites of the game's FPU scope guard.
+  - `emit.fpcr-guards = true` keeps the guards, for debugging and for the
+    reference mode `RELIFT_FP_EXACT=1`, which runs through them (the
+    runtime warns when that mode is asked of a build without them).
+    `program.c` of a guard-free build calls `rl_arm64_set_fpcr_const(1)`,
+    and `rl_msr_fpcr` then reports a non-default mode as an error: it
+    would mean the proof was wrong.
 - **FPSR cumulative flags** (IOC, DZC, OFC, UFC, IXC, IDC, QC) are produced
   only for a program that can observe them. The build's FPSR census
   (`cpus/arm64/src/flags.rs`) looks at every reachable `MRS Xt, FPSR`: it
@@ -1230,6 +1301,10 @@ are also call boundaries. [inferred]
 - The reference mode `RELIFT_FP_EXACT=1` sets `RL_FPCR_EXACT` (FPCR bit 31,
   RES0, never visible to the guest or the host FPCR) so every guarded block
   runs on the slow path; it exists to check the host-flag path against.
+  It needs the FPCR guards: build with `emit.fpcr-guards = true` when the
+  FPCR proof dropped them. Program-wide or per-function FPSR flags do not
+  go through the FPCR guard (they are the build's `-DRL_FP_FLAGS`
+  choice and the `SLOW_FLAGS` guard), so they work the same without it.
 - **FP cut layer** (the Sail prototype's option (b), 11 operations): FPAdd, FPSub,
   FPMul, FPDiv, FPMulAdd, FPSqrt, FPRoundInt, FPRSqrtEstimate (each for
   single and double), FPConvert, FPToFixed, FixedToFP. Every one has an

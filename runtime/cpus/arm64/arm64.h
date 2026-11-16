@@ -31,6 +31,10 @@ RL_RUNTIME_API int rl_arm64_fp_flags(void);
 extern int rl_arm64_fp_flags_on;
 /** @brief Turns FPSR flag production on; program.c calls it before the program starts. */
 RL_RUNTIME_API void rl_arm64_set_fp_flags(int on);
+/** @brief Records that lifted code was built without FPCR guards (RL_FPCR_CONST); program.c calls it before the program starts. */
+RL_RUNTIME_API void rl_arm64_set_fpcr_const(int on);
+/** @brief Whether lifted code was built without FPCR guards. */
+RL_RUNTIME_API int rl_arm64_fpcr_const(void);
 /** @brief Saves and clears the host FP flags at a runtime entry that may do host FP work, in flag mode. */
 static inline uint32_t rl_arm64_flags_enter(void)
 {

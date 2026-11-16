@@ -109,6 +109,8 @@ struct Emitted {
     unlifted_list: String,
     /// Which functions produce FPSR flags.
     fpsr: crate::fpflags::Plan,
+    /// Whether lifted code drops the FPCR guards.
+    fpcr: crate::fpcr::Plan,
     /// The entries of every module, one `<module> <address> <kind>` line
     /// each ([`entries_line`]), for the dev server's later discovery.
     entries: String,
@@ -215,6 +217,7 @@ fn emit_modules(
         unlifted: 0,
         unlifted_list: String::new(),
         fpsr: crate::fpflags::Plan::default(),
+        fpcr: crate::fpcr::Plan::default(),
         entries: String::new(),
         cold_files: Vec::new(),
         cold_units: Vec::new(),
@@ -223,6 +226,7 @@ fn emit_modules(
     };
     let mut census = crate::total::Census::default();
     let mut fpsr = crate::fpflags::Fpsr::new(placed);
+    let mut fpcr = crate::fpcr::Fpcr::default();
     let cpu = Arm64 {
         features: relift_switch::CPU_FEATURES,
     };
@@ -401,6 +405,9 @@ fn emit_modules(
             )?;
         }
         let flags = fpsr.begin_module(i, &module, &layout, visits, &cpu, &overrides);
+        if fpsr.has_linkage() {
+            fpcr.add_module(p, &layout, &flags, &overrides, &swapped);
+        }
         let summaries = std::sync::Mutex::new(Vec::new());
         let summarized: Vec<std::sync::atomic::AtomicBool> = heads
             .iter()
@@ -558,6 +565,8 @@ fn emit_modules(
     if settings.emit.cold {
         done.total.push_str(&format!("all {}\n", census.line()));
     }
+    done.fpcr = fpcr.finish(&fpsr.linkage(), settings.emit.fpcr_guards);
+    drop(fpcr);
     done.fpsr = fpsr.finish()?;
     Ok(done)
 }
@@ -1027,6 +1036,8 @@ struct EmitRecord {
     fp_part1: Vec<PathBuf>,
     /// Whether any function produces FPSR flags.
     fp_flags: bool,
+    /// Whether lifted code is built without FPCR guards (`RL_FPCR_CONST`).
+    fpcr_const: bool,
     /// The C files of the cold copies, built for size rather than speed.
     cold: Vec<PathBuf>,
 }
@@ -1049,6 +1060,9 @@ impl EmitRecord {
         if self.fp_flags {
             t.push_str("fp_flags 1\n");
         }
+        if self.fpcr_const {
+            t.push_str("fpcr_const 1\n");
+        }
         for p in &self.fp_part1 {
             t.push_str(&format!("fp_part1 {}\n", p.display()));
         }
@@ -1068,6 +1082,7 @@ impl EmitRecord {
             fp_program_wide: false,
             fp_part1: Vec::new(),
             fp_flags: false,
+            fpcr_const: false,
             cold: Vec::new(),
         };
         for line in t.lines() {
@@ -1081,6 +1096,7 @@ impl EmitRecord {
                 "fp_program_wide" => r.fp_program_wide = v == "1",
                 "fp_part1" => r.fp_part1.push(v.into()),
                 "fp_flags" => r.fp_flags = v == "1",
+                "fpcr_const" => r.fpcr_const = v == "1",
                 "cold" => r.cold.push(v.into()),
                 _ => return Err(format!("unknown emit record key {k}").into()),
             }
@@ -1184,9 +1200,10 @@ fn lift_and_emit(
     relift_cache::write_if_changed(&unlifted_file, emitted.unlifted_list.as_bytes())?;
     let fpsr = emitted.fpsr;
     let fp_flags = fpsr.flags;
-    for l in fpsr.report.lines() {
+    for l in fpsr.report.lines().chain(emitted.fpcr.report.lines()) {
         ui.note(&Line::new().text(l));
     }
+    let fpcr_const = emitted.fpcr.constant;
     let mut prog = Vec::new();
     let game = read_toml(Path::new("game.toml"))?;
     let mut ports = game_ports(Path::new("game.toml"))?;
@@ -1227,7 +1244,10 @@ fn lift_and_emit(
         npdm.as_ref(),
         &units,
         &emitted.code_maps,
-        fp_flags,
+        program::Fp {
+            flags: fp_flags,
+            fpcr_const,
+        },
         mods_c.as_ref().map(|_| crate::mods::bundled::SYMBOL),
         true,
     ) {
@@ -1246,6 +1266,7 @@ fn lift_and_emit(
         fp_program_wide: fpsr.program_wide,
         fp_part1: fpsr.part1,
         fp_flags: fp_flags || fpsr.program_wide,
+        fpcr_const,
         cold: emitted.cold_files,
     })
 }
@@ -1511,6 +1532,10 @@ pub(crate) fn build_project(
         .collect();
     // Code that produces FPSR flags gets them from host FP operations,
     // which the compiler must then neither fold nor reorder.
+    let lifted_flags: Vec<String> = lifted_flags
+        .into_iter()
+        .chain(emitted.fpcr_const.then(|| "-DRL_FPCR_CONST".to_string()))
+        .collect();
     let strict = ["-DRL_FP_FLAGS", "-ffp-exception-behavior=strict"].map(String::from);
     let flag_flags: Vec<String> = lifted_flags.iter().cloned().chain(strict).collect();
     let pic: Vec<String> = if cfg!(windows) && cross.is_none() {

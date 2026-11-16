@@ -164,6 +164,13 @@ pub struct Emit {
         description = "for tests: run every function from the cold copy, which then calls only itself"
     )]
     pub cold_first: bool,
+
+    #[configulator(
+        name = "fpcr-guards",
+        default = "false",
+        description = "for debugging: keep the FPCR guards of lifted code even when the build proves the FP mode constant (RELIFT_FP_EXACT=1 needs them)"
+    )]
+    pub fpcr_guards: bool,
 }
 
 /// Host tools relift drives. An empty path means look it up on `PATH`.
