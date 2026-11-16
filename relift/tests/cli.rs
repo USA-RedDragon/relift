@@ -128,6 +128,21 @@ fn import_in(dir: &std::path::Path, args: &[&str]) -> Output {
         .expect("the relift binary runs")
 }
 
+/// The bytes of `path` in the romfs imported into folder `dir`.
+fn romfs_file(dir: &std::path::Path, path: &str) -> Vec<u8> {
+    use relift_switch_formats::{romfs::Romfs, romfs_image};
+    let found = romfs_image::find(dir).expect("an imported romfs");
+    let r = Romfs::open(romfs_image::open(found.path()).expect("it opens")).expect("it parses");
+    let f = r
+        .files()
+        .iter()
+        .find(|f| f.path == path)
+        .expect("the file is in the romfs");
+    let mut out = Vec::new();
+    r.copy_file(f, &mut out).expect("it reads");
+    out
+}
+
 fn scratch(name: &str) -> std::path::PathBuf {
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_dir_all(&root);
@@ -147,12 +162,10 @@ fn import_reads_an_extracted_tree_and_picks_the_update() {
     let out = import_in(&project, &["--cache-dir", &cache, "import", &dump]);
     assert!(out.status.success(), "{}", stderr(&out));
     let import = root.join("cache/projects/game/import");
+    assert_eq!(romfs_file(&import, "readme.txt"), b"version 2");
+    assert!(import.join("romfs.img").is_file() && !import.join("romfs").exists());
     assert_eq!(
-        std::fs::read(import.join("romfs/readme.txt")).expect("the romfs is extracted"),
-        b"version 2"
-    );
-    assert_eq!(
-        std::fs::read(import.join("dlc/0100123456781001/0/romfs/dlc.txt")).expect("the DLC"),
+        romfs_file(&import.join("dlc/0100123456781001/0"), "dlc.txt"),
         b"add-on"
     );
     let table = std::fs::read_to_string(import.join("modules.toml")).expect("module table");
@@ -176,7 +189,7 @@ fn import_reads_an_extracted_tree_and_picks_the_update() {
     );
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
-        std::fs::read(older.join("projects/game/import/romfs/readme.txt")).expect("romfs"),
+        romfs_file(&older.join("projects/game/import"), "readme.txt"),
         b"version 1"
     );
 
@@ -207,10 +220,8 @@ fn import_reads_a_nup_and_picks_the_base() {
     );
     assert!(out.status.success(), "{}", stderr(&out));
     let import = root.join("cache/projects/game/import");
-    assert_eq!(
-        std::fs::read(import.join("romfs/readme.txt")).expect("the romfs is extracted"),
-        b"version 0"
-    );
+    assert_eq!(romfs_file(&import, "readme.txt"), b"version 0");
+    assert!(import.join("romfs.map").is_file() && !import.join("romfs").exists());
     let game = std::fs::read_to_string(project.join("game.toml")).expect("game.toml stub");
     assert!(game.contains("version = 0"), "{game}");
 }

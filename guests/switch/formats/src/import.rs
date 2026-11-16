@@ -1,9 +1,14 @@
 //! Import: read a decrypted dump, a `.nup` file or an extracted tree, and
-//! write the exefs files, the decompressed modules, the module table, the
-//! romfs tree and the DLC romfs trees into a directory. Every file goes
-//! through relift-cache's write-if-changed writers, and romfs files stream
+//! write the exefs files, the decompressed modules, the module table, and
+//! the game's romfs and each DLC's romfs as one image each
+//! ([`crate::romfs_image`]): from a `.nup`, a RomFS map (`romfs.map`) that
+//! reads the files in place in the `.nup` (plus `romfs.blob` for its zstd
+//! files), so a game with hundreds of thousands of romfs files costs a few
+//! files on disk; from a tree, a plain image (`romfs.img`). Every file goes
+//! through relift-cache's write-if-changed writers and romfs data streams
 //! through them, so a re-import of the same dump touches nothing and no
-//! large file is held in memory.
+//! large file is held in memory. A romfs form left by an older import (a
+//! `romfs/` tree) is removed.
 //!
 //! The extracted tree is the layout NUP packers read:
 //!
@@ -23,7 +28,6 @@
 //! A module is identified by the module name in its .rodata header plus its
 //! build ID, never by the exefs slot it sits in.
 
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -32,6 +36,7 @@ use crate::error::{Error, Result, malformed};
 use crate::npdm::Npdm;
 use crate::nso::Nso;
 use crate::nup::{Nup, PackageKind, TLV_ICON, TLV_NACP, UpdateSelect};
+use crate::romfs_image;
 use crate::storage::{FileStorage, Shared, Storage, read_vec};
 
 /// One imported module.
@@ -166,7 +171,8 @@ fn open(path: &Path) -> Result<Shared> {
 
 /// Import the dump at `input` (a `.nup` file or an extracted tree) into
 /// `out`: `exefs/<slot>`, `modules/<module name>.nso` (uncompressed),
-/// `modules.toml`, `romfs/` and `dlc/<title id>/<index>/romfs/`.
+/// `modules.toml`, the romfs (`romfs.map` or `romfs.img`) and
+/// `dlc/<title id>/<index>/` holding each DLC's romfs the same way.
 ///
 /// # Errors
 ///
@@ -200,7 +206,7 @@ pub fn import_with(
     let storage = open(input)?;
     let head = read_vec(&*storage, 0, 4.min(storage.size()))?;
     if head.get(..3) == Some(&crate::nup::MAGIC[..3]) {
-        return import_nup(&Nup::open(storage)?, out, opts, on);
+        return import_nup(&Nup::open(storage)?, input, out, opts, on);
     }
     refuse_encrypted(input, &*storage)?;
     malformed(format!(
@@ -234,7 +240,29 @@ fn program_id(report: &mut Report, fallback: Option<u64>) -> Result<()> {
     Ok(())
 }
 
-fn import_nup(nup: &Nup, out: &Path, opts: &Options, on: &mut dyn FnMut(Event)) -> Result<Report> {
+fn nup_romfs(
+    nup: &Nup,
+    input: &Path,
+    files: &[(String, crate::nup::NupEntry)],
+    dirs: &[String],
+    dir: &Path,
+    on: &mut dyn FnMut(Event),
+) -> Result<usize> {
+    let w = romfs_image::write_nup(nup, input, files, dirs, dir, &mut |e| match e {
+        Some(n) => on(Event::Chunk(n)),
+        None => on(Event::File),
+    })?;
+    romfs_image::remove_others(dir, romfs_image::MAP_NAME)?;
+    Ok(w.written)
+}
+
+fn import_nup(
+    nup: &Nup,
+    input: &Path,
+    out: &Path,
+    opts: &Options,
+    on: &mut dyn FnMut(Event),
+) -> Result<Report> {
     let t = nup.effective_title(opts.update)?;
     if t.exefs.is_empty() {
         return malformed("NUP: the selected update and the base have no exefs");
@@ -272,7 +300,7 @@ fn import_nup(nup: &Nup, out: &Path, opts: &Options, on: &mut dyn FnMut(Event)) 
         files: Some(t.romfs.len() as u64),
         bytes: Some(t.romfs.iter().map(|(_, e)| e.size).sum()),
     });
-    report.written += nup.extract_romfs_with(&t, &out.join("romfs"), on)?;
+    report.written += nup_romfs(nup, input, &t.romfs, &t.romfs_dirs, out, on)?;
     on(Event::End);
     let mut seen: Vec<u64> = Vec::new();
     for (i, p) in nup.packages().iter().enumerate() {
@@ -291,7 +319,14 @@ fn import_nup(nup: &Nup, out: &Path, opts: &Options, on: &mut dyn FnMut(Event)) 
             files: Some(addon.romfs.len() as u64),
             bytes: Some(addon.romfs.iter().map(|(_, e)| e.size).sum()),
         });
-        report.written += nup.extract_romfs_with(&addon, &out.join(&rel).join("romfs"), on)?;
+        report.written += nup_romfs(
+            nup,
+            input,
+            &addon.romfs,
+            &addon.romfs_dirs,
+            &out.join(&rel),
+            on,
+        )?;
         on(Event::End);
         report.dlc.push(rel);
     }
@@ -501,90 +536,44 @@ fn import_tree(
     on(Event::End);
     program_id(&mut report, None)?;
     if let Some(r) = romfs {
-        let (files, written) = copy_tree(r, &out.join("romfs"), "romfs", on)?;
+        let (files, written) = tree_image(r, out, "romfs", on)?;
         report.romfs_files = files;
         report.written += written;
     }
     for (id, index, romfs) in &tree.dlc {
         let rel = format!("dlc/{id:016x}/{index}");
-        report.written += copy_tree(romfs, &out.join(&rel).join("romfs"), &rel, on)?.1;
+        report.written += tree_image(romfs, &out.join(&rel), &rel, on)?.1;
         report.dlc.push(rel);
     }
     finish(out, &mut report)?;
     Ok(report)
 }
 
-/// The files (with sizes) and directories under a root, as paths relative
-/// to it.
-struct Walk {
-    files: Vec<(PathBuf, u64)>,
-    dirs: Vec<PathBuf>,
-}
-
-fn walk_tree(src: &Path) -> Result<Walk> {
-    let (mut files, mut dirs) = (Vec::new(), Vec::new());
-    let mut stack = vec![PathBuf::new()];
-    while let Some(rel) = stack.pop() {
-        dirs.push(rel.clone());
-        for (name, path) in sorted_entries(&src.join(&rel))? {
-            let meta = std::fs::metadata(&path)?;
-            if meta.is_dir() {
-                stack.push(rel.join(&name));
-            } else if meta.is_file() {
-                files.push((rel.join(&name), meta.len()));
-            } else {
-                return malformed(format!("{}: not a file or directory", path.display()));
-            }
-        }
-    }
-    Ok(Walk { files, dirs })
-}
-
-/// Stream every file under `src` to the same path under `dst` with
-/// relift-cache's write-if-changed stream writer, keeping empty
-/// directories, as stage `stage`. Returns (files, files rewritten).
-fn copy_tree(
+/// Write the extracted tree `src` as one plain image `romfs.img` in `dir`,
+/// as stage `stage`. Returns (files, files rewritten).
+fn tree_image(
     src: &Path,
-    dst: &Path,
+    dir: &Path,
     stage: &str,
     on: &mut dyn FnMut(Event),
 ) -> Result<(usize, usize)> {
-    const CHUNK: usize = 1 << 20;
-    let Walk { files: list, dirs } = walk_tree(src)?;
+    let img = romfs_image::Image::from_tree(src)?;
+    let files = img.file_count();
     on(Event::Begin {
         stage,
-        files: Some(list.len() as u64),
-        bytes: Some(list.iter().map(|(_, n)| n).sum()),
+        files: Some(files as u64),
+        bytes: Some(img.size()),
     });
-    let mut buf = vec![0u8; CHUNK];
-    let mut written = 0;
-    for d in &dirs {
-        std::fs::create_dir_all(dst.join(d))?;
-    }
-    for (rel, _) in &list {
-        let path = src.join(rel);
-        let mut input = std::fs::File::open(&path).map_err(|e| {
-            Error::Io(std::io::Error::new(
-                e.kind(),
-                format!("{}: {e}", path.display()),
-            ))
-        })?;
-        let mut w = relift_cache::StreamWriter::new(&dst.join(rel))?;
-        loop {
-            let n = input.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            w.write_all(&buf[..n])?;
-            on(Event::Chunk(n as u64));
-        }
-        if w.finish()? {
-            written += 1;
-        }
-        on(Event::File);
-    }
+    std::fs::create_dir_all(dir)?;
+    let mut w = relift_cache::StreamWriter::new(&dir.join(romfs_image::IMAGE_NAME))?;
+    img.write_to(&mut w, &mut |e| match e {
+        Some(n) => on(Event::Chunk(n)),
+        None => on(Event::File),
+    })?;
+    let written = usize::from(w.finish()?);
+    romfs_image::remove_others(dir, romfs_image::IMAGE_NAME)?;
     on(Event::End);
-    Ok((list.len(), written))
+    Ok((files, written))
 }
 
 /// Write one exefs file (and, for an NSO, its module) into `out`.
@@ -640,7 +629,7 @@ fn control_file(out: &Path, name: &str, bytes: &[u8], report: &mut Report) -> Re
 }
 
 fn prepare(out: &Path) -> Result<()> {
-    for d in ["exefs", "modules", "romfs"] {
+    for d in ["exefs", "modules"] {
         std::fs::create_dir_all(out.join(d))?;
     }
     Ok(())

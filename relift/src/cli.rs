@@ -27,12 +27,14 @@ pub struct Cli {
 /// One `relift` action.
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Extract a decrypted game dump into a project.
+    /// Import a decrypted game dump into a project.
     ///
     /// The dump is a .nup file, or a directory holding base/{exefs,romfs},
     /// updates/<version>/{exefs,romfs} and dlc/<title id>/<index>/romfs (or
-    /// exefs/ and romfs/ directly). Encrypted dumps are refused: convert
-    /// them with a separate tool first. A Game Boy or Game Boy Color
+    /// exefs/ and romfs/ directly). The romfs is not extracted: a .nup's is
+    /// read in place (keep the .nup where it is), a tree's becomes one
+    /// image file. Encrypted dumps are refused: convert them with a
+    /// separate tool first. A Game Boy or Game Boy Color
     /// cartridge ROM (.gb, .gbc) is imported as it is; its battery save
     /// stays next to it as a .sav file.
     Import {

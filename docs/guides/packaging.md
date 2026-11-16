@@ -48,9 +48,9 @@ desktop file and icon, the self-description (`relift info <game>.AppImage`
 reads it without running the game) and the license of everything bundled
 (`usr/share/licenses/<game>/BUNDLED.txt`). The Vulkan loader, GPU drivers,
 the C library and the display and audio servers are always the system's. A
-Switch game's romfs and DLC trees go inside; saves, settings and the SD card
-go to `$XDG_DATA_HOME/<game>` (default `~/.local/share/<game>`), never into
-the AppImage.
+Switch game's romfs and DLC go inside as plain images (`romfs.img`); saves,
+settings and the SD card go to `$XDG_DATA_HOME/<game>` (default
+`~/.local/share/<game>`), never into the AppImage.
 
 It needs `appimagetool` on `PATH` (or `toolchain.appimagetool`); without it
 the build prints how to get it and still finishes. The AppImage runtime (the

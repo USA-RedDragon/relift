@@ -51,6 +51,15 @@ choice applies to the update packages of a `.nup`. The program ID comes from
 has them; they give the game's title and icon (`docs/guides/packaging.md`).
 Encrypted dumps are refused: convert them with a separate tool first.
 
+Import never extracts the romfs into a folder tree. From a `.nup` it writes a
+RomFS map (`romfs.map`, a few MB) that reads every file in place in the
+`.nup` after checking its SHA-256, plus `romfs.blob` holding the files the
+`.nup` stores zstd compressed; keep the `.nup` where it was imported from.
+From an extracted tree it writes one plain image, `romfs.img`. Either way a
+game with hundreds of thousands of romfs files takes a few files on disk.
+`relift-romfs hash <romfs>` lists every file's SHA-256 of a map, an image or a
+tree, to compare two of them.
+
 The CPU code is lifted for comes from `main.npdm` as well: a program whose
 kernel capabilities grant SVC 0x80 is a Switch 2 program (Cortex-A78C, with
 pointer authentication), any other one a Switch program (Cortex-A57), and

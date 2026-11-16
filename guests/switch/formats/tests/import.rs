@@ -4,12 +4,15 @@
 //! paths: a corrupted NUP, a missing exefs, unknown versions and encrypted
 //! inputs.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use relift_switch_formats::Error;
 use relift_switch_formats::import::{Event, Options, Report, import, import_with};
 use relift_switch_formats::nso::Nso;
 use relift_switch_formats::nup::UpdateSelect;
+use relift_switch_formats::romfs::Romfs;
+use relift_switch_formats::romfs_image;
 use relift_switch_formats::synth::{self, PROGRAM_ID};
 
 fn scratch(name: &str) -> PathBuf {
@@ -40,12 +43,26 @@ fn read(p: PathBuf) -> Vec<u8> {
     std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
 
-/// The imported romfs equals `files`, file for file.
+/// Every file of the romfs imported into folder `dir`, by path.
+fn romfs_files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let found = romfs_image::find(dir).expect("an imported romfs");
+    let r = Romfs::open(romfs_image::open(found.path()).expect("it opens")).expect("it parses");
+    r.files()
+        .iter()
+        .map(|f| {
+            let mut b = Vec::new();
+            r.copy_file(f, &mut b).expect("it reads");
+            (f.path.clone(), b)
+        })
+        .collect()
+}
+
+/// The imported romfs is `files`, file for file and nothing else.
 fn assert_romfs(out: &Path, r: &Report, files: &[(String, Vec<u8>)]) {
-    for (path, bytes) in files {
-        assert_eq!(&read(out.join("romfs").join(path)), bytes, "{path}");
-    }
+    let want: BTreeMap<String, Vec<u8>> = files.iter().cloned().collect();
+    assert_eq!(romfs_files(out), want);
     assert_eq!(r.romfs_files, files.len());
+    assert!(!out.join("romfs").exists(), "no extracted tree is left");
 }
 
 fn main_build_id(out: &Path, r: &Report) -> [u8; 32] {
@@ -79,7 +96,7 @@ fn tree_takes_the_newest_update_by_default() {
     assert_romfs(&out, &r, &g.updates[1].1.romfs);
     assert_eq!(r.dlc, ["dlc/0100123456781001/0"]);
     assert_eq!(
-        read(out.join("dlc/0100123456781001/0/romfs/dlc.txt")),
+        romfs_files(&out.join("dlc/0100123456781001/0"))["dlc.txt"],
         b"add-on"
     );
     let again = import(&d.join("dump"), &out, &Options::default()).expect("second import");
@@ -99,7 +116,7 @@ fn tree_update_flag_picks_an_older_update_or_the_base() {
     assert_eq!(r.version, 0x10000);
     assert_eq!(main_build_id(&out, &r), [0xB1; 32]);
     assert_romfs(&out, &r, &g.updates[0].1.romfs);
-    assert!(!out.join("romfs/data/new/added.bin").exists());
+    assert!(!romfs_files(&out).contains_key("data/new/added.bin"));
 
     let out = d.join("base");
     let r = import(&d.join("dump"), &out, &select(UpdateSelect::None)).expect("base");
@@ -200,7 +217,7 @@ fn nup_imports_newest_older_base_and_dlc() {
     assert_romfs(&out, &r, &g.updates[1].1.romfs);
     assert_eq!(r.dlc, ["dlc/0100123456781001/0"]);
     assert_eq!(
-        read(out.join("dlc/0100123456781001/0/romfs/dlc.txt")),
+        romfs_files(&out.join("dlc/0100123456781001/0"))["dlc.txt"],
         b"add-on"
     );
 
@@ -232,8 +249,8 @@ fn a_corrupted_nup_file_is_a_hash_error() {
     let err = import(&file, &out, &Options::default()).expect_err("fails");
     assert!(matches!(err, Error::Hash(_)), "{err}");
     assert!(
-        !out.join("romfs/readme.txt").exists(),
-        "a file that failed its hash is not left behind"
+        romfs_image::find(&out).is_none(),
+        "a romfs whose files failed their hash is not left behind"
     );
 }
 
