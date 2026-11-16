@@ -245,12 +245,20 @@ void hos_wake(hos_thread *t, rl_result r)
 {
     t->wait_result = r;
     t->woken = true;
+    t->deadline = 0;
     pthread_cond_signal(&t->cv);
     hos_sched_ready(t);
 }
 
 static bool wait_woken(hos_thread *t, int64_t timeout_ns)
 {
+    if (hos.sched.fixed) {
+        hos_fs_set_deadline(t, timeout_ns);
+        while (!t->woken && !t->expired)
+            pthread_cond_wait(&t->cv, &hos.lock);
+        t->deadline = 0;
+        return t->woken;
+    }
     if (timeout_ns < 0) {
         while (!t->woken)
             pthread_cond_wait(&t->cv, &hos.lock);

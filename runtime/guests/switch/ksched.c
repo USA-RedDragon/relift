@@ -12,9 +12,20 @@
  * the holder's preemption clock and the holder leaves at its next svc or
  * preemption point (docs/abi.md section 14.1), and the round robin of
  * priorities 59 and 63 runs at the holder's svcs.
+ *
+ * In fixed-step mode (clock.fixed_step, fixed_step.c) the cores keep their
+ * selections but only one thread runs guest code at a time: the holder of
+ * the token. It gives the token up when it blocks or yields, when its core
+ * selects another thread (at its next preemption point or svc), and after
+ * HOS_FS_SLICE points and svcs or at a yield when another core's selected
+ * thread waits.
+ * The token then goes to the first core after the holder's whose selected
+ * thread can run, so the order depends only on what the guest did.
  */
 #include "hos.h"
 #include "vi.h"
+
+#include <relift/settings.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -138,7 +149,7 @@ static void set_selected(int32_t c, hos_thread *t)
     if (k->selected == t)
         return;
     if (k->selected)
-        k->selected->last_sched_ns = rl_clock_ns();
+        k->selected->last_sched_ns = hos_clock_ns();
     k->selected = t;
 }
 
@@ -209,9 +220,16 @@ static void grant(int32_t c, hos_thread *t)
     hos_core *k = &s->cores[c];
     k->holder = t;
     t->cur_core = c;
-    rl_preempt_clear(t->rt->ctx);
+    if (s->fixed) {
+        s->token = t;
+        s->points = 0;
+        s->resched = false;
+        rl_preempt_request(t->rt->ctx);
+    } else {
+        rl_preempt_clear(t->rt->ctx);
+    }
     uint64_t now = rl_clock_ns();
-    t->slice_ns = now;
+    t->slice_ns = hos_clock_ns();
     if (k->last != t) {
         k->last = t;
         s->handovers++;
@@ -245,14 +263,42 @@ static void kick(int32_t c)
         grant(c, sel);
 }
 
+static void fs_update(void)
+{
+    hos_sched *s = &hos.sched;
+    select_threads();
+    hos_thread *h = s->token;
+    if (h) {
+        s->resched = h->cur_core < 0 || s->cores[h->cur_core].selected != h;
+        return;
+    }
+    if (s->clock_busy)
+        return;
+    for (int32_t i = 0; i < HOS_CORES; i++) {
+        int32_t c = (s->next_core + i) % HOS_CORES;
+        hos_thread *sel = s->cores[c].selected;
+        if (sel && sel->runnable && sel->cur_core < 0) {
+            grant(c, sel);
+            return;
+        }
+    }
+    hos_fs_idle();
+}
+
 static void update(void)
 {
+    if (hos.sched.fixed) {
+        fs_update();
+        return;
+    }
     if (hos.sched.free)
         return;
     select_threads();
     for (int32_t c = 0; c < HOS_CORES; c++)
         kick(c);
 }
+
+void hos_sched_kick(void) { update(); }
 
 static void release(hos_thread *t)
 {
@@ -265,6 +311,12 @@ static void release(hos_thread *t)
     k->holder = NULL;
     t->cur_core = -1;
     rl_preempt_clear(t->rt->ctx);
+    if (s->fixed) {
+        s->token = NULL;
+        s->next_core = (c + 1) % HOS_CORES;
+        fs_update();
+        return;
+    }
     if (k->preempt_ns) {
         uint64_t d = rl_clock_ns() - k->preempt_ns;
         k->preempt_ns = 0;
@@ -290,10 +342,15 @@ static void preempted(rl_ctx *c)
 void hos_sched_init(void)
 {
     const char *e = getenv("RELIFT_SCHED");
-    hos.sched.free = e && strstr(e, "free");
+    hos.sched.fixed = rl_setting_bool("clock.fixed_step");
+    hos.sched.free = !hos.sched.fixed && e && strstr(e, "free");
     hos.sched.stats = e && strstr(e, "stats");
     if (hos.sched.free)
         rl_log(RL_LOG_WARN, "sched", "RELIFT_SCHED=free: guest threads run freely, ignoring priorities and cores");
+    if (hos.sched.fixed) {
+        hos_fs_init();
+        rl_log(RL_LOG_WARN, "sched", "clock.fixed_step: one guest thread at a time on a fixed-step guest clock");
+    }
     rl_set_preempt_hook(preempted);
 }
 
@@ -318,9 +375,35 @@ void hos_sched_unready(hos_thread *t)
     update();
 }
 
+static void fs_run(hos_thread *t)
+{
+    hos_sched *s = &hos.sched;
+    for (;;) {
+        if (!t->runnable)
+            return;
+        select_threads();
+        if (s->token == t) {
+            if (t->cur_core == t->active_core && s->cores[t->cur_core].selected == t) {
+                s->resched = false;
+                return;
+            }
+            release(t);
+            continue;
+        }
+        if (!s->token)
+            fs_update();
+        if (s->token != t)
+            pthread_cond_wait(&t->cv, &hos.lock);
+    }
+}
+
 void hos_sched_run(hos_thread *t)
 {
     hos_sched *s = &hos.sched;
+    if (s->fixed) {
+        fs_run(t);
+        return;
+    }
     if (s->free || !t->runnable)
         return;
     bool waited = false;
@@ -381,10 +464,52 @@ static void rotate(int32_t c, int32_t p)
     s->reselect = true;
 }
 
+static bool fs_other_waits(const hos_thread *t)
+{
+    hos_sched *s = &hos.sched;
+    for (int32_t c = 0; c < HOS_CORES; c++) {
+        hos_thread *sel = s->cores[c].selected;
+        if (sel && sel != t && sel->runnable && sel->cur_core < 0)
+            return true;
+    }
+    return false;
+}
+
+static void fs_point(hos_thread *t)
+{
+    hos_sched *s = &hos.sched;
+    if (s->token != t)
+        return;
+    hos_fs_charge(HOS_FS_POINT_NS);
+    bool due = hos_fs_due();
+    if (++s->points < HOS_FS_SLICE && !s->resched && !due)
+        return;
+    if (due)
+        hos_fs_fire_due();
+    hos_lock();
+    if (s->token == t && s->points >= HOS_FS_SLICE) {
+        s->points = 0;
+        int32_t c = t->cur_core;
+        uint64_t now = hos_clock_ns();
+        if (t->prio >= 59 && c >= 0 && t->prio == rr_prio(c) && now - t->slice_ns >= RR_NS) {
+            rotate(c, t->prio);
+            t->slice_ns = now;
+        }
+        if (fs_other_waits(t))
+            release(t);
+    }
+    hos_sched_run(t);
+    hos_unlock();
+}
+
 void hos_sched_point(void)
 {
     hos_thread *t = hos_current();
     hos_sched *s = &hos.sched;
+    if (t && s->fixed) {
+        fs_point(t);
+        return;
+    }
     if (!t || s->free)
         return;
     bool rr = t->prio >= 59;
@@ -394,7 +519,7 @@ void hos_sched_point(void)
     if (!t->runnable)
         rl_preempt_clear(t->rt->ctx);
     else {
-        uint64_t now = rl_clock_ns();
+        uint64_t now = hos_clock_ns();
         int32_t c = t->cur_core;
         if (rr && c >= 0 && t->prio == rr_prio(c) && now - t->slice_ns >= RR_NS) {
             rotate(c, t->prio);
@@ -409,7 +534,7 @@ void hos_sched_point(void)
 void hos_sched_leave(void)
 {
     hos_thread *t = hos_current();
-    if (!t || hos.sched.free)
+    if (!t || hos.sched.free || hos.sched.fixed)
         return;
     hos_lock();
     hos_sched_unready(t);
@@ -419,7 +544,7 @@ void hos_sched_leave(void)
 void hos_sched_return(void)
 {
     hos_thread *t = hos_current();
-    if (!t || hos.sched.free)
+    if (!t || hos.sched.free || hos.sched.fixed)
         return;
     hos_lock();
     hos_sched_ready(t);
@@ -485,6 +610,27 @@ static bool yield_any(hos_thread *t)
     return t != sel;
 }
 
+/**
+ * @brief Fixed step: a yield that leaves the holder the only thread that can
+ * run waits for the next deadline, as a thread that spins on the console
+ * waits for a timer, so the guest clock moves there and its timers run.
+ */
+static void fs_yield(hos_thread *t)
+{
+    hos_sched *s = &hos.sched;
+    select_threads();
+    if (s->token != t || s->cores[t->cur_core].selected != t || fs_other_waits(t))
+        return;
+    uint64_t next = hos_fs_next_deadline();
+    if (next == UINT64_MAX)
+        return;
+    if (next > hos_clock_ns())
+        hos_fs_charge(next - hos_clock_ns());
+    hos_unlock();
+    hos_fs_fire_due();
+    hos_lock();
+}
+
 void hos_sched_yield(int64_t ns)
 {
     hos_thread *t = hos_current();
@@ -497,6 +643,11 @@ void hos_sched_yield(int64_t ns)
         bool changed = ns == 0 ? yield_same(t) : ns == -1 ? yield_balance(t) : ns == -2 ? yield_any(t) : false;
         if (changed)
             hos.sched.reselect = true;
+        if (hos.sched.fixed) {
+            fs_yield(t);
+            if (hos.sched.token == t && fs_other_waits(t))
+                release(t);
+        }
         hos_sched_run(t);
     }
     hos_unlock();

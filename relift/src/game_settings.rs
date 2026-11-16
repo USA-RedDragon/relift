@@ -169,6 +169,13 @@ pub fn runtime_settings() -> Vec<Setting> {
                 choices: ["compact", "console"].map(String::from).into(),
             },
         ),
+        s(
+            "clock.fixed_step",
+            "Fixed-step clock (testing)",
+            "For tests: run one guest thread at a time on a guest clock that only the game's progress moves, so two runs with the same input script show the same frames. Slower; vi.follow_display is off",
+            Value::Bool(false),
+            SettingKind::Bool,
+        ),
     ]
 }
 
@@ -839,7 +846,7 @@ default = "gamepad:south,key:z"
         let listed: Vec<String> = runtime_settings().into_iter().map(|s| s.key).collect();
         assert_eq!(declared, listed);
         assert!(runtime_settings().iter().all(|s| key_ok(&s.key)));
-        assert_eq!(section(Vec::new()).runtime.len(), 15);
+        assert_eq!(section(Vec::new()).runtime.len(), 16);
     }
 
     #[test]

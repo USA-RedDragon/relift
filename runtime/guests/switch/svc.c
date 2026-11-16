@@ -125,6 +125,8 @@ static rl_result reslimit_value(uint32_t h, uint32_t which, bool current, uint64
 
 static uint64_t thread_cpu_ticks(void)
 {
+    if (hos_fixed())
+        return rl_ns_to_ticks(hos_clock_ns());
     struct timespec ts;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
     return rl_ns_to_ticks((uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec);
@@ -507,6 +509,10 @@ void rl_hos_default_config(rl_hos_config *cfg)
 
 static void fill_entropy(void)
 {
+    if (hos_fixed()) {
+        hos_fs_random(hos.entropy, sizeof hos.entropy);
+        return;
+    }
     if (!rl_host_random(hos.entropy, sizeof hos.entropy)) {
         uint64_t s = rl_clock_ns();
         for (int i = 0; i < 4; i++) {
@@ -562,6 +568,8 @@ void rl_hos_shutdown(void)
     hos_kobj *drop[HOS_HANDLES];
     uint32_t n = 0;
     hos_audio_shutdown();
+    if (hos.sched.fixed)
+        hos_fs_shutdown();
     hos_lock();
     for (uint32_t i = 0; i < HOS_HANDLES; i++)
         if (hos.handles[i]) {

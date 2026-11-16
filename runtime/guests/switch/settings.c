@@ -2,7 +2,8 @@
  * @file settings.c
  * @brief The settings of the Switch layer: where saves go, which host
  * Vulkan device the guest sees, whether attachments keep their contents and
- * whether compressed textures are decoded.
+ * whether compressed textures are decoded, and the fixed-step clock for
+ * tests.
  */
 #include "hid_priv.h"
 #include "services.h"
@@ -87,6 +88,15 @@ static const rl_setting_def g_defs[] = {
         .env = "RELIFT_KERNEL_LAYOUT",
         .choices = g_layout,
         .nchoices = 2,
+    },
+    {
+        .key = "clock.fixed_step",
+        .type = RL_SETTING_BOOL,
+        .label = "Fixed-step clock (testing)",
+        .description = "For tests: run one guest thread at a time on a guest clock that only the game's progress moves, "
+                       "so two runs with the same input script show the same frames. Slower; vi.follow_display is off",
+        .env = "RELIFT_FIXED_STEP",
+        .def_int = 0,
     },
 };
 

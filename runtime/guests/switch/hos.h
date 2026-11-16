@@ -253,6 +253,18 @@ typedef struct hos_sched {
     bool free;
     /** @brief RELIFT_SCHED=stats: log hand-overs and preemption delays each second. */
     bool stats;
+    /** @brief clock.fixed_step: one guest thread at a time on the fixed-step clock (fixed_step.c). */
+    bool fixed;
+    /** @brief Fixed step: the one thread that may run guest code, or NULL. */
+    hos_thread *token;
+    /** @brief Fixed step: the clock thread is running timers, so no thread gets the token. */
+    bool clock_busy;
+    /** @brief Fixed step: the core whose selected thread gets the token first when it is free. */
+    int32_t next_core;
+    /** @brief Fixed step: preemption points and svcs of the token's holder since it got the token. */
+    uint32_t points;
+    /** @brief Fixed step: the holder's core selected another thread; it gives the token up at its next point. */
+    bool resched;
     /** @brief Statistics of the current second. */
     uint64_t stat_start_ns, handovers, preempts, late_ns;
     /** @brief Longest preemption delay seen (ns). */
@@ -285,6 +297,10 @@ struct hos_thread {
     uint64_t last_sched_ns;
     /** @brief When the thread got its core (ns), for the round robin of the preemption priorities. */
     uint64_t slice_ns;
+    /** @brief Fixed step: guest clock time at which the current wait times out, 0 for none. */
+    uint64_t deadline;
+    /** @brief Fixed step: the current wait timed out. */
+    bool expired;
     /** @brief Neighbors in the one scheduled or suggested queue of each core the thread is in. */
     hos_thread *qnext[HOS_CORES], *qprev[HOS_CORES];
     /** @brief Guest address of the 0x200-byte TLS slot (tpidrro_el0). */
@@ -579,8 +595,46 @@ bool hos_block(hos_thread *t, int64_t timeout_ns);
 /** @brief Wakes t with result r. Lock held. */
 void hos_wake(hos_thread *t, rl_result r);
 
-/** @brief Reads RELIFT_SCHED (strict by default; free or stats). Called by rl_hos_init. */
+/** @brief Reads RELIFT_SCHED (strict by default; free or stats) and clock.fixed_step. Called by rl_hos_init. */
 void hos_sched_init(void);
+/** @brief Fixed step: gives the token to the next thread, or starts the clock when none can run. Lock held. */
+void hos_sched_kick(void);
+
+/** @brief Fixed step: guest clock time each preemption point and svc of the running thread takes. */
+#define HOS_FS_POINT_NS 2ull
+/** @brief Fixed step: preemption points and svcs a thread runs before the token goes to another core's thread. */
+#define HOS_FS_SLICE 4096u
+
+/** @brief True in fixed-step mode (clock.fixed_step). */
+static inline bool hos_fixed(void) { return hos.sched.fixed; }
+/** @brief The guest's clock in nanoseconds: the fixed-step clock in fixed-step mode, else the host's monotonic clock. */
+uint64_t hos_clock_ns(void);
+/** @brief Fixed step: the guest's wall clock in seconds since 1970 (a fixed date plus the guest clock). */
+int64_t hos_fs_wall_seconds(void);
+/** @brief Fixed step: starts the clock at its epoch and makes it the guest's clock. Called by hos_sched_init. */
+void hos_fs_init(void);
+/** @brief Fixed step: stops the clock thread and drops the timers. */
+void hos_fs_shutdown(void);
+/** @brief Fixed step: moves the guest clock ns forward (the token's holder). */
+void hos_fs_charge(uint64_t ns);
+/** @brief Fixed step: a timer or a wait deadline is due at the guest clock's time. */
+bool hos_fs_due(void);
+/** @brief Fixed step: runs the timers and ends the waits that are due, in deadline order. Lock not held; the caller holds the token or is the clock. */
+void hos_fs_fire_due(void);
+/** @brief Fixed step: the earliest timer or wait deadline, UINT64_MAX for none. Lock held. */
+uint64_t hos_fs_next_deadline(void);
+/** @brief Fixed step: sets t's wait deadline timeout_ns after now (negative: none). Lock held. */
+void hos_fs_set_deadline(hos_thread *t, int64_t timeout_ns);
+/** @brief Fixed step: no thread can run; the clock thread moves the clock to the next deadline. Lock held. */
+void hos_fs_idle(void);
+/** @brief A fixed-step timer callback; runs with the lock not held while no guest code runs. */
+typedef void hos_fs_fn(void *ctx);
+/** @brief Fixed step: calls fn(ctx) at guest clock time first and then every period ns (0: once). Returns a handle or NULL. */
+void *hos_fs_every(uint64_t first, uint64_t period, hos_fs_fn *fn, void *ctx);
+/** @brief Fixed step: drops a timer of hos_fs_every. */
+void hos_fs_cancel(void *timer);
+/** @brief Fixed step: fills dst with n bytes of a fixed pseudo-random sequence, in place of host entropy. */
+void hos_fs_random(void *dst, size_t n);
 /** @brief Puts t in the scheduler's queues (started or woken). Lock held. */
 void hos_sched_ready(hos_thread *t);
 /** @brief Takes t out of the queues (blocked or exited) and frees its core. Lock held. */
