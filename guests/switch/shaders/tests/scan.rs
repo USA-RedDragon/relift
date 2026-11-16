@@ -217,6 +217,43 @@ fn carve_kinds_stages_and_exact_bytes() {
     assert_eq!(f[0].code - f[0].start, 0x80);
 }
 
+fn nops(lines: usize) -> Vec<u8> {
+    let mut l = vec![0x18, 0x79];
+    l.resize(16, 0);
+    l.repeat(lines)
+}
+
+#[test]
+fn carve_walks_over_nops_inside_a_program() {
+    let mut sph = graphics(2, 1);
+    sph.truncate(0x80);
+    let mut g = sph.clone();
+    g.extend(code(1, 2).split_at(32).0);
+    g.extend(nops(3));
+    g.extend(code(1, 3));
+    let mut c = code(3, 2).split_at(32).0.to_vec();
+    c.extend(nops(2));
+    c.extend(code(3, 2));
+    let b = blob(&[&g, &c]);
+    let f = carve(&b);
+    assert_eq!(f.len(), 2);
+    assert_eq!(f[0].kind, Kind::Graphics);
+    assert_eq!(&b[f[0].start..f[0].end], &g[..]);
+    assert_eq!(f[1].kind, Kind::Compute);
+    assert_eq!(&b[f[1].start..f[1].end], &c[..]);
+}
+
+#[test]
+fn carve_stops_at_nops_after_an_sph() {
+    let mut g = graphics(1, 1)[..0x80].to_vec();
+    g.extend(nops(2));
+    g.extend(code(1, 3));
+    let b = blob(&[&g]);
+    let f = carve(&b);
+    assert_eq!(f[0].kind, Kind::Graphics);
+    assert_eq!(f[0].start, 0x100);
+}
+
 #[test]
 fn carve_ignores_a_header_that_is_not_one() {
     let mut g = graphics(1, 1);

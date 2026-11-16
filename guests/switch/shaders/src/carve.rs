@@ -131,17 +131,48 @@ pub fn find_all<'a>(b: &'a [u8], pat: &'a [u8]) -> impl Iterator<Item = usize> +
     })
 }
 
+/// The start of the SPH within 0x80 to 0x100 bytes before `first`.
+fn sph_before(b: &[u8], first: usize) -> Option<usize> {
+    (SPH_LEN..=SPH_SLACK)
+        .step_by(LINE)
+        .filter_map(|back| first.checked_sub(back))
+        .find(|&q| sph_ok(b, q))
+}
+
+/// Where the walk back from the instruction line at `p` over a run of
+/// NOP lines continues: a run that follows an instruction line and does
+/// not sit right after an SPH is alignment inside a program, so the walk
+/// goes on from that instruction line.
+fn past_nops(b: &[u8], p: usize) -> Option<usize> {
+    if sph_before(b, p + LINE).is_some() {
+        return None;
+    }
+    let mut q = p;
+    while line_kind(b, q) == Line::Nop {
+        q = q.checked_sub(LINE)?;
+    }
+    (line_kind(b, q) == Line::Ins).then_some(q)
+}
+
 /// Every program in `b`: from each terminator, walk back over
-/// instruction lines to the first line that is zero, NOP, another
-/// terminator or past the start; look for an SPH within 0x80 to 0x100 bytes
-/// before that line; without one the program is compute.
+/// instruction lines (and over NOP lines inside a program) to the first
+/// line that is zero, a NOP run after a terminator or an SPH, another
+/// terminator or past the start; look for an SPH within 0x80 to 0x100
+/// bytes before that line; without one the program is compute.
 pub fn carve(b: &[u8]) -> Vec<Found> {
     let mut out = Vec::new();
     for e in find_all(b, &BRA_SELF) {
         let mut p = e as isize - LINE as isize;
         let mut steps = 0;
-        while p >= 0 && line_kind(b, p as usize) == Line::Ins && steps < MAX_LINES {
-            p -= LINE as isize;
+        while p >= 0 && steps < MAX_LINES {
+            match line_kind(b, p as usize) {
+                Line::Ins => p -= LINE as isize,
+                Line::Nop => match past_nops(b, p as usize) {
+                    Some(q) => p = q as isize,
+                    None => break,
+                },
+                _ => break,
+            }
             steps += 1;
         }
         let first = (p + LINE as isize) as usize;
@@ -151,16 +182,10 @@ pub fn carve(b: &[u8]) -> Vec<Found> {
             end: e + LINE,
             kind: Kind::Compute,
         };
-        for back in (SPH_LEN..=SPH_SLACK).step_by(LINE) {
-            let Some(q) = first.checked_sub(back) else {
-                break;
-            };
-            if sph_ok(b, q) {
-                found.start = q;
-                found.code = q + SPH_LEN;
-                found.kind = Kind::Graphics;
-                break;
-            }
+        if let Some(q) = sph_before(b, first) {
+            found.start = q;
+            found.code = q + SPH_LEN;
+            found.kind = Kind::Graphics;
         }
         out.push(found);
     }
