@@ -227,17 +227,25 @@ impl Ctx {
         self.m.emit(op::S_NEGATE, i, &[k])
     }
 
-    /// `xs`, or a tiny normal value with the sign of `x` if scaling flushed a
-    /// nonzero `x` to zero: it then only breaks ties, which keeps the sign
-    /// of the error right.
-    pub(crate) fn keep_tiny(&mut self, xs: u32, x: u32) -> u32 {
+    /// `xs`, or a tiny normal value with the sign of `x` if scaling left a
+    /// nonzero `x` (after the guest's input flush with `ftz`) below the
+    /// normal range, where a flushing host would read it as zero: it then
+    /// only breaks ties, which keeps the sign of the error right. Both tests
+    /// are on the bits, which no host flushes.
+    pub(crate) fn keep_tiny(&mut self, xs: u32, x: u32, ftz: bool) -> u32 {
         let u = self.u32t();
         let f = self.f32t();
-        let zero = self.m.c_f32(0);
-        let xz = self.fcmp(op::F_ORD_EQUAL, xs, zero);
-        let x_nz = self.fcmp(op::F_UNORD_NOT_EQUAL, x, zero);
-        let lost = self.and(xz, x_nz);
+        let b = self.boolt();
+        let mag_mask = self.m.c_u32(0x7fff_ffff);
+        let min_normal = self.m.c_u32(0x0080_0000);
+        let sbits = self.as_bits(xs);
+        let smag = self.m.emit(op::BITWISE_AND, u, &[sbits, mag_mask]);
+        let small = self.m.emit(op::U_LESS_THAN, b, &[smag, min_normal]);
         let bits = self.as_bits(x);
+        let mag = self.m.emit(op::BITWISE_AND, u, &[bits, mag_mask]);
+        let floor = self.m.c_u32(if ftz { 0x0080_0000 } else { 1 });
+        let x_nz = self.m.emit(op::U_GREATER_THAN_EQUAL, b, &[mag, floor]);
+        let lost = self.and(small, x_nz);
         let sign_mask = self.m.c_u32(0x8000_0000);
         let sign = self.m.emit(op::BITWISE_AND, u, &[bits, sign_mask]);
         let tiny = self.m.c_u32(0x0d80_0000);
@@ -328,8 +336,8 @@ impl Ctx {
         let nm = self.ineg(m);
         let a1 = self.ldexp(a, nm);
         let b1 = self.ldexp(b, nm);
-        let a1 = self.keep_tiny(a1, a);
-        let b1 = self.keep_tiny(b1, b);
+        let a1 = self.keep_tiny(a1, a, ftz);
+        let b1 = self.keep_tiny(b1, b, ftz);
         let (s1, e) = self.two_sum(a1, b1);
         let fin = self.all_finite(&[a, b]);
         let (up, down) = self.error_sides(s, e, fin);
