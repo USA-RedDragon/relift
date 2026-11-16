@@ -292,6 +292,39 @@ typedef struct rl_nds_input {
  */
 void rl_nds_set_input(rl_nds *m, const rl_nds_input *in);
 
+/**
+ * @brief Gives the machine the cartridge image (kept by pointer: it must
+ * outlive the machine), which the slot serves with the chip ID derived from
+ * its size and header. Returns -1 for an image too small to hold a header.
+ */
+int rl_nds_set_cartridge(rl_nds *m, const uint8_t *rom, size_t len);
+/** @brief The chip ID the cartridge reports (B8 and the first-stage command). */
+uint32_t rl_nds_chip_id(const rl_nds *m);
+
+/**
+ * @brief Chooses the backup chip by name (auto, eeprom512, eeprom8k, eeprom64k,
+ * eeprom128k, fram8k, fram32k, flash256k, flash512k, flash1m) before a save
+ * is loaded; "auto" keeps the rule of backup.c. Returns -1 for an unknown name.
+ */
+int rl_nds_save_set(rl_nds *m, const char *type);
+/** @brief The save's length (0 until a chip is chosen), image and change flag. */
+size_t rl_nds_save_len(const rl_nds *m);
+const uint8_t *rl_nds_save_data(const rl_nds *m);
+bool rl_nds_save_dirty(const rl_nds *m);
+void rl_nds_save_clean(rl_nds *m);
+/** @brief Loads a raw save image; its length names the chip unless one is chosen. Returns -1 if it does not fit. */
+int rl_nds_save_load(rl_nds *m, const uint8_t *data, size_t len);
+/** @brief Reads a save file: 0 loaded, 1 no file, -1 does not fit. */
+int rl_nds_save_read(rl_nds *m, const char *path);
+/** @brief Writes the save atomically: 0 written, 1 no chip yet, -1 failed. */
+int rl_nds_save_write(rl_nds *m, const char *path);
+/** @brief Writes a changed save once the last change is quiet ticks old: 1 wrote, 0 nothing to do, -1 failed. */
+int rl_nds_save_poll(rl_nds *m, const char *path, uint64_t quiet);
+/** @brief The default save path of a ROM path (the save.dir setting, the user folder or the ROM's folder). */
+bool rl_nds_save_path(char *out, size_t size, const char *rom_path);
+/** @brief Declares the save settings. */
+void rl_nds_declare_settings(void);
+
 /** @brief Kinds of access in the cost table. */
 enum {
     RL_NDS_CODE = 0,

@@ -7,6 +7,7 @@
 
 #include "gpu2d.h"
 #include "nds.h"
+#include "nds_dev.h"
 
 /** @brief A tick that never comes. */
 #define NDS_NEVER UINT64_MAX
@@ -340,6 +341,7 @@ struct rl_nds {
     nds_disp disp;
     nds_dma dma[2];
     nds_keypad pad;
+    nds_cart cart;
     nds_sound snd;
     /** @brief POWCNT2 (ARM7 0x04000304, bits 0 and 1) and WIFIWAITCNT (0x04000206, bits 0 to 5). */
     uint8_t powcnt2;

@@ -30,8 +30,8 @@ static void regs_put(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t
 static uint16_t exmem_read(const rl_nds *m, unsigned cpu)
 {
     if (cpu == RL_NDS_ARM9)
-        return m->exmem[RL_NDS_ARM9];
-    return (uint16_t)((m->exmem[RL_NDS_ARM7] & 0x7F) | (m->exmem[RL_NDS_ARM9] & 0xFF80));
+        return (uint16_t)(m->exmem[RL_NDS_ARM9] | 0x6000);
+    return (uint16_t)((m->exmem[RL_NDS_ARM7] & 0x7F) | ((m->exmem[RL_NDS_ARM9] & 0xFF80) | 0x6000));
 }
 
 static void exmem_write(rl_nds *m, unsigned cpu, uint16_t v, uint16_t mask)
@@ -60,6 +60,8 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
         return nds_dma_read(m, cpu, off);
     if (off == 0x130 || (off == 0x134 && cpu == RL_NDS_ARM7))
         return nds_keypad_read(m, cpu, off);
+    if ((off >= 0x1A0 && off < 0x1C0 && off != 0x1A8 && off != 0x1AC) || off == NDS_CARDPORT)
+        return nds_cart_read(m, off, now);
     if (math_reg(cpu, off))
         return nds_math_read(m, off, now);
     switch (off) {
@@ -116,6 +118,10 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
     }
     if (off == 0x130) {
         nds_keypad_write(m, cpu, v, mask, now);
+        return;
+    }
+    if (off >= 0x1A0 && off < 0x1C0) {
+        nds_cart_write(m, off, v, mask, now);
         return;
     }
     if (off == 0x134 && cpu == RL_NDS_ARM7) {
@@ -211,6 +217,7 @@ void nds_io_reset(rl_nds *m)
     nds_timer_reset(m);
     nds_dma_reset(m);
     nds_sys_reset(m);
+    nds_cart_reset(m);
     nds_math_reset(m);
     nds_lcd_reset(m);
     nds_disp_reset(m);

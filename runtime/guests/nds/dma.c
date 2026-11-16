@@ -138,6 +138,8 @@ static void finish(rl_nds *m, nds_dma *d, unsigned i, uint64_t t)
     }
     if (c->cnt & 0x40000000u)
         nds_irq_set(m, d->cpu, RL_NDS_IRQ_DMA0 << i, t);
+    if ((c->cnt & 0x80000000u) && timing == (d->cpu == RL_NDS_ARM9 ? NDS_DMA9_CARD : NDS_DMA7_CARD))
+        nds_cart_poke(m, t);
 }
 
 /** @brief One unit of channel i from tick t; returns the tick it ends. */

@@ -1,0 +1,202 @@
+/**
+ * @file save.c
+ * @brief The cartridge backup as a file (the raw image emulators and flash
+ * carts use: its length names the chip, see backup.c), atomic writes, the
+ * save path and the settings, and the memory the boot code leaves behind for
+ * a cartridge (chip ID, header CRC, the firmware's user settings).
+ */
+#include "nds_int.h"
+
+#include <relift/settings.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#define make_dir(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#define make_dir(p) mkdir(p, 0777)
+#endif
+
+static const struct {
+    const char *name;
+    nds_bk_kind kind;
+    uint32_t len;
+} types[] = {
+    {"eeprom512", NDS_BK_EEPROM, 512},     {"eeprom8k", NDS_BK_EEPROM, 8192},    {"eeprom64k", NDS_BK_EEPROM, 65536},
+    {"eeprom128k", NDS_BK_EEPROM, 131072}, {"fram8k", NDS_BK_FRAM, 8192},        {"fram32k", NDS_BK_FRAM, 32768},
+    {"flash256k", NDS_BK_FLASH, 262144},   {"flash512k", NDS_BK_FLASH, 524288},  {"flash1m", NDS_BK_FLASH, 1048576},
+};
+
+int rl_nds_save_set(rl_nds *m, const char *type)
+{
+    if (!type || !*type || !strcmp(type, "auto"))
+        return 0;
+    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
+        if (!strcmp(type, types[i].name))
+            return nds_bk_set(&m->cart.bk, types[i].kind, types[i].len) ? 0 : -1;
+    return -1;
+}
+
+size_t rl_nds_save_len(const rl_nds *m) { return m->cart.bk.data ? m->cart.bk.len : 0; }
+const uint8_t *rl_nds_save_data(const rl_nds *m) { return m->cart.bk.data; }
+bool rl_nds_save_dirty(const rl_nds *m) { return m->cart.bk.dirty; }
+void rl_nds_save_clean(rl_nds *m) { m->cart.bk.dirty = false; }
+
+int rl_nds_save_load(rl_nds *m, const uint8_t *data, size_t len)
+{
+    nds_backup *b = &m->cart.bk;
+    if (!data)
+        return -1;
+    if (b->data) {
+        if (len != b->len)
+            return -1;
+    } else {
+        size_t i = 0;
+        while (i < sizeof types / sizeof types[0] && types[i].len != len)
+            i++;
+        if (i == sizeof types / sizeof types[0])
+            return -1;
+        nds_bk_kind kind = types[i].kind;
+        if (len == 8192)
+            kind = NDS_BK_EEPROM;
+        if (!nds_bk_set(b, kind, (uint32_t)len))
+            return -1;
+    }
+    memcpy(b->data, data, len);
+    b->dirty = false;
+    return 0;
+}
+
+int rl_nds_save_read(rl_nds *m, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 1;
+    uint8_t *buf = malloc(NDS_BACKUP_MAX + 1);
+    int rc = -1;
+    if (buf) {
+        size_t n = fread(buf, 1, NDS_BACKUP_MAX + 1, f);
+        if (!ferror(f))
+            rc = rl_nds_save_load(m, buf, n);
+    }
+    fclose(f);
+    free(buf);
+    return rc;
+}
+
+static void make_dirs(const char *path)
+{
+    char *p = strdup(path);
+    if (!p)
+        return;
+    for (char *c = p + 1; *c; c++)
+        if (*c == '/' || *c == '\\') {
+            char sep = *c;
+            *c = 0;
+            make_dir(p);
+            *c = sep;
+        }
+    free(p);
+}
+
+int rl_nds_save_write(rl_nds *m, const char *path)
+{
+    nds_backup *b = &m->cart.bk;
+    if (!b->data)
+        return 1;
+    char *tmp = malloc(strlen(path) + 5);
+    if (!tmp)
+        return -1;
+    strcpy(tmp, path);
+    strcat(tmp, ".tmp");
+    make_dirs(path);
+    int rc = -1;
+    FILE *f = fopen(tmp, "wb");
+    if (f) {
+        bool ok = fwrite(b->data, 1, b->len, f) == b->len && fflush(f) == 0;
+#ifndef _WIN32
+        ok = ok && fsync(fileno(f)) == 0;
+#endif
+        ok = fclose(f) == 0 && ok;
+#ifdef _WIN32
+        if (ok)
+            remove(path);
+#endif
+        if (ok && rename(tmp, path) == 0)
+            rc = 0;
+        else
+            remove(tmp);
+    }
+    if (rc == 0)
+        b->dirty = false;
+    free(tmp);
+    return rc;
+}
+
+int rl_nds_save_poll(rl_nds *m, const char *path, uint64_t quiet)
+{
+    nds_backup *b = &m->cart.bk;
+    if (!b->dirty || nds_now(m, RL_NDS_ARM9) < b->changed + quiet)
+        return 0;
+    int rc = rl_nds_save_write(m, path);
+    return rc == 0 ? 1 : rc < 0 ? -1 : 0;
+}
+
+bool rl_nds_save_path(char *out, size_t size, const char *rom_path)
+{
+    const char *base = rom_path;
+    for (const char *c = rom_path; *c; c++)
+        if (*c == '/' || *c == '\\')
+            base = c + 1;
+    size_t stem = strlen(base);
+    const char *dot = strrchr(base, '.');
+    if (dot && dot != base)
+        stem = (size_t)(dot - base);
+    char dir[4096];
+    const char *save = rl_setting_str("save.dir");
+    if (*save) {
+        snprintf(dir, sizeof dir, "%s", save);
+    } else if (rl_settings_app() && rl_settings_user_dir(dir, sizeof dir - 8, rl_settings_app())) {
+        strcat(dir, "/save");
+    } else {
+        size_t n = (size_t)(base - rom_path);
+        if (n == 0)
+            snprintf(dir, sizeof dir, ".");
+        else
+            snprintf(dir, sizeof dir, "%.*s", (int)(n - 1), rom_path);
+    }
+    size_t dl = strlen(dir);
+    while (dl > 1 && (dir[dl - 1] == '/' || dir[dl - 1] == '\\'))
+        dir[--dl] = 0;
+    int n = snprintf(out, size, "%s/%.*s.sav", dir, (int)stem, base);
+    return n > 0 && (size_t)n < size;
+}
+
+static const rl_setting_def g_defs[] = {
+    {
+        .key = "save.dir",
+        .type = RL_SETTING_STRING,
+        .label = "Save folder",
+        .description = "Where the game's save file is kept. Empty: <user folder>/save when the program names an app, "
+                       "else next to the ROM",
+        .env = "RELIFT_SAVE",
+    },
+    {
+        .key = "save.type",
+        .type = RL_SETTING_STRING,
+        .label = "Backup chip",
+        .description = "The cartridge's backup chip when no save file names it by its length: auto, eeprom512, eeprom8k, "
+                       "eeprom64k, eeprom128k, fram8k, fram32k, flash256k, flash512k or flash1m",
+        .env = "RELIFT_SAVE_TYPE",
+    },
+};
+
+void rl_nds_declare_settings(void)
+{
+    rl_settings_declare_runtime();
+    rl_settings_declare(g_defs, sizeof g_defs / sizeof g_defs[0]);
+}
