@@ -72,6 +72,9 @@ impl M {
     fn ftz(self) -> M {
         M { ftz: true, ..self }
     }
+    fn sat(self) -> M {
+        M { sat: true, ..self }
+    }
 }
 
 fn alu(op: u32, m: M) -> u128 {
@@ -96,6 +99,30 @@ fn alu(op: u32, m: M) -> u128 {
 
 fn fadd(m: M) -> u128 {
     alu(0x021, m)
+}
+
+fn fmul(m: M) -> u128 {
+    alu(0x020, m)
+}
+
+fn ffma(m: M) -> u128 {
+    alu(0x023, m)
+}
+
+/// FMNMX R14, R4, R5, !PT (the maximum) or PT (the minimum).
+fn fmnmx(min: bool, ftz: bool) -> u128 {
+    word(
+        0x009,
+        1,
+        &[
+            (16, 8, 14),
+            (24, 8, 4),
+            (32, 8, 5),
+            (87, 3, 7),
+            (90, 1, u64::from(!min)),
+            (80, 1, u64::from(ftz)),
+        ],
+    )
 }
 
 /// `inst` on R4 = a, R5 = b, R6 = c, its R14 stored at [`OUT`].
@@ -253,6 +280,147 @@ fn directed_fadd_keeps_a_far_smaller_operand() {
                     .map(|&(a, b, (w, wf))| (a, b, 0, if ftz { wf } else { w }[rnd as usize]))
                     .collect();
                 check("FADD", &o, &devices(&h), fadd(m), &cases);
+            }
+        }
+    }
+}
+
+/// Every rounding mode, with and without `.FTZ`, with and without `.SAT`.
+fn modes() -> Vec<M> {
+    let mut v = Vec::new();
+    for sat in [false, true] {
+        for ftz in [false, true] {
+            for rnd in 0..4 {
+                let m = RN.rnd(rnd);
+                let m = if ftz { m.ftz() } else { m };
+                v.push(if sat { m.sat() } else { m });
+            }
+        }
+    }
+    v
+}
+
+/// The devices of [`devices`], each also with a host NaN of `0x7fc00000`.
+fn nan_devices(h: &HostProfile) -> Vec<Device> {
+    let mut v = devices(h);
+    let c: Vec<Device> = v
+        .iter()
+        .map(|d| Device {
+            canonical_nan: true,
+            ..*d
+        })
+        .collect();
+    v.extend(c);
+    v
+}
+
+/// A NaN from FADD, FMUL or FFMA is `0x7fffffff` whatever its inputs, and
+/// `.SAT` makes it `+0`.
+#[test]
+fn arithmetic_nans_are_canonical() {
+    type Row = (u32, u32, u32, u32, u32);
+    let fadd_rows: [Row; 8] = [
+        (0x7fa0_0000, 0x3f80_0000, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x3f80_0000, 0xffc0_0001, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x7f80_0000, 0xff80_0000, 0x3f80_0000, 0x7fff_ffff, 0),
+        (
+            0x7f80_0000,
+            0x0000_0000,
+            0x3f80_0000,
+            0x7f80_0000,
+            0x3f80_0000,
+        ),
+        (
+            0x3f80_0000,
+            0x3f80_0000,
+            0xff80_0001,
+            0x4000_0000,
+            0x3f80_0000,
+        ),
+        (
+            0x7f80_0000,
+            0x3f80_0000,
+            0xff80_0000,
+            0x7f80_0000,
+            0x3f80_0000,
+        ),
+        (0xffc1_2345, 0x7f81_2345, 0x7fc0_0000, 0x7fff_ffff, 0),
+        (
+            0x0000_0000,
+            0x7f80_0000,
+            0x7fc0_0000,
+            0x7f80_0000,
+            0x3f80_0000,
+        ),
+    ];
+    let fmul_rows: [Row; 8] = [
+        (0x7fa0_0000, 0x3f80_0000, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x3f80_0000, 0xffc0_0001, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x7f80_0000, 0xff80_0000, 0x3f80_0000, 0xff80_0000, 0),
+        (0x7f80_0000, 0x0000_0000, 0x3f80_0000, 0x7fff_ffff, 0),
+        (
+            0x3f80_0000,
+            0x3f80_0000,
+            0xff80_0001,
+            0x3f80_0000,
+            0x3f80_0000,
+        ),
+        (
+            0x7f80_0000,
+            0x3f80_0000,
+            0xff80_0000,
+            0x7f80_0000,
+            0x3f80_0000,
+        ),
+        (0xffc1_2345, 0x7f81_2345, 0x7fc0_0000, 0x7fff_ffff, 0),
+        (0x0000_0000, 0x7f80_0000, 0x7fc0_0000, 0x7fff_ffff, 0),
+    ];
+    let ffma_rows: [Row; 8] = [
+        (0x7fa0_0000, 0x3f80_0000, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x3f80_0000, 0xffc0_0001, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x7f80_0000, 0xff80_0000, 0x3f80_0000, 0xff80_0000, 0),
+        (0x7f80_0000, 0x0000_0000, 0x3f80_0000, 0x7fff_ffff, 0),
+        (0x3f80_0000, 0x3f80_0000, 0xff80_0001, 0x7fff_ffff, 0),
+        (0x7f80_0000, 0x3f80_0000, 0xff80_0000, 0x7fff_ffff, 0),
+        (0xffc1_2345, 0x7f81_2345, 0x7fc0_0000, 0x7fff_ffff, 0),
+        (0x0000_0000, 0x7f80_0000, 0x7fc0_0000, 0x7fff_ffff, 0),
+    ];
+    for h in HostProfile::presets() {
+        let o = host(h.clone());
+        let devs = nan_devices(&h);
+        for m in modes() {
+            let pick = |rows: &[Row]| -> Vec<(u32, u32, u32, u32)> {
+                rows.iter()
+                    .map(|&(a, b, c, w, ws)| (a, b, c, if m.sat { ws } else { w }))
+                    .collect()
+            };
+            check("FADD", &o, &devs, fadd(m), &pick(&fadd_rows));
+            check("FMUL", &o, &devs, fmul(m), &pick(&fmul_rows));
+            check("FFMA", &o, &devs, ffma(m), &pick(&ffma_rows));
+        }
+    }
+}
+
+/// FMNMX of two NaNs is `0x7fffffff`; of one NaN, the other operand.
+#[test]
+fn fmnmx_of_two_nans_is_canonical() {
+    let rows: [(u32, u32, [u32; 2]); 5] = [
+        (0x7fa0_0000, 0xffc0_0001, [0x7fff_ffff, 0x7fff_ffff]),
+        (0x7fa0_0000, 0x3f80_0000, [0x3f80_0000, 0x3f80_0000]),
+        (0x8000_0001, 0x7fc0_0000, [0x8000_0001, 0x8000_0000]),
+        (0xffff_ffff, 0x7f80_0001, [0x7fff_ffff, 0x7fff_ffff]),
+        (0x0000_0001, 0xff80_0001, [0x0000_0001, 0x0000_0000]),
+    ];
+    for h in HostProfile::presets() {
+        let o = host(h.clone());
+        let devs = nan_devices(&h);
+        for ftz in [false, true] {
+            let cases: Vec<_> = rows
+                .iter()
+                .map(|&(a, b, w)| (a, b, 0, w[usize::from(ftz)]))
+                .collect();
+            for min in [false, true] {
+                check("FMNMX", &o, &devs, fmnmx(min, ftz), &cases);
             }
         }
     }

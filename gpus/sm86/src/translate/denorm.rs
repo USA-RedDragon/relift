@@ -273,7 +273,7 @@ impl Ctx {
             };
         let fast_bits = self.as_bits(fast);
         if native {
-            return fast_bits;
+            return self.canonical_nan(fast_bits, xs);
         }
         self.iface.host.denorm_fixups += 1;
         let xs: Vec<u32> = if ftz {
@@ -335,7 +335,21 @@ impl Ctx {
         self.m.emit_void(op::STORE, &[var, r]);
         self.m.emit_void(op::BRANCH, &[merge]);
         self.m.emit_void(op::LABEL, &[merge]);
-        self.m.emit(op::LOAD, u, &[var])
+        let r = self.m.emit(op::LOAD, u, &[var]);
+        self.canonical_nan(r, &xs)
+    }
+
+    /// `r`, or the guest's NaN `0x7fffffff` when `r` or an input is a NaN
+    /// (the host may keep or make another payload).
+    fn canonical_nan(&mut self, r: u32, xs: &[u32]) -> u32 {
+        let mut nan = self.is_nan_bits(r);
+        for &x in xs {
+            let n = self.is_nan_bits(x);
+            nan = self.or(nan, n);
+        }
+        let k = self.dn_ku(0x7fff_ffff);
+        let u = self.u32t();
+        self.select(u, nan, k, r)
     }
 
     fn exact_mul(&mut self, f: u32, a: u32, b: u32) -> u32 {
@@ -696,7 +710,8 @@ impl Ctx {
 
     /// FMNMX on float bits, any host: `(min, max)` bits. The native
     /// minimum and maximum, the guest's signed zeros (`-0` is the smaller),
-    /// and an exact choice by the order keys when an input is a denormal.
+    /// an exact choice by the order keys when an input is a denormal, the
+    /// other operand when one is a NaN and `0x7fffffff` when both are.
     pub(crate) fn fminmax(&mut self, a: u32, b: u32, ftz: bool) -> (u32, u32) {
         let f = self.f32t();
         let u = self.u32t();
@@ -719,26 +734,30 @@ impl Ctx {
         let n = self.dn_ub(op::BITWISE_AND, a, b);
         let lo = self.select(u, both, o, lo);
         let hi = self.select(u, both, n, hi);
-        if ftz || mode == Denorm::Preserve {
-            return (lo, hi);
-        }
-        let ka = self.order_key(a);
-        let kb = self.order_key(b);
-        let da = self.is_denormal(a);
-        let db = self.is_denormal(b);
-        let any = self.or(da, db);
+        let (lo, hi) = if ftz || mode == Denorm::Preserve {
+            (lo, hi)
+        } else {
+            let ka = self.order_key(a);
+            let kb = self.order_key(b);
+            let da = self.is_denormal(a);
+            let db = self.is_denormal(b);
+            let any = self.or(da, db);
+            let lt = self.dn_bc(op::U_LESS_THAN, ka, kb);
+            let ex_lo = self.select(u, lt, a, b);
+            let ex_hi = self.select(u, lt, b, a);
+            (
+                self.select(u, any, ex_lo, lo),
+                self.select(u, any, ex_hi, hi),
+            )
+        };
         let na = self.is_nan_bits(a);
         let nb = self.is_nan_bits(b);
-        let lt = self.dn_bc(op::U_LESS_THAN, ka, kb);
-        let ex_lo = self.select(u, lt, a, b);
-        let ex_hi = self.select(u, lt, b, a);
-        let ex_lo = self.select(u, nb, a, ex_lo);
-        let ex_hi = self.select(u, nb, a, ex_hi);
-        let ex_lo = self.select(u, na, b, ex_lo);
-        let ex_hi = self.select(u, na, b, ex_hi);
-        (
-            self.select(u, any, ex_lo, lo),
-            self.select(u, any, ex_hi, hi),
-        )
+        let lo = self.select(u, nb, a, lo);
+        let hi = self.select(u, nb, a, hi);
+        let lo = self.select(u, na, b, lo);
+        let hi = self.select(u, na, b, hi);
+        let two = self.and(na, nb);
+        let k = self.dn_ku(0x7fff_ffff);
+        (self.select(u, two, k, lo), self.select(u, two, k, hi))
     }
 }
