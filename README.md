@@ -140,7 +140,12 @@ ROM copies to work RAM) into one unit and links the runtime's ARMv4T and
 GBA layers. The program runs on the high-level BIOS; no BIOS image is
 needed. The backup (SRAM, Flash or EEPROM) is a `.sav` next to the ROM, or
 in the `save.dir` setting's folder. Missed code stops the program with a
-report; hot-loading is not available for this guest yet.
+report; hot-loading is not available for this guest yet. As for the Game
+Boy, `relift build` packages the program for the host (an AppImage on
+Linux, a signed `.app` on macOS) and `relift build --target android-arm64`
+or `--target ios-arm64` makes an APK or an iOS app, whose backup is
+`battery.sav` in the app's own folder and whose touch screen shows the
+on-screen controller.
 
 `relift-gbarom` reads and checks a ROM header and lists the save library
 strings and the multiboot entry of an image that fits work RAM.
