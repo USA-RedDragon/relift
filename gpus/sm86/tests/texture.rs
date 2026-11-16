@@ -169,6 +169,21 @@ fn offsets_set_in_an_earlier_block_stay_constant() {
         vec![mov(4, 0xf1), bra_p0(1), mov(4, 0x12), t],
         vec![
             mov(4, 0xf1),
+            tex(
+                0x160,
+                &[
+                    (16, 8, 3),
+                    (64, 8, 255),
+                    (32, 8, 255),
+                    (61, 3, 1),
+                    (72, 4, 3),
+                    (87, 3, 1),
+                ],
+            ),
+            t,
+        ],
+        vec![
+            mov(4, 0xf1),
             word(
                 0x002,
                 4,
