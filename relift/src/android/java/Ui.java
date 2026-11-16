@@ -290,6 +290,7 @@ final class Ui {
     }
 
     void build(LinearLayout page, Page p, boolean land) {
+        land = land && p != Page.SETTINGS && p != Page.GRAPHICS;
         Col a = new Col();
         Col b = land ? new Col() : a;
         switch (p) {
