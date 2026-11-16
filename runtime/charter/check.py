@@ -17,7 +17,8 @@ Each absence rule has a presence control, so an empty walk or a broken
 pattern cannot pass: the walk must find the core's sources, headers and
 tests; the include rule must reject at least one include of the CPU and
 guest layers; every rule must match its own sample; and the denylist must hit
-at least one file under runtime/guests/switch or runtime/cpus/arm64.
+at least one file under runtime/guests/switch, runtime/cpus/arm64 or
+runtime/cpus/mips.
 
 Run from anywhere: python3 runtime/charter/check.py. Exit status 1 on any
 failure. Standard library only.
@@ -31,7 +32,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUNTIME = os.path.dirname(HERE)
 CORE = os.path.join(RUNTIME, "core")
 ABOVE = [os.path.join(RUNTIME, "cpus"), os.path.join(RUNTIME, "guests")]
-CONTROLS = [os.path.join(RUNTIME, "guests", "switch"), os.path.join(RUNTIME, "cpus", "arm64")]
+CONTROLS = [os.path.join(RUNTIME, "guests", "switch"), os.path.join(RUNTIME, "cpus", "arm64"),
+            os.path.join(RUNTIME, "cpus", "mips")]
 ALLOW = os.path.join(HERE, "allow.txt")
 
 # (rule, pattern, sample the pattern must match, what it guards against)
@@ -50,6 +52,8 @@ DENYLIST = [
     ("register-file", r"->(?:x|w|v)\[|\bx\[3[01]\]|\bx30\b|\blr\b", "c->x[30]", "reads of a guest register file"),
     ("page-4k", r"(?i)4 ?KiB|\b0x1000ull\b|RL_GUEST_PAGE", "the 4 KiB map", "a fixed guest page size"),
     ("horizon-clock", r"(?i)19[.,]2 ?MHz|19200000|\b12u?\) ?/ ?625", "19.2 MHz", "the Switch counter rate"),
+    ("mips-cp0", r"(?i)vr4300|\bcp0_|\bcop[012]\b|fcr31|\bx?kseg[0-3]\b|\bkuseg\b|\beret\b|\bentry_?hi\b|\bbadvaddr\b",
+     "the VR4300 CP0 kseg0", "VR4300 coprocessor 0 and FPU names"),
     ("address-widths", r"\b3[69]-bit\b|\b2\^3[69]\b|\(36 or 39\)", "the 36-bit layout", "Switch address space widths"),
 ]
 
