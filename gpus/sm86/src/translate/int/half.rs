@@ -1,11 +1,13 @@
 //! Packed half-precision arithmetic: HADD2, HMUL2, HFMA2, HMNMX2, HSET2
 //! and HSETP2, with the `.F32` forms that produce a single float.
 //!
-//! The lanes are widened to single precision, which is exact for sums and
-//! products of two halves, and narrowed with a rounding built from integer
-//! operations. A fused multiply-add sums in single precision with the low
-//! bit forced odd when the sum is inexact, so rounding it again to half
-//! precision cannot double-round.
+//! The lanes are widened to single precision and narrowed with a rounding
+//! built from integer operations. A product of two halves is exact in
+//! single precision; a sum need not be (65504 + 2^-24 spans 40 bits), but
+//! rounding it to single and then to half precision gives the correctly
+//! rounded half because 24 >= 2 * 11 + 2. A fused multiply-add sums in
+//! single precision with the low bit forced odd when the sum is inexact, so
+//! rounding it again to half precision cannot double-round.
 
 use crate::spirv::op;
 use crate::translate::{Ctx, Res, bad};
