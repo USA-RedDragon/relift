@@ -155,25 +155,41 @@ fn insert(b: &mut Block, at: usize, f: impl FnOnce(&mut Block) -> Value) -> Valu
 }
 
 /// Moves `b`, lifted at offset `pc`, to run at any base: the link becomes
-/// an address and an absolute target an offset.
+/// an address and an absolute target an offset. The delay slot reads the
+/// link before the block writes it back, so every use of the link's value
+/// takes the address.
 fn relocate(b: &mut Block, pc: u64, enc: Encoding, word: u32) {
     if let Some(r) = link_reg(enc, word) {
         let reg = regs::gpr(r);
-        if let Some(at) = b
-            .insts
-            .iter()
-            .position(|i| matches!(i.op, Op::Set(g, _) if g == reg))
-        {
+        let old = b.insts.iter().find_map(|i| match i.op {
+            Op::Set(g, v) if g == reg => Some(v),
+            _ => None,
+        });
+        if let Some(old) = old {
             let link = (pc + 8) & 0xFFF;
-            let a = insert(b, at, |b| {
+            let from = old.index() + 1;
+            let a = insert(b, from, |b| {
                 let k = konst(b, link);
                 rebase(b, k, true)
             });
-            let set = b.insts.len() - 1;
-            let at = (at..=set)
-                .find(|&k| matches!(b.insts[k].op, Op::Set(g, _) if g == reg))
-                .expect("the link write");
-            b.insts[at].op = Op::Set(reg, a);
+            let swap = |x: &Value| if *x == old { a } else { *x };
+            for i in a.index() + 1..b.insts.len() {
+                let op = std::mem::replace(&mut b.insts[i].op, Op::Sync);
+                b.insts[i].op = op.map_values(&swap);
+            }
+            b.exit.next = match b.exit.next {
+                Next::Dynamic(t) => Next::Dynamic(swap(&t)),
+                Next::Select {
+                    cond,
+                    taken,
+                    not_taken,
+                } => Next::Select {
+                    cond: swap(&cond),
+                    taken,
+                    not_taken,
+                },
+                n => n,
+            };
         }
     }
     match (enc, b.exit.next) {
@@ -934,6 +950,37 @@ mod tests {
         let b = Rsp.lift_at(0x100, beq, 0).expect("lifts");
         assert_eq!(intrinsic_count(&b, BASE), 0, "branches are relative");
         assert_eq!(Rsp.intrinsic(BASE, &[]).as_deref(), Some("rl_rsp_base(c)"));
+    }
+
+    /// Whether `v` of `b` is computed from the running image's base.
+    fn uses_base(b: &Block, v: Value) -> bool {
+        let op = &b.insts[v.index()].op;
+        if matches!(op, Op::Intrinsic(c) if c.name == BASE) {
+            return true;
+        }
+        let ins = std::cell::RefCell::new(Vec::new());
+        let _ = op.clone().map_values(&|x: &Value| {
+            ins.borrow_mut().push(*x);
+            *x
+        });
+        ins.into_inner().into_iter().any(|x| uses_base(b, x))
+    }
+
+    #[test]
+    fn a_delay_slot_reads_the_link_as_an_address() {
+        let jal = 0x0C00_07ED;
+        let ori_r12_r31 = 0x37EC_0000;
+        let b = Rsp.lift_at(0x170, jal, ori_r12_r31).expect("lifts");
+        b.verify().expect("verifies");
+        let r12 = b
+            .insts
+            .iter()
+            .find_map(|i| match i.op {
+                Op::Set(r, v) if r == regs::gpr(12) => Some(v),
+                _ => None,
+            })
+            .expect("the delay slot's write");
+        assert!(uses_base(&b, r12));
     }
 
     #[test]
