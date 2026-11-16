@@ -112,6 +112,31 @@ fn bindless_index_is_non_uniform() {
 }
 
 #[test]
+fn uniform_register_handle_is_uniform() {
+    let w = word(
+        0x160,
+        7,
+        &[
+            (64, 8, 2),
+            (24, 8, 8),
+            (32, 8, 4),
+            (40, 6, 6),
+            (60, 1, 1),
+            (61, 3, 1),
+            (72, 4, 0xf),
+            (81, 3, 7),
+            (84, 3, 1),
+            (87, 3, 1),
+        ],
+    );
+    let s = compute(&[w]);
+    assert!(s.interface.textures.is_empty());
+    let decos = insts(&s.spirv, 71);
+    assert!(decos.iter().all(|d| d.get(2) != Some(&5300)));
+    assert_eq!(insts(&s.spirv, 88).len(), 1);
+}
+
+#[test]
 fn constant_offsets_stay_constant() {
     let s = compute(&[
         mov(4, 0xf1),

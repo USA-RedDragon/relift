@@ -414,6 +414,9 @@ fn sources(c: &mut Ctx, g0: &[Slot], g1: &[Slot], scr: bool) -> Res<Srcs> {
 /// The handle word of a bound (`Some((bank, byte offset))`) or bindless
 /// texture, and whether its index may diverge.
 fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
+    if key.is_none() && c.word.get(9, 3) == 7 {
+        return Ok((ur_handle(c)?, false));
+    }
     match key {
         Some((bank, off)) => {
             c.iface.textures.insert((bank, off));
@@ -423,12 +426,33 @@ fn handle(c: &mut Ctx, key: Option<(u32, u32)>, s: &Srcs) -> Res<(u32, bool)> {
     }
 }
 
+/// Whether the handle of a texture instruction is a register source.
+fn reg_handle(c: &Ctx, key: Option<(u32, u32)>) -> bool {
+    key.is_none() && c.word.get(9, 3) != 7
+}
+
+/// The handle of a texture instruction that names a uniform register
+/// pair: the texture index in the first register and the sampler index in
+/// the second, repacked into the combined handle word.
+fn ur_handle(c: &mut Ctx) -> Res<u32> {
+    let w = c.word;
+    let n = w.get(40, 6);
+    if w.get(46, 8) != 0 || w.get(54, 5) != 0 || n >= 62 {
+        return bad("texture handle in a uniform register with an offset");
+    }
+    let t = c.load_ureg(n as u8);
+    let sm = c.load_ureg(n as u8 + 1);
+    let t = c.and_k(t, 0xfffff);
+    let sm = c.sh(op::SHIFT_LEFT_LOGICAL, sm, 20);
+    Ok(c.ib(op::BITWISE_OR, t, sm))
+}
+
 /// The bound handle of a texture instruction, `None` for `.B`.
 fn texref(c: &Ctx) -> Res<Option<(u32, u32)>> {
     match c.word.get(9, 3) {
         5 => Ok(Some((c.word.get(54, 5), 4 * c.word.get(40, 14)))),
-        1 => Ok(None),
-        _ => bad("texture handle in a uniform register"),
+        1 | 7 => Ok(None),
+        _ => bad("texture handle form"),
     }
 }
 
@@ -909,7 +933,7 @@ fn tex(c: &mut Ctx) -> Res<()> {
     }
     g0.extend(coord_slots(d));
     let mut g1 = Vec::new();
-    if key.is_none() {
+    if reg_handle(c, key) {
         g1.push(Slot::Handle);
     }
     if matches!(lod, 2 | 3 | 5) {
@@ -1039,7 +1063,7 @@ fn tld(c: &mut Ctx) -> Res<()> {
     }
     g0.extend(coord_slots(d));
     let mut g1 = Vec::new();
-    if key.is_none() {
+    if reg_handle(c, key) {
         g1.push(Slot::Handle);
     }
     if lod == 3 {
@@ -1137,7 +1161,7 @@ fn tld4(c: &mut Ctx) -> Res<()> {
     }
     g0.extend(coord_slots(d));
     let mut g1 = Vec::new();
-    if key.is_none() {
+    if reg_handle(c, key) {
         g1.push(Slot::Handle);
     }
     match offmode {
@@ -1246,7 +1270,7 @@ fn tmml(c: &mut Ctx) -> Res<()> {
         g0.push(Slot::Packed);
     }
     g0.extend(coord_slots(d));
-    let g1 = if key.is_none() {
+    let g1 = if reg_handle(c, key) {
         vec![Slot::Handle]
     } else {
         Vec::new()
@@ -1300,7 +1324,7 @@ fn txd(c: &mut Ctx) -> Res<()> {
     }
     let aoffi = w.bit(76);
     let mut g0 = Vec::new();
-    if key.is_none() {
+    if reg_handle(c, key) {
         g0.push(Slot::Handle);
     }
     g0.extend(coord_slots(d));
@@ -1361,7 +1385,7 @@ fn txq(c: &mut Ctx) -> Res<()> {
         return bad("TXQ query");
     }
     let mut g0 = Vec::new();
-    if key.is_none() {
+    if reg_handle(c, key) {
         g0.push(Slot::Handle);
     }
     if query == 0 {
