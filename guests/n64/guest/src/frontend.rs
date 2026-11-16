@@ -9,7 +9,9 @@
 //!   instruction makes only under a condition leaves through its guard when
 //!   it is not in RDRAM, so a device sees only the accesses that happen;
 //! - every instruction ticks its cycles (the lifter's), and every block
-//!   ends in a sync point, where the runtime takes interrupts;
+//!   ends in a sync point, where the runtime takes interrupts; code in SP
+//!   memory (the boot code, uncached at its kseg1 address) also waits for
+//!   the RCP bus at every fetch ([`SP_FETCH`]);
 //! - a fetch that may start an instruction cache line calls
 //!   `rl_mips_icache` with its address: a delay slot that starts a line
 //!   here, and the first instruction of a block the program enters other
@@ -56,6 +58,17 @@ pub const ICACHE: &str = "n64.icache";
 
 /// The bytes of an instruction cache line.
 pub const ICACHE_LINE: u64 = 32;
+
+/// The cycles an uncached fetch from SP memory waits for the RCP bus, as
+/// any CPU read of an RCP device does.
+pub const SP_FETCH: u32 = 20;
+
+/// Whether `pc` is a kseg1 address in SP memory, where every fetch goes to
+/// the RCP bus.
+#[must_use]
+pub fn in_sp_memory(pc: u64) -> bool {
+    (0xFFFF_FFFF_A400_0000..0xFFFF_FFFF_A404_0000).contains(&pc)
+}
 
 /// The guard code of `ERET`.
 pub const ERET_GUARD: u32 = 0x4000;
@@ -323,6 +336,13 @@ impl N64 {
                 |i| matches!(i.op, Op::Set(r, _) if r == regs::CP0_COUNT || r == regs::CP0_WIRED),
             );
         reshape(&mut b, &shape);
+        if in_sp_memory(pc) {
+            for i in &mut b.insts {
+                if let Op::Tick(n) = &mut i.op {
+                    *n += SP_FETCH;
+                }
+            }
+        }
         let slot_pc = pc.wrapping_add(4);
         if l.encs.len() == 2
             && slot_pc.is_multiple_of(ICACHE_LINE)
@@ -529,6 +549,28 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn code_in_sp_memory_waits_for_the_rcp_bus_at_each_fetch() {
+        let ticks = |pc: u64, word: u32| -> Vec<u32> {
+            let b = N64.lift_at(pc, word, 0).expect("lifts");
+            b.insts
+                .iter()
+                .filter_map(|i| match i.op {
+                    Op::Tick(n) => Some(n),
+                    _ => None,
+                })
+                .collect()
+        };
+        let addiu = 0x2442_0001;
+        let beq = 0x1000_0002;
+        assert_eq!(ticks(PC, addiu), [1]);
+        assert_eq!(ticks(0xFFFF_FFFF_A400_0040, addiu), [1 + SP_FETCH]);
+        assert_eq!(
+            ticks(0xFFFF_FFFF_A400_0040, beq),
+            [1 + SP_FETCH, 1 + SP_FETCH]
+        );
     }
 
     #[test]

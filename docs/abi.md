@@ -2157,7 +2157,10 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
 - A read outside RDRAM waits for the bus (`rl_n64_read_stall`): 20 cycles
   for the RCP's registers, SP memory and the PIF, plus 250 for the PI bus
   in the cartridge's space, or twice the rest of a PI bus write in flight.
-  The device answers at the cycle the read starts; writes are posted.
+  The device answers at the cycle the read starts; writes are posted. A
+  fetch from SP memory (the boot code, uncached at its kseg1 address) waits
+  the same 20 cycles: the frontend adds them to the tick of each
+  instruction there, a branch's delay slot included.
 - A read of Count calls `rl_mips_count`. A
   write of Status, Cause, Compare, Count or Wired ends the budget
   (`rl_n64_cp0_break`), and the block's sync point is `rl_n64_cp0_sync`,
@@ -2188,8 +2191,8 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   the game).
 - Code is bound at run time, never interpreted. The build lifts every code
   run the analysis found, at its link address, one unit per segment linked
-  in RDRAM, and lists each run with its source, offset, length, link address
-  and FNV-1a hash (`rl_n64_code`). No unit is in dispatch at the start: each
+  in RDRAM or SP memory, and lists each run with its source, offset,
+  length, link address and FNV-1a hash (`rl_n64_code`). No unit is in dispatch at the start: each
   run's slots hold the run layer's entry check, which binds the run whose
   bytes in RDRAM hash to its hash (the functions replace the check in every
   slot of the run). A DMA into RDRAM (PI, SP, SI) or a CACHE that
@@ -2319,8 +2322,8 @@ and audio layers through `runtime/guests/n64/run`.
   frame rate is whatever the registers make it (about 59.83 Hz for the
   usual NTSC values) and a VI that is off makes a frame every 200 lines of
   0x800 clocks. The counter starts with a line at cycle 0, and a line is
-  seen from the cycle after the one it starts at (ares runs its VI up to the
-  CPU's clock before an access, not including it).
+  seen from the cycle after the one it starts at (ares runs its VI up to the CPU's clock before an access, not
+  including it).
 - Scan-out (`rl_n64_scanout`) is ares' software path, with no RDP: the
   output is 640 by 480 (NTSC) or 640 by 576 (PAL) RGB; the lines and columns
   inside `VI_V_VIDEO` and `VI_H_VIDEO` are drawn (clamped to the output

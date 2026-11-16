@@ -30,7 +30,9 @@ use relift_ir::{Block, Flow, Next, Op};
 use relift_n64_analyze::{Boot, Report, Source};
 use relift_n64_formats::Cic;
 
-use crate::frontend::{ICACHE_LINE, N64, RDRAM_END, dispatch_exit, fetch_check, io_map};
+use crate::frontend::{
+    ICACHE_LINE, N64, RDRAM_END, dispatch_exit, fetch_check, in_sp_memory, io_map,
+};
 
 /// The physical address bits of a kseg0 or kseg1 address.
 const PHYS: u32 = 0x1FFF_FFFF;
@@ -225,7 +227,8 @@ fn source_bytes<'a>(rom: &'a [u8], streams: &'a [Vec<u8>], s: Source) -> &'a [u8
 }
 
 /// Lifts every segment of `report` (the analysis of the big-endian image
-/// `rom`) that is linked in RDRAM and emits one unit for each; `image_id`
+/// `rom`) that is linked in RDRAM or SP memory (the boot code) and emits
+/// one unit for each; `image_id`
 /// identifies the ROM to the runtime.
 #[must_use]
 pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
@@ -246,8 +249,8 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
             out.skipped.push((si, "no link address"));
             continue;
         };
-        if u64::from(link & PHYS) >= RDRAM_END {
-            out.skipped.push((si, "linked outside RDRAM"));
+        if u64::from(link & PHYS) >= RDRAM_END && !in_sp_memory(sext(link)) {
+            out.skipped.push((si, "linked outside RDRAM and SP memory"));
             continue;
         }
         let bytes = source_bytes(rom, &streams, seg.source);
