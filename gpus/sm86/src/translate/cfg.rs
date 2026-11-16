@@ -24,7 +24,9 @@
 //! put in a register with `MOV`, which with the RET's offset must name the
 //! instruction after the `CALL`.
 //!
-//! A CALL whose callee never reaches a RET is a plain jump.
+//! A CALL whose callee never reaches a RET is a plain jump. The absolute
+//! forms (`CALL.ABS`, `RET.ABS`, `JMP`, indirect calls) are described in
+//! the calls module; `BPT.TRAP` ends the invocation like EXIT.
 //!
 //! `BRX` and `BRXU` jump to a register plus a base, through a table in a
 //! constant bank the program cannot see. Their targets are the instruction
@@ -58,6 +60,7 @@
 
 mod uniform;
 
+use super::calls::{self, Callee};
 use super::{Code, Ctx, Res, bad};
 use crate::Operand;
 use crate::spirv::op;
@@ -66,6 +69,7 @@ use std::collections::{HashMap, HashSet};
 const EXIT: usize = usize::MAX;
 const MAX_CALL_DEPTH: usize = 8;
 pub(crate) const TOO_MUCH_DUPLICATION: &str = "control flow needs too much duplication";
+const MAX_BLOCKS: usize = 1 << 16;
 
 #[derive(Clone, Copy, Debug)]
 enum Sel {
@@ -173,12 +177,16 @@ fn raw_target(w: crate::Word) -> i64 {
 }
 
 fn is_transfer(i: &crate::Inst) -> bool {
-    matches!(i.mnemonic, "BRA" | "EXIT" | "CALL" | "RET" | "BRX" | "BRXU")
+    matches!(
+        i.mnemonic,
+        "BRA" | "JMP" | "EXIT" | "CALL" | "RET" | "BRX" | "BRXU"
+    ) || calls::is_trap(i)
 }
 
-/// Ends a block with no fall-through: an unguarded BRA, EXIT, BRX or RET.
+/// Ends a block with no fall-through: an unguarded BRA, JMP, EXIT, BRX,
+/// RET or BPT.TRAP.
 fn no_fall(i: &crate::Inst, w: crate::Word) -> bool {
-    matches!(i.mnemonic, "BRA" | "EXIT" | "BRX" | "BRXU" | "RET")
+    (matches!(i.mnemonic, "BRA" | "JMP" | "EXIT" | "BRX" | "BRXU" | "RET") || calls::is_trap(i))
         && conditions(i, w).is_ok_and(|c| c.is_empty())
 }
 
@@ -192,17 +200,30 @@ fn bra_target(i: &crate::Inst, end: usize) -> Res<usize> {
         .map_or_else(|| bad("branch target outside the program"), Ok)
 }
 
+/// The instruction a direct CALL goes to.
+fn callee_of(i: &crate::Inst, w: crate::Word, end: usize) -> Res<usize> {
+    match calls::callee(i, w, end)? {
+        Callee::To(t) => Ok(t),
+        Callee::Reg(_) => bad("indirect CALL"),
+    }
+}
+
 /// Instruction-level successors, with each BRX going only to the
 /// instruction after it and each CALL to its target and its return point.
 fn plain_succs(code: &Code, end: usize, k: usize) -> Vec<usize> {
     let i = &code.insts[k];
     let w = code.words[k];
     let mut v = Vec::new();
-    if matches!(i.mnemonic, "BRA" | "CALL")
-        && let Ok(t) = bra_target(i, end)
-    {
-        v.push(t);
-    }
+    let t = match i.mnemonic {
+        "BRA" => bra_target(i, end).ok(),
+        "JMP" => calls::jmp_target(i, end).ok(),
+        "CALL" => match calls::callee(i, w, end) {
+            Ok(Callee::To(t)) => Some(t),
+            _ => None,
+        },
+        _ => None,
+    };
+    v.extend(t);
     if i.mnemonic == "BRX" || !no_fall(i, w) {
         v.push(k + 1);
     }
@@ -276,42 +297,6 @@ fn returns(code: &Code, end: usize, t: usize) -> bool {
     false
 }
 
-/// The register a CALL's return address goes through is set by a `MOV`
-/// shortly before it. `RET.REL` at `ret` jumps to the register it reads
-/// plus its own offset, so the address moved is the return point minus the
-/// offset, into that register or one the callee copies into it with
-/// unguarded register MOVs.
-fn return_address_set(code: &Code, k: usize, ret: usize) -> bool {
-    let rw = code.words[ret];
-    if rw.bit(91) {
-        return false;
-    }
-    let mut regs = vec![rw.get(24, 8)];
-    if let Ok(callee) = bra_target(&code.insts[k], code.insts.len()) {
-        for j in (callee..ret).rev() {
-            let w = code.words[j];
-            if w.opcode() == 0x202
-                && w.get(72, 4) == 0xf
-                && code.insts[j].guard.is_none()
-                && regs.contains(&w.get(16, 8))
-            {
-                let src = w.get(32, 8);
-                regs.retain(|r| *r != w.get(16, 8));
-                regs.push(src);
-            }
-        }
-    }
-    let off = 16 * (ret as i64 + 1) + raw_target(rw);
-    let want = (16 * (k as i64 + 1) - off) as u32;
-    (k.saturating_sub(16)..k).rev().any(|j| {
-        let w = code.words[j];
-        w.opcode() == 0x802
-            && regs.contains(&w.get(16, 8))
-            && w.get(32, 32) == want
-            && code.insts[j].guard.is_none()
-    })
-}
-
 /// Block numbers of (call stack, first instruction) pairs, and the pairs
 /// still to build.
 #[derive(Default)]
@@ -361,21 +346,21 @@ fn build(code: &Code) -> Res<Vec<Block>> {
                 leaders[k + 1] = true;
             }
             "CALL" => {
-                if !i.has("REL") || !matches!(i.ops.last(), Some(Operand::Target(_))) {
-                    return bad(format!("CALL form {i}"));
+                if let Callee::To(t) = calls::callee(i, code.words[k], end)? {
+                    leaders[t] = true;
                 }
-                let t = bra_target(i, end)?;
-                leaders[t] = true;
                 leaders[k + 1] = true;
             }
-            "RET" => {
-                if !i.has("REL") {
-                    return bad(format!("RET form {i}"));
-                }
+            "JMP" => {
+                leaders[calls::jmp_target(i, end)?] = true;
+                leaders[k + 1] = true;
+            }
+            "RET" | "BPT" => {
+                calls::check(i)?;
                 leaders[k + 1] = true;
             }
             "EXIT" | "BRX" | "BRXU" => leaders[k + 1] = true,
-            "JMP" | "JMX" | "BPT" | "RTT" => {
+            "JMX" | "RTT" => {
                 return bad(format!("control {}", i.mnemonic));
             }
             "WARPSYNC" if i.has("EXCLUSIVE") => return bad("WARPSYNC.EXCLUSIVE"),
@@ -396,10 +381,14 @@ fn build(code: &Code) -> Res<Vec<Block>> {
     for k in (0..end).rev() {
         next[k] = if leaders[k + 1] { k + 1 } else { next[k + 1] };
     }
+    let mut functions: Option<Vec<usize>> = None;
     let mut ids = Ids::default();
     let mut blocks: Vec<Option<Block>> = Vec::new();
     ids.get((Vec::new(), 0), &mut blocks);
     while let Some((stack, s, me)) = ids.next() {
+        if blocks.len() > MAX_BLOCKS {
+            return bad("control flow needs too much duplication");
+        }
         let stop = next[s];
         let last = &code.insts[stop - 1];
         let w = code.words[stop - 1];
@@ -408,22 +397,55 @@ fn build(code: &Code) -> Res<Vec<Block>> {
         let to = |stack: &[usize], t: usize| (stack.to_vec(), t);
         let target: Option<(Vec<usize>, usize)>;
         let mut term = None;
+        let indirect = match last.mnemonic {
+            "CALL" => match calls::callee(last, w, end)? {
+                Callee::Reg(r) => Some(r),
+                Callee::To(_) => None,
+            },
+            _ => None,
+        };
         match last.mnemonic {
             "BRA" => target = Some(to(&stack, bra_target(last, end)?)),
+            "JMP" => target = Some(to(&stack, calls::jmp_target(last, end)?)),
             "EXIT" => target = None,
+            "CALL" if let Some(r) = indirect => {
+                if last.guard.is_some() {
+                    return bad("guarded indirect CALL");
+                }
+                if stack.len() >= MAX_CALL_DEPTH || stack.contains(&(stop - 1)) {
+                    return bad("recursive CALL");
+                }
+                let fs = functions
+                    .get_or_insert_with(|| calls::functions(code, end, |t| returns(code, end, t)));
+                if fs.is_empty() {
+                    return bad("indirect CALL with no function in the program");
+                }
+                let mut st = stack.clone();
+                st.push(stop - 1);
+                if fall.is_none() {
+                    return bad("CALL falls off the end");
+                }
+                let mut cases = Vec::new();
+                for &t in fs.iter() {
+                    let b = ids.get((st.clone(), t), &mut blocks);
+                    cases.push((16 * t as u32, b));
+                }
+                term = Some(Term::Switch(Sel::Reg(r), 0, cases));
+                target = None;
+            }
             "CALL"
                 if !*calls.entry(stop - 1).or_insert_with(|| {
-                    bra_target(last, end).is_ok_and(|t| returns(code, end, t))
+                    callee_of(last, w, end).is_ok_and(|t| returns(code, end, t))
                 }) =>
             {
-                target = Some(to(&stack, bra_target(last, end)?));
+                target = Some(to(&stack, callee_of(last, w, end)?));
             }
             "CALL" => {
-                let t = bra_target(last, end)?;
+                let t = callee_of(last, w, end)?;
                 if stack.len() >= MAX_CALL_DEPTH
-                    || stack
-                        .iter()
-                        .any(|&c| matches!(code.insts[c].ops.last(), Some(Operand::Target(x)) if *x / 16 == t as i64))
+                    || stack.iter().any(|&c| {
+                        callee_of(&code.insts[c], code.words[c], end).is_ok_and(|x| x == t)
+                    })
                 {
                     return bad("recursive CALL");
                 }
@@ -435,7 +457,7 @@ fn build(code: &Code) -> Res<Vec<Block>> {
                 let Some((&site, rest)) = stack.split_last() else {
                     return bad("RET outside a call");
                 };
-                if !return_address_set(code, site, stop - 1) {
+                if !calls::return_address_set(code, site, stop - 1) {
                     return bad("CALL without its return address");
                 }
                 target = Some(to(rest, site + 1));
@@ -462,7 +484,7 @@ fn build(code: &Code) -> Res<Vec<Block>> {
             None if term_inst => {
                 let conds = conditions(last, w)?;
                 let to = match last.mnemonic {
-                    "EXIT" => EXIT,
+                    "EXIT" | "BPT" => EXIT,
                     _ => match target {
                         Some(k) => ids.get(k, &mut blocks),
                         None => return bad(format!("{} without a target", last.mnemonic)),

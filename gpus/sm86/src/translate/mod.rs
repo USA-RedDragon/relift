@@ -6,6 +6,7 @@
 //! answers `None` for opcodes it does not know, so [`Ctx::inst`] asks them in
 //! turn.
 
+mod calls;
 mod cfg;
 mod denorm;
 mod float;
@@ -559,6 +560,16 @@ impl Ctx {
     fn inst(&mut self, i: &Inst) -> Res<()> {
         match i.mnemonic {
             "NOP" | "BSSY" | "BSYNC" | "BREAK" | "DEPBAR" | "YIELD" => {
+                return Ok(());
+            }
+            "LEPC" => {
+                let n = Self::dst_reg(&i.ops[0])?;
+                if n != 255 {
+                    let lo = self.m.c_u32(self.pc as u32);
+                    let hi = self.m.c_u32((self.pc >> 32) as u32);
+                    self.store_reg(n, lo);
+                    self.store_reg(n + 1, hi);
+                }
                 return Ok(());
             }
             _ => {}
