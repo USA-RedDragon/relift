@@ -1019,3 +1019,41 @@ TEST(am_proxy_without_pid_uses_default)
     CHECK_EQ(rc_of(r), 0);
     CHECK(tc_u64(&r, 0) != 0);
 }
+
+TEST(am_switch2_proxy_and_its_functions)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    env e;
+    memset(&e, 0, sizeof e);
+    e.c = t_boot(&cfg);
+    e.heap = t_heap(e.c, 0x200000);
+    e.svc = tc_open_service(e.c, e.heap, "appletOE");
+    CHECK(e.svc.handle && tc_to_domain(e.c, &e.svc) == 0);
+    CHECK_EQ(tc_sub(e.c, e.svc, proxy_req(10), &e.proxy), 0);
+    tc_obj perf, scaling;
+    CHECK_EQ(get(&e, e.proxy, 40, &perf), 0);
+    CHECK_EQ(u8_out(&e, perf, 0), 0);
+    CHECK_EQ(set8(&e, perf, 1, 1), 0);
+    CHECK_EQ(u8_out(&e, perf, 0), 1);
+    CHECK_EQ(get(&e, e.proxy, 60, &scaling), 0);
+    tc_res r = tc_send(e.c, scaling, tc_new(10));
+    CHECK_EQ(rc_of(r), 0);
+    CHECK_EQ(tc_u32(&r, 0) | tc_u32(&r, 4) | tc_u32(&r, 8), 0);
+    CHECK_EQ(get(&e, e.proxy, 20, &e.af), 0);
+    r = tc_send(e.c, e.af, tc_new(320));
+    CHECK_EQ(rc_of(r), 0);
+    CHECK_EQ(r.data[0] | r.data[1], 0);
+}
+
+TEST(am_switch_has_no_switch2_proxy)
+{
+    env e;
+    env_open(&e, "appletOE", 0);
+    CHECK(e.ok);
+    tc_obj o;
+    CHECK_EQ(get(&e, e.proxy, 40, &o), SF_RESULT_UNKNOWN_COMMAND);
+    CHECK_EQ(get(&e, e.proxy, 60, &o), SF_RESULT_UNKNOWN_COMMAND);
+    CHECK(tc_sub(e.c, e.svc, proxy_req(10), &o) != 0);
+}

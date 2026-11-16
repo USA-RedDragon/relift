@@ -459,6 +459,19 @@ static rl_result af_get_notification_event(rl_ipc_req *r) { return af_event(r, E
 static rl_result af_get_health_warning_event(rl_ipc_req *r) { return af_event(r, EV_HEALTH_WARNING); }
 static rl_result af_get_unknown_event(rl_ipc_req *r) { return af_event(r, EV_UNKNOWN); }
 
+/**
+ * @brief Command 320 (20.0.0+, unnamed): no input, two output bytes the SDK
+ * hands back as they come. Their meaning is not known; both are zero.
+ */
+static rl_result af_cmd_320(rl_ipc_req *r)
+{
+    uint8_t *out = rl_ipc_out(r, 2);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    out[0] = out[1] = 0;
+    return KR_SUCCESS;
+}
+
 static rl_result af_try_pop_from_friend_invitation_channel(rl_ipc_req *r)
 {
     (void)r;
@@ -502,6 +515,7 @@ static const rl_ipc_cmd af_cmds[] = {
     { 150, "GetNotificationStorageChannelEvent", af_get_notification_event },
     { 160, "GetHealthWarningDisappearedSystemEvent", af_get_health_warning_event },
     { 210, "GetUnknownEvent", af_get_unknown_event },
+    { 320, "Cmd320", af_cmd_320 },
     RL_SRV_STUB(1001, "PrepareForJit"),
 };
 

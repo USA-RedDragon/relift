@@ -64,6 +64,12 @@ rl_ipc_object *am_new_home_menu_functions(void);
 rl_ipc_object *am_new_library_self_accessor(void);
 rl_ipc_object *am_new_process_winding_controller(void);
 rl_ipc_object *am_new_empty(const rl_ipc_class *cls);
+/** @brief Switch 2: IPerformanceFunctions. */
+rl_ipc_object *am_new_performance_functions(void);
+/** @brief Switch 2: IGraphicsScalingParametersFunctions. */
+rl_ipc_object *am_new_graphics_scaling_functions(void);
+/** @brief Resets the Switch 2 interfaces' state. */
+void am_s2_reset(void);
 
 extern const rl_ipc_class am_debug_functions_class;
 extern const rl_ipc_class am_global_state_controller_class;

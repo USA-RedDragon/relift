@@ -258,6 +258,25 @@ static const rl_ipc_cmd application_proxy_cmds[] = {
     { 1000, "GetDebugFunctions", px_debug_functions },
 };
 
+static rl_result px_performance_functions(rl_ipc_req *r) { return am_push_object(r, am_new_performance_functions()); }
+static rl_result px_graphics_scaling_functions(rl_ipc_req *r)
+{
+    return am_push_object(r, am_new_graphics_scaling_functions());
+}
+
+static const rl_ipc_cmd application_proxy2_cmds[] = {
+    { 0, "GetCommonStateGetter", px_common_state_getter },
+    { 1, "GetSelfController", px_self_controller },
+    { 2, "GetWindowController", px_window_controller },
+    { 3, "GetAudioController", px_audio_controller },
+    { 4, "GetDisplayController", px_display_controller },
+    { 11, "GetLibraryAppletCreator", px_library_applet_creator },
+    { 20, "GetApplicationFunctions", px_application_functions },
+    { 40, "GetPerformanceFunctions", px_performance_functions },
+    { 60, "GetGraphicsScalingParametersFunctions", px_graphics_scaling_functions },
+    { 1000, "GetDebugFunctions", px_debug_functions },
+};
+
 static const rl_ipc_cmd library_proxy_cmds[] = {
     { 0, "GetCommonStateGetter", px_common_state_getter },
     { 1, "GetSelfController", px_self_controller },
@@ -288,6 +307,9 @@ static const rl_ipc_cmd system_proxy_cmds[] = {
 static const rl_ipc_class application_proxy_class = {
     "nn::am::service::IApplicationProxy", application_proxy_cmds, AM_N(application_proxy_cmds), 0, free
 };
+static const rl_ipc_class application_proxy2_class = {
+    "nn::am::service::IApplicationProxy", application_proxy2_cmds, AM_N(application_proxy2_cmds), 0, free
+};
 static const rl_ipc_class library_proxy_class = {
     "nn::am::service::ILibraryAppletProxy", library_proxy_cmds, AM_N(library_proxy_cmds), 0, free
 };
@@ -309,13 +331,21 @@ static rl_result open_proxy(rl_ipc_req *r, const rl_ipc_class *cls)
     return rl_ipc_push_object(r, o);
 }
 
-static rl_result oe_open_application_proxy(rl_ipc_req *r) { return open_proxy(r, &application_proxy_class); }
+static rl_result oe_open_application_proxy(rl_ipc_req *r)
+{
+    return open_proxy(r, hos_switch2() ? &application_proxy2_class : &application_proxy_class);
+}
 static rl_result ae_open_system_applet_proxy(rl_ipc_req *r) { return open_proxy(r, &system_proxy_class); }
 static rl_result ae_open_library_applet_proxy(rl_ipc_req *r) { return open_proxy(r, &library_proxy_class); }
 static rl_result ae_open_system_application_proxy(rl_ipc_req *r) { return open_proxy(r, &application_proxy_class); }
 
 static const rl_ipc_cmd oe_cmds[] = {
     { 0, "OpenApplicationProxy", oe_open_application_proxy },
+};
+
+static const rl_ipc_cmd oe2_cmds[] = {
+    { 0, "OpenApplicationProxy", oe_open_application_proxy },
+    { 10, "OpenApplicationProxy2", oe_open_application_proxy },
 };
 
 static const rl_ipc_cmd ae_cmds[] = {
@@ -326,9 +356,10 @@ static const rl_ipc_cmd ae_cmds[] = {
 };
 
 static const rl_ipc_class oe_class = { "appletOE", oe_cmds, AM_N(oe_cmds), 0, NULL };
+static const rl_ipc_class oe2_class = { "appletOE", oe2_cmds, AM_N(oe2_cmds), 0, NULL };
 static const rl_ipc_class ae_class = { "appletAE", ae_cmds, AM_N(ae_cmds), 0, NULL };
 
-static rl_ipc_object *oe_factory(void) { return rl_srv_object(&oe_class, NULL); }
+static rl_ipc_object *oe_factory(void) { return rl_srv_object(hos_switch2() ? &oe2_class : &oe_class, NULL); }
 static rl_ipc_object *ae_factory(void) { return rl_srv_object(&ae_class, NULL); }
 
 void rl_srv_install_am(void)
@@ -354,6 +385,7 @@ void rl_srv_install_am(void)
     sync_event();
     pthread_mutex_unlock(&am_mu);
     am_app_reset();
+    am_s2_reset();
     rl_ipc_register_service("appletOE", oe_factory);
     rl_ipc_register_service("appletAE", ae_factory);
 }
