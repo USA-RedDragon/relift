@@ -2155,7 +2155,9 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   invalidates instruction cache lines puts the check back over the runs it
   touches. An entry that no run matches is missed code: a report, an RDRAM
   dump with `--dump`, and the program stops. Dev builds have no hot-load
-  for this guest yet.
+  for this guest yet. A transfer from one run to another is always a
+  computed one, through dispatch, so the other run's check sees the bytes
+  that are there when it runs.
 
 ### The RSP
 
