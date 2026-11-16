@@ -523,7 +523,7 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
       </intent-filter>
       <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
     </activity>
-    <activity android:name="dev.relift.app.SettingsActivity" android:exported="false" android:taskAffinity="{package}.settings" android:excludeFromRecents="true" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
+    <activity android:name="dev.relift.app.SettingsActivity" android:exported="false" android:taskAffinity="{package}.settings" android:excludeFromRecents="true" android:screenOrientation="behind" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
     <activity android:name="dev.relift.app.Restarter" android:exported="false" android:process=":restart" android:taskAffinity="{package}.restart" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
     <service android:name="dev.relift.app.GpuProbe" android:exported="false" android:process=":gpucheck"/>
 {data}  </application>
@@ -1135,6 +1135,7 @@ mod tests {
         assert!(m.contains("android.permission.INTERNET"));
         assert!(m.contains("android:name=\"relift.gpu_driver\" android:value=\"true\""));
         assert!(m.contains("android:process=\":gpucheck\""));
+        assert!(m.contains("android:taskAffinity=\"dev.relift.game.x.settings\" android:excludeFromRecents=\"true\" android:screenOrientation=\"behind\""));
         assert!(!m.contains("DataService"));
         let with_data = Apk {
             data_manifest: Some(b""),
