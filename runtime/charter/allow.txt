@@ -7,3 +7,4 @@ core/crash_posix.c  a64-isa  the host pc, sp and frame pointer of a faulting hos
 core/fiber_aarch64.S  a64-isa  the fiber switch for 64-bit Arm hosts (Linux, macOS, Windows): host-arch code that saves the host's callee-saved registers, not guest code
 core/fiber_aarch64.S  a64-system-registers  the fiber switch reads the host's FP control register to check the default mode at a hand-over: the host CPU, not a guest CPU
 core/fiber_aarch64.S  register-file  the fiber switch saves and restores the host's link register x30: the host CPU, not a guest register file
+core/include/relift/abi_core.h  a64-isa  RL_COLD_CALL names the host architectures whose compilers have the preserve_all convention (64-bit x86 and Arm): the host CPU, not a guest CPU
