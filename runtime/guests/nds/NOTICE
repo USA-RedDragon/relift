@@ -6,6 +6,16 @@ Most of this layer is fresh C written from GBATEK (problemkaputt.de/gbatek.htm:
 Tightly Coupled Memory"): mem.c, bus.c, io.c, irq.c, ipc.c, math.c. The
 ordering of the two CPUs (order.c) follows relift's spike 20-nds q3.
 
+The high-level BIOS (bios.c, bios_copy.c, bios_decomp.c, bios_tables.c) is fresh C
+from GBATEK ("BIOS Function Summary" and the sections it lists, "DS Memory
+Control - BIOS"). Its algorithms follow relift's GBA BIOS (runtime/guests/gba/
+bios), which the DS routines share. No BIOS image, code or table is used. The
+sine and pitch tables are the formulas in bios_tables.c; the volume table is a
+fit of GBATEK's stated range to the values an open BIOS replacement returns
+when run as a black box (its source was not read). Results were checked
+against that replacement as a black box (tests/bios_oracle.h) and, where it
+disagrees with GBATEK, GBATEK is followed (test_bios.c names each case).
+
 ares has no NDS core. The DS timers are the GBA's timers clocked by the DS bus
 (GBATEK "DS Timers"), so timer.c is relift's GBA timer (runtime/guests/gba/
 timer.c) for two CPUs with bus-cycle counters. That file was ported from ares,
