@@ -459,6 +459,8 @@ TEST(compact_layout_36_bit_agrees)
 
 TEST(compact_layout_39_bit_agrees)
 {
+    if (rl_cfg()->address_bits == 36)
+        return;
     rl_hos_config cfg;
     rl_hos_default_config(&cfg);
     uint64_t code_end = (cfg.code_start + cfg.code_size + 0x1FFFFF) & ~0x1FFFFFull;
@@ -467,6 +469,8 @@ TEST(compact_layout_39_bit_agrees)
 
 TEST(console_layout_keeps_the_console_regions)
 {
+    if (rl_cfg()->address_bits == 36)
+        return;
     rl_ctx *c = boot_layout(3, "console");
     CHECK(c && !hos.compact);
     CHECK_EQ(hos.vm.size, 1ull << 39);
