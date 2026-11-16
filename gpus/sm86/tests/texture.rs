@@ -212,6 +212,36 @@ fn surfaces_are_storage_images() {
 }
 
 #[test]
+fn surface_atomics_return_the_old_value() {
+    let suatom = word(
+        0x593,
+        0,
+        &[
+            (16, 8, 0),
+            (24, 8, 8),
+            (32, 8, 4),
+            (40, 14, 0x12),
+            (54, 5, 2),
+            (59, 2, 0),
+            (61, 3, 3),
+            (72, 1, 1),
+            (73, 3, 0),
+            (81, 3, 7),
+            (84, 3, 1),
+            (87, 4, 0),
+        ],
+    );
+    let s = compute(&[suatom]);
+    assert_eq!(insts(&s.spirv, 60).len(), 1);
+    assert_eq!(insts(&s.spirv, 234).len(), 1);
+    assert!(
+        s.interface
+            .texture_bindings
+            .contains(&image_binding(ImageKind::Atomic32, ImageDim::D2))
+    );
+}
+
+#[test]
 fn rejects_texture_forms_it_cannot_translate() {
     for w in [
         tex(0x166, &[(61, 3, 1), (77, 1, 1), (87, 3, 1)]),

@@ -25,6 +25,11 @@
 //! the other instructions on the same bound handle (2D if none).
 //! Indices from a register are decorated `NonUniform`.
 //!
+//! Binary (`.D`) surface accesses read and write unsigned texels of the
+//! access size (8 to 128 bits; `.BA` byte x coordinates are divided by it),
+//! so the runtime gives those arrays views of a size-compatible unsigned
+//! format; atomics use 32-bit `R32ui` views.
+//!
 //! The numeric kind of a bound handle's texture is chosen by the runtime:
 //! each bound handle that a TEX, TLD, TLD4, TXD, SULD.P or SUST.P reads gets
 //! a specialization constant ([`TEXTURE_KIND_SPEC`] onwards, listed in
@@ -1516,6 +1521,8 @@ fn surface(c: &mut Ctx, i: &Inst) -> Res<()> {
     }
     let size = if formatted || !w.bit(72) {
         1
+    } else if !(load || store) {
+        4
     } else {
         match w.get(73, 3) {
             0 | 1 => 1,
