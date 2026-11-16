@@ -15,8 +15,9 @@ generated files are committed and never edited by hand.
 cargo test -p relift-cpu-mips
 ```
 
-State: no guest crate links the frontend yet, the VR4300 has a runtime CPU
-layer (`runtime/cpus/mips`), the R3000A has none, and the lifted-versus-oracle
+State: `relift-n64-analyze` runs the VR4300's lifted IR for code discovery;
+no guest crate emits it yet. The VR4300 has a runtime CPU layer
+(`runtime/cpus/mips`), the R3000A has none, and the lifted-versus-oracle
 check covers the VR4300 only (`relift-check mips`).
 
 ## Layout
