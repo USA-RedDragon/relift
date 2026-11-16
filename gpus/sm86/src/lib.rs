@@ -7,6 +7,8 @@
 mod decode;
 mod inst;
 pub mod program;
+pub mod spirv;
+pub mod translate;
 
 pub use decode::{DecodeError, decode};
 pub use inst::{CBank, Inst, Operand, RegMods, Sched, Swz, Word, f16_to_f64, fmt_f64, fmt_hex};
