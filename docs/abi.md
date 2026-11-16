@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 7.
+Contract version: `RL_ABI_VERSION` 8.
 
 ## 0. Runtime layers
 
@@ -1925,23 +1925,19 @@ is not in.
   `rl_dispatch_jump_miss` (section 6, shipped builds): lifted code's computed
   jumps now call the runtime there. `rl_dispatch_trap` is gone; trap slots
   stay empty.
+- Version 8 added the return check (section 5.4): `rl_fn` returns
+  `uint64_t`, an A64 function returns its RET's target and a host function
+  with the lifted ABI x30 (`rl_arm64_ret`), each call site compares that
+  with its return address and calls `rl_arm64_ret_elsewhere` otherwise, and
+  lifted A64 code raises `RL_PEND_REDIRECT` records. `RL_PENDING` always
+  comes with a pending record, which is how it is told from a RET to
+  address 1.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a
   mismatched runtime before any code is built.
 - Static units carry the same fields and are checked at start-up, which
   catches a stale shard linked against a newer runtime.
-- Version 6 added the return check (section 5.4): the `ra` field at offset
-  912 (in padding, so `sizeof(rl_ctx)` stays 960), `rl_arm64_ret_far`,
-  `rl_arm64_jump_far` and `RL_LIKELY`, which emitted code now calls, and the
-  `RL_PEND_REDIRECT` records lifted A64 code raises.
-- Version 7 moved the check to the call site (section 5.4): `rl_fn` returns
-  `uint64_t`, an A64 function returns its RET's target and a host function
-  with the lifted ABI x30 (`rl_arm64_ret`), each call site compares that
-  with its return address and calls `rl_arm64_ret_elsewhere` otherwise.
-  `rl_ctx.ra`, `RL_LOAD_LINK`, `rl_arm64_ret_far` and `rl_arm64_jump_far`
-  are gone (offset 912 is padding again); `RL_PENDING` now always comes
-  with a pending record, which is how it is told from a RET to address 1.
 
 ## 13. Hardware-register guests
 
