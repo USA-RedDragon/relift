@@ -81,6 +81,10 @@ const DMA_SLACK: i32 = 32;
 /// an OAM DMA visits before it gives up.
 const CONFLICT_STATES: usize = 1 << 16;
 
+/// Addresses from an I/O register a transfer goes to that are lifted with
+/// every opcode: its instruction and the one after it.
+const IO_RUN: u16 = 4;
+
 /// Most instructions [`Machine::widen`] runs for one round of a loop.
 const WIDEN_STEPS: u32 = 256;
 
@@ -1997,7 +2001,10 @@ impl Machine<'_> {
 /// cartridge an instruction in VRAM may fetch the 0 the boot ROM cleared it
 /// to, before a store or DMA reached it. A `HALT` or `STOP` at the window's
 /// last address, after which the CPU may fetch whatever the bus holds at
-/// `$8000`, gets every opcode there. A path
+/// `$8000`, gets every opcode there. A target among the
+/// I/O registers, whose values the analysis does not know (a test runs
+/// the timer's as code), gets every opcode at it and the
+/// [`IO_RUN`]` - 1` addresses after it. A path
 /// ends at a ROM location that is not in `code`, the instructions the
 /// analysis decoded, nor in the fixed region or a bank of `whole`, the
 /// banks lifted at every address, as it has gone astray.
@@ -2090,6 +2097,16 @@ pub(crate) fn predict(
         found.roots.insert(Loc::fixed(0x38));
     }
     ops.sleds = cleared;
+    for &t in targets {
+        if !(0xFF00..0xFF80).contains(&t) {
+            continue;
+        }
+        for a in t..t.saturating_add(IO_RUN).min(0xFF80) {
+            for k in 0..0x200 {
+                all.entry((a, k)).or_insert(RamClass::Generated);
+            }
+        }
+    }
     ops.ops = all
         .into_iter()
         .map(|((addr, key), class)| RamOp { addr, key, class })

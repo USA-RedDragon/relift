@@ -306,6 +306,15 @@ fn a_loop_left_on_an_unknown_flag_forgets_its_count() {
 }
 
 #[test]
+fn a_jump_to_an_io_register_gets_every_opcode_there() {
+    let r = predict(&[(0x150, &[0xCD, 0x04, 0xFF, 0x18, 0xFE])]);
+    let at = |a: u16| r.ops.iter().filter(|o| o.addr == a).count();
+    assert_eq!(at(0xFF04), 0x200);
+    assert_eq!(at(0xFF07), 0x200);
+    assert_eq!(at(0xFF08), 0);
+}
+
+#[test]
 fn a_vram_dma_copies_code_into_vram() {
     let r = predict_on(
         0x80,
