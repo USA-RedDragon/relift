@@ -50,6 +50,7 @@ impl Ctx {
             Swz::H0H0 => (lo, lo),
             Swz::H1H1 => (hi, hi),
             Swz::H1H0 => (hi, lo),
+            Swz::H0NH1 => (self.sh(op::BITWISE_XOR, hi, 0x8000), lo),
             s => return bad(format!("half swizzle {s:?}")),
         };
         if m.abs {

@@ -668,9 +668,11 @@ fn f2fp(c: &mut Ctx, i: &Inst) -> Res<()> {
     let mut relu = false;
     let mut sat = false;
     let mut mode = 0;
+    let mut merge = false;
     for m in &i.mods {
         match *m {
             "PACK_AB" => {}
+            "MERGE_C" => merge = true,
             "RELU" => relu = true,
             "SATFINITE" => sat = true,
             "RZ" => mode = 3,
@@ -680,7 +682,8 @@ fn f2fp(c: &mut Ctx, i: &Inst) -> Res<()> {
     let a = c.usrc(&i.ops[1])?;
     let b = c.usrc(&i.ops[2])?;
     let mut halves = Vec::new();
-    for v in [a, b] {
+    let convert = if merge { vec![a] } else { vec![a, b] };
+    for v in convert {
         let mut h = c.f32_to_f16(v, mode, false);
         if relu {
             let s = c.and_k(h, 0x8000);
@@ -697,8 +700,13 @@ fn f2fp(c: &mut Ctx, i: &Inst) -> Res<()> {
         }
         halves.push(h);
     }
-    let hi = c.sh(op::SHIFT_LEFT_LOGICAL, halves[0], 16);
-    let r = c.ib(op::BITWISE_OR, hi, halves[1]);
+    let (hi, lo) = if merge {
+        (b, halves[0])
+    } else {
+        (halves[0], halves[1])
+    };
+    let hi = c.sh(op::SHIFT_LEFT_LOGICAL, hi, 16);
+    let r = c.ib(op::BITWISE_OR, hi, lo);
     c.store_dst(&i.ops[0], r)
 }
 

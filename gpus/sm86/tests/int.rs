@@ -218,6 +218,11 @@ fn conversions() {
         ),
         "F2FP",
     );
+    check(
+        "f2fp merge",
+        word(0x03e, 1, &[(16, 8, 6), (32, 8, 5), (64, 8, 4), (78, 1, 1)]),
+        "F2FP.MERGE_C",
+    );
 }
 
 #[test]
@@ -254,6 +259,15 @@ fn half_arithmetic() {
             ],
         ),
         "HFMA2.SAT",
+    );
+    check(
+        "hfma2 negated high half",
+        word(
+            0x031,
+            1,
+            &[(16, 8, 6), (24, 8, 4), (32, 8, 5), (64, 8, 8), (86, 1, 1)],
+        ),
+        "HFMA2 R6, R4, R5.H0_NH1",
     );
     check(
         "hset2",
