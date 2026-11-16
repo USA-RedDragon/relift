@@ -10,7 +10,8 @@ DIR for --roms holds the c-sp game-boy-test-roms v7.0 release; with
 --fetch it is downloaded there first and its sha256 checked. The ROMs are
 never part of the repository. A case with local = true names a ROM that gen_roms.py
 writes. Exit status 0 when every case passes.
-Standard library only.
+Each subprocess is limited by the CPU time it uses, not by wall-clock time, so
+the result does not depend on machine load. Standard library only.
 """
 
 import argparse
@@ -18,9 +19,11 @@ import concurrent.futures as cf
 import hashlib
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 import urllib.request
 import zipfile
@@ -73,12 +76,27 @@ def spec(case, roms):
     return "\n".join(lines) + "\n"
 
 
-def run(cmd, env, cwd=None, timeout=600):
-    try:
-        p = subprocess.run(cmd, env=env, cwd=cwd, capture_output=True, text=True, errors="replace", timeout=timeout)
-        return p.returncode, p.stdout, p.stderr
-    except subprocess.TimeoutExpired:
-        return -9, "", "timed out"
+BUILD_CPU_SECONDS = 900
+RUN_CPU_SECONDS = 300
+BACKSTOP_SECONDS = 3600
+
+
+def run(cmd, env, cwd=None, cpu=RUN_CPU_SECONDS):
+    """Runs cmd with a limit on the CPU time each of its processes may use, so
+    that a slow or busy machine does not fail a case; a hang that uses no CPU
+    ends at the wall-clock backstop."""
+
+    with subprocess.Popen(
+        cmd, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace"
+    ) as p:
+        resource.prlimit(p.pid, resource.RLIMIT_CPU, (cpu, cpu))
+        try:
+            so, se = p.communicate(timeout=BACKSTOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+            return -9, "", "no progress within the wall-clock backstop"
+        return p.returncode, so, se
 
 
 def one_rom(args, index, rom, cases):
@@ -88,9 +106,11 @@ def one_rom(args, index, rom, cases):
     proj = os.path.join(args.work, "projects", name)
     os.makedirs(proj, exist_ok=True)
     path = os.path.join(args.local, rom) if cases[0].get("local") else os.path.join(args.roms, rom)
-    rc, so, se = run([args.relift, "-q", "import", path], env, proj)
+    t0 = time.monotonic()
+    rc, so, se = run([args.relift, "-q", "import", path], env, proj, BUILD_CPU_SECONDS)
     if rc == 0:
-        rc, so, se = run([args.relift, "-q", "build"], env, proj)
+        rc, so, se = run([args.relift, "-q", "build"], env, proj, BUILD_CPU_SECONDS)
+    built = time.monotonic() - t0
     game = os.path.join(args.work, "cache", "projects", name, "build", "host", "game")
     out = []
     for case in cases:
@@ -101,7 +121,9 @@ def one_rom(args, index, rom, cases):
         with open(sp, "w") as f:
             f.write(spec(case, args.roms))
         hw = case.get("hardware", case["mode"])
+        t1 = time.monotonic()
         crc, cso, cse = run([game, "--case", sp, "--model", hw, "--check", "--stats"], env)
+        print(f"{case['id']}: build {built:.0f}s run {time.monotonic() - t1:.0f}s", file=sys.stderr, flush=True)
         m = VERDICT.search(cso)
         verdict = m.group(1) if m else ("diverged" if crc == 70 else "crash")
         detail = m.group(2) if m else (cse or cso).strip()[-300:]
@@ -135,8 +157,14 @@ def main():
         by_rom.setdefault(c["rom"], []).append(c)
     first = sorted(by_rom)[0]
     results = one_rom(args, 0, first, by_rom.pop(first))
+
+    def size(rom):
+        base = args.local if by_rom[rom][0].get("local") else args.roms
+        return os.path.getsize(os.path.join(base, rom))
+
+    queue = sorted(by_rom.items(), key=lambda kv: (-size(kv[0]), kv[0]))
     with cf.ThreadPoolExecutor(args.jobs) as ex:
-        futs = [ex.submit(one_rom, args, i + 1, r, cs) for i, (r, cs) in enumerate(sorted(by_rom.items()))]
+        futs = [ex.submit(one_rom, args, i + 1, r, cs) for i, (r, cs) in enumerate(queue)]
         for fu in futs:
             results.extend(fu.result())
     failed = 0
