@@ -31,12 +31,14 @@ jobs:
         run: scripts/ci/release-guard.sh
 
   linux:
-    name: cross ${{ matrix.target }}
+    name: cross ${{ matrix.guest }} ${{ matrix.target }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        guest: [gb, gba]
+        target: [windows-x64, windows-arm64, android-arm64]
         include:
           - target: windows-x64
             rust: x86_64-pc-windows-gnullvm
@@ -85,16 +87,18 @@ jobs:
           echo "$ANDROID_NDK_HOME"
           cat "$ANDROID_NDK_HOME/source.properties"
 
-      - name: Cross-build the runtime and a Game Boy program, check the release, run it
-        run: scripts/ci/gbcross.sh "${{ matrix.target }}"
+      - name: Cross-build the runtime and a program of the guest, check the release, run it
+        run: scripts/ci/gbcross.sh "${{ matrix.target }}" --guest "${{ matrix.guest }}"
 
   macos:
-    name: cross ${{ matrix.target }}
+    name: cross ${{ matrix.guest }} ${{ matrix.target }}
     runs-on: macos-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        guest: [gb, gba]
+        target: [macos-x64, ios-arm64]
         include:
           - target: macos-x64
             rust: x86_64-apple-darwin
@@ -117,5 +121,5 @@ jobs:
             .
             guests/gb/devices
 
-      - name: Cross-build the runtime and a Game Boy program, check the release
-        run: scripts/ci/gbcross.sh "${{ matrix.target }}"
+      - name: Cross-build the runtime and a program of the guest, check the release
+        run: scripts/ci/gbcross.sh "${{ matrix.target }}" --guest "${{ matrix.guest }}"

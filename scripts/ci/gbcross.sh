@@ -1,22 +1,30 @@
 #!/usr/bin/env bash
-# Cross-build the runtime and a Game Boy program for one relift host target,
-# check the release, and run it where the host can (windows-x64 under wine).
+# Cross-build the runtime and a Game Boy program (or with --guest gba a Game
+# Boy Advance program) for one relift host target, check the release, and
+# run it where the host can (windows-x64 under wine).
 # For ios-arm64 it also builds SDL3 and libopus for iOS and the program as an
 # unsigned app, with an empty HOME so a developer's own signing identity and
 # provisioning profiles are not found, as on a CI runner.
-# Usage: gbcross.sh TARGET [gbcross.py options, such as --jobs N]
+# Usage: gbcross.sh TARGET [gbcross.py options, such as --jobs N or --guest gba]
 . "$(dirname "$0")/lib.sh"
 
 target=${1:?usage: gbcross.sh TARGET [gbcross.py options]}
 shift
+guest=gb
+prev=
+for a in "$@"; do
+  [ "$prev" = --guest ] && guest=$a
+  prev=$a
+done
+work="$CI_WORK/cross-$target"
+[ "$guest" = gb ] || work="$work-$guest"
 run=()
 [ "$target" = windows-x64 ] && run=(--run)
 cargo build --locked -p relift
 python3 -I runtime/tools/cross/gbcross.py --target "$target" \
-  --relift "${CARGO_TARGET_DIR:-target}/debug/relift" --work "$CI_WORK/cross-$target" ${run[@]+"${run[@]}"} ${@+"$@"}
+  --relift "${CARGO_TARGET_DIR:-target}/debug/relift" --work "$work" ${run[@]+"${run[@]}"} ${@+"$@"}
 
 if [ "$target" = ios-arm64 ]; then
-  work="$CI_WORK/cross-$target"
   cache="$work/cache"
   relift="${CARGO_TARGET_DIR:-$ROOT/target}/debug/relift"
   command -v ninja >/dev/null || brew install ninja
