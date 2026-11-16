@@ -129,12 +129,66 @@ static void bytes_at(rl_nds_arm *k, uint32_t pc, char *out, size_t n)
         o += (size_t)snprintf(out + o, n - o, i ? " %02x" : "%02x", b[i]);
 }
 
+/** @brief The cold range of unit u that holds pc, or NULL. */
+static const rl_fn_entry *cold_range(const rl_nds_unit *u, uint32_t pc)
+{
+    const rl_unit *cu = u->cold;
+    size_t lo = 0, hi = cu->fn_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (cu->fns[mid].guest_addr <= pc)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (!lo)
+        return NULL;
+    const rl_fn_entry *e = &cu->fns[lo - 1];
+    uint64_t size = (e->flags & RL_FN_RANGE) && e->guest_size > 2 ? e->guest_size : 2;
+    return pc - e->guest_addr < size ? e : NULL;
+}
+
+/**
+ * @brief The cold copy's function at pc inside a lifted function of k's
+ * units, in k's state, whose run of bytes that holds pc matches memory, or
+ * NULL. Only that run is compared, as an entry check compares only the
+ * entry's: a function can run on from code that was overwritten since,
+ * such as a boot stub that jumped to code it copied elsewhere.
+ */
+static rl_fn cold_at(rl_nds_arm *k, uint32_t pc, unsigned thumb)
+{
+    const rl_nds_run *r = k->run;
+    for (uint32_t n = 0; n < r->p->unit_count; n++) {
+        const rl_nds_unit *u = &r->p->units[n];
+        if (u->cpu != k->id || !u->cold)
+            continue;
+        const rl_fn_entry *e = cold_range(u, pc);
+        if (!e)
+            continue;
+        for (uint32_t i = 0; i < u->run_count; i++) {
+            const rl_nds_run_bytes *x = &u->runs[i];
+            if (pc - x->at >= x->len || (u->fns[x->function].at & 1u) != thumb)
+                continue;
+            bool same = rl_nds_code_equal(r->m, k->id, x->at, u->blob + x->offset, x->len);
+            if (same) {
+                k->stats.colds++;
+                return e->fn;
+            }
+        }
+    }
+    return NULL;
+}
+
 /** @brief Code no unit was lifted from: stops the program with the CPU, the address and the bytes there. */
 static int unfound(rl_ctx *c, uint8_t *mem)
 {
-    (void)mem;
     rl_nds_arm *k = cpu_of(c);
     uint32_t pc = c->pc & ~1u;
+    rl_fn cold = cold_at(k, pc, c->t);
+    if (cold) {
+        c->pc = pc;
+        return cold(c, mem);
+    }
     char hex[32];
     bytes_at(k, pc, hex, sizeof hex);
     k->stats.unfound++;

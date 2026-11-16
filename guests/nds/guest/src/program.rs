@@ -12,6 +12,14 @@
 //! another unit lifted from the bytes there, or stops with a report of the
 //! CPU, the address and the bytes. Code no unit holds is never
 //! interpreted: it stops the program the same way.
+//!
+//! With a cold copy ([`Cold`]), each unit also gets a second C unit that
+//! dispatch enters at any instruction (the shared mechanism of the Switch
+//! build: `enter_anywhere` in pieces, `RL_FN_RANGE` entries, direct calls
+//! to the hot functions by name). The runtime goes there when a jump lands
+//! inside a lifted function rather than at its entry, such as a thread's
+//! context restored to the instruction after the one that saved it, once
+//! the bytes of the function that holds the address match memory.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -66,6 +74,31 @@ pub struct LiftedUnit {
     pub functions: Vec<Checked>,
     /// The bytes the entry checks compare.
     pub blob: Vec<u8>,
+    /// The cold copy, with the C symbol of its `rl_unit`.
+    pub cold: Option<(String, Output)>,
+    /// With a cold copy, the runs of consecutive instruction bytes of each
+    /// function, which a cold entry compares with memory.
+    pub runs: Vec<Run>,
+}
+
+/// A run of consecutive bytes one function was lifted from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Run {
+    /// The first address.
+    pub at: u32,
+    /// Where the bytes start in the unit's blob.
+    pub offset: u32,
+    /// How many bytes.
+    pub len: u32,
+    /// The function's index in the unit's checks.
+    pub function: u32,
+}
+
+/// How to emit the cold copy of each unit.
+#[derive(Clone, Copy, Debug)]
+pub struct Cold {
+    /// The most bytes of C per C function.
+    pub piece_bytes: usize,
 }
 
 /// Everything a cartridge lifts to.
@@ -204,9 +237,15 @@ struct Pending<'a> {
 }
 
 /// Lifts every unit of `units`, as `reports` (its analysis) found them;
-/// `image_id` identifies the cartridge to the runtime.
+/// `image_id` identifies the cartridge to the runtime; `cold` asks for the
+/// cold copy of every unit.
 #[must_use]
-pub fn lift(units: &Units, reports: &[UnitReport], image_id: [u8; 32]) -> Lifted {
+pub fn lift(
+    units: &Units,
+    reports: &[UnitReport],
+    image_id: [u8; 32],
+    cold: Option<Cold>,
+) -> Lifted {
     let mut pending: Vec<Pending<'_>> = units
         .units
         .iter()
@@ -290,8 +329,37 @@ pub fn lift(units: &Units, reports: &[UnitReport], image_id: [u8; 32]) -> Lifted
         let mut liftings = Vec::new();
         let mut checks = Vec::new();
         let mut blob = Vec::new();
+        let mut runs = Vec::new();
         for (index, (entry, report, images)) in p.fns.values().enumerate() {
             let f = &report.functions[entry];
+            if cold.is_some() {
+                let mut spans: Vec<(&[u8], u32, u32, u32)> = Vec::new();
+                for &l in f.instructions.keys() {
+                    let Some((img, base)) = image(images, report, l) else {
+                        continue;
+                    };
+                    let end = l.addr + l.size();
+                    match spans.last_mut() {
+                        Some((i, b, _, e))
+                            if *b == base && std::ptr::eq(*i, img) && l.addr <= *e =>
+                        {
+                            *e = (*e).max(end);
+                        }
+                        _ => spans.push((img, base, l.addr, end)),
+                    }
+                }
+                for (img, base, at, end) in spans {
+                    let off = (at - base) as usize;
+                    let n = ((end - at) as usize).min(img.len() - off);
+                    runs.push(Run {
+                        at,
+                        offset: blob.len() as u32,
+                        len: n as u32,
+                        function: index as u32,
+                    });
+                    blob.extend_from_slice(&img[off..off + n]);
+                }
+            }
             let mut blocks: Blocks = BTreeMap::new();
             let mut end = u64::from(entry.addr);
             for &l in f.instructions.keys() {
@@ -388,6 +456,10 @@ pub fn lift(units: &Units, reports: &[UnitReport], image_id: [u8; 32]) -> Lifted
             ..Options::default()
         };
         let output = relift_emit::emit(&fe, &fns, &[], &opts);
+        let cold = cold.map(|c| {
+            let sym = format!("rl_cold_nds_{dir}");
+            (sym.clone(), emit_cold(&fe, &fns, &opts, sym, c))
+        });
         out.push(LiftedUnit {
             id: p.id,
             dir,
@@ -395,6 +467,8 @@ pub fn lift(units: &Units, reports: &[UnitReport], image_id: [u8; 32]) -> Lifted
             output,
             functions: checks,
             blob,
+            cold,
+            runs,
         });
     }
     Lifted {
@@ -403,6 +477,44 @@ pub fn lift(units: &Units, reports: &[UnitReport], image_id: [u8; 32]) -> Lifted
         unlifted,
         shadowed,
     }
+}
+
+/// The cold copy of a unit whose hot functions are `fns`, emitted with
+/// `hot`'s options: each function once by entry (the first of an ARM and a
+/// Thumb function at one address), entered at any instruction, calling the
+/// hot functions by name.
+fn emit_cold(fe: &Nds, fns: &[Function<'_>], hot: &Options, symbol: String, c: Cold) -> Output {
+    let mut seen = BTreeSet::new();
+    let mut cold = Vec::new();
+    let mut calls = Vec::new();
+    for f in fns {
+        if !seen.insert(f.entry) {
+            continue;
+        }
+        calls.push(relift_emit::Override {
+            entry: f.entry,
+            host_fn: f.name.clone(),
+            may_unwind: true,
+            resume_point: false,
+            declare: true,
+        });
+        cold.push(Function {
+            name: format!("{}_cold", f.name),
+            ..f.clone()
+        });
+    }
+    let opts = Options {
+        unit_name: format!("{} (cold)", hot.unit_name),
+        unit_symbol: symbol,
+        piece_bytes: c.piece_bytes,
+        enter_anywhere: Some(u64::MAX),
+        entry_ranges: true,
+        calls,
+        io_map: device_map(),
+        image_id: hot.image_id,
+        ..Options::default()
+    };
+    relift_emit::emit(fe, &cold, &[], &opts)
 }
 
 /// The functions to emit for `lifted`.
@@ -480,6 +592,9 @@ pub fn program_c(title: &str, units: &[LiftedUnit], args: &[String]) -> String {
     );
     for (k, u) in units.iter().enumerate() {
         let _ = writeln!(s, "extern const rl_unit {};", u.symbol);
+        if let Some((sym, _)) = &u.cold {
+            let _ = writeln!(s, "extern const rl_unit {sym};");
+        }
         let _ = writeln!(s, "extern const uint8_t rl_nds_blob{k}[];");
         for f in &u.functions {
             let _ = writeln!(s, "extern RL_LIFTED({});", f.name);
@@ -498,19 +613,39 @@ pub fn program_c(title: &str, units: &[LiftedUnit], args: &[String]) -> String {
             s.push_str("    { 0u, 0u, 0u, NULL },\n");
         }
         s.push_str("};\n");
+        if !u.runs.is_empty() {
+            let _ = writeln!(s, "static const rl_nds_run_bytes runs{k}[] = {{");
+            for r in &u.runs {
+                let _ = writeln!(
+                    s,
+                    "    {{ {:#x}u, {:#x}u, {:#x}u, {}u }},",
+                    r.at, r.offset, r.len, r.function
+                );
+            }
+            s.push_str("};\n");
+        }
     }
     s.push_str("static const rl_nds_unit units[] = {\n");
     for (k, u) in units.iter().enumerate() {
         let _ = writeln!(
             s,
-            "    {{ {}, &{}, rl_nds_blob{k}, fns{k}, {}u, {} }},",
+            "    {{ {}, &{}, rl_nds_blob{k}, fns{k}, {}u, {}, {}, {}, {}u }},",
             match u.id.cpu() {
                 Cpu::Arm9 => "RL_NDS_ARM9",
                 Cpu::Arm7 => "RL_NDS_ARM7",
             },
             u.symbol,
             u.functions.len(),
-            c_string(&u.dir)
+            c_string(&u.dir),
+            u.cold
+                .as_ref()
+                .map_or_else(|| "NULL".to_string(), |(sym, _)| format!("&{sym}")),
+            if u.runs.is_empty() {
+                "NULL".to_string()
+            } else {
+                format!("runs{k}")
+            },
+            u.runs.len()
         );
     }
     s.push_str("};\nstatic const char *const args[] = {\n");
@@ -567,7 +702,7 @@ mod tests {
         let rom = relift_nds_formats::Rom::parse(r).expect("parses");
         let units = Units::read(&rom).expect("reads");
         let reports = units.analyze(1, &|_| {});
-        lift(&units, &reports, [0; 32])
+        lift(&units, &reports, [0; 32], None)
     }
 
     #[test]

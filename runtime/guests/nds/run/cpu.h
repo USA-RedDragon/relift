@@ -28,6 +28,8 @@ typedef struct rl_nds_arm_stats {
     uint64_t variants;
     /** @brief Entries and dispatch misses that found no lifted code (the program stopped). */
     uint64_t unfound;
+    /** @brief Dispatch misses inside a lifted function that went on in the cold copy. */
+    uint64_t colds;
     /** @brief Byte compares of entry checks (the others were known good). */
     uint64_t compares;
 } rl_nds_arm_stats;

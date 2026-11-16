@@ -25,6 +25,18 @@ typedef struct rl_nds_fn {
     rl_fn fn;
 } rl_nds_fn;
 
+/** @brief A run of consecutive bytes one function was lifted from. */
+typedef struct rl_nds_run_bytes {
+    /** @brief The first address. */
+    uint32_t at;
+    /** @brief Where the bytes start in the unit's blob. */
+    uint32_t offset;
+    /** @brief How many bytes. */
+    uint32_t len;
+    /** @brief The function's index in fns. */
+    uint32_t function;
+} rl_nds_run_bytes;
+
 /** @brief One lifted unit: a static binary or an overlay of one CPU. */
 typedef struct rl_nds_unit {
     /** @brief RL_NDS_ARM9 or RL_NDS_ARM7. */
@@ -38,6 +50,14 @@ typedef struct rl_nds_unit {
     uint32_t fn_count;
     /** @brief The unit's name, for reports. */
     const char *name;
+    /**
+     * @brief The cold copy, or NULL: every function again, entered at any
+     * instruction (RL_FN_RANGE entries whose pieces switch on c->pc).
+     */
+    const rl_unit *cold;
+    /** @brief With a cold copy, the runs of bytes of each function, which a cold entry compares. */
+    const rl_nds_run_bytes *runs;
+    uint32_t run_count;
 } rl_nds_unit;
 
 /** @brief What program.c gives rl_nds_main. */

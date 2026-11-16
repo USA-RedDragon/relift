@@ -164,8 +164,8 @@ static void make_program(void)
     g_fns7[1] = (rl_nds_fn){HANDLER7, 0, 4, handler7};
     g_fns7[2] = (rl_nds_fn){OPEN7, 0, 4, open7};
     g_fns7[3] = (rl_nds_fn){GET8_7, 0, 4, get8_7};
-    g_nds_units[0] = (rl_nds_unit){RL_NDS_ARM9, &g_units[0], g_blob9, g_fns9, 1, "test"};
-    g_nds_units[1] = (rl_nds_unit){RL_NDS_ARM7, &g_units[1], g_blob7, g_fns7, 4, "test"};
+    g_nds_units[0] = (rl_nds_unit){RL_NDS_ARM9, &g_units[0], g_blob9, g_fns9, 1, "test", NULL, NULL, 0};
+    g_nds_units[1] = (rl_nds_unit){RL_NDS_ARM7, &g_units[1], g_blob7, g_fns7, 4, "test", NULL, NULL, 0};
     g_prog = (rl_nds_program){g_rom, sizeof g_rom, g_nds_units, 2, "test", NULL, 0};
 }
 

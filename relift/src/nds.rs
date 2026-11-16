@@ -224,7 +224,10 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
     relift_cache::write_if_changed(&out.join("unresolved.txt"), notes.as_bytes())?;
     ui.begin(row, "lift");
     let image_id = relift_nds_formats::checksum::sha256(rom);
-    let lifted = relift_nds::program::lift(&units, &reports, image_id);
+    let cold = settings.emit.cold.then(|| relift_nds::program::Cold {
+        piece_bytes: settings.emit.cold_piece_kib as usize * 1024,
+    });
+    let lifted = relift_nds::program::lift(&units, &reports, image_id, cold);
     let mut files = Vec::new();
     let mut dirs = Vec::new();
     for (k, u) in lifted.units.iter().enumerate() {
@@ -241,6 +244,23 @@ pub fn build(settings: &Settings, mods: &[PathBuf], ui: &mut Ui) -> Result<PathB
             &udir.join(relift_emit::PRELUDE_NAME),
             relift_emit::PRELUDE.as_bytes(),
         )?;
+        let cold_dir = udir.join("cold");
+        if let Some((_, cold)) = &u.cold {
+            std::fs::create_dir_all(&cold_dir)?;
+            for f in &cold.files {
+                let path = cold_dir.join(&f.name);
+                relift_cache::write_if_changed(&path, f.text.as_bytes())?;
+                if f.name.ends_with(".c") {
+                    files.push(path);
+                }
+            }
+            relift_cache::write_if_changed(
+                &cold_dir.join(relift_emit::PRELUDE_NAME),
+                relift_emit::PRELUDE.as_bytes(),
+            )?;
+        } else if cold_dir.exists() {
+            std::fs::remove_dir_all(&cold_dir)?;
+        }
         relift_cache::write_if_changed(&cdir.join(relift_nds::program::blob_file(k)), &u.blob)?;
         dirs.push(u.dir.clone());
     }
