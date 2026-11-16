@@ -10,6 +10,7 @@
 
 #include <relift/ports.h>
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 #include <relift/window.h>
 
 #include <stdio.h>
@@ -19,6 +20,8 @@
 
 extern const rl_port_decl rl_gba_ports[];
 extern const uint32_t rl_gba_ports_count;
+extern const rl_port_decl rl_gba_ports_touchpad[];
+extern const uint32_t rl_gba_ports_touchpad_count;
 
 #define FRAME_NS 16742706ull
 #define W 240u
@@ -281,6 +284,7 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
     const char *save = NULL;
     bool no_save = false, headless = false;
     rl_gba_declare_settings();
+    rl_touchpad_declare(rl_gba_touchpad());
     rl_settings_args(argc, argv);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -319,6 +323,8 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
         return 1;
     }
     rl_ports_declare(rl_gba_ports, rl_gba_ports_count);
+    if (rl_touchpad_wanted())
+        rl_ports_declare(rl_gba_ports_touchpad, rl_gba_ports_touchpad_count);
     rl_ports_bind_defaults();
     rl_gba_save_info si = rl_gba_save_detect(p->rom, p->rom_len);
     rl_gba_cart cart = {.rom = p->rom, .rom_len = p->rom_len, .save = si.kind, .flash_id = si.flash_id};
@@ -332,6 +338,8 @@ int rl_gba_main(const rl_gba_program *p, int argc, char **argv)
     if (!no_save && si.kind != RL_GBA_SAVE_NONE) {
         if (save)
             snprintf(H.save, sizeof H.save, "%s", save);
+        else if (p->save && *p->save)
+            snprintf(H.save, sizeof H.save, "%s", p->save);
         else if (p->rom_path && *p->rom_path && !rl_gba_save_path(H.save, sizeof H.save, p->rom_path))
             H.save[0] = 0;
     }

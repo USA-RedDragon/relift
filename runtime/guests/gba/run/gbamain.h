@@ -28,6 +28,8 @@ typedef struct rl_gba_program {
     const char *title;
     /** @brief The path of the ROM the project imported, which names the save (rl_gba_save_path); "" for none. */
     const char *rom_path;
+    /** @brief The save file to read and write unless --save or --no-save says otherwise, before the one rom_path names; "" for none. */
+    const char *save;
     /** @brief Every lifted function in work RAM, sorted by at and unit: where code that finds other bytes than it was lifted from goes on. */
     const rl_gba_variant *variants;
     uint32_t variant_count;
