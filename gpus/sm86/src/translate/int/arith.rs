@@ -1,5 +1,6 @@
-//! Integer arithmetic: IADD3, IMAD, LEA, SHF, comparisons, selects and
-//! minimum and maximum, with their uniform-datapath twins.
+//! Integer arithmetic: IADD3, IMAD, LEA, SHF, comparisons, selects,
+//! minimum and maximum and the IDP dot products, with their
+//! uniform-datapath twins.
 //!
 //! Carries follow the hardware: a three-input add counts how many times the
 //! 32-bit sum wrapped (0 to 3) and its two carry predicates are the unary
@@ -21,6 +22,7 @@ pub(super) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "IMNMX" => imnmx(c, i),
         "IABS" => iabs(c, i),
         "SEL" | "USEL" => sel(c, i),
+        "IDP" => idp(c, i),
         _ => return None,
     })
 }
@@ -557,4 +559,49 @@ fn sel(c: &mut Ctx, i: &Inst) -> Res<()> {
     let p = c.pred_operand(&i.ops[3])?;
     let r = c.bpick(p, a, b);
     c.store_dst(&i.ops[0], r)
+}
+
+/// IDP: the dot product of the 8-bit (`.4A`) or 16-bit (`.2A`) pieces of
+/// the first source with bytes of the second (all four, or with `.2A` bytes
+/// 0 and 1 for `.LO` and 2 and 3 for `.HI`), added to the third, modulo
+/// 2^32.
+fn idp(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let mut four = false;
+    let mut hi = false;
+    let mut types = Vec::new();
+    for m in &i.mods {
+        match *m {
+            "4A" => four = true,
+            "2A" | "LO" => {}
+            "HI" => hi = true,
+            "U8" | "S8" | "U16" | "S16" => types.push(*m),
+            m => return bad(format!("IDP.{m}")),
+        }
+    }
+    let [ta, tb] = types[..] else {
+        return bad("IDP types");
+    };
+    let a = c.usrc(&i.ops[1])?;
+    let b = c.usrc(&i.ops[2])?;
+    let mut acc = c.usrc(&i.ops[3])?;
+    let u = c.u32t();
+    let field = |c: &mut Ctx, v: u32, off: u32, bits: u32, signed: bool| {
+        let ko = c.kc(off);
+        let kb = c.kc(bits);
+        let opc = if signed {
+            op::BIT_FIELD_S_EXTRACT
+        } else {
+            op::BIT_FIELD_U_EXTRACT
+        };
+        c.m.emit(opc, u, &[v, ko, kb])
+    };
+    let (n, abits) = if four { (4, 8) } else { (2, 16) };
+    let first = if hi { 2 } else { 0 };
+    for k in 0..n {
+        let x = field(c, a, abits * k, abits, ta.starts_with('S'));
+        let y = field(c, b, 8 * (first + k), 8, tb.starts_with('S'));
+        let p = c.ib(op::I_MUL, x, y);
+        acc = c.ib(op::I_ADD, acc, p);
+    }
+    c.store_dst(&i.ops[0], acc)
 }
