@@ -206,7 +206,7 @@ impl Ctx {
     }
 
     /// `bits` is a NaN.
-    fn is_nan_bits(&mut self, bits: u32) -> u32 {
+    pub(crate) fn is_nan_bits(&mut self, bits: u32) -> u32 {
         let b2 = self.dn_shl1(bits);
         let lim = self.dn_ku(0xff00_0000);
         self.dn_bc(op::U_GREATER_THAN, b2, lim)

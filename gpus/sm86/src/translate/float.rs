@@ -593,14 +593,25 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
     c.store_dst(&i.ops[0], u)
 }
 
+/// FMNMX, and with `.NAN` a NaN in either input gives the canonical NaN
+/// `0x7fffffff` instead of the other input.
 fn fmnmx(c: &mut Ctx, i: &Inst) -> Res<()> {
-    Ctx::mods_ok(i, &["FTZ"])?;
+    Ctx::mods_ok(i, &["FTZ", "NAN"])?;
     let u = c.u32t();
     let a = c.fsrc_bits(&i.ops[1])?;
     let b = c.fsrc_bits(&i.ops[2])?;
     let p = c.pred_operand(&i.ops[3])?;
     let (lo, hi) = c.fminmax(a, b, i.has("FTZ"));
     let r = c.select(u, p, lo, hi);
+    let r = if i.has("NAN") {
+        let na = c.is_nan_bits(a);
+        let nb = c.is_nan_bits(b);
+        let any = c.or(na, nb);
+        let qnan = c.m.c_u32(0x7fff_ffff);
+        c.select(u, any, qnan, r)
+    } else {
+        r
+    };
     c.store_dst(&i.ops[0], r)
 }
 
