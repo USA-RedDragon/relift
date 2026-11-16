@@ -233,6 +233,13 @@ RL_RUNTIME_API void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t
     } while (0)
 /** @brief Marks the likely branch of a return check. */
 #define RL_LIKELY(x) __builtin_expect(!!(x), 1)
+/**
+ * @brief Reads a link register at a function's entry for its return check
+ * (docs/abi.md section 5.3). A relaxed atomic load: the compiler does not
+ * pair it with the load of a neighbouring field, and on AArch64 hosts such a
+ * pair, whose halves the caller stored separately, misses store forwarding.
+ */
+#define RL_LOAD_LINK(lv) __atomic_load_n(&(lv), __ATOMIC_RELAXED)
 /** @brief Compiler-only barrier at the back edge of a loop whose exit depends on a guest load. */
 #define RL_LOOP_FENCE() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 

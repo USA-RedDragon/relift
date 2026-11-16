@@ -1689,7 +1689,10 @@ fn a_return_goes_to_the_caller_only_at_the_link_value_of_entry() {
         &Options::default(),
     );
     let s = shard(&out);
-    assert!(s.contains("    const uint64_t rl_ra = c->x[3];\n"), "{s}");
+    assert!(
+        s.contains("    const uint64_t rl_ra = RL_LOAD_LINK(c->x[3]);\n"),
+        "{s}"
+    );
     assert!(
         s.contains("    uint64_t rl_to = (uint64_t)r3;\n    c->x[0] = r0;\n    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return rl_ret_far(c, rl_to, UINT64_C(0x104));"),
         "{s}"
@@ -1748,7 +1751,10 @@ fn split_pieces_carry_the_expected_return_address_through_the_context() {
         ),
         "{all}"
     );
-    assert!(all.contains("    const uint64_t rl_ra = c->ra;\n"), "{all}");
+    assert!(
+        all.contains("    const uint64_t rl_ra = RL_LOAD_LINK(c->ra);\n"),
+        "{all}"
+    );
     assert!(
         all.contains("c->x[0] = r0; c->pc = UINT64_C(0x104); c->ra = rl_ra; RL_MUSTTAIL return F_100_part2(c, mem);"),
         "{all}"

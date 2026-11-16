@@ -506,13 +506,22 @@ RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 /**
  * @brief A return to target, which is not the address the function's caller
  * expects (x30 at the function's entry), from the return instruction at pc,
- * with the context stored (docs/abi.md section 5.2). A target outside the
- * guest's virtual address range (rl_arm64_set_va_bits) reports an instruction
- * abort; else records {RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}, so
- * every host frame returns and the runtime entry (rl_call_guest) continues
- * at target. Returns RL_PENDING.
+ * with the context stored (docs/abi.md section 5.3): sets c->pc to pc and
+ * records {RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}, so every host
+ * frame returns and the runtime entry (rl_call_guest) continues at target, or
+ * reports an instruction abort for a target outside the guest's virtual
+ * address range (rl_arm64_set_va_bits). Inline and without calls, so a
+ * function that returns through it stays cheap to inline. Returns RL_PENDING.
  */
-RL_RUNTIME_API int rl_arm64_ret_far(rl_ctx *c, uint64_t target, uint64_t pc);
+static inline int rl_arm64_ret_far(rl_ctx *c, uint64_t target, uint64_t pc)
+{
+    c->pc = pc;
+    c->pend.pc = target;
+    c->pend.sp = RL_SP_NONE;
+    c->pend.kind = RL_PEND_REDIRECT;
+    c->pend.code = 0;
+    return RL_PENDING;
+}
 
 /**
  * @brief A tail transfer to fn while x30 is not the address the function's

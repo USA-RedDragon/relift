@@ -138,21 +138,12 @@ int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry)
         c->pend.kind = RL_PEND_NONE;
         if (pc == ra)
             return RL_OK;
+        if (!canonical(pc))
+            return rl_guest_fatal(c, "guest",
+                                  "instruction abort: return at guest pc 0x%llx to 0x%llx, outside the %u-bit address "
+                                  "space (a failed pointer authentication of a return address gives such an address)",
+                                  (unsigned long long)c->pc, (unsigned long long)pc, g_va_bits);
     }
-}
-
-int rl_arm64_ret_far(rl_ctx *c, uint64_t target, uint64_t pc)
-{
-    if (!canonical(target))
-        return rl_guest_fatal(c, "guest",
-                              "instruction abort: return at guest pc 0x%llx to 0x%llx, outside the %u-bit address space "
-                              "(a failed pointer authentication of a return address gives such an address)",
-                              (unsigned long long)pc, (unsigned long long)target, g_va_bits);
-    c->pend.pc = target;
-    c->pend.sp = RL_SP_NONE;
-    c->pend.kind = RL_PEND_REDIRECT;
-    c->pend.code = 0;
-    return RL_PENDING;
 }
 
 int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn)

@@ -737,7 +737,10 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         } else {
             home(fe, l.reg)
         };
-        let _ = writeln!(t, "    const uint64_t rl_ra = {from};\n    (void)rl_ra;");
+        let _ = writeln!(
+            t,
+            "    const uint64_t rl_ra = RL_LOAD_LINK({from});\n    (void)rl_ra;"
+        );
     }
     t.push_str("    int rc;\n    (void)rc;\n");
     if plan.shared().is_some() {

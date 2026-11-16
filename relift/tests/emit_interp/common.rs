@@ -257,7 +257,6 @@ void rl_wfe(rl_ctx *c) { (void)c; events |= 8; }
 void rl_preempt(rl_ctx *c) { c->time.budget = INT64_MAX; }
 int rl_arm64_fp_flags(void) { return 0; }
 int rl_arm64_fp_flags_on;
-int rl_arm64_ret_far(rl_ctx *c, uint64_t target, uint64_t pc) { (void)c; (void)target; (void)pc; return RL_OK; }
 int rl_arm64_jump_far(rl_ctx *c, uint8_t *mem, rl_fn fn) { return fn(c, mem); }
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn) { (void)c; (void)mem; (void)fn; abort(); }
 
@@ -349,7 +348,10 @@ int main(int argc, char **argv)
             return 3;
         uint64_t res[4 + CTX];
         if (sigsetjmp(jb, 1) == 0) {
-            res[0] = (uint64_t)cases[rec[0]](&ctx, mem);
+            int r = cases[rec[0]](&ctx, mem);
+            if (r == RL_PENDING && ctx.pend.kind == RL_PEND_REDIRECT)
+                r = RL_OK;
+            res[0] = (uint64_t)r;
         } else {
             res[0] = UINT64_MAX;
             events |= 16;
