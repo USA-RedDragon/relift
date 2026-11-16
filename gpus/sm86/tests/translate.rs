@@ -126,12 +126,119 @@ fn fragment_perspective_color() {
 
 #[test]
 fn rejects_what_it_cannot_translate() {
-    let mut b = sph(1, 1, &[]);
-    b.extend(word(
-        0x002,
-        5,
-        &[(16, 8, 0), (32, 27, 0x10 << 4), (72, 4, 0xf)],
-    ));
+    let mut b = Vec::new();
+    b.extend(word(0x149, 4, &[(24, 8, 4), (87, 3, 7)]));
     exit_and_halt(&mut b);
     assert!(translate(&Program::parse(&b)).is_err());
+}
+
+fn bra(at: usize, to: usize, pred: Option<u64>) -> [u8; 16] {
+    let rel = (to as i64 * 16 - (at as i64 * 16 + 16)) / 4;
+    let mut f = vec![(34, 48, (rel as u64) & 0xffff_ffff_ffff), (87, 3, 7)];
+    if let Some(p) = pred {
+        f.push((12, 3, p));
+    }
+    word(0x147, 4, &f)
+}
+
+fn spirv_has(words: &[u32], opcode: u32) -> bool {
+    let mut k = 5;
+    while k < words.len() {
+        let n = (words[k] >> 16) as usize;
+        if words[k] & 0xffff == opcode {
+            return true;
+        }
+        k += n.max(1);
+    }
+    false
+}
+
+#[test]
+fn compute_loop_is_structured() {
+    let mut b = Vec::new();
+    b.extend(word(0x119, 1, &[(16, 8, 0), (72, 8, 33)]));
+    b.extend(word(0x002, 4, &[(16, 8, 1), (32, 32, 0), (72, 4, 0xf)]));
+    b.extend(word(
+        0x010,
+        4,
+        &[
+            (16, 8, 1),
+            (24, 8, 1),
+            (32, 32, 1),
+            (64, 8, 255),
+            (81, 3, 7),
+            (84, 3, 7),
+        ],
+    ));
+    b.extend(word(
+        0x00c,
+        1,
+        &[
+            (24, 8, 1),
+            (32, 8, 0),
+            (73, 1, 1),
+            (76, 3, 1),
+            (81, 3, 0),
+            (84, 3, 7),
+            (87, 3, 7),
+        ],
+    ));
+    b.extend(bra(4, 2, Some(0)));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(p.stage(), Stage::Compute);
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    header_ok(&s.spirv);
+    assert!(spirv_has(&s.spirv, 246), "no OpLoopMerge");
+}
+
+#[test]
+fn guarded_exit_returns_in_place() {
+    let mut b = Vec::new();
+    b.extend(word(
+        0x00c,
+        1,
+        &[
+            (24, 8, 1),
+            (32, 8, 0),
+            (76, 3, 2),
+            (81, 3, 0),
+            (84, 3, 7),
+            (87, 3, 7),
+        ],
+    ));
+    b.extend(word(0x14d, 4, &[(12, 3, 0), (87, 3, 7)]));
+    b.extend(word(0x002, 4, &[(16, 8, 1), (32, 32, 7), (72, 4, 0xf)]));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(spirv_has(&s.spirv, 247), "no OpSelectionMerge");
+}
+
+#[test]
+fn directed_rounding_translates() {
+    for rnd in 1..4u64 {
+        let mut b = Vec::new();
+        for op in [0x021u32, 0x020, 0x023] {
+            let mut f = vec![(16, 8, 2), (24, 8, 0), (32, 8, 1), (78, 2, rnd)];
+            if op == 0x023 {
+                f.push((64, 8, 3));
+            }
+            if op == 0x020 {
+                f.push((84, 3, 4));
+            }
+            b.extend(word(op, 1, &f));
+        }
+        exit_and_halt(&mut b);
+        let p = Program::parse(&b);
+        let text: Vec<String> = p
+            .decode()
+            .into_iter()
+            .map(|d| d.map(|i| i.to_string()).unwrap_or_default())
+            .collect();
+        assert!(
+            text[0].contains(["M", "P", "Z"].map(|c| format!(".R{c}"))[rnd as usize - 1].as_str()),
+            "{text:?}"
+        );
+        translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    }
 }

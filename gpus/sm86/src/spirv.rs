@@ -78,6 +78,35 @@ pub mod op {
     pub const RETURN: u16 = 253;
     pub const KILL: u16 = 252;
     pub const IS_NAN: u16 = 156;
+    pub const IS_INF: u16 = 157;
+    pub const EXTENSION: u16 = 10;
+    pub const TYPE_RUNTIME_ARRAY: u16 = 29;
+    pub const CONSTANT_COMPOSITE: u16 = 44;
+    pub const SPEC_CONSTANT: u16 = 50;
+    pub const SPEC_CONSTANT_COMPOSITE: u16 = 51;
+    pub const VECTOR_SHUFFLE: u16 = 79;
+    pub const COMPOSITE_CONSTRUCT: u16 = 80;
+    pub const U_CONVERT: u16 = 113;
+    pub const S_CONVERT: u16 = 114;
+    pub const F_CONVERT: u16 = 115;
+    pub const CONVERT_U_TO_PTR: u16 = 120;
+    pub const S_NEGATE: u16 = 126;
+    pub const I_SUB: u16 = 130;
+    pub const F_SUB: u16 = 131;
+    pub const U_DIV: u16 = 134;
+    pub const U_MOD: u16 = 137;
+    pub const I_ADD_CARRY: u16 = 149;
+    pub const U_MUL_EXTENDED: u16 = 151;
+    pub const S_MUL_EXTENDED: u16 = 152;
+    pub const BIT_FIELD_INSERT: u16 = 201;
+    pub const BIT_FIELD_S_EXTRACT: u16 = 202;
+    pub const BIT_FIELD_U_EXTRACT: u16 = 203;
+    pub const BIT_REVERSE: u16 = 204;
+    pub const BIT_COUNT: u16 = 205;
+    pub const CONTROL_BARRIER: u16 = 224;
+    pub const MEMORY_BARRIER: u16 = 225;
+    pub const LOOP_MERGE: u16 = 246;
+    pub const UNREACHABLE: u16 = 255;
 }
 
 pub mod glsl {
@@ -96,6 +125,19 @@ pub mod glsl {
     pub const N_MIN: u32 = 79;
     pub const N_MAX: u32 = 80;
     pub const N_CLAMP: u32 = 81;
+    pub const S_ABS: u32 = 5;
+    pub const U_MIN: u32 = 38;
+    pub const S_MIN: u32 = 39;
+    pub const U_MAX: u32 = 41;
+    pub const S_MAX: u32 = 42;
+    pub const PACK_HALF_2X16: u32 = 58;
+    pub const UNPACK_HALF_2X16: u32 = 62;
+    pub const FIND_S_MSB: u32 = 74;
+    pub const FIND_U_MSB: u32 = 75;
+    pub const S_CLAMP: u32 = 45;
+    pub const U_CLAMP: u32 = 44;
+    pub const LDEXP: u32 = 53;
+    pub const F_SIGN: u32 = 6;
 }
 
 #[derive(Default)]
@@ -204,9 +246,27 @@ impl Module {
         inst(&mut self.types, op::TYPE_STRUCT, &a);
         i
     }
+    /// A struct type with no decorations, shared by every use.
+    pub fn t_struct_cached(&mut self, members: &[u32]) -> u32 {
+        self.ty(op::TYPE_STRUCT, members)
+    }
+    pub fn t_u64(&mut self) -> u32 {
+        self.ty(op::TYPE_INT, &[64, 0])
+    }
+    pub fn t_runtime_array(&mut self, t: u32) -> u32 {
+        self.ty(op::TYPE_RUNTIME_ARRAY, &[t])
+    }
     pub fn c_u32(&mut self, v: u32) -> u32 {
         let t = self.t_u32();
         self.konst(op::CONSTANT, t, &[v])
+    }
+    pub fn c_u64(&mut self, v: u64) -> u32 {
+        let t = self.t_u64();
+        self.konst(op::CONSTANT, t, &[v as u32, (v >> 32) as u32])
+    }
+    pub fn c_i32(&mut self, v: i32) -> u32 {
+        let t = self.t_i32();
+        self.konst(op::CONSTANT, t, &[v as u32])
     }
     pub fn c_f32(&mut self, v: u32) -> u32 {
         let t = self.t_f32();
@@ -215,6 +275,30 @@ impl Module {
     pub fn c_bool(&mut self, v: bool) -> u32 {
         let t = self.t_bool();
         self.konst(if v { 41 } else { 42 }, t, &[])
+    }
+
+    /// A 32-bit unsigned specialization constant with `SpecId` `spec`.
+    pub fn spec_u32(&mut self, default: u32, spec: u32) -> u32 {
+        let key = vec![u32::from(op::SPEC_CONSTANT), spec, default];
+        if let Some(&i) = self.cache.get(&key) {
+            return i;
+        }
+        let t = self.t_u32();
+        let i = self.id();
+        inst(&mut self.types, op::SPEC_CONSTANT, &[t, i, default]);
+        self.deco(i, 1, &[spec]);
+        self.cache.insert(key, i);
+        i
+    }
+
+    /// A constant composite of `ty` from constants `parts`.
+    pub fn c_composite(&mut self, ty: u32, parts: &[u32]) -> u32 {
+        self.konst(op::CONSTANT_COMPOSITE, ty, parts)
+    }
+
+    /// A specialization constant composite of `ty` from `parts`.
+    pub fn spec_composite(&mut self, ty: u32, parts: &[u32]) -> u32 {
+        self.konst(op::SPEC_CONSTANT_COMPOSITE, ty, parts)
     }
 
     pub fn global(&mut self, ptr: u32, class: u32) -> u32 {
@@ -248,7 +332,7 @@ impl Module {
     }
 
     pub fn finish(self) -> Vec<u32> {
-        let mut w = vec![0x0723_0203, 0x0001_0300, 0, self.next, 0];
+        let mut w = vec![0x0723_0203, 0x0001_0500, 0, self.next, 0];
         w.extend(self.caps);
         w.extend(self.ext);
         w.extend(self.head);

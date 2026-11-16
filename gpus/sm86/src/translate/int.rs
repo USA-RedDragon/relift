@@ -1,0 +1,356 @@
+//! Integer and data-movement ALU, special registers and uniform-datapath
+//! instructions.
+
+use super::{INPUT, Res, bad};
+use crate::spirv::op;
+use crate::{Inst, Operand};
+
+use super::Ctx;
+
+const BUILTIN_WORKGROUP_ID: u32 = 26;
+const BUILTIN_LOCAL_INVOCATION_ID: u32 = 27;
+const WORKGROUP_SIZE_KEY: u32 = 0x1_0000;
+
+pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
+    Some(match i.mnemonic {
+        "MOV" | "UMOV" => mov(c, i),
+        "S2R" | "S2UR" => s2r(c, i),
+        "CS2R" => cs2r(c, i),
+        "IMAD" => imad(c, i),
+        "ISETP" | "UISETP" => isetp(c, i),
+        "IADD3" | "UIADD3" => iadd3(c, i),
+        "ULDC" | "LDC" => ldc(c, i),
+        "SEL" | "USEL" => sel(c, i),
+        _ => return None,
+    })
+}
+
+impl Ctx {
+    /// The compute workgroup size: specialization constants 0, 1, 2.
+    pub(crate) fn workgroup_size(&mut self) -> u32 {
+        if let Some(&v) = self.builtins.get(&WORKGROUP_SIZE_KEY) {
+            return v;
+        }
+        let u = self.u32t();
+        let v3 = self.m.t_vec(u, 3);
+        let x = self.m.spec_u32(1, 0);
+        let y = self.m.spec_u32(1, 1);
+        let z = self.m.spec_u32(1, 2);
+        let ws = self.m.spec_composite(v3, &[x, y, z]);
+        self.builtins.insert(WORKGROUP_SIZE_KEY, ws);
+        ws
+    }
+
+    fn uvec3_input(&mut self, b: u32, comp: u32) -> u32 {
+        let u = self.u32t();
+        let v3 = self.m.t_vec(u, 3);
+        let var = self.builtin(b, INPUT, v3);
+        let p = self.m.t_ptr(INPUT, u);
+        let ci = self.m.c_u32(comp);
+        let ptr = self.m.emit(op::ACCESS_CHAIN, p, &[var, ci]);
+        self.m.emit(op::LOAD, u, &[ptr])
+    }
+
+    /// Writes a 64-bit value given as (low, high) to a register pair.
+    pub(crate) fn store_pair(&mut self, o: &Operand, lo: u32, hi: u32) -> Res<()> {
+        match o {
+            Operand::Reg(255, _) | Operand::UReg(63, _) => Ok(()),
+            Operand::Reg(n, _) => {
+                self.store_reg(*n, lo);
+                self.store_reg(n + 1, hi);
+                Ok(())
+            }
+            Operand::UReg(n, _) => {
+                self.store_ureg(*n, lo);
+                self.store_ureg(n + 1, hi);
+                Ok(())
+            }
+            o => bad(format!("pair dst {o}")),
+        }
+    }
+
+    /// Reads a 64-bit operand as (low, high): a register pair or two words
+    /// of a constant bank.
+    pub(crate) fn src_pair(&mut self, o: &Operand) -> Res<(u32, u32)> {
+        match o {
+            Operand::Reg(255, _) | Operand::UReg(63, _) => {
+                let z = self.m.c_u32(0);
+                Ok((z, z))
+            }
+            Operand::Reg(n, m) if *m == Default::default() || m.reuse => {
+                Ok((self.load_reg(*n), self.load_reg(n + 1)))
+            }
+            Operand::UReg(n, _) => Ok((self.load_ureg(*n), self.load_ureg(n + 1))),
+            Operand::CBuf {
+                bank,
+                index,
+                offset,
+                mods,
+                ..
+            } if !mods.neg && !mods.abs && !mods.not => {
+                let lo = self.cbuf_operand(bank, index.as_deref(), *offset)?;
+                let hi = self.cbuf_operand(bank, index.as_deref(), *offset + 4)?;
+                Ok((lo, hi))
+            }
+            o => bad(format!("64-bit operand {o}")),
+        }
+    }
+}
+
+fn mov(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.ops.len() == 3 && !matches!(i.ops[2], Operand::Hex(0xf) | Operand::Int(0xf)) {
+        return bad("MOV with a partial lane mask");
+    }
+    let v = c.usrc(&i.ops[1])?;
+    c.store_dst(&i.ops[0], v)
+}
+
+fn s2r(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let Operand::Sym(name) = &i.ops[1] else {
+        return bad("S2R source");
+    };
+    let v = match name.as_str() {
+        "SRZ" => c.m.c_u32(0),
+        "SR_TID.X" => c.uvec3_input(BUILTIN_LOCAL_INVOCATION_ID, 0),
+        "SR_TID.Y" => c.uvec3_input(BUILTIN_LOCAL_INVOCATION_ID, 1),
+        "SR_TID.Z" => c.uvec3_input(BUILTIN_LOCAL_INVOCATION_ID, 2),
+        "SR_CTAID.X" => c.uvec3_input(BUILTIN_WORKGROUP_ID, 0),
+        "SR_CTAID.Y" => c.uvec3_input(BUILTIN_WORKGROUP_ID, 1),
+        "SR_CTAID.Z" => c.uvec3_input(BUILTIN_WORKGROUP_ID, 2),
+        s => return bad(format!("special register {s}")),
+    };
+    c.store_dst(&i.ops[0], v)
+}
+
+fn cs2r(c: &mut Ctx, i: &Inst) -> Res<()> {
+    match &i.ops[1] {
+        Operand::Sym(s) if s == "SRZ" => {
+            let z = c.m.c_u32(0);
+            if i.has("32") {
+                c.store_dst(&i.ops[0], z)
+            } else {
+                c.store_pair(&i.ops[0], z, z)
+            }
+        }
+        o => bad(format!("CS2R {o}")),
+    }
+}
+
+fn imad(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let u = c.u32t();
+    let signed = !i.has("U32");
+    for m in &i.mods {
+        if !matches!(*m, "U32" | "WIDE" | "MOV" | "IADD" | "SHL") {
+            return bad(format!("IMAD.{m}"));
+        }
+    }
+    if i.ops.len() != 4 {
+        return bad("IMAD with carry");
+    }
+    let a = c.usrc(&i.ops[1])?;
+    let b = c.usrc(&i.ops[2])?;
+    if i.has("WIDE") {
+        let (clo, chi) = c.src_pair(&i.ops[3])?;
+        let st = c.m.t_struct_cached(&[u, u]);
+        let opc = if signed {
+            op::S_MUL_EXTENDED
+        } else {
+            op::U_MUL_EXTENDED
+        };
+        let r = c.m.emit(opc, st, &[a, b]);
+        let lo = c.m.emit(op::COMPOSITE_EXTRACT, u, &[r, 0]);
+        let hi = c.m.emit(op::COMPOSITE_EXTRACT, u, &[r, 1]);
+        let s = c.m.emit(op::I_ADD_CARRY, st, &[lo, clo]);
+        let slo = c.m.emit(op::COMPOSITE_EXTRACT, u, &[s, 0]);
+        let carry = c.m.emit(op::COMPOSITE_EXTRACT, u, &[s, 1]);
+        let h1 = c.m.emit(op::I_ADD, u, &[hi, chi]);
+        let shi = c.m.emit(op::I_ADD, u, &[h1, carry]);
+        return c.store_pair(&i.ops[0], slo, shi);
+    }
+    let cc = c.isrc_neg(&i.ops[3])?;
+    let p = c.m.emit(op::I_MUL, u, &[a, b]);
+    let r = c.m.emit(op::I_ADD, u, &[p, cc]);
+    c.store_dst(&i.ops[0], r)
+}
+
+impl Ctx {
+    /// An integer operand that may carry a negation (two's complement).
+    pub(crate) fn isrc_neg(&mut self, o: &Operand) -> Res<u32> {
+        let (v, m) = self.raw(o)?;
+        if m.abs || m.swz != crate::Swz::None {
+            return bad(format!("int operand mods {o}"));
+        }
+        let u = self.u32t();
+        let mut v = v;
+        if m.not {
+            v = self.m.emit(op::NOT, u, &[v]);
+        }
+        if m.neg {
+            v = self.m.emit(op::S_NEGATE, u, &[v]);
+        }
+        Ok(v)
+    }
+}
+
+fn icmp(c: &mut Ctx, cmp: &str, signed: bool, a: u32, b: u32) -> Res<u32> {
+    let opc = match (cmp, signed) {
+        ("F", _) => return Ok(c.m.c_bool(false)),
+        ("T", _) => return Ok(c.m.c_bool(true)),
+        ("EQ", _) => op::I_EQUAL,
+        ("NE", _) => op::I_NOT_EQUAL,
+        ("LT", true) => op::S_LESS_THAN,
+        ("LE", true) => op::S_LESS_THAN_EQUAL,
+        ("GT", true) => op::S_GREATER_THAN,
+        ("GE", true) => op::S_GREATER_THAN_EQUAL,
+        ("LT", false) => op::U_LESS_THAN,
+        ("LE", false) => op::U_LESS_THAN_EQUAL,
+        ("GT", false) => op::U_GREATER_THAN,
+        ("GE", false) => op::U_GREATER_THAN_EQUAL,
+        (c, _) => return bad(format!("int comparison {c}")),
+    };
+    let t = c.boolt();
+    Ok(c.m.emit(opc, t, &[a, b]))
+}
+
+fn isetp(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let mut cmp = None;
+    let mut bop = None;
+    let mut signed = true;
+    for m in &i.mods {
+        match *m {
+            "U32" => signed = false,
+            "AND" | "OR" | "XOR" => bop = Some(*m),
+            "EX" => return bad("ISETP.EX"),
+            m => cmp = Some(m),
+        }
+    }
+    let (Some(cmp), Some(bop)) = (cmp, bop) else {
+        return bad("ISETP form");
+    };
+    if i.ops.len() != 5 {
+        return bad("ISETP operands");
+    }
+    let a = c.usrc(&i.ops[2])?;
+    let b = c.usrc(&i.ops[3])?;
+    let pc = c.pred_operand(&i.ops[4])?;
+    let r = icmp(c, cmp, signed, a, b)?;
+    let t = c.boolt();
+    let nr = c.m.emit(op::LOGICAL_NOT, t, &[r]);
+    let p = c.bool_op(bop, r, pc)?;
+    let q = c.bool_op(bop, nr, pc)?;
+    c.store_pdst(&i.ops[0], p)?;
+    c.store_pdst(&i.ops[1], q)
+}
+
+fn iadd3(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if !i.mods.is_empty() || i.ops.len() != 4 {
+        return bad(format!("{} form", i.mnemonic));
+    }
+    let u = c.u32t();
+    let a = c.isrc_neg(&i.ops[1])?;
+    let b = c.isrc_neg(&i.ops[2])?;
+    let cc = c.isrc_neg(&i.ops[3])?;
+    let s = c.m.emit(op::I_ADD, u, &[a, b]);
+    let s = c.m.emit(op::I_ADD, u, &[s, cc]);
+    c.store_dst(&i.ops[0], s)
+}
+
+fn cbuf_words(i: &Inst) -> Res<(u32, Option<(u32, bool)>)> {
+    let mut n = 1;
+    let mut sub = None;
+    for m in &i.mods {
+        match *m {
+            "32" => {}
+            "64" => n = 2,
+            "128" => n = 4,
+            "U8" => sub = Some((8, false)),
+            "S8" => sub = Some((8, true)),
+            "U16" => sub = Some((16, false)),
+            "S16" => sub = Some((16, true)),
+            m => return bad(format!("{}.{m}", i.mnemonic)),
+        }
+    }
+    Ok((n, sub))
+}
+
+/// ULDC and LDC: the bank, index register and offset come from the word.
+fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let w = c.word;
+    let (n, sub) = cbuf_words(i)?;
+    let op9 = w.get(0, 9);
+    if w.bit(91) {
+        return bad(format!("{} with a bank in a uniform register", i.mnemonic));
+    }
+    let bank = w.get(54, 5);
+    let off = i64::from(w.get(38, 16) as u16 as i16);
+    let index = match (i.mnemonic, op9) {
+        ("ULDC", 0xb9) => None,
+        ("ULDC", _) => Some(c.load_ureg(w.get(24, 6) as u8)),
+        _ => {
+            if w.get(78, 2) != 0 {
+                return bad("LDC indexed-bank mode");
+            }
+            let r = w.get(24, 8) as u8;
+            if r == 255 { None } else { Some(c.load_reg(r)) }
+        }
+    };
+    let u = c.u32t();
+    let mut words = Vec::new();
+    for k in 0..n {
+        let o = off + 4 * i64::from(k);
+        words.push(match index {
+            None => {
+                if o % 4 != 0 {
+                    let base = c.m.c_u32(o as u32);
+                    c.load_cbuf_dyn(bank, base)?
+                } else {
+                    c.load_cbuf(bank, o)?
+                }
+            }
+            Some(r) => {
+                let k = c.m.c_u32(o as u32);
+                let a = c.m.emit(op::I_ADD, u, &[r, k]);
+                c.load_cbuf_dyn(bank, a)?
+            }
+        });
+    }
+    if let Some((bits, signed)) = sub {
+        let byte = match index {
+            None => c.m.c_u32((off as u32 & 3) * 8),
+            Some(r) => {
+                let k = c.m.c_u32(off as u32);
+                let a = c.m.emit(op::I_ADD, u, &[r, k]);
+                let three = c.m.c_u32(3);
+                let lo = c.m.emit(op::BITWISE_AND, u, &[a, three]);
+                let eight = c.m.c_u32(8);
+                c.m.emit(op::I_MUL, u, &[lo, eight])
+            }
+        };
+        let cnt = c.m.c_u32(bits);
+        let opc = if signed {
+            op::BIT_FIELD_S_EXTRACT
+        } else {
+            op::BIT_FIELD_U_EXTRACT
+        };
+        words[0] = c.m.emit(opc, u, &[words[0], byte, cnt]);
+    }
+    let d = &i.ops[0];
+    for (k, v) in words.into_iter().enumerate() {
+        match d {
+            Operand::Reg(255, _) | Operand::UReg(63, _) => {}
+            Operand::Reg(r, _) => c.store_reg(r + k as u8, v),
+            Operand::UReg(r, _) => c.store_ureg(r + k as u8, v),
+            o => return bad(format!("dst {o}")),
+        }
+    }
+    Ok(())
+}
+
+fn sel(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let a = c.usrc(&i.ops[1])?;
+    let b = c.usrc(&i.ops[2])?;
+    let p = c.pred_operand(&i.ops[3])?;
+    let u = c.u32t();
+    let r = c.select(u, p, a, b);
+    c.store_dst(&i.ops[0], r)
+}
