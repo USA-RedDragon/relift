@@ -144,7 +144,7 @@ int rl_pad_resume(rl_ctx *c, uint8_t *mem)
 uint64_t rl_mrs_cntpct(rl_ctx *c)
 {
     (void)c;
-    return rl_ns_to_ticks(rl_clock_ns());
+    return rl_ns_to_ticks(rl_guest_clock_ns());
 }
 
 void rl_msr_fpcr(rl_ctx *c, uint64_t v)

@@ -570,7 +570,7 @@ RL_RUNTIME_API int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm);
 /** @brief UDF, HLT, an instruction relift cannot lift, or MSR to a read-only register. Reports a guest crash; always returns RL_PENDING with RL_PEND_EXIT_PROCESS. */
 RL_RUNTIME_API int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn);
 
-/** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: host monotonic clock in RL_CNTFRQ ticks. */
+/** @brief MRS CNTPCT_EL0 and CNTVCT_EL0: the guest's clock (rl_guest_clock_ns, the host's monotonic clock by default) in RL_CNTFRQ ticks. */
 RL_RUNTIME_API uint64_t rl_mrs_cntpct(rl_ctx *c);
 /** @brief MSR FPCR. Stores the value; reports in dev builds when it selects a mode the lifted code was not generated for. */
 RL_RUNTIME_API void rl_msr_fpcr(rl_ctx *c, uint64_t v);

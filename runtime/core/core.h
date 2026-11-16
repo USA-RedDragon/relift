@@ -159,6 +159,12 @@ RL_RUNTIME_API uint64_t rl_guest_order64(uint64_t v);
 
 /** @brief Host monotonic clock in nanoseconds. */
 RL_RUNTIME_API uint64_t rl_clock_ns(void);
+/** @brief A clock in nanoseconds that the guest layer gives the guest instead of the host's. */
+typedef uint64_t rl_guest_clock_fn(void);
+/** @brief Sets the guest's clock (NULL: the host's, rl_clock_ns), which rl_guest_clock_ns and the CPU's counter read. */
+RL_RUNTIME_API void rl_set_guest_clock(rl_guest_clock_fn *fn);
+/** @brief The guest's clock in nanoseconds: the one set with rl_set_guest_clock, else rl_clock_ns. */
+RL_RUNTIME_API uint64_t rl_guest_clock_ns(void);
 /** @brief Converts nanoseconds to guest clock ticks (rl_guest_desc.tick_hz). */
 RL_RUNTIME_API uint64_t rl_ns_to_ticks(uint64_t ns);
 /** @brief Converts guest clock ticks to nanoseconds. */

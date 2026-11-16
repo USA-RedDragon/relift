@@ -144,6 +144,16 @@ uint64_t rl_clock_ns(void)
 #endif
 }
 
+static rl_guest_clock_fn *g_guest_clock;
+
+void rl_set_guest_clock(rl_guest_clock_fn *fn) { __atomic_store_n(&g_guest_clock, fn, __ATOMIC_RELEASE); }
+
+uint64_t rl_guest_clock_ns(void)
+{
+    rl_guest_clock_fn *fn = __atomic_load_n(&g_guest_clock, __ATOMIC_ACQUIRE);
+    return fn ? fn() : rl_clock_ns();
+}
+
 uint64_t rl_ns_to_ticks(uint64_t ns)
 {
     return (uint64_t)(((rl_u128)ns * rl_core_guest()->tick_hz) / 1000000000u);
