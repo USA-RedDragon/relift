@@ -50,6 +50,7 @@ host_extensions = [
     "VK_EXT_map_memory_placed",
     "VK_EXT_external_memory_host",
     "VK_EXT_headless_surface",
+    "VK_EXT_depth_bias_control",
 ]
 
 [thunks]
@@ -112,6 +113,7 @@ hand_commands = [
     "vkCmdBeginRendering",
     "vkCreateGraphicsPipelines",
     "vkCreateShaderModule",
+    "vkCmdSetDepthBias",
     "vkAllocateCommandBuffers",
     "vkFreeCommandBuffers",
     "vkDestroyCommandPool",
@@ -178,6 +180,16 @@ vkDestroyBuffer = "vkf_buffer_destroyed"
 vkCmdExecuteCommands = "vkf_note_execute"
 vkResetCommandBuffer = "vkf_cb_reset_hook"
 vkResetCommandPool = "vkf_pool_reset_hook"
+# Depth attachments that reach the host as D32 and the depth bias for them (vk_format.c).
+vkDestroyRenderPass = "vkf_depth_forget_pass"
+vkDestroyImageView = "vkf_depth_forget_view"
+vkCmdBeginRenderPass = "vkf_depth_begin_pass"
+vkCmdBeginRenderPass2 = "vkf_depth_begin_pass"
+vkCmdNextSubpass = "vkf_depth_next_subpass"
+vkCmdNextSubpass2 = "vkf_depth_next_subpass"
+vkCmdEndRenderPass = "vkf_depth_end_pass"
+vkCmdEndRenderPass2 = "vkf_depth_end_pass"
+vkCmdEndRendering = "vkf_depth_end_pass"
 
 # Fail a call that goes past a host limit below the Switch's (vk_props.c).
 [hooks.check]

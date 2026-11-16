@@ -52,6 +52,8 @@
 #define VK_EXT_DEBUG_REPORT_SPEC_VERSION 10
 #define VK_EXT_DEBUG_UTILS_EXTENSION_NAME "VK_EXT_debug_utils"
 #define VK_EXT_DEBUG_UTILS_SPEC_VERSION 2
+#define VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME "VK_EXT_depth_bias_control"
+#define VK_EXT_DEPTH_BIAS_CONTROL_SPEC_VERSION 1
 #define VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME "VK_EXT_discard_rectangles"
 #define VK_EXT_DISCARD_RECTANGLES_SPEC_VERSION 2
 #define VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME "VK_EXT_extended_dynamic_state2"
@@ -457,6 +459,12 @@ typedef enum VkDependencyFlagBits {
     VK_DEPENDENCY_VIEW_LOCAL_BIT = 0x00000002,
     VK_DEPENDENCY_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
 } VkDependencyFlagBits;
+typedef enum VkDepthBiasRepresentationEXT {
+    VK_DEPTH_BIAS_REPRESENTATION_FLOAT_EXT = 2,
+    VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORCE_UNORM_EXT = 1,
+    VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORMAT_EXT = 0,
+    VK_DEPTH_BIAS_REPRESENTATION_E_X_T_MAX_ENUM = 0x7FFFFFFF
+} VkDepthBiasRepresentationEXT;
 typedef enum VkDescriptorBindingFlagBits {
     VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT = 0x00000004,
     VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT = 0x00000001,
@@ -1657,6 +1665,8 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT = 1000128000,
     VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT = 1000128001,
     VK_STRUCTURE_TYPE_DEPENDENCY_INFO = 1000314003,
+    VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT = 1000283001,
+    VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT = 1000283002,
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO = 33,
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_INLINE_UNIFORM_BLOCK_CREATE_INFO = 1000138003,
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO = 34,
@@ -1736,6 +1746,7 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES = 1000083000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES = 1000177000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES = 1000257000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT = 1000283000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES = 1000199000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES = 1000161001,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES = 1000161002,
@@ -2195,6 +2206,8 @@ typedef struct VkDebugUtilsMessengerCreateInfoEXT VkDebugUtilsMessengerCreateInf
 typedef struct VkDebugUtilsObjectNameInfoEXT VkDebugUtilsObjectNameInfoEXT;
 typedef struct VkDebugUtilsObjectTagInfoEXT VkDebugUtilsObjectTagInfoEXT;
 typedef struct VkDependencyInfo VkDependencyInfo;
+typedef struct VkDepthBiasInfoEXT VkDepthBiasInfoEXT;
+typedef struct VkDepthBiasRepresentationInfoEXT VkDepthBiasRepresentationInfoEXT;
 typedef struct VkDescriptorBufferInfo VkDescriptorBufferInfo;
 typedef struct VkDescriptorImageInfo VkDescriptorImageInfo;
 typedef struct VkDescriptorPoolCreateInfo VkDescriptorPoolCreateInfo;
@@ -2299,6 +2312,7 @@ typedef struct VkOffset3D VkOffset3D;
 typedef struct VkPhysicalDevice16BitStorageFeatures VkPhysicalDevice16BitStorageFeatures;
 typedef struct VkPhysicalDevice8BitStorageFeatures VkPhysicalDevice8BitStorageFeatures;
 typedef struct VkPhysicalDeviceBufferDeviceAddressFeatures VkPhysicalDeviceBufferDeviceAddressFeatures;
+typedef struct VkPhysicalDeviceDepthBiasControlFeaturesEXT VkPhysicalDeviceDepthBiasControlFeaturesEXT;
 typedef struct VkPhysicalDeviceDepthStencilResolveProperties VkPhysicalDeviceDepthStencilResolveProperties;
 typedef struct VkPhysicalDeviceDescriptorIndexingFeatures VkPhysicalDeviceDescriptorIndexingFeatures;
 typedef struct VkPhysicalDeviceDescriptorIndexingProperties VkPhysicalDeviceDescriptorIndexingProperties;
@@ -3171,6 +3185,21 @@ struct VkDependencyInfo {
     const VkImageMemoryBarrier2* pImageMemoryBarriers;
 };
 
+struct VkDepthBiasInfoEXT {
+    VkStructureType sType;
+    const void* pNext;
+    float depthBiasConstantFactor;
+    float depthBiasClamp;
+    float depthBiasSlopeFactor;
+};
+
+struct VkDepthBiasRepresentationInfoEXT {
+    VkStructureType sType;
+    const void* pNext;
+    VkDepthBiasRepresentationEXT depthBiasRepresentation;
+    VkBool32 depthBiasExact;
+};
+
 struct VkDescriptorBufferInfo {
     VkBuffer buffer;
     VkDeviceSize offset;
@@ -3937,6 +3966,15 @@ struct VkPhysicalDeviceBufferDeviceAddressFeatures {
     VkBool32 bufferDeviceAddress;
     VkBool32 bufferDeviceAddressCaptureReplay;
     VkBool32 bufferDeviceAddressMultiDevice;
+};
+
+struct VkPhysicalDeviceDepthBiasControlFeaturesEXT {
+    VkStructureType sType;
+    void* pNext;
+    VkBool32 depthBiasControl;
+    VkBool32 leastRepresentableValueForceUnormRepresentation;
+    VkBool32 floatRepresentation;
+    VkBool32 depthBiasExact;
 };
 
 struct VkPhysicalDeviceDepthStencilResolveProperties {
@@ -6035,6 +6073,17 @@ _Static_assert(offsetof(VkDependencyInfo, bufferMemoryBarrierCount) == 32, "VkDe
 _Static_assert(offsetof(VkDependencyInfo, pBufferMemoryBarriers) == 40, "VkDependencyInfo.pBufferMemoryBarriers guest offset");
 _Static_assert(offsetof(VkDependencyInfo, imageMemoryBarrierCount) == 48, "VkDependencyInfo.imageMemoryBarrierCount guest offset");
 _Static_assert(offsetof(VkDependencyInfo, pImageMemoryBarriers) == 56, "VkDependencyInfo.pImageMemoryBarriers guest offset");
+_Static_assert(sizeof(VkDepthBiasInfoEXT) == 32 && _Alignof(VkDepthBiasInfoEXT) == 8, "VkDepthBiasInfoEXT guest layout");
+_Static_assert(offsetof(VkDepthBiasInfoEXT, sType) == 0, "VkDepthBiasInfoEXT.sType guest offset");
+_Static_assert(offsetof(VkDepthBiasInfoEXT, pNext) == 8, "VkDepthBiasInfoEXT.pNext guest offset");
+_Static_assert(offsetof(VkDepthBiasInfoEXT, depthBiasConstantFactor) == 16, "VkDepthBiasInfoEXT.depthBiasConstantFactor guest offset");
+_Static_assert(offsetof(VkDepthBiasInfoEXT, depthBiasClamp) == 20, "VkDepthBiasInfoEXT.depthBiasClamp guest offset");
+_Static_assert(offsetof(VkDepthBiasInfoEXT, depthBiasSlopeFactor) == 24, "VkDepthBiasInfoEXT.depthBiasSlopeFactor guest offset");
+_Static_assert(sizeof(VkDepthBiasRepresentationInfoEXT) == 24 && _Alignof(VkDepthBiasRepresentationInfoEXT) == 8, "VkDepthBiasRepresentationInfoEXT guest layout");
+_Static_assert(offsetof(VkDepthBiasRepresentationInfoEXT, sType) == 0, "VkDepthBiasRepresentationInfoEXT.sType guest offset");
+_Static_assert(offsetof(VkDepthBiasRepresentationInfoEXT, pNext) == 8, "VkDepthBiasRepresentationInfoEXT.pNext guest offset");
+_Static_assert(offsetof(VkDepthBiasRepresentationInfoEXT, depthBiasRepresentation) == 16, "VkDepthBiasRepresentationInfoEXT.depthBiasRepresentation guest offset");
+_Static_assert(offsetof(VkDepthBiasRepresentationInfoEXT, depthBiasExact) == 20, "VkDepthBiasRepresentationInfoEXT.depthBiasExact guest offset");
 _Static_assert(sizeof(VkDescriptorBufferInfo) == 24 && _Alignof(VkDescriptorBufferInfo) == 8, "VkDescriptorBufferInfo guest layout");
 _Static_assert(offsetof(VkDescriptorBufferInfo, buffer) == 0, "VkDescriptorBufferInfo.buffer guest offset");
 _Static_assert(offsetof(VkDescriptorBufferInfo, offset) == 8, "VkDescriptorBufferInfo.offset guest offset");
@@ -6619,6 +6668,13 @@ _Static_assert(offsetof(VkPhysicalDeviceBufferDeviceAddressFeatures, pNext) == 8
 _Static_assert(offsetof(VkPhysicalDeviceBufferDeviceAddressFeatures, bufferDeviceAddress) == 16, "VkPhysicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddress guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceBufferDeviceAddressFeatures, bufferDeviceAddressCaptureReplay) == 20, "VkPhysicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceBufferDeviceAddressFeatures, bufferDeviceAddressMultiDevice) == 24, "VkPhysicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice guest offset");
+_Static_assert(sizeof(VkPhysicalDeviceDepthBiasControlFeaturesEXT) == 32 && _Alignof(VkPhysicalDeviceDepthBiasControlFeaturesEXT) == 8, "VkPhysicalDeviceDepthBiasControlFeaturesEXT guest layout");
+_Static_assert(offsetof(VkPhysicalDeviceDepthBiasControlFeaturesEXT, sType) == 0, "VkPhysicalDeviceDepthBiasControlFeaturesEXT.sType guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceDepthBiasControlFeaturesEXT, pNext) == 8, "VkPhysicalDeviceDepthBiasControlFeaturesEXT.pNext guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceDepthBiasControlFeaturesEXT, depthBiasControl) == 16, "VkPhysicalDeviceDepthBiasControlFeaturesEXT.depthBiasControl guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceDepthBiasControlFeaturesEXT, leastRepresentableValueForceUnormRepresentation) == 20, "VkPhysicalDeviceDepthBiasControlFeaturesEXT.leastRepresentableValueForceUnormRepresentation guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceDepthBiasControlFeaturesEXT, floatRepresentation) == 24, "VkPhysicalDeviceDepthBiasControlFeaturesEXT.floatRepresentation guest offset");
+_Static_assert(offsetof(VkPhysicalDeviceDepthBiasControlFeaturesEXT, depthBiasExact) == 28, "VkPhysicalDeviceDepthBiasControlFeaturesEXT.depthBiasExact guest offset");
 _Static_assert(sizeof(VkPhysicalDeviceDepthStencilResolveProperties) == 32 && _Alignof(VkPhysicalDeviceDepthStencilResolveProperties) == 8, "VkPhysicalDeviceDepthStencilResolveProperties guest layout");
 _Static_assert(offsetof(VkPhysicalDeviceDepthStencilResolveProperties, sType) == 0, "VkPhysicalDeviceDepthStencilResolveProperties.sType guest offset");
 _Static_assert(offsetof(VkPhysicalDeviceDepthStencilResolveProperties, pNext) == 8, "VkPhysicalDeviceDepthStencilResolveProperties.pNext guest offset");
@@ -8105,6 +8161,7 @@ typedef void (VKAPI_PTR *PFN_vkCmdSetBlendConstants)(VkCommandBuffer commandBuff
 typedef void (VKAPI_PTR *PFN_vkCmdSetCullMode)(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode);
 typedef void (VKAPI_PTR *PFN_vkCmdSetCullModeEXT)(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBias)(VkCommandBuffer commandBuffer, float depthBiasConstantFactor, float depthBiasClamp, float depthBiasSlopeFactor);
+typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBias2EXT)(VkCommandBuffer commandBuffer, const VkDepthBiasInfoEXT* pDepthBiasInfo);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBiasEnable)(VkCommandBuffer commandBuffer, VkBool32 depthBiasEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBiasEnableEXT)(VkCommandBuffer commandBuffer, VkBool32 depthBiasEnable);
 typedef void (VKAPI_PTR *PFN_vkCmdSetDepthBounds)(VkCommandBuffer commandBuffer, float minDepthBounds, float maxDepthBounds);

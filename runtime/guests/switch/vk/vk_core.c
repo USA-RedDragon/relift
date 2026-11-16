@@ -998,6 +998,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         last->pNext = (VkBaseOutStructure *)ci->pNext;
         ci->pNext = chain;
     }
+    vkf_depth_device_extend(&k, d, ci);
     VkDevice dev = NULL;
     r = vkf_queue_create_infos(&k, pd, ci, d);
     if (r >= 0)

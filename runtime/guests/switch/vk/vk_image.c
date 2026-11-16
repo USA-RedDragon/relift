@@ -324,10 +324,13 @@ int vkh_vkCreateImageView(rl_ctx *restrict c, uint8_t *mem)
         }
         ci->format = f->host;
     }
+    VkFormat guest = ci ? ci->format : VK_FORMAT_UNDEFINED;
     if (ci)
         ci->format = vkf_depth_format(k.obj->dev, ci->format);
     VkImageView v = NULL;
     VkResult r = VKF_FN(k.fns, vkCreateImageView)(dev, ci, NULL, &v);
+    if (r >= 0)
+        vkf_depth_note_view(k.obj->dev, (uint64_t)(uintptr_t)v, guest);
     if (r >= 0 && c->x[3])
         vkf_s64(&k, c->x[3], (uint64_t)(uintptr_t)v);
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateImageView, r);

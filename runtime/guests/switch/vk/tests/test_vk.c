@@ -3856,6 +3856,233 @@ TEST(vk_d24_on_a_host_without_it_is_d32)
 }
 
 /**
+ * @brief SPIR-V (glslc -O) of a vertex shader that draws a triangle over the
+ * whole viewport at depth 0.1:
+ *
+ *   void main() { vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.1, 1.0); }
+ */
+static const uint32_t g_tri_vert[] = {
+    0x07230203, 0x00010300, 0x000d000b, 0x0000002c, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
+    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
+    0x0007000f, 0x00000000, 0x00000004, 0x6e69616d, 0x00000000, 0x0000000c, 0x0000001d, 0x00040047,
+    0x0000000c, 0x0000000b, 0x0000002a, 0x00030047, 0x0000001b, 0x00000002, 0x00050048, 0x0000001b,
+    0x00000000, 0x0000000b, 0x00000000, 0x00050048, 0x0000001b, 0x00000001, 0x0000000b, 0x00000001,
+    0x00050048, 0x0000001b, 0x00000002, 0x0000000b, 0x00000003, 0x00050048, 0x0000001b, 0x00000003,
+    0x0000000b, 0x00000004, 0x00020013, 0x00000002, 0x00030021, 0x00000003, 0x00000002, 0x00030016,
+    0x00000006, 0x00000020, 0x00040017, 0x00000007, 0x00000006, 0x00000002, 0x00040015, 0x0000000a,
+    0x00000020, 0x00000001, 0x00040020, 0x0000000b, 0x00000001, 0x0000000a, 0x0004003b, 0x0000000b,
+    0x0000000c, 0x00000001, 0x0004002b, 0x0000000a, 0x0000000e, 0x00000001, 0x0004002b, 0x0000000a,
+    0x00000010, 0x00000002, 0x00040017, 0x00000017, 0x00000006, 0x00000004, 0x00040015, 0x00000018,
+    0x00000020, 0x00000000, 0x0004002b, 0x00000018, 0x00000019, 0x00000001, 0x0004001c, 0x0000001a,
+    0x00000006, 0x00000019, 0x0006001e, 0x0000001b, 0x00000017, 0x00000006, 0x0000001a, 0x0000001a,
+    0x00040020, 0x0000001c, 0x00000003, 0x0000001b, 0x0004003b, 0x0000001c, 0x0000001d, 0x00000003,
+    0x0004002b, 0x0000000a, 0x0000001e, 0x00000000, 0x0004002b, 0x00000006, 0x00000020, 0x40000000,
+    0x0004002b, 0x00000006, 0x00000022, 0x3f800000, 0x0004002b, 0x00000006, 0x00000025, 0x3dcccccd,
+    0x00040020, 0x00000029, 0x00000003, 0x00000017, 0x0005002c, 0x00000007, 0x0000002b, 0x00000022,
+    0x00000022, 0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005,
+    0x0004003d, 0x0000000a, 0x0000000d, 0x0000000c, 0x000500c4, 0x0000000a, 0x0000000f, 0x0000000d,
+    0x0000000e, 0x000500c7, 0x0000000a, 0x00000011, 0x0000000f, 0x00000010, 0x0004006f, 0x00000006,
+    0x00000012, 0x00000011, 0x000500c7, 0x0000000a, 0x00000014, 0x0000000d, 0x00000010, 0x0004006f,
+    0x00000006, 0x00000015, 0x00000014, 0x00050050, 0x00000007, 0x00000016, 0x00000012, 0x00000015,
+    0x0005008e, 0x00000007, 0x00000021, 0x00000016, 0x00000020, 0x00050083, 0x00000007, 0x00000024,
+    0x00000021, 0x0000002b, 0x00050051, 0x00000006, 0x00000026, 0x00000024, 0x00000000, 0x00050051,
+    0x00000006, 0x00000027, 0x00000024, 0x00000001, 0x00070050, 0x00000017, 0x00000028, 0x00000026,
+    0x00000027, 0x00000025, 0x00000022, 0x00050041, 0x00000029, 0x0000002a, 0x0000001d, 0x0000001e,
+    0x0003003e, 0x0000002a, 0x00000028, 0x000100fd, 0x00010038,
+};
+
+/** @brief Makes *out a depth-only pipeline for pass that draws g_tri_vert with a constant depth bias of 1000, static or dynamic. */
+static void bias_pipeline(uint64_t dev, uint64_t pass, uint64_t layout, uint64_t module, bool dynamic, uint64_t *out)
+{
+    VkPipelineShaderStageCreateInfo st = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
+                                           .module = (VkShaderModule)GP(module), .pName = GP(gstr("main")) };
+    VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                                                  .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    VkViewport vp = { 0, 0, 16, 16, 0, 1 };
+    VkRect2D sc = { { 0, 0 }, { 16, 16 } };
+    VkPipelineViewportStateCreateInfo vs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1,
+                                             .pViewports = GP(gput(&vp, sizeof vp)), .scissorCount = 1, .pScissors = GP(gput(&sc, sizeof sc)) };
+    VkPipelineRasterizationStateCreateInfo rs = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                  .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE,
+                                                  .depthBiasEnable = VK_TRUE, .depthBiasConstantFactor = dynamic ? 0.0f : 1000.0f,
+                                                  .lineWidth = 1.0f };
+    VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
+    VkPipelineDepthStencilStateCreateInfo ds = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+                                                 .depthTestEnable = VK_TRUE, .depthWriteEnable = VK_TRUE, .depthCompareOp = VK_COMPARE_OP_ALWAYS };
+    VkDynamicState dyn = VK_DYNAMIC_STATE_DEPTH_BIAS;
+    VkPipelineDynamicStateCreateInfo dy = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 1,
+                                            .pDynamicStates = GP(gput(&dyn, sizeof dyn)) };
+    VkGraphicsPipelineCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 1,
+        .pStages = GP(gput(&st, sizeof st)),
+        .pVertexInputState = GP(gput(&vi, sizeof vi)),
+        .pInputAssemblyState = GP(gput(&ia, sizeof ia)),
+        .pViewportState = GP(gput(&vs, sizeof vs)),
+        .pRasterizationState = GP(gput(&rs, sizeof rs)),
+        .pMultisampleState = GP(gput(&ms, sizeof ms)),
+        .pDepthStencilState = GP(gput(&ds, sizeof ds)),
+        .pDynamicState = dynamic ? GP(gput(&dy, sizeof dy)) : NULL,
+        .layout = (VkPipelineLayout)GP(layout),
+        .renderPass = (VkRenderPass)GP(pass),
+    };
+    uint64_t gp = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateGraphicsPipelines", dev, 0, 1, gput(&ci, sizeof ci), 0, gp)), VK_SUCCESS);
+    *out = g64(gp);
+}
+
+/**
+ * @brief On a host without 24-bit depth, a constant depth bias of 1000 on a
+ * D24S8 attachment moves depth 0.1 by 1000 x 2^-24, as on the console, in a
+ * pipeline with static bias and in one with vkCmdSetDepthBias. A D32
+ * attachment's own unit at 0.1 is 2^-27, eight times smaller. The host
+ * depth (D32 float) is read back on the host side.
+ */
+TEST(vk_d24_depth_bias_on_d32_is_in_d24_units)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    void *(*fg)(void *, const char *) = no_d24_gipa;
+    void *gipa;
+    memcpy(&gipa, &fg, sizeof gipa);
+    CHECK_EQ(boot_with(NULL, gipa), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pd = 0;
+    CHECK(physical_devices(&pd, 1) == 1);
+    uint64_t dev = make_device(pd, queue_family(pd, 0), NULL, 0);
+    CHECK(dev != 0);
+    vkf_dev *d = vkf_obj_of(dev, VKG_KIND_VkDevice)->dev;
+    CHECK(d->depth24);
+    if (!d->bias_float) {
+        fprintf(stderr, "  skipped: the host has no exact float depth bias\n");
+        finish(dev);
+        return;
+    }
+    mapped_buf rb;
+    CHECK_EQ(make_mapped(pd, dev, 2 * 16 * 16 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &rb), 0);
+    VkAttachmentDescription a = {
+        .format = VK_FORMAT_D24_UNORM_S8_UINT,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    };
+    VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription sub = { .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .pDepthStencilAttachment = GP(gput(&ref, sizeof ref)) };
+    VkSubpassDependency dep = { .srcSubpass = 0, .dstSubpass = VK_SUBPASS_EXTERNAL,
+                                .srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, .dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT };
+    VkRenderPassCreateInfo rci = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = 1, .pAttachments = GP(gput(&a, sizeof a)),
+                                   .subpassCount = 1, .pSubpasses = GP(gput(&sub, sizeof sub)), .dependencyCount = 1,
+                                   .pDependencies = GP(gput(&dep, sizeof dep)) };
+    uint64_t grp = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateRenderPass", dev, gput(&rci, sizeof rci), 0, grp)), VK_SUCCESS);
+    uint64_t pass = g64(grp);
+    VkPipelineLayoutCreateInfo plci = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    uint64_t gpl = galloc(8);
+    CHECK_EQ(VKR(G("vkCreatePipelineLayout", dev, gput(&plci, sizeof plci), 0, gpl)), VK_SUCCESS);
+    VkShaderModuleCreateInfo smci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = sizeof g_tri_vert,
+                                      .pCode = GP(gput(g_tri_vert, sizeof g_tri_vert)) };
+    uint64_t gsm = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateShaderModule", dev, gput(&smci, sizeof smci), 0, gsm)), VK_SUCCESS);
+    uint64_t pipe[2] = { 0, 0 };
+    bias_pipeline(dev, pass, g64(gpl), g64(gsm), false, &pipe[0]);
+    bias_pipeline(dev, pass, g64(gpl), g64(gsm), true, &pipe[1]);
+    uint64_t img[2], imem[2], view[2], fb[2];
+    for (int i = 0; i < 2; i++) {
+        VkImageCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_D24_UNORM_S8_UINT,
+                                  .extent = { 16, 16, 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+                                  .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                  .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT };
+        uint64_t gi = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)), VK_SUCCESS);
+        img[i] = g64(gi);
+        VkMemoryRequirements req;
+        imem[i] = bind_image(pd, dev, img[i], &req);
+        CHECK(imem[i] != 0);
+        VkImageViewCreateInfo vci = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = (VkImage)GP(img[i]),
+                                      .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_D24_UNORM_S8_UINT,
+                                      .subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 } };
+        uint64_t gv = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gv)), VK_SUCCESS);
+        view[i] = g64(gv);
+        VkFramebufferCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = (VkRenderPass)GP(pass),
+                                        .attachmentCount = 1, .pAttachments = GP(gv), .width = 16, .height = 16, .layers = 1 };
+        uint64_t gfb = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateFramebuffer", dev, gput(&fci, sizeof fci), 0, gfb)), VK_SUCCESS);
+        fb[i] = g64(gfb);
+    }
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, 0, 0, gq);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = (VkCommandPool)GP(g64(gpool)),
+                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo cbbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&cbbi, sizeof cbbi))), VK_SUCCESS);
+    float zero = 0.0f, k1000 = 1000.0f;
+    uint32_t zbits, kbits;
+    memcpy(&zbits, &zero, 4);
+    memcpy(&kbits, &k1000, 4);
+    g_c->v[0].s[0] = kbits;
+    g_c->v[1].s[0] = zbits;
+    g_c->v[2].s[0] = zbits;
+    G("vkCmdSetDepthBias", cb);
+    for (int i = 0; i < 2; i++) {
+        VkClearValue cv = { .depthStencil = { 1.0f, 0 } };
+        VkRenderPassBeginInfo rbi = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = (VkRenderPass)GP(pass),
+                                      .framebuffer = (VkFramebuffer)GP(fb[i]), .renderArea = { { 0, 0 }, { 16, 16 } },
+                                      .clearValueCount = 1, .pClearValues = GP(gput(&cv, sizeof cv)) };
+        G("vkCmdBeginRenderPass", cb, gput(&rbi, sizeof rbi), VK_SUBPASS_CONTENTS_INLINE);
+        G("vkCmdBindPipeline", cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe[i]);
+        G("vkCmdDraw", cb, 3, 1, 0, 0);
+        G("vkCmdEndRenderPass", cb);
+        vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
+        VkBufferImageCopy r = { .bufferOffset = (VkDeviceSize)i * 16 * 16 * 4, .imageSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 },
+                                .imageExtent = { 16, 16, 1 } };
+        ((PFN_vkCmdCopyImageToBuffer)o->fns->f[VKG_vkCmdCopyImageToBuffer])(o->host, (VkImage)GP(img[i]), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                                            (VkBuffer)GP(rb.buf), 1, &r);
+    }
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", g64(gq), 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", g64(gq))), VK_SUCCESS);
+    const float want = 0.1f + 1000.0f / 16777216.0f;
+    for (int i = 0; i < 2; i++) {
+        float got;
+        memcpy(&got, g_mem + rb.ptr + (uint64_t)i * 16 * 16 * 4 + (8 * 16 + 8) * 4, 4);
+        fprintf(stderr, "  %s bias: depth %.9f, want %.9f (0.1 + 1000 x 2^-24), D32's own unit gives %.9f\n", i ? "dynamic" : "static", got, want,
+                0.1f + 1000.0f / 134217728.0f);
+        CHECK(fabsf(got - want) < 4e-7f);
+    }
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    for (int i = 0; i < 2; i++) {
+        G("vkDestroyFramebuffer", dev, fb[i], 0);
+        G("vkDestroyImageView", dev, view[i], 0);
+        G("vkDestroyImage", dev, img[i], 0);
+        G("vkFreeMemory", dev, imem[i], 0);
+        G("vkDestroyPipeline", dev, pipe[i], 0);
+    }
+    G("vkDestroyShaderModule", dev, g64(gsm), 0);
+    G("vkDestroyPipelineLayout", dev, g64(gpl), 0);
+    G("vkDestroyRenderPass", dev, pass, 0);
+    G("vkDestroyBuffer", dev, rb.buf, 0);
+    G("vkFreeMemory", dev, rb.mem, 0);
+    finish(dev);
+}
+
+/**
  * @brief SPIR-V (glslc -O) of a compute shader whose storage images declare
  * rg32f: binding 1 is read into the buffer at binding 2 and binding 0 gets
  * vec4(0.25, 0.75, 0.5, 1.0). A game's SMAA edge pass declares rg32f on an

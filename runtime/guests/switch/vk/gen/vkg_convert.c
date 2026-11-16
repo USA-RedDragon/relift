@@ -1468,6 +1468,66 @@ void vkg_aout_VkDependencyInfo(vkf_call *k, uint64_t g, const VkDependencyInfo *
         vkg_out_VkDependencyInfo(k, g + 64 * i, &h[i]);
 }
 
+void vkg_in_VkDepthBiasInfoEXT(vkf_call *k, VkDepthBiasInfoEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkDepthBiasInfoEXT(vkf_call *k, uint64_t g, const VkDepthBiasInfoEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 12);
+}
+
+VkDepthBiasInfoEXT *vkg_ain_VkDepthBiasInfoEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkDepthBiasInfoEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkDepthBiasInfoEXT(k, &h[i], g + 32 * i);
+    return h;
+}
+
+void vkg_aout_VkDepthBiasInfoEXT(vkf_call *k, uint64_t g, const VkDepthBiasInfoEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkDepthBiasInfoEXT(k, g + 32 * i, &h[i]);
+}
+
+void vkg_in_VkDepthBiasRepresentationInfoEXT(vkf_call *k, VkDepthBiasRepresentationInfoEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkDepthBiasRepresentationInfoEXT(vkf_call *k, uint64_t g, const VkDepthBiasRepresentationInfoEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 8);
+}
+
+VkDepthBiasRepresentationInfoEXT *vkg_ain_VkDepthBiasRepresentationInfoEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkDepthBiasRepresentationInfoEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkDepthBiasRepresentationInfoEXT(k, &h[i], g + 24 * i);
+    return h;
+}
+
+void vkg_aout_VkDepthBiasRepresentationInfoEXT(vkf_call *k, uint64_t g, const VkDepthBiasRepresentationInfoEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkDepthBiasRepresentationInfoEXT(k, g + 24 * i, &h[i]);
+}
+
 void vkg_in_VkDescriptorPoolCreateInfo(vkf_call *k, VkDescriptorPoolCreateInfo *h, uint64_t g)
 {
     memcpy(h, k->mem + g, sizeof *h);
@@ -3884,6 +3944,36 @@ void vkg_aout_VkPhysicalDeviceBufferDeviceAddressFeatures(vkf_call *k, uint64_t 
         return;
     for (uint64_t i = 0; i < n; i++)
         vkg_out_VkPhysicalDeviceBufferDeviceAddressFeatures(k, g + 32 * i, &h[i]);
+}
+
+void vkg_in_VkPhysicalDeviceDepthBiasControlFeaturesEXT(vkf_call *k, VkPhysicalDeviceDepthBiasControlFeaturesEXT *h, uint64_t g)
+{
+    memcpy(h, k->mem + g, sizeof *h);
+    h->pNext = vkg_chain_in(k, vkf_g64(k, g + 8));
+}
+
+void vkg_out_VkPhysicalDeviceDepthBiasControlFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceDepthBiasControlFeaturesEXT *h)
+{
+    vkg_chain_out(k, vkf_g64(k, g + 8), h->pNext);
+    memcpy(k->mem + g + 16, (const uint8_t *)h + 16, 16);
+}
+
+VkPhysicalDeviceDepthBiasControlFeaturesEXT *vkg_ain_VkPhysicalDeviceDepthBiasControlFeaturesEXT(vkf_call *k, uint64_t g, uint64_t n)
+{
+    if (!g)
+        return NULL;
+    VkPhysicalDeviceDepthBiasControlFeaturesEXT *h = vkf_alloc(k, (n ? n : 1) * sizeof *h);
+    for (uint64_t i = 0; i < n; i++)
+        vkg_in_VkPhysicalDeviceDepthBiasControlFeaturesEXT(k, &h[i], g + 32 * i);
+    return h;
+}
+
+void vkg_aout_VkPhysicalDeviceDepthBiasControlFeaturesEXT(vkf_call *k, uint64_t g, const VkPhysicalDeviceDepthBiasControlFeaturesEXT *h, uint64_t n)
+{
+    if (!g || !h)
+        return;
+    for (uint64_t i = 0; i < n; i++)
+        vkg_out_VkPhysicalDeviceDepthBiasControlFeaturesEXT(k, g + 32 * i, &h[i]);
 }
 
 void vkg_in_VkPhysicalDeviceDepthStencilResolveProperties(vkf_call *k, VkPhysicalDeviceDepthStencilResolveProperties *h, uint64_t g)
@@ -8484,6 +8574,16 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
             vkg_in_VkDependencyInfo(k, h, g);
             return h;
         }
+        case VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT: {
+            VkDepthBiasInfoEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkDepthBiasInfoEXT(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT: {
+            VkDepthBiasRepresentationInfoEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkDepthBiasRepresentationInfoEXT(k, h, g);
+            return h;
+        }
         case VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO: {
             VkDescriptorPoolCreateInfo *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkDescriptorPoolCreateInfo(k, h, g);
@@ -8867,6 +8967,11 @@ void *vkg_chain_in(vkf_call *k, uint64_t g)
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES: {
             VkPhysicalDeviceBufferDeviceAddressFeatures *h = vkf_alloc(k, sizeof *h);
             vkg_in_VkPhysicalDeviceBufferDeviceAddressFeatures(k, h, g);
+            return h;
+        }
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT: {
+            VkPhysicalDeviceDepthBiasControlFeaturesEXT *h = vkf_alloc(k, sizeof *h);
+            vkg_in_VkPhysicalDeviceDepthBiasControlFeaturesEXT(k, h, g);
             return h;
         }
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES: {
@@ -9681,6 +9786,12 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
         case VK_STRUCTURE_TYPE_DEPENDENCY_INFO:
             vkg_out_VkDependencyInfo(k, g, (const VkDependencyInfo *)h);
             return;
+        case VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT:
+            vkg_out_VkDepthBiasInfoEXT(k, g, (const VkDepthBiasInfoEXT *)h);
+            return;
+        case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+            vkg_out_VkDepthBiasRepresentationInfoEXT(k, g, (const VkDepthBiasRepresentationInfoEXT *)h);
+            return;
         case VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO:
             vkg_out_VkDescriptorPoolCreateInfo(k, g, (const VkDescriptorPoolCreateInfo *)h);
             return;
@@ -9911,6 +10022,9 @@ void vkg_chain_out(vkf_call *k, uint64_t g, const void *h)
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES:
             vkg_out_VkPhysicalDeviceBufferDeviceAddressFeatures(k, g, (const VkPhysicalDeviceBufferDeviceAddressFeatures *)h);
+            return;
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT:
+            vkg_out_VkPhysicalDeviceDepthBiasControlFeaturesEXT(k, g, (const VkPhysicalDeviceDepthBiasControlFeaturesEXT *)h);
             return;
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES:
             vkg_out_VkPhysicalDeviceDepthStencilResolveProperties(k, g, (const VkPhysicalDeviceDepthStencilResolveProperties *)h);

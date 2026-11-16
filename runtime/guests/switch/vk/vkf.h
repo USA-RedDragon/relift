@@ -62,6 +62,13 @@ typedef struct vkf_obj {
     vkf_inst *inst;
     /** @brief Devices, queues and command buffers: the device state. */
     vkf_dev *dev;
+    /** @brief Command buffers on a device with D32 for D24: the render pass and subpass recording, and whether its depth attachment is substituted (vk_format.c). */
+    uint64_t pass;
+    uint32_t subpass;
+    bool depth_now;
+    /** @brief Command buffers: the guest's dynamic depth bias (constant, clamp, slope), whether it set one, and whether the host has it scaled for D32. */
+    float bias[3];
+    bool bias_set, bias_scaled;
 } vkf_obj;
 
 /** @brief A mark in the per-thread arena. */
@@ -168,6 +175,8 @@ struct vkf_dev {
     bool keep_attachments;
     /** @brief The host has no 24-bit depth: D24S8 and X8D24 reach it as D32S8 and D32 (vk_format.c). */
     bool depth24;
+    /** @brief With depth24: the host gives an exact float depth bias (VK_EXT_depth_bias_control), on in the device. */
+    bool bias_float;
     /** @brief The formatless storage features are on: shaders' storage image formats become Unknown (vk_spirv.c). */
     bool formatless;
     /** @brief The host format of each format the layer can decode (vkf_decode_index), the format itself when the host takes it. */
@@ -421,6 +430,31 @@ VkFormat vkf_host_format(const vkf_fns *fns, VkPhysicalDevice pd, VkFormat f);
 size_t vkf_spirv_formatless(const uint32_t *in, size_t n, uint32_t *out);
 /** @brief Turns the formatless storage features on for a device whose host has them and sets d->formatless. */
 void vkf_spirv_device_features(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd, VkDeviceCreateInfo *ci);
+/** @brief Enables VK_EXT_depth_bias_control in a host device create info when d->bias_float. */
+void vkf_depth_device_extend(vkf_call *k, const vkf_dev *d, VkDeviceCreateInfo *ci);
+/** @brief The subpasses of a render pass (guest formats) whose depth attachment is substituted, as a mask. */
+uint64_t vkf_depth_pass_mask(const vkf_dev *d, const VkAttachmentDescription *a, uint32_t na, const VkSubpassDescription *s, uint32_t ns);
+uint64_t vkf_depth_pass_mask2(const vkf_dev *d, const VkRenderPassCreateInfo2 *ci);
+/** @brief Records the mask of a host render pass. */
+void vkf_depth_note_pass(uint64_t pass, uint64_t mask);
+/** @brief Records a host image view whose guest format is substituted. */
+void vkf_depth_note_view(const vkf_dev *d, uint64_t view, VkFormat guest);
+/** @brief Hooks after vkDestroyRenderPass and vkDestroyImageView. */
+void vkf_depth_forget_pass(vkf_call *k);
+void vkf_depth_forget_view(vkf_call *k);
+/** @brief Whether subpass of a host render pass, or a host image view, has a substituted depth format. */
+bool vkf_depth_pass_uses(uint64_t pass, uint32_t subpass);
+bool vkf_depth_view_uses(uint64_t view);
+/** @brief Sets whether command buffer o now renders to a substituted depth attachment and gives the host the dynamic depth bias that fits. */
+void vkf_depth_attachment(vkf_call *k, vkf_obj *o, bool substituted);
+/** @brief Resets o's depth state at vkBeginCommandBuffer, from its inheritance. */
+void vkf_depth_cb_begin(vkf_obj *o, const VkCommandBufferBeginInfo *bi);
+/** @brief Hooks after the render pass begins, subpass steps and ends. */
+void vkf_depth_begin_pass(vkf_call *k);
+void vkf_depth_next_subpass(vkf_call *k);
+void vkf_depth_end_pass(vkf_call *k);
+/** @brief Scales the static constant depth bias of a pipeline that renders to a substituted depth attachment. */
+void vkf_depth_pipeline(vkf_call *k, const vkf_dev *d, VkGraphicsPipelineCreateInfo *ci);
 /** @brief Sets d->depth24 from the host's depth formats. */
 void vkf_depth_device_setup(vkf_call *k, vkf_dev *d, VkPhysicalDevice pd);
 /** @brief The format a guest format reaches the host as on device d: f, or its 32-bit depth stand-in. */
