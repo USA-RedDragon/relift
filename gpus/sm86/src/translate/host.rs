@@ -89,7 +89,10 @@ pub struct HostProfile {
     pub denorm_preserve_mode: bool,
     /// `shaderDenormFlushToZeroFloat32`.
     pub denorm_flush_mode: bool,
-    /// The GLSL `Fma` instruction is fused (one rounding).
+    /// `shaderFmaFloat32` (VK_KHR_shader_fma): `OpFmaKHR` is available and
+    /// fused. GLSL `Fma` only has to be as precise as a multiply and an add,
+    /// so without this FFMA is built from integer operations. Set in the
+    /// presets only where a device was seen to report it.
     pub fused_fma: bool,
     pub clock: Clock,
     /// `maxComputeSharedMemorySize`.
@@ -147,6 +150,7 @@ impl HostProfile {
         HostProfile {
             name: "radv",
             warp_graphics: Warp::Varies,
+            fused_fma: false,
             denorm: Denorm::Unknown,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
@@ -207,7 +211,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
-            fused_fma: true,
+            fused_fma: false,
             clock: Clock::None,
             max_shared_bytes: 32768,
             max_samplers: 1024,
@@ -236,7 +240,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: true,
-            fused_fma: true,
+            fused_fma: false,
             clock: Clock::Device,
             max_shared_bytes: 32768,
             max_samplers: 1 << 24,
@@ -300,7 +304,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
-            fused_fma: true,
+            fused_fma: false,
             clock: Clock::Device,
             max_shared_bytes: 32768,
             max_samplers: 1_015_808,
@@ -357,7 +361,7 @@ impl HostProfile {
             denorm: Denorm::Unknown,
             denorm_preserve_mode: false,
             denorm_flush_mode: false,
-            fused_fma: true,
+            fused_fma: false,
             clock: Clock::None,
             max_shared_bytes: 16384,
             max_samplers: 1024,
@@ -469,6 +473,9 @@ pub struct HostReport {
     /// Float instructions that check for tiny values and round them
     /// themselves.
     pub denorm_fixups: u32,
+    /// The program uses `OpFmaKHR`: the device must enable
+    /// `shaderFmaFloat32` (VK_KHR_shader_fma).
+    pub fma_khr: bool,
     pub global: GlobalPath,
     pub atomics64: Atomic64Path,
     pub clock: ClockPath,

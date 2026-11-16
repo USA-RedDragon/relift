@@ -4,8 +4,10 @@
 //! SPIR-V has no per-instruction rounding mode for arithmetic, so RZ, RM
 //! and RP round to nearest and then step one ulp when the exact error says
 //! the nearest value lies on the wrong side. The error comes from error-free
-//! transformations: Knuth's TwoSum for sums and a fused multiply-add for
-//! products (exact as long as no intermediate underflows). FFMA's error sums
+//! transformations: Knuth's TwoSum for sums and, for products, a fused
+//! multiply-add where the host promises one, Dekker's product otherwise
+//! (exact as long as no intermediate underflows). FFMA without a fused host
+//! multiply-add is built from integer operations (the `fma` module). FFMA's error sums
 //! four terms with a TwoSum cascade. Results that overflowed to infinity
 //! from finite operands step back to the largest finite value where the
 //! mode says so.
@@ -16,6 +18,8 @@ use crate::program::Stage;
 use crate::spirv::{glsl, op};
 
 const NO_CONTRACTION: u32 = 42;
+const OP_FMA_KHR: u16 = 4427;
+const CAP_FMA_KHR: u32 = 6030;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Round {
@@ -71,9 +75,47 @@ impl Ctx {
         (s, e)
     }
 
+    /// The fused `a * b + c`, through `OpFmaKHR`: only for a host with
+    /// [`HostProfile::fused_fma`](super::HostProfile::fused_fma).
     pub(crate) fn fma(&mut self, a: u32, b: u32, c: u32) -> u32 {
+        debug_assert!(self.host.fused_fma);
+        self.cap(CAP_FMA_KHR);
+        self.exts.insert("SPV_KHR_fma");
+        self.iface.host.fma_khr = true;
         let f = self.f32t();
-        self.ext(f, glsl::FMA, &[a, b, c])
+        self.m.emit(OP_FMA_KHR, f, &[a, b, c])
+    }
+
+    /// `a * b - p` exactly, for the nearest product `p` of `a` and `b` with
+    /// no intermediate below the normal range: a fused multiply-add where
+    /// the host promises one, else Dekker's product of halves split with
+    /// Veltkamp's constant, which needs only correctly rounded multiplies
+    /// and adds.
+    pub(crate) fn prod_err(&mut self, a: u32, b: u32, p: u32) -> u32 {
+        if self.host.fused_fma {
+            let np = self.fneg(p);
+            return self.fma(a, b, np);
+        }
+        let (ah, al) = self.split(a);
+        let (bh, bl) = self.split(b);
+        let hh = self.exact(op::F_MUL, ah, bh);
+        let t = self.exact(op::F_SUB, hh, p);
+        let hl = self.exact(op::F_MUL, ah, bl);
+        let t = self.exact(op::F_ADD, t, hl);
+        let lh = self.exact(op::F_MUL, al, bh);
+        let t = self.exact(op::F_ADD, t, lh);
+        let ll = self.exact(op::F_MUL, al, bl);
+        self.exact(op::F_ADD, t, ll)
+    }
+
+    /// `(hi, lo)` with `hi + lo = a` exactly and each half of 12 bits.
+    fn split(&mut self, a: u32) -> (u32, u32) {
+        let k = self.m.c_f32(4097.0f32.to_bits());
+        let t = self.exact(op::F_MUL, k, a);
+        let d = self.exact(op::F_SUB, t, a);
+        let hi = self.exact(op::F_SUB, t, d);
+        let lo = self.exact(op::F_SUB, a, hi);
+        (hi, lo)
     }
 
     /// `-a` by its sign bit, which keeps a denormal on any host.
@@ -366,8 +408,7 @@ impl Ctx {
         let a1 = self.ldexp(a, na);
         let b1 = self.ldexp(b, nb);
         let p1 = self.exact(op::F_MUL, a1, b1);
-        let np1 = self.fneg(p1);
-        let e = self.fma(a1, b1, np1);
+        let e = self.prod_err(a1, b1, p1);
         let fin = self.all_finite(&[a, b]);
         let (up, down) = self.error_sides(p, e, fin);
         let out = self.directed(p, up, down, mode, ftz);

@@ -3,11 +3,14 @@ use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
 
 fn main() {
     let mut o = Options::default();
+    let mut no_fma = false;
     let args: Vec<String> = std::env::args()
         .filter(|a| {
             let flag = a == "--exact-mufu";
             o.exact_mufu |= flag;
-            !flag
+            let unfused = a == "--no-fused-fma";
+            no_fma |= unfused;
+            !flag && !unfused
         })
         .collect();
     let b = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("{}: {e}", args[1]));
@@ -17,6 +20,7 @@ fn main() {
         None => HostProfile::default(),
     };
     o.host = host;
+    o.host.fused_fma &= !no_fma;
     match translate_with(&p, &o) {
         Ok(s) => {
             let bytes: Vec<u8> = s.spirv.iter().flat_map(|w| w.to_le_bytes()).collect();

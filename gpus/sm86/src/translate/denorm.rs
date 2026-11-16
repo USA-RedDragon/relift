@@ -252,6 +252,9 @@ impl Ctx {
     }
 
     fn arith_exact(&mut self, k: Arith, xs: &[u32], mode: Round, ftz: bool, scale: i32) -> u32 {
+        if k == Arith::Fma && !self.host.fused_fma {
+            return self.soft_fma(xs[0], xs[1], Some(xs[2]), mode, ftz, 0);
+        }
         let dm = self.dn_dmode();
         let ins = self.arith_inputs(xs, ftz);
         let mut unscaled = None;
@@ -481,8 +484,7 @@ impl Ctx {
                 let (sb, eb) = self.dn_decompose(ps[1]);
                 let f = self.f32t();
                 let p = self.exact_mul(f, sa, sb);
-                let np = self.fneg(p);
-                let e = self.fma(sa, sb, np);
+                let e = self.prod_err(sa, sb, p);
                 let r = self.dn_ib(op::I_ADD, ea, eb);
                 let sc = self.dn_ki(scale);
                 let r = self.dn_ib(op::I_ADD, r, sc);

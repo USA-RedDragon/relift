@@ -15,7 +15,8 @@ pub struct Device {
     pub flush_ldexp: bool,
     /// With `flush`, comparisons read denormals as zero too.
     pub flush_cmp: bool,
-    /// GLSL `Fma` is fused; otherwise a multiply and an add, each rounded.
+    /// GLSL `Fma` is fused; otherwise a multiply and an add, each rounded
+    /// (`OpFmaKHR` is always fused).
     pub fused: bool,
     /// A NaN result is `0x7fc00000` whatever the inputs; otherwise the CPU's
     /// own (a quieted input NaN, or the negative default NaN).
@@ -504,6 +505,7 @@ impl Ex<'_> {
             132 => a[0].wrapping_mul(a[1]) & m,
             134 => a[0].checked_div(a[1]).unwrap_or(m),
             137 => a[0].checked_rem(a[1]).unwrap_or(0),
+            4427 => self.fout(fi(a[0]).mul_add(fi(a[1]), fi(a[2]))),
             129 => self.fout(fi(a[0]) + fi(a[1])),
             131 => self.fout(fi(a[0]) - fi(a[1])),
             133 => self.fout(fi(a[0]) * fi(a[1])),

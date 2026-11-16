@@ -9,6 +9,7 @@
 mod cfg;
 mod denorm;
 mod float;
+mod fma;
 mod host;
 mod int;
 mod io;

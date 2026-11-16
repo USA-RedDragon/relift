@@ -176,25 +176,22 @@ fn check(name: &str, o: &Options, devs: &[Device], inst: u128, cases: &[(u32, u3
 
 /// The devices a preset may run on: as promised, preserving where the
 /// translator asks for DenormPreserve, or anything for a host that promises
-/// no denormal mode.
+/// no denormal mode; all with a GLSL `Fma` that rounds twice.
 fn devices(h: &HostProfile) -> Vec<Device> {
     use relift_gpu_sm86::translate::Denorm;
-    let fused = |d: Device| Device {
-        fused: h.fused_fma,
-        ..d
-    };
+    let unfused = |d: Device| Device { fused: false, ..d };
     let flush: Vec<Device> = (0..4)
         .map(|k| Device {
             flush_ldexp: k & 1 != 0,
             flush_cmp: k & 2 != 0,
-            ..fused(FLUSH)
+            ..unfused(FLUSH)
         })
         .collect();
     match h.denorm {
         Denorm::Flush => flush,
-        Denorm::Unknown if h.denorm_preserve_mode => vec![fused(PRESERVE)],
-        Denorm::Preserve => vec![fused(PRESERVE)],
-        Denorm::Unknown => [&flush[..], &[fused(PRESERVE)]].concat(),
+        Denorm::Unknown if h.denorm_preserve_mode => vec![unfused(PRESERVE)],
+        Denorm::Preserve => vec![unfused(PRESERVE)],
+        Denorm::Unknown => [&flush[..], &[unfused(PRESERVE)]].concat(),
     }
 }
 
@@ -1078,5 +1075,41 @@ fn ffma_and_fmul_vectors_on_every_preset() {
         let devs = devices(&h);
         check_vectors("FFMA", &o, &devs, ffma, &FFMA_VECTORS);
         check_vectors("FMUL", &o, &devs, fmul, &FMUL_VECTORS);
+    }
+}
+
+/// Where the host does not promise a fused GLSL `Fma`, FFMA and the
+/// directed FMUL stay exact on a device that multiplies and adds with two
+/// roundings.
+#[test]
+fn ffma_is_exact_without_a_fused_host_fma() {
+    for h in HostProfile::presets() {
+        let h = HostProfile {
+            fused_fma: false,
+            ..h
+        };
+        let o = host(h.clone());
+        let devs = devices(&h);
+        assert!(devs.iter().all(|d| !d.fused));
+        check_vectors("FFMA", &o, &devs, ffma, &FFMA_VECTORS);
+        check_vectors("FMUL", &o, &devs, fmul, &FMUL_VECTORS);
+    }
+}
+
+/// Only presets whose device reports `shaderFmaFloat32` use `OpFmaKHR`, and
+/// the report says so.
+#[test]
+fn only_measured_presets_count_on_a_fused_fma() {
+    let fused: Vec<_> = HostProfile::presets()
+        .into_iter()
+        .chain([HostProfile::minimal()])
+        .filter(|h| h.fused_fma)
+        .map(|h| h.name)
+        .collect();
+    assert_eq!(fused, ["nvidia"]);
+    for h in HostProfile::presets() {
+        let p = program(ffma(RN), 0, 0, 0);
+        let s = translate_with(&p, &host(h.clone())).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(s.interface.host.fma_khr, h.fused_fma, "{}", h.name);
     }
 }
