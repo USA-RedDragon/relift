@@ -105,7 +105,6 @@ fn retab_is_undefined_on_the_switch_cpu() {
 /// return address (PAuth2 without FPAC), so the fetch from it faults and
 /// the process crashes before it prints "returned".
 #[test]
-#[ignore = "needs authenticated returns to leave through the return address"]
 fn a_corrupted_signed_return_address_crashes() {
     if !clang() {
         return;
