@@ -68,7 +68,7 @@ struct Charter {
 const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries or are not wired into `relift` yet
-/// (`relift-emit-wasm` until a browser build uses it), so the reachability controls skip them; the
+/// (`relift-emit-wasm` until a browser build uses it, `relift-nds-formats` until a guest uses it), so the reachability controls skip them; the
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-cpu-arm32",
@@ -80,6 +80,8 @@ const STANDALONE: &[&str] = &[
     "relift-gb-tools",
     "relift-gba-tools",
     "relift-n64-tools",
+    "relift-nds-formats",
+    "relift-nds-tools",
     "relift-sms-formats",
     "relift-sms-tools",
     "relift-switch-shaders",
@@ -349,6 +351,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-nds-formats",
+        band: 2,
+        why: "the Nintendo DS cartridge format: header with CRC16 and logo hash, module parameters, BLZ, static binaries with autoload blocks, overlays and file tables; reads bytes only",
+        normal: &["sha2"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-n64-analyze",
         band: 2,
         why: "Nintendo 64 code discovery: the VR4300 lifter's IR run over abstract values, the PI DMA fixed point, the ROM-wide region scan with the link address vote and the RSP image list, over the cartridge format; analysis only",
@@ -399,6 +409,14 @@ const CHARTERS: &[Charter] = &[
             "relift-proc",
             "serde_json",
         ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-nds-tools",
+        band: 2,
+        why: "single-purpose tools for decrypted Nintendo DS files, thin wrappers over relift-nds-formats",
+        normal: &["clap", "relift-cache", "relift-nds-formats", "serde_json"],
+        dev: &["relift-proc", "serde_json"],
         build: NONE,
     },
     Charter {
