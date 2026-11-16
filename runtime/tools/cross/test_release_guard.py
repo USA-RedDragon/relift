@@ -62,6 +62,26 @@ class ReleaseGuard(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("hot-load", r.stderr)
 
+    def elf(self, extra):
+        elf = bytearray(0x200)
+        elf[0:4] = b"\x7fELF"
+        elf[4] = 2
+        d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
+        path = os.path.join(d, "game")
+        with open(path, "wb") as f:
+            f.write(bytes(elf) + extra)
+        return path
+
+    def test_a_binary_with_the_cpu_interpreter_fails_the_interpreter_check(self):
+        path = self.elf(b"\0rlgbd_exec_native\0")
+        self.assertEqual(guard("--binary", path).returncode, 0)
+        r = guard("--binary", path, "--no-interpreter")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("CPU interpreter (rlgbd_exec_native)", r.stderr)
+
+    def test_a_binary_without_the_cpu_interpreter_passes_the_interpreter_check(self):
+        self.assertEqual(guard("--binary", self.elf(b"\0rlgbd_control\0"), "--no-interpreter").returncode, 0)
+
     def test_a_writable_executable_segment_fails(self):
         import struct
 

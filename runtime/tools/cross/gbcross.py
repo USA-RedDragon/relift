@@ -427,7 +427,7 @@ def main():
         print(f"{n} files compile")
         exe = link(args, tool, objs, devlib)
         print(f"linked {exe}")
-        guard = [sys.executable, "-I", os.path.join(HERE, "release_guard.py"), "--sources", os.path.join(ROOT, "runtime"), "--objects", os.path.join(args.work, "obj", args.target), "--binary", exe]
+        guard = [sys.executable, "-I", os.path.join(HERE, "release_guard.py"), "--sources", os.path.join(ROOT, "runtime"), "--objects", os.path.join(args.work, "obj", args.target), "--binary", exe, "--no-interpreter"]
         r = run(guard)
         print((r.stdout + r.stderr).strip())
         if r.returncode:

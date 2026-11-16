@@ -18,6 +18,11 @@ package the user installed and picked with video.gpu_driver, which
 libadrenotools opens next to the system loader (core/gpu_driver.h).
 - binary: ELF, PE or Mach-O with no hot-load connection and no segment or
   section that is both writable and executable.
+- no-interpreter (with binary): the binary holds none of the names of the
+  Game Boy device library's CPU interpreter (rlgbd_exec_native,
+  rlgbd_step_native, rustyboi's cpu::opcodes and step_instruction), which a
+  release build leaves out: every instruction it runs is lifted. A stripped
+  binary has no names to find, so the check is for unstripped builds.
 
 Exit status 0 when every check passes. Standard library only.
 """
@@ -32,6 +37,7 @@ EXEC_API = re.compile(rb"\b(PROT_EXEC|MAP_JIT|PAGE_EXECUTE\w*|FILE_MAP_EXECUTE|V
 LOAD_API = re.compile(rb"\b(dlopen|LoadLibrary[AWX]?(?:Ex[AW]?)?|LoadPackagedLibrary|adrenotools_open_libvulkan)\b")
 ALLOWED_LOAD = {"hostlib.c", "hostlib.h", "devload.c"}
 HOTLOAD = b"RELIFT_DEV_SOCKET"
+INTERPRETER = (b"rlgbd_exec_native", b"rlgbd_step_native", b"3cpu7opcodes", b"16step_instruction")
 
 
 def scan_sources(root):
@@ -118,12 +124,16 @@ def wx_macho(data):
     return out
 
 
-def scan_binary(path):
+def scan_binary(path, no_interpreter=False):
     with open(path, "rb") as f:
         data = f.read()
     bad = []
     if HOTLOAD in data:
         bad.append(f"{path}: holds the hot-load connection")
+    if no_interpreter:
+        for name in INTERPRETER:
+            if name in data:
+                bad.append(f"{path}: holds the CPU interpreter ({name.decode()})")
     if data[:4] == b"\x7fELF":
         found = wx_elf(data)
     elif data[:2] == b"MZ":
@@ -140,6 +150,7 @@ def main():
     ap.add_argument("--sources", action="append", default=[])
     ap.add_argument("--objects", action="append", default=[])
     ap.add_argument("--binary", action="append", default=[])
+    ap.add_argument("--no-interpreter", action="store_true", help="also check the binaries hold no CPU interpreter")
     args = ap.parse_args()
     bad = []
     for d in args.sources:
@@ -147,7 +158,7 @@ def main():
     for d in args.objects:
         bad += scan_objects(d)
     for b in args.binary:
-        bad += scan_binary(b)
+        bad += scan_binary(b, args.no_interpreter)
     for b in bad:
         print(f"release guard: {b}", file=sys.stderr)
     checked = len(args.sources) + len(args.objects) + len(args.binary)
