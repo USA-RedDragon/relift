@@ -1,4 +1,4 @@
-//! Koei Tecmo KTGL archives: `.rdb` indexes of `IDRK` entries, the `.rdx`
+//! KTGL archives: `.rdb` indexes of `IDRK` entries, the `.rdx`
 //! that maps an entry's file index to a `.fdata` file, and the entries
 //! themselves, whole or in zlib chunks.
 
