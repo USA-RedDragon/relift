@@ -406,11 +406,14 @@ rl_result hos_set_memory_attribute(uint64_t addr, uint64_t size, uint32_t mask, 
     if (!aligned(size) || size == 0)
         return KR_INVALID_SIZE;
     uint32_t all = mask | value;
-    if (mask != all || (all | MA_UNCACHED) != MA_UNCACHED)
+    if (mask != all || (all | MA_UNCACHED | MA_PERMISSION_LOCKED) != (MA_UNCACHED | MA_PERMISSION_LOCKED))
+        return KR_INVALID_COMBINATION;
+    if ((mask & MA_PERMISSION_LOCKED) != (value & MA_PERMISSION_LOCKED))
         return KR_INVALID_COMBINATION;
     rl_result rc = KR_SUCCESS;
     rl_vm_block b;
-    uint32_t smask = (mask & MA_UNCACHED) ? MS_ATTRIBUTE_CHANGE_ALLOWED : 0;
+    uint32_t smask = ((mask & MA_UNCACHED) ? MS_ATTRIBUTE_CHANGE_ALLOWED : 0) |
+                     ((mask & MA_PERMISSION_LOCKED) ? MS_PERMISSION_LOCK_ALLOWED : 0);
     hos_lock();
     if (!rl_vm_contains(&hos.vm, addr, size) ||
         !check(addr, size, smask, smask, 0, 0, MA_BORROWED | MA_IPC_MAPPED, 0, &b))

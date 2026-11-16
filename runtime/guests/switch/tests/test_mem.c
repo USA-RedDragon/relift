@@ -660,3 +660,18 @@ TEST(map_physical_memory_needs_a_system_resource)
     CHECK(c);
     CHECK_EQ(t_svc(c, SVC_MAP_PHYSICAL_MEMORY, hos.lay.alias_start, 0x1000, 0, 0, 0, 0), KR_INVALID_STATE);
 }
+
+TEST(permission_locked_pages_keep_their_permission)
+{
+    rl_ctx *c = t_boot(NULL);
+    uint64_t heap = t_heap(c, 0x200000);
+    CHECK(heap);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_ATTRIBUTE, heap, 0x1000, MA_PERMISSION_LOCKED, 0, 0, 0), KR_INVALID_COMBINATION);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_ATTRIBUTE, heap, 0x1000, MA_PERMISSION_LOCKED, MA_PERMISSION_LOCKED, 0, 0),
+             KR_INVALID_MEM_STATE);
+    uint64_t data = hos.cfg.code_start + 0x4000;
+    CHECK_EQ(rl_hos_map_segment(data, 0x2000, HOS_PERM_RW, MS_CODE_MUTABLE), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, data, 0x1000, HOS_PERM_R, 0, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_ATTRIBUTE, data, 0x1000, MA_PERMISSION_LOCKED, MA_PERMISSION_LOCKED, 0, 0), 0);
+    CHECK_EQ(t_svc(c, SVC_SET_MEMORY_PERMISSION, data, 0x1000, HOS_PERM_RW, 0, 0, 0), KR_INVALID_MEM_STATE);
+}
