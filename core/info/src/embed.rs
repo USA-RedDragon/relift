@@ -64,9 +64,62 @@ fn titles(info: &crate::Info) -> Vec<(&str, &str)> {
     out
 }
 
+/// The `build:` line of a binary's stop reports: a 64-bit FNV-1a digest of
+/// its embedded info document, as 16 hex digits. The document holds the
+/// relift version, the game's identity and module build ids, the code mods
+/// and the settings schema, so two builds of one game with another relift
+/// or other mods differ here; the guest images themselves are the report's
+/// `image:` line.
+#[must_use]
+pub fn build_digest(doc: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in doc {
+        h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// The header lines the binary gives every stop report (`rl_report_info`):
+/// the relift that built it, the game, the code mods built in and a digest
+/// of the whole document, which tells two builds apart.
+fn report_lines(info: Option<&crate::Info>, doc: &[u8]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(i) = info {
+        out.push(("relift".to_string(), i.relift.version.clone()));
+        let id = &i.identity;
+        let mut game = id.platform.clone();
+        if let Some(t) = &id.title_id {
+            game.push(' ');
+            game.push_str(t);
+        }
+        if let Some(v) = &id.version {
+            game.push_str(" version ");
+            game.push_str(v);
+        }
+        out.push(("game".to_string(), game));
+        let code: Vec<String> = i
+            .mods
+            .code
+            .iter()
+            .map(|m| format!("{} {}", m.name, m.hash))
+            .collect();
+        out.push((
+            "code mods".to_string(),
+            if code.is_empty() {
+                "none".to_string()
+            } else {
+                code.join(", ")
+            },
+        ));
+    }
+    out.push(("build".to_string(), build_digest(doc)));
+    out
+}
+
 /// The C file of a binary: the document in its own section, the same
 /// document's title table and icon registered with the runtime at start-up
-/// (the icon's base64 is stored once, inside the document), and
+/// (the icon's base64 is stored once, inside the document) with the header
+/// lines of stop reports, and
 /// `int relift_info_main(void)`, which writes the document to stdout.
 #[must_use]
 pub fn c_source(doc: &[u8]) -> String {
@@ -121,9 +174,13 @@ pub fn c_source(doc: &[u8]) -> String {
     } else {
         "(const char *)relift_info_doc.icon, sizeof relift_info_doc.icon".to_string()
     };
+    let report: String = report_lines(info.as_ref(), doc)
+        .iter()
+        .map(|(k, v)| format!("    rl_report_info({}, {});\n", c_string(k), c_string(v)))
+        .collect();
     let _ = write!(
         t,
-        "__attribute__((constructor)) static void relift_register_identity(void)\n{{\n    rl_app_set_identity(relift_langs, relift_names, {}, {default}, {icon_ref});\n}}\n",
+        "__attribute__((constructor)) static void relift_register_identity(void)\n{{\n    rl_app_set_identity(relift_langs, relift_names, {}, {default}, {icon_ref});\n{report}}}\n",
         titles.len()
     );
     t.push_str(

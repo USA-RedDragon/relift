@@ -26,6 +26,12 @@ RL_RUNTIME_API void rl_app_set_identity(const char *const *langs, const char *co
                                         const char *default_lang, const char *icon_b64, size_t icon_b64_len);
 
 /**
+ * @brief Adds one `key: value` header line to every stop report the runtime writes (the program's generated info
+ * file gives the relift version, the game, the code mods built in and the build digest). Copies both.
+ */
+RL_RUNTIME_API void rl_report_info(const char *key, const char *value);
+
+/**
  * @brief The title for the first of the locale tags (such as "ja", "en_GB.UTF-8", "zh-Hant-TW", or a language key
  * such as "French") that matches a language the game has, else the registered default language's title, else the
  * first title. NULL when no title is registered. Tags that are NULL or empty are skipped.
