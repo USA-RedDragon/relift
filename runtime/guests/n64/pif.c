@@ -119,6 +119,8 @@ static void joy_run(rl_n64 *m)
         unsigned status = 0;
         if (channel < 4 && m->pif.pad[channel].present)
             status = rl_n64_pad_comm(m, (unsigned)channel, send, recv, input, output);
+        else if (channel == 4)
+            status = rl_n64_cart_joybus(m, send, recv, input, output);
         if (!(status & 1))
             ram[recv_at] = (uint8_t)(0x80 | recv);
         if (status & 2)

@@ -8,7 +8,7 @@ scheduler events instead of per-cycle threads); each ported file keeps the
 ISC notice in its header.
 
 pi.c      the PI registers, the DMA's block shape, its duration from the
-          domain timing, the busy and error rules
+          domain timing, the busy and error rules, the bus write window
                                    n64/pi/io.cpp, dma.cpp, bus.hpp
 si.c      the SI registers, the DMA durations, the bus write window
                                    n64/si/io.cpp, dma.cpp
@@ -16,11 +16,18 @@ pif.c     the joybus command block parse, run and timing estimate
                                    n64/pif/hle.cpp, io.cpp, pif.cpp
 pad.c     the standard controller's answers, the pak CRC
                                    n64/controller/gamepad/gamepad.cpp
+cart.c    the cartridge bus devices, the latch, the SRAM view
+                                   n64/pi/bus.hpp, device.hpp,
+                                   n64/cartridge/cartridge.hpp
+flash.c   the Flash chip's command set, status and ID reads, timings
+                                   n64/cartridge/flash.cpp
+eeprom.c  the EEPROM joybus commands
+                                   n64/cartridge/joybus.cpp
 vi.c      the VI registers, the line counter, field and leap pattern, the
           interrupt line rules, the frame edge
                                    n64/vi/vi.cpp, io.cpp
 
-machine.c (MI, RI, AI, the boot words) and code.c are
+machine.c (MI, RI, AI, the boot words) save.c and code.c are
 relift's own, written from the public n64brew documentation.
 
 ----------------------------------------------------------------------

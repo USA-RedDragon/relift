@@ -159,6 +159,35 @@ RL_RUNTIME_API void rl_n64_pad_remove(rl_n64 *m, unsigned port);
 RL_RUNTIME_API void rl_n64_pad_use_ports(rl_n64 *m, bool on);
 
 /**
+ * @brief The cartridge's save memory, on disk as raw images under one base
+ * path: EEPROM (.eep, 512 or 2048 bytes), SRAM (.sra, 32 KiB) and Flash
+ * (.fla, 128 KiB). No game table says which the game has: SRAM answers at
+ * 0x08000000 until the game writes the Flash command register at
+ * 0x08010000, which makes the Flash chip answer from then on; EEPROM
+ * answers on joybus channel 4 and reports 16 Kbit unless a 512-byte file
+ * was loaded.
+ *
+ * Reads the files that exist under base. Returns how many it loaded, or -1
+ * when one did not fit (the others are still loaded). A Flash file is a
+ * game that used Flash, so the chip answers from the start.
+ */
+RL_RUNTIME_API int rl_n64_save_load(rl_n64 *m, const char *base);
+/** @brief Writes the stores the game changed since the last write, each atomically; returns how many it wrote or -1. */
+RL_RUNTIME_API int rl_n64_save_write(rl_n64 *m, const char *base);
+/** @brief As rl_n64_save_write when a store changed and nothing changed for quiet CPU cycles; returns 1 when it wrote, 0 when not, -1 on an error. */
+RL_RUNTIME_API int rl_n64_save_poll(rl_n64 *m, const char *base, uint64_t quiet);
+/** @brief Whether a store changed since the last write. */
+RL_RUNTIME_API bool rl_n64_save_dirty(const rl_n64 *m);
+/**
+ * @brief The base path of the save files of the ROM at rom_path: its name
+ * without the extension in the save folder setting (save.dir), else in the
+ * program's user folder, else next to the ROM. False when out is too small.
+ */
+RL_RUNTIME_API bool rl_n64_save_path(char *out, size_t size, const char *rom_path);
+/** @brief Declares the settings of the machine layer (save.dir). */
+RL_RUNTIME_API void rl_n64_declare_settings(void);
+
+/**
  * @brief The framebuffer VI scans out, read raw from RDRAM with the VI
  * registers (origin, width, the visible size from the video and scale
  * registers; RGBA5551 or RGBA8888): writes width * height RGB pixels to rgb

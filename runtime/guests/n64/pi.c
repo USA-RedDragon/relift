@@ -2,8 +2,8 @@
  * @file pi.c
  * @brief PI: the DMA registers, the two cartridge domains' timing, DMA
  * between RDRAM and the cartridge with the duration the bus takes, the
- * status and the interrupt at the end, and CPU reads of the cartridge bus.
- * A DMA from the cartridge tells the code binding which ROM bytes reached
+ * status and the interrupt at the end, and CPU reads of the cartridge bus
+ * (the devices on it are cart.c's). A DMA from the cartridge tells the code binding which ROM bytes reached
  * RDRAM (rl_n64_code_loaded).
  *
  * The register rules, the DMA's block shape and its duration are ported
@@ -31,28 +31,6 @@ static n64_bsd *bsd_for(rl_n64 *m, uint32_t a)
 {
     uint32_t hi = a >> 24;
     return (hi == 0x05u || (hi >= 0x08u && hi <= 0x0Fu)) ? &m->pi.bsd[1] : &m->pi.bsd[0];
-}
-
-/** @brief A halfword of the cartridge bus at a: ROM in 0x10000000 to 0x1FBFFFFF, open bus elsewhere (the latch). */
-static uint16_t bus_half(rl_n64 *m, uint32_t a)
-{
-    if (a >= 0x10000000u && a < 0x1FC00000u) {
-        size_t off = a - 0x10000000u;
-        if (off + 1 < m->rom_len)
-            return (uint16_t)(m->rom[off] << 8 | m->rom[off + 1]);
-        return (uint16_t)a;
-    }
-    return (uint16_t)a;
-}
-
-uint32_t rl_n64_cart_read(rl_n64 *m, uint32_t paddr)
-{
-    if (m->pi.io_busy)
-        return m->pi.latch;
-    uint32_t a = paddr & ~1u;
-    m->pi.latch = (uint32_t)bus_half(m, a) << 16 | bus_half(m, a + 2u);
-    m->pi.cart = (paddr + 4u) & ~1u;
-    return m->pi.latch;
 }
 
 /** @brief The cycles of a DMA of len bytes (len already rounded) starting at cart address a. */
@@ -94,6 +72,8 @@ static void dma_write(rl_n64 *m)
     int32_t length = (int32_t)m->pi.wr_len + 1;
     int32_t max_block = 128;
     uint32_t dram0 = m->pi.dram, cart0 = m->pi.cart;
+    uint32_t page_mask = (1u << (bsd_for(m, m->pi.cart)->page_size + 2u)) - 1u;
+    bool selected = false;
     uint8_t buf[128];
     while (length > 0) {
         int32_t misalign = (int32_t)(m->pi.dram & 7u);
@@ -101,10 +81,13 @@ static void dma_write(rl_n64 *m)
         int32_t block = max_block - misalign < row_end ? max_block - misalign : row_end;
         int32_t cur = length < block ? length : block;
         for (int32_t i = 0; i < cur; i += 2) {
-            uint16_t d = bus_half(m, m->pi.cart);
+            if (!selected || (m->pi.cart & page_mask) == 0) {
+                rl_n64_bus_select(m, m->pi.cart);
+                selected = true;
+            }
+            uint16_t d = rl_n64_bus_read_half(m);
             buf[i] = (uint8_t)(d >> 8);
             buf[i + 1] = (uint8_t)d;
-            m->pi.latch = (uint32_t)d << 16 | d;
             m->pi.cart += 2;
             length -= 2;
         }
@@ -121,14 +104,19 @@ static void dma_write(rl_n64 *m)
         rl_n64_code_written(m, dram0, n);
 }
 
-/** @brief RDRAM to the cartridge: the cartridge bus has no writable device yet, so only the latch changes. */
+/** @brief RDRAM to the cartridge: to the save memory in domain 2, and to nothing on the ROM. */
 static void dma_read(rl_n64 *m)
 {
     uint32_t len = (m->pi.rd_len | 1u) + 1u;
+    uint32_t page_mask = (1u << (bsd_for(m, m->pi.cart)->page_size + 2u)) - 1u;
+    rl_n64_bus_select(m, m->pi.cart);
     for (uint32_t a = 0; a < len; a += 2) {
+        uint32_t cursor = m->pi.cart + a;
+        if (a && (cursor & page_mask) == 0)
+            rl_n64_bus_select(m, cursor);
         uint32_t d = m->pi.dram + a;
         uint16_t v = (uint16_t)(m->rdram[d & (RL_N64_RDRAM_SIZE - 1u)] << 8 | m->rdram[(d + 1u) & (RL_N64_RDRAM_SIZE - 1u)]);
-        m->pi.latch = (uint32_t)v << 16 | v;
+        rl_n64_bus_write_half(m, v);
     }
 }
 
@@ -146,6 +134,7 @@ void rl_n64_pi_attach(rl_n64 *m)
 {
     m->pi.done.fire = dma_done;
     m->pi.done.opaque = m;
+    rl_n64_cart_attach(m);
 }
 
 uint32_t rl_n64_pi_read(rl_n64 *m, unsigned i)

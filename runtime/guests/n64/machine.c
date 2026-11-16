@@ -54,6 +54,7 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     m->rom_len = rom_len;
     rl_n64_sp_init(m);
     rl_n64_pif_init(m);
+    rl_n64_cart_init(m);
     return m;
 }
 
@@ -67,6 +68,7 @@ void rl_n64_destroy(rl_n64 *m)
         rl_sched_cancel(m->s, &m->sp.slice);
         rl_sched_cancel(m->s, &m->sp.dma_event);
         rl_n64_si_detach(m);
+        rl_n64_cart_detach(m);
     }
     free(m->code.state);
     free(m->code.order);
@@ -265,7 +267,9 @@ static void write_word(rl_n64 *m, uint32_t a, uint32_t v)
     default:
         break;
     }
-    if (a >= 0x1FC00000u)
+    if (a >= 0x05000000u && a < 0x1FC00000u)
+        rl_n64_cart_write(m, a, v);
+    else if (a >= 0x1FC00000u)
         rl_n64_si_bus_write(m, a, v);
 }
 

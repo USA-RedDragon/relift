@@ -34,6 +34,32 @@ typedef struct n64_pad {
     int8_t y;
 } n64_pad;
 
+/** @brief The chips' state of the cartridge's save memory the machine finds out by behavior. */
+typedef struct n64_flash {
+    uint8_t mode;
+    uint8_t status;
+    uint8_t erase_setup;
+    uint8_t erase_sector;
+    uint8_t busy;
+    uint8_t page[128];
+    uint32_t offset;
+    bool high_valid;
+    uint16_t high;
+    bool open_bus;
+    bool stale;
+    uint16_t stale_value;
+    uint8_t pending_cmd;
+    uint8_t pending_count;
+    uint16_t burst;
+    rl_event done;
+} n64_flash;
+
+/** @brief The save stores, bits of the dirty mask. */
+enum { SAVE_EEPROM = 1, SAVE_SRAM = 2, SAVE_FLASH = 4 };
+
+/** @brief The PI device a cartridge bus access reaches. */
+enum { BUS_NONE, BUS_ROM, BUS_SRAM, BUS_FLASH };
+
 /** @brief Where a code run is: not loaded, loaded and not checked, or checked and in dispatch. */
 enum { CODE_OUT, CODE_LOADED, CODE_LIVE };
 
@@ -71,6 +97,7 @@ struct rl_n64 {
         uint32_t latch;
         n64_bsd bsd[2];
         rl_event done;
+        rl_event bus_write;
     } pi;
 
     struct {
@@ -136,6 +163,22 @@ struct rl_n64 {
     } pif;
 
     struct {
+        uint8_t sram[0x8000];
+        uint8_t flash[0x20000];
+        uint8_t eeprom[2048];
+        uint32_t eeprom_len;
+        bool eeprom_busy;
+        bool flash_armed;
+        uint8_t dirty;
+        uint64_t changed;
+        n64_flash fl;
+        rl_event eeprom_done;
+        uint8_t dev;
+        uint32_t view;
+        uint32_t raw;
+    } cart;
+
+    struct {
         uint32_t control;
         uint32_t origin;
         uint32_t width;
@@ -186,6 +229,36 @@ uint32_t rl_n64_pi_read(rl_n64 *m, unsigned index);
 void rl_n64_pi_write(rl_n64 *m, unsigned index, uint32_t value);
 /** @brief A CPU read of the cartridge bus at paddr (a word). */
 uint32_t rl_n64_cart_read(rl_n64 *m, uint32_t paddr);
+/** @brief A CPU write of the cartridge bus at paddr (a word); the bus is busy for a while after it. */
+void rl_n64_cart_write(rl_n64 *m, uint32_t paddr, uint32_t v);
+/** @brief Selects the device at cartridge bus address a: the ROM, the SRAM, the Flash chip once its command register has been written, or none; sets the bus latch to the address. */
+void rl_n64_bus_select(rl_n64 *m, uint32_t a);
+/** @brief The next halfword of the selected device, or the bus latch's when it gives none. */
+uint16_t rl_n64_bus_read_half(rl_n64 *m);
+/** @brief Writes a halfword to the selected device. */
+void rl_n64_bus_write_half(rl_n64 *m, uint16_t v);
+/** @brief The save chips at creation: SRAM zeroed, Flash and EEPROM erased, EEPROM at its larger size. */
+void rl_n64_cart_init(rl_n64 *m);
+/** @brief Sets up the save chips' events. */
+void rl_n64_cart_attach(rl_n64 *m);
+/** @brief Removes the save chips' events from the scheduler. */
+void rl_n64_cart_detach(rl_n64 *m);
+/** @brief The stores in the bits of SAVE_* changed now. */
+void rl_n64_cart_touch(rl_n64 *m, uint8_t stores);
+/** @brief The Flash chip's registers are at offset (from 0x08000000) for the access that starts there. */
+void rl_n64_flash_select(rl_n64 *m, uint32_t offset);
+/** @brief The Flash chip's next halfword; false when it gives none. */
+bool rl_n64_flash_read(rl_n64 *m, uint16_t *out);
+/** @brief The Flash chip takes a halfword. */
+void rl_n64_flash_write(rl_n64 *m, uint16_t v);
+/** @brief Puts the Flash chip in its power-on state. */
+void rl_n64_flash_power(rl_n64 *m);
+/** @brief Sets up the Flash chip's event. */
+void rl_n64_flash_attach(rl_n64 *m);
+/** @brief The joybus command of channel 4 (the cartridge's EEPROM): returns bit 0 valid, bit 1 over. */
+unsigned rl_n64_cart_joybus(rl_n64 *m, unsigned send, unsigned recv, const uint8_t *input, uint8_t *output);
+/** @brief Sets up the EEPROM's event. */
+void rl_n64_eeprom_attach(rl_n64 *m);
 /** @brief Sets up PI's events. */
 void rl_n64_pi_attach(rl_n64 *m);
 
