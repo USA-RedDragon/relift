@@ -166,7 +166,8 @@ fn prmt(c: &mut Ctx, i: &Inst) -> Res<()> {
                 let one = c.kc(1);
                 let odd = c.ib(op::BITWISE_AND, s, one);
                 let two = c.ib(op::I_ADD, odd, odd);
-                c.ib(op::I_ADD, two, ib)
+                let half = c.kc(byte & 1);
+                c.ib(op::I_ADD, two, half)
             }
         };
         let idx = c.ib(op::BITWISE_AND, nib, k7);
