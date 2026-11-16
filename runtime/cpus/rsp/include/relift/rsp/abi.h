@@ -247,6 +247,33 @@ static inline rl_fn rl_indirect(rl_ctx *c, uint64_t target)
 static inline uint32_t rl_rsp_base(const rl_ctx *c) { return c->base; }
 
 /**
+ * @brief The f64 operations of the VRSQ ROM formula (relift-cpu-rsp
+ * rsq_rom), on bit patterns: from a signed integer, the correctly rounded
+ * square root, and to an integer rounding up. The formula's operands are
+ * positive and below 2^53, the only domain rl_rsp_f2i_ceil64 handles.
+ */
+static inline double rl_rsp_f64(uint64_t b)
+{
+    double d;
+    memcpy(&d, &b, sizeof d);
+    return d;
+}
+static inline uint64_t rl_rsp_b64(double d)
+{
+    uint64_t b;
+    memcpy(&b, &d, sizeof b);
+    return b;
+}
+static inline uint64_t rl_rsp_i2f64(uint64_t a) { return rl_rsp_b64((double)(int64_t)a); }
+static inline uint64_t rl_rsp_fsqrt64(uint64_t a) { return rl_rsp_b64(__builtin_sqrt(rl_rsp_f64(a))); }
+static inline uint64_t rl_rsp_f2i_ceil64(uint64_t a)
+{
+    double d = rl_rsp_f64(a);
+    int64_t t = (int64_t)d;
+    return (uint64_t)(t + ((double)t < d));
+}
+
+/**
  * @brief The slow path of a sync point, with the block's register writes
  * done and the clock stored: returns RL_OK to go on to offset next when the
  * slice has cycles left and the RSP still runs, or else stores next's IMEM

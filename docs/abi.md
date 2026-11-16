@@ -2225,7 +2225,12 @@ the machine's SP interface drives through `runtime/guests/n64/run`.
   that IMEM holds the bytes of an image, at some base, at every word the
   lifted code there can reach without a computed jump; an IMEM write puts
   `rl_rsp_enter` back in every slot. A word no image matches is missed
-  code: a report, IMEM and DMEM with `--dump`, and the program stops.
+  code: a report, IMEM and DMEM with `--dump`, and the program stops. So is
+  a word that did not lift or that has no C form (`rl_rsp_undefined`); the
+  build counts both among the instructions not lifted.
+- VRCP, VRSQ and their variants read the ROMs from the formulas that
+  define them; VRSQ's needs an f64 square root, which the lifted code calls
+  as `rl_rsp_i2f64`, `rl_rsp_fsqrt64` and `rl_rsp_f2i_ceil64`.
 
 ### SI, the PIF and the cartridge's saves
 

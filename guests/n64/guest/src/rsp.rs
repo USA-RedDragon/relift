@@ -32,7 +32,8 @@ use relift_cpu_rsp::regs;
 use relift_emit::{Function, Insn, Options, Output};
 use relift_guest::{Frontend, Home, LiftFailure};
 use relift_ir::{
-    BinOp, Block, CryptoOp, Flow, FpOp, Inst, IoMap, Konst, Next, Op, Reg, RegFile, Value, Width,
+    BinOp, Block, CryptoOp, Flow, FpOp, FpRound, Inst, IoMap, Konst, Next, Op, Reg, RegFile, Value,
+    Width,
 };
 use relift_n64_analyze::{Report, RspImage, Source};
 
@@ -268,15 +269,26 @@ impl Frontend for Rsp {
         "0"
     }
 
+    /// The f64 operations of the VRSQ ROM formula (`rl_rsp_i2f64`,
+    /// `rl_rsp_fsqrt64`, `rl_rsp_f2i_ceil64`); the RSP has no other.
     fn fp(
         &self,
-        _op: FpOp,
-        _from: Width,
-        _to: Width,
-        _args: &[String],
+        op: FpOp,
+        from: Width,
+        to: Width,
+        args: &[String],
         _reg: &dyn Fn(Reg) -> String,
     ) -> Option<String> {
-        None
+        if from != Width::W64 || to != Width::W64 {
+            return None;
+        }
+        let a = args.first()?;
+        Some(match op {
+            FpOp::FromSInt => format!("rl_rsp_i2f64({a})"),
+            FpOp::Sqrt => format!("rl_rsp_fsqrt64({a})"),
+            FpOp::ToSInt(FpRound::Ceil) => format!("rl_rsp_f2i_ceil64({a})"),
+            _ => return None,
+        })
     }
 
     fn crypto(&self, _op: CryptoOp, _arg: &str) -> Option<String> {
@@ -441,6 +453,32 @@ fn fnv(b: &[u8]) -> u64 {
     })
 }
 
+/// The offsets and words of the instructions whose C reports them undefined
+/// at run time (`rl_rsp_undefined` at a constant offset): those that did
+/// not lift and those the emitter has no C form of.
+fn undefined_in(output: &Output) -> Vec<(u64, u32)> {
+    const CALL: &str = "rl_rsp_undefined(c, mem, UINT64_C(";
+    let mut out = Vec::new();
+    for f in &output.files {
+        for (at, _) in f.text.match_indices(CALL) {
+            let rest = &f.text[at + CALL.len()..];
+            let Some((pc, rest)) = rest.split_once("), ") else {
+                continue;
+            };
+            let Some((insn, _)) = rest.split_once("u)") else {
+                continue;
+            };
+            let hex = |s: &str| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok();
+            if let (Some(pc), Some(insn)) = (hex(pc), hex(insn)) {
+                out.push((pc, insn as u32));
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 /// The pieces the images of the analysis become: per source, the union of
 /// the images' byte ranges, cut into pieces of at most 4 KiB that overlap
 /// by 8 bytes, as (source, offset, length).
@@ -595,6 +633,18 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Images {
             ..Options::default()
         };
         let output = relift_emit::emit(&fe, &functions, &[], &opts);
+        for (pc, insn) in undefined_in(&output) {
+            if !out.unlifted.iter().any(|u| u.image == k && u.pc == pc) {
+                out.unlifted.push(Unlifted {
+                    image: k,
+                    pc,
+                    failure: LiftFailure {
+                        insn: u64::from(insn),
+                        message: "the emitter has no C form of it".into(),
+                    },
+                });
+            }
+        }
         out.images.push(Image {
             source,
             offset: start,
@@ -784,6 +834,70 @@ mod tests {
                 (Source::Stream(2), 0x10, 0x20),
             ]
         );
+    }
+
+    #[test]
+    fn the_divide_unit_instructions_have_c_forms() {
+        let words = [
+            0x4A01_0030u32,
+            0x4A01_0031,
+            0x4A01_0034,
+            0x4A01_0035,
+            0x4A01_0036,
+        ];
+        let blocks: Vec<Block> = words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| Rsp.lift_at(4 * i as u64, *w, 0).expect("lifts"))
+            .collect();
+        let f = Function {
+            entry: 0,
+            name: "f".into(),
+            guest_name: None,
+            span: 4 * words.len() as u64,
+            insts: blocks
+                .iter()
+                .enumerate()
+                .map(|(i, block)| {
+                    (
+                        4 * i as u64,
+                        Insn::Lifted {
+                            block,
+                            raw: u64::from(words[i]),
+                        },
+                    )
+                })
+                .collect(),
+            tables: BTreeMap::new(),
+            pads: BTreeSet::new(),
+        };
+        let opts = Options {
+            enter_anywhere: Some(u64::MAX),
+            ..Options::default()
+        };
+        let out = relift_emit::emit(&Rsp, &[f], &[], &opts);
+        assert_eq!(out.undefined, 0);
+        assert!(undefined_in(&out).is_empty());
+        let text: String = out.files.iter().map(|f| f.text.as_str()).collect();
+        assert!(
+            text.contains("rl_rsp_fsqrt64("),
+            "VRSQ reads the ROM formula"
+        );
+    }
+
+    #[test]
+    fn undefined_calls_are_found_in_the_c() {
+        let f = |t: &str| Output {
+            files: vec![relift_emit::File {
+                name: "s.c".into(),
+                text: t.into(),
+                fns: Vec::new(),
+            }],
+            undefined: 1,
+        };
+        let out = f("x;\n    return rl_rsp_undefined(c, mem, UINT64_C(0xc4), 0x4a010034u);\n}");
+        assert_eq!(undefined_in(&out), vec![(0xC4, 0x4A01_0034)]);
+        assert!(undefined_in(&f("rl_rsp_undefined(c, mem, c->pc, 0x2u)")).is_empty());
     }
 
     #[test]
