@@ -172,6 +172,37 @@ static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
         finish(d, when);
 }
 
+/**
+ * @brief Whether a frame from line 0 leaves nothing but black frames: the
+ * LCDs are off, no capture is armed, the main memory FIFO is not read and
+ * no frame hook watches.
+ */
+static bool dark(const nds_disp *d)
+{
+    return !(d->powcnt & 1) && !(d->capcnt & 0x80000000u) && ((d->eng[0].dispcnt >> 16) & 3) != 3 && !d->frame_fn;
+}
+
+/**
+ * @brief Passes n dark frames at once (what n runs of every line leave,
+ * without drawing them). Display-only: the display timing, its interrupts
+ * and DMA starts are lcd.c's and are not touched. It runs only while dark()
+ * holds, so never with a frame hook (PNG dumps and --frames see every frame).
+ */
+static void skip_dark(nds_disp *d, uint64_t n)
+{
+    for (unsigned e = 0; e < 2; e++) {
+        nds_eng_frame(&d->eng[e]);
+        for (unsigned l = 0; l < RL_NDS_LINES; l++)
+            d->fb[e][l] = d->eng[e].dispcnt & 0x80;
+    }
+    memset(d->frame, 0, sizeof d->frame);
+    memset(d->last, 0, sizeof d->last);
+    d->frames += n;
+    d->have = true;
+    d->capturing = false;
+    d->t0 += n * RL_NDS_FRAME_TICKS;
+}
+
 void nds_disp_catch_up(rl_nds *m, uint64_t to)
 {
     nds_disp *d = &m->disp;
@@ -179,6 +210,13 @@ void nds_disp_catch_up(rl_nds *m, uint64_t to)
         return;
     d->busy = true;
     while (due_of(d) <= to) {
+        if (d->line == 0 && dark(d)) {
+            uint64_t n = (to - due_of(d)) / RL_NDS_FRAME_TICKS;
+            if (n > 1) {
+                skip_dark(d, n - 1);
+                continue;
+            }
+        }
         line(m, d, d->line, due_of(d));
         d->t0 += RL_NDS_LINE_TICKS;
         if (++d->line == RL_NDS_LINES)
