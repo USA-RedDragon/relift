@@ -2080,8 +2080,10 @@ CPU layer `runtime/cpus/arm32` and the glue in `runtime/guests/gba/run`.
 
 ### The VR4300
 
-VR4300 code (`relift/mips/abi.h`, lifted by relift-cpu-mips) runs on the CPU
-layer `runtime/cpus/mips`; the Nintendo 64 machine above it is open.
+VR4300 code (`relift/mips/abi.h`, `relift/n64/run.h`, lifted by
+relift-cpu-mips through the frontend in `guests/n64/guest`) runs on the CPU
+layer `runtime/cpus/mips` and the Nintendo 64 machine in
+`runtime/guests/n64`, through the glue in `runtime/guests/n64/run`.
 
 - `rl_ctx` holds relift-cpu-mips's register slots in slot order
   (`RL_MIPS_SLOTS`, checked against the register file by
@@ -2120,6 +2122,40 @@ layer `runtime/cpus/mips`; the Nintendo 64 machine above it is open.
   lift --fp-corpus --c-slow-path FILE` compares it with ares.
 - CACHE calls the hook of `rl_mips_set_cache_hook` (code invalidation is the
   guest layer's).
+- Loads and stores are I/O accesses of kind `Any` on physical addresses.
+  The N64 map makes RDRAM (below 8 MiB) plain memory, read and written in
+  place through `mem` (the RDRAM base) with the raw accessors `rl_ldN` and
+  `rl_stN` (host byte order; the lifted code swaps for the guest's
+  big-endian data), and passes every other address to the machine
+  (`rl_n64_cpu_read`, `rl_n64_cpu_write`, whose values are the bytes in host
+  order). An access the instruction makes only under a condition (a likely
+  branch's delay slot, SC, the cases of LWL and its kin) first leaves through
+  its TLB guard when its address is not in RDRAM, so the slow path makes it
+  exactly and a device never sees an annulled access. The runtime's own
+  accesses use `rl_mips_ld` and `rl_mips_st` (big-endian values).
+- Each instruction charges one cycle (a branch and its delay slot two) and
+  every block ends in a sync point. A read of Count calls `rl_mips_count`. A
+  write of Status, Cause, Compare, Count or Wired ends the budget
+  (`rl_n64_cp0_break`), and the block's sync point is `rl_n64_cp0_sync`,
+  which applies the write with the block's register writes done (the mask,
+  the timer event at `rl_mips_timer_cycles`) and then takes an interrupt
+  that is due. A TLB instruction outside a delay slot ends in the trap
+  `rl_n64_tlb`. `ERET` leaves before any effect to
+  `rl_mips_eret_to(c, rl_mips_eret(c))`. `JAL` and `JALR` with a link
+  register open a host frame (`rl_mips_call`).
+- MI's interrupt output is scheduler line 2, the CPU's IP2. The timer is a
+  scheduler event at the cycle Count reaches Compare.
+- Code is bound at run time, never interpreted. The build lifts every code
+  run the analysis found, at its link address, one unit per segment linked
+  in RDRAM, and lists each run with its source, offset, length, link address
+  and FNV-1a hash (`rl_n64_code`). No unit is in dispatch at the start: each
+  run's slots hold the run layer's entry check, which binds the run whose
+  bytes in RDRAM hash to its hash (the functions replace the check in every
+  slot of the run). A DMA into RDRAM (PI, SP, SI) or a CACHE that
+  invalidates instruction cache lines puts the check back over the runs it
+  touches. An entry that no run matches is missed code: a report, an RDRAM
+  dump with `--dump`, and the program stops. Dev builds have no hot-load
+  for this guest yet.
 
 ### The Z80 layer
 

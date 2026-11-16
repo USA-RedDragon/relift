@@ -1,0 +1,36 @@
+Provenance of the Nintendo 64 machine layer (runtime/guests/n64)
+
+The register rules and timing below are ported from ares,
+https://github.com/ares-emulator/ares, commit
+0b928930af4cc59ed99e942996f0d3c815379388, ISC license (text below). The
+code here is new C11 in relift's scheduler shape (closed forms and
+scheduler events instead of per-cycle threads); each ported file keeps the
+ISC notice in its header.
+
+pi.c      the PI registers, the DMA's block shape, its duration from the
+          domain timing, the busy and error rules
+                                   n64/pi/io.cpp, dma.cpp, bus.hpp
+vi.c      the VI registers, the line counter, field and leap pattern, the
+          interrupt line rules, the frame edge
+                                   n64/vi/vi.cpp, io.cpp
+
+machine.c (MI, RI, SP, DP, AI, SI, PIF RAM, the boot words) and code.c are
+relift's own, written from the public n64brew documentation.
+
+----------------------------------------------------------------------
+ares
+
+Copyright (c) 2004-2025 ares team, Near et al
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+----------------------------------------------------------------------

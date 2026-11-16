@@ -1,12 +1,14 @@
 # guests/n64
 
-The Nintendo 64 guest. State: ROM format pieces and static code discovery;
-`relift import` does not take an N64 image yet.
+The Nintendo 64 guest. State: `relift import`, `build` and `run` take a
+ROM in any byte order and run it with every instruction lifted; the RSP,
+the RDP, audio, controllers and saves are not there yet.
 
 | Crate | Folder | Does |
 |---|---|---|
 | `relift-n64-formats` | `formats` | Byte orders and normalization, the header, the boot variant by hash, CRC1/CRC2, Yay0, Yaz0 and MIO0 decoders and a stream scan |
 | `relift-n64-analyze` | `analyze` | Code discovery: the VR4300 IR over abstract values from the boot entry, the PI DMA fixed point, the ROM-wide region scan with the link address vote, relocation masks, the sweep and the RSP image list |
+| `relift-n64` | `guest` | The VR4300 frontend for the runtime's N64 layer and the build's lift: one unit per segment linked in RDRAM, `program.c` with every code run's source, link address and hash |
 | `relift-n64-tools` | `tools` | `relift-n64rom`: `info`, `streams`, `normalize`, `functions` |
 
 ```sh
@@ -35,4 +37,26 @@ variants whose checksum is computed from the game's own data (6101, 6102,
 6103, 6106); for the others it reports `not checked`. `info --cic 6102`
 checks as that variant, for images with a custom boot code.
 
+## Running a ROM
+
+```sh
+relift import rom.z64        # writes game.toml with guest = "n64"
+relift build                 # analysis, lift, C, the runtime's N64 layers
+relift run
+game --headless --frames 60 --png out.png --stats
+```
+
+The program boots without the boot code: the runtime sets what the
+console's boot leaves (the first MiB of the game at the entry point, the
+RDRAM size word, the registers) for the boot variant the import names. No
+lifted code is in dispatch at the start. Each code run the analysis found
+is entered through a check that hashes its bytes in RDRAM and binds the run
+when they match; a PI, SP or SI DMA into RDRAM or an instruction cache
+invalidation makes the next entry check again. An entry that no lifted run
+matches is missed code: the program stops with a report (and an RDRAM dump
+with `--dump`). Nothing is interpreted; `--stats` prints `interpreted 0`
+with the binding counters.
+
 Tests build their input with `synth`; no game data is used.
+`relift/tests/e2e_n64.rs` builds and runs a synthetic ROM that loads a
+routine with a PI DMA and calls it.
