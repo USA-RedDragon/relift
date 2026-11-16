@@ -1221,6 +1221,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-nds"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-arm32",
+ "relift-emit",
+ "relift-guest",
+ "relift-ir",
+ "relift-nds-analyze",
+ "relift-nds-formats",
+]
+
+[[package]]
 name = "relift-nds-analyze"
 version = "0.1.0"
 dependencies = [
