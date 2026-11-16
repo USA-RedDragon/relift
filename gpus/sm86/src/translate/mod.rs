@@ -15,6 +15,7 @@ mod host;
 mod int;
 mod io;
 mod mem;
+mod mma;
 mod mufu;
 mod tex;
 
@@ -574,7 +575,14 @@ impl Ctx {
             }
             _ => {}
         }
-        for f in [mem::inst, float::inst, int::inst, io::inst, tex::inst] {
+        for f in [
+            mem::inst,
+            float::inst,
+            int::inst,
+            io::inst,
+            tex::inst,
+            mma::inst,
+        ] {
             if let Some(r) = f(self, i) {
                 return r;
             }

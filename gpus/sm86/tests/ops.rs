@@ -137,3 +137,33 @@ fn movm_plans_the_warp() {
     check(&[movm], &["MOVM.16.MT88 R13, R2"]);
     assert_eq!(narrow_warp_path(&[movm]), WarpPath::Shared);
 }
+
+#[test]
+fn hmma_f16() {
+    let words = [
+        w(0x0c4f_f000_0000_080a, 0x0000_0008_040c_723c),
+        w(0x000f_ee00_0000_08ff, 0x0000_0008_040e_723c),
+        w(0x000f_e200_0000_0006, 0x0000_0009_0408_723c),
+    ];
+    let spirv = check(
+        &words,
+        &[
+            "HMMA.16816.F16 R12, R4, R8, R10",
+            "HMMA.16816.F16 R14, R4, R8, RZ",
+            "HMMA.1688.F16 R8, R4, R9, R6",
+        ],
+    );
+    let calls = spirv_ops(&spirv).iter().filter(|&&o| o == 57).count();
+    assert_eq!(calls, 8 + 8 + 4);
+    assert_eq!(narrow_warp_path(&words), WarpPath::Shared);
+}
+
+fn spirv_ops(words: &[u32]) -> Vec<u32> {
+    let mut ops = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        ops.push(words[k] & 0xffff);
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    ops
+}

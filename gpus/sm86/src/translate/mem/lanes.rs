@@ -76,7 +76,7 @@ pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
         {
             Some(true)
         }
-        "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM" | "MOVM" => Some(false),
+        "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM" | "MOVM" | "HMMA" => Some(false),
         "BMOV" if reads_active(i) => Some(false),
         "S2R" | "S2UR" | "CS2R" => match i.ops.get(1) {
             Some(Operand::Sym(s))
@@ -575,6 +575,16 @@ impl Ctx {
         let u = self.u32t();
         let scope = self.m.c_u32(SCOPE_SUBGROUP);
         self.m.emit(spv::GROUP_SHUFFLE, u, &[scope, v, src])
+    }
+
+    /// `v` as each of the guest lanes `ls` holds it, publishing `v` once on
+    /// the workgroup path.
+    pub(crate) fn shuffle_set(&mut self, v: u32, ls: &[u32]) -> Vec<u32> {
+        if self.warp_path() == WarpPath::Shared {
+            self.put(v);
+            return ls.iter().map(|&l| self.get(l)).collect();
+        }
+        ls.iter().map(|&l| self.shuffle(v, l)).collect()
     }
 
     /// `v` from each of the 32 lanes of the warp.
