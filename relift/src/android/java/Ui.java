@@ -643,7 +643,7 @@ final class Ui {
         String d = p.detail();
         stacked("Use this driver for " + game + "?", p.name + " was added." + (d.isEmpty() ? "" : " " + d + ".")
                 + " It started fine on this phone's GPU (" + gpu() + ").",
-                new Btn("Use for " + game, Style.PRIMARY, () -> {
+                new Btn(game.length() <= 24 ? "Use for " + game : "Use for this game", Style.PRIMARY, () -> {
                     drivers.setChoice(p.dir);
                     render();
                 }), new Btn("Not now", Style.GHOST, null));
