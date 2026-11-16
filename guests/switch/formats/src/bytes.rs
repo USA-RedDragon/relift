@@ -64,3 +64,25 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     Sha256::digest(data).into()
 }
+
+/// A SHA-256 of bytes written to it, for streamed data.
+#[derive(Default)]
+pub struct Sha256Writer(sha2::Sha256);
+
+impl Sha256Writer {
+    /// The digest of everything written.
+    pub fn finish(self) -> [u8; 32] {
+        sha2::Digest::finalize(self.0).into()
+    }
+}
+
+impl std::io::Write for Sha256Writer {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        sha2::Digest::update(&mut self.0, b);
+        Ok(b.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}

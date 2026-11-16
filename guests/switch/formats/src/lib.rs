@@ -1,5 +1,6 @@
 //! Readers for decrypted Switch files: romfs, NSO (LZ4 and ZBIC segments),
-//! NRO, NPDM, NUP and IPSwitch `.pchtxt` patches, and
+//! NRO, NPDM, NUP and IPSwitch `.pchtxt` patches, whole romfs images
+//! served from a tree, a `.nup` or a plain image (`romfs_image`), and
 //! the import of a decrypted dump (a `.nup`, or an extracted
 //! `exefs`/`romfs` tree) into a project.
 //!
@@ -19,9 +20,10 @@ pub mod nso;
 pub mod nup;
 pub mod pchtxt;
 pub mod romfs;
+pub mod romfs_image;
 pub mod storage;
 pub mod synth;
 pub mod zbic;
 
-pub use bytes::{hex, sha256};
+pub use bytes::{Sha256Writer, hex, sha256};
 pub use error::{Error, Result};

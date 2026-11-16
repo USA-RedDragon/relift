@@ -2,9 +2,8 @@
 //! buffer, a window into another storage.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::error::{Error, Result};
 
@@ -56,9 +55,38 @@ pub fn read_all(s: &dyn Storage) -> Result<Vec<u8>> {
     read_vec(s, 0, s.size())
 }
 
+/// Fill `buf` from `file` at `offset` without moving a shared cursor, so
+/// several threads read one file at once.
+///
+/// # Errors
+///
+/// The read fails or the file ends first.
+pub fn read_exact_at(file: &File, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::FileExt::read_exact_at(file, buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        let mut done = 0;
+        while done < buf.len() {
+            let n = std::os::windows::fs::FileExt::seek_read(
+                file,
+                &mut buf[done..],
+                offset + done as u64,
+            )?;
+            if n == 0 {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
+            done += n;
+        }
+        Ok(())
+    }
+}
+
 /// A file opened for reading.
 pub struct FileStorage {
-    file: Mutex<File>,
+    file: File,
     size: u64,
     name: String,
 }
@@ -78,7 +106,7 @@ impl FileStorage {
         })?;
         let size = file.metadata()?.len();
         Ok(FileStorage {
-            file: Mutex::new(file),
+            file,
             size,
             name: path.display().to_string(),
         })
@@ -92,12 +120,7 @@ impl Storage for FileStorage {
 
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
         check_range(offset, buf.len(), self.size, &self.name)?;
-        let mut f = self
-            .file
-            .lock()
-            .map_err(|_| Error::Format(format!("{}: reader lock poisoned", self.name)))?;
-        f.seek(SeekFrom::Start(offset))?;
-        f.read_exact(buf)?;
+        read_exact_at(&self.file, offset, buf)?;
         Ok(())
     }
 }
