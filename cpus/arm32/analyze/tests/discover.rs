@@ -118,6 +118,10 @@ fn a_b(at: u32, to: u32) -> u32 {
     0xEA00_0000 | (to.wrapping_sub(at + 8) >> 2 & 0x00FF_FFFF)
 }
 
+fn a_bl(at: u32, to: u32) -> u32 {
+    0xEB00_0000 | (to.wrapping_sub(at + 8) >> 2 & 0x00FF_FFFF)
+}
+
 const A_BX_LR: u32 = 0xE12F_FF1E;
 const A_MOV_R0_1: u32 = 0xE3A0_0001;
 const A_MOVEQ_R0_1: u32 = 0x03A0_0001;
@@ -327,4 +331,39 @@ fn an_unbounded_add_pc_enters_a_branch_table_or_unrolled_code() {
     assert!(found(&unrolled, arm(BASE + 8)));
     assert!(found(&unrolled, arm(BASE + 0x10)));
     assert!(!found(&unrolled, arm(BASE + 4)));
+}
+
+#[test]
+fn calls_into_another_unit_seed_its_run() {
+    let mut a = Machine::new(Profile::V5te);
+    a.arm(
+        BASE,
+        &[A_PUSH_R4_LR, a_bl(BASE + 4, OTHER), A_MOV_R0_1, A_POP_R4_PC],
+    );
+    let alone = a.run(Options::default(), arm(BASE));
+    assert!(alone.outside.contains(&arm(OTHER)));
+    assert!(
+        !found(&alone, arm(BASE + 8)),
+        "control: a call to code not known does not return"
+    );
+    a.external = Some((OTHER, OTHER + 0x1000));
+    let linked = a.run(Options::default(), arm(BASE));
+    assert!(
+        found(&linked, arm(BASE + 8)),
+        "a call into another unit returns"
+    );
+    let mut b = Machine::new(Profile::V5te);
+    b.segments = vec![(OTHER, vec![0; 0x1000])];
+    b.arm(OTHER, &[A_PUSH_R4_LR, A_MOV_R0_1, A_POP_R4_PC]);
+    b.arm(OTHER + 0x100, &[A_MOV_R0_1, A_BX_LR]);
+    let config = Config {
+        seeds: vec![arm(OTHER), arm(OTHER + 0x100)],
+        ..Config::default()
+    };
+    let seeded = discover(&b, &config);
+    assert!(found(&seeded, arm(OTHER)));
+    assert!(
+        !found(&seeded, arm(OTHER + 0x100)),
+        "a seed must open a stack frame"
+    );
 }
