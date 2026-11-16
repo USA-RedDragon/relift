@@ -8,7 +8,12 @@
 //!   then compared with the manifest, missing or short files are copied
 //!   again, and what is still wrong fails the push, naming the first file.
 //! - Android: into the app's external files folder with `adb push`, checked
-//!   the same way with `stat` on the device.
+//!   the same way with `stat` on the device, one stream of names through
+//!   `xargs` (one `find -exec ... +` overflows the device shell's argument
+//!   list on a large tree). `adb push` makes its folders the shell's, mode
+//!   2770, which the app cannot enter, so every folder under the data that
+//!   the app does not own is opened to all (`a+rx`; the files are already
+//!   readable by all) and checked again.
 //!
 //! The app checks the data against the same manifest at start, so data a
 //! push did not finish never runs.
@@ -73,6 +78,11 @@ trait Device {
     fn copy(&self, local: &Path, remote: &str) -> Result<(), BoxError>;
     /// Every file under the data folders, by manifest name, with its size.
     fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError>;
+    /// Makes the copied data readable by the app; the folders it still
+    /// cannot read, by manifest name.
+    fn open_up(&self) -> Result<Vec<String>, BoxError> {
+        Ok(Vec::new())
+    }
 }
 
 struct Ios {
@@ -234,21 +244,73 @@ impl Device for Android {
     }
 
     fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError> {
-        let out = self
-            .adb()
-            .args([
-                "shell",
-                &format!(
-                    "for r in romfs dlc; do [ -d '{d}'/$r ] && find '{d}'/$r -type f -exec stat -c '%s %n' {{}} +; done; true",
-                    d = self.dir
-                ),
-            ])
-            .output()?;
+        let out = run(
+            self.adb()
+                .args(["shell", &android_sizes_command(&self.dir)]),
+            "adb shell stat",
+        )?;
         Ok(android_listing(
             &String::from_utf8_lossy(&out.stdout),
             &self.dir,
         ))
     }
+
+    fn open_up(&self) -> Result<Vec<String>, BoxError> {
+        run(
+            self.adb().args(["shell", &android_open_command(&self.dir)]),
+            "adb shell chmod",
+        )?;
+        let out = run(
+            self.adb()
+                .args(["shell", &android_closed_command(&self.dir)]),
+            "adb shell find",
+        )?;
+        Ok(android_names(
+            &String::from_utf8_lossy(&out.stdout),
+            &self.dir,
+        ))
+    }
+}
+
+/// The paths of `text`, one per line, named relative to `dir`.
+fn android_names(text: &str, dir: &str) -> Vec<String> {
+    let prefix = format!("{}/", dir.trim_end_matches('/'));
+    text.lines()
+        .filter_map(|l| l.strip_prefix(&prefix).map(String::from))
+        .collect()
+}
+
+/// The data folders under `dir` that exist, for a device shell `for` list.
+fn android_roots(dir: &str) -> String {
+    format!("'{dir}'/romfs '{dir}'/dlc")
+}
+
+/// The device command that prints `<size> <path>` for every data file: one
+/// `find` streams the names to `xargs`, which runs `stat` on as many as fit
+/// in one argument list at a time.
+fn android_sizes_command(dir: &str) -> String {
+    format!(
+        "for r in {}; do [ -d \"$r\" ] || continue; find \"$r\" -type f -print0 | xargs -0 -r stat -c '%s %n' || exit 1; done",
+        android_roots(dir)
+    )
+}
+
+/// The device command that opens to all every data folder the app (the
+/// owner of `dir`) does not own and that is not yet open.
+fn android_open_command(dir: &str) -> String {
+    format!(
+        "u=$(stat -c %u '{dir}') || exit 1; for r in {}; do [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 -print0 | xargs -0 -r chmod a+rx || exit 1; done",
+        android_roots(dir)
+    )
+}
+
+/// The device command that prints the data folders the app still cannot
+/// enter: owned by another user and closed to others.
+fn android_closed_command(dir: &str) -> String {
+    format!(
+        "u=$(stat -c %u '{dir}') || exit 1; for r in {}; do [ -d \"$r\" ] || continue; find \"$r\" -type d ! -user \"$u\" ! -perm -005 || exit 1; done",
+        android_roots(dir)
+    )
 }
 
 fn first_bad(bad: &[(&Entry, Option<u64>)]) -> String {
@@ -256,6 +318,20 @@ fn first_bad(bad: &[(&Entry, Option<u64>)]) -> String {
         Some((e, None)) => format!("{} is missing", e.name),
         Some((e, Some(s))) => format!("{} is {s} bytes, expected {}", e.name, e.size),
         None => String::new(),
+    }
+}
+
+/// Opens the data on `dev` to the app, failing on a folder it still cannot
+/// enter.
+fn opened(dev: &dyn Device) -> Result<(), BoxError> {
+    let closed = dev.open_up()?;
+    match closed.first() {
+        None => Ok(()),
+        Some(first) => Err(format!(
+            "{} data folders stay closed to the app after chmod; first: {first}",
+            closed.len()
+        )
+        .into()),
     }
 }
 
@@ -269,7 +345,7 @@ fn push_to(
     for round in 0..ROUNDS {
         let bad = datamanifest::mismatches(entries, &have);
         if bad.is_empty() {
-            return Ok(());
+            return opened(dev);
         }
         let mut dirty: Vec<String> = Vec::new();
         for root in ["romfs", "dlc"] {
@@ -304,7 +380,7 @@ fn push_to(
     }
     let bad = datamanifest::mismatches(entries, &have);
     if bad.is_empty() {
-        return Ok(());
+        return opened(dev);
     }
     Err(format!(
         "{} of {} files still differ after {ROUNDS} copies; first: {}",
@@ -458,6 +534,116 @@ mod tests {
         );
         assert_eq!(m.len(), 1);
         assert_eq!(m["romfs/a"], 3);
+    }
+
+    #[test]
+    fn android_sizes_stream_names_through_xargs() {
+        let cmd = android_sizes_command("/sdcard/x/files");
+        assert!(!cmd.contains("-exec"), "{cmd}");
+        assert!(cmd.contains("-print0 | xargs -0 -r stat"), "{cmd}");
+    }
+
+    /// The device's `stat -c` and `xargs -r` are toybox's, which GNU's match;
+    /// the BSD tools of macOS lack them.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn android_sizes_list_every_file_of_a_large_tree() {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("relift-push-sizes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("romfs/a b")).unwrap();
+        for i in 0..3000 {
+            relift_cache::write_if_changed(&d.join(format!("romfs/a b/file {i:05}")), b"xy")
+                .unwrap();
+        }
+        relift_cache::write_if_changed(&d.join("romfs/top"), b"xyz").unwrap();
+        let dir = d.to_str().unwrap();
+        let out = relift_proc::command("sh")
+            .arg("-c")
+            .arg(android_sizes_command(dir))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let m = android_listing(&String::from_utf8_lossy(&out.stdout), dir);
+        assert_eq!(m.len(), 3001);
+        assert_eq!(m["romfs/a b/file 02999"], 2);
+        assert_eq!(m["romfs/top"], 3);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn android_open_up_only_touches_folders_the_app_does_not_own() {
+        for cmd in [
+            android_open_command("/sdcard/x/files"),
+            android_closed_command("/sdcard/x/files"),
+        ] {
+            assert!(
+                cmd.starts_with("u=$(stat -c %u '/sdcard/x/files')"),
+                "{cmd}"
+            );
+            assert!(cmd.contains("-type d ! -user \"$u\" ! -perm -005"), "{cmd}");
+            assert!(!cmd.contains("-exec"), "{cmd}");
+        }
+        assert!(android_open_command("/d").contains("xargs -0 -r chmod a+rx"));
+        assert_eq!(
+            android_names("/sdcard/x/files/romfs/a\n/elsewhere/b\n", "/sdcard/x/files"),
+            ["romfs/a"]
+        );
+    }
+
+    struct Fake {
+        files: BTreeMap<String, u64>,
+        closed: Vec<String>,
+        opened: std::cell::Cell<usize>,
+    }
+
+    impl Device for Fake {
+        fn copy(&self, _: &Path, _: &str) -> Result<(), BoxError> {
+            Ok(())
+        }
+        fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError> {
+            Ok(self.files.clone())
+        }
+        fn open_up(&self) -> Result<Vec<String>, BoxError> {
+            self.opened.set(self.opened.get() + 1);
+            Ok(self.closed.clone())
+        }
+    }
+
+    #[test]
+    fn a_push_whose_files_match_still_opens_the_folders_and_fails_on_closed_ones() {
+        let entries = [Entry {
+            name: "romfs/a".into(),
+            size: 3,
+            sha256: String::new(),
+        }];
+        let mut ui = relift_progress::Reporter::new(
+            std::io::stderr(),
+            Box::new(relift_progress::ManualClock::new()),
+            relift_progress::Mode::Plain,
+            false,
+            80,
+            relift_progress::Verbosity::Quiet,
+        );
+        let ok = Fake {
+            files: [("romfs/a".to_string(), 3)].into(),
+            closed: Vec::new(),
+            opened: 0.into(),
+        };
+        push_to(&ok, Path::new("/nonexistent"), &entries, &mut ui).unwrap();
+        assert_eq!(ok.opened.get(), 1);
+        let closed = Fake {
+            closed: vec!["romfs".into()],
+            ..ok
+        };
+        let e = push_to(&closed, Path::new("/nonexistent"), &entries, &mut ui).unwrap_err();
+        assert!(e.to_string().contains("first: romfs"), "{e}");
     }
 
     #[test]
