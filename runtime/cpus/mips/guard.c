@@ -293,7 +293,7 @@ static mem_result run_access(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn
 static uint32_t cop_of(uint32_t insn)
 {
     uint32_t op = insn >> 26;
-    if ((op & 0x3Cu) == 0x10u || (op & 0x38u) == 0x30u)
+    if ((op & 0x3Cu) == 0x10u || (op & 0x30u) == 0x30u)
         return op & 3u;
     return 0;
 }

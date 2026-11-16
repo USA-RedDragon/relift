@@ -506,6 +506,9 @@ TEST(mips_guard_raises_the_static_exceptions_and_fpe)
     c->cp0_status = RL_MIPS_SR_CU1 | RL_MIPS_SR_FR;
     CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_CPU, K0(0x2000), 0x46000000u), RL_PENDING);
     CHECK_EQ(c->cp0_cause, (1u << 28) | RL_MIPS_EXC_CPU << 2);
+    c->cp0_status = RL_MIPS_SR_FR;
+    CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_CPU, K0(0x2000), 0xE4A40000u), RL_PENDING);
+    CHECK_EQ(c->cp0_cause, (1u << 28) | RL_MIPS_EXC_CPU << 2);
     c->cp0_status = RL_MIPS_SR_CU1 | RL_MIPS_SR_FR;
     c->f[2] = 0x3F800000;
     c->f[4] = 0x3F800000;
