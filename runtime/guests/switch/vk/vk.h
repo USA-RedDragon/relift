@@ -74,13 +74,20 @@ typedef struct rl_vk_surface_provider {
      */
     bool (*presents)(void *user, void *host_instance, void *gipa, void *physical_device, uint32_t family);
     /**
+     * @brief Optional: a new host surface for the window of surface (the one
+     * create made) after the host lost it, as Android does when the app goes
+     * to the background. Returns a VkResult; VK_NOT_READY while the window
+     * has no surface to make one on. NULL means a lost surface stays lost.
+     */
+    int32_t (*recreate)(void *user, void *host_instance, void *gipa, uint64_t surface, uint64_t *fresh);
+    /**
      * @brief The surfaces are never shown: a guest swapchain renders each
      * present into images the layer owns instead of a host swapchain, and
      * every device and queue family supports the surface. For drivers that
      * cannot present to a surface of this kind (NVIDIA on headless ones).
      */
     bool offscreen;
-    /** @brief Passed to create, extent and presents. */
+    /** @brief Passed to create, extent, presents and recreate. */
     void *user;
 } rl_vk_surface_provider;
 

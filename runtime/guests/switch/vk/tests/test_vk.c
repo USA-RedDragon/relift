@@ -1180,6 +1180,117 @@ TEST(vk_vi_surface_presents_headless)
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 
+static int g_recreates, g_recreate_ready_after;
+static PFN_vkAcquireNextImageKHR g_real_acquire;
+static int g_lose_acquires;
+
+static int32_t lost_recreate(void *user, void *host_instance, void *gipa, uint64_t surface, uint64_t *fresh)
+{
+    (void)user;
+    (void)surface;
+    if (++g_recreates < g_recreate_ready_after)
+        return VK_NOT_READY;
+    const rl_vk_surface_provider *h = rl_vk_headless_surfaces();
+    return h->create(h->user, host_instance, gipa, 0, fresh);
+}
+
+static VkResult losing_acquire(VkDevice dev, VkSwapchainKHR sw, uint64_t timeout, VkSemaphore sem, VkFence fence, uint32_t *i)
+{
+    if (g_lose_acquires > 0) {
+        g_lose_acquires--;
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    return g_real_acquire(dev, sw, timeout, sem, fence, i);
+}
+
+static rl_vk_surface_provider g_losable = { .create = resizable_create, .recreate = lost_recreate };
+
+TEST(vk_a_lost_host_surface_is_made_again_behind_the_guest)
+{
+    g_losable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
+    CHECK_EQ(boot(&g_losable), 0);
+    const char *exts[] = { "VK_KHR_surface", "VK_NN_vi_surface" };
+    CHECK(make_instance(exts, 2, 0) != 0);
+    VkViSurfaceCreateInfoNN sci = { .sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, .window = GP(galloc(64)) };
+    uint64_t gs = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateViSurfaceNN", g_inst, gput(&sci, sizeof sci), 0, gs)), VK_SUCCESS);
+    uint64_t surface = g64(gs);
+    uint64_t pds[8];
+    uint32_t np = physical_devices(pds, 8);
+    unsigned tested = 0;
+    for (uint32_t p = 0; p < np && !tested; p++) {
+        uint32_t qf = queue_family(pds[p], VK_QUEUE_GRAPHICS_BIT);
+        uint64_t gsup = galloc(4);
+        if (qf == UINT32_MAX || VKR(G("vkGetPhysicalDeviceSurfaceSupportKHR", pds[p], qf, surface, gsup)) != VK_SUCCESS ||
+            !g32(gsup))
+            continue;
+        const char *dexts[] = { "VK_KHR_swapchain" };
+        uint64_t dev = make_device(pds[p], qf, dexts, 1);
+        CHECK(dev != 0);
+        VkSwapchainCreateInfoKHR swci = {
+            .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            .surface = (VkSurfaceKHR)GP(surface),
+            .minImageCount = 2,
+            .imageFormat = VK_FORMAT_R8G8B8A8_UNORM,
+            .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+            .imageExtent = { 64, 64 },
+            .imageArrayLayers = 1,
+            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+            .clipped = VK_TRUE,
+        };
+        uint64_t gsw = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateSwapchainKHR", dev, gput(&swci, sizeof swci), 0, gsw)), VK_SUCCESS);
+        uint64_t sw = g64(gsw);
+        vkf_obj *d = vkf_obj_of(dev, VKG_KIND_VkDevice);
+        g_real_acquire = (PFN_vkAcquireNextImageKHR)d->fns->f[VKG_vkAcquireNextImageKHR];
+        d->fns->f[VKG_vkAcquireNextImageKHR] = (void (*)(void))losing_acquire;
+        g_recreates = 0;
+        g_recreate_ready_after = 3;
+        g_lose_acquires = 1;
+        VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        uint64_t gf = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateFence", dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+        uint64_t fence = g64(gf), gidx = galloc(4);
+        uint32_t made0 = 0, hw, hh;
+        CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made0));
+        CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, 0, 0, fence, gidx)), VK_NOT_READY);
+        CHECK_EQ(g_recreates, 1);
+        CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, UINT64_MAX, 0, fence, gidx)), VK_SUCCESS);
+        CHECK_EQ(g_recreates, 3);
+        uint32_t made = 0;
+        CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made));
+        CHECK_EQ(made, made0 + 1);
+        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+        uint64_t gq = galloc(8);
+        G("vkGetDeviceQueue", dev, qf, 0, gq);
+        uint64_t queue = g64(gq);
+        uint32_t idx = g32(gidx);
+        VkPresentInfoKHR pi = {
+            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .swapchainCount = 1,
+            .pSwapchains = GP(gput(&sw, 8)),
+            .pImageIndices = GP(gput(&idx, 4)),
+        };
+        int32_t pr = VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi)));
+        CHECK(pr == VK_SUCCESS);
+        d->fns->f[VKG_vkAcquireNextImageKHR] = (void (*)(void))g_real_acquire;
+        CHECK_EQ(VKR(G("vkDeviceWaitIdle", dev)), VK_SUCCESS);
+        G("vkDestroyFence", dev, fence, 0);
+        G("vkDestroySwapchainKHR", dev, sw, 0);
+        G("vkDestroyDevice", dev, 0);
+        tested++;
+    }
+    G("vkDestroySurfaceKHR", g_inst, surface, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    if (!tested)
+        fprintf(stderr, "  no host device presents to a headless surface: lost surface test skipped\n");
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
 TEST(vk_bad_handles_and_unknown_structs)
 {
     CHECK_EQ(boot(NULL), 0);

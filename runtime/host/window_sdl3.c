@@ -509,6 +509,8 @@ typedef struct surface_req {
     void *instance;
     uint64_t surface;
     bool ok;
+    /** @brief Android: the window has no surface now (the app is in the background); a later try can work. */
+    bool later;
 } surface_req;
 
 static void do_surface(void *p)
@@ -527,10 +529,12 @@ static void do_surface(void *p)
     r->ok = create && info.window && create((VkInstance)r->instance, &info, NULL, &s) == VK_SUCCESS;
     if (!r->ok)
         SDL_SetError("vkCreateAndroidSurfaceKHR failed");
+    if (!info.window)
+        r->later = true;
 #else
     r->ok = SDL_Vulkan_CreateSurface(r->w->w, (VkInstance)r->instance, NULL, &s);
 #endif
-    if (!r->ok)
+    if (!r->ok && !r->later)
         rl_log(RL_LOG_ERROR, "window", "SDL could not create a Vulkan surface: %s", SDL_GetError());
     memcpy(&r->surface, &s, sizeof r->surface);
 }

@@ -116,9 +116,28 @@ static void window_extent(void *user, uint64_t surface, uint32_t guest[2], uint3
     pthread_mutex_unlock(&g_lock);
 }
 
+static int32_t window_recreate(void *user, void *host_instance, void *gipa, uint64_t surface, uint64_t *fresh)
+{
+    (void)user;
+    (void)gipa;
+    const rl_window_backend *b = rl_window_backend_current();
+    if (!b)
+        return VK_ERROR_INITIALIZATION_FAILED;
+    pthread_mutex_lock(&g_lock);
+    int32_t r = VK_ERROR_SURFACE_LOST_KHR;
+    for (uint32_t i = g_nsurfaces; i-- > 0;)
+        if (g_surfaces[i].surface == surface) {
+            r = b->vulkan_surface(g_surfaces[i].layer->win, host_instance, fresh) >= 0 ? VK_SUCCESS : VK_NOT_READY;
+            break;
+        }
+    pthread_mutex_unlock(&g_lock);
+    return r;
+}
+
 static rl_vk_surface_provider g_window_provider = {
     .create = window_create,
     .extent = window_extent,
+    .recreate = window_recreate,
 };
 
 const rl_vk_surface_provider *rl_vk_window_surfaces(void)

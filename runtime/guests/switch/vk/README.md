@@ -330,7 +330,13 @@ image (letterboxed, linear filter when the format allows) after the guest's
 wait semaphores, then presents the host image. The host swapchain is recreated
 when the provider's size generation changes (`rl_vk_surface_provider.extent`)
 or the host reports out of date or suboptimal, while no guest image is held;
-the guest never sees `VK_ERROR_OUT_OF_DATE_KHR` from a resize. Guest swapchain
+the guest never sees `VK_ERROR_OUT_OF_DATE_KHR` from a resize. A lost host
+surface (`VK_ERROR_SURFACE_LOST_KHR`: Android destroys the window's surface
+when the app goes to the background) drops the host swapchain; presents
+until a new one exists drop their frame, and acquire waits, asking the
+provider (`rl_vk_surface_provider.recreate`) at most every 100 ms for a new
+host surface on the same window, then builds a host swapchain on it. The
+guest never sees the loss. Guest swapchain
 handles are ids from the layer (`0x57` in the top byte). Commands on
 swapchains the layer does not implement (`vkGetSwapchainStatusKHR`, shared,
 counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.

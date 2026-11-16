@@ -14,6 +14,13 @@
  * guest never gets VK_ERROR_OUT_OF_DATE_KHR or VK_SUBOPTIMAL_KHR from a
  * resize.
  *
+ * A host surface can be lost: Android destroys the window's surface when the
+ * app goes to the background and makes a new one when it comes back. The
+ * guest never sees that either. The swapchain drops its host swapchain, and
+ * acquire waits until the provider can make a new host surface for the same
+ * window, then builds a host swapchain on it; a present in between drops the
+ * frame.
+ *
  * Presents are paced like the console's FIFO queue: each frame is shown at
  * the first vsync of vi_vsync_after that follows its present and the frame
  * before it, and an image comes back to vkAcquireNextImageKHR only when the
@@ -46,6 +53,16 @@ typedef struct vkf_swap {
     VkPhysicalDevice phys;
     const vkf_fns *ifns;
     VkSurfaceKHR surface;
+    /** @brief The host surface presents go to: the guest's surface, or one made again after the host lost it. */
+    VkSurfaceKHR hsurf;
+    /** @brief hsurf was made by this file and is destroyed with the swapchain. */
+    bool hsurf_own;
+    /** @brief The host surface was lost: acquire makes a new one before a host swapchain. */
+    bool lost;
+    /** @brief While lost: when to ask the provider for a new host surface next (monotonic ns). */
+    int64_t renew_at;
+    VkInstance inst;
+    const vkf_fns *gfns;
     VkFormat format;
     VkColorSpaceKHR color_space;
     VkExtent2D extent;
@@ -312,11 +329,11 @@ static void retire_semaphores(vkf_swap *s)
 static VkSurfaceFormatKHR pick_format(vkf_swap *s)
 {
     uint32_t n = 0;
-    IFN(s, vkGetPhysicalDeviceSurfaceFormatsKHR)(s->phys, s->surface, &n, NULL);
+    IFN(s, vkGetPhysicalDeviceSurfaceFormatsKHR)(s->phys, s->hsurf, &n, NULL);
     VkSurfaceFormatKHR *f = calloc(n ? n : 1, sizeof *f);
     if (!f)
         abort();
-    IFN(s, vkGetPhysicalDeviceSurfaceFormatsKHR)(s->phys, s->surface, &n, f);
+    IFN(s, vkGetPhysicalDeviceSurfaceFormatsKHR)(s->phys, s->hsurf, &n, f);
     bool srgb = s->format == VK_FORMAT_B8G8R8A8_SRGB || s->format == VK_FORMAT_R8G8B8A8_SRGB ||
                 s->format == VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     VkSurfaceFormatKHR pick = n ? f[0] : (VkSurfaceFormatKHR){ VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
@@ -343,11 +360,11 @@ static VkSurfaceFormatKHR pick_format(vkf_swap *s)
 static VkPresentModeKHR pick_mode(vkf_swap *s)
 {
     uint32_t n = 0;
-    IFN(s, vkGetPhysicalDeviceSurfacePresentModesKHR)(s->phys, s->surface, &n, NULL);
+    IFN(s, vkGetPhysicalDeviceSurfacePresentModesKHR)(s->phys, s->hsurf, &n, NULL);
     VkPresentModeKHR m[16];
     if (n > 16)
         n = 16;
-    IFN(s, vkGetPhysicalDeviceSurfacePresentModesKHR)(s->phys, s->surface, &n, m);
+    IFN(s, vkGetPhysicalDeviceSurfacePresentModesKHR)(s->phys, s->hsurf, &n, m);
     for (uint32_t i = 0; i < n; i++)
         if (m[i] == s->mode)
             return s->mode;
@@ -420,6 +437,55 @@ fail:
     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 }
 
+/** @brief Drops the host swapchain of a lost host surface. Lock held. */
+static void lose(vkf_swap *s)
+{
+    if (rl_once(0x4c4f535400000000ull ^ s->id))
+        rl_log(RL_LOG_INFO, "vk", "the host surface of swapchain 0x%llx was lost; a new one is made when the window has one again",
+               (unsigned long long)s->id);
+    wait_all(s);
+    DFN(s, vkDeviceWaitIdle)(s->dev);
+    if (s->ov) {
+        vkf_overlay_free(s->ov);
+        s->ov = NULL;
+    }
+    if (s->host) {
+        vkf_flip_forget(s->host);
+        DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
+        s->host = NULL;
+    }
+    retire_semaphores(s);
+    s->lost = true;
+}
+
+/** @brief A new host surface for the guest's window after the host lost it; VK_NOT_READY while the window has none.
+ * Lock held. */
+static VkResult renew(vkf_swap *s)
+{
+    const rl_vk_surface_provider *p = vkf.cfg.surfaces;
+    if (!p || !p->recreate)
+        return VK_ERROR_SURFACE_LOST_KHR;
+    int64_t now = now_ns();
+    if (now < s->renew_at)
+        return VK_NOT_READY;
+    s->renew_at = now + 100000000ll;
+    uint64_t fresh = 0;
+    void *gipa;
+    memcpy(&gipa, &vkf.gipa, sizeof gipa);
+    int32_t r = p->recreate(p->user, s->inst, gipa, (uint64_t)(uintptr_t)s->surface, &fresh);
+    if (r < 0 || !fresh)
+        return VK_NOT_READY;
+    if (s->hsurf_own)
+        VKF_FN(s->gfns, vkDestroySurfaceKHR)(s->inst, s->hsurf, NULL);
+    s->hsurf = (VkSurfaceKHR)(uintptr_t)fresh;
+    s->hsurf_own = true;
+    s->lost = false;
+    s->renew_at = 0;
+    s->stale = true;
+    rl_log(RL_LOG_INFO, "vk", "swapchain 0x%llx has a new host surface", (unsigned long long)s->id);
+    return VK_SUCCESS;
+}
+
 /** @brief Makes the host swapchain match the host surface. The blit does not rotate, so the presentation engine turns
  * the image when the display is not in its native orientation. VK_NOT_READY while the surface has no area. Lock
  * held. */
@@ -427,8 +493,17 @@ static VkResult host_create(vkf_swap *s)
 {
     if (s->offscreen)
         return offscreen_create(s);
+    if (s->lost) {
+        VkResult n = renew(s);
+        if (n < 0 || n == VK_NOT_READY)
+            return n;
+    }
     VkSurfaceCapabilitiesKHR caps;
-    VkResult r = IFN(s, vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(s->phys, s->surface, &caps);
+    VkResult r = IFN(s, vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(s->phys, s->hsurf, &caps);
+    if (r == VK_ERROR_SURFACE_LOST_KHR) {
+        lose(s);
+        return VK_NOT_READY;
+    }
     if (r < 0)
         return r;
     uint32_t guest[2], host[2];
@@ -462,7 +537,7 @@ static VkResult host_create(vkf_swap *s)
         usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = s->surface,
+        .surface = s->hsurf,
         .minImageCount = count,
         .imageFormat = fmt.format,
         .imageColorSpace = fmt.colorSpace,
@@ -478,6 +553,10 @@ static VkResult host_create(vkf_swap *s)
     };
     VkSwapchainKHR sw = NULL;
     r = DFN(s, vkCreateSwapchainKHR)(s->dev, &ci, NULL, &sw);
+    if (r == VK_ERROR_SURFACE_LOST_KHR || r == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR) {
+        lose(s);
+        return VK_NOT_READY;
+    }
     if (r < 0) {
         rl_log(RL_LOG_ERROR, "vk", "host swapchain %ux%u: %d", e.width, e.height, r);
         return r;
@@ -526,7 +605,7 @@ static VkResult host_create(vkf_swap *s)
 static bool suboptimal_stale(vkf_swap *s)
 {
     VkSurfaceCapabilitiesKHR caps;
-    if (IFN(s, vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(s->phys, s->surface, &caps) < 0)
+    if (IFN(s, vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(s->phys, s->hsurf, &caps) < 0)
         return true;
     if (caps.currentTransform != s->host_hint)
         return true;
@@ -561,6 +640,8 @@ static void swap_free(vkf_swap *s)
         vkf_flip_forget(s->host);
         DFN(s, vkDestroySwapchainKHR)(s->dev, s->host, NULL);
     }
+    if (s->hsurf_own)
+        VKF_FN(s->gfns, vkDestroySurfaceKHR)(s->inst, s->hsurf, NULL);
     if (s->offscreen)
         offscreen_destroy(s);
     retire_semaphores(s);
@@ -643,6 +724,9 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     s->ifns = k.obj->parent->fns;
     s->offscreen = offscreen_surfaces();
     s->surface = ci->surface;
+    s->hsurf = ci->surface;
+    s->inst = k.obj->parent->parent->host;
+    s->gfns = k.obj->parent->parent->fns;
     s->format = ci->imageFormat;
     s->color_space = ci->imageColorSpace;
     s->extent = ci->imageExtent;
@@ -652,6 +736,12 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     if (old) {
         pthread_mutex_lock(&old->lock);
         s->last_shown = old->last_shown;
+        if (old->surface == s->surface && old->hsurf_own) {
+            s->hsurf = old->hsurf;
+            s->hsurf_own = true;
+            old->hsurf_own = false;
+            s->lost = old->lost;
+        }
         if (old->surface == s->surface && old->host) {
             wait_all(old);
             s->host = old->host;
@@ -784,7 +874,7 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
         uint32_t guest[2], host[2];
         uint64_t gen;
         vkf_surface_extent((uint64_t)(uintptr_t)s->surface, guest, host, &gen);
-        if ((!have_host(s) || s->stale || gen != s->gen) && !any_held(s)) {
+        if ((!have_host(s) || s->stale || s->lost || gen != s->gen) && !any_held(s)) {
             r = host_create(s);
             if (r == VK_NOT_READY) {
                 if (!timeout || (timeout != UINT64_MAX && now_ns() - start >= (int64_t)timeout)) {
@@ -798,6 +888,16 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             }
             if (r < 0)
                 break;
+        }
+        if (!s->offscreen && !s->host) {
+            if (!timeout || (timeout != UINT64_MAX && now_ns() - start >= (int64_t)timeout)) {
+                r = timeout ? VK_TIMEOUT : VK_NOT_READY;
+                break;
+            }
+            pthread_mutex_unlock(&s->lock);
+            nap();
+            pthread_mutex_lock(&s->lock);
+            continue;
         }
         uint32_t i = s->n;
         for (uint32_t t = 0; t < s->n; t++) {
@@ -849,6 +949,10 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             int64_t h0 = now_ns();
             r = DFN(s, vkAcquireNextImageKHR)(s->dev, s->host, timeout, sem, fence, &hi);
             host_ns += now_ns() - h0;
+        }
+        if (r == VK_ERROR_SURFACE_LOST_KHR) {
+            lose(s);
+            r = VK_ERROR_OUT_OF_DATE_KHR;
         }
         if (r == VK_ERROR_OUT_OF_DATE_KHR && !any_held(s)) {
             s->stale = true;
@@ -1198,6 +1302,24 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         r = VK_ERROR_UNKNOWN;
         goto out;
     }
+    if (!s->offscreen && (!s->host || s->lost)) {
+        VkPipelineStageFlags drop[16];
+        for (uint32_t w = 0; w < nwaits && w < 16; w++)
+            drop[w] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        VkSubmitInfo none = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .waitSemaphoreCount = nwaits < 16 ? nwaits : 16,
+            .pWaitSemaphores = waits,
+            .pWaitDstStageMask = drop,
+        };
+        r = DFN(s, vkQueueSubmit)(q, 1, &none, s->done[i]);
+        s->held[i] = false;
+        if (r >= 0)
+            s->busy[i] = true;
+        show(s, i);
+        r = r < 0 ? r : VK_SUCCESS;
+        goto out;
+    }
     r = ensure_pool(s, family_of(d, s->fns, s->dev, q));
     if (r < 0)
         goto out;
@@ -1244,6 +1366,10 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     if (t_s)
         vi_trace('H', (uint64_t)(t_h - t_s), (uint64_t)(t_x - t_h), (uint64_t)(vi_trace_now() - t_x));
     show(s, i);
+    if (r == VK_ERROR_SURFACE_LOST_KHR) {
+        lose(s);
+        r = VK_SUCCESS;
+    }
     if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && suboptimal_stale(s)))
         s->stale = true;
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
@@ -1262,7 +1388,7 @@ out:
 static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
 {
     pthread_mutex_lock(&s->lock);
-    if (!s->host || s->stale || !s->pool || i >= s->n) {
+    if (!s->host || s->stale || s->lost || !s->pool || i >= s->n) {
         pthread_mutex_unlock(&s->lock);
         return;
     }
@@ -1309,6 +1435,8 @@ static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
     }
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
         s->stale = true;
+    if (r == VK_ERROR_SURFACE_LOST_KHR)
+        lose(s);
     pthread_mutex_unlock(&s->lock);
 }
 
