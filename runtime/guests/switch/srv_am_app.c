@@ -472,6 +472,18 @@ static rl_result af_cmd_320(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/** @brief Command 321 (Switch 2, unnamed): no input, one output bool, false here. */
+static rl_result af_cmd_321(rl_ipc_req *r)
+{
+    if (!hos_switch2())
+        return SF_RESULT_UNKNOWN_COMMAND;
+    uint8_t *out = rl_ipc_out(r, 1);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
 static rl_result af_try_pop_from_friend_invitation_channel(rl_ipc_req *r)
 {
     (void)r;
@@ -516,6 +528,7 @@ static const rl_ipc_cmd af_cmds[] = {
     { 160, "GetHealthWarningDisappearedSystemEvent", af_get_health_warning_event },
     { 210, "GetUnknownEvent", af_get_unknown_event },
     { 320, "Cmd320", af_cmd_320 },
+    { 321, "Cmd321", af_cmd_321 },
     RL_SRV_STUB(1001, "PrepareForJit"),
 };
 

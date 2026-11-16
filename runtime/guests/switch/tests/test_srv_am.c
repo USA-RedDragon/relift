@@ -1045,15 +1045,20 @@ TEST(am_switch2_proxy_and_its_functions)
     r = tc_send(e.c, e.af, tc_new(320));
     CHECK_EQ(rc_of(r), 0);
     CHECK_EQ(r.data[0] | r.data[1], 0);
+    CHECK_EQ(u8_out(&e, e.af, 321), 0);
+    CHECK_EQ(get(&e, e.proxy, 1, &e.sc), 0);
+    CHECK_EQ(set8(&e, e.sc, 2400, 1), 0);
 }
 
 TEST(am_switch_has_no_switch2_proxy)
 {
     env e;
-    env_open(&e, "appletOE", 0);
+    libnx_init_application(&e);
     CHECK(e.ok);
     tc_obj o;
     CHECK_EQ(get(&e, e.proxy, 40, &o), SF_RESULT_UNKNOWN_COMMAND);
     CHECK_EQ(get(&e, e.proxy, 60, &o), SF_RESULT_UNKNOWN_COMMAND);
     CHECK(tc_sub(e.c, e.svc, proxy_req(10), &o) != 0);
+    CHECK_EQ(set8(&e, e.sc, 2400, 1), SF_RESULT_UNKNOWN_COMMAND);
+    CHECK_EQ(rc_of(tc_send(e.c, e.af, tc_new(321))), SF_RESULT_UNKNOWN_COMMAND);
 }

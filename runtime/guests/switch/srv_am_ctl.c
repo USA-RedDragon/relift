@@ -381,6 +381,15 @@ static rl_result sc_save_current_screenshot(rl_ipc_req *r)
     return (option < 0 || option > 3) ? AM_INVALID_PARAMETERS : KR_SUCCESS;
 }
 
+/** @brief Switch 2 setters of what the system records or shares (SetRtcScreenSharingAudioEnabled): accepted, nothing to apply. */
+static rl_result sc_switch2_setting(rl_ipc_req *r)
+{
+    uint8_t on;
+    if (!hos_switch2())
+        return SF_RESULT_UNKNOWN_COMMAND;
+    return rl_srv_in(r, &on, 1) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
+}
+
 static const rl_ipc_cmd sc_cmds[] = {
     { 0, "Exit", sc_exit },
     RL_SRV_STUB(1, "LockExit"),
@@ -412,6 +421,7 @@ static const rl_ipc_cmd sc_cmds[] = {
     { 100, "SetAlbumImageTakenNotificationEnabled", sc_set_album_image_taken_notification_enabled },
     { 120, "SaveCurrentScreenshot", sc_save_current_screenshot },
     { 130, "SetRecordVolumeMuted", sc_set_record_volume_muted },
+    { 2400, "SetRtcScreenSharingAudioEnabled", sc_switch2_setting },
 };
 
 static const rl_ipc_class sc_class = { "nn::am::service::ISelfController", sc_cmds, AM_N(sc_cmds), 0, sc_destroy };
