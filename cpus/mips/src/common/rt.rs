@@ -135,6 +135,7 @@ pub(crate) struct Core {
     plain_below: Option<u64>,
     endian: Endian,
     proved: Vec<Value>,
+    plain: Vec<Value>,
     pc: u64,
     in_delay: bool,
     pending: Vec<(Reg, Value)>,
@@ -154,6 +155,7 @@ impl Core {
             plain_below,
             endian,
             proved: Vec::new(),
+            plain: Vec::new(),
             pc,
             in_delay: false,
             pending: Vec::new(),
@@ -344,11 +346,16 @@ impl Core {
     }
 
     /// Leaves through the guard of `code` when the access at `pa` is
-    /// conditional (`g`) and may not be plain memory.
+    /// conditional (`g`) and may not be plain memory; once per address, so
+    /// the guard of an instruction's first access covers the rest.
     fn device_exit(&mut self, b: &mut Builder, pa: Value, g: Option<Value>, code: Exc) {
         let (Some(_), Some(limit)) = (g, self.plain_below) else {
             return;
         };
+        if self.plain.contains(&pa) {
+            return;
+        }
+        self.plain.push(pa);
         let k = b.konst(Width::W64, u128::from(limit));
         let dev = b.cmp(CmpOp::Ule, k, pa);
         let code = self.exc_code(code);

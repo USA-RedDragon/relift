@@ -31,13 +31,13 @@ static rl_n64 *machine(rl_ctx *c) { return c->machine; }
 uint64_t rl_n64_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
 {
     (void)mem;
-    return rl_n64_read(machine(c), (uint32_t)addr, size);
+    return rl_mips_swap(rl_n64_read(machine(c), (uint32_t)addr, size), size);
 }
 
 void rl_n64_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value)
 {
     (void)mem;
-    rl_n64_write(machine(c), (uint32_t)addr, size, value);
+    rl_n64_write(machine(c), (uint32_t)addr, size, rl_mips_swap(value, size));
 }
 
 static uint64_t bus_read(rl_ctx *c, uint8_t *mem, uint64_t paddr, uint32_t size)

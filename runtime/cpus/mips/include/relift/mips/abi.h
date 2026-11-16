@@ -357,35 +357,63 @@ _Static_assert(offsetof(rl_ctx, disp_count) == RL_MIPS_COMMON_OFFSET + offsetof(
                "common disp_count");
 _Static_assert(sizeof(rl_ctx_common) == offsetof(rl_ctx, time) - RL_MIPS_COMMON_OFFSET, "common block size");
 
-/** @brief Big-endian guest memory accessors over the host window at physical addresses. */
+/**
+ * @brief Raw accessors over the host window at physical addresses, as the
+ * emitted C uses them: the bytes in host order (little-endian on every
+ * host relift targets); the lifted code swaps them for the guest's
+ * big-endian accesses.
+ */
 static inline uint8_t rl_ld8(const uint8_t *mem, uint64_t a) { return mem[a]; }
 static inline uint16_t rl_ld16(const uint8_t *mem, uint64_t a)
 {
-    return (uint16_t)((uint16_t)mem[a] << 8 | mem[a + 1]);
+    uint16_t v;
+    memcpy(&v, mem + a, sizeof v);
+    return v;
 }
 static inline uint32_t rl_ld32(const uint8_t *mem, uint64_t a)
 {
-    return (uint32_t)rl_ld16(mem, a) << 16 | rl_ld16(mem, a + 2);
+    uint32_t v;
+    memcpy(&v, mem + a, sizeof v);
+    return v;
 }
 static inline uint64_t rl_ld64(const uint8_t *mem, uint64_t a)
 {
-    return (uint64_t)rl_ld32(mem, a) << 32 | rl_ld32(mem, a + 4);
+    uint64_t v;
+    memcpy(&v, mem + a, sizeof v);
+    return v;
 }
 static inline void rl_st8(uint8_t *mem, uint64_t a, uint8_t v) { mem[a] = v; }
-static inline void rl_st16(uint8_t *mem, uint64_t a, uint16_t v)
+static inline void rl_st16(uint8_t *mem, uint64_t a, uint16_t v) { memcpy(mem + a, &v, sizeof v); }
+static inline void rl_st32(uint8_t *mem, uint64_t a, uint32_t v) { memcpy(mem + a, &v, sizeof v); }
+static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v) { memcpy(mem + a, &v, sizeof v); }
+
+/** @brief The big-endian value of size bytes (1, 2, 4 or 8) at mem + a: the guest's view, for the runtime's own accesses. */
+static inline uint64_t rl_mips_ld(const uint8_t *mem, uint64_t a, uint32_t size)
 {
-    mem[a] = (uint8_t)(v >> 8);
-    mem[a + 1] = (uint8_t)v;
+    uint64_t v = 0;
+    for (uint32_t i = 0; i < size; i++)
+        v = v << 8 | mem[a + i];
+    return v;
 }
-static inline void rl_st32(uint8_t *mem, uint64_t a, uint32_t v)
+/** @brief Stores the big-endian value v of size bytes at mem + a. */
+static inline void rl_mips_st(uint8_t *mem, uint64_t a, uint32_t size, uint64_t v)
 {
-    rl_st16(mem, a, (uint16_t)(v >> 16));
-    rl_st16(mem, a + 2, (uint16_t)v);
+    for (uint32_t i = 0; i < size; i++)
+        mem[a + i] = (uint8_t)(v >> (8u * (size - 1u - i)));
 }
-static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v)
+/** @brief v (size bytes) in the other byte order: a device value as the emitted C passes it. */
+static inline uint64_t rl_mips_swap(uint64_t v, uint32_t size)
 {
-    rl_st32(mem, a, (uint32_t)(v >> 32));
-    rl_st32(mem, a + 4, (uint32_t)v);
+    switch (size) {
+    case 2:
+        return __builtin_bswap16((uint16_t)v);
+    case 4:
+        return __builtin_bswap32((uint32_t)v);
+    case 8:
+        return __builtin_bswap64(v);
+    default:
+        return v & 0xFFu;
+    }
 }
 
 /*

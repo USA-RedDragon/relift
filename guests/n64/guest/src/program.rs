@@ -4,7 +4,8 @@
 //! one unit: each code word of the segment is lifted at its link address,
 //! and the functions hold the instructions their entries reach (the
 //! analysis's entries first, then one at the first word no function
-//! reached, until every code word is in one). Dispatch may enter any
+//! reached, which stops at the words of earlier functions, until every
+//! code word is in one). Dispatch may enter any
 //! instruction, since an exception handler returns wherever its exception
 //! was raised.
 //!
@@ -122,12 +123,14 @@ pub fn unit_symbol(seg: u32) -> String {
 
 type Blocks = BTreeMap<u64, (Result<Block, LiftFailure>, u64)>;
 
-/// The instructions a run from `entry` reaches without calls.
-fn reach(blocks: &Blocks, entry: u64) -> BTreeSet<u64> {
+/// The instructions a run from `entry` reaches without calls, stopping at
+/// those of `taken` (other functions', which a jump there enters through
+/// dispatch).
+fn reach(blocks: &Blocks, entry: u64, taken: &BTreeSet<u64>) -> BTreeSet<u64> {
     let mut seen = BTreeSet::new();
     let mut todo = vec![entry];
     while let Some(pc) = todo.pop() {
-        if !blocks.contains_key(&pc) || !seen.insert(pc) {
+        if !blocks.contains_key(&pc) || (pc != entry && taken.contains(&pc)) || !seen.insert(pc) {
             continue;
         }
         let Some((Ok(b), _)) = blocks.get(&pc) else {
@@ -226,13 +229,18 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         entries.dedup();
         let mut covered: BTreeSet<u64> = BTreeSet::new();
         let mut fns: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
+        let none = BTreeSet::new();
         for e in entries {
-            let r = reach(&blocks, e);
+            let r = reach(&blocks, e, &none);
             covered.extend(&r);
             fns.insert(e, r);
         }
-        while let Some(&pc) = blocks.keys().find(|pc| !covered.contains(*pc)) {
-            let r = reach(&blocks, pc);
+        let pcs: Vec<u64> = blocks.keys().copied().collect();
+        for pc in pcs {
+            if covered.contains(&pc) {
+                continue;
+            }
+            let r = reach(&blocks, pc, &covered);
             covered.extend(&r);
             fns.insert(pc, r);
         }

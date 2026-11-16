@@ -22,16 +22,7 @@ static uint64_t bus_read(rl_ctx *c, uint8_t *mem, uint64_t pa, uint32_t size)
 {
     if (g_bus)
         return g_bus->read(c, mem, pa, size);
-    switch (size) {
-    case 1:
-        return rl_ld8(mem, pa);
-    case 2:
-        return rl_ld16(mem, pa);
-    case 4:
-        return rl_ld32(mem, pa);
-    default:
-        return rl_ld64(mem, pa);
-    }
+    return rl_mips_ld(mem, pa, size);
 }
 
 static void bus_write(rl_ctx *c, uint8_t *mem, uint64_t pa, uint32_t size, uint64_t v)
@@ -40,20 +31,7 @@ static void bus_write(rl_ctx *c, uint8_t *mem, uint64_t pa, uint32_t size, uint6
         g_bus->write(c, mem, pa, size, v);
         return;
     }
-    switch (size) {
-    case 1:
-        rl_st8(mem, pa, (uint8_t)v);
-        break;
-    case 2:
-        rl_st16(mem, pa, (uint16_t)v);
-        break;
-    case 4:
-        rl_st32(mem, pa, (uint32_t)v);
-        break;
-    default:
-        rl_st64(mem, pa, v);
-        break;
-    }
+    rl_mips_st(mem, pa, size, v);
 }
 
 static void set_gpr(rl_ctx *c, unsigned n, uint64_t v)

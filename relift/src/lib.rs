@@ -29,6 +29,7 @@ pub mod info;
 pub mod ios;
 pub mod macapp;
 pub mod mods;
+pub mod n64;
 pub mod paths;
 pub mod push;
 pub mod report;

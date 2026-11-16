@@ -11,9 +11,9 @@
 
 #include <relift/mips/abi.h>
 
-/** @brief A read of size bytes at physical address addr outside RDRAM, at the CPU's cycle. */
+/** @brief A read of size bytes at physical address addr outside RDRAM, at the CPU's cycle: the bytes in host order, as the emitted C takes them (rl_mips_swap of the guest's value). */
 RL_RUNTIME_API uint64_t rl_n64_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size);
-/** @brief A write of size bytes of value at physical address addr outside RDRAM, at the CPU's cycle. */
+/** @brief A write of size bytes at physical address addr outside RDRAM, at the CPU's cycle; value holds the bytes in host order. */
 RL_RUNTIME_API void rl_n64_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value);
 
 /** @brief Ends the budget, so the block's sync point calls rl_n64_cp0_sync. */

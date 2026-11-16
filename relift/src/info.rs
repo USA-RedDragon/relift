@@ -377,6 +377,30 @@ pub fn handheld_document(
     Ok(info)
 }
 
+/// The document of a Nintendo 64 build: the identity from the cartridge
+/// header (title, game id, version); no save or input section yet.
+#[must_use]
+pub fn n64_document(name: &str, rom: &relift_n64_formats::Rom, settings: Vec<Setting>) -> Info {
+    let h = rom.header();
+    let mut info = Info::new(env!("CARGO_PKG_VERSION"));
+    info.identity.platform = "n64".into();
+    info.identity.title_id = Some(
+        h.game_id
+            .iter()
+            .map(|b| relift_n64_formats::Header::printable(*b))
+            .collect(),
+    );
+    info.identity.version = Some(h.version.to_string());
+    info.identity.names = std::iter::once(("default".to_string(), name.to_string())).collect();
+    info.identity.default_language = info.identity.first_language();
+    info.save = Save {
+        kind: "none".into(),
+        ..Save::default()
+    };
+    info.settings = game_settings::section(settings);
+    info
+}
+
 /// The stored `mods` section with the run-time state a running binary
 /// reports (`rl_hos_mods_json`: `active` and `conflicts`), as one section.
 ///

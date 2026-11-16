@@ -474,7 +474,7 @@ TEST(mips_guard_runs_a_tlb_mapped_load_and_store)
     c->r[5] = UINT64_C(0x1122334455667788);
     uint32_t sd = 0x3Fu << 26 | 4u << 21 | 5u << 16 | 8u;
     CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBS, K0(0x2000), sd), RL_OK);
-    CHECK_EQ(rl_ld64(mem, 0x100108u), UINT64_C(0x1122334455667788));
+    CHECK_EQ(rl_mips_ld(mem, 0x100108u, 8), UINT64_C(0x1122334455667788));
     uint32_t lw = 0x23u << 26 | 4u << 21 | 6u << 16 | 12u;
     CHECK_EQ(rl_mips_guard(c, mem, 0x1000 + RL_MIPS_EXC_TLBL, K0(0x2000), lw), RL_OK);
     CHECK_EQ(c->r[6], 0x55667788u);

@@ -29,9 +29,10 @@ static struct {
 
 static int handler(rl_ctx *c, uint8_t *mem)
 {
+    (void)mem;
     hs.handlers++;
     hs.handler_epc = c->cp0_epc;
-    rl_n64_cpu_write(c, mem, 0x04400010u, 4, 0);
+    rl_n64_write(c->machine, 0x04400010u, 4, 0);
     RL_MUSTTAIL return rl_mips_eret_to(c, rl_mips_eret(c))(c, mem);
 }
 
@@ -46,12 +47,12 @@ static int main_fn(rl_ctx *c, uint8_t *mem)
 static int spin_fn(rl_ctx *c, uint8_t *mem)
 {
     hs.mains++;
-    rl_n64_cpu_write(c, mem, 0x0430000Cu, 4, 0x80u);
-    rl_n64_cpu_write(c, mem, 0x04400000u, 4, 0x3002u);
-    rl_n64_cpu_write(c, mem, 0x0440000Cu, 4, 0x10u);
-    rl_n64_cpu_write(c, mem, 0x04400018u, 4, 0x20Du);
-    rl_n64_cpu_write(c, mem, 0x0440001Cu, 4, 0xC15u);
-    rl_n64_cpu_write(c, mem, 0x04400020u, 4, 0x0C150C15u);
+    rl_n64_write(c->machine, 0x0430000Cu, 4, 0x80u);
+    rl_n64_write(c->machine, 0x04400000u, 4, 0x3002u);
+    rl_n64_write(c->machine, 0x0440000Cu, 4, 0x10u);
+    rl_n64_write(c->machine, 0x04400018u, 4, 0x20Du);
+    rl_n64_write(c->machine, 0x0440001Cu, 4, 0xC15u);
+    rl_n64_write(c->machine, 0x04400020u, 4, 0x0C150C15u);
     c->cp0_status = 0x34000401u;
     int rc = rl_n64_cp0_sync(c, mem, K0(0x1004));
     while (!rc && !hs.handlers && hs.spins < 1000000) {
