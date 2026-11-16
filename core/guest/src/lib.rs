@@ -214,7 +214,7 @@ pub trait Frontend {
         None
     }
 
-    /// How lifted returns check their target (docs/abi.md section 5.2):
+    /// How lifted returns check their target (docs/abi.md section 5.4):
     /// a return goes back to the host caller only when its target is the
     /// link register's value at the function's entry, and anything else
     /// continues at the target through the runtime. `None` returns to the

@@ -160,7 +160,7 @@ struct rl_ctx {
     uint64_t disp_count;
     /** @brief Preemption clock: its budget stays positive while the thread may run on; the guest layer ends it to preempt the thread. */
     rl_time time;
-    /** @brief Expected return address of a split function: x30 at its entry, written by its stub and before each transfer between its pieces (docs/abi.md section 5.2). */
+    /** @brief Expected return address of a split function: x30 at its entry, written by its stub and before each transfer between its pieces (docs/abi.md section 5.4). */
     uint64_t ra;
 } __attribute__((aligned(64)));
 
@@ -505,7 +505,7 @@ RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /**
  * @brief Reads a link register at a function's entry for its return check
- * (docs/abi.md section 5.3). On AArch64 hosts a relaxed atomic load, which
+ * (docs/abi.md section 5.4). On AArch64 hosts a relaxed atomic load, which
  * clang never pairs with the load of a neighbouring field: such a pair,
  * whose halves the caller stored separately, misses store forwarding. On
  * other hosts a plain load, which the compiler can forward from the
@@ -520,7 +520,7 @@ RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 /**
  * @brief A return to target, which is not the address the function's caller
  * expects (x30 at the function's entry), from the return instruction at pc,
- * with the context stored (docs/abi.md section 5.3): sets c->pc to pc and
+ * with the context stored (docs/abi.md section 5.4): sets c->pc to pc and
  * records {RL_PEND_REDIRECT, pc = target, sp = RL_SP_NONE}, so every host
  * frame returns and the runtime entry (rl_call_guest) continues at target, or
  * reports an instruction abort for a target outside the guest's virtual

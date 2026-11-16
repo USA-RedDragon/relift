@@ -2,7 +2,7 @@
 //! to the call site. A function that rewrites its saved x30 continues at
 //! the new address, and a return to an address outside the guest's address
 //! space (what a failed pointer authentication leaves in x30) stops with an
-//! instruction abort report (docs/abi.md section 5.2).
+//! instruction abort report (docs/abi.md section 5.4).
 
 mod tiny;
 

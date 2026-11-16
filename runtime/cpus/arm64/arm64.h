@@ -61,7 +61,7 @@ RL_RUNTIME_API uint32_t rl_host_get_fpcr(void);
 /**
  * @brief Calls guest code at entry from the host, as the runtime does for a
  * thread entry, until it returns to x30 as it was at the call. A return
- * elsewhere (RL_PEND_REDIRECT, docs/abi.md section 5.2) continues at its
+ * elsewhere (RL_PEND_REDIRECT, docs/abi.md section 5.4) continues at its
  * target in a fresh host frame, and a function so entered that returns
  * normally continues at the x30 it was entered with. Returns RL_OK, or
  * RL_PENDING with any other record set.

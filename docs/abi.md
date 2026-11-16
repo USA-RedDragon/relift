@@ -212,7 +212,7 @@ their offsets to it, and the A64 descriptor gives the core offset 840.
 | 864 | `thread` | runtime thread object |
 | 872 | `disp_table`, `disp_lo`, `disp_count` | dispatch table view |
 | 896 | `time` | preemption clock, an `rl_time` (section 14.1) |
-| 912 | `ra` | expected return address of a split function (section 5.3) |
+| 912 | `ra` | expected return address of a split function (section 5.4) |
 | 960 | | size |
 
 `_Static_assert`s in the header pin every offset, the size and the alignment.
@@ -264,7 +264,7 @@ Reasons:
   scheduler writes, so the check of a running thread reads a line it
   keeps. [inferred]
 - **ra** carries a split function's expected return address from its stub
-  to its pieces (section 5.3). It took padding at the end of the struct, so
+  to its pieces (section 5.4). It took padding at the end of the struct, so
   the size did not change. It shares the clock's cache line; only the
   running thread writes it, and only in split functions. [inferred]
 - **64-byte alignment** keeps two threads' contexts off one cache line.
@@ -347,7 +347,7 @@ no one function or file grows past what clang can compile in a few GB.
 - Landing pads: every piece of a function with resume points has its own
   `lp_dispatch`, which reaches a resume point in another piece by the same
   transfer.
-- Return check (section 5.3): the stub stores x30 into `c->ra`, each piece
+- Return check (section 5.4): the stub stores x30 into `c->ra`, each piece
   reads it into its `rl_ra` local, and each transfer stores it back before
   the tail call, since a split callee's stub may have overwritten it.
 - Pieces go in shards of their own (`emit.shard-kib`, 4 MiB by default, the
@@ -1908,7 +1908,7 @@ is not in.
   mismatched runtime before any code is built.
 - Static units carry the same fields and are checked at start-up, which
   catches a stale shard linked against a newer runtime.
-- Version 6 added the return check (section 5.3): the `ra` field at offset
+- Version 6 added the return check (section 5.4): the `ra` field at offset
   912 (in padding, so `sizeof(rl_ctx)` stays 960), `rl_arm64_ret_far`,
   `rl_arm64_jump_far` and `RL_LIKELY`, which emitted code now calls, and the
   `RL_PEND_REDIRECT` records lifted A64 code raises.
