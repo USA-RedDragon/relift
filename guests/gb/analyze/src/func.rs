@@ -514,30 +514,53 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// After a halt with interrupts disabled and one pending, the next
-    /// instruction runs twice.
+    /// After a halt with interrupts disabled and one pending (the HALT
+    /// bug), the opcode after it is fetched without the program counter
+    /// moving: the CPU runs the bytes `op op b1` as one instruction at the
+    /// halt (`loc`), which ends one byte short of the instruction after
+    /// it. A one-byte instruction so runs twice; a longer one reads its own
+    /// opcode as its first operand and goes on one byte early, and a
+    /// transfer goes where those bytes send it.
     fn halt_bug(&mut self, loc: Loc, next: Option<u16>, st: State) {
         let Some(n) = next else {
             return;
         };
         let at = Loc { addr: n, ..loc };
-        let Some(ins) = self.env.image.fetch(at).and_then(|b| decode(b).ok()) else {
+        let Some(b) = self.env.image.fetch(at) else {
+            return;
+        };
+        let Some(&op) = b.first() else {
+            return;
+        };
+        let form = [op, op, b.get(1).copied().unwrap_or(0xFF)];
+        let Ok(ins) = decode(&form) else {
             return;
         };
         let mn = ins.opcode.mnemonic;
-        if ins.opcode.is_illegal()
-            || matches!(
-                mn,
-                Mnemonic::Jr
-                    | Mnemonic::Jp
-                    | Mnemonic::Call
-                    | Mnemonic::Rst
-                    | Mnemonic::Ret
-                    | Mnemonic::Reti
-                    | Mnemonic::Halt
-                    | Mnemonic::Stop
-            )
-        {
+        if ins.opcode.is_illegal() || matches!(mn, Mnemonic::Halt | Mnemonic::Stop) {
+            return;
+        }
+        let end = loc.addr.checked_add(u16::from(ins.length()));
+        let cond = match ins.opcode.dst {
+            Operand::Cond(c) => Some(c),
+            _ => None,
+        };
+        if matches!(
+            mn,
+            Mnemonic::Jr
+                | Mnemonic::Jp
+                | Mnemonic::Call
+                | Mnemonic::Rst
+                | Mnemonic::Ret
+                | Mnemonic::Reti
+        ) {
+            let (taken, fall) = self.branch_states(&st, cond);
+            if let Some(t) = taken {
+                self.control(loc, &ins, t, end);
+            }
+            if let Some(f) = fall {
+                self.fall(loc, end, f);
+            }
             return;
         }
         let mut s = st;
@@ -546,7 +569,7 @@ impl<'a> Run<'a> {
         for w in events {
             self.write_event(at, &s, w);
         }
-        self.fall(loc, next, s);
+        self.fall(loc, end, s);
     }
 
     fn branch_states(&self, st: &State, cond: Option<Cond>) -> (Option<State>, Option<State>) {
