@@ -68,7 +68,7 @@ struct Charter {
 const NONE: &[&str] = &[];
 
 /// Members that ship their own binaries or are not wired into `relift` yet
-/// (`relift-emit-wasm` until a browser build uses it, `relift-nds-formats` until a guest uses it), so the reachability controls skip them; the
+/// (`relift-emit-wasm` until a browser build uses it, `relift-nds-formats` and `relift-nds-analyze` until a guest uses them), so the reachability controls skip them; the
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-cpu-arm32",
@@ -80,6 +80,7 @@ const STANDALONE: &[&str] = &[
     "relift-gb-tools",
     "relift-gba-tools",
     "relift-n64-tools",
+    "relift-nds-analyze",
     "relift-nds-formats",
     "relift-nds-tools",
     "relift-sms-formats",
@@ -359,6 +360,14 @@ const CHARTERS: &[Charter] = &[
         band: 2,
         why: "the Master System, Game Gear and SG-1000 cartridge format: size and bank layout, TMR SEGA and Codemasters headers and checksums, system and mapper detection; reads bytes only",
         normal: NONE,
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-nds-analyze",
+        band: 2,
+        why: "Nintendo DS function discovery: the DS memory map, BIOS calls, DMA and the unit runs (static binaries, overlays, seeds between them) over the shared arm32 discovery and the cartridge format; analysis only",
+        normal: &["relift-cpu-arm32-analyze", "relift-nds-formats"],
         dev: NONE,
         build: NONE,
     },

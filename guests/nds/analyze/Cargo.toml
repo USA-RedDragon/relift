@@ -1,0 +1,14 @@
+[package]
+name = "relift-nds-analyze"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-cpu-arm32-analyze = { workspace = true }
+relift-nds-formats = { workspace = true }
+
+[lints]
+workspace = true
