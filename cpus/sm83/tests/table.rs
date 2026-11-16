@@ -479,8 +479,14 @@ fn decode_reports_truncation() {
         decode(&[0xC3, 0x00]),
         Err(DecodeError::Truncated { needed: 3 })
     );
-    assert_eq!(decode(&[0x10]), Err(DecodeError::Truncated { needed: 2 }));
     assert!(decode(&[0x00]).is_ok());
+}
+
+#[test]
+fn a_stop_at_the_end_of_the_bytes_decodes_with_padding() {
+    let i = decode(&[0x10]).unwrap();
+    assert_eq!(i.immediate, Immediate::U8(0));
+    assert_eq!(i.length(), 2);
 }
 
 #[test]

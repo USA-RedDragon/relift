@@ -77,6 +77,9 @@ impl Instruction {
 ///
 /// The 11 unused opcodes decode to an entry whose mnemonic is
 /// [`Mnemonic::Illegal`]; they are not an error, so a scan can report them.
+/// A `STOP` that is the last byte of `bytes`, as one at the end of a ROM
+/// window is, decodes with a padding byte of 0: no execution reads it as an
+/// operand.
 pub fn decode(bytes: &[u8]) -> Result<Instruction, DecodeError> {
     let first = *bytes.first().ok_or(DecodeError::Truncated { needed: 1 })?;
     let (opcode, immediate_at) = if first == 0xCB {
@@ -86,6 +89,12 @@ pub fn decode(bytes: &[u8]) -> Result<Instruction, DecodeError> {
         (&BASE[usize::from(first)], 1)
     };
     let needed = opcode.length;
+    if opcode.mnemonic == Mnemonic::Stop && bytes.len() == 1 {
+        return Ok(Instruction {
+            opcode,
+            immediate: Immediate::U8(0),
+        });
+    }
     if bytes.len() < usize::from(needed) {
         return Err(DecodeError::Truncated { needed });
     }
