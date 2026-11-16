@@ -7,7 +7,8 @@
 //! (flags included, so the output is the flags-stored build) stored at each
 //! call, trap and exit and the used ones reloaded after a call, one label per
 //! instruction, direct calls by name followed by the pending check, indirect
-//! calls and dynamic exits through `rl_indirect`, tail calls with
+//! calls through `rl_indirect`, computed jumps and tail calls through
+//! dispatch with `RL_JUMP` (target and site), direct tail calls with
 //! `RL_MUSTTAIL`, host overrides called by name and registered over the
 //! guest code ([`Override`]), resume points after calls to overrides that
 //! may come back through the landing-pad dispatch (section 7.1), one

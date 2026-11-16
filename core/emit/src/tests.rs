@@ -108,10 +108,7 @@ fn calls_check_pending_and_tail_calls_use_musttail() {
     );
     assert!(s.contains("RL_MUSTTAIL return F_108(c, mem);"), "{s}");
     assert!(s.contains("rc = rl_svc(c, mem, 0x27u);"), "{s}");
-    assert!(
-        s.contains("RL_MUSTTAIL return rl_indirect(c, r2)(c, mem);"),
-        "{s}"
-    );
+    assert!(s.contains("RL_JUMP(r2, UINT64_C(0x110));"), "{s}");
     let unit = &out.files.last().expect("unit").text;
     assert!(unit.contains("{ UINT64_C(0x10c), 8u, RL_FN_MAY_UNWIND, F_10c },"));
     assert!(unit.contains("const rl_unit rl_unit_module = {"));
@@ -681,7 +678,7 @@ fn jump_tables_branch_to_their_targets_inside_the_function() {
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
     assert!(
-        s.contains("    switch (r0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_MUSTTAIL return rl_indirect(c, r0)(c, mem);"),
+        s.contains("    switch (r0) {\n    case UINT64_C(0x104): goto L_104;\n    case UINT64_C(0x108): goto L_108;\n    default: break;\n    }\n    RL_JUMP(r0, UINT64_C(0x100));"),
         "{s}"
     );
 }

@@ -8,6 +8,8 @@
 //! same states. A mutation control breaks one tick or one byte order in the
 //! IR and must be seen. Skipped with a note when clang is not on `PATH`.
 
+mod mockabi;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -135,6 +137,7 @@ struct rl_ctx {
     uint16_t hl, sp;
     uint8_t z, ime;
     uint64_t pc;
+    rl_pending pend;
     rl_time time;
 };
 
@@ -149,14 +152,6 @@ static inline void rl_st32(uint8_t *mem, uint64_t a, uint32_t v) { memcpy(mem + 
 static inline void rl_st64(uint8_t *mem, uint64_t a, uint64_t v) { memcpy(mem + a, &v, 8); }
 static inline void rl_st128(uint8_t *mem, uint64_t a, rl_u128 v) { memcpy(mem + a, &v, 16); }
 
-RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
-
-static inline rl_fn rl_indirect(rl_ctx *c, uint64_t target)
-{
-    c->pc = target;
-    return rl_dispatch_miss;
-}
-#endif
 "#;
 
 /// The mock scheduler: the device model of the interpreter, in C.
@@ -642,7 +637,10 @@ fn clang(cc: &Path, args: &[String]) {
 fn build(cc: &Path, blocks: &[Block], dir: &Path) -> PathBuf {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir.join("inc")).expect("the scratch dir is creatable");
-    write(&dir.join("inc/hwabi.h"), ABI_H.as_bytes());
+    write(
+        &dir.join("inc/hwabi.h"),
+        format!("{ABI_H}{}#endif\n", mockabi::DISPATCH_H).as_bytes(),
+    );
     let fns: Vec<Function<'_>> = blocks
         .iter()
         .enumerate()
@@ -680,7 +678,10 @@ fn build(cc: &Path, blocks: &[Block], dir: &Path) -> PathBuf {
     ));
     let mut sources = vec![dir.join("cases.c"), dir.join("harness.c")];
     write(&sources[0], cases.as_bytes());
-    write(&sources[1], HARNESS.as_bytes());
+    write(
+        &sources[1],
+        format!("{HARNESS}{}", mockabi::DISPATCH_C).as_bytes(),
+    );
     for f in &out.files {
         write(&dir.join(&f.name), f.text.as_bytes());
         if f.name.starts_with("shard") {

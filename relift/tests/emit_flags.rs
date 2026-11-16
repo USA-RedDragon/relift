@@ -127,9 +127,11 @@ static uint8_t buf[WINDOW] __attribute__((aligned(64)));
 static int fatal;
 
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
+int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { (void)c; (void)mem; return RL_OK; }
 int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm) { (void)c; (void)mem; (void)imm; abort(); }
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (void)mem; (void)pc; (void)insn; fatal = 1; return RL_PENDING; }
 int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...) { (void)c; (void)tag; (void)fmt; fatal = 1; return RL_PENDING; }
+int rl_guest_stop_at(rl_ctx *c, const char *kind, uint64_t pc, const char *fmt, ...) { (void)c; (void)kind; (void)pc; (void)fmt; fatal = 1; return RL_PENDING; }
 uint64_t rl_mrs_cntpct(rl_ctx *c) { (void)c; return 0; }
 void rl_msr_fpcr(rl_ctx *c, uint64_t v) { c->fpcr = (uint32_t)v; }
 void rl_wfe(rl_ctx *c) { (void)c; }

@@ -13,6 +13,8 @@
 //! another host by compiling there and comparing the output with `cmp`.
 //! Skipped with a note when clang is not on `PATH`.
 
+mod mockabi;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -152,14 +154,8 @@ struct rl_ctx {
     uint32_t s32;
     uint64_t s64;
     uint64_t pc;
+    rl_pending pend;
 };
-RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
-static inline rl_fn rl_indirect(rl_ctx *c, uint64_t target)
-{
-    c->pc = target;
-    return rl_dispatch_miss;
-}
-#endif
 "#;
 
 const HARNESS: &str = r#"
@@ -547,7 +543,10 @@ fn build(
 ) -> PathBuf {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir.join("inc")).expect("the scratch dir is creatable");
-    write(&dir.join("inc/lanesabi.h"), ABI_H.as_bytes());
+    write(
+        &dir.join("inc/lanesabi.h"),
+        format!("{ABI_H}{}#endif\n", mockabi::DISPATCH_H).as_bytes(),
+    );
     let fns: Vec<Function<'_>> = blocks
         .iter()
         .enumerate()
@@ -586,7 +585,10 @@ fn build(
     ));
     let mut sources = vec![dir.join("cases.c"), dir.join("harness.c")];
     write(&sources[0], cases.as_bytes());
-    write(&sources[1], HARNESS.as_bytes());
+    write(
+        &sources[1],
+        format!("{HARNESS}{}", mockabi::DISPATCH_C).as_bytes(),
+    );
     for f in &out.files {
         let text = swaps
             .iter()

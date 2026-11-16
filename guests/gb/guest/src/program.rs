@@ -821,7 +821,7 @@ mod tests {
         assert!(!c.contains("L_15a: {"), "{c}");
         assert_eq!(l.filler, 0);
         assert!(l.sleds.contains(&(FIXED, 0x15A, 0x200)), "{:?}", l.sleds);
-        assert!(c.contains("rl_indirect(c, UINT64_C(0x15a))"), "{c}");
+        assert!(c.contains("RL_JUMP(UINT64_C(0x15a), "), "{c}");
         let prog = program_c(
             &l.units,
             &l.sleds,

@@ -244,6 +244,7 @@ static void on_fault(int sig) { (void)sig; siglongjmp(jb, 1); }
 static uint8_t buf[WINDOW] __attribute__((aligned(64)));
 
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem) { (void)mem; if (!missed) { missed = 1; miss = c->pc; } return RL_OK; }
+int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem) { return rl_dispatch_miss(c, mem); }
 int rl_svc(rl_ctx *c, uint8_t *mem, uint32_t imm) { (void)c; (void)mem; (void)imm; events |= 4; return RL_PENDING; }
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (void)mem; (void)pc; (void)insn; events |= 1; return RL_PENDING; }
 int rl_fp_slow(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn) { (void)c; (void)mem; (void)pc; (void)insn; events |= 2; return RL_PENDING; }

@@ -65,6 +65,11 @@ struct Split {
     names: Vec<String>,
 }
 
+/// The site of a transfer no guest instruction makes (the resume of a
+/// landing pad): the runtime's `RL_SITE_NONE`, which a stop report prints as
+/// an unknown site.
+const SITE_NONE: u64 = u64::MAX;
+
 struct Ctx<'a> {
     fe: &'a dyn Frontend,
     f: &'a Function<'a>,
@@ -90,8 +95,11 @@ struct Ctx<'a> {
     /// The registers the piece has locals for.
     used: &'a BTreeSet<Reg>,
     /// The slow calls of the guards that share the slow path, with the
-    /// address each continues at.
-    slow: Vec<(String, u64)>,
+    /// address each continues at and the guard's own address.
+    slow: Vec<(String, u64, u64)>,
+    /// The guest address of the instruction being written: the site a
+    /// transfer through dispatch names when it misses, or [`SITE_NONE`].
+    site: u64,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -185,8 +193,9 @@ impl Ctx<'_> {
             return format!("{}RL_MUSTTAIL return {}(c, mem);", self.lead(), target.name);
         }
         format!(
-            "{}RL_MUSTTAIL return rl_indirect(c, UINT64_C({t:#x}))(c, mem);",
-            self.lead()
+            "{}RL_JUMP(UINT64_C({t:#x}), UINT64_C({:#x}));",
+            self.lead(),
+            self.site
         )
     }
 
@@ -711,6 +720,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         written: &written,
         used: &used,
         slow: Vec::new(),
+        site: 0,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -754,7 +764,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             "rl_slow:\n{}    switch (rl_k) {{",
             Ctx::line(&st, "    ")
         );
-        for (k, (call, _)) in slow.iter().enumerate() {
+        for (k, (call, _, _)) in slow.iter().enumerate() {
             let _ = writeln!(t, "    case {k}: rc = {call}; break;");
         }
         let _ = writeln!(
@@ -763,7 +773,8 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
             Ctx::line(&rl, "    ")
         );
         cx.dirty = Regs::new(regs.len());
-        for (k, (_, to)) in slow.iter().enumerate() {
+        for (k, (_, to, at)) in slow.iter().enumerate() {
+            cx.site = *at;
             let _ = writeln!(t, "    case {k}: {}", cx.jump(*to));
         }
         t.push_str("    default: __builtin_unreachable();\n    }\n");
@@ -772,6 +783,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         t.push_str("lp_dispatch:\n    switch (c->pend.pc) {\n");
         for r in resumes {
             cx.dirty = Regs::new(regs.len());
+            cx.site = SITE_NONE;
             let next = cx.jump(*r);
             let rl = cx.reload(plan.live_at(*r));
             let _ = writeln!(
@@ -940,6 +952,7 @@ fn loop_has_work(cx: &Ctx<'_>, from: u64, to: u64) -> bool {
 /// The body of one instruction, or the raw word and reason it cannot be
 /// emitted.
 fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)> {
+    cx.site = b.pc;
     let mut s = String::new();
     let mut sets = Vec::new();
     let vec = vectors(b, !cx.in_context);
@@ -1014,7 +1027,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 let to = b.pc + u64::from(b.len);
                 if cx.plan.shared().is_some() {
                     let k = cx.slow.len();
-                    cx.slow.push((slow, to));
+                    cx.slow.push((slow, to, b.pc));
                     let _ = writeln!(
                         s,
                         "    if (RL_UNLIKELY({cond})) {{ rl_k = {k}; goto rl_slow; }}"
@@ -1146,9 +1159,10 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                 }
                 let _ = writeln!(
                     s,
-                    "{}    RL_MUSTTAIL return rl_indirect(c, {})(c, mem);",
+                    "{}    RL_JUMP({}, UINT64_C({:#x}));",
                     Ctx::line(&out_store, "    "),
-                    val(v)
+                    val(v),
+                    b.pc
                 );
             }
         },
