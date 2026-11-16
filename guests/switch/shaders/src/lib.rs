@@ -8,12 +8,15 @@
 //! the game ships in `ZsDic.pack.zs`), SARC archives, shader archives
 //! (`bfsha`, BNSH, agl `BAHS`), sead `.bin` files, effect files with
 //! embedded BNSH, KTGL `rdb`/`rdx`/`fdata` entries (whole or in zlib
-//! chunks) and the NSOs of `exefs`.
+//! chunks) and the NSOs of `exefs`. CUDA cubins (whole or in fat
+//! binaries) give one program per kernel, linked with its callees
+//! ([`cubin`]), and are not carved.
 //!
 //! Work is cached per input file (see [`scan`]), and runs in parallel on
 //! the worker count of `relift-proc`.
 
 pub mod carve;
+pub mod cubin;
 pub mod error;
 pub mod inflate;
 pub mod ktgl;

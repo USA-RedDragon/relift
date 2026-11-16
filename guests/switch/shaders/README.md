@@ -25,6 +25,16 @@ files, effect files with embedded BNSH, the NSOs of `exefs`, and KTGL
 `rdb`/`rdx`/`fdata` entries (whole or in zlib chunks; the zlib decoder is
 this crate's own).
 
+CUDA modules are not carved: each ELF cubin (whole, or an entry of a fat
+binary, stored plain, LZ4 or zstd) gives one compute program per sm_86 or
+sm_87 kernel. The kernel's `.text` section sits at address 0, followed by
+every function section its relocations reach and every one whose address
+the module's data holds, and the relocations that point into that layout
+are applied (call targets, return addresses), so `CALL.ABS` and `RET.ABS`
+resolve inside the program. References outside it (functions the driver
+provides, data addresses) keep the cubin's value and are listed in the
+summary's errors.
+
 Each input file is one cached job, keyed by its path, size and content (the
 SHA-256 a NUP records; a hash of the file for a directory, size and
 modification time above 32 MiB), the dictionaries and, for an `.fdata`, the

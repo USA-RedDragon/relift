@@ -25,7 +25,7 @@ use crate::carve::{self, Kind, find_all};
 use crate::error::{Error, Result};
 use crate::sha256_hex;
 use crate::source::{SNIFF_WHOLE, Source, SourceFile};
-use crate::{ktgl, sarc, zst};
+use crate::{cubin, ktgl, sarc, zst};
 
 const CACHE_VERSION: u32 = 2;
 const MAX_DEPTH: u32 = 6;
@@ -257,7 +257,7 @@ fn classify(path: &str) -> Option<Class> {
     match ext {
         Some(
             "bfsha" | "sarc" | "sharc" | "sharcb" | "byml" | "ptcl" | "dat" | "bnsh" | "esetb"
-            | "vsetb",
+            | "vsetb" | "cubin" | "fatbin",
         ) => Some(Class::Container),
         Some("bin") if zstd => Some(Class::Container),
         Some("bin") | None => Some(Class::Sniff),
@@ -274,6 +274,9 @@ fn sniff(head: &[u8]) -> Option<Class> {
         || head.starts_with(b"BNSH")
         || head.starts_with(b"BAHS")
         || head.get(0x10..0x14) == Some(&carve::PROGRAM_MAGIC)
+        || head.starts_with(&cubin::FATBIN_MAGIC)
+        || (head.starts_with(b"\x7fELF")
+            && head.get(0x12..0x14) == Some(&cubin::EM_CUDA.to_le_bytes()))
     {
         return Some(Class::Container);
     }
@@ -346,7 +349,28 @@ impl Ctx<'_> {
             out.container("sead-bin", 1);
         }
         out.container("bnsh", find_all(b, b"BNSH").count() as u64);
+        let cubins = cubin::find(b);
+        out.container("fatbin", cubins.fatbins);
+        out.container("cubin", cubins.cubins.len() as u64);
+        for (e, at) in &cubins.errors {
+            out.error(format!("cubin: {e}"), &format!("{name}@{at}"));
+        }
+        for c in &cubins.cubins {
+            if !cubin::SMS.contains(&c.sm) {
+                out.container(&format!("cubin-sm{}", c.sm), 1);
+            }
+            for k in &c.kernels {
+                let src = format!("{name}@{}:{}", c.at, k.name);
+                for u in &k.unresolved {
+                    out.error(format!("cubin: not linked into the kernel: {u}"), &src);
+                }
+                self.program(out, &src, &k.code, Kind::Compute, 0, 0)?;
+            }
+        }
         for f in carve::carve(b) {
+            if cubins.covers(&(f.start..f.end)) {
+                continue;
+            }
             if f.cut {
                 out.error(
                     format!(
@@ -357,22 +381,35 @@ impl Ctx<'_> {
                 );
                 continue;
             }
-            let sha = carve::program_sha(b, &f);
-            let p = out.programs.entry(sha.clone()).or_insert_with(|| Program {
-                kind: f.kind,
-                stage: f.stage(b),
-                sph: f.code - f.start,
-                size: f.end - f.start,
-                n: 0,
-                srcs: Vec::new(),
-            });
-            p.n += 1;
-            if p.srcs.len() < MAX_SRCS {
-                p.srcs.push(name.to_string());
-            }
-            self.store(&sha, &b[f.start..f.end])?;
+            let bytes = &b[f.start..f.end];
+            self.program(out, name, bytes, f.kind, f.stage(b), f.code - f.start)?;
         }
         Ok(())
+    }
+
+    fn program(
+        &self,
+        out: &mut Out,
+        src: &str,
+        bytes: &[u8],
+        kind: Kind,
+        stage: u8,
+        sph: usize,
+    ) -> Result<()> {
+        let sha = sha256_hex(bytes);
+        let p = out.programs.entry(sha.clone()).or_insert_with(|| Program {
+            kind,
+            stage,
+            sph,
+            size: bytes.len(),
+            n: 0,
+            srcs: Vec::new(),
+        });
+        p.n += 1;
+        if p.srcs.len() < MAX_SRCS {
+            p.srcs.push(src.to_string());
+        }
+        self.store(&sha, bytes)
     }
 
     fn unwrap(&self, out: &mut Out, name: &str, b: &[u8], depth: u32) -> Result<()> {
