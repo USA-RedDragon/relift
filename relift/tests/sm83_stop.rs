@@ -148,6 +148,7 @@ fn a_lifted_rom_with_stop_links_and_runs() {
         insts,
         tables: BTreeMap::new(),
         pads: Default::default(),
+        guesses: Default::default(),
     };
     let out = emit(
         &fe,

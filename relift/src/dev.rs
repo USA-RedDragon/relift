@@ -292,6 +292,7 @@ impl Server {
                     .collect::<BTreeMap<_, _>>(),
                 tables: f.tables.clone(),
                 pads: f.pads.clone(),
+                guesses: Default::default(),
             })
             .collect();
         let overrides: Vec<relift_emit::Override> = analysis

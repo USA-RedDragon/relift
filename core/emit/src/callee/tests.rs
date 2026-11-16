@@ -129,6 +129,7 @@ impl Code {
                     .collect(),
                 tables: BTreeMap::new(),
                 pads: BTreeSet::new(),
+                guesses: BTreeMap::new(),
             })
             .collect()
     }

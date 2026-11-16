@@ -71,6 +71,13 @@ pub(crate) fn salt(fe: &dyn Frontend, opts: &Options) -> Vec<u8> {
             put_uvar(&mut out, m);
         }
     }
+    put_uvar(&mut out, opts.guess_ranges.len() as u64);
+    for g in &opts.guess_ranges {
+        put_uvar(&mut out, g.lo);
+        put_uvar(&mut out, g.hi);
+        put_str(&mut out, &g.cond);
+    }
+    put_str(&mut out, &opts.guess_decl);
     out
 }
 
@@ -109,6 +116,11 @@ pub(crate) fn input(fe: &dyn Frontend, salt: &[u8], f: &Function<'_>, test_fault
     put_uvar(&mut out, f.pads.len() as u64);
     for p in &f.pads {
         put_uvar(&mut out, *p);
+    }
+    put_uvar(&mut out, f.guesses.len() as u64);
+    for (j, t) in &f.guesses {
+        put_uvar(&mut out, *j);
+        put_uvar(&mut out, *t);
     }
     out
 }

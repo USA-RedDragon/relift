@@ -74,6 +74,11 @@ pub struct Function<'a> {
     /// The landing pads in the function: resume points the unwinder enters
     /// by a computed jump (`RL_FN_LANDING_PADS`).
     pub pads: BTreeSet<u64>,
+    /// The likely target of computed transfers out of the function, by the
+    /// transfer's address, such as the function a PLT stub's GOT word is
+    /// bound to: the emitter compares the target with it and, when they
+    /// are equal, transfers to it by name.
+    pub guesses: BTreeMap<u64, u64>,
 }
 
 /// A host function that replaces the guest function at `entry`.
@@ -168,6 +173,25 @@ pub struct Options {
     /// Name each piece of a split function in the function maps by its own
     /// C symbol, rather than all of them by the function's.
     pub piece_syms: bool,
+    /// Where the guesses of computed transfers ([`Function::guesses`]) may
+    /// go: a guess is taken only for a target in one of these ranges, and
+    /// only while the range's condition holds.
+    pub guess_ranges: Vec<GuessRange>,
+    /// C declarations every shard needs for the conditions of
+    /// [`Options::guess_ranges`].
+    pub guess_decl: String,
+}
+
+/// Guest addresses a guess may name ([`Options::guess_ranges`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuessRange {
+    /// The first address.
+    pub lo: u64,
+    /// The address after the last.
+    pub hi: u64,
+    /// A C expression, nonzero at run time when a direct transfer to a
+    /// function of the range is the transfer dispatch makes to its entry.
+    pub cond: String,
 }
 
 impl Default for Options {
@@ -188,6 +212,8 @@ impl Default for Options {
             calls: Vec::new(),
             entry_ranges: false,
             piece_syms: true,
+            guess_ranges: Vec::new(),
+            guess_decl: String::new(),
         }
     }
 }
@@ -547,7 +573,11 @@ fn emit_core(
         fns: Vec::new(),
     });
     let mut w = Shards {
-        header: format!("{}#include \"{PRELUDE_NAME}\"\n", includes(fe)),
+        header: format!(
+            "{}#include \"{PRELUDE_NAME}\"\n{}",
+            includes(fe),
+            opts.guess_decl
+        ),
         opts,
         targets: &targets,
         maps: Vec::new(),

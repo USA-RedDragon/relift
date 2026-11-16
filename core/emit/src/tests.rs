@@ -28,6 +28,7 @@ fn function(entry: u64, blocks: &[(u64, Block)]) -> Function<'_> {
             .collect::<BTreeMap<_, _>>(),
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
+        guesses: BTreeMap::new(),
     }
 }
 
@@ -361,6 +362,7 @@ fn failures_and_unknown_intrinsics_report_undefined() {
         insts: BTreeMap::from([(0x40, Insn::Failed(&fail))]),
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
+        guesses: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     assert!(shard(&out).contains("return rl_undefined(c, mem, UINT64_C(0x40), 0xdeadu);"));
@@ -395,6 +397,8 @@ fn shards_declare_their_foreign_callees() {
             calls: Vec::new(),
             entry_ranges: false,
             piece_syms: true,
+            guess_ranges: Vec::new(),
+            guess_decl: String::new(),
         },
     );
     assert_eq!(out.files.len(), 4);
@@ -454,6 +458,7 @@ fn guards_leave_for_the_slow_path_and_continue_after() {
         ]),
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
+        guesses: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -513,6 +518,7 @@ fn guards_share_one_slow_path_that_continues_after_each() {
         ]),
         tables: BTreeMap::new(),
         pads: BTreeSet::new(),
+        guesses: BTreeMap::new(),
     };
     let out = emit(&Toy, &[f], &[], &Options::default());
     let s = shard(&out);
@@ -606,6 +612,7 @@ fn guards_that_leave_tail_call_the_function_the_frontend_gives() {
     let f = Function {
         entry: 0x200,
         name: "F_200".into(),
+        guesses: BTreeMap::new(),
         guest_name: None,
         span: 8,
         insts: BTreeMap::from([
@@ -652,6 +659,7 @@ fn guards_that_leave_store_the_dirty_registers_first() {
     let f = Function {
         entry: 0x1fc,
         name: "F_1fc".into(),
+        guesses: BTreeMap::new(),
         guest_name: None,
         span: 12,
         insts: BTreeMap::from([
@@ -808,6 +816,8 @@ fn emit_with_reports_the_functions_done_after_each_shard() {
         calls: Vec::new(),
         entry_ranges: false,
         piece_syms: true,
+        guess_ranges: Vec::new(),
+        guess_decl: String::new(),
     };
     let mut seen = Vec::new();
     let out = emit_with(&Toy, &fns, &[], &opts, &mut |d, t| seen.push((d, t)));
@@ -1772,4 +1782,51 @@ fn split_pieces_need_no_expected_return_address() {
         "{all}"
     );
     assert!(!all.contains("c->ra"), "{all}");
+}
+
+#[test]
+fn a_guessed_computed_jump_goes_to_its_guess_by_name_under_the_condition() {
+    let code = [
+        word(0x06, 2, 0), // 0x100 br r2, guessed 0x108
+        word(0x06, 2, 0), // 0x104 br r2, guessed 0x100
+        word(0x03, 0, 0), // 0x108 ret
+        word(0x06, 2, 0), // 0x10c br r2, guessed 0x300
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let mut fns: Vec<Function<'_>> = (0..4)
+        .map(|k| function(0x100 + 4 * k, &blocks[k as usize..k as usize + 1]))
+        .collect();
+    fns[0].guesses.insert(0x100, 0x108);
+    fns[1].guesses.insert(0x104, 0x100);
+    fns[3].guesses.insert(0x10c, 0x300);
+    let opts = Options {
+        guess_ranges: vec![GuessRange {
+            lo: 0x100,
+            hi: 0x200,
+            cond: "!hooked".into(),
+        }],
+        guess_decl: "extern int hooked;\n".into(),
+        ..Options::default()
+    };
+    let s = shard(&emit(&PREEMPT, &fns, &[], &opts)).to_string();
+    let at = |pc: u64| {
+        let from = s.find(&format!("L_{pc:x}: {{")).expect("label");
+        s[from..from + s[from..].find("\n}\n").expect("end")].to_string()
+    };
+    let check = "    if (RL_UNLIKELY(rl_time_spent(&c->time)))\n        rl_preempt(c);\n";
+    assert!(s.contains("extern int hooked;\n"), "{s}");
+    assert!(
+        at(0x100).contains(&format!(
+            "    if (r2 == UINT64_C(0x108) && !hooked) {{ RL_MUSTTAIL return F_108(c, mem); }}\n{check}"
+        )),
+        "{s}"
+    );
+    assert!(
+        at(0x104).contains(&format!(
+            "{check}    if (r2 == UINT64_C(0x100) && !hooked) {{ RL_MUSTTAIL return F_100(c, mem); }}\n"
+        )),
+        "{s}"
+    );
+    assert!(!at(0x10c).contains("0x300"), "{s}");
+    assert_eq!(s.matches("RL_JUMP(r2, ").count(), 3, "{s}");
 }

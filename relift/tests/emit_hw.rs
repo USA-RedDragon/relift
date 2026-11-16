@@ -652,6 +652,7 @@ fn build(cc: &Path, blocks: &[Block], dir: &Path) -> PathBuf {
             insts: BTreeMap::from([(b.pc, Insn::Lifted { block: b, raw: 0 })]),
             tables: BTreeMap::new(),
             pads: Default::default(),
+            guesses: Default::default(),
         })
         .collect();
     let out = emit(

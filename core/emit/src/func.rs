@@ -20,7 +20,7 @@ use crate::callee::Shape;
 use crate::state::{Plan, Regs, plan};
 use crate::time;
 use crate::value::{Emitted, Lowering, VQ, cty, emit_op, inlined, reg, reg_ty, val, vectors};
-use crate::{Function, Insn, Options, Targets};
+use crate::{Function, GuessRange, Insn, Options, Targets};
 
 /// One C function of an emitted guest function.
 pub(crate) struct Piece {
@@ -102,6 +102,8 @@ struct Ctx<'a> {
     site: u64,
     /// The return check, when the frontend has one.
     link: Option<ReturnLink>,
+    /// Where guesses may go.
+    ranges: &'a [GuessRange],
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -204,6 +206,20 @@ impl Ctx<'_> {
     /// A tail transfer to the C function `f` that leaves the function.
     fn tail(&self, f: &str) -> String {
         format!("{}RL_MUSTTAIL return {f}(c, mem);", self.lead())
+    }
+
+    /// The guess for the computed transfer at `pc` ([`Function::guesses`]):
+    /// the target, the C function it names and the condition under which
+    /// it may be taken. Only a target outside the function, in one of
+    /// [`Options::guess_ranges`], called by name and not a resume point.
+    fn guess(&self, pc: u64) -> Option<(u64, String, &str)> {
+        let &t = self.f.guesses.get(&pc)?;
+        if self.inside(t) {
+            return None;
+        }
+        let range = self.ranges.iter().find(|g| (g.lo..g.hi).contains(&t))?;
+        let target = self.targets.get(&t).filter(|t| !t.resume_point)?;
+        Some((t, target.name.clone(), range.cond.as_str()))
     }
 
     /// The stores of the dirty registers before a jump on the same line.
@@ -465,6 +481,7 @@ pub(crate) fn emit_function(
         anywhere,
         in_context: opts.regs_in_context,
         shape: &shape,
+        ranges: &opts.guess_ranges,
     };
     let whole = emit_piece(&env, &all, None);
     if !anywhere && (whole.text.len() <= piece_bytes || all.len() < 2) {
@@ -560,6 +577,7 @@ pub(crate) struct Env<'a> {
     anywhere: bool,
     in_context: bool,
     pub(crate) shape: &'a Shape,
+    ranges: &'a [GuessRange],
 }
 
 /// One emitted C function over the instructions `pcs` of `f`.
@@ -582,6 +600,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         io,
         anywhere,
         in_context,
+        ranges,
         ..
     } = *env;
     let lp_reg = fe.stack_pointer().filter(|_| !resumes.is_empty());
@@ -729,6 +748,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         slow: Vec::new(),
         site: 0,
         link: fe.return_link(),
+        ranges,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -1108,6 +1128,18 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         let rl = cx.reload(cx.plan.exit_live(b.pc));
         s.push_str(&time::sync(cx.fe, b, &next_expr(b, &val), &out_store, &rl));
     }
+    // A guessed computed jump forward leaves before the preemption check,
+    // as a direct jump forward has none.
+    let mut guessed = false;
+    if let (Flow::Jump, Next::Dynamic(v)) = (b.exit.flow, b.exit.next)
+        && let Some((t, _, cond)) = cx.guess(b.pc)
+        && t > b.pc
+    {
+        let cond = format!("{} == UINT64_C({t:#x}) && {cond}", val(v));
+        let j = cx.jump(t);
+        let _ = writeln!(s, "    if ({cond}) {{ {j} }}");
+        guessed = true;
+    }
     if let Some(clk) = cx.fe.preempt_clock().filter(|_| preempts(cx, b)) {
         s.push_str(&time::preempt(clk));
     }
@@ -1129,7 +1161,17 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     format!("{}(c, mem)", target.name)
                 }
                 Next::Const(t) => format!("rl_indirect(c, UINT64_C({t:#x}))(c, mem)"),
-                Next::Dynamic(v) => format!("rl_indirect(c, {})(c, mem)", val(v)),
+                Next::Dynamic(v) => match cx.guess(b.pc) {
+                    Some((t, name, cond)) => {
+                        let x = val(v);
+                        let call = format!(
+                            "{x} == UINT64_C({t:#x}) && {cond} ? {name}(c, mem) : rl_indirect(c, {x})(c, mem)"
+                        );
+                        cx.callees.insert(t);
+                        call
+                    }
+                    None => format!("rl_indirect(c, {})(c, mem)", val(v)),
+                },
                 Next::Select { .. } => return Err((raw, "a conditional call".into())),
             };
             after(cx, &mut s, call, ret, &returned(ret));
@@ -1167,6 +1209,11 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                         let _ = writeln!(s, "    case UINT64_C({t:#x}): {}", cx.jump(*t));
                     }
                     s.push_str("    default: break;\n    }\n");
+                }
+                if let Some((t, _, cond)) = cx.guess(b.pc).filter(|_| !guessed) {
+                    let cond = format!("{} == UINT64_C({t:#x}) && {cond}", val(v));
+                    let j = cx.jump(t);
+                    let _ = writeln!(s, "    if ({cond}) {{ {j} }}");
                 }
                 let _ = writeln!(
                     s,

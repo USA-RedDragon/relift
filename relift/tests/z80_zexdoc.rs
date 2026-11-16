@@ -301,6 +301,7 @@ fn zexdoc_passes_as_emitted_c() {
                 .map(|(pc, b)| (*pc, Insn::Lifted { block: b, raw: 0 }))
                 .collect(),
             tables: BTreeMap::new(),
+            guesses: BTreeMap::new(),
             pads: Default::default(),
         });
     }

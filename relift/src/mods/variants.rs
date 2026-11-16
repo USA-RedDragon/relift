@@ -158,6 +158,7 @@ pub fn emit(v: &Variants<'_>, dir: &Path) -> Result<(Vec<PathBuf>, Vec<SwapC>), 
                     .collect(),
                 tables: f.tables.clone(),
                 pads: f.pads.clone(),
+                guesses: Default::default(),
             }];
             let mut ovs: Vec<relift_emit::Override> = Vec::new();
             for t in targets(f) {

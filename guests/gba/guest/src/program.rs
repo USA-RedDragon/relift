@@ -325,6 +325,7 @@ fn functions<'a>(lifted: impl Iterator<Item = &'a Lifting>) -> Vec<Function<'a>>
                 })
                 .collect(),
             tables: tables.clone(),
+            guesses: Default::default(),
             pads: BTreeSet::new(),
         })
         .collect()

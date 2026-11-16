@@ -194,6 +194,7 @@ pub fn functions(found: &[Found]) -> Vec<Function<'_>> {
                     .map(|(k, b)| (*k, Insn::Lifted { block: b, raw: 0 }))
                     .collect(),
                 tables: BTreeMap::new(),
+                guesses: BTreeMap::new(),
                 pads: Default::default(),
             }
         })

@@ -318,6 +318,7 @@ fn host_flags_match_the_exact_layer_on_every_fp_form() {
             )]),
             tables: BTreeMap::new(),
             pads: Default::default(),
+            guesses: Default::default(),
         })
         .collect();
     let out = emit(

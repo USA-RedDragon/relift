@@ -172,6 +172,7 @@ fn emitted(fe: &dyn Frontend, name: &str) -> Vec<(String, String)> {
             .collect::<BTreeMap<_, _>>(),
         tables: BTreeMap::new(),
         pads: Default::default(),
+        guesses: Default::default(),
     };
     let opts = Options {
         unit_symbol: format!("rl_unit_{name}"),
