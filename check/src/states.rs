@@ -639,7 +639,9 @@ fn eor_bit(reg: u32, bit: u32) -> u32 {
 /// (and the modifier) set to values that exercise the interesting paths, and
 /// the words that sign the pointer, with the key and modifier of the
 /// instruction or others, and tamper with it; unsigned on a CPU whose
-/// signing words do not lift. `None` for any other form.
+/// signing words do not lift. No words under `--pac-states`, whose states
+/// come signed and which runs on oracles of one word. `None` for any other
+/// form.
 fn pauth_prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<Vec<u32>> {
     let name = insn.encoding.name();
     let is = ["PAC", "AUT", "XPAC", "BRA", "BLRA", "RETA", "LDRA"]
@@ -647,6 +649,9 @@ fn pauth_prelude(insn: &Insn, g: &mut Guest, r: &mut Rng) -> Option<Vec<u32>> {
         .any(|p| name.starts_with(p));
     if !is {
         return None;
+    }
+    if crate::pac::PAC_STATES.load(std::sync::atomic::Ordering::Relaxed) {
+        return Some(Vec::new());
     }
     let Some(f) = pauth_form(insn) else {
         if name.starts_with("PACGA") && insn.get("Rn") != 31 {
