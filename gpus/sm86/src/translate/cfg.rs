@@ -285,9 +285,10 @@ fn build(code: &Code) -> Res<Vec<Block>> {
                 leaders[k + 1] = true;
             }
             "EXIT" | "BRX" | "BRXU" => leaders[k + 1] = true,
-            "JMP" | "JMX" | "BPT" | "RTT" | "WARPSYNC.EXCLUSIVE" => {
+            "JMP" | "JMX" | "BPT" | "RTT" => {
                 return bad(format!("control {}", i.mnemonic));
             }
+            "WARPSYNC" if i.has("EXCLUSIVE") => return bad("WARPSYNC.EXCLUSIVE"),
             _ => {}
         }
     }

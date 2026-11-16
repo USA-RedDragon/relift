@@ -179,6 +179,24 @@ fn converged_branch_always_leaves_the_slow_path() {
     translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
 }
 
+#[test]
+fn exclusive_warpsync_is_rejected() {
+    let sync = |exclusive: u64| word(0x148, 1, &[(32, 8, 14), (86, 1, exclusive), (87, 3, 7)]);
+    let mut b = Vec::new();
+    b.extend(sync(0));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "WARPSYNC R14");
+    translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    let mut b = Vec::new();
+    b.extend(sync(1));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert_eq!(text(&p)[0], "WARPSYNC.EXCLUSIVE R14");
+    let e = translate(&p).err().map(|e| e.0);
+    assert_eq!(e.as_deref(), Some("WARPSYNC.EXCLUSIVE"));
+}
+
 fn spirv_has(words: &[u32], opcode: u32) -> bool {
     let mut k = 5;
     while k < words.len() {
