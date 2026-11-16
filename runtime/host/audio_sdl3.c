@@ -17,13 +17,16 @@
 
 #include <stdlib.h>
 
-/** @brief Silence queued when playback starts on an empty stream (60 ms at 48 kHz), so scheduling jitter of the producer does not reach the device as a gap. */
-#define PRIME_FRAMES 2880u
-
 typedef struct sdl_out {
     rl_audio_out head;
     SDL_AudioStream *stream;
     uint32_t frame_bytes;
+    /**
+     * @brief Frames kept queued ahead of the guest's (rl_audio_lead_visible):
+     * the device's buffer and one 5 ms guest mixing period. A stream that is
+     * paused while empty gets this much silence, so playback starts with it.
+     */
+    uint32_t lead;
 } sdl_out;
 
 static const rl_audio_backend g_sdl;
@@ -49,9 +52,17 @@ static rl_audio_out *sdl_open(uint32_t rate, uint32_t channels)
     o->head.b = &g_sdl;
     o->stream = s;
     o->frame_bytes = channels * (uint32_t)sizeof(int16_t);
-    const char *name = SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(s));
-    rl_log(RL_LOG_INFO, "audio", "SDL %s output %s, %u Hz, %u channels", SDL_GetCurrentAudioDriver(), name ? name : "?",
-           rate, channels);
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(s);
+    SDL_AudioSpec have = { 0 };
+    int device_frames = 0;
+    if (!SDL_GetAudioDeviceFormat(dev, &have, &device_frames) || device_frames <= 0)
+        device_frames = 1024;
+    if (have.freq > 0 && (uint32_t)have.freq != rate)
+        device_frames = (int)((uint64_t)device_frames * rate / (uint32_t)have.freq + 1);
+    o->lead = (uint32_t)device_frames + rate / 200;
+    const char *name = SDL_GetAudioDeviceName(dev);
+    rl_log(RL_LOG_INFO, "audio", "SDL %s output %s, %u Hz, %u channels, device buffer %d frames", SDL_GetCurrentAudioDriver(),
+           name ? name : "?", rate, channels, device_frames);
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     rl_ios_log_audio_route();
 #endif
@@ -71,26 +82,27 @@ static void sdl_write(rl_audio_out *h, const int16_t *pcm, uint32_t frames)
     SDL_PutAudioStreamData(o->stream, pcm, (int)(frames * o->frame_bytes));
 }
 
-static uint32_t sdl_queued(rl_audio_out *h)
+static uint32_t sdl_held(rl_audio_out *h)
 {
     sdl_out *o = (sdl_out *)h;
     int bytes = SDL_GetAudioStreamQueued(o->stream);
     return bytes > 0 ? (uint32_t)bytes / o->frame_bytes : 0;
 }
 
+static uint32_t sdl_queued(rl_audio_out *h) { return rl_audio_lead_visible(sdl_held(h), ((sdl_out *)h)->lead); }
+
 static void sdl_pause(rl_audio_out *h, bool paused)
 {
     sdl_out *o = (sdl_out *)h;
-    if (paused)
+    if (paused) {
         SDL_PauseAudioStreamDevice(o->stream);
-    else {
         if (SDL_GetAudioStreamQueued(o->stream) == 0) {
-            int bytes = (int)(PRIME_FRAMES * o->frame_bytes);
-            void *zero = calloc(1, (size_t)bytes);
+            void *zero = calloc(o->lead, o->frame_bytes);
             if (zero)
-                SDL_PutAudioStreamData(o->stream, zero, bytes);
+                SDL_PutAudioStreamData(o->stream, zero, (int)(o->lead * o->frame_bytes));
             free(zero);
         }
+    } else {
         SDL_ResumeAudioStreamDevice(o->stream);
     }
 }
@@ -102,6 +114,7 @@ static const rl_audio_backend g_sdl = {
     .write = sdl_write,
     .queued = sdl_queued,
     .pause = sdl_pause,
+    .held = sdl_held,
 };
 
 const rl_audio_backend *rl_host_audio_backend(void) { return &g_sdl; }

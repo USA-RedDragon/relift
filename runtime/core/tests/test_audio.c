@@ -177,3 +177,12 @@ TEST(audio_late_open_after_close_is_closed_by_the_helper)
     CHECK_EQ(g_fake_closed, 1);
     CHECK_EQ(g_fake_frames, 0);
 }
+
+TEST(audio_lead_is_not_seen_by_the_guest)
+{
+    CHECK_EQ(rl_audio_lead_visible(2704, 1264), 1440);
+    CHECK_EQ(rl_audio_lead_visible(1264, 1264), 0);
+    CHECK_EQ(rl_audio_lead_visible(700, 1264), 0);
+    CHECK_EQ(rl_audio_lead_visible(0, 1264), 0);
+    CHECK_EQ(rl_audio_lead_visible(1440, 0), 1440);
+}

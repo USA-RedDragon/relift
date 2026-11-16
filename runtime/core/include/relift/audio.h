@@ -46,6 +46,8 @@ struct rl_audio_backend {
     uint32_t (*queued)(rl_audio_out *o);
     /** @brief Pauses or resumes playback. */
     void (*pause)(rl_audio_out *o, bool paused);
+    /** @brief Frames queued in the host, the lead (rl_audio_lead_visible) included; NULL when it equals queued. Statistics only. */
+    uint32_t (*held)(rl_audio_out *o);
 };
 
 /** @brief The null backend: plays nothing and drains at the stream's rate. */
@@ -70,6 +72,18 @@ RL_RUNTIME_API void rl_audio_write(rl_audio_out *o, const int16_t *pcm, uint32_t
 RL_RUNTIME_API uint32_t rl_audio_queued(rl_audio_out *o);
 /** @brief Pauses or resumes playback. */
 RL_RUNTIME_API void rl_audio_pause(rl_audio_out *o, bool paused);
+
+/**
+ * @brief The frames a guest sees queued when a host output keeps lead frames
+ * ahead of it. A host device takes frames in its own buffer size (1024
+ * frames or more) while the console's mixer takes 5 ms at a time, so a guest
+ * that keeps only a few milliseconds queued, as the console allows, would run
+ * the host queue dry at every device pull. A backend that reports its queue
+ * less the lead makes the guest keep the lead queued on top of its own
+ * frames; the guest's buffers are released that much earlier, as on a device
+ * with a longer output latency, and the rate it sees is unchanged.
+ */
+RL_RUNTIME_API uint32_t rl_audio_lead_visible(uint32_t queued, uint32_t lead);
 
 /** @brief Records that a caller discarded frames instead of queueing them (shown in the stream's statistics). */
 RL_RUNTIME_API void rl_audio_count_drop(rl_audio_out *o, uint32_t frames);

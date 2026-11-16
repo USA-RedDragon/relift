@@ -420,7 +420,7 @@ static void tap_write(rl_audio_out *o, const int16_t *pcm, uint32_t frames)
 {
     tap_out *t = (tap_out *)o;
     uint64_t now = rl_clock_ns();
-    uint32_t q = t->in->b->queued(t->in);
+    uint32_t q = t->in->b->held ? t->in->b->held(t->in) : t->in->b->queued(t->in);
     if (!t->paused) {
         if (t->started && q == 0) {
             t->underruns++;
@@ -598,6 +598,8 @@ static const rl_opus_backend g_stub_opus = {
 };
 
 const rl_opus_backend *rl_opus_stub_backend(void) { return &g_stub_opus; }
+
+uint32_t rl_audio_lead_visible(uint32_t queued, uint32_t lead) { return queued > lead ? queued - lead : 0; }
 
 void rl_opus_set_backend(const rl_opus_backend *b) { g_opus = b; }
 
