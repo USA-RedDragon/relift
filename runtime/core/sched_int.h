@@ -36,6 +36,7 @@ struct rl_sched_cpu {
     uint64_t origin_cycle;
     uint32_t ratio;
     uint32_t index;
+    uint32_t rank;
     uint64_t lines;
     uint64_t mask;
     rl_irq_hook *irq;

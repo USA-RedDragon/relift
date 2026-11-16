@@ -644,6 +644,175 @@ TEST(sched_two_cpus_stay_within_the_quantum_and_repeat)
     CHECK(g2.skew_max <= 100 + 10 + 2);
 }
 
+/** @brief The ordered-mode runs: the accesses each CPU logged, in the order they happened. */
+static struct {
+    rl_sched_cpu *k[2];
+    uint64_t at[4096];
+    uint8_t who[4096];
+    int n;
+    int steps[2];
+    int64_t cost[2];
+    int halt_cpu;
+    int wake_step;
+    uint64_t woke_at;
+    uint64_t waits_while_halted;
+    uint64_t waits_at_halt;
+} go;
+
+static void go_log(int id)
+{
+    if (go.n < 4096) {
+        go.at[go.n] = rl_sched_now(go.k[id]);
+        go.who[go.n++] = (uint8_t)id;
+    }
+}
+
+static void go_main(rl_sched_cpu *k, void *p)
+{
+    int id = (int)(intptr_t)p;
+    rl_sched_run(k);
+    if (id == go.halt_cpu) {
+        go.waits_at_halt = rl_sched_get_stats(rl_sched_of(k))->order_waits;
+        CHECK_EQ(rl_sched_halt(k), 1);
+        go.woke_at = rl_sched_now(k);
+        rl_sched_lower(rl_sched_of(k), 0);
+    }
+    for (int i = 0; i < go.steps[id]; i++) {
+        spend(k, go.cost[id] + (i * 7 + id) % 3);
+        rl_sched_order(k);
+        go_log(id);
+        if (id != go.halt_cpu && go.halt_cpu >= 0 && i == go.wake_step) {
+            go.waits_while_halted = rl_sched_get_stats(rl_sched_of(k))->order_waits;
+            rl_sched_cpu *h = go.k[go.halt_cpu];
+            uint64_t now = rl_sched_now(k), hn = rl_sched_now(h);
+            rl_sched_stall(h, (now + 2 - hn + 1) / 2);
+            rl_sched_raise(rl_sched_of(k), 0);
+        }
+    }
+}
+
+/** @brief Runs two CPUs (ratios 1 and 2) in ordered mode; rank1 is CPU 1's rank. */
+static rl_sched_stats go_run(uint32_t rank1, int halt_cpu)
+{
+    go.n = 0;
+    go.halt_cpu = halt_cpu;
+    go.woke_at = 0;
+    rl_sched_config cfg = {.ordered = true, .stack = 256u << 10};
+    rl_sched *s = rl_sched_create(&cfg);
+    go.k[0] = rl_sched_add_cpu(s, 1);
+    go.k[1] = rl_sched_add_cpu(s, 2);
+    rl_sched_set_rank(go.k[1], rank1);
+    rl_sched_set_rank(go.k[0], rank1 ? 0 : 1);
+    rl_sched_route(s, 0, 1);
+    rl_sched_set_mask(go.k[1], 1);
+    rl_sched_spawn(go.k[0], go_main, (void *)(intptr_t)0);
+    rl_sched_spawn(go.k[1], go_main, (void *)(intptr_t)1);
+    rl_sched_main(s);
+    rl_sched_stats st = *rl_sched_get_stats(s);
+    rl_sched_destroy(s);
+    return st;
+}
+
+/** @brief True when the log is in (tick, rank, index) order for the ranks given. */
+static bool go_in_order(uint32_t rank1)
+{
+    for (int i = 1; i < go.n; i++) {
+        uint64_t a = go.at[i - 1], b = go.at[i];
+        if (a > b)
+            return false;
+        if (a == b && go.who[i - 1] != go.who[i]) {
+            if (go.who[i - 1] != (rank1 ? 0 : 1))
+                return false;
+        }
+    }
+    return true;
+}
+
+TEST(sched_ordered_accesses_follow_the_tick_then_the_rank)
+{
+    go.steps[0] = 1500;
+    go.steps[1] = 700;
+    go.cost[0] = 2;
+    go.cost[1] = 1;
+    rl_sched_stats st = go_run(1, -1);
+    CHECK_EQ(go.n, 2200);
+    CHECK(go_in_order(1));
+    CHECK(st.order_waits > 100);
+    CHECK_EQ(st.orders, 2200);
+    static uint64_t first[4096];
+    memcpy(first, go.at, sizeof first);
+    go_run(1, -1);
+    CHECK(memcmp(first, go.at, sizeof first) == 0);
+    int ties = 0, cpu1_first = 0;
+    go_run(0, -1);
+    for (int i = 1; i < go.n; i++)
+        if (go.at[i - 1] == go.at[i] && go.who[i - 1] != go.who[i]) {
+            ties++;
+            cpu1_first += go.who[i - 1] == 1;
+        }
+    CHECK(ties > 10);
+    CHECK_EQ(cpu1_first, ties);
+}
+
+TEST(sched_ordered_halt_leaves_the_order_until_a_raise)
+{
+    go.steps[0] = 400;
+    go.steps[1] = 100;
+    go.cost[0] = 5;
+    go.cost[1] = 3;
+    go.wake_step = 200;
+    rl_sched_stats st = go_run(1, 1);
+    CHECK_EQ(go.waits_while_halted, go.waits_at_halt);
+    CHECK(go.woke_at > 1000);
+    CHECK_EQ(go.woke_at % 2, 0);
+    int k = 0;
+    while (k < go.n && go.who[k] == 0)
+        k++;
+    CHECK(k >= 201);
+    CHECK(go.at[k] > go.woke_at);
+    CHECK(go.woke_at >= go.at[200] + 2);
+    CHECK(go.woke_at <= go.at[200] + 3);
+    CHECK(go_in_order(1));
+    CHECK(st.order_waits > 0);
+}
+
+static void alone_main(rl_sched_cpu *k, void *p)
+{
+    (void)p;
+    rl_sched_run(k);
+    go.woke_at = (uint64_t)rl_sched_halt(k) << 32 | rl_sched_now(k);
+    rl_sched_lower(rl_sched_of(k), 1);
+    go.steps[0] = rl_sched_halt(k);
+}
+
+static void leave_main(rl_sched_cpu *k, void *p)
+{
+    (void)p;
+    rl_sched_run(k);
+    spend(k, 40);
+}
+
+TEST(sched_ordered_halt_alone_runs_to_the_next_event)
+{
+    rl_sched_config cfg = {.ordered = true, .stack = 256u << 10};
+    rl_sched *s = rl_sched_create(&cfg);
+    rl_sched_cpu *a = rl_sched_add_cpu(s, 1), *b = rl_sched_add_cpu(s, 2);
+    timer t;
+    timer_init(s, &t, 1);
+    rl_sched_route(s, 1, 1);
+    rl_sched_set_mask(b, 1u << 1);
+    rl_sched_post(s, &t.ev, 501);
+    go.steps[0] = 7;
+    rl_sched_spawn(a, leave_main, NULL);
+    rl_sched_spawn(b, alone_main, NULL);
+    CHECK_EQ(rl_sched_main(s), 0);
+    CHECK_EQ(go.woke_at >> 32, 1);
+    CHECK_EQ(go.woke_at & 0xFFFFFFFFu, 502);
+    CHECK_EQ(t.raised_at, 501);
+    CHECK_EQ(go.steps[0], 0);
+    rl_sched_destroy(s);
+}
+
 /** @brief A fake CPU with a clock in its context. */
 struct rl_ctx {
     /** @brief Four registers. */

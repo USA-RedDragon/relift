@@ -56,6 +56,8 @@ rl_time *rl_sched_clock(rl_sched_cpu *c) { return c->time; }
 void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook) { c->irq = hook; }
 void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook *hook) { c->irq_ret = hook; }
 rl_sched *rl_sched_of(const rl_sched_cpu *c) { return c->sched; }
+uint32_t rl_sched_index(const rl_sched_cpu *c) { return c->index; }
+void rl_sched_set_rank(rl_sched_cpu *c, uint32_t rank) { c->rank = rank; }
 uint64_t rl_sched_pending(const rl_sched_cpu *c) { return c->lines & c->mask; }
 
 rl_sched_cpu *rl_sched_current(rl_sched *s) { return s->holder == NO_HOLDER ? NULL : &s->cpus[s->holder]; }
@@ -210,12 +212,18 @@ static void fire_due(rl_sched *s, uint64_t upto)
         s->time = upto;
 }
 
+/** @brief A halted CPU no raised line wakes: in ordered mode it bounds no one. */
+static bool blocked(const rl_sched_cpu *o) { return o->halted && !(o->lines & o->mask); }
+
+/** @brief Whether o's clock bounds the others: active, and in ordered mode not blocked. */
+static bool counts(const rl_sched *s, const rl_sched_cpu *o) { return o->active && !(s->cfg.ordered && blocked(o)); }
+
 static uint64_t frontier(const rl_sched *s, const rl_sched_cpu *c, uint64_t now)
 {
     uint64_t f = now;
     for (uint32_t i = 0; i < s->ncpu; i++) {
         const rl_sched_cpu *o = &s->cpus[i];
-        if (o != c && o->active) {
+        if (o != c && counts(s, o)) {
             uint64_t t = rl_sched_now(o);
             if (t < f)
                 f = t;
@@ -229,6 +237,8 @@ static uint64_t deadline(const rl_sched *s, const rl_sched_cpu *c, uint64_t now)
     uint64_t lim = now + s->cfg.slice;
     if (s->qn && s->heap[0]->when < lim)
         lim = s->heap[0]->when;
+    if (s->cfg.ordered)
+        return lim;
     for (uint32_t i = 0; i < s->ncpu; i++) {
         const rl_sched_cpu *o = &s->cpus[i];
         if (o != c && o->active) {
@@ -246,7 +256,7 @@ static uint32_t slowest_other(const rl_sched *s, const rl_sched_cpu *c)
     uint64_t at = 0;
     for (uint32_t i = 0; i < s->ncpu; i++) {
         const rl_sched_cpu *o = &s->cpus[i];
-        if (o == c || !o->active)
+        if (o == c || !counts(s, o))
             continue;
         uint64_t t = rl_sched_now(o);
         if (best == NO_HOLDER || t < at) {
@@ -376,12 +386,25 @@ int rl_sched_main(rl_sched *s)
     return 0;
 }
 
+/** @brief In ordered mode, any other active CPU (a blocked one runs its halt loop on to the next event). */
+static uint32_t any_other(const rl_sched *s, const rl_sched_cpu *c)
+{
+    for (uint32_t i = 0; i < s->ncpu; i++)
+        if (&s->cpus[i] != c && s->cpus[i].active)
+            return i;
+    return NO_HOLDER;
+}
+
 void rl_sched_leave(rl_sched_cpu *c)
 {
     rl_sched *s = c->sched;
     c->active = false;
-    if (s->holder == c->index)
-        hand_to(s, slowest_other(s, c));
+    if (s->holder == c->index) {
+        uint32_t next = slowest_other(s, c);
+        if (next == NO_HOLDER && s->cfg.ordered)
+            next = any_other(s, c);
+        hand_to(s, next);
+    }
 }
 
 void rl_sched_set_ratio(rl_sched_cpu *c, uint32_t ratio)
@@ -420,10 +443,90 @@ int rl_sched_run(rl_sched_cpu *c)
     return rl_sched_pending(c) != 0;
 }
 
+/** @brief Shortens c's budget to its deadline after the run came back to it (events may have been queued meanwhile). */
+static void refresh(rl_sched *s, rl_sched_cpu *c)
+{
+    uint64_t now = rl_sched_now(c);
+    uint64_t lim = deadline(s, c, now);
+    if (lim < end_tick(c))
+        set_budget(c, now, lim);
+}
+
+static int halt_ordered(rl_sched_cpu *c)
+{
+    rl_sched *s = c->sched;
+    int got = 0;
+    c->halted = true;
+    for (;;) {
+        if (rl_sched_pending(c)) {
+            got = 1;
+            break;
+        }
+        uint32_t next = slowest_other(s, c);
+        if (next != NO_HOLDER) {
+            hand_to(s, next);
+            continue;
+        }
+        if (!s->qn)
+            break;
+        uint64_t now = rl_sched_now(c), when = s->heap[0]->when;
+        if (when > now)
+            rl_sched_stall(c, (when - now + c->ratio - 1) / c->ratio);
+        fire_due(s, rl_sched_now(c));
+    }
+    c->halted = false;
+    refresh(s, c);
+    return got;
+}
+
+/** @brief True when CPU o goes before (t, rank, index). */
+static bool before(const rl_sched_cpu *o, uint64_t ot, uint64_t t, uint32_t rank, uint32_t index)
+{
+    if (ot != t)
+        return ot < t;
+    if (o->rank != rank)
+        return o->rank < rank;
+    return o->index < index;
+}
+
+void rl_sched_order(rl_sched_cpu *c)
+{
+    rl_sched *s = c->sched;
+    bool waited = false;
+    s->stats.orders++;
+    for (;;) {
+        uint64_t now = rl_sched_now(c);
+        const rl_sched_cpu *first = NULL;
+        uint64_t first_t = 0;
+        for (uint32_t i = 0; i < s->ncpu; i++) {
+            const rl_sched_cpu *o = &s->cpus[i];
+            if (o == c || !o->active || blocked(o))
+                continue;
+            uint64_t t = rl_sched_now(o);
+            if (!before(o, t, now, c->rank, c->index))
+                continue;
+            if (!first || before(o, t, first_t, first->rank, first->index)) {
+                first = o;
+                first_t = t;
+            }
+        }
+        if (!first)
+            break;
+        if (!waited)
+            s->stats.order_waits++;
+        waited = true;
+        hand_to(s, first->index);
+    }
+    if (waited)
+        refresh(s, c);
+}
+
 int rl_sched_halt(rl_sched_cpu *c)
 {
     rl_sched *s = c->sched;
     int got = 0;
+    if (s->cfg.ordered)
+        return halt_ordered(c);
     c->halted = true;
     for (;;) {
         if (rl_sched_pending(c)) {

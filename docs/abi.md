@@ -2649,6 +2649,19 @@ stacks, not a wake-up of another host thread.
   own stack, which keeps the one-CPU case free of fibers. These are runtime
   calls, not part of the lifted-code contract, so they leave
   `RL_ABI_VERSION` alone.
+- **Ordered mode** (`rl_sched_config.ordered`, for machines whose CPUs
+  share memory with cycle-exact timing, such as the NDS): the CPUs no
+  longer bound each other by a quantum. Before each access another CPU may
+  observe, the guest layer calls `rl_sched_order(cpu)`, which hands the run
+  to whichever CPU is first in the order (tick, rank, index) until the
+  caller is first; private code runs fused in between. A halted CPU with no
+  raised line leaves the order and does not hold events back; the guest
+  layer moves its clock to the wake tick (`rl_sched_stall`) when it raises
+  the line. The result depends on the clocks only, so it is repeatable and
+  matches a per-instruction lockstep run access for access; an interrupt is
+  seen at the guest layer's next check (a block boundary), not between two
+  instructions of a block.
+  [verified: core_tests `sched_ordered_*`, nds_tests `q3_*`]
 - **Not supported:** Intel CET shadow stacks and Windows CET compatibility
   would reject any user-mode stack switch; relift binaries are not marked
   for CET, so it does not trigger.

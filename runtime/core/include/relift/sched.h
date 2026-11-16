@@ -28,6 +28,14 @@
  *   nanoseconds (docs/abi.md section 14). Events fire once every active CPU
  *   has reached them. The order depends on the clocks alone, so a run is
  *   repeatable. With one CPU every access and event is exact to the tick.
+ * - Ordered mode (rl_sched_config.ordered): the CPUs are not bounded by each
+ *   other's clocks at all; they agree on order only where it matters, at the
+ *   accesses the guest layer orders with rl_sched_order. That call hands the
+ *   run to the other CPUs until each of them is past the caller in the order
+ *   (tick, rank, index), so those accesses happen in that order whatever the
+ *   clocks did in between. A halted CPU with no line raised is out of the
+ *   order and does not hold events back; its clock stays where it halted
+ *   until a raise moves it (the guest layer moves it with rl_sched_stall).
  * - A CPU that was not spawned runs on the stack of the host thread that
  *   calls rl_sched_run for it; at most one CPU of a scheduler does, and not
  *   while rl_sched_main runs. One CPU alone needs no fiber.
@@ -146,6 +154,8 @@ typedef struct rl_sched_config {
     uint64_t stack;
     /** @brief Most interrupt entries of one CPU open at once in rl_sync; 0 means RL_SCHED_IRQ_DEPTH_DEFAULT. */
     uint32_t irq_depth;
+    /** @brief Ordered mode: quantum is ignored and the CPUs order their shared accesses with rl_sched_order. */
+    bool ordered;
 } rl_sched_config;
 
 /** @brief Counters for tests and benchmarks. */
@@ -166,6 +176,10 @@ typedef struct rl_sched_stats {
     uint64_t irqs;
     /** @brief Handler returns that went somewhere else than the entry's next (RL_PEND_REDIRECT). */
     uint64_t redirects;
+    /** @brief rl_sched_order calls. */
+    uint64_t orders;
+    /** @brief rl_sched_order calls that handed the run to another CPU first. */
+    uint64_t order_waits;
 } rl_sched_stats;
 
 /** @brief Creates a scheduler at tick 0, or NULL (out of memory). cfg may be NULL for the defaults. */
@@ -197,6 +211,8 @@ RL_RUNTIME_API void rl_sched_set_irq(rl_sched_cpu *c, rl_irq_hook *hook);
 RL_RUNTIME_API void rl_sched_set_irq_return(rl_sched_cpu *c, rl_irq_return_hook *hook);
 /** @brief The scheduler of c. */
 RL_RUNTIME_API rl_sched *rl_sched_of(const rl_sched_cpu *c);
+/** @brief The index of c: the order it was added in, from 0 (rl_sched_route takes it). */
+RL_RUNTIME_API uint32_t rl_sched_index(const rl_sched_cpu *c);
 /** @brief The CPU that holds the run (the one whose access or sync is being served), or NULL. */
 RL_RUNTIME_API rl_sched_cpu *rl_sched_current(rl_sched *s);
 /** @brief The code a spawned CPU runs: body(c, arg) on c's fiber. */
@@ -247,9 +263,22 @@ RL_RUNTIME_API void rl_sched_stall(rl_sched_cpu *c, uint64_t cycles);
  * @brief Lets c wait for an interrupt: moves its clock to each next deadline
  * and runs the scheduler until a line in its mask is raised. Returns 1 then,
  * or 0 when nothing could raise one (no event queued and no other running
- * CPU).
+ * CPU). In ordered mode c's clock stays put while another CPU can run: c
+ * leaves the order, the others run, and only when none can does c's clock
+ * move to the next event.
  */
 RL_RUNTIME_API int rl_sched_halt(rl_sched_cpu *c);
+
+/**
+ * @brief Orders an access of c against the other CPUs: hands the run to the
+ * CPU first in the order (tick, rank, index) until c is first among the
+ * active CPUs that are not halted (a halted CPU with a raised line in its
+ * mask counts). Call it before every access that another CPU may observe or
+ * change; on c's own fiber.
+ */
+RL_RUNTIME_API void rl_sched_order(rl_sched_cpu *c);
+/** @brief Sets the rank of c for rl_sched_order: at equal ticks a lower rank goes first, then a lower index (all ranks start at 0). */
+RL_RUNTIME_API void rl_sched_set_rank(rl_sched_cpu *c, uint32_t rank);
 
 /** @brief Adds a device; sets its index, now (the current time) and sched. Returns 0, or -1 when RL_SCHED_MAX_DEVICES is reached. */
 RL_RUNTIME_API int rl_sched_add_device(rl_sched *s, rl_device *d);
