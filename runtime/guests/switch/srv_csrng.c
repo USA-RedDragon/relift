@@ -4,7 +4,8 @@
  * one command fills the client's buffer with random bytes from the host.
  *
  * The command follows Ryujinx (MIT) Services/Spl/IRandomInterface: command
- * 0 writes the receive (B) buffer whole.
+ * 0 writes the receive (B) buffer whole. In fixed-step mode the bytes come
+ * from the fixed pseudo-random sequence (hos_fs_random).
  */
 #include "services.h"
 
@@ -16,7 +17,9 @@ static rl_result generate_random_bytes(rl_ipc_req *r)
     rl_ipc_buf out = r->nb ? r->b[0] : (rl_ipc_buf){ 0 };
     for (uint64_t at = 0; at < out.size;) {
         uint64_t n = out.size - at < CSRNG_CHUNK ? out.size - at : CSRNG_CHUNK;
-        if (!rl_host_random(chunk, (size_t)n))
+        if (hos_fixed())
+            hos_fs_random(chunk, (size_t)n);
+        else if (!rl_host_random(chunk, (size_t)n))
             return KR_INVALID_STATE;
         rl_ipc_buf part = { out.addr + at, n, out.attr };
         if (!rl_ipc_buf_write(&part, chunk, n))

@@ -69,6 +69,7 @@ static struct {
     bool thread_done;
     bool stop;
     bool manual;
+    void *timer;
     bool active[6];
     uint32_t styles;
     bool players[NPAD_SLOTS];
@@ -655,7 +656,7 @@ static void signal_events(uint32_t mask)
 
 static uint32_t update_locked(const rl_input_snapshot *s)
 {
-    uint64_t ns = rl_clock_ns();
+    uint64_t ns = hos_clock_ns();
     g.dt_ns = g.last_ns ? ns - g.last_ns : UPDATE_NS;
     g.last_ns = ns;
     g.now_ns = ns;
@@ -700,8 +701,16 @@ static void *update_thread(void *arg)
     return NULL;
 }
 
+static void timer_update(void *ctx)
+{
+    (void)ctx;
+    rl_hid_update_now();
+}
+
 static void join_thread_locked_tm(void)
 {
+    hos_fs_cancel(g.timer);
+    g.timer = NULL;
     if (g.thread_up) {
         pthread_join(g.thread, NULL);
         g.thread_up = false;
@@ -729,7 +738,9 @@ hos_shmem *hid_core_open(void)
     pthread_mutex_unlock(&g_m);
     if (g.thread_up && __atomic_load_n(&g.thread_done, __ATOMIC_ACQUIRE))
         join_thread_locked_tm();
-    if (!g.thread_up && !g.manual) {
+    if (hos_fixed() && !g.timer && !g.manual) {
+        g.timer = hos_fs_every(hos_clock_ns() + UPDATE_NS, UPDATE_NS, timer_update, NULL);
+    } else if (!hos_fixed() && !g.thread_up && !g.manual) {
         __atomic_store_n(&g.stop, false, __ATOMIC_RELEASE);
         __atomic_store_n(&g.thread_done, false, __ATOMIC_RELEASE);
         if (pthread_create(&g.thread, NULL, update_thread, NULL) == 0)
@@ -772,7 +783,8 @@ void hid_core_reset(void)
 bool rl_hid_is_active(void)
 {
     pthread_mutex_lock(&g_m);
-    bool a = g.shm != NULL && (g.manual || (g.thread_up && !__atomic_load_n(&g.thread_done, __ATOMIC_ACQUIRE)));
+    bool a = g.shm != NULL &&
+             (g.manual || g.timer || (g.thread_up && !__atomic_load_n(&g.thread_done, __ATOMIC_ACQUIRE)));
     pthread_mutex_unlock(&g_m);
     return a;
 }

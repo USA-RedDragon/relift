@@ -40,6 +40,8 @@ typedef struct audout {
     uint64_t released[OUT_MAX_BUFFERS];
     uint32_t rn;
     uint64_t written_frames;
+    /** @brief Fixed step: frames the output played on the guest clock, 240 per 5 ms tick up to written_frames. */
+    uint64_t fs_played;
     rl_audio_out *host;
     hos_revent *event;
     void *tick;
@@ -47,6 +49,8 @@ typedef struct audout {
 
 static uint64_t played_frames(audout *a)
 {
+    if (hos_fixed())
+        return a->fs_played;
     uint64_t queued = rl_audio_queued(a->host);
     return queued > a->written_frames ? 0 : a->written_frames - queued;
 }
@@ -87,6 +91,11 @@ static void out_tick(void *ctx)
     audout *a = ctx;
     bool sig = false;
     pthread_mutex_lock(&a->lock);
+    if (a->state == OUT_STATE_STARTED && hos_fixed()) {
+        a->fs_played += OUT_RATE / (1000000000ull / AUDIO_FRAME_NS);
+        if (a->fs_played > a->written_frames)
+            a->fs_played = a->written_frames;
+    }
     if (a->state == OUT_STATE_STARTED)
         release_done(a, &sig);
     pthread_mutex_unlock(&a->lock);

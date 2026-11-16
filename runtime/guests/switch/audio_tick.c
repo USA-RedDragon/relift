@@ -4,7 +4,8 @@
  * callback once per 5 ms frame, on absolute deadlines so the rate does not
  * drift. A late thread catches up by running the missed frames back to back
  * (the audio keeps its length and pitch); only a stall longer than
- * TICK_CATCHUP_FRAMES skips the rest.
+ * TICK_CATCHUP_FRAMES skips the rest. In fixed-step mode a timer of the
+ * fixed-step clock calls them instead, every 5 ms of guest clock.
  */
 #include "hos_audio.h"
 
@@ -36,6 +37,7 @@ static struct {
     bool thread_up;
     bool stop;
     pthread_t thread;
+    void *timer;
 } g_tick = { .lock = PTHREAD_MUTEX_INITIALIZER, .idle = PTHREAD_COND_INITIALIZER, .running_index = -1 };
 
 static void sleep_until(uint64_t deadline)
@@ -46,6 +48,22 @@ static void sleep_until(uint64_t deadline)
     uint64_t d = deadline - now;
     struct timespec ts = { (time_t)(d / 1000000000ull), (long)(d % 1000000000ull) };
     while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+    }
+}
+
+static void run_all(void)
+{
+    for (int i = 0; i < TICK_MAX; i++) {
+        if (!g_tick.e[i].used)
+            continue;
+        audio_tick_fn *fn = g_tick.e[i].fn;
+        void *ctx = g_tick.e[i].ctx;
+        g_tick.running_index = i;
+        pthread_mutex_unlock(&g_tick.lock);
+        fn(ctx);
+        pthread_mutex_lock(&g_tick.lock);
+        g_tick.running_index = -1;
+        pthread_cond_broadcast(&g_tick.idle);
     }
 }
 
@@ -64,20 +82,17 @@ static void *tick_main(void *arg)
             pthread_mutex_unlock(&g_tick.lock);
             return NULL;
         }
-        for (int i = 0; i < TICK_MAX; i++) {
-            if (!g_tick.e[i].used)
-                continue;
-            audio_tick_fn *fn = g_tick.e[i].fn;
-            void *ctx = g_tick.e[i].ctx;
-            g_tick.running_index = i;
-            pthread_mutex_unlock(&g_tick.lock);
-            fn(ctx);
-            pthread_mutex_lock(&g_tick.lock);
-            g_tick.running_index = -1;
-            pthread_cond_broadcast(&g_tick.idle);
-        }
+        run_all();
         pthread_mutex_unlock(&g_tick.lock);
     }
+}
+
+static void timer_tick(void *ctx)
+{
+    (void)ctx;
+    pthread_mutex_lock(&g_tick.lock);
+    run_all();
+    pthread_mutex_unlock(&g_tick.lock);
 }
 
 void *audio_tick_add(audio_tick_fn *fn, void *ctx)
@@ -92,7 +107,10 @@ void *audio_tick_add(audio_tick_fn *fn, void *ctx)
         g_tick.count++;
         h = &g_tick.e[i];
     }
-    if (h && !g_tick.thread_up) {
+    if (h && hos_fixed()) {
+        if (!g_tick.timer)
+            g_tick.timer = hos_fs_every(hos_clock_ns() + AUDIO_FRAME_NS, AUDIO_FRAME_NS, timer_tick, NULL);
+    } else if (h && !g_tick.thread_up) {
         g_tick.stop = false;
         if (pthread_create(&g_tick.thread, NULL, tick_main, NULL) == 0) {
             g_tick.thread_up = true;
@@ -109,6 +127,11 @@ void *audio_tick_add(audio_tick_fn *fn, void *ctx)
 
 static void tick_join(void)
 {
+    pthread_mutex_lock(&g_tick.lock);
+    void *timer = g_tick.timer;
+    g_tick.timer = NULL;
+    pthread_mutex_unlock(&g_tick.lock);
+    hos_fs_cancel(timer);
     pthread_mutex_lock(&g_tick.lock);
     bool join = g_tick.thread_up;
     g_tick.stop = true;

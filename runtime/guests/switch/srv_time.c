@@ -94,7 +94,7 @@ static int64_t floor_div(int64_t a, int64_t b)
     return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
 }
 
-static int64_t ticks_ns(void) { return (int64_t)rl_ticks_to_ns(rl_ns_to_ticks(rl_clock_ns())); }
+static int64_t ticks_ns(void) { return (int64_t)rl_ticks_to_ns(rl_ns_to_ticks(hos_clock_ns())); }
 
 static int64_t steady_ns(void) { return ticks_ns() + g_time.test_offset_ns + g_time.internal_offset_ns; }
 
@@ -102,6 +102,8 @@ static int64_t steady_seconds(void) { return floor_div(steady_ns(), NS_PER_SECON
 
 static int64_t wall_seconds(void)
 {
+    if (hos_fixed())
+        return hos_fs_wall_seconds();
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return (int64_t)ts.tv_sec;
