@@ -164,12 +164,15 @@ impl Npdm {
             None
         } else {
             let acid = slice(b, acid_off, acid_size, "ACID")?;
-            if acid.get(0x200..0x204) != Some(b"ACID") {
+            let Some(head) = [0x200, 0x300]
+                .into_iter()
+                .find(|&h| acid.get(h..h + 4) == Some(b"ACID"))
+            else {
                 return malformed("NPDM: bad ACID magic");
-            }
+            };
             Some(Acid {
-                services: access_list(acid, 0x228, "ACID")?,
-                svcs: kernel_caps(acid, 0x230, "ACID")?,
+                services: access_list(acid, head + 0x28, "ACID")?,
+                svcs: kernel_caps(acid, head + 0x30, "ACID")?,
             })
         };
         Ok(Npdm {
@@ -367,6 +370,33 @@ mod tests {
             Some("ldr:*")
         );
         assert!(n.uses_service("jit:u").is_none());
+    }
+
+    #[test]
+    fn a_switch2_acid_has_its_header_after_three_signature_blocks() {
+        let b = build_with(
+            "g",
+            1,
+            0x1000,
+            &[("fsp-srv", false)],
+            Some((&[0x01, 0x80], &[0x01, 0x80])),
+        );
+        let word = |b: &[u8], at: usize| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let (off, size) = (word(&b, 0x78) as usize, word(&b, 0x7C) as usize);
+        let mut acid = b[off..off + size].to_vec();
+        acid.splice(0x200..0x200, [0u8; 0x100]);
+        for at in [0x320, 0x328, 0x330] {
+            let v = word(&acid, at) + 0x100;
+            acid[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        let mut s2 = b.clone();
+        s2[0x78..0x7C].copy_from_slice(&(b.len() as u32).to_le_bytes());
+        s2[0x7C..0x80].copy_from_slice(&(acid.len() as u32).to_le_bytes());
+        s2.extend_from_slice(&acid);
+        let n = Npdm::parse(&s2).expect("parses");
+        let e: Vec<u32> = n.effective_svcs().iter().collect();
+        assert_eq!(e, vec![0x01, 0x80]);
+        assert!(n.uses_service("fsp-srv").is_some());
     }
 
     #[test]
