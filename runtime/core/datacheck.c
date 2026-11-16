@@ -173,7 +173,11 @@ int rl_data_check(const char *manifest, size_t len, const char *romfs, const cha
             return -1;
         const char *hexw = sp1 + 1, *name = sp2 + 1;
         const char *root = NULL, *rel = NULL;
-        if (!strncmp(name, "romfs/", 6)) {
+        bool whole = false;
+        if (!strcmp(name, "romfs.img")) {
+            root = romfs;
+            whole = true;
+        } else if (!strncmp(name, "romfs/", 6)) {
             root = romfs;
             rel = name + 6;
         } else if (!strncmp(name, "dlc/", 4)) {
@@ -186,7 +190,10 @@ int rl_data_check(const char *manifest, size_t len, const char *romfs, const cha
         out->bytes += size;
         char path[4096];
         struct stat st;
-        if (!root || snprintf(path, sizeof path, "%s/%s", root, rel) >= (int)sizeof path || stat(path, &st) != 0) {
+        int plen = !root ? 0
+                   : whole ? snprintf(path, sizeof path, "%s", root)
+                           : snprintf(path, sizeof path, "%s/%s", root, rel);
+        if (!root || plen >= (int)sizeof path || stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
             note_bad(out, name, strlen(name), "missing");
             continue;
         }

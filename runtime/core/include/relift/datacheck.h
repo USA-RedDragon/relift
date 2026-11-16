@@ -2,8 +2,9 @@
  * @file datacheck.h
  * @brief Checks the game data a mobile app was given against the manifest relift wrote at build time.
  *
- * The manifest is text, one file per line: `<size> <sha256 hex> <root>/<path>`, where root is `romfs` or
- * `dlc` and names the folder RELIFT_ROMFS or RELIFT_DLC points at. Lines starting with `#` are comments.
+ * The manifest is text, one file per line: `<size> <sha256 hex> <name>`. The name `romfs.img` is the file
+ * RELIFT_ROMFS points at (the game's RomFS image); `dlc/<path>` and `romfs/<path>` are files under the folders
+ * RELIFT_DLC and RELIFT_ROMFS point at. Lines starting with `#` are comments.
  */
 #ifndef RELIFT_DATACHECK_H
 #define RELIFT_DATACHECK_H
@@ -30,7 +31,8 @@ typedef struct rl_data_report {
 
 /**
  * @brief Checks every file the manifest text lists: its size, and its SHA-256 when hash is true.
- * romfs and dlc are the folders the two roots stand for (NULL: every file under that root is missing).
+ * romfs (the image or folder) and dlc (the folder) are what the names stand for (NULL: every file under that root
+ * is missing).
  * Returns 0 when all match, 1 when a file does not (the report says which), -1 when the manifest is malformed.
  */
 RL_RUNTIME_API int rl_data_check(const char *manifest, size_t len, const char *romfs, const char *dlc, bool hash,

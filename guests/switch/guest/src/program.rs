@@ -780,8 +780,9 @@ pub fn program_files(
 }
 
 /// The entry of `program.c`: `main` on desktops; on Android `SDL_main`
-/// and on iOS `rl_ios_main`, which first point the save, SD card, romfs
-/// and DLC folders into the app's own storage.
+/// and on iOS `rl_ios_main`, which first point the save, SD card and DLC
+/// folders into the app's own storage, and the romfs at `romfs.img` there
+/// (a `romfs/` tree when there is no image).
 const ENTRY: &str = r#"#if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -800,6 +801,15 @@ static void set_dir(const char *env, const char *base, const char *name)
     mkdir(p, 0771);
     setenv(env, p, 0);
 }
+static void set_file(const char *env, const char *base, const char *name)
+{
+    char p[4096];
+    struct stat st;
+    if (!base || getenv(env) || snprintf(p, sizeof p, "%s/%s", base, name) >= (int)sizeof p || stat(p, &st) != 0 ||
+        !S_ISREG(st.st_mode))
+        return;
+    setenv(env, p, 0);
+}
 #endif
 #if defined(__ANDROID__)
 #include <relift/android.h>
@@ -810,6 +820,7 @@ static void set_app_dirs(void)
     rl_settings_set_app("relift");
     set_dir("RELIFT_SAVE", rl_android_files_dir(), "save");
     set_dir("RELIFT_SDMC", rl_android_files_dir(), "sdmc");
+    set_file("RELIFT_ROMFS", rl_android_external_dir(), "romfs.img");
     set_dir("RELIFT_ROMFS", rl_android_external_dir(), "romfs");
     set_dir("RELIFT_DLC", rl_android_external_dir(), "dlc");
 }
@@ -830,11 +841,13 @@ static void set_app_dirs(void)
 {
     rl_ios_init();
     rl_settings_set_app("relift");
+    set_file("RELIFT_ROMFS", rl_ios_bundle_dir(), "romfs.img");
     set_bundled("RELIFT_ROMFS", rl_ios_bundle_dir(), "romfs");
     set_bundled("RELIFT_DLC", rl_ios_bundle_dir(), "dlc");
     const char *docs = rl_ios_documents_dir();
     set_dir("RELIFT_SAVE", docs, "save");
     set_dir("RELIFT_SDMC", docs, "sdmc");
+    set_file("RELIFT_ROMFS", docs, "romfs.img");
     set_dir("RELIFT_ROMFS", docs, "romfs");
     set_dir("RELIFT_DLC", docs, "dlc");
 }

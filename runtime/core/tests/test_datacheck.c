@@ -1,6 +1,7 @@
 /**
  * @file test_datacheck.c
- * @brief The game data check: SHA-256 vectors, a matching folder, a missing, a short and a changed file.
+ * @brief The game data check: SHA-256 vectors, a matching folder, a missing, a short and a changed file, and
+ * RomFS images named by RELIFT_ROMFS itself and under the DLC folder.
  */
 #include "runner.h"
 
@@ -66,5 +67,39 @@ TEST(data_check_names_the_first_bad_file)
     CHECK(!strcmp(r.why, "missing"));
     CHECK_EQ(rl_data_check("3 short romfs/a\n", 16, romfs, NULL, false, &r), -1);
     rmdir(romfs);
+    rmdir(root);
+}
+
+TEST(data_check_reads_romfs_img_as_the_romfs_path_itself)
+{
+    char root[256], img[300], dlc[300], p[400];
+    snprintf(root, sizeof root, "%s/relift-datacheck-img-%d", getenv("TMPDIR") ? getenv("TMPDIR") : ".",
+             (int)getpid());
+    snprintf(img, sizeof img, "%s/romfs.img", root);
+    snprintf(dlc, sizeof dlc, "%s/dlc", root);
+    mkdir(root, 0700);
+    mkdir(dlc, 0700);
+    snprintf(p, sizeof p, "%s/01", dlc);
+    mkdir(p, 0700);
+    snprintf(p, sizeof p, "%s/01/0", dlc);
+    mkdir(p, 0700);
+    snprintf(p, sizeof p, "%s/01/0/romfs.img", dlc);
+    put(img, "abc");
+    put(p, "abc");
+    const char *m = "3 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad romfs.img\n"
+                    "3 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad dlc/01/0/romfs.img\n";
+    rl_data_report r;
+    CHECK_EQ(rl_data_check(m, strlen(m), img, dlc, true, &r), 0);
+    CHECK_EQ(r.files, 2);
+    CHECK_EQ(rl_data_check(m, strlen(m), root, dlc, false, &r), 1);
+    CHECK(!strcmp(r.first, "romfs.img"));
+    CHECK(!strcmp(r.why, "missing"));
+    unlink(p);
+    snprintf(p, sizeof p, "%s/01/0", dlc);
+    rmdir(p);
+    snprintf(p, sizeof p, "%s/01", dlc);
+    rmdir(p);
+    rmdir(dlc);
+    unlink(img);
     rmdir(root);
 }
