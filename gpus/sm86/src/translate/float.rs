@@ -642,19 +642,5 @@ fn fset(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 fn frnd(c: &mut Ctx, i: &Inst) -> Res<()> {
-    let mut how = glsl::ROUND_EVEN;
-    for m in &i.mods {
-        how = match *m {
-            "FTZ" | "" => how,
-            "FLOOR" => glsl::FLOOR,
-            "CEIL" => glsl::CEIL,
-            "TRUNC" => glsl::TRUNC,
-            m => return bad(format!("FRND.{m}")),
-        };
-    }
-    let a = c.fsrc(&i.ops[1])?;
-    let f = c.f32t();
-    let r = c.ext(f, how, &[a]);
-    let u = c.as_bits(r);
-    c.store_dst(&i.ops[0], u)
+    super::int::conv::frnd(c, i)
 }

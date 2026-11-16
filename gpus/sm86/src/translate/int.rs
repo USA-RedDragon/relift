@@ -9,7 +9,7 @@ use super::Ctx;
 
 mod arith;
 mod bits;
-mod conv;
+pub(crate) mod conv;
 mod half;
 
 const BUILTIN_WORKGROUP_ID: u32 = 26;
