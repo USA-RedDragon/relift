@@ -2310,6 +2310,16 @@ instructions an emitter uses for each. `relift_ir::lane::eval` is the
 reference the interpreter runs; `core/ir/tests/lane.rs` checks every kind and
 width against an independent per-lane reference. An emitter that does not
 lower them yet refuses the block through its existing unsupported path.
+
+`core/emit` lowers each to a call of a `static inline` helper in the prelude
+(`rl_lane_KINDn`, `RL_LANE_PERM1` for one source and `RL_LANE_PERM2` for
+two) on `rl_e_vq` values. With clang the helpers are vector-extension
+expressions, so the target flags of the build pick the NEON or SSE2 to
+SSE4.1 instruction; defining `RL_LANE_SCALAR`, or a compiler without the
+extensions (gcc), gives per-lane loops. `relift/tests/emit_lanes.rs` checks
+every kind, width and immediate, byte permutations and random chains
+against the interpreter on SSE2, SSSE3, SSE4.1, the scalar path, `-O0` and
+registers in the context. `core/emit-wasm` does not lower them yet.
 Text mnemonics are `lane.KIND.WIDTH` (`lane.qadds.16 v1, v2`,
 `lane.shli.32 v1, 5`), `lane.perm` and `lane.perm2`; the binary form is
 `relift_ir::BIN_FORMAT` 2.
