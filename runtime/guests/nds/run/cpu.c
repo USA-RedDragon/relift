@@ -400,7 +400,8 @@ static void boot_regs(rl_nds_arm *k, uint32_t sp, uint32_t sp_irq, uint32_t sp_s
  * @brief The memory the BIOS and firmware leave at cartridge boot (GBATEK
  * "BIOS RAM Usage"): the header at 0x027FFE00, the boot indicator, both
  * binaries at their RAM addresses as stored, the shared work RAM given to
- * the ARM7 and the ARM9's vectors high. Runs before the machine is attached
+ * the ARM7, POWCNT1 at 0x820F (the oracle's boot) and the ARM9's vectors
+ * high. Runs before the machine is attached
  * to the scheduler, whose clocks have not started.
  */
 static int boot_memory(rl_nds_run *r)
@@ -420,6 +421,7 @@ static int boot_memory(rl_nds_run *r)
     load(m, RL_NDS_ARM9, 0x027FFE00u, p->rom, 0x170);
     rl_nds_write(m, RL_NDS_ARM9, 0x027FFC40u, 2, 1);
     rl_nds_write(m, RL_NDS_ARM9, 0x04000247u, 1, 3);
+    rl_nds_write(m, RL_NDS_ARM9, 0x04000304u, 2, 0x820F);
     rl_nds_cp15_write(m, RL_CP15_KEY(0, 1, 0, 0), rl_nds_cp15(m)->control | RL_CP15_HIGH_VECTORS);
     r->cpu[RL_NDS_ARM9].vectors = rl_arm32_cp15_vectors(rl_nds_cp15(m));
     return 0;
