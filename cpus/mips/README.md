@@ -29,7 +29,8 @@ src/
     rt.rs             Core: pending register writes, delay-slot and branch
                       state, guards and the static exception, memory as I/O
     lift.rs           Profile trait and the block driver: one instruction,
-                      or a branch with its delay slot, then a tick and the exit
+                      or a branch with its delay slot, each with its tick,
+                      then the exit
   vr4300/, r3000a/    one module per profile
     regs.rs           the register file (slot order, names the cut checks)
     decode/           generated.rs (the table) and mod.rs (Encoding, decode)
@@ -52,6 +53,21 @@ slot) cannot fault, and loads and stores are I/O accesses in the profile's
 byte order. A new profile adds an overlay, an entry in `gen/src/profile.rs`
 (mnemonic table, template classes, register file), its module here and its
 line in `gen/regen.sh` and `scripts/ci/generated.sh`.
+
+## Cycles
+
+Each instruction ticks one issue cycle plus what the overlay's `mips_run`
+gives the cut `MIPS_Cycles` for it (`cycles` and `fp_cycles` in
+`gen/vr4300.sail`: the multiplier, the divider and the FPU, as ares counts
+them). A template that ticks under a condition of its own does it at once
+(`TickIf`); the rest is added to the instruction's tick, which is
+conditional only in a likely branch's slot (an annulled slot takes no
+cycle). The block driver puts a branch's tick after the block's last guard,
+so the slot's accesses and calls see it and guards stay before effects.
+The memory system's cycles are not in the templates: `St` calls the
+intrinsic `mips_dcache` after every load and store, and the guest frontend
+adds the instruction cache fetches and the bus waits (`docs/abi.md`, the
+N64 section).
 
 The VR4300 modules stay at the crate root (`relift_cpu_mips::lift`,
 `decode`, `regs`), so code written before the split keeps working.

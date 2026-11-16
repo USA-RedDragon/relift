@@ -2133,8 +2133,32 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   its TLB guard when its address is not in RDRAM, so the slow path makes it
   exactly and a device never sees an annulled access. The runtime's own
   accesses use `rl_mips_ld` and `rl_mips_st` (big-endian values).
-- Each instruction charges one cycle (a branch and its delay slot two) and
-  every block ends in a sync point. A read of Count calls `rl_mips_count`. A
+- Each instruction ticks one issue cycle plus the cycles the overlay's
+  `MIPS_Cycles` gives it, as ares counts them: MULT and MULTU 4 more, DMULT
+  and DMULTU 7, DIV and DIVU 36, DDIV and DDIVU 68, and on the FPU ADD, SUB
+  and the compares 2, MUL.S 4 and MUL.D 7, DIV and SQRT 28 (S) or 57 (D),
+  CVT.S.D 1, the other conversions and roundings 4. A branch ticks before
+  its delay slot runs, and a slot a likely branch annuls takes no cycle.
+  Every block ends in a sync point.
+- The caches are modeled for their cycles, not their data (RDRAM is always
+  up to date): `rl_ctx` keeps the tags of the 16 KiB instruction cache
+  (32-byte lines) and the 8 KiB write-back data cache (16-byte lines, a
+  dirty bit). A fetch where a run may start a line (a line's first word, a
+  function entry, a branch or jump target, a call's return, a delay slot
+  that starts a line, the target of `rl_mips_eret_to`) calls
+  `rl_mips_icache`: a kseg0 or mapped line that is not in the cache costs
+  48 cycles. Every load and store calls `rl_mips_dcache` after the access:
+  a cached hit takes 1 cycle (a store marks the line dirty), a miss 40, plus
+  40 to write a dirty line back first. kseg1 costs nothing in either cache.
+  CACHE (`rl_mips_cache_op`) invalidates, writes back, fills and loads and
+  stores tags through TagLo with the same costs. A guard's slow path takes
+  its instruction's fetch, its issue cycle and its data cache cycles, but
+  not the multiplier's or the FPU's.
+- A read outside RDRAM waits for the bus (`rl_n64_read_stall`): 20 cycles
+  for the RCP's registers, SP memory and the PIF, plus 250 for the PI bus
+  in the cartridge's space, or twice the rest of a PI bus write in flight.
+  The device answers at the cycle the read starts; writes are posted.
+- A read of Count calls `rl_mips_count`. A
   write of Status, Cause, Compare, Count or Wired ends the budget
   (`rl_n64_cp0_break`), and the block's sync point is `rl_n64_cp0_sync`,
   which applies the write with the block's register writes done (the mask,
