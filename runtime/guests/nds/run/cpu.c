@@ -191,13 +191,29 @@ static rl_fn cold_at(rl_nds_arm *k, uint32_t pc, unsigned thumb)
     return NULL;
 }
 
-/** @brief Code no unit was lifted from: stops the program with the CPU, the address and the bytes there. */
+static uint64_t irq_return(rl_ctx *c, uint8_t *mem, uint64_t expected);
+
+/**
+ * @brief A dispatch miss. The BIOS's IRQ return address, reached by a
+ * handler whose host frame is gone, runs the BIOS's return. A jump inside a
+ * lifted function, such as a thread's context loaded by the SDK, goes on in
+ * the cold copy from the base of the CPU's run: the host frames of the code
+ * that jumped are unwound first (a redirect), so switches between threads
+ * do not pile up host frames. Code no unit was lifted from stops the
+ * program with the CPU, the address and the bytes there.
+ */
 static int unfound(rl_ctx *c, uint8_t *mem)
 {
     rl_nds_arm *k = cpu_of(c);
     uint32_t pc = c->pc & ~1u;
+    if (pc == (k->id == RL_NDS_ARM9 ? BIOS_IRQ_RETURN9 : BIOS_IRQ_RETURN7) && c->m == 0x12) {
+        uint32_t to = (uint32_t)irq_return(c, mem, 0);
+        return rl_arm32_redirect(c, to);
+    }
     rl_fn cold = cold_at(k, pc, c->t);
     if (cold) {
+        if (c->depth)
+            return rl_arm32_redirect(c, pc);
         c->pc = pc;
         return cold(c, mem);
     }
