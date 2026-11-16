@@ -281,18 +281,23 @@ int rl_pend_exit_thread(rl_ctx *c)
 
 int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...)
 {
-    const rl_cpu_desc *cpu = rl_core_cpu();
-    char what[512], regs[256];
+    char what[512];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(what, sizeof what, fmt, ap);
     va_end(ap);
-    regs[0] = 0;
-    if (cpu && cpu->describe)
-        cpu->describe(c, regs, sizeof regs);
-    if (regs[0])
-        rl_log(RL_LOG_ERROR, tag, "%s (%s)", what, regs);
-    else
-        rl_log(RL_LOG_ERROR, tag, "%s", what);
+    rl_report_stop(c, tag, what, NULL, NULL, 0);
+    return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
+}
+
+int rl_guest_stop_at(rl_ctx *c, const char *kind, uint64_t pc, const char *fmt, ...)
+{
+    char what[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(what, sizeof what, fmt, ap);
+    va_end(ap);
+    rl_miss_info m = { pc, pc, RL_MISS_NONE, 0 };
+    rl_report_stop(c, kind, what, &m, NULL, 0);
     return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
 }

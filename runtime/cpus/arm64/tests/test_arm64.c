@@ -116,7 +116,7 @@ TEST(arm64_undefined_names_the_instruction)
     c->x[30] = 0x1230;
     c->sp = 0x8000;
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_undefined(c, rl_mem_base(), 0x4000, 0xD4207D00u);
@@ -124,7 +124,11 @@ TEST(arm64_undefined_names_the_instruction)
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
     CHECK_EQ(c->pend.code, RL_EXIT_SOFTWARE);
-    CHECK(strstr(out, "undefined instruction 0xd4207d00 (BRK #1000) at guest pc 0x4000 (lr 0x1230, sp 0x8000)") != NULL);
+    CHECK(strstr(out, "kind: undefined instruction\nsummary: undefined instruction 0xd4207d00 (BRK #1000) at guest pc "
+                      "0x4000\n") != NULL);
+    CHECK(strstr(out, "\ntransfer: none\nat: 0x4000") != NULL);
+    CHECK(strstr(out, "x30 0000000000001230\n") != NULL);
+    CHECK(strstr(out, "sp  0000000000008000  pc  ") != NULL);
 }
 
 TEST(arm64_brk_reports_a_breakpoint)
@@ -134,14 +138,15 @@ TEST(arm64_brk_reports_a_breakpoint)
     c->x[30] = 0x1230;
     c->sp = 0x8000;
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_brk(c, rl_mem_base(), 1000);
     capture_end(fds, saved, out, sizeof out);
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
-    CHECK(strstr(out, "breakpoint BRK #1000 (lr 0x1230, sp 0x8000)") != NULL);
+    CHECK(strstr(out, "kind: breakpoint\nsummary: breakpoint BRK #1000\n") != NULL);
+    CHECK(strstr(out, "x30 0000000000001230\n") != NULL);
 }
 
 static _Alignas(16) uint8_t g_unw_mem[0x4000];
@@ -206,38 +211,69 @@ static int entry_fn(rl_ctx *c, uint8_t *mem)
     return RL_OK;
 }
 
+static int jumps_missing(rl_ctx *c, uint8_t *mem) { RL_JUMP(0x10002, UINT64_C(0x10004)); }
+
 static int calls_missing(rl_ctx *c, uint8_t *mem)
 {
-    RL_MUSTTAIL return rl_indirect(c, 0x10002)(c, mem);
+    c->x[30] = 0x1000c;
+    int rc = rl_indirect(c, 0x10002)(c, mem);
+    if (rc)
+        return rc;
+    c->x[1] = 1;
+    return RL_OK;
 }
 
 TEST(arm64_dispatch_through_lookup)
 {
     rl_ctx *c = boot();
     CHECK(c != NULL);
-    static const rl_fn_entry e[] = { { 0x10000, 4, 0, entry_fn }, { 0x10004, 4, 0, calls_missing } };
+    static const rl_fn_entry e[] = { { 0x10000, 4, 0, entry_fn }, { 0x10004, 4, 0, jumps_missing },
+                                     { 0x10008, 8, 0, calls_missing } };
+    static const rl_fn_info fi[] = { { 0x10000, 0x10000, 4, 0, entry_fn, "entry_fn", NULL },
+                                     { 0x10004, 0x10004, 4, 0, jumps_missing, "jumps_missing", NULL },
+                                     { 0x10008, 0x10008, 8, 0, calls_missing, "calls_missing", NULL } };
+    static const rl_fn_map fm = { RL_FN_MAP_VERSION, 3, fi, "test", "shard0000", 0x10000, NULL, NULL };
+    static const rl_fn_map *const fms[] = { &fm };
     rl_unit u;
     memset(&u, 0, sizeof u);
     u.abi_version = RL_ABI_VERSION;
     u.ctx_size = sizeof(rl_ctx);
-    u.fn_count = 2;
+    u.fn_count = 3;
     u.fns = e;
     u.name = "arm64-test";
+    u.map_count = 1;
+    u.maps = fms;
     const rl_unit *list[] = { &u };
     CHECK_EQ(rl_units_register(list, 1), 0);
     rl_dispatch_view(c);
     CHECK(rl_lookup(c, 0x10000) == entry_fn);
     CHECK(rl_lookup(c, 0x10002) == rl_dispatch_miss);
     CHECK(rl_lookup(c, 0x0FFFC) == rl_dispatch_miss);
+    CHECK(rl_jump_find(c, 0x10002) == NULL);
     CHECK_EQ(rl_call_guest(c, rl_mem_base(), 0x10000), RL_OK);
     CHECK_EQ(c->x[0], 0x600D);
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_call_guest(c, rl_mem_base(), 0x10004);
     capture_end(fds, saved, out, sizeof out);
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
-    CHECK(strstr(out, "missed code: no function at guest 0x10002 (lr ") != NULL);
+    CHECK_EQ(c->pend.pc, 0);
+    CHECK(strstr(out, "kind: missed code\nsummary: no function at guest 0x10002\n") != NULL);
+    CHECK(strstr(out, "\ntransfer: jump\ntarget: 0x10002 test+0x2\n") != NULL);
+    CHECK(strstr(out, "\nsite: 0x10004 test+0x4\nsite function: 0x10004 test+0x4 jumps_missing +0x0\n") != NULL);
+    c->pend.kind = RL_PEND_NONE;
+    saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    rc = rl_call_guest(c, rl_mem_base(), 0x10008);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(rc, RL_PENDING);
+    CHECK(strstr(out, "\ntransfer: call\ntarget: 0x10002 test+0x2\n") != NULL);
+    CHECK(strstr(out, "\nsite: 0x10008 test+0x8\nsite function: 0x10008 test+0x8 calls_missing +0x0\n") != NULL);
+    CHECK(strstr(out, "\ncaller function: 0x10008 test+0x8 calls_missing (host calls_missing+0x") != NULL);
+    CHECK(strstr(out, "guest backtrace: lifted frames, innermost first; tail calls leave no frame\n  #0 0x10008 test+0x8 "
+                      "calls_missing (nearest)\n") != NULL);
+    c->pend.kind = RL_PEND_NONE;
 }

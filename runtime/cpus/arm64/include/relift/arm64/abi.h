@@ -453,13 +453,11 @@ static inline rl_u128 rl_cas128(uint8_t *mem, uint64_t a, rl_u128 expected, rl_u
 /** @brief Dispatch miss handler. Reads the target from c->pc. Has the lifted signature so a miss is a call in place. */
 RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 
-/** @brief The function of an RL_CODE_TRAP slot (rl_code_maps_register): reports that c->pc holds no instruction and stops. */
-RL_RUNTIME_API int rl_dispatch_trap(rl_ctx *c, uint8_t *mem);
 /** @brief The function of a dev build's RL_CODE_COLD slot not dispatched to yet: logs the entry at c->pc (rl_core_cold) and runs the cold code there. */
 RL_RUNTIME_API int rl_dispatch_cold(rl_ctx *c, uint8_t *mem);
 
-/** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss or a misaligned target. */
-static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
+/** @brief Looks up the host function for guest address target; NULL on a miss or a misaligned target. */
+static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
 {
     uint64_t off = target - c->disp_lo;
     uint64_t i = (off >> RL_ARM64_CODE_SHIFT) | (off << (64 - RL_ARM64_CODE_SHIFT));
@@ -471,15 +469,36 @@ static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
         f = c->disp_table[i];
 #endif
     }
+    return f;
+}
+
+/** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss or a misaligned target. */
+static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
+{
+    rl_fn f = rl_find(c, target);
     return f ? f : rl_dispatch_miss;
 }
 
-/** @brief Indirect call or jump: records the target for the miss handler and returns the function to call. */
+/** @brief Indirect call: records the target for the miss handler and returns the function to call. */
 static inline rl_fn rl_indirect(rl_ctx *c, uint64_t target)
 {
     c->pc = target;
     return rl_lookup(c, target);
 }
+
+/** @brief The lookup of RL_JUMP: records the target and returns its function, or NULL on a miss. */
+static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
+{
+    c->pc = target;
+    return rl_find(c, target);
+}
+
+/**
+ * @brief The miss path of RL_JUMP: the target is in c->pc and the guest
+ * address of the transferring instruction in c->pend.pc. Has the lifted
+ * signature so the miss stays a tail call.
+ */
+RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /** @brief Register values installed by an unwinder or longjmp: the guest unwinder's install step converts its own layout to this. */
 typedef struct rl_resume_regs {

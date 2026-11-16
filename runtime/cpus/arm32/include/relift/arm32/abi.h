@@ -172,8 +172,8 @@ RL_RUNTIME_API int rl_dispatch_miss(rl_ctx *c, uint8_t *mem);
 /** @brief Closes the innermost host frame: the target of rl_indirect for a return. */
 RL_RUNTIME_API int rl_arm32_return(rl_ctx *c, uint8_t *mem);
 
-/** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss. */
-static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
+/** @brief Looks up the host function for guest address target; NULL on a miss. */
+static inline rl_fn rl_find(const rl_ctx *c, uint64_t target)
 {
     uint64_t i = (target - c->disp_lo) >> RL_ARM32_CODE_SHIFT;
     rl_fn f = 0;
@@ -184,6 +184,13 @@ static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
         f = c->disp_table[i];
 #endif
     }
+    return f;
+}
+
+/** @brief Looks up the host function for guest address target; returns rl_dispatch_miss on a miss. */
+static inline rl_fn rl_lookup(const rl_ctx *c, uint64_t target)
+{
+    rl_fn f = rl_find(c, target);
     return f ? f : rl_dispatch_miss;
 }
 
@@ -199,6 +206,22 @@ static inline rl_fn rl_indirect(rl_ctx *c, uint64_t target)
         return rl_arm32_return;
     return rl_lookup(c, target);
 }
+
+/** @brief The lookup of RL_JUMP: rl_indirect, but NULL on a miss. */
+static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
+{
+    c->pc = (uint32_t)target;
+    if (c->depth - 1u < RL_ARM32_SHADOW && c->shadow[c->depth - 1u] == (uint32_t)target)
+        return rl_arm32_return;
+    return rl_find(c, target);
+}
+
+/**
+ * @brief The miss path of RL_JUMP: the target is in c->pc and the guest
+ * address of the transferring instruction in c->pend.pc. Has the lifted
+ * signature so the miss stays a tail call.
+ */
+RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /** @brief A lifted call that returns to ret opens a host frame. */
 static inline void rl_arm32_call(rl_ctx *c, uint32_t ret)

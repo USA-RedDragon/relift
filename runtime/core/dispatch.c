@@ -23,8 +23,36 @@ static rl_fn g_cold_first;
 static const rl_code_map *const *g_maps;
 static uint32_t g_map_count;
 
+/**
+ * @brief RELIFT_FORCE_MISS: empties the dispatch slots of the listed guest
+ * addresses (hex, comma separated) when the first context takes its view of
+ * the table, after every static unit and code map is registered, so a test
+ * reaches the miss path of a shipped build at a chosen target. The first
+ * caller does it (an atomic flag); every other returns at once.
+ */
+static void force_misses(void)
+{
+    static int done;
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    const char *e = getenv("RELIFT_FORCE_MISS");
+    if (!e || !*e || !g_table || !cpu || __atomic_exchange_n(&done, 1, __ATOMIC_ACQ_REL))
+        return;
+    while (*e) {
+        char *end;
+        unsigned long long a = strtoull(e, &end, 16);
+        if (end == e)
+            break;
+        if (a >= g_lo && !(a & ((1ull << cpu->code_shift) - 1)) && ((a - g_lo) >> cpu->code_shift) < g_count) {
+            __atomic_store_n(&g_table[(a - g_lo) >> cpu->code_shift], NULL, __ATOMIC_RELEASE);
+            rl_log(RL_LOG_WARN, "dispatch", "RELIFT_FORCE_MISS: no function at 0x%llx", a);
+        }
+        e = *end == ',' ? end + 1 : end;
+    }
+}
+
 void rl_dispatch_view(rl_ctx *c)
 {
+    force_misses();
     rl_ctx_common *k = rl_common(c);
     k->disp_table = g_table;
     k->disp_lo = g_lo;
@@ -241,8 +269,8 @@ static const char *class_name(unsigned cls)
     }
 }
 
-/* Checks map m against its units and the table; with fill, stores trap and cold_first. */
-static int code_map_walk(const rl_code_map *m, rl_fn trap, rl_fn cold_first, bool fill)
+/* Checks map m against its units and the table; with fill, stores cold_first. */
+static int code_map_walk(const rl_code_map *m, rl_fn cold_first, bool fill)
 {
     uint32_t sh = rl_core_cpu()->code_shift;
     const char *name = m->module ? m->module : "?";
@@ -275,9 +303,7 @@ static int code_map_walk(const rl_code_map *m, rl_fn trap, rl_fn cold_first, boo
             const rl_fn_entry *h = entry_at(m->hot, &kh, a);
             rl_fn *slot = &g_table[base + i];
             if (fill) {
-                if (cls == RL_CODE_TRAP)
-                    *slot = trap;
-                else if (cls == RL_CODE_COLD && cold_first) {
+                if (cls == RL_CODE_COLD && cold_first) {
                     g_cold[base + i] = *slot;
                     *slot = cold_first;
                 }
@@ -305,14 +331,14 @@ static int code_map_walk(const rl_code_map *m, rl_fn trap, rl_fn cold_first, boo
     return 0;
 }
 
-int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn trap, rl_fn cold_first)
+int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn cold_first)
 {
-    if (!rl_core_cpu() || !g_table || !trap) {
-        rl_log(RL_LOG_ERROR, "dispatch", "code maps registered before the units or without a trap");
+    if (!rl_core_cpu() || !g_table) {
+        rl_log(RL_LOG_ERROR, "dispatch", "code maps registered before the units");
         return -1;
     }
     for (uint32_t k = 0; k < count; k++)
-        if (code_map_walk(maps[k], trap, cold_first, false) != 0)
+        if (code_map_walk(maps[k], cold_first, false) != 0)
             return -1;
     if (cold_first && count) {
         free(g_cold);
@@ -322,17 +348,33 @@ int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn 
         g_cold_first = cold_first;
     }
     for (uint32_t k = 0; k < count; k++)
-        code_map_walk(maps[k], trap, cold_first, true);
+        code_map_walk(maps[k], cold_first, true);
     g_maps = maps;
     g_map_count = count;
     return 0;
 }
 
-int rl_core_trap(rl_ctx *c, uint8_t *mem, uint64_t target)
+int rl_code_class(uint64_t a, const char **module)
 {
-    (void)mem;
-    return rl_guest_fatal(c, "dispatch", "jump to guest 0x%llx, which holds no instruction (padding or data)",
-                          (unsigned long long)target);
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    if (!cpu)
+        return -1;
+    for (uint32_t k = 0; k < g_map_count; k++) {
+        const rl_code_map *m = g_maps[k];
+        if (a < m->lo)
+            continue;
+        uint64_t i = (a - m->lo) >> cpu->code_shift;
+        if (i >= (uint64_t)m->page_count * RL_CODE_PAGE_SLOTS)
+            continue;
+        uint32_t p = (uint32_t)(i / RL_CODE_PAGE_SLOTS), s = (uint32_t)(i % RL_CODE_PAGE_SLOTS);
+        if (m->pages[p] >= m->pattern_count)
+            return -1;
+        const uint8_t *pat = m->patterns + (size_t)m->pages[p] * RL_CODE_PAGE_BYTES;
+        if (module)
+            *module = m->module;
+        return (pat[s / 4] >> (2 * (s % 4))) & 3;
+    }
+    return -1;
 }
 
 rl_fn rl_core_cold(uint64_t target)
@@ -361,17 +403,49 @@ rl_fn rl_core_cold(uint64_t target)
     return f;
 }
 
-int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target)
+rl_miss_info rl_core_miss_classify(rl_ctx *c, uint64_t target, uintptr_t host_ret)
+{
+    const rl_cpu_desc *cpu = rl_core_cpu();
+    rl_miss_info m = { target, RL_SITE_NONE, RL_MISS_ENTRY, 0 };
+    rl_fn_hit h;
+    if (host_ret && rl_fn_find_host(host_ret - 1, &h)) {
+        m.reason = RL_MISS_CALL;
+        m.host_ret = host_ret;
+        if (cpu && cpu->call_site)
+            m.site = cpu->call_site(c);
+    }
+    return m;
+}
+
+int rl_core_miss_at(rl_ctx *c, uint8_t *mem, const rl_miss_info *m)
 {
     (void)mem;
-    return rl_guest_fatal(c, "dispatch", "missed code: no function at guest 0x%llx", (unsigned long long)target);
+    char what[160];
+    if (rl_code_class(m->target, NULL) == RL_CODE_TRAP) {
+        snprintf(what, sizeof what, "guest 0x%llx holds no instruction (padding or data)",
+                 (unsigned long long)m->target);
+        rl_report_stop(c, "no instruction", what, m, NULL, 0);
+    } else {
+        snprintf(what, sizeof what, "no function at guest 0x%llx", (unsigned long long)m->target);
+        rl_report_stop(c, "missed code", what, m, NULL, 0);
+    }
+    return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
+}
+
+int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target, uintptr_t host_ret)
+{
+    rl_miss_info m = rl_core_miss_classify(c, target, host_ret);
+    return rl_core_miss_at(c, mem, &m);
 }
 
 _Noreturn void rl_bad_resume(rl_ctx *c, uint8_t *mem, uint64_t fn_guest_addr)
 {
     (void)mem;
-    rl_log(RL_LOG_ERROR, "unwind", "landing pad 0x%llx has no case in function 0x%llx",
-           (unsigned long long)rl_common(c)->pend.pc, (unsigned long long)fn_guest_addr);
+    rl_miss_info m = { rl_common(c)->pend.pc, RL_SITE_NONE, RL_MISS_RESUME, 0 };
+    char what[160];
+    snprintf(what, sizeof what, "landing pad 0x%llx has no case in function 0x%llx",
+             (unsigned long long)rl_common(c)->pend.pc, (unsigned long long)fn_guest_addr);
+    rl_report_stop(c, "bad resume", what, &m, NULL, 0);
     rl_process_exit(RL_EXIT_SOFTWARE);
     abort();
 }

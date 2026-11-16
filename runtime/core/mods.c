@@ -8,6 +8,8 @@
 #include <relift/mods.h>
 #include <relift/settings.h>
 
+#include <stdio.h>
+
 int rl_mods_choose(const rl_mods *m, bool *on)
 {
     bool local[RL_MODS_MAX];
@@ -40,12 +42,20 @@ int rl_mods_choose(const rl_mods *m, bool *on)
         }
         __atomic_store_n(fn->slot, v, __ATOMIC_RELEASE);
     }
+    char set[256];
+    size_t k = 0;
+    set[0] = 0;
     for (uint32_t i = 0; i < m->count; i++) {
-        if (local[i])
+        if (local[i]) {
             rl_log(RL_LOG_INFO, "mods", "bundled mod %s is on", m->mods[i].key);
+            int w = snprintf(set + k, sizeof set - k, "%s%s", k ? " " : "", m->mods[i].key);
+            if (w > 0 && (size_t)w < sizeof set - k)
+                k += (size_t)w;
+        }
         if (on)
             on[i] = local[i];
     }
+    rl_report_info("mods", k ? set : "none");
     return 0;
 }
 

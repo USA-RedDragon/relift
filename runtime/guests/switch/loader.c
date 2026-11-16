@@ -14,13 +14,13 @@
 #include <relift/window.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
-#include <stdio.h>
 #endif
 
 static const rl_switch_hook *g_hooks[RL_SWITCH_HOOKS];
@@ -371,6 +371,62 @@ static void attach_mods(const rl_switch_program *p)
         rl_hos_mods_attach(m->base, m->build_id);
 }
 
+static const rl_switch_program *g_program;
+
+/** @brief Report peek: bytes of a module's image (text, rodata, data as loaded), never bss or other memory. */
+static bool report_peek(uint64_t a, void *out, size_t n)
+{
+    const rl_switch_program *p = g_program;
+    for (uint32_t i = 0; p && i < p->module_count; i++) {
+        const rl_switch_module *m = &p->modules[i];
+        if (a >= m->base && a - m->base <= m->image_size && n <= m->image_size - (a - m->base)) {
+            memcpy(out, rl_mem_base() + a, n);
+            return true;
+        }
+    }
+    return false;
+}
+
+/** @brief Report place: the module segment that holds a. */
+static void report_where(uint64_t a, char *buf, size_t n)
+{
+    const rl_switch_program *p = g_program;
+    for (uint32_t i = 0; p && i < p->module_count; i++) {
+        const rl_switch_module *m = &p->modules[i];
+        if (a < m->base)
+            continue;
+        uint64_t off = a - m->base;
+        const char *seg = off >= m->text_off && off - m->text_off < m->text_size   ? "text"
+                          : off >= m->ro_off && off - m->ro_off < m->ro_size       ? "rodata"
+                          : off >= m->data_off && off - m->data_off < m->data_size ? "data"
+                          : off >= m->data_off + m->data_size && off - m->data_off - m->data_size < m->bss_size
+                              ? "bss"
+                              : NULL;
+        if (seg) {
+            snprintf(buf, n, "%s %s segment", m->name ? m->name : "?", seg);
+            return;
+        }
+    }
+    snprintf(buf, n, "no module (heap, stack or unmapped)");
+}
+
+static const rl_report_guest g_report_guest = { report_peek, report_where, 4, NULL };
+
+/** @brief Tells stop reports the program's identity and modules. */
+static void report_program(const rl_switch_program *p)
+{
+    char v[64];
+    g_program = p;
+    rl_report_set_guest(&g_report_guest);
+    rl_report_info("guest", "switch");
+    snprintf(v, sizeof v, "%016llx", (unsigned long long)p->program_id);
+    rl_report_info("program", v);
+    for (uint32_t i = 0; i < p->module_count; i++) {
+        const rl_switch_module *m = &p->modules[i];
+        rl_report_module(m->name, m->base, m->image_size + m->bss_size, m->build_id);
+    }
+}
+
 static void write_mod(void *user, uint64_t addr, const uint8_t *bytes, uint32_t size)
 {
     (void)user;
@@ -453,13 +509,14 @@ static int run_program(void *arg)
         if (link_module(p, &p->modules[i]) != 0)
             return 1;
     attach_mods(p);
+    report_program(p);
     if (p->code_map_count) {
 #if defined(RL_HOTLOAD)
         rl_fn cold_first = rl_dispatch_cold;
 #else
         rl_fn cold_first = NULL;
 #endif
-        if (rl_code_maps_register(p->code_maps, p->code_map_count, rl_dispatch_trap, cold_first) != 0) {
+        if (rl_code_maps_register(p->code_maps, p->code_map_count, cold_first) != 0) {
             rl_log(RL_LOG_ERROR, "loader", "the code maps disagree with the lifted units");
             return 1;
         }

@@ -149,6 +149,17 @@ bool rl_crash_os_symbolize(uintptr_t pc, char *buf, size_t n)
     return true;
 }
 
+__attribute__((noinline)) int rl_crash_capture(uintptr_t *frames, int max)
+{
+    PVOID tmp[RL_CRASH_MAX_FRAMES];
+    if (max > RL_CRASH_MAX_FRAMES)
+        max = RL_CRASH_MAX_FRAMES;
+    USHORT n = RtlCaptureStackBackTrace(1, (DWORD)max, tmp, NULL);
+    for (USHORT i = 0; i < n; i++)
+        frames[i] = (uintptr_t)tmp[i];
+    return n;
+}
+
 void rl_crash_os_write(const char *s, size_t n)
 {
     HANDLE h = GetStdHandle(STD_ERROR_HANDLE);

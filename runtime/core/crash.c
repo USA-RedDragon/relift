@@ -153,6 +153,10 @@ void rl_crash_set_extra(rl_crash_extra *fn)
     g_extra = fn;
 }
 
+static rl_crash_file_fn *volatile g_file;
+
+void rl_crash_set_file(rl_crash_file_fn *fn) { g_file = fn; }
+
 typedef struct out_buf {
     char *p;
     size_t n;
@@ -264,4 +268,7 @@ void rl_crash_report(const rl_crash_info *ci)
     char buf[16384];
     size_t len = rl_crash_format(ci, buf, sizeof buf);
     rl_crash_os_write(buf, len);
+    rl_crash_file_fn *f = g_file;
+    if (f)
+        f(buf, len);
 }

@@ -152,6 +152,24 @@ bool rl_crash_os_symbolize(uintptr_t pc, char *buf, size_t n)
     return true;
 }
 
+__attribute__((noinline)) int rl_crash_capture(uintptr_t *frames, int max)
+{
+    uintptr_t fp = (uintptr_t)__builtin_frame_address(0);
+    uintptr_t sp = (uintptr_t)&fp;
+    int n = 0;
+    while (n < max && fp && (fp & 7) == 0 && fp >= sp && fp - sp < RL_CRASH_STACK_SPAN) {
+        const uintptr_t *f = (const uintptr_t *)fp;
+        uintptr_t next = f[0], ret = f[1];
+        if (!ret)
+            break;
+        frames[n++] = ret;
+        if (next <= fp)
+            break;
+        fp = next;
+    }
+    return n;
+}
+
 void rl_crash_os_write(const char *s, size_t n)
 {
     while (n) {

@@ -78,6 +78,24 @@ static void describe(const rl_ctx *c, char *buf, size_t n)
     snprintf(buf, n, "lr 0x%llx, sp 0x%llx", (unsigned long long)c->x[30], (unsigned long long)c->sp);
 }
 
+static void regs(const rl_ctx *c, char *buf, size_t n)
+{
+    size_t k = 0;
+    for (int i = 0; i < 31 && k < n; i++) {
+        int w = snprintf(buf + k, n - k, "x%-2d %016llx%s", i, (unsigned long long)c->x[i], i % 4 == 3 || i == 30 ? "\n" : "  ");
+        if (w < 0)
+            break;
+        k += (size_t)w;
+    }
+    if (k < n)
+        snprintf(buf + k, n - k,
+                 "sp  %016llx  pc  %016llx  nzcv %08x  fpcr %08x  fpsr %08x\ntpidr_el0 %016llx  tpidrro_el0 %016llx\n",
+                 (unsigned long long)c->sp, (unsigned long long)c->pc, c->nzcv, c->fpcr, c->fpsr,
+                 (unsigned long long)c->tpidr_el0, (unsigned long long)c->tpidrro_el0);
+}
+
+static uint64_t call_site(const rl_ctx *c) { return c->x[30] >= 4 ? c->x[30] - 4 : RL_SITE_NONE; }
+
 static const rl_cpu_desc g_arm64 = {
     .name = "arm64",
     .ctx_size = sizeof(rl_ctx),
@@ -89,6 +107,8 @@ static const rl_cpu_desc g_arm64 = {
     .ctx_init = ctx_init,
     .bind = bind,
     .describe = describe,
+    .regs = regs,
+    .call_site = call_site,
 };
 
 const rl_cpu_desc *rl_arm64_cpu(void) { return &g_arm64; }
@@ -101,20 +121,29 @@ int rl_call_guest(rl_ctx *c, uint8_t *mem, uint64_t entry)
 
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
-    rl_fn f = rl_core_miss_load(c, c->pc, c->fpcr);
+    rl_miss_info m = rl_core_miss_classify(c, c->pc, (uintptr_t)__builtin_return_address(0));
+    rl_fn f = rl_core_miss_load(c, &m, c->fpcr);
     if (f)
         RL_MUSTTAIL return f(c, mem);
-    return rl_core_miss(c, mem, c->pc);
+    return rl_core_miss_at(c, mem, &m);
 }
 
-int rl_dispatch_trap(rl_ctx *c, uint8_t *mem) { return rl_core_trap(c, mem, c->pc); }
+int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+{
+    rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
+    c->pend.pc = 0;
+    rl_fn f = rl_core_miss_load(c, &m, c->fpcr);
+    if (f)
+        RL_MUSTTAIL return f(c, mem);
+    return rl_core_miss_at(c, mem, &m);
+}
 
 int rl_dispatch_cold(rl_ctx *c, uint8_t *mem)
 {
     rl_fn f = rl_core_cold(c->pc);
     if (f)
         RL_MUSTTAIL return f(c, mem);
-    return rl_core_trap(c, mem, c->pc);
+    return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
 }
 
 int rl_resume(rl_ctx *c, uint8_t *mem, const rl_resume_regs *r)
@@ -186,13 +215,13 @@ const char *rl_arm64_insn_kind(uint32_t insn, char *buf, size_t n)
 int rl_brk(rl_ctx *c, uint8_t *mem, uint32_t imm)
 {
     (void)mem;
-    return rl_guest_fatal(c, "guest", "breakpoint BRK #%u", imm);
+    return rl_guest_fatal(c, "breakpoint", "breakpoint BRK #%u", imm);
 }
 
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     char kind[32];
     (void)mem;
-    return rl_guest_fatal(c, "guest", "undefined instruction 0x%08x (%s) at guest pc 0x%llx", insn,
-                          rl_arm64_insn_kind(insn, kind, sizeof kind), (unsigned long long)pc);
+    return rl_guest_stop_at(c, "undefined instruction", pc, "undefined instruction 0x%08x (%s) at guest pc 0x%llx",
+                            insn, rl_arm64_insn_kind(insn, kind, sizeof kind), (unsigned long long)pc);
 }

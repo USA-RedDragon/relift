@@ -546,7 +546,7 @@ TEST(sm83_halt_with_nothing_to_wake_it_stops_the_guest)
     mc.ie = 0x01;
     c->pc = 0x0150;
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_sm83_halt(c, ram);
@@ -583,7 +583,7 @@ TEST(sm83_undefined_report_names_the_registers)
     rl_ctx *c = t->ctx;
     set_regs(c);
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_undefined(c, ram, 0x0150, 0xD3);
@@ -591,9 +591,8 @@ TEST(sm83_undefined_report_names_the_registers)
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
     CHECK_EQ(c->pend.code, RL_EXIT_SOFTWARE);
-    CHECK(strstr(out,
-                 "undefined instruction 0xd3 at guest pc 0x0150 (af 12b0 Z-HC, bc 3456, de 789a, hl c0de, sp fff0, pc 0150, ime 1)") !=
-          NULL);
+    CHECK(strstr(out, "kind: undefined instruction\nsummary: undefined instruction 0xd3 at guest pc 0x0150\n") != NULL);
+    CHECK(strstr(out, "\nregisters:\n  af 12b0 Z-HC, bc 3456, de 789a, hl c0de, sp fff0, pc 0150, ime 1\n") != NULL);
     c->pend.kind = RL_PEND_NONE;
     saved = capture_begin(fds);
     rc = rl_undefined(c, ram, 0x0150, 0xCB10);
@@ -613,15 +612,16 @@ TEST(sm83_trap_report_and_halted_marker)
     set_regs(c);
     c->halted = 1;
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_trap(c, ram, 0x10);
     capture_end(fds, saved, out, sizeof out);
     CHECK_EQ(rc, RL_PENDING);
     CHECK_EQ(c->pend.kind, RL_PEND_EXIT_PROCESS);
-    CHECK(strstr(out, "trap 0x10 (af 12b0 Z-HC,") != NULL);
-    CHECK(strstr(out, "ime 1, halted)") != NULL);
+    CHECK(strstr(out, "kind: trap\nsummary: trap 0x10\n") != NULL);
+    CHECK(strstr(out, "\nregisters:\n  af 12b0 Z-HC,") != NULL);
+    CHECK(strstr(out, "ime 1, halted\n") != NULL);
     c->pend.kind = RL_PEND_NONE;
     rl_sched_destroy(s);
     rl_thread_free(t);
@@ -636,7 +636,7 @@ TEST(sm83_a_miss_reports_the_target)
     rl_ctx *c = t->ctx;
     set_regs(c);
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_indirect(c, 0x4321)(c, ram);
@@ -781,7 +781,7 @@ TEST(sm83_stop_with_nothing_to_wake_it_stops_the_guest)
     rl_ctx *c = t->ctx;
     mc.stop = (rl_sm83_stop_info){.kind = RL_SM83_STOP_MODE};
     int fds[2];
-    char out[1024];
+    static char out[32768];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int rc = rl_sm83_stop(c, ram);

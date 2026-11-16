@@ -7,6 +7,9 @@
  */
 #include "runner.h"
 
+#include "crash.h"
+
+#include <dirent.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -30,6 +33,7 @@ static int g_binds;
 static void fake_init(rl_ctx *c) { c->init_mark = 0x5EED; }
 static void fake_bind(rl_ctx *c) { (void)c; g_binds++; }
 static void fake_describe(const rl_ctx *c, char *buf, size_t n) { snprintf(buf, n, "r15 0x%x", c->r[15]); }
+static uint64_t fake_call_site(const rl_ctx *c) { return c->r[14] - 2u; }
 
 static const rl_cpu_desc fake_cpu = {
     .name = "fake",
@@ -41,6 +45,7 @@ static const rl_cpu_desc fake_cpu = {
     .ctx_init = fake_init,
     .bind = fake_bind,
     .describe = fake_describe,
+    .call_site = fake_call_site,
 };
 
 static const rl_guest_desc fake_guest = {
@@ -78,8 +83,14 @@ static void capture_end(int fds[2], int saved, char *buf, size_t n)
     dup2(saved, 2);
     close(saved);
     close(fds[1]);
-    ssize_t got = read(fds[0], buf, n - 1);
-    buf[got > 0 ? got : 0] = 0;
+    size_t len = 0;
+    while (len + 1 < n) {
+        ssize_t got = read(fds[0], buf + len, n - 1 - len);
+        if (got <= 0)
+            break;
+        len += (size_t)got;
+    }
+    buf[len] = 0;
     close(fds[0]);
 }
 
@@ -89,6 +100,35 @@ static int count_of(const char *hay, const char *needle)
     for (const char *p = strstr(hay, needle); p; p = strstr(p + 1, needle))
         n++;
     return n;
+}
+
+/** @brief Makes a fresh report folder under TMPDIR and points stop reports at it. */
+static void report_dir(char *dir, size_t n)
+{
+    const char *tmp = getenv("TMPDIR");
+    snprintf(dir, n, "%s/relift-report-XXXXXX", tmp && *tmp ? tmp : ".");
+    if (!mkdtemp(dir))
+        dir[0] = 0;
+    rl_report_set_dir(dir);
+}
+
+/** @brief Removes the report folder report_dir made, with the files in it, and points stop reports nowhere. */
+static void report_dir_done(const char *dir)
+{
+    rl_report_set_dir("");
+    DIR *d = dir[0] ? opendir(dir) : NULL;
+    if (!d)
+        return;
+    struct dirent *e;
+    char path[1024];
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        unlink(path);
+    }
+    closedir(d);
+    rmdir(dir);
 }
 
 TEST(core_needs_descriptors)
@@ -339,13 +379,6 @@ TEST(core_hot_units_fill_a_fixed_table)
     rl_thread_free(t);
 }
 
-static int fn_trap(rl_ctx *c, uint8_t *mem)
-{
-    (void)mem;
-    c->r[1] = 0x7;
-    return RL_OK;
-}
-
 static int fn_first(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
@@ -370,23 +403,26 @@ TEST(core_code_maps_fill_every_slot_of_their_pages)
     static const uint32_t pages[] = { 0 };
     rl_code_map m = { RL_CODE_MAP_VERSION, 1, 1, 0x1000, pages, pat, &h, &cu, "fake" };
     const rl_code_map *maps[] = { &m };
-    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    CHECK_EQ(rl_code_maps_register(maps, 1, NULL), -1);
     pat[0] = RL_CODE_HOT | RL_CODE_HOT << 2;
-    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    CHECK_EQ(rl_code_maps_register(maps, 1, NULL), -1);
     pat[0] = RL_CODE_COLD | RL_CODE_COLD << 2 | RL_CODE_COLD << 4;
-    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    CHECK_EQ(rl_code_maps_register(maps, 1, NULL), -1);
     pat[0] = RL_CODE_HOT | RL_CODE_COLD << 2;
-    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    CHECK_EQ(rl_code_maps_register(maps, 1, NULL), -1);
     m.pattern_count = 0;
     pat[0] = RL_CODE_HOT | RL_CODE_COLD << 2 | RL_CODE_COLD << 4;
-    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, NULL), -1);
+    CHECK_EQ(rl_code_maps_register(maps, 1, NULL), -1);
     m.pattern_count = 1;
-    CHECK_EQ(rl_code_maps_register(maps, 1, fn_trap, fn_first), 0);
+    CHECK_EQ(rl_code_maps_register(maps, 1, fn_first), 0);
     CHECK(rl_dispatch_find(0x1000) == fn_a);
     CHECK(rl_dispatch_find(0x1002) == fn_first);
     CHECK(rl_dispatch_find(0x1004) == fn_first);
-    CHECK(rl_dispatch_find(0x1006) == fn_trap);
-    CHECK(rl_dispatch_find(0x1000 + 2 * (RL_CODE_PAGE_SLOTS - 1)) == fn_trap);
+    CHECK(rl_dispatch_find(0x1006) == NULL);
+    CHECK(rl_dispatch_find(0x1000 + 2 * (RL_CODE_PAGE_SLOTS - 1)) == NULL);
+    CHECK_EQ(rl_code_class(0x1006, NULL), RL_CODE_TRAP);
+    CHECK_EQ(rl_code_class(0x1002, NULL), RL_CODE_COLD);
+    CHECK_EQ(rl_code_class(0x1000 + 2 * RL_CODE_PAGE_SLOTS, NULL), -1);
     CHECK(rl_core_cold(0x1006) == NULL);
     CHECK(rl_core_cold(0x1002) == fn_b);
     CHECK(rl_dispatch_find(0x1002) == fn_b);
@@ -403,7 +439,8 @@ TEST(core_dev_miss_without_a_server_says_why)
     char out[2048];
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
-    rl_fn f = rl_core_miss_load(t->ctx, 0x4444, 0);
+    rl_miss_info m = { 0x4444, RL_SITE_NONE, RL_MISS_CALL, 0 };
+    rl_fn f = rl_core_miss_load(t->ctx, &m, 0);
     capture_end(fds, saved, out, sizeof out);
     CHECK(f == NULL);
 #if defined(RL_HOTLOAD)
@@ -424,19 +461,26 @@ TEST(core_pending_and_fatal_reports)
     CHECK_EQ(c->k.pend.kind, RL_PEND_EXIT_THREAD);
     c->r[15] = 0x1234;
     int fds[2];
-    char out[2048];
+    static char out[32768];
+    char dir[512];
+    report_dir(dir, sizeof dir);
     int saved = capture_begin(fds);
     CHECK(saved >= 0);
     int a = rl_guest_fatal(c, "test", "bad thing %d", 7);
-    int b = rl_core_miss(c, rl_mem_base(), 0x4444);
+    int b = rl_core_miss(c, rl_mem_base(), 0x4444, 0);
     capture_end(fds, saved, out, sizeof out);
     CHECK_EQ(a, RL_PENDING);
     CHECK_EQ(b, RL_PENDING);
     CHECK_EQ(c->k.pend.kind, RL_PEND_EXIT_PROCESS);
     CHECK_EQ(c->k.pend.code, RL_EXIT_SOFTWARE);
     CHECK_EQ(c->k.pend.sp, RL_SP_NONE);
-    CHECK_EQ(count_of(out, "bad thing 7 (r15 0x1234)"), 1);
-    CHECK_EQ(count_of(out, "missed code: no function at guest 0x4444 (r15 0x1234)"), 1);
+    CHECK_EQ(count_of(out, "kind: test\nsummary: bad thing 7\n"), 1);
+    CHECK_EQ(count_of(out, "kind: missed code\nsummary: no function at guest 0x4444\n"), 1);
+    CHECK_EQ(count_of(out, "transfer: entry\ntarget: 0x4444\n"), 1);
+    CHECK_EQ(count_of(out, "  r15 0x1234\n"), 2);
+    CHECK_EQ(count_of(out, "end of report\n"), 2);
+    report_dir_done(dir);
+    rl_report_reset();
     rl_thread_free(t);
 }
 
@@ -475,4 +519,185 @@ TEST(core_config_names_no_guest)
     CHECK(!rl_cfg()->strict);
     CHECK(!rl_cfg()->trace_os);
     CHECK_EQ(rl_cfg()->address_bits, 0);
+}
+
+static uint8_t g_peek_bytes[16] = { 0x1f, 0x20, 0x03, 0xd5, 0xc0, 0x03, 0x5f, 0xd6 };
+
+static bool fake_peek(uint64_t a, void *out, size_t n)
+{
+    if (a < 0x1800 || a + n > 0x1800 + sizeof g_peek_bytes)
+        return false;
+    memcpy(out, g_peek_bytes + (a - 0x1800), n);
+    return true;
+}
+
+static void fake_where(uint64_t a, char *buf, size_t n) { snprintf(buf, n, "fake segment at 0x%llx", (unsigned long long)a); }
+
+static const rl_report_guest fake_report_guest = { fake_peek, fake_where, 4, NULL };
+
+static const rl_fn_info report_fns[] = {
+    { 0x1000, 0x1000, 0x20, 0, fn_a, "_ZN5guest4fake1aEv", "guest::fake::a()" },
+};
+static const rl_fn_map report_map = { RL_FN_MAP_VERSION, 1, report_fns, "fake", "shard0000", 0x1000, NULL, NULL };
+
+/** @brief Reads the whole file at path into buf (NUL terminated); returns its length or -1. */
+static long read_all(const char *path, char *buf, size_t n)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return -1;
+    size_t k = fread(buf, 1, n - 1, f);
+    fclose(f);
+    buf[k] = 0;
+    return (long)k;
+}
+
+TEST(core_stop_report_names_the_jump_site_and_the_target)
+{
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    rl_fn_maps_reset();
+    const rl_fn_map *maps[] = { &report_map };
+    CHECK_EQ(rl_fn_maps_register(maps, 1), 0);
+    rl_report_reset();
+    rl_report_info("relift", "0.0.0-test");
+    rl_report_module("fake", 0x1000, 0x1000, "00112233");
+    rl_report_set_guest(&fake_report_guest);
+    struct rl_thread *t = rl_thread_alloc();
+    CHECK(t != NULL);
+    rl_ctx *c = t->ctx;
+    c->r[15] = 0x1234;
+    char dir[512], path[1400];
+    report_dir(dir, sizeof dir);
+    CHECK(dir[0] != 0);
+    rl_miss_info m = { 0x1800, 0x1008, RL_MISS_JUMP, 0 };
+    int fds[2];
+    static char out[65536], file[65536];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    CHECK_EQ(rl_report_stop(c, "missed code", "no function at guest 0x1800", &m, path, sizeof path), 0);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK(strncmp(path, dir, strlen(dir)) == 0);
+    CHECK(read_all(path, file, sizeof file) > 0);
+    CHECK(strstr(out, file) != NULL);
+    CHECK(strstr(out, "[relift error stop] missed code: no function at guest 0x1800; report written to ") != NULL);
+    CHECK_EQ(strncmp(file, "relift stop report 1\nkind: missed code\nsummary: no function at guest 0x1800\n"
+                           "relift: 0.0.0-test\nmodule: fake base 0x1000 size 0x1000 build 00112233\n",
+                     strlen("relift stop report 1\nkind: missed code\nsummary: no function at guest 0x1800\n"
+                            "relift: 0.0.0-test\nmodule: fake base 0x1000 size 0x1000 build 00112233\n")),
+             0);
+    CHECK_EQ(count_of(file, "\ntransfer: jump\ntarget: 0x1800 fake+0x800\n"), 1);
+    CHECK_EQ(count_of(file, "\ntarget code: not lifted (outside every lifted function)\n"), 1);
+    CHECK_EQ(count_of(file, "\ntarget where: fake segment at 0x1800\n"), 1);
+    CHECK_EQ(count_of(file, "\ntarget words 0x1800: d503201f d65f03c0 00000000 00000000\n"), 1);
+    CHECK_EQ(count_of(file, "\nsite: 0x1008 fake+0x8\nsite function: 0x1000 fake+0x0 guest::fake::a() +0x8\n"), 1);
+    CHECK_EQ(count_of(file, "\nsite words: unreadable\n"), 1);
+    CHECK_EQ(count_of(file, "\nregisters:\n  r15 0x1234\n"), 1);
+    CHECK_EQ(count_of(file, "\nhost backtrace:\n  #0 "), 1);
+    CHECK_EQ(count_of(file, "\nend of report\n"), 1);
+    report_dir_done(dir);
+    rl_report_reset();
+    rl_fn_maps_reset();
+    rl_thread_free(t);
+}
+
+TEST(core_stop_reports_of_one_second_get_files_of_their_own)
+{
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    rl_report_reset();
+    struct rl_thread *t = rl_thread_alloc();
+    CHECK(t != NULL);
+    char dir[512], a[1400], b[1400], c2[1400];
+    report_dir(dir, sizeof dir);
+    int fds[2];
+    static char out[32768];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    CHECK_EQ(rl_report_stop(t->ctx, "test", "one", NULL, a, sizeof a), 0);
+    CHECK_EQ(rl_report_stop(t->ctx, "test", "two", NULL, b, sizeof b), 0);
+    CHECK_EQ(rl_report_stop(t->ctx, "test", "three", NULL, c2, sizeof c2), 0);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK(strcmp(a, b) != 0);
+    CHECK(strcmp(b, c2) != 0);
+    CHECK(strcmp(a, c2) != 0);
+    static char text[32768];
+    CHECK(read_all(a, text, sizeof text) > 0);
+    CHECK(strstr(text, "\nsummary: one\n") != NULL);
+    CHECK(read_all(b, text, sizeof text) > 0);
+    CHECK(strstr(text, "\nsummary: two\n") != NULL);
+    report_dir_done(dir);
+    rl_report_reset();
+    rl_thread_free(t);
+}
+
+TEST(core_a_host_fault_report_goes_to_a_file_too)
+{
+    char dir[512];
+    report_dir(dir, sizeof dir);
+    CHECK(dir[0] != 0);
+    rl_crash_info ci;
+    memset(&ci, 0, sizeof ci);
+    ci.kind = "SIGSEGV";
+    ci.pc = 0x1234;
+    int fds[2];
+    static char out[32768];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    rl_crash_report(&ci);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK(strstr(out, "[relift crash] SIGSEGV") != NULL);
+    DIR *d = opendir(dir);
+    CHECK(d != NULL);
+    int files = 0;
+    char path[1024] = "";
+    struct dirent *e;
+    while (d && (e = readdir(d)) != NULL)
+        if (!strncmp(e->d_name, "relift-crash-", 13)) {
+            files++;
+            snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        }
+    if (d)
+        closedir(d);
+    CHECK_EQ(files, 1);
+    static char text[32768];
+    CHECK(read_all(path, text, sizeof text) > 0);
+    CHECK(strstr(text, "[relift crash] SIGSEGV") != NULL);
+    report_dir_done(dir);
+    rl_crash_set_file(NULL);
+}
+
+TEST(core_stop_report_takes_a_call_site_from_the_cpu)
+{
+    CHECK_EQ(rl_core_init(&fake_guest, &fake_cpu), 0);
+    rl_fn_maps_reset();
+    const rl_fn_map *maps[] = { &report_map };
+    CHECK_EQ(rl_fn_maps_register(maps, 1), 0);
+    rl_report_reset();
+    rl_report_module("fake", 0x1000, 0x1000, NULL);
+    struct rl_thread *t = rl_thread_alloc();
+    CHECK(t != NULL);
+    rl_ctx *c = t->ctx;
+    c->r[14] = 0x100c;
+    rl_miss_info e = rl_core_miss_classify(c, 0x1800, 0);
+    CHECK_EQ(e.reason, RL_MISS_ENTRY);
+    CHECK_EQ(e.site, RL_SITE_NONE);
+    rl_miss_info m = rl_core_miss_classify(c, 0x1800, (uintptr_t)fn_a + 1);
+    CHECK_EQ(m.reason, RL_MISS_CALL);
+    CHECK_EQ(m.site, 0x100a);
+    char dir[512];
+    report_dir(dir, sizeof dir);
+    int fds[2];
+    static char out[65536];
+    int saved = capture_begin(fds);
+    CHECK(saved >= 0);
+    CHECK_EQ(rl_core_miss_at(c, rl_mem_base(), &m), RL_PENDING);
+    capture_end(fds, saved, out, sizeof out);
+    CHECK_EQ(count_of(out, "\ntransfer: call\ntarget: 0x1800 fake+0x800\n"), 1);
+    CHECK_EQ(count_of(out, "\nsite: 0x100a fake+0xa\nsite function: 0x1000 fake+0x0 guest::fake::a() +0xa\n"), 1);
+    CHECK_EQ(count_of(out, "\ncaller function: 0x1000 fake+0x0 guest::fake::a() (host _ZN5guest4fake1aEv+0x1)\n"), 1);
+    CHECK_EQ(count_of(out, "module: fake base 0x1000 size 0x1000 build -\n"), 1);
+    CHECK_EQ(c->k.pend.kind, RL_PEND_EXIT_PROCESS);
+    report_dir_done(dir);
+    rl_report_reset();
+    rl_fn_maps_reset();
+    rl_thread_free(t);
 }

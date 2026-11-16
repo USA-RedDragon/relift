@@ -158,6 +158,23 @@ static void describe(const rl_ctx *c, char *buf, size_t n)
              c->halted ? ", halted" : "");
 }
 
+/**
+ * @brief The return address a lifted CALL or RST pushed is on top of the
+ * guest stack: the call is the 3-byte CALL before it, else the 1-byte RST.
+ */
+static uint64_t call_site(const rl_ctx *c)
+{
+    uint8_t b[2], op;
+    if (!rl_report_peek(c->sp, b, 2))
+        return RL_SITE_NONE;
+    uint16_t ret = (uint16_t)(b[0] | b[1] << 8);
+    if (rl_report_peek((uint16_t)(ret - 3u), &op, 1) && (op == 0xCD || (op & 0xE7) == 0xC4))
+        return (uint16_t)(ret - 3u);
+    if (rl_report_peek((uint16_t)(ret - 1u), &op, 1) && (op & 0xC7) == 0xC7)
+        return (uint16_t)(ret - 1u);
+    return RL_SITE_NONE;
+}
+
 static void ctx_init(rl_ctx *c)
 {
     c->ime = 0;
@@ -174,6 +191,7 @@ static const rl_cpu_desc g_sm83 = {
     .time_offset = RL_SM83_TIME_OFFSET,
     .ctx_init = ctx_init,
     .describe = describe,
+    .call_site = call_site,
 };
 
 const rl_cpu_desc *rl_sm83_cpu(void) { return &g_sm83; }
@@ -186,19 +204,30 @@ int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     if (g_miss)
         RL_MUSTTAIL return g_miss(c, mem);
-    return rl_core_miss(c, mem, c->pc);
+    return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
+}
+
+int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+{
+    rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
+    c->pend.pc = 0;
+    if (g_miss)
+        RL_MUSTTAIL return g_miss(c, mem);
+    return rl_core_miss_at(c, mem, &m);
 }
 
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     (void)mem;
     if (insn > 0xFFu)
-        return rl_guest_fatal(c, "guest", "undefined instruction 0x%04x at guest pc 0x%04llx", insn, (unsigned long long)pc);
-    return rl_guest_fatal(c, "guest", "undefined instruction 0x%02x at guest pc 0x%04llx", insn, (unsigned long long)pc);
+        return rl_guest_stop_at(c, "undefined instruction", pc, "undefined instruction 0x%04x at guest pc 0x%04llx", insn,
+                                (unsigned long long)pc);
+    return rl_guest_stop_at(c, "undefined instruction", pc, "undefined instruction 0x%02x at guest pc 0x%04llx", insn,
+                            (unsigned long long)pc);
 }
 
 int rl_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
 {
     (void)mem;
-    return rl_guest_fatal(c, "guest", "trap 0x%x", code);
+    return rl_guest_fatal(c, "trap", "trap 0x%x", code);
 }

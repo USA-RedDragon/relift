@@ -69,7 +69,7 @@ int rl_sync(rl_ctx *c, uint8_t *mem, uint64_t next)
             return rl_guest_fatal(c, "sched", "%u interrupt entries are open at once; a handler neither returns nor leaves the interrupt state", k->irq_depth);
         rl_fn fn = rl_dispatch_find(pc);
         k->irq_depth++;
-        int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc);
+        int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc, 0);
         k->irq_depth--;
         if (r != RL_OK)
             return RL_PENDING;
@@ -92,7 +92,7 @@ int rl_run_from(rl_ctx *c, uint8_t *mem, uint64_t pc)
 {
     for (;;) {
         rl_fn fn = rl_dispatch_find(pc);
-        int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc);
+        int r = fn ? fn(c, mem) : rl_core_miss(c, mem, pc, 0);
         rl_pending *p = &rl_common(c)->pend;
         if (r == RL_OK || p->kind != RL_PEND_REDIRECT)
             return r;

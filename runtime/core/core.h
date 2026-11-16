@@ -118,6 +118,19 @@ typedef struct rl_cpu_desc {
     void (*bind)(rl_ctx *c);
     /** @brief Writes a short register summary of c for crash reports into buf (NUL terminated), or NULL. */
     void (*describe)(const rl_ctx *c, char *buf, size_t n);
+    /**
+     * @brief Writes the whole register file of c for a stop report into buf,
+     * one or more lines of `name value` pairs, each line ending in a newline
+     * (NUL terminated), or NULL to use describe.
+     */
+    void (*regs)(const rl_ctx *c, char *buf, size_t n);
+    /**
+     * @brief The guest address of the computed call that missed, from the
+     * architectural state the call left in c (the return address it set), or
+     * NULL when the CPU cannot tell. Called only for a miss entered by a host
+     * call from lifted code. Returns RL_SITE_NONE when unknown.
+     */
+    uint64_t (*call_site)(const rl_ctx *c);
 } rl_cpu_desc;
 
 /**
@@ -433,8 +446,106 @@ RL_RUNTIME_API int rl_pend_exit_thread(rl_ctx *c);
  * and returns RL_PENDING.
  */
 RL_RUNTIME_API int rl_guest_fatal(rl_ctx *c, const char *tag, const char *fmt, ...) RL_PRINTF(3, 4);
-/** @brief The shipped-build miss path: reports that no function exists at guest target and stops (rl_guest_fatal). */
-RL_RUNTIME_API int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target);
+
+/** @brief rl_miss_info.site when the transfer site is unknown. */
+#define RL_SITE_NONE UINT64_MAX
+/** @brief rl_miss_info.reason of a stop at an instruction rather than a transfer (target and site are its address). */
+#define RL_MISS_NONE 0u
+
+/**
+ * @brief Reports a fatal stop at the guest instruction at pc (undefined
+ * instruction, trap): writes the stop report of kind with the formatted
+ * summary, sets an RL_PEND_EXIT_PROCESS record with RL_EXIT_SOFTWARE and
+ * returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_guest_stop_at(rl_ctx *c, const char *kind, uint64_t pc, const char *fmt, ...) RL_PRINTF(4, 5);
+
+/** @brief What the runtime knows about a dispatch miss. */
+typedef struct rl_miss_info {
+    /** @brief Guest address with no function. */
+    uint64_t target;
+    /** @brief Guest address of the instruction that transferred there, or RL_SITE_NONE. */
+    uint64_t site;
+    /** @brief enum rl_miss_reason. */
+    uint32_t reason;
+    /** @brief Host return address into the lifted caller (RL_MISS_CALL), or 0. */
+    uintptr_t host_ret;
+} rl_miss_info;
+
+/**
+ * @brief The shipped-build miss path: writes the stop report for m (docs/abi.md
+ * section 11, stop reports) and sets an RL_PEND_EXIT_PROCESS record with
+ * RL_EXIT_SOFTWARE. Returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_core_miss_at(rl_ctx *c, uint8_t *mem, const rl_miss_info *m);
+/**
+ * @brief The miss entry of a CPU layer's rl_dispatch_miss: host_ret is the
+ * address the dispatcher returns to. A return address in lifted code makes it
+ * a computed call (site from rl_cpu_desc.call_site), anything else an entry
+ * from the runtime. Returns RL_PENDING.
+ */
+RL_RUNTIME_API int rl_core_miss(rl_ctx *c, uint8_t *mem, uint64_t target, uintptr_t host_ret);
+/** @brief rl_miss_info of a miss entered from host_ret, as rl_core_miss classifies it. */
+RL_RUNTIME_API rl_miss_info rl_core_miss_classify(rl_ctx *c, uint64_t target, uintptr_t host_ret);
+
+struct rl_fn_hit;
+
+/**
+ * @brief Guest-layer hooks for stop reports. Each may be NULL.
+ */
+typedef struct rl_report_guest {
+    /** @brief Copies n bytes of guest code or data at guest address a into out without faulting; false when a is not readable. */
+    bool (*peek)(uint64_t a, void *out, size_t n);
+    /** @brief Writes what lies at guest address a (region, bank, segment) into buf, or leaves it empty. */
+    void (*where)(uint64_t a, char *buf, size_t n);
+    /** @brief The width in bytes of the instruction words a report prints at a target (default 4). */
+    uint32_t word_bytes;
+    /**
+     * @brief For a guest whose code at one address changes (a ROM bank
+     * window): the lifted function at guest address a in the code mapped
+     * now. Returns 1 with out filled, 0 when a is in such a window and no
+     * function of the mapped code holds it, -1 when a is not in one (the
+     * registered function maps answer). NULL for none.
+     */
+    int (*find)(uint64_t a, struct rl_fn_hit *out);
+} rl_report_guest;
+
+/** @brief Reads n bytes of guest memory at a through the guest layer's peek (or module code by default); false when unreadable. */
+RL_RUNTIME_API bool rl_report_peek(uint64_t a, void *out, size_t n);
+/** @brief Sets the guest layer's report hooks (NULL for none). */
+RL_RUNTIME_API void rl_report_set_guest(const rl_report_guest *g);
+/**
+ * @brief Adds one `key: value` header line to every stop report, such as
+ * `relift`, `guest`, `mods` or `module` (`<name> base 0x<base> size 0x<size>
+ * build <id>`). A key may repeat. Copies both; up to 64 lines.
+ */
+RL_RUNTIME_API void rl_report_info(const char *key, const char *value);
+/** @brief Adds a module header line and the module range used for `name+0xoff` of any guest address. */
+RL_RUNTIME_API void rl_report_module(const char *name, uint64_t base, uint64_t size, const char *build_id);
+/** @brief Forgets the header lines and modules (tests). */
+RL_RUNTIME_API void rl_report_reset(void);
+/**
+ * @brief Sets the folder stop reports are written to. Without one, reports
+ * go to RELIFT_REPORT_DIR, else `reports` in the app's user folder when the
+ * program names an app, else the working directory.
+ */
+RL_RUNTIME_API void rl_report_set_dir(const char *dir);
+/**
+ * @brief Writes a stop report: kind (such as "missed code") and the one-line
+ * summary, the transfer of m when not NULL, the registers of c, the guest
+ * and host backtraces. The report goes to a new file in the report folder
+ * and to stderr (and the system log on Apple hosts). Formats into static
+ * buffers, so it works with a corrupt heap. path receives the file written
+ * (empty when none) when not NULL. Returns 0 when the file was written.
+ */
+RL_RUNTIME_API int rl_report_stop(rl_ctx *c, const char *kind, const char *summary, const rl_miss_info *m, char *path,
+                                  size_t path_n);
+/**
+ * @brief Works out the report folder ahead of a crash (the crash handler
+ * cannot): rl_fault_install and rl_report_set_dir call it. Creates the
+ * folder when report files are written at all.
+ */
+RL_RUNTIME_API void rl_report_prepare(void);
 
 /**
  * @brief The thread entry of a guest that uses RL_PEND_REDIRECT: runs the
@@ -452,16 +563,16 @@ RL_RUNTIME_API int rl_units_register(const rl_unit *const *units, uint32_t count
  * (docs/abi.md section 5.1): every RL_CODE_HOT slot is an entry of the hot
  * unit and set, every RL_CODE_COLD slot set and no entry of the hot unit
  * (the cold unit's entries and ranges filled it), and every RL_CODE_TRAP
- * slot no hot entry and still empty.
- * Then stores trap in every RL_CODE_TRAP slot and, when cold_first is not
- * NULL (a dev build), cold_first in every RL_CODE_COLD slot, so the first
- * dispatch to each is logged
+ * slot no hot entry and still empty. Trap slots stay empty, so a dispatch
+ * there is a miss and the miss path reports the class.
+ * Then, when cold_first is not NULL (a dev build), stores cold_first in
+ * every RL_CODE_COLD slot, so the first dispatch to each is logged
  * (rl_core_cold). Call after every static unit is registered. Returns 0 or
  * -1 (a map failed its checks).
  */
-RL_RUNTIME_API int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn trap, rl_fn cold_first);
-/** @brief The trap of an RL_CODE_TRAP slot: reports that guest target holds no instruction and stops (rl_guest_fatal). */
-RL_RUNTIME_API int rl_core_trap(rl_ctx *c, uint8_t *mem, uint64_t target);
+RL_RUNTIME_API int rl_code_maps_register(const rl_code_map *const *maps, uint32_t count, rl_fn cold_first);
+/** @brief The enum rl_code_class of guest address a in the registered code maps, with the map's module name in module when not NULL; -1 when no map covers a. */
+RL_RUNTIME_API int rl_code_class(uint64_t a, const char **module);
 /**
  * @brief The cold function of the RL_CODE_COLD slot of guest target, for a
  * CPU layer's cold_first of rl_code_maps_register: logs the first dispatch to
@@ -483,13 +594,14 @@ RL_RUNTIME_API int rl_unit_add(const rl_unit *u, char *why, size_t n);
 RL_RUNTIME_API const uint8_t *rl_dispatch_image(void);
 /**
  * @brief The dev-build miss path (docs/abi.md section 6, steps 1 to 5): under
- * the miss lock, asks relift over RELIFT_DEV_SOCKET for the code at target,
+ * the miss lock, asks relift over RELIFT_DEV_SOCKET for the code at m->target
+ * (with its site and reason; never for a trap slot of a code map),
  * loads and registers the library it builds, and returns the function now
  * registered at target. fp_mode is the CPU layer's floating-point control
  * value for the request. Returns NULL after logging why when the dev path
  * fails, and always in a build without RL_HOTLOAD.
  */
-RL_RUNTIME_API rl_fn rl_core_miss_load(rl_ctx *c, uint64_t target, uint32_t fp_mode);
+RL_RUNTIME_API rl_fn rl_core_miss_load(rl_ctx *c, const rl_miss_info *m, uint32_t fp_mode);
 /** @brief Sets the image id of the guest image set (RL_IMAGE_ID_BYTES bytes) that hot-loaded units must carry, for static units that carry none. NULL leaves it unset. */
 RL_RUNTIME_API void rl_dispatch_set_image(const uint8_t *id);
 /** @brief Drops the dispatch table (tests). */

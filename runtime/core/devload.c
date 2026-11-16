@@ -227,7 +227,7 @@ static int dev_connect(char *why, size_t n)
 }
 
 /** @brief Steps 3 to 5 for target, under the miss lock. */
-static int dev_lift(rl_ctx *c, uint64_t target, uint32_t fp_mode, char *why, size_t n)
+static int dev_lift(rl_ctx *c, const rl_miss_info *mi, uint32_t fp_mode, char *why, size_t n)
 {
     if (dev_connect(why, n) != 0)
         return -1;
@@ -238,9 +238,11 @@ static int dev_lift(rl_ctx *c, uint64_t target, uint32_t fp_mode, char *why, siz
     } m;
     memset(&m, 0, sizeof m);
     m.h = (rl_dev_hdr){ RL_DEV_MAGIC, RL_DEV_LIFT, 0, ++g_seq, sizeof m.b };
+    uint64_t target = mi->target;
     m.b.target = target;
+    m.b.site = mi->site == RL_SITE_NONE ? 0 : mi->site;
     m.b.thread_id = t ? t->host_tid : 0;
-    m.b.reason = RL_MISS_CALL;
+    m.b.reason = mi->reason;
     m.b.fp_mode = fp_mode;
     rl_dev_reply r;
     static char path[4096], msg[65536];
@@ -288,14 +290,17 @@ static int dev_lift(rl_ctx *c, uint64_t target, uint32_t fp_mode, char *why, siz
     return 0;
 }
 
-rl_fn rl_core_miss_load(rl_ctx *c, uint64_t target, uint32_t fp_mode)
+rl_fn rl_core_miss_load(rl_ctx *c, const rl_miss_info *mi, uint32_t fp_mode)
 {
     char why[2048];
+    uint64_t target = mi->target;
+    if (rl_code_class(target, NULL) == RL_CODE_TRAP)
+        return NULL;
     miss_lock();
     rl_fn f = rl_dispatch_find(target);
     if (!f) {
         why[0] = 0;
-        if (dev_lift(c, target, fp_mode, why, sizeof why) == 0) {
+        if (dev_lift(c, mi, fp_mode, why, sizeof why) == 0) {
             f = rl_dispatch_find(target);
             if (!f)
                 snprintf(why, sizeof why, "the library relift built has no function at 0x%llx",
@@ -310,10 +315,10 @@ rl_fn rl_core_miss_load(rl_ctx *c, uint64_t target, uint32_t fp_mode)
 
 #else
 
-rl_fn rl_core_miss_load(rl_ctx *c, uint64_t target, uint32_t fp_mode)
+rl_fn rl_core_miss_load(rl_ctx *c, const rl_miss_info *mi, uint32_t fp_mode)
 {
     (void)c;
-    (void)target;
+    (void)mi;
     (void)fp_mode;
     return NULL;
 }

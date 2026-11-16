@@ -17,8 +17,9 @@
 
 static int unsupported(rl_ctx *c, uint64_t pc, uint32_t insn)
 {
-    return rl_guest_fatal(c, "guest", "no FPCR slow path for instruction 0x%08x at guest pc 0x%llx (FPCR 0x%x)", insn,
-                          (unsigned long long)pc, c->fpcr);
+    return rl_guest_stop_at(c, "unsupported instruction", pc,
+                            "no FPCR slow path for instruction 0x%08x at guest pc 0x%llx (FPCR 0x%x)", insn,
+                            (unsigned long long)pc, c->fpcr);
 }
 
 static uint64_t sign_bit(unsigned w) { return 1ull << (w - 1); }

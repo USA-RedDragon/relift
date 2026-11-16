@@ -102,5 +102,16 @@ RL_RUNTIME_API void rl_crash_signal(int sig, void *siginfo, void *ucontext);
 bool rl_crash_os_symbolize(uintptr_t pc, char *buf, size_t n);
 /** @brief Writes n bytes to stderr. Host-OS part. */
 void rl_crash_os_write(const char *s, size_t n);
+/**
+ * @brief Fills frames with the return addresses of the calling thread's host
+ * frames, innermost first, starting with the caller of this function; returns
+ * the count. Frame-pointer walk on POSIX hosts, the unwind tables on
+ * Windows. Host-OS part.
+ */
+RL_RUNTIME_API int rl_crash_capture(uintptr_t *frames, int max);
+/** @brief Writes a crash report's text somewhere besides stderr; called from the crash handler, so async-signal-safe. */
+typedef void rl_crash_file_fn(const char *text, size_t len);
+/** @brief Sets the crash report's file writer (the stop reports' rl_report_prepare sets one), or NULL for none. */
+RL_RUNTIME_API void rl_crash_set_file(rl_crash_file_fn *fn);
 
 #endif

@@ -99,8 +99,12 @@ static void init_once(void)
 {
     rl_hostlib_on_gpu_driver_failed(driver_failed);
     const char *dir = rl_android_files_dir();
-    if (dir)
+    if (dir) {
         setenv("HOME", dir, 1);
+        char reports[4096];
+        snprintf(reports, sizeof reports, "%s/reports", dir);
+        rl_report_set_dir(reports);
+    }
     if (pipe(g_pipe) != 0)
         return;
     setvbuf(stdout, NULL, _IOLBF, 0);

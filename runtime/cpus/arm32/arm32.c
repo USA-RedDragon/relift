@@ -254,6 +254,53 @@ static void describe(const rl_ctx *c, char *buf, size_t n)
         snprintf(buf + k, n - (size_t)k, ", pc %08x, frames %u", c->pc, c->depth);
 }
 
+static void regs(const rl_ctx *c, char *buf, size_t n)
+{
+    size_t k = 0;
+    for (unsigned i = 0; i < 15 && k < n; i++) {
+        int w = snprintf(buf + k, n - k, "r%-2u %08x%s", i, c->r[i], i % 4 == 3 || i == 14 ? "\n" : "  ");
+        if (w < 0)
+            return;
+        k += (size_t)w;
+    }
+    if (k < n) {
+        int w = snprintf(buf + k, n - k, "pc  %08x\ncpsr %08x (%s%s%s%s %s%s%s %s)  frames %u\n", c->pc, rl_arm32_cpsr(c),
+                         c->n ? "N" : "-", c->z ? "Z" : "-", c->c ? "C" : "-", c->v ? "V" : "-", c->i ? "I" : "-",
+                         c->f ? "F" : "-", c->t ? "T" : "-", rl_arm32_mode_name(c->m), c->depth);
+        if (w < 0)
+            return;
+        k += (size_t)w;
+    }
+    for (uint32_t i = 0; i < c->depth && i < RL_ARM32_SHADOW && k < n; i++) {
+        int w = snprintf(buf + k, n - k, "frame %u returns to %08x\n", i, c->shadow[i]);
+        if (w < 0)
+            return;
+        k += (size_t)w;
+    }
+}
+
+/**
+ * @brief A computed call pushed its return address last: the call is the
+ * instruction before it, a Thumb BX, BLX or MOV PC (2 bytes) when the
+ * halfword there is one, else a 4-byte ARM instruction or Thumb BL pair. The
+ * upper halfword of an ARM load of pc (`ldrmi pc, [r0, r1]`) also reads as a
+ * Thumb BX, so a word that is one is taken as the ARM call.
+ */
+static uint64_t call_site(const rl_ctx *c)
+{
+    if (c->depth == 0 || c->depth > RL_ARM32_SHADOW)
+        return RL_SITE_NONE;
+    uint32_t ret = c->shadow[c->depth - 1u] & ~1u;
+    uint8_t b[4];
+    if (!rl_report_peek(ret - 4u, b, 4))
+        return ret - 4u;
+    uint32_t w = (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
+    uint16_t op = (uint16_t)(w >> 16);
+    bool thumb_jump = (op & 0xFF07u) == 0x4700u || (op & 0xFF87u) == 0x4687u;
+    bool arm_load_pc = (w & 0x0C10F000u) == 0x0410F000u;
+    return thumb_jump && !arm_load_pc ? ret - 2u : ret - 4u;
+}
+
 static void ctx_init(rl_ctx *c)
 {
     c->m = RL_ARM32_SVC;
@@ -271,6 +318,8 @@ static const rl_cpu_desc g_arm32 = {
     .time_offset = RL_ARM32_TIME_OFFSET,
     .ctx_init = ctx_init,
     .describe = describe,
+    .regs = regs,
+    .call_site = call_site,
 };
 
 const rl_cpu_desc *rl_arm32_cpu(void) { return &g_arm32; }
@@ -278,12 +327,21 @@ const rl_cpu_desc *rl_arm32_cpu(void) { return &g_arm32; }
 int rl_dispatch_miss(rl_ctx *c, uint8_t *mem)
 {
     g_stats.misses++;
-    return rl_core_miss(c, mem, c->pc);
+    return rl_core_miss(c, mem, c->pc, (uintptr_t)__builtin_return_address(0));
+}
+
+int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem)
+{
+    g_stats.misses++;
+    rl_miss_info m = { c->pc, c->pend.pc, RL_MISS_JUMP, 0 };
+    c->pend.pc = 0;
+    return rl_core_miss_at(c, mem, &m);
 }
 
 int rl_undefined(rl_ctx *c, uint8_t *mem, uint64_t pc, uint32_t insn)
 {
     (void)mem;
-    return rl_guest_fatal(c, "guest", "undefined instruction 0x%08x at guest pc 0x%08llx (%s state)", insn,
-                          (unsigned long long)pc, c->t ? "Thumb" : "ARM");
+    return rl_guest_stop_at(c, "undefined instruction", pc,
+                            "undefined instruction 0x%08x at guest pc 0x%08llx (%s state)", insn, (unsigned long long)pc,
+                            c->t ? "Thumb" : "ARM");
 }

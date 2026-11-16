@@ -414,6 +414,7 @@ test-portable: $(PORTABLE)
 TEST_RUN := $(CRASH_TEST) $(FIBER_TESTS) $(CORE_TESTS) $(ARM64_TESTS) $(SM83_TESTS) $(ARM32_TESTS) $(MIPS_TESTS) $(SWITCH_TESTS) $(GB_TESTS) $(GBA_TESTS) $(GBAR_TESTS)
 
 test: export RELIFT_VIDEO := headless
+test: export RELIFT_REPORT_DIR := $(abspath $(BUILD))/reports
 test: $(TESTS) $(CRASH_TEST) $(FIBER_TESTS)
 	@for t in $(abspath $(TEST_RUN)); do \
 		echo "$$t"; "$$t" || { rc=$$?; echo "test binary failed: $$t (exit $$rc)"; exit $$rc; }; \

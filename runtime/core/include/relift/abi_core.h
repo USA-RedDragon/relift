@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 5u
+#define RL_ABI_VERSION 6u
 
 /** @brief Lifted function return: normal return to the caller. */
 #define RL_OK 0
@@ -212,6 +212,25 @@ RL_RUNTIME_API void rl_io_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t
 #define RL_MUSTTAIL __attribute__((musttail))
 /** @brief Marks the unlikely branch of a pending check. */
 #define RL_UNLIKELY(x) __builtin_expect(!!(x), 0)
+/**
+ * @brief A transfer through dispatch that leaves no host frame (a computed
+ * jump, a tail call, a jump to code outside the function's known targets),
+ * as a statement inside a lifted function: `RL_JUMP(target, site);`, where
+ * site is the guest address of the transferring instruction. The hot path is
+ * the CPU layer's rl_jump_find and a tail call. On a miss the site goes to
+ * c->pend.pc (unused while pend.kind is RL_PEND_NONE) and the CPU layer's
+ * rl_dispatch_jump_miss runs in place, so the stop report names the site
+ * while the hot path carries no constant.
+ */
+#define RL_JUMP(target, site)                                                                           \
+    do {                                                                                                \
+        rl_fn rl_j_ = rl_jump_find(c, (target));                                                        \
+        if (RL_UNLIKELY(!rl_j_)) {                                                                      \
+            c->pend.pc = (site);                                                                        \
+            RL_MUSTTAIL return rl_dispatch_jump_miss(c, mem);                                           \
+        }                                                                                               \
+        RL_MUSTTAIL return rl_j_(c, mem);                                                               \
+    } while (0)
 /** @brief Compiler-only barrier at the back edge of a loop whose exit depends on a guest load. */
 #define RL_LOOP_FENCE() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 

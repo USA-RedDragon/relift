@@ -56,6 +56,11 @@ void rl_ios_init(void)
     const char *d = rl_ios_documents_dir();
     if (d && chdir(d) != 0)
         rl_log(RL_LOG_WARN, "ios", "cannot enter %s", d);
+    if (d) {
+        char reports[PATH_MAX];
+        snprintf(reports, sizeof reports, "%s/reports", d);
+        rl_report_set_dir(reports);
+    }
 }
 
 static char g_bundle[PATH_MAX];

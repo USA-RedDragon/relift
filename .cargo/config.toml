@@ -1,0 +1,2 @@
+[env]
+RELIFT_REPORT_DIR = { value = "target/test-reports", relative = true }

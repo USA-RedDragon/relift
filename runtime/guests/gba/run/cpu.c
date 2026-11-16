@@ -100,8 +100,9 @@ int rl_gba_cpu_fetch_code(rl_ctx *c, uint32_t pc, unsigned thumb, uint32_t unit)
 static int unknown_code(rl_ctx *c, uint8_t *mem)
 {
     (void)mem;
-    return rl_guest_fatal(c, "gba", "the code at 0x%08x (%s) is now 0x%0*x, which no lifted code was made from",
-                          c->pc & ~1u, c->t ? "Thumb" : "ARM", c->t ? 4 : 8, g_found);
+    return rl_guest_stop_at(c, "changed code", c->pc & ~1u,
+                            "the code at 0x%08x (%s) is now 0x%0*x, which no lifted code was made from", c->pc & ~1u,
+                            c->t ? "Thumb" : "ARM", c->t ? 4 : 8, g_found);
 }
 
 rl_fn rl_gba_cpu_variant(rl_ctx *c, uint32_t pc, unsigned thumb)

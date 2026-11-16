@@ -144,6 +144,7 @@ void rl_fault_install(rl_vm *vm)
     g_vm = vm;
     rl_crash_set_space(vm->base, (uintptr_t)vm->map_start, vm->map_len);
     rl_crash_set_extra(crash_extra);
+    rl_report_prepare();
     rl_crash_install();
     rl_fault_thread_init();
     if (g_installed)
