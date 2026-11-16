@@ -13,6 +13,19 @@ pub enum Stage {
     Geometry,
     Fragment,
     Compute,
+    /// A task program: SPH type 1 (vertex) with the stage buffer (ISBE)
+    /// header of a task or mesh program (see [`Sph::isbe_program`]).
+    Task,
+    /// A mesh program: SPH type 3 (tessellation evaluation) after a task
+    /// program, or type 1 without one, with the stage buffer header.
+    Mesh,
+}
+
+impl Stage {
+    /// The task and mesh stages, which run as workgroups like compute.
+    pub fn is_mesh_pipeline(self) -> bool {
+        matches!(self, Stage::Task | Stage::Mesh)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -40,7 +53,10 @@ impl Sph {
     }
 
     pub fn stage(&self) -> Option<Stage> {
+        let isbe = self.isbe_program();
         Some(match (self.words[0] >> 10) & 0xf {
+            1 if isbe => Stage::Task,
+            3 if isbe => Stage::Mesh,
             1 => Stage::Vertex,
             2 => Stage::TessControl,
             3 => Stage::TessEval,
@@ -48,6 +64,16 @@ impl Sph {
             5 => Stage::Fragment,
             _ => return None,
         })
+    }
+
+    /// Word 4 of a task or mesh program: no maximum output vertex count
+    /// and the whole stage buffer (store request 0 to 255) in place of the
+    /// attribute range a vertex or tessellation program stores. NVIDIA
+    /// types task programs as vertex and mesh programs as tessellation
+    /// evaluation; no vertex or tessellation evaluation program of the
+    /// corpus has this word.
+    pub fn isbe_program(&self) -> bool {
+        self.words[4] == 0xff00_0000
     }
 
     /// Bits `lo..lo + len` of the header.
@@ -83,6 +109,12 @@ impl Sph {
     }
 }
 
+/// `ISBEWR.O` to the primitive map or `ISBEWR.O.ATTR.SKEW`: an output only
+/// a mesh program writes.
+fn writes_mesh_output(w: Word) -> bool {
+    w.get(0, 12) == 0x927 && w.get(79, 1) == 1 && (w.get(76, 2) == 0 || w.get(78, 1) == 1)
+}
+
 #[derive(Clone, Debug)]
 pub struct Program {
     pub sph: Option<Sph>,
@@ -104,11 +136,21 @@ impl Program {
         Program { sph, words }
     }
 
+    /// The stage. A task program and a mesh program without one share an
+    /// SPH; the mesh program is the one that writes mesh outputs.
     pub fn stage(&self) -> Stage {
+        match self.sph.as_ref().and_then(Sph::stage) {
+            Some(Stage::Task) if self.words.iter().any(|w| writes_mesh_output(*w)) => Stage::Mesh,
+            Some(s) => s,
+            None => Stage::Compute,
+        }
+    }
+
+    /// A mesh program that runs after a task program.
+    pub fn after_task(&self) -> bool {
         self.sph
             .as_ref()
-            .and_then(Sph::stage)
-            .unwrap_or(Stage::Compute)
+            .is_some_and(|s| (s.words[0] >> 10) & 0xf == 3)
     }
 
     pub fn decode(&self) -> Vec<Result<Inst, DecodeError>> {

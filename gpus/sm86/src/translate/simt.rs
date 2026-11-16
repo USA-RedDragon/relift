@@ -32,7 +32,8 @@
 //! `WorkgroupSize` the shader declares is the guest size (specialization
 //! constants 0, 1 and 2, as on every path) divided by 32, rounded up, and
 //! the thread ids come from the invocation index and the lane. Local
-//! memory and the clock counters are per lane.
+//! memory and the clock counters are per lane. A task or mesh workgroup is
+//! one warp: invocation 0 runs it (see `io::mesh`).
 
 use super::cfg::{Block, EXIT, Graph, Sel, Term};
 use super::{Code, Ctx, INPUT, Res, bad};
@@ -219,6 +220,10 @@ impl Ctx {
 
     /// The guest workgroup's invocation count, a specialization constant.
     pub(crate) fn guest_invocations(&mut self) -> u32 {
+        if self.stage.is_mesh_pipeline() {
+            let n = self.mesh_lanes();
+            return self.m.c_u32(n);
+        }
         let ws = self.workgroup_size();
         let u = self.u32t();
         let x = self.m.spec_op(u, op::COMPOSITE_EXTRACT, &[ws, 0]);

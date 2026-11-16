@@ -135,8 +135,8 @@ impl GsInput {
     }
 }
 
-/// Pipeline state the tessellation and geometry programs depend on that
-/// their SPH does not carry.
+/// Pipeline state the tessellation, geometry, task and mesh programs
+/// depend on that their SPH does not carry.
 #[derive(Clone, Debug)]
 pub struct Pipeline {
     pub tess_domain: TessDomain,
@@ -149,6 +149,7 @@ pub struct Pipeline {
     /// tessellation control program copies: the ones the tessellation
     /// evaluation program reads.
     pub tcs_passthrough: u64,
+    pub mesh: super::mesh::MeshPipeline,
 }
 
 impl Default for Pipeline {
@@ -160,6 +161,7 @@ impl Default for Pipeline {
             patch_vertices: 3,
             gs_input: GsInput::default(),
             tcs_passthrough: 0,
+            mesh: super::mesh::MeshPipeline::default(),
         }
     }
 }

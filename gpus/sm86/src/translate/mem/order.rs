@@ -21,8 +21,8 @@
 //! * a strong CTA access, or a weak one in a program with a barrier or a
 //!   CTA fence, in a program that writes global memory (a weak access can
 //!   only meet a write of its own workgroup through those): at Workgroup
-//!   scope in compute programs, Device scope elsewhere (Vulkan allows
-//!   Workgroup scope only in compute).
+//!   scope in compute, task and mesh programs, Device scope elsewhere
+//!   (Vulkan allows Workgroup scope only in those).
 //!
 //! Every other access is plain: nothing it could meet is ordered with it.
 //! PTX treats a vector access as one access per element, so splitting a
@@ -110,7 +110,7 @@ impl Plan {
 impl Ctx {
     /// Scope of a CTA-wide guarantee in this stage.
     pub(crate) fn cta_scope(&self) -> u32 {
-        if self.stage == Stage::Compute {
+        if self.stage == Stage::Compute || self.stage.is_mesh_pipeline() {
             SCOPE_WORKGROUP
         } else {
             SCOPE_DEVICE

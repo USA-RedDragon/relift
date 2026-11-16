@@ -24,8 +24,12 @@ mod uniform;
 
 pub use host::{
     Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, GUEST_MEMORY_SET, GlobalPath,
-    HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, SEGMENT_COUNT_DEFAULT, SEGMENT_COUNT_SPEC,
-    SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp, WarpPath,
+    HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, MeshLimits, SEGMENT_COUNT_DEFAULT,
+    SEGMENT_COUNT_SPEC, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC, Warp, WarpPath,
+};
+pub use io::mesh::{
+    Component, MESH_FIRST_TASK_OFFSET, MeshPath, MeshPipeline, MeshTopology,
+    fallback as mesh_fallback, mesh_components,
 };
 pub use io::vtg::{GsInput, Pipeline, TESS_LEVEL_SPEC, TessDomain, TessOutput, TessSpacing};
 pub use tex::{
@@ -138,8 +142,11 @@ pub struct Options {
     /// pipeline binds (a target not named is float); the output variable of
     /// a target has that type (see the `io` module).
     pub color_kinds: BTreeMap<u32, Kind>,
-    /// Pipeline state of the tessellation and geometry stages.
+    /// Pipeline state of the tessellation, geometry, task and mesh stages.
     pub pipeline: Pipeline,
+    /// Translate task and mesh programs for the compute back end even on
+    /// a host with mesh shaders.
+    pub mesh_compute: bool,
 }
 
 /// A translated program.
@@ -718,45 +725,13 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
 fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     let stage = p.stage();
     let code = decode_all(p)?;
-    let mut m = Module::new();
-    let glsl_id = m.id();
-    let mut c = Ctx {
-        m,
-        glsl: glsl_id,
-        stage,
-        regs: BTreeMap::new(),
-        preds: BTreeMap::new(),
-        uregs: BTreeMap::new(),
-        upreds: BTreeMap::new(),
-        inputs: BTreeMap::new(),
-        outputs: BTreeMap::new(),
-        cbufs: BTreeMap::new(),
-        cbuf_block: None,
-        builtins: BTreeMap::new(),
-        colors: BTreeMap::new(),
-        globals: Vec::new(),
-        caps: BTreeSet::from([1]),
-        exts: BTreeSet::new(),
-        iface: Interface::default(),
-        word: Word(0),
-        pc: 0,
-        sph_words: p.sph.as_ref().map_or([0; 32], |s| s.words),
-        tex: tex::Prep::new(&code.insts, &code.words),
-        io: io::State::default(),
-        locals: Vec::new(),
-        exact_mufu: o.exact_mufu || !o.host.native_mufu(),
-        host: o.host.clone(),
-        denorm: denorm::State::default(),
-        funcs: Vec::new(),
-        clock_vars: None,
-        divergent: Vec::new(),
-        mem: mem::order::Plan::default(),
-        simt: None,
-        warp_idioms: uniform::Plan::default(),
-    };
+    let mut c = Ctx::new(stage, o, tex::Prep::new(&code.insts, &code.words));
+    c.sph_words = p.sph.as_ref().map_or([0; 32], |s| s.words);
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();
     c.io.vtg.pipe = o.pipeline.clone();
+    c.io.mesh.pipe = o.pipeline.mesh.clone();
+    io::mesh::prescan(&mut c, o.mesh_compute)?;
     io::vtg::prescan(&mut c, &code.insts)?;
     c.denorm_plan(&code.insts);
     c.warp_plan(&code);
@@ -779,10 +754,105 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     c.m.emit_void(op::FUNCTION_END, &[]);
     let funcs = std::mem::take(&mut c.funcs);
     c.m.body.extend(funcs);
-    finish(c, main, entry, var_at)
+    let ep = if stage.is_mesh_pipeline() {
+        io::mesh::entry(&mut c, main)?
+    } else {
+        main
+    };
+    let _ = entry;
+    finish(c, main, ep, var_at)
 }
 
-fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
+impl Ctx {
+    fn new(stage: Stage, o: &Options, tex: tex::Prep) -> Ctx {
+        let mut m = Module::new();
+        let glsl_id = m.id();
+        Ctx {
+            m,
+            glsl: glsl_id,
+            stage,
+            regs: BTreeMap::new(),
+            preds: BTreeMap::new(),
+            uregs: BTreeMap::new(),
+            upreds: BTreeMap::new(),
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::new(),
+            cbufs: BTreeMap::new(),
+            cbuf_block: None,
+            builtins: BTreeMap::new(),
+            colors: BTreeMap::new(),
+            globals: Vec::new(),
+            caps: BTreeSet::from([1]),
+            exts: BTreeSet::new(),
+            iface: Interface::default(),
+            word: Word(0),
+            pc: 0,
+            sph_words: [0; 32],
+            tex,
+            io: io::State::default(),
+            locals: Vec::new(),
+            exact_mufu: o.exact_mufu || !o.host.native_mufu(),
+            host: o.host.clone(),
+            denorm: denorm::State::default(),
+            funcs: Vec::new(),
+            clock_vars: None,
+            divergent: Vec::new(),
+            mem: mem::order::Plan::default(),
+            simt: None,
+            warp_idioms: uniform::Plan::default(),
+        }
+    }
+
+    /// A context for a module the translator builds without a guest
+    /// program (the helper passes of a back end).
+    pub(crate) fn bare(stage: Stage) -> Ctx {
+        Ctx::new(stage, &Options::default(), tex::Prep::new(&[], &[]))
+    }
+
+    /// Starts `main` of a helper module with `vars` function variables.
+    pub(crate) fn helper_begin(&mut self, vars: usize) -> (u32, Vec<u32>) {
+        let void = self.m.t_void();
+        let fnt = self.m.t_fn(void);
+        let main = self.m.id();
+        self.m.emit_void(op::FUNCTION, &[void, main, 0, fnt]);
+        let label = self.m.id();
+        self.m.emit_void(op::LABEL, &[label]);
+        let u = self.m.t_u32();
+        let pu = self.m.t_ptr(FUNCTION, u);
+        let v = (0..vars)
+            .map(|_| self.m.emit(op::VARIABLE, pu, &[FUNCTION]))
+            .collect();
+        (main, v)
+    }
+
+    /// The module of a helper whose `main` is complete: execution model
+    /// `model`, with a local size for compute.
+    pub(crate) fn helper_finish(mut self, main: u32, model: u32, local: &[u32]) -> Vec<u32> {
+        for &cap in &self.caps {
+            crate::spirv::inst(&mut self.m.caps, op::CAPABILITY, &[cap]);
+        }
+        for e in &self.exts {
+            crate::spirv::inst(&mut self.m.caps, op::EXTENSION, &crate::spirv::str_words(e));
+        }
+        let mut e = vec![self.glsl];
+        e.extend(crate::spirv::str_words("GLSL.std.450"));
+        crate::spirv::inst(&mut self.m.ext, op::EXT_INST_IMPORT, &e);
+        crate::spirv::inst(&mut self.m.head, op::MEMORY_MODEL, &[0, 1]);
+        let mut ep = vec![model, main];
+        ep.extend(crate::spirv::str_words("main"));
+        ep.extend(self.outputs.values());
+        ep.extend(self.globals.iter().copied());
+        crate::spirv::inst(&mut self.m.head, op::ENTRY_POINT, &ep);
+        if !local.is_empty() {
+            let mut a = vec![main, 17];
+            a.extend_from_slice(local);
+            crate::spirv::inst(&mut self.m.modes, op::EXECUTION_MODE, &a);
+        }
+        self.m.finish()
+    }
+}
+
+fn finish(mut c: Ctx, main: u32, entry: u32, var_at: usize) -> Res<Shader> {
     let stage = c.stage;
     let u = c.m.t_u32();
     let pu = c.m.t_ptr(FUNCTION, u);
@@ -827,8 +897,8 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         crate::spirv::inst(&mut decls, op::STORE, &[v, z]);
     }
     c.m.body.splice(var_at..var_at, decls);
-    io::finish(&mut c, main);
-    io::vtg::modes(&mut c, main)?;
+    io::finish(&mut c, entry);
+    io::vtg::modes(&mut c, entry)?;
     let mut iface: Vec<u32> = Vec::new();
     iface.extend(c.inputs.values());
     iface.extend(c.outputs.values());
@@ -856,13 +926,15 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         Stage::Geometry => 3,
         Stage::Fragment => 4,
         Stage::Compute => 5,
+        Stage::Task | Stage::Mesh => io::mesh::model(&mut c),
     };
-    let mut ep = vec![model, main];
+    let mut ep = vec![model, entry];
     ep.extend(crate::spirv::str_words("main"));
     ep.extend(iface);
     crate::spirv::inst(&mut c.m.head, op::ENTRY_POINT, &ep);
     match stage {
-        Stage::Fragment => crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[main, 7]),
+        Stage::Fragment => crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[entry, 7]),
+        Stage::Task | Stage::Mesh => io::mesh::modes(&mut c, entry),
         Stage::Compute => {
             crate::spirv::inst(&mut c.m.modes, op::EXECUTION_MODE, &[main, 17, 1, 1, 1]);
             if c.iface.compute_derivatives {
@@ -877,7 +949,7 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         }
         _ => {}
     }
-    c.denorm_mode(main);
+    c.denorm_mode(entry);
     if c.iface.host.max_reconvergence {
         crate::spirv::inst(
             &mut c.m.caps,
@@ -887,7 +959,7 @@ fn finish(mut c: Ctx, main: u32, _entry: u32, var_at: usize) -> Res<Shader> {
         crate::spirv::inst(
             &mut c.m.modes,
             op::EXECUTION_MODE,
-            &[main, EXECUTION_MODE_MAXIMALLY_RECONVERGES],
+            &[entry, EXECUTION_MODE_MAXIMALLY_RECONVERGES],
         );
     }
     let iface = c.iface;

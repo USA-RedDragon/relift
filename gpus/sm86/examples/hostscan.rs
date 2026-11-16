@@ -33,6 +33,8 @@ fn stage_name(s: Stage) -> &'static str {
         Stage::Geometry => "geometry",
         Stage::Fragment => "fragment",
         Stage::Compute => "compute",
+        Stage::Task => "task",
+        Stage::Mesh => "mesh",
     }
 }
 

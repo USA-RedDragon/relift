@@ -52,6 +52,7 @@ use std::collections::BTreeMap;
 
 use super::Ctx;
 
+pub(crate) mod mesh;
 pub(crate) mod vtg;
 
 const B_POSITION: u32 = 0;
@@ -77,6 +78,8 @@ const CAP_GEOMETRY: u32 = 2;
 const CAP_CLIP_DISTANCE: u32 = 32;
 const CAP_INTERPOLATION_FUNCTION: u32 = 52;
 const CAP_MULTI_VIEWPORT: u32 = 57;
+const CAP_MESH_SHADING: u32 = 5283;
+const DECO_PER_PRIMITIVE: u32 = 5271;
 const CAP_VIEWPORT_INDEX_LAYER: u32 = 5254;
 const CAP_DEMOTE: u32 = 5379;
 const CAP_DRAW_PARAMETERS: u32 = 4427;
@@ -92,6 +95,7 @@ pub(crate) struct State {
     /// Numeric kind of each render target's format (Options::color_kinds).
     pub(crate) color_kinds: BTreeMap<u32, Kind>,
     pub vtg: vtg::State,
+    pub mesh: mesh::State,
 }
 
 /// Records how each fragment input is sampled before any code is emitted.
@@ -147,6 +151,8 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "AST" => ast(c, i),
         "IPA" => ipa(c, i),
         "KILL" => kill(c, i),
+        "ISBERD" if c.stage.is_mesh_pipeline() => mesh::isberd(c, i),
+        "ISBEWR" if c.stage.is_mesh_pipeline() => mesh::isbewr(c, i),
         "ISBERD" => vtg::isberd(c, i),
         "ISBEWR" => bad(format!("stage buffer {}", i.mnemonic)),
         "OUT" => vtg::out(c, i),
@@ -179,7 +185,24 @@ impl Ctx {
         let p = self.m.t_ptr(INPUT, v4);
         let var = self.m.global(p, INPUT);
         self.m.deco(var, 30, &[loc]);
+        let per_primitive = self.io.vtg.pipe.mesh.fragment_per_primitive;
+        if self.stage == Stage::Fragment && loc < 64 && per_primitive & (1 << loc) != 0 {
+            self.m.deco(var, DECO_PER_PRIMITIVE, &[]);
+            self.cap(CAP_MESH_SHADING);
+            self.exts.insert("SPV_EXT_mesh_shader");
+        }
         self.inputs.insert(loc, var);
+        var
+    }
+
+    /// A flat integer fragment input at generic location `loc`.
+    fn flat_int_input(&mut self, loc: u32) -> u32 {
+        let i = self.m.t_i32();
+        let p = self.m.t_ptr(INPUT, i);
+        let var = self.m.global(p, INPUT);
+        self.m.deco(var, 30, &[loc]);
+        self.m.deco(var, 14, &[]);
+        self.globals.push(var);
         var
     }
 
@@ -252,10 +275,13 @@ impl Ctx {
     fn input_slot(&mut self, off: u32) -> Res<Slot> {
         let frag = self.stage == Stage::Fragment;
         Ok(match off {
-            0x60 if frag => {
-                self.cap(CAP_GEOMETRY);
-                self.int_slot(B_PRIMITIVE_ID, INPUT)
-            }
+            0x60 if frag => match self.io.vtg.pipe.mesh.primitive_id_location {
+                Some(loc) => Slot::Int(self.flat_int_input(loc)),
+                None => {
+                    self.cap(CAP_GEOMETRY);
+                    self.int_slot(B_PRIMITIVE_ID, INPUT)
+                }
+            },
             0x64 if frag => {
                 self.cap(CAP_GEOMETRY);
                 self.int_slot(B_LAYER, INPUT)

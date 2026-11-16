@@ -63,6 +63,12 @@ pub struct HostProfile {
     pub warp_fragment: Warp,
     /// Subgroups in the other graphics stages.
     pub warp_graphics: Warp,
+    /// `VK_EXT_mesh_shader` with task and mesh shaders, and its limits: a
+    /// task or mesh pipeline that fits them takes the native back end,
+    /// every other one the compute back end.
+    pub mesh_shader: Option<MeshLimits>,
+    /// Subgroups in task and mesh shaders.
+    pub warp_mesh: Warp,
     /// Subgroup quad operations in the fragment stage.
     pub quad_fragment: bool,
     /// `shaderMaximalReconvergence` (VK_KHR_shader_maximal_reconvergence):
@@ -135,6 +141,8 @@ impl HostProfile {
             warp_compute: Warp::Fixed32,
             warp_fragment: Warp::Fixed32,
             warp_graphics: Warp::Fixed32,
+            mesh_shader: Some(MeshLimits::NVIDIA),
+            warp_mesh: Warp::Fixed32,
             quad_fragment: true,
             maximal_reconvergence: true,
             demote: true,
@@ -163,6 +171,7 @@ impl HostProfile {
         HostProfile {
             name: "radv",
             warp_graphics: Warp::Varies,
+            warp_mesh: Warp::Varies,
             fused_fma: false,
             denorm: Denorm::Unknown,
             denorm_preserve_mode: true,
@@ -213,6 +222,8 @@ impl HostProfile {
             warp_compute: Warp::Unchecked32,
             warp_fragment: Warp::Unchecked32,
             warp_graphics: Warp::Absent,
+            mesh_shader: None,
+            warp_mesh: Warp::Absent,
             quad_fragment: true,
             maximal_reconvergence: true,
             demote: false,
@@ -243,6 +254,8 @@ impl HostProfile {
             warp_compute: Warp::Wide,
             warp_fragment: Warp::Wide,
             warp_graphics: Warp::Absent,
+            mesh_shader: None,
+            warp_mesh: Warp::Absent,
             quad_fragment: true,
             maximal_reconvergence: true,
             demote: true,
@@ -308,6 +321,12 @@ impl HostProfile {
             warp_compute: Warp::Narrow(8),
             warp_fragment: Warp::Narrow(8),
             warp_graphics: Warp::Absent,
+            mesh_shader: Some(MeshLimits {
+                max_task_work_group_invocations: 1024,
+                max_mesh_work_group_invocations: 1024,
+                ..MeshLimits::NVIDIA
+            }),
+            warp_mesh: Warp::Narrow(8),
             quad_fragment: true,
             maximal_reconvergence: true,
             demote: true,
@@ -367,6 +386,8 @@ impl HostProfile {
             warp_compute: Warp::Varies,
             warp_fragment: Warp::Absent,
             warp_graphics: Warp::Absent,
+            mesh_shader: None,
+            warp_mesh: Warp::Absent,
             quad_fragment: false,
             maximal_reconvergence: false,
             demote: false,
@@ -464,6 +485,41 @@ pub enum ClockPath {
     Counter,
 }
 
+/// The `VkPhysicalDeviceMeshShaderPropertiesEXT` limits the native back
+/// end depends on (the field names are Vulkan's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeshLimits {
+    pub max_mesh_output_vertices: u32,
+    pub max_mesh_output_primitives: u32,
+    pub max_task_payload_size: u32,
+    pub max_task_work_group_invocations: u32,
+    pub max_mesh_work_group_invocations: u32,
+    pub max_mesh_shared_memory_size: u32,
+}
+
+impl MeshLimits {
+    /// An RTX 3090 (and the `VK_EXT_mesh_shader` minimums for the counts).
+    pub const NVIDIA: MeshLimits = MeshLimits {
+        max_mesh_output_vertices: 256,
+        max_mesh_output_primitives: 256,
+        max_task_payload_size: 16384,
+        max_task_work_group_invocations: 128,
+        max_mesh_work_group_invocations: 128,
+        max_mesh_shared_memory_size: 28672,
+    };
+
+    /// Whether a pipeline whose mesh workgroup keeps `shared` bytes of
+    /// stage buffer fits.
+    pub fn fits(&self, p: &super::MeshPipeline, shared: u32) -> bool {
+        p.max_vertices <= self.max_mesh_output_vertices
+            && p.max_primitives <= self.max_mesh_output_primitives
+            && p.payload_bytes <= self.max_task_payload_size
+            && p.task_lanes <= self.max_task_work_group_invocations
+            && p.mesh_lanes <= self.max_mesh_work_group_invocations
+            && shared <= self.max_mesh_shared_memory_size
+    }
+}
+
 /// Descriptor set of the guest memory segment array (binding 0, a
 /// runtime array of storage buffers) used when the device lacks buffer
 /// device addresses, and of the 64-bit atomic lock table (binding 1).
@@ -494,6 +550,8 @@ pub const CLOCK_SEED_OFFSET: u32 = 0x1f0;
 pub struct HostReport {
     /// The preset the program was translated for.
     pub host: &'static str,
+    /// The back end of a task or mesh program.
+    pub mesh: super::MeshPath,
     pub warp: WarpPath,
     /// Warp operations (SHFL, VOTE, REDUX, MATCH, lane masks, SR_LANEID)
     /// translated through the warp path.

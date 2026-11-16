@@ -31,7 +31,7 @@
 use super::spv;
 use crate::program::Stage;
 use crate::spirv::{glsl, op};
-use crate::translate::{Ctx, INPUT, Warp, WarpPath};
+use crate::translate::{Ctx, INPUT, MeshPath, Warp, WarpPath};
 use crate::{Inst, Operand};
 
 const BUILTIN_LOCAL_INVOCATION_INDEX: u32 = 29;
@@ -301,9 +301,14 @@ impl Ctx {
             self.warp_idioms = plan;
             return;
         }
+        let kernel = self.stage == Stage::Compute || self.stage.is_mesh_pipeline();
         let warp = match self.stage {
             Stage::Compute => self.host.warp_compute,
             Stage::Fragment => self.host.warp_fragment,
+            Stage::Task | Stage::Mesh if self.io.mesh.path == MeshPath::Compute => {
+                self.host.warp_compute
+            }
+            Stage::Task | Stage::Mesh => self.host.warp_mesh,
             _ => self.host.warp_graphics,
         };
         let path = match warp {
@@ -322,14 +327,14 @@ impl Ctx {
                     .iter()
                     .all(|&(k, _)| !div[k] && insts[k].guard.is_none());
                 let wide = ops.iter().filter(|&&(_, q)| !q).count();
-                if self.stage == Stage::Compute && uniform {
+                if kernel && uniform {
                     self.iface.host.warp_shared_bytes_per_warp = 132;
                     WarpPath::Shared
                 } else if wide == 0 && warp != Warp::Absent {
                     WarpPath::Quad
                 } else if plan.invariant && warp != Warp::Absent {
                     WarpPath::Invariant
-                } else if self.stage == Stage::Compute {
+                } else if kernel {
                     WarpPath::Simt
                 } else {
                     let why = if warp == Warp::Absent {
@@ -453,6 +458,7 @@ impl Ctx {
     pub(crate) fn lane_id(&mut self) -> u32 {
         match self.warp_path() {
             WarpPath::Simt => self.simt.as_ref().map_or(0, |s| s.lane),
+            _ if self.stage.is_mesh_pipeline() => self.local_index(),
             WarpPath::Shared => {
                 let i = self.local_index();
                 self.lk(op::BITWISE_AND, i, 31)
