@@ -409,6 +409,12 @@ pub enum WarpPath {
     /// consecutive local invocations. Needs every warp operation in
     /// workgroup-uniform control flow.
     Shared,
+    /// The host's own subgroups, which are not 32 wide, for a program
+    /// whose warp-wide operations all give the same result however the
+    /// guest groups lanes into warps: exact on any subgroup size. A guest
+    /// warp is the aligned 32-invocation group of the subgroup that holds
+    /// the invocation (the whole subgroup when it is smaller).
+    Invariant,
     /// The host's own subgroups, which are not 32 wide: not exact (listed
     /// in [`HostReport::inexact`]).
     Host,
@@ -495,6 +501,12 @@ pub struct HostReport {
     /// Votes on a draw-uniform predicate: the same result in any warp the
     /// guest could form, so translated per lane on every host.
     pub warp_invariant: u32,
+    /// The warp operations depend on 2x2 quads holding the same pixels as
+    /// on the guest, helper invocations included: the runtime must run
+    /// the fragment stage with whole quads (`FullQuadsKHR` where it has
+    /// `VK_KHR_shader_quad_control`, which keeps helper invocations for
+    /// uncovered pixels of a quad as the guest does).
+    pub whole_quads: bool,
     /// Workgroup memory the warp emulation adds, in bytes per guest warp.
     pub warp_shared_bytes_per_warp: u32,
     /// Denormal execution mode requested (`None`: the device default).

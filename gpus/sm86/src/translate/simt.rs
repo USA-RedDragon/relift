@@ -629,7 +629,7 @@ impl Emit<'_> {
         for k in blk.first..blk.end {
             let i = &code.insts[k];
             let (w, pc) = (code.words[k], 16 * k as u64);
-            let kind = if c.invariant.contains(&k) {
+            let kind = if c.warp_idioms.per_lane.contains(&k) {
                 Kind::Lane(Mem::None)
             } else {
                 kind(i)

@@ -216,9 +216,9 @@ pub(crate) struct Ctx {
     pub mem: mem::order::Plan,
     /// The warp emulation state on [`WarpPath::Simt`].
     pub simt: Option<simt::State>,
-    /// Instructions (by index) whose warp operation gives the same result
-    /// in any warp (see [`uniform`]), translated per lane.
-    pub invariant: BTreeSet<usize>,
+    /// How warp operations whose result does not depend on the warp's
+    /// composition are translated (see [`uniform`]).
+    pub warp_idioms: uniform::Plan,
 }
 
 impl Ctx {
@@ -752,7 +752,7 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
         divergent: Vec::new(),
         mem: mem::order::Plan::default(),
         simt: None,
-        invariant: BTreeSet::new(),
+        warp_idioms: uniform::Plan::default(),
     };
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();

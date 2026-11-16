@@ -156,6 +156,8 @@ fn shfl(c: &mut Ctx, i: &Inst) -> Res<()> {
     let b = c.usrc(&i.ops[3])?;
     let cl = c.usrc(&i.ops[4])?;
     let quad = c.quad_only() && super::lanes::shfl_is_quad(i);
+    let in_quad =
+        quad || (c.quad_only() && c.warp_idioms.quad_shfl.contains(&((c.pc / 16) as usize)));
     let lane = c.lane_id();
     let lane = if quad {
         let k3 = c.m.c_u32(3);
@@ -197,7 +199,7 @@ fn shfl(c: &mut Ctx, i: &Inst) -> Res<()> {
         }
     };
     let src = c.select(u, valid, j, lane);
-    let v = if quad {
+    let v = if in_quad {
         c.quad_shuffle(a, src)
     } else {
         c.shuffle(a, src)
@@ -214,7 +216,8 @@ fn vote(c: &mut Ctx, i: &Inst) -> Res<()> {
         _ => return bad("VOTE operands"),
     };
     let p = c.pred_operand(ps)?;
-    if c.invariant.contains(&((c.pc / 16) as usize)) {
+    let at = (c.pc / 16) as usize;
+    if c.warp_idioms.per_lane.contains(&at) {
         let r = if i.has("EQ") { c.m.c_bool(true) } else { p };
         return c.store_pdst(pd, r);
     }

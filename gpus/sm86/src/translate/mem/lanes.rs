@@ -21,6 +21,12 @@
 //! - [`WarpPath::Quad`] and [`WarpPath::Host`]: the host's own subgroups.
 //!   Shuffles that stay in a 2x2 quad are exact through the subgroup's
 //!   quads; anything wider is listed as inexact.
+//! - [`WarpPath::Invariant`]: the host's own subgroups for a program whose
+//!   warp-wide operations are all idioms whose result does not depend on
+//!   which lanes share a warp (see `uniform`). A warp is the aligned
+//!   32-lane group of the subgroup (all of it when smaller): lanes and
+//!   ballots as in the cluster path, shuffles that the analysis proved
+//!   stay in the reader's quad through the host quad.
 
 use super::spv;
 use crate::program::Stage;
@@ -271,12 +277,11 @@ impl Ctx {
         let insts = &code.insts;
         let fast_paths = code.fast_paths;
         self.divergent = divergent(insts);
-        self.invariant = crate::translate::uniform::invariant_votes(code);
-        self.iface.host.warp_invariant = self.invariant.len() as u32;
-        let ops: Vec<(usize, bool)> = insts
+        let outputs = self.output_registers();
+        let plan = crate::translate::uniform::plan(code, &outputs);
+        let all: Vec<(usize, bool)> = insts
             .iter()
             .enumerate()
-            .filter(|(k, _)| !self.invariant.contains(k))
             .filter(|&(k, _)| {
                 let free = self.stage == Stage::TessEval && tess_coord_lane(insts, k);
                 if free {
@@ -286,8 +291,14 @@ impl Ctx {
             })
             .filter_map(|(k, i)| warp_op(i).map(|q| (k, q)))
             .collect();
+        let ops: Vec<(usize, bool)> = all
+            .into_iter()
+            .filter(|(k, _)| !plan.per_lane.contains(k))
+            .collect();
         self.iface.host.warp_ops = ops.len() as u32;
+        self.iface.host.warp_invariant = plan.per_lane.len() as u32;
         if ops.is_empty() {
+            self.warp_idioms = plan;
             return;
         }
         let warp = match self.stage {
@@ -316,6 +327,8 @@ impl Ctx {
                     WarpPath::Shared
                 } else if wide == 0 && warp != Warp::Absent {
                     WarpPath::Quad
+                } else if plan.invariant && warp != Warp::Absent {
+                    WarpPath::Invariant
                 } else if self.stage == Stage::Compute {
                     WarpPath::Simt
                 } else {
@@ -336,6 +349,39 @@ impl Ctx {
         if !matches!(path, WarpPath::Shared | WarpPath::Simt) {
             self.reconvergence_plan(insts, fast_paths);
         }
+        let quads = ops.iter().any(|&(_, q)| q) || !plan.quad_shfl.is_empty();
+        self.iface.host.whole_quads = self.stage == Stage::Fragment
+            && quads
+            && matches!(path, WarpPath::Quad | WarpPath::Invariant | WarpPath::Host);
+        self.warp_idioms = plan;
+    }
+
+    /// The registers the fragment epilogue reads: the enabled components
+    /// of each color target the SPH enables (four registers apart), then
+    /// the sample mask and depth.
+    fn output_registers(&self) -> Vec<u8> {
+        if self.stage != Stage::Fragment {
+            return Vec::new();
+        }
+        let targets = self.sph_words[18];
+        let flags = self.sph_words[19];
+        let mut out = Vec::new();
+        let mut reg = 0u8;
+        for t in 0..8 {
+            let mask = (targets >> (4 * t)) & 0xf;
+            if mask == 0 {
+                continue;
+            }
+            out.extend((0..4u8).filter(|c| mask >> c & 1 == 1).map(|c| reg + c));
+            reg += 4;
+        }
+        if flags & 1 != 0 {
+            out.push(reg);
+        }
+        if flags & 2 != 0 {
+            out.push(reg + 1);
+        }
+        out
     }
 
     /// Asks for maximal reconvergence when a warp operation that reads
@@ -411,7 +457,7 @@ impl Ctx {
                 let i = self.local_index();
                 self.lk(op::BITWISE_AND, i, 31)
             }
-            WarpPath::Cluster => {
+            WarpPath::Cluster | WarpPath::Invariant => {
                 let s = self.sg_id();
                 self.lk(op::BITWISE_AND, s, 31)
             }
@@ -423,7 +469,7 @@ impl Ctx {
     /// invocation's warp.
     fn host_lane(&mut self, l: u32) -> u32 {
         match self.warp_path() {
-            WarpPath::Cluster => {
+            WarpPath::Cluster | WarpPath::Invariant => {
                 let s = self.sg_id();
                 let base = self.lk(op::BITWISE_AND, s, !31);
                 self.lb(op::BITWISE_OR, base, l)
@@ -570,7 +616,7 @@ impl Ctx {
         let v4 = self.m.t_vec(u, 4);
         let scope = self.m.c_u32(SCOPE_SUBGROUP);
         let b = self.m.emit(spv::GROUP_BALLOT, v4, &[scope, pred]);
-        if self.warp_path() == WarpPath::Cluster {
+        if matches!(self.warp_path(), WarpPath::Cluster | WarpPath::Invariant) {
             let s = self.sg_id();
             let w = self.lk(op::SHIFT_RIGHT_LOGICAL, s, 5);
             return self.m.emit(VECTOR_EXTRACT_DYNAMIC, u, &[b, w]);
@@ -655,7 +701,10 @@ impl Ctx {
 
     /// Shuffles stay in the host's quads rather than the warp.
     pub(crate) fn quad_only(&self) -> bool {
-        matches!(self.warp_path(), WarpPath::Quad | WarpPath::Host)
+        matches!(
+            self.warp_path(),
+            WarpPath::Quad | WarpPath::Invariant | WarpPath::Host
+        )
     }
 
     /// VOTE.ALL, VOTE.ANY and VOTE.EQ of `p` over the active lanes, with
