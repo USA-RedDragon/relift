@@ -151,7 +151,10 @@ pub struct UnitReport {
     pub report: Report,
 }
 
-/// The Nintendo DS as one run of one unit sees it.
+/// The Nintendo DS as one run of one unit sees it. The ARM9's instruction
+/// TCM mirrors start at address 0, but programs use it at its SDK address
+/// in the `0x01` block; the lowest 16 MiB are where null pointers and
+/// small integers taken as addresses lead, so they hold no RAM here.
 pub struct Nds<'a> {
     cpu: Cpu,
     segments: Vec<(u32, &'a [u8])>,
@@ -173,7 +176,7 @@ impl Platform for Nds<'_> {
             return Kind::Image;
         }
         match (self.cpu, addr >> 24) {
-            (Cpu::Arm9, 0x00 | 0x01) | (_, 0x02 | 0x03) => Kind::Ram,
+            (Cpu::Arm9, 0x01) | (_, 0x02 | 0x03) => Kind::Ram,
             (Cpu::Arm9, 0xFF) if addr >= 0xFFFF_0000 => Kind::Bios,
             (Cpu::Arm7, 0x00) if addr < 0x4000 => Kind::Bios,
             _ => Kind::Other,

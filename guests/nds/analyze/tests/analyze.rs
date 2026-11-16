@@ -1,7 +1,7 @@
 //! Discovery on a synthetic cartridge whose ARM9 static binary calls into
 //! an overlay.
 
-use relift_nds_analyze::{Loc, Program, UnitId, UnitReport};
+use relift_nds_analyze::{Loc, Program, UnitId, UnitReport, UnresolvedKind};
 use relift_nds_formats::checksum::sha256;
 use relift_nds_formats::synth::{self, OverlaySpec, Spec, StaticSpec};
 use relift_nds_formats::{Cpu, Rom};
@@ -14,6 +14,8 @@ const A_PUSH_R4_LR: u32 = 0xE92D_4010;
 const A_POP_R4_PC: u32 = 0xE8BD_8010;
 const A_MOV_R0_1: u32 = 0xE3A0_0001;
 const A_BX_LR: u32 = 0xE12F_FF1E;
+const A_MOV_R0_0: u32 = 0xE3A0_0000;
+const A_BLX_R0: u32 = 0xE12F_FF30;
 
 fn a_bl(at: u32, to: u32) -> u32 {
     0xEB00_0000 | (to.wrapping_sub(at + 8) >> 2 & 0x00FF_FFFF)
@@ -116,4 +118,23 @@ fn the_irq_slot_is_at_the_end_of_the_data_tcm() {
         !arm9.segments.iter().any(|(b, _)| *b == 0x027E_0000),
         "the data TCM block is not"
     );
+}
+
+#[test]
+fn a_null_function_pointer_leads_to_no_arm9_ram() {
+    let mut bytes = cartridge();
+    let at = Rom::parse(&bytes).expect("parses").header.arm9.rom_offset as usize + 0x400;
+    let code = words(&[A_PUSH_R4_LR, A_MOV_R0_0, A_BLX_R0, A_MOV_R0_1, A_POP_R4_PC]);
+    bytes[at..at + code.len()].copy_from_slice(&code);
+    synth::fix_crcs(&mut bytes);
+    let rom = Rom::parse(&bytes).expect("parses");
+    let rs = Program::read(&rom).expect("units read").analyze(1, &|_| {});
+    let st = unit(&rs, UnitId::Static(Cpu::Arm9));
+    assert!(!st.report.outside.contains(&Loc::rom(0, false)));
+    assert!(
+        st.report.unresolved.iter().any(|u| {
+            u.at == Loc::rom(ENTRY + 8, false) && u.kind == UnresolvedKind::OutsideCode
+        })
+    );
+    assert!(found(st, ENTRY + 0xC), "the call may return");
 }
