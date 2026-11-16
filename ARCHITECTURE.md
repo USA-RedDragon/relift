@@ -308,6 +308,9 @@ sped up, never given more time.
   interpreter against the 1,604,000 cases of the pinned SingleStepTests z80 v1
   set (fetched by commit and SHA-256, never in the repository), then again
   with every lifted block broken, which nearly every file must catch.
+- **z80-zexdoc**: lifts Frank Cringle's ZEXDOC with the Z80 frontend, emits it
+  as C, builds it with the runtime and runs it natively: all 67 groups must
+  print OK (the .com is fetched by URL and SHA-256, never in the repository).
 - **generated**: fetches the pinned Sail sources, reruns the A64, SM83 and
   ARMv4T template generators and fails on any difference.
 - **macos** (macos-latest): all tests.

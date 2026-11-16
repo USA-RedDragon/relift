@@ -2121,6 +2121,47 @@ layer `runtime/cpus/mips`; the Nintendo 64 machine above it is open.
 - CACHE calls the hook of `rl_mips_set_cache_hook` (code invalidation is the
   guest layer's).
 
+### The Z80 layer
+
+`runtime/cpus/z80` (`relift/z80/abi.h`) is the CPU layer of the Z80
+frontend (`cpus/z80`); the clock is in T-states. [verified: the layer by
+`runtime/cpus/z80/tests`; lifted code on it by `relift/tests/z80_irq.rs`
+(IM 1 taken while the CPU waits in HALT, and after the one instruction EI lets
+through, with the T-state count and R) and `relift/tests/z80_zexdoc.rs`
+(ZEXDOC, 67 of 67 groups, natively)]
+
+- **Interrupt entries are lifted code.** The frontend lifts the entry of
+  each interrupt (NMI, IM 0 with 0xFF on the bus, IM 1, IM 2) as a block at
+  `RL_Z80_ENTRY` plus the kind that pushes `ret`, clears the flip-flops,
+  charges the entry's T-states and jumps to the vector. The entry hook
+  (`rl_irq_hook`) stores the address `rl_sync` gives it in `ctx->ret` and
+  returns the entry's address, which dispatch runs like any function; so a
+  program that can take interrupts must contain the four entries. The return
+  hook reads the address the handler's return popped, as for the SM83.
+- **The mask follows IFF1.** A block that sets IFF1 (EI, DI, RETI, RETN, an
+  entry) calls the intrinsic `z80_iff(iff1)` before its sync point, which the
+  frontend lowers to `rl_z80_iff`: the scheduler mask is the NMI line plus the
+  INT line while IFF1 is 1, so a raise of INT while interrupts are disabled
+  does not end the budget, and enabling them with INT asserted does. EI sets
+  `ei` (EIDelay); the hook withholds a maskable interrupt while it is set and
+  ends the budget, so the entry happens at the sync point after the next
+  instruction. An NMI is edge latched by the machine (`rl_z80_ints.pending`)
+  and is never withheld.
+- **HALT** charges its 4 T-states and calls `z80_halt(iff1, r) -> r`: lifted
+  code keeps registers in locals, so the values go in and the new R comes
+  back. The layer waits through the scheduler for an NMI, or INT with IFF1
+  set, in whole NOP cycles that count in R, and ends the budget so the sync
+  point that closes the block enters the interrupt with the address after
+  HALT. A HALT nothing can end stops the guest with a report.
+- **Ports** are the intrinsics `z80_in(port)` and `z80_out(port, value)`,
+  lowered to `rl_z80_in` and `rl_z80_out` over `rl_z80_ints.in` and `.out`;
+  the 16-bit port is the whole address bus.
+- A lifted `CALL` is a host call and `RET` a host return, so a host function
+  standing in for guest code at a call target (a BDOS stub) is its own `RET`:
+  it adds 2 to SP, which the pushed return address took. Conditional calls
+  and returns are two blocks, the second at the instruction's address plus
+  `RL_Z80_HALF`.
+
 ## 14. Fibers
 
 The device scheduler (`relift/sched.h`) runs every guest CPU of a machine on
