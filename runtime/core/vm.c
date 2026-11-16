@@ -255,6 +255,13 @@ static int host_protect(rl_vm *vm, uint64_t addr, uint64_t len, int prot)
     return 0;
 }
 
+int rl_vm_host_access(rl_vm *vm, uint64_t addr, uint64_t size, bool access)
+{
+    if ((addr | size) & (vm->host_page - 1) || !rl_vm_contains(vm, addr, size))
+        return -1;
+    return os_protect(vm->base + addr, size, access ? PROT_READ | PROT_WRITE : PROT_NONE);
+}
+
 static int apply_range(rl_vm *vm, uint64_t addr, uint64_t size, uint32_t perm)
 {
     uint64_t hp = vm->host_page;

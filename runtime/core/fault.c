@@ -48,14 +48,14 @@ static LONG CALLBACK handler(EXCEPTION_POINTERS *ep)
         f.in_guest = true;
         f.guest_addr = (uint64_t)(a - (uintptr_t)g_vm->base);
     }
+    if (f.in_guest && g_hook && g_hook(&f))
+        return EXCEPTION_CONTINUE_EXECUTION;
     if (t_catch) {
         rl_fault_catch *c = t_catch;
         t_catch = NULL;
         c->fault = f;
         RL_FAULT_LONGJMP(c->jb, 1);
     }
-    if (f.in_guest && g_hook && g_hook(&f))
-        return EXCEPTION_CONTINUE_EXECUTION;
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -95,14 +95,14 @@ static void handler(int sig, siginfo_t *si, void *uc)
         f.in_guest = true;
         f.guest_addr = (uint64_t)(a - (uintptr_t)g_vm->base);
     }
+    if (f.in_guest && g_hook && g_hook(&f))
+        return;
     if (t_catch) {
         rl_fault_catch *c = t_catch;
         t_catch = NULL;
         c->fault = f;
         RL_FAULT_LONGJMP(c->jb, 1);
     }
-    if (f.in_guest && g_hook && g_hook(&f))
-        return;
     rl_crash_signal(sig, si, uc);
     signal(sig, SIG_DFL);
 }
@@ -180,3 +180,5 @@ void rl_fault_set_hook(rl_fault_hook *hook)
 {
     g_hook = hook;
 }
+
+bool rl_fault_installed(void) { return g_installed != 0; }

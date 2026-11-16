@@ -276,6 +276,13 @@ RL_RUNTIME_API rl_vm_block rl_vm_query(const rl_vm *vm, uint64_t addr);
 RL_RUNTIME_API bool rl_vm_uniform(const rl_vm *vm, uint64_t addr, uint64_t size, rl_vm_block *out);
 /** @brief Host protection (PROT_*) the policy gives the host page containing addr. */
 RL_RUNTIME_API int rl_vm_host_prot(const rl_vm *vm, uint64_t addr);
+/**
+ * @brief Gives the host pages of [addr, addr+size) read and write access, or
+ * none, without changing the map: for tracking accesses to read-write pages
+ * through a fault hook. addr and size must be host-page aligned. Logs nothing
+ * and touches no shared state, so a fault hook may call it. Returns 0 or -1.
+ */
+RL_RUNTIME_API int rl_vm_host_access(rl_vm *vm, uint64_t addr, uint64_t size, bool access);
 /** @brief True when guest range [addr, addr+size) is inside the space. */
 static inline bool rl_vm_contains(const rl_vm *vm, uint64_t addr, uint64_t size)
 {
@@ -360,10 +367,16 @@ RL_RUNTIME_API rl_fault_catch *rl_fault_arm(rl_fault_catch *c);
 /** @brief Disarms the catcher and restores prev. */
 RL_RUNTIME_API void rl_fault_disarm(rl_fault_catch *prev);
 
-/** @brief Called at a guest fault with no catcher; return true when the fault was resolved and the access should retry. */
+/**
+ * @brief Called first at a guest fault, before any catcher, on the faulting
+ * thread inside the signal handler; return true when the fault was resolved
+ * and the access should retry.
+ */
 typedef bool rl_fault_hook(const rl_fault *f);
 /** @brief Sets the guest layer's fault hook (NULL for none). */
 RL_RUNTIME_API void rl_fault_set_hook(rl_fault_hook *hook);
+/** @brief True once rl_fault_install has run, so guest faults reach the hook. */
+RL_RUNTIME_API bool rl_fault_installed(void);
 
 /** @brief Runtime thread object (guest-neutral part). */
 struct rl_thread {
