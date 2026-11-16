@@ -366,10 +366,7 @@ fn calls_into_another_unit_seed_its_run() {
     };
     let seeded = discover(&b, &config);
     assert!(found(&seeded, arm(OTHER)));
-    assert!(
-        !found(&seeded, arm(OTHER + 0x100)),
-        "a seed must open a stack frame"
-    );
+    assert!(found(&seeded, arm(OTHER + 0x100)));
 }
 
 #[test]
@@ -534,4 +531,24 @@ fn a_flag_loaded_from_a_writable_image_decides_no_branch() {
     m.writable = true;
     let rw = m.run(Options::default(), arm(BASE));
     assert!(found(&rw, arm(BASE + 0x10)));
+}
+
+#[test]
+fn a_leaf_seed_is_an_entry_when_its_run_checks_out() {
+    let mut m = Machine::new(Profile::V5te);
+    m.segments = vec![(OTHER, vec![0; 0x1000])];
+    m.arm(OTHER, &[A_PUSH_R4_LR, A_MOV_R0_1, A_POP_R4_PC]);
+    m.arm(OTHER + 0x100, &[A_MOV_R0_1, A_BX_LR]);
+    m.arm(OTHER + 0x200, &[0xE7F0_00F0]);
+    let config = Config {
+        seeds: vec![arm(OTHER + 0x100), arm(OTHER + 0x200)],
+        roots: vec![arm(OTHER)],
+        ..Config::default()
+    };
+    let r = discover(&m, &config);
+    assert!(found(&r, arm(OTHER + 0x104)));
+    assert!(
+        !found(&r, arm(OTHER + 0x200)),
+        "an undefined seed is no entry"
+    );
 }

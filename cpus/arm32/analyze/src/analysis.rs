@@ -21,15 +21,21 @@ const MAX_ROUNDS: usize = 8;
 const MAX_RUNS_PER_FUNCTION: usize = 1024;
 
 /// Finds the functions of the code on `platform` reachable from the
-/// roots of `config`, and from its seeds that open a stack frame.
+/// roots of `config`, and from its seeds: entries when they open a stack
+/// frame, else candidates checked as code addresses taken are.
 #[must_use]
 pub fn discover(platform: &dyn Platform, config: &Config) -> Report {
     let mut image = Image::new(platform, config.options);
     image.copies.clone_from(&config.loads);
     let mut roots = config.roots.clone();
     for &l in &config.seeds {
-        if !roots.contains(&l) && func::opens_frame(&image, l) {
+        if roots.contains(&l) {
+            continue;
+        }
+        if func::opens_frame(&image, l) {
             roots.push(l);
+        } else if l.copy.is_none() {
+            image.seeds.push(l);
         }
     }
     run(image, &roots, &config.hints)
@@ -271,6 +277,12 @@ impl<'a> Driver<'a> {
         for r in self.runs.values() {
             cands.extend(r.escaped.iter().map(|&v| Cand::taken(v & !1, true)));
         }
+        cands.extend(
+            self.image
+                .seeds
+                .iter()
+                .map(|l| Cand::taken(l.addr, l.thumb)),
+        );
         let word = |a: u32| self.image.read(None, a, 4);
         let mut scans = Vec::new();
         for &a in &words {

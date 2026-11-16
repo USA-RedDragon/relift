@@ -46,7 +46,8 @@ pub struct Config {
     /// The entries ([`crate::Origin::Entry`]).
     pub roots: Vec<Loc>,
     /// Code addresses other runs transfer to ([`crate::Report::outside`]):
-    /// entries too when the code there opens a stack frame.
+    /// entries too when the code there opens a stack frame, otherwise when
+    /// their run passes the checks of a code address taken.
     pub seeds: Vec<Loc>,
     /// Code addresses a run reached that discovery did not (the hints of a
     /// stop report, [`crate::Origin::Hint`]): roots too.

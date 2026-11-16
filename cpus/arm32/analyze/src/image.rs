@@ -16,6 +16,9 @@ pub(crate) struct Image<'a> {
     /// The image bytes discovered code stores to at constant addresses:
     /// variables, whose image bytes are only their first values.
     pub written: HashSet<u32>,
+    /// Seeds that open no stack frame: candidates that become entries as
+    /// code addresses taken do, once their own run checks out.
+    pub seeds: Vec<Loc>,
 }
 
 fn le(b: &[u8]) -> u32 {
@@ -31,6 +34,7 @@ impl<'a> Image<'a> {
             options,
             copies: Vec::new(),
             written: HashSet::new(),
+            seeds: Vec::new(),
         }
     }
 
