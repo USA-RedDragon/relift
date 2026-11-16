@@ -42,7 +42,7 @@
 #define LANDSCAPE 1
 
 enum { OWN_NONE, OWN_ITEM, OWN_GAME, OWN_UI };
-enum { UI_NONE, UI_PAUSE, UI_SETTINGS, UI_EDIT };
+enum { UI_NONE, UI_PAUSE, UI_SETTINGS, UI_EDIT, UI_HOST };
 enum { SHOW_AUTO, SHOW_ALWAYS, SHOW_NEVER };
 
 enum {
@@ -188,6 +188,8 @@ static struct {
     bool dirty;
     bool tick;
     bool leave;
+    bool open_host;
+    bool from_host;
     rl_tp_canvas cv;
     int32_t drawn[4];
 } g = { .lock = PTHREAD_MUTEX_INITIALIZER,
@@ -642,6 +644,25 @@ static void open_ui(int ui)
     g.dirty = true;
     if (ui == UI_NONE)
         pthread_cond_broadcast(&g.resumed);
+}
+
+static void open_settings(void)
+{
+    g.from_host = false;
+    if (g.host.settings) {
+        open_ui(UI_HOST);
+        g.open_host = true;
+    } else {
+        open_ui(UI_SETTINGS);
+    }
+}
+
+static void settings_back(void)
+{
+    if (g.from_host)
+        open_settings();
+    else
+        open_ui(UI_PAUSE);
 }
 
 /* ---- sheets */
@@ -1133,14 +1154,14 @@ static void sheet_up(finger *f)
         open_ui(UI_EDIT);
         break;
     case T_SETTINGS:
-        open_ui(UI_SETTINGS);
+        open_settings();
         break;
     case T_LEAVE:
         g.leave = true;
         open_ui(UI_NONE);
         break;
     case T_BACK:
-        open_ui(UI_PAUSE);
+        settings_back();
         break;
     case T_SHOW:
         rl_settings_save("input.touch_pad.show", g_show_choices[(show_mode() + 1) % 3]);
@@ -1253,11 +1274,13 @@ static finger *find_finger(uint64_t id, bool make)
 
 static void after(void)
 {
-    bool tick = g.tick, leave = g.leave;
+    bool tick = g.tick, leave = g.leave, open_host = g.open_host;
     void (*haptic)(void) = g.host.haptic, (*leave_fn)(void) = g.host.leave, (*wake)(void) = g.host.wake;
+    void (*settings)(void) = g.host.settings;
     bool dirty = g.dirty;
     g.tick = false;
     g.leave = false;
+    g.open_host = false;
     if (dirty)
         pthread_cond_broadcast(&g.resumed);
     pthread_mutex_unlock(&g.lock);
@@ -1265,6 +1288,8 @@ static void after(void)
         haptic();
     if (leave && leave_fn)
         leave_fn();
+    if (open_host && settings)
+        settings();
     if (dirty && wake)
         wake();
 }
@@ -1290,13 +1315,13 @@ void rl_touchpad_finger(uint64_t id, int phase, float x, float y)
             f->own = OWN_UI;
             if (g.ui == UI_EDIT)
                 edit_down(f);
-            else
+            else if (g.ui != UI_HOST)
                 sheet_down(f);
         }
     } else if (phase == RL_TOUCHPAD_MOVE) {
         if (f->own == OWN_UI && g.ui == UI_EDIT)
             edit_move(f);
-        else if (f->own == OWN_UI)
+        else if (f->own == OWN_UI && g.ui != UI_HOST)
             sheet_move(f);
         else
             pad_move(f);
@@ -1304,7 +1329,7 @@ void rl_touchpad_finger(uint64_t id, int phase, float x, float y)
         if (f->own == OWN_UI && phase == RL_TOUCHPAD_UP) {
             if (g.ui == UI_EDIT)
                 edit_up(f);
-            else if (g.ui != UI_NONE)
+            else if (g.ui != UI_NONE && g.ui != UI_HOST)
                 sheet_up(f);
         }
         if (f->own == OWN_ITEM)
@@ -1328,13 +1353,30 @@ void rl_touchpad_back(void)
         open_ui(UI_PAUSE);
         break;
     case UI_SETTINGS:
-        open_ui(UI_PAUSE);
+        settings_back();
+        break;
+    case UI_HOST:
         break;
     default:
         open_ui(UI_NONE);
         break;
     }
     compute_values();
+    after();
+}
+
+void rl_touchpad_host_settings_done(bool controller)
+{
+    pthread_mutex_lock(&g.lock);
+    if (g.ui == UI_HOST) {
+        g.now = rl_clock_ns();
+        if (controller) {
+            open_ui(UI_SETTINGS);
+            g.from_host = true;
+        } else {
+            open_ui(UI_PAUSE);
+        }
+    }
     after();
 }
 
@@ -1941,7 +1983,7 @@ void rl_touchpad_reset(void)
     memset(g.values, 0, sizeof g.values);
     memset(g.dirs, 0, sizeof g.dirs);
     memset(g.f, 0, sizeof g.f);
-    g.dirty = g.tick = g.leave = false;
+    g.dirty = g.tick = g.leave = g.open_host = g.from_host = false;
     pthread_cond_broadcast(&g.resumed);
     pthread_mutex_unlock(&g.lock);
 }

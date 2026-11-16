@@ -275,6 +275,40 @@ TEST(touchpad_hide_button_and_pause_sheet)
     down();
 }
 
+static int g_host_opens;
+
+static void host_settings(void) { g_host_opens++; }
+
+TEST(touchpad_settings_open_the_host_page_and_its_controller_row_returns_to_it)
+{
+    up();
+    static const rl_touchpad_host host = { .settings = host_settings };
+    rl_touchpad_set_host(&host);
+    g_host_opens = 0;
+    float k = 0.7619f, row0 = 540 - 350 * k + 190 * k;
+    rl_touchpad_back();
+    rl_touchpad_finger(1, RL_TOUCHPAD_DOWN, 960, row0 + 2 * 130 * k);
+    rl_touchpad_finger(1, RL_TOUCHPAD_UP, 960, row0 + 2 * 130 * k);
+    CHECK_EQ(g_host_opens, 1);
+    CHECK(rl_touchpad_paused());
+    rl_touchpad_finger(2, RL_TOUCHPAD_DOWN, 960, row0);
+    rl_touchpad_finger(2, RL_TOUCHPAD_UP, 960, row0);
+    rl_touchpad_back();
+    CHECK(rl_touchpad_paused());
+    CHECK_EQ(g_host_opens, 1);
+    rl_touchpad_host_settings_done(true);
+    CHECK(rl_touchpad_paused());
+    rl_touchpad_back();
+    CHECK_EQ(g_host_opens, 2);
+    rl_touchpad_host_settings_done(false);
+    CHECK(rl_touchpad_paused());
+    rl_touchpad_finger(3, RL_TOUCHPAD_DOWN, 960, row0);
+    rl_touchpad_finger(3, RL_TOUCHPAD_UP, 960, row0);
+    CHECK(!rl_touchpad_paused());
+    rl_touchpad_set_host(NULL);
+    down();
+}
+
 TEST(touchpad_editor_saves_groups_and_detached_buttons)
 {
     up();

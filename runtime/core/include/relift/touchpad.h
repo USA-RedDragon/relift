@@ -107,6 +107,11 @@ typedef struct rl_touchpad_host {
     void (*leave)(void);
     /** @brief The overlay changed: make the loop draw again (any thread). */
     void (*wake)(void);
+    /**
+     * @brief Settings on the pause sheet: the host shows its own settings page over the paused game and calls
+     * rl_touchpad_host_settings_done when the player leaves it. NULL: the module's own settings sheet opens.
+     */
+    void (*settings)(void);
 } rl_touchpad_host;
 
 /** @brief Finger phases. */
@@ -144,6 +149,11 @@ RL_RUNTIME_API void rl_touchpad_gamepad(bool connected, const char *name, uint32
 RL_RUNTIME_API void rl_touchpad_finger(uint64_t id, int phase, float x, float y);
 /** @brief The system back gesture: opens the pause sheet, or steps back out of a sheet. */
 RL_RUNTIME_API void rl_touchpad_back(void);
+/**
+ * @brief The host's settings page closed: with controller, the player chose the on-screen controller settings (the
+ * module's settings sheet opens, and its back returns to the host page); otherwise the pause sheet opens again.
+ */
+RL_RUNTIME_API void rl_touchpad_host_settings_done(bool controller);
 /** @brief Moves time on (fades, toasts, long presses); returns true while something animates or waits. */
 RL_RUNTIME_API bool rl_touchpad_tick(uint64_t now_ns);
 
