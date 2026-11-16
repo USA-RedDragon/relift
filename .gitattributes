@@ -2,6 +2,7 @@ runtime/guests/switch/vk/gen/** linguist-generated=true
 cpus/arm64/src/lift/sail/generated/*.rs linguist-generated=true
 cpus/arm64/src/lift/sail/generated/mod.rs -linguist-generated
 cpus/sm83/src/lift/sail/generated.rs linguist-generated=true
+cpus/z80/src/lift/generated.rs linguist-generated=true
 cpus/arm32/src/decode/generated.rs linguist-generated=true
 cpus/arm32/src/lift/generated/*.rs linguist-generated=true
 cpus/arm32/src/lift/generated/mod.rs -linguist-generated

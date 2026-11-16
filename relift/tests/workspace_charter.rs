@@ -73,6 +73,7 @@ const NONE: &[&str] = &[];
 const STANDALONE: &[&str] = &[
     "relift-cpu-arm32",
     "relift-cpu-mips",
+    "relift-cpu-z80",
     "relift-emit-wasm",
     "relift-gb-analyze",
     "relift-gb-tools",
@@ -249,6 +250,14 @@ const CHARTERS: &[Charter] = &[
         why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words only",
         normal: NONE,
         dev: &["relift-cache", "relift-proc"],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-cpu-z80",
+        band: 2,
+        why: "the Z80 decoder and lifter over the templates generated from our Sail model, over the IR only; no guest uses it yet",
+        normal: &["relift-ir"],
+        dev: NONE,
         build: NONE,
     },
     Charter {
@@ -458,6 +467,14 @@ const CHARTERS: &[Charter] = &[
         band: 3,
         why: "the SM83 template generator over the opcode table and the Sail frontend, run by hand; nothing links it",
         normal: &["relift-cpu-sm83", "relift-sail"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
+        member: "relift-cpu-z80-gen",
+        band: 3,
+        why: "the Z80 template generator over the lifter's template groups and the Sail frontend, run by hand; nothing links it",
+        normal: &["relift-cpu-z80", "relift-sail"],
         dev: NONE,
         build: NONE,
     },

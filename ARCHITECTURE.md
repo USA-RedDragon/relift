@@ -44,9 +44,10 @@ list of hard rules; read it before changing anything.
 - **Generated code is committed.** `cpus/arm64/src/decode/generated.rs`
   (from AARCHMRS) and `cpus/arm64/src/lift/sail/generated/*.rs` (from sail-arm,
   one file per instruction class, `linguist-generated` in `.gitattributes`)
-  and `cpus/sm83/src/lift/sail/generated.rs` (from our SM83 Sail model) are
-  never edited by hand; `cpus/arm64/gen/README.md` and
-  `cpus/sm83/gen/README.md` say how to regenerate them, and their notices sit next to the crate manifest. CI's
+  `cpus/sm83/src/lift/sail/generated.rs` (from our SM83 Sail model) and
+  `cpus/z80/src/lift/generated.rs` (from our Z80 Sail model) are
+  never edited by hand; `cpus/arm64/gen/README.md`,
+  `cpus/sm83/gen/README.md` and `cpus/z80/gen/README.md` say how to regenerate them, and their notices sit next to the crate manifest. CI's
   `generated templates are current` job fetches the pinned Sail files,
   reruns both generators and fails on any difference. A form joins
   `cpus/arm64/gen/forms.txt` only after `relift-check forms` passes it and its
@@ -105,6 +106,8 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-cpu-mips` | `cpus/mips` | MIPS decoders and lifters to `relift-ir`, one profile per CPU (VR4300, the Nintendo 64 CPU; an R3000A stub, the PlayStation CPU), with templates generated from sail-cheri-mips and a per-profile overlay; a branch lifts with its delay slot |
 | 3 | `relift-cpu-mips-gen` | `cpus/mips/gen` | Generates each MIPS profile's decode table and lifting templates from sail-cheri-mips and the profile's overlay (`vr4300.sail`, `r3000a.sail`): the MIPS cut and `Form` over `relift-sail`; run by hand, linked by nothing |
 | 3 | `relift-cpu-sm83-gen` | `cpus/sm83/gen` | Generates the SM83 lifting templates (`cpus/sm83/src/lift/sail/generated.rs`) from our Sail model `cpus/sm83/sail/sm83.sail`: the SM83 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
+| 3 | `relift-cpu-z80-gen` | `cpus/z80/gen` | Generates the Z80 lifting templates (`cpus/z80/src/lift/generated.rs`) from our Sail model `cpus/z80/sail/z80.sail`: the Z80 cut and `Form` over `relift-sail`; run by hand, linked by nothing |
+| 2 | `relift-cpu-z80` | `cpus/z80` | Z80 (NMOS) decoder and lifter to `relift-ir` over the templates generated from the Z80 Sail model: every page, the interrupt entries, port intrinsics and the T-state of every bus access; no guest uses it yet |
 | 2 | `relift-cpu-sm83` | `cpus/sm83` | SM83 (Game Boy and Game Boy Color) decoder, opcode table (length, M-cycles taken and not taken, flags, bus access per cycle) and lifter to `relift-ir`, with templates generated from the SM83 Sail model |
 | 2 | `relift-gpu-sm86` | `gpus/sm86` | NVIDIA SM86 (Ampere, Switch 2) SASS decoder with nvdisasm's text form, and a SASS to SPIR-V translator; field positions from Mesa NAK (MIT) |
 | 0 | `relift-info` | `core/info` | The self-description of a built binary: the `--relift-info` JSON document in sections (identity, needs, settings, input, mods, save), its embedding in the binary and its reader; read by `relift info` and by launchers |

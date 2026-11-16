@@ -992,6 +992,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-z80"
+version = "0.1.0"
+dependencies = [
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-z80-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-z80",
+ "relift-sail",
+]
+
+[[package]]
 name = "relift-diff"
 version = "0.1.0"
 
