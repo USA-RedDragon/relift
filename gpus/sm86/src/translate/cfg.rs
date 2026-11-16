@@ -12,7 +12,9 @@
 //! nothing: where a program asks for maximal reconvergence (see the lanes
 //! module), lanes come together at the merges this structure picks, so
 //! each BSSY's target must lie on the chain of merges that starts at its
-//! block, no BREAK may let lanes run warp operations before their BSYNC,
+//! block or no warp operation may run between the target and the next
+//! merge on that chain, no BREAK may let lanes run warp operations before
+//! their BSYNC,
 //! and no BMOV may change a barrier; anything else is rejected. Elsewhere
 //! which lanes run together cannot be observed.
 //!
@@ -1028,7 +1030,9 @@ impl Graph {
                         _ => break,
                     }
                 }
-                p
+                // Exits that meet nowhere inside the enclosing loop: the
+                // lanes that stay in it are together again at its header.
+                p.or(outer)
             }
         }
     }
@@ -1058,6 +1062,11 @@ impl Graph {
     /// the blocks reached from the successors of `b` without passing `t`,
     /// as ranges of instructions.
     fn reach_before(&self, b: usize, t: usize) -> Vec<std::ops::Range<usize>> {
+        self.reach_before_any(b, &[t])
+    }
+
+    /// As `reach_before`, stopping at any of `stops`.
+    fn reach_before_any(&self, b: usize, stops: &[usize]) -> Vec<std::ops::Range<usize>> {
         let mut seen = vec![false; self.blocks.len()];
         let mut work = self.succs[b].clone();
         let mut out = Vec::new();
@@ -1067,7 +1076,7 @@ impl Graph {
             }
             seen[u] = true;
             let blk = &self.blocks[u];
-            if self.holds(u, t) {
+            if let Some(t) = stops.iter().copied().filter(|t| self.holds(u, *t)).min() {
                 out.push(blk.first..t);
                 continue;
             }
@@ -1097,11 +1106,14 @@ impl Graph {
                             return bad("BSSY without a target");
                         };
                         let t = (*t / 16) as usize;
-                        if !self.merges_at(b, t) {
+                        if !self.merges_at(b, t)
+                            && let Some(j) = self.unmerged_warp_op(b, t, insts)
+                        {
                             return bad(format!(
-                                "BSSY at {:#x} reconverges at {:#x}, not at a merge",
+                                "BSSY at {:#x} reconverges at {:#x}, not at a merge, before the warp operation at {:#x}",
                                 16 * k,
-                                16 * t
+                                16 * t,
+                                16 * j
                             ));
                         }
                     }
@@ -1122,8 +1134,10 @@ impl Graph {
                             return bad("BREAK without its BSSY");
                         };
                         let t = (*t / 16) as usize;
-                        let after =
-                            (k + 1..blk.end).chain(self.reach_before(b, t).into_iter().flatten());
+                        let mut stops = vec![t];
+                        stops.extend(enclosing_bsyncs(insts, bssy.unwrap_or(0), k));
+                        let after = (k + 1..blk.end)
+                            .chain(self.reach_before_any(b, &stops).into_iter().flatten());
                         let warp = after
                             .into_iter()
                             .find(|&j| super::mem::lanes::reads_lanes(&insts[j]));
@@ -1242,6 +1256,47 @@ impl Graph {
         entry
     }
 
+    /// The first instruction that sees which lanes run together (a warp
+    /// operation that reads other lanes or the active mask, or WARPSYNC)
+    /// from `t` on and before the lanes of `b` reach a merge of the
+    /// structure: where the guest's lanes are back together and the host's
+    /// may not be yet.
+    fn unmerged_warp_op(&mut self, b: usize, t: usize, insts: &[crate::Inst]) -> Option<usize> {
+        let mut chain = vec![false; self.blocks.len()];
+        let mut cur = Some(b);
+        let mut entering = false;
+        for _ in 0..2 * self.blocks.len() + 2 {
+            let Some(x) = cur else { break };
+            if x != b {
+                chain[x] = true;
+            }
+            cur = self.next_merge(x, entering);
+            entering = true;
+        }
+        let sees = |i: &crate::Inst| {
+            super::mem::lanes::reads_lanes(i)
+                || super::mem::lanes::reads_active(i)
+                || i.mnemonic == "WARPSYNC"
+        };
+        let mut seen = vec![false; self.blocks.len()];
+        let mut work: Vec<(usize, usize)> = (0..self.blocks.len())
+            .filter(|&u| self.holds(u, t))
+            .map(|u| (u, t))
+            .collect();
+        while let Some((u, from)) = work.pop() {
+            if seen[u] || chain[u] {
+                continue;
+            }
+            seen[u] = true;
+            let blk = &self.blocks[u];
+            if let Some(j) = (from.max(blk.first)..blk.end).find(|&j| sees(&insts[j])) {
+                return Some(j);
+            }
+            work.extend(self.succs[u].iter().map(|&s| (s, 0)));
+        }
+        None
+    }
+
     /// Instruction `t` lies on the chain of merges that starts at `b`, or
     /// the lanes of `b` never reach it.
     fn merges_at(&mut self, b: usize, t: usize) -> bool {
@@ -1260,6 +1315,42 @@ impl Graph {
             .iter()
             .any(|r| r.contains(&t) || r.end == t)
     }
+}
+
+/// The BSYNCs of the regions around the BSSY at `inner` that hold the
+/// BREAK at `k` and are never left by a BREAK of their own: lanes that
+/// break out of the inner region still wait there for the rest.
+fn enclosing_bsyncs(insts: &[crate::Inst], inner: usize, k: usize) -> Vec<usize> {
+    use super::mem::lanes::barrier_name;
+    let mut out = Vec::new();
+    for (j, i) in insts.iter().enumerate().take(inner) {
+        if i.mnemonic != "BSSY" {
+            continue;
+        }
+        let (Some(m), Some(Operand::Target(t))) =
+            (i.ops.first().and_then(barrier_name), i.ops.last())
+        else {
+            continue;
+        };
+        let t = (*t / 16) as usize;
+        let Some(sync) = t.checked_sub(1).filter(|&s| s > k) else {
+            continue;
+        };
+        let is_sync = |x: &crate::Inst, name: &str| {
+            x.mnemonic == name && x.ops.last().and_then(barrier_name) == Some(m)
+        };
+        if !insts.get(sync).is_some_and(|x| is_sync(x, "BSYNC")) {
+            continue;
+        }
+        if insts[j + 1..sync]
+            .iter()
+            .any(|x| is_sync(x, "BREAK") || is_sync(x, "BSSY"))
+        {
+            continue;
+        }
+        out.push(sync);
+    }
+    out
 }
 
 /// Emits the program's body, starting with label `first`.

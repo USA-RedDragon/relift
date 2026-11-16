@@ -260,19 +260,27 @@ fn vote_any() -> [u8; 16] {
     word(0x006, 1, &[(16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)])
 }
 
-/// `BSSY B0` to `to`, then `@P0 BRA 3` over a MOV, then a VOTE when
-/// `warp`.
-fn region(to: usize, warp: bool) -> Program {
+/// `BSSY B0` to `to`, then `@P0 BRA 3` over a MOV (a VOTE when `inside`),
+/// then a VOTE when `warp`.
+fn region_with(to: usize, inside: bool, warp: bool) -> Program {
     let mut b = Vec::new();
     b.extend(bssy(0, 0, to));
     b.extend(bra(1, 3, Some(0)));
-    b.extend(mov_imm(1, 1));
+    if inside {
+        b.extend(vote_any());
+    } else {
+        b.extend(mov_imm(1, 1));
+    }
     b.extend(bsync(0));
     if warp {
         b.extend(vote_any());
     }
     exit_and_halt(&mut b);
     Program::parse(&b)
+}
+
+fn region(to: usize, warp: bool) -> Program {
+    region_with(to, false, warp)
 }
 
 #[test]
@@ -282,13 +290,22 @@ fn bssy_must_reconverge_at_the_merge() {
     let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
     dump("bssy_region", &s.spirv);
     assert!(s.interface.host.max_reconvergence);
-    let p = region(2, true);
+    let p = region_with(2, true, true);
     let e = translate(&p).err().map(|e| e.0);
     assert_eq!(
         e.as_deref(),
-        Some("BSSY at 0x0 reconverges at 0x20, not at a merge")
+        Some("BSSY at 0x0 reconverges at 0x20, not at a merge, before the warp operation at 0x20")
     );
     translate(&region(2, false)).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// A BSSY whose target is no merge of the structure is harmless when no
+/// warp operation runs between it and the next merge: the lanes are
+/// together again before anything can tell.
+#[test]
+fn bssy_off_the_merges_is_harmless_without_warp_operations() {
+    let s = translate(&region(2, true)).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.host.max_reconvergence);
 }
 
 /// A loop left through `@P0 BREAK B0; @P0 BRA 4`, with a VOTE after the
@@ -321,6 +338,38 @@ fn break_must_not_skip_warp_operations() {
     assert_eq!(
         e.as_deref(),
         Some("warp operation at 0x40 between BREAK and its BSYNC")
+    );
+}
+
+/// `BSSY B1` around a loop in `BSSY B0` that `@P0 BREAK B0` leaves for
+/// `out`, with a VOTE after `BSYNC B1`.
+fn break_to_outer(out: usize) -> Program {
+    let mut b = Vec::new();
+    b.extend(bssy(1, 0, 8));
+    b.extend(bssy(0, 1, 6));
+    b.extend(word(0x142, 4, &[(12, 3, 0), (16, 4, 0), (87, 3, 7)]));
+    b.extend(bra(3, out, Some(0)));
+    b.extend(bra(4, 2, Some(1)));
+    b.extend(bsync(0));
+    b.extend(mov_imm(1, 1));
+    b.extend(bsync(1));
+    b.extend(vote_any());
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+/// Lanes that break out of an inner region and wait at the BSYNC of the
+/// region around it are back with the rest before the warp operation.
+#[test]
+fn break_may_wait_at_an_outer_bsync() {
+    let p = break_to_outer(7);
+    assert_eq!(text(&p)[7], "BSYNC B1");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.host.max_reconvergence);
+    let e = translate(&break_to_outer(8)).err().map(|e| e.0);
+    assert_eq!(
+        e.as_deref(),
+        Some("warp operation at 0x80 between BREAK and its BSYNC")
     );
 }
 
