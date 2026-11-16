@@ -63,6 +63,8 @@ bool rl_nds_halt(rl_nds *m, unsigned cpu)
         return false;
     nds_order(m, cpu);
     nds_irq *q = &m->irq[cpu];
+    if (!q->ie)
+        return false;
     if (q->wake_at == NDS_NEVER) {
         m->halted[cpu] = true;
         int got = rl_sched_halt(m->cpu[cpu]);
