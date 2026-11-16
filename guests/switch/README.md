@@ -8,6 +8,7 @@ The Nintendo Switch guest. It reads decrypted dumps only and has no keys.
 | `relift-switch-names` | `names` | Itanium names as host names, the address fallback and the reverse map |
 | `relift-switch` | `guest` | The guest over the formats and `relift-cpu-arm64`: the CPU feature set, module loading, exception-handling tables, the program description |
 | `relift-switch-tools` | `tools` | `relift-nup`, `relift-romfs`, `relift-nso`, `relift-nro`, `relift-npdm` and `relift-ir` |
+| `relift-switch-shaders` | `shaders` | `relift-shaders`: finds the SM86 shader programs of a game |
 | `relift-switch-vkgen` | `vkgen` | `relift-vkgen`: generates the Vulkan forwarding C from the pinned `vk.xml` |
 
 ```sh

@@ -1194,6 +1194,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-switch-shaders"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "relift-proc",
+ "relift-switch-formats",
+ "serde_json",
+ "zstd",
+]
+
+[[package]]
 name = "relift-switch-tools"
 version = "0.1.0"
 dependencies = [

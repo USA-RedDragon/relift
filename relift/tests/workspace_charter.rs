@@ -77,6 +77,7 @@ const STANDALONE: &[&str] = &[
     "relift-gb-analyze",
     "relift-gb-tools",
     "relift-gba-tools",
+    "relift-switch-shaders",
     "relift-switch-tools",
     "relift-switch-vkgen",
 ];
@@ -344,6 +345,21 @@ const CHARTERS: &[Charter] = &[
             "relift-switch-formats",
             "serde_json",
         ],
+        build: NONE,
+    },
+    Charter {
+        member: "relift-switch-shaders",
+        band: 2,
+        why: "finds the SM86 shader programs of a Switch 2 dump (carving, containers, KTGL entries); reads decrypted dumps through relift-switch-formats and writes through relift-cache",
+        normal: &[
+            "clap",
+            "relift-cache",
+            "relift-proc",
+            "relift-switch-formats",
+            "serde_json",
+            "zstd",
+        ],
+        dev: NONE,
         build: NONE,
     },
     Charter {

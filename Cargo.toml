@@ -50,6 +50,7 @@ relift-switch-formats = { path = "guests/switch/formats" }
 relift-switch-names = { path = "guests/switch/names" }
 relift-switch-tools = { path = "guests/switch/tools" }
 relift-switch-vkgen = { path = "guests/switch/vkgen" }
+relift-switch-shaders = { path = "guests/switch/shaders" }
 relift-testguest = { path = "testguest" }
 
 clap = { version = "=4.6.7", features = ["derive"] }

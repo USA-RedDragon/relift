@@ -119,6 +119,7 @@ Read the graph bottom-up. Nothing in a lower band depends on a higher one.
 | 2 | `relift-gba-tools` | `guests/gba/tools` | `relift-gbarom`: prints a ROM header as text or JSON, validates logo hash, complement and size, lists the save library strings and the multiboot entry; `functions` runs `relift-gba-analyze`, as a cartridge or with `--multiboot` from work RAM |
 | 2 | `relift-switch-formats` | `guests/switch/formats` | Decrypted Switch formats (romfs, NSO, NRO, NPDM, NUP) and the import of a `.nup` or an extracted dump tree |
 | 2 | `relift-switch-tools` | `guests/switch/tools` | `relift-romfs`, `relift-nso`, `relift-npdm`, `relift-nro`, `relift-nup`: thin tools over the formats crate; `relift-ir` prints the IR of A64 words or NSO symbols |
+| 2 | `relift-switch-shaders` | `guests/switch/shaders` | `relift-shaders scan`: finds every NVIDIA SM86 shader program in a NUP or an extracted tree (zstd with the game's dictionaries, SARC, BNSH, agl BAHS, sead bin, KTGL rdb/fdata, NSO), deduplicated, cached per file and parallel |
 | 2 | `relift-switch-vkgen` | `guests/switch/vkgen` | `relift-vkgen`: generates the Vulkan forwarding C in `runtime/guests/switch/vk/gen/` from the pinned `vk.xml`; standalone (nothing depends on it) |
 | 2 | `relift-switch-names` | `guests/switch/names` | Switch symbol names as host names: Itanium names remangled into `guest::<module>`, the address fallback, and the reverse map |
 | 2 | `relift-switch` | `guests/switch/guest` | The Switch guest, over its formats and `relift-cpu-arm64` |

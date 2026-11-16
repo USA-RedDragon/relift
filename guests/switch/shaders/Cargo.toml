@@ -1,0 +1,22 @@
+[package]
+name = "relift-switch-shaders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+relift-cache = { workspace = true }
+relift-proc = { workspace = true }
+relift-switch-formats = { workspace = true }
+serde_json = { workspace = true }
+zstd = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "relift-shaders"
+path = "src/bin/relift-shaders.rs"
