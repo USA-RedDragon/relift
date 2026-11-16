@@ -1150,3 +1150,114 @@ TEST(nv_va_allocator)
     CHECK(!nv_va_find(&a, 0x1000, 1, 0, &at));
     nv_va_destroy(&a);
 }
+
+/** @brief Offset of byte x of row y in a block-linear surface one GOB wide with two-GOB blocks. */
+static uint32_t bl_at(uint32_t x, uint32_t y)
+{
+    uint32_t gob = (y / 16) * 2 + (y / 8) % 2;
+    return gob * 512 + ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((x % 32) / 16) * 32 + (y % 2) * 16 + x % 16;
+}
+
+static void put_bits(uint8_t *s, uint32_t lo, uint32_t n, uint64_t v)
+{
+    for (uint32_t i = 0; i < n; i++)
+        if ((v >> i) & 1)
+            s[(lo + i) / 8] |= (uint8_t)(1u << ((lo + i) % 8));
+}
+
+TEST(nv_vic_copies_nv12_to_pitch_linear)
+{
+    nvt t;
+    CHECK(nv_boot(&t, "nvdrv", true));
+    int32_t nvmap = nv_fd(&t, "/dev/nvmap");
+    int32_t vic = nv_fd(&t, "/dev/nvhost-vic");
+    CHECK(nvmap > 0 && vic > 0);
+    enum { W = 64, H = 16, CMD = 0, CFG = 1, SY = 2, SC = 3, DY = 4, DC = 5, N = 6 };
+    int32_t h[N];
+    uint32_t dma[N];
+    uint8_t *m = t_mem() + t.heap;
+    for (int i = 0; i < N; i++) {
+        h[i] = map_new(&t, nvmap, 0x1000, t.heap + BUF_AT + (uint64_t)i * 0x1000, 0x1000, 0);
+        CHECK(h[i] > 0);
+        uint8_t mcb[12 + 8];
+        memset(mcb, 0, sizeof mcb);
+        int32_t one = 1;
+        memcpy(mcb, &one, 4);
+        memcpy(mcb + 12, &h[i], 4);
+        CHECK_EQ(nv_ioctl(&t, vic, IOWR(0, 9, 20), mcb), 0);
+        memcpy(&dma[i], mcb + 16, 4);
+        memset(m + BUF_AT + (size_t)i * 0x1000, 0, 0x1000);
+    }
+    uint8_t *sy = m + BUF_AT + SY * 0x1000, *sc = m + BUF_AT + SC * 0x1000;
+    for (uint32_t y = 0; y < H; y++)
+        for (uint32_t x = 0; x < W; x++)
+            sy[bl_at(x, y)] = (uint8_t)(x * 3 + y * 7);
+    for (uint32_t y = 0; y < H / 2; y++)
+        for (uint32_t x = 0; x < W; x++)
+            sc[bl_at(x, y)] = (uint8_t)(200 - x - y * 5);
+    CHECK_EQ(bl_at(16, 0), 32);
+    CHECK_EQ(bl_at(0, 1), 16);
+    CHECK_EQ(bl_at(32, 0), 256);
+    CHECK_EQ(bl_at(0, 8), 512);
+
+    uint8_t *cfg = m + BUF_AT + CFG * 0x1000;
+    put_bits(cfg + 0x10, 80, 14, W - 1);
+    put_bits(cfg + 0x10, 112, 14, H - 1);
+    uint8_t *osc = cfg + 0x20;
+    put_bits(osc, 0, 7, 68);
+    put_bits(osc, 32, 14, W - 1);
+    put_bits(osc, 46, 14, H - 1);
+    put_bits(osc, 64, 14, W - 1);
+    put_bits(osc, 78, 14, H - 1);
+    put_bits(osc, 96, 14, W / 2 - 1);
+    put_bits(osc, 110, 14, H / 2 - 1);
+    uint8_t *slot = cfg + 0x90;
+    put_bits(slot, 0, 1, 1);
+    put_bits(slot, 138, 10, 1023);
+    uint8_t *ssc = slot + 0x40;
+    put_bits(ssc, 0, 7, 68);
+    put_bits(ssc, 11, 4, 1);
+    put_bits(ssc, 15, 4, 1);
+    put_bits(ssc, 64, 14, W - 1);
+    put_bits(ssc, 78, 14, H - 1);
+    put_bits(ssc, 96, 14, W / 2 - 1);
+    put_bits(ssc, 110, 14, H / 2 - 1);
+
+    uint32_t *cmd = (uint32_t *)(void *)(m + BUF_AT + CMD * 0x1000);
+    uint32_t n = 0;
+    cmd[n++] = (0x5Du << 6);
+    const uint32_t writes[][2] = {
+        { 0x1C2, dma[CFG] >> 8 }, { 0x100, dma[SY] >> 8 }, { 0x101, dma[SC] >> 8 },
+        { 0x1C8, dma[DY] >> 8 },  { 0x1C9, dma[DC] >> 8 },
+    };
+    for (size_t i = 0; i < sizeof writes / sizeof writes[0]; i++) {
+        cmd[n++] = (1u << 28) | (0x10u << 16) | 2;
+        cmd[n++] = writes[i][0];
+        cmd[n++] = writes[i][1];
+    }
+    cmd[n++] = (3u << 28) | (0x10u << 16) | 3;
+    cmd[n++] = 0xC0;
+    cmd[n++] = 0;
+
+    uint32_t gp[2] = { 0, 0 };
+    CHECK_EQ(nv_ioctl(&t, vic, IOWR(0, 2, 8), gp), 0);
+    uint8_t sub[16 + 12 + 20 + 4];
+    memset(sub, 0, sizeof sub);
+    int32_t hdr[4] = { 1, 0, 1, 1 };
+    memcpy(sub, hdr, 16);
+    uint32_t cmdbuf[3] = { (uint32_t)h[CMD], 0, n };
+    memcpy(sub + 16, cmdbuf, 12);
+    uint32_t incr[5] = { gp[1], 1, 0, 0, 0 };
+    memcpy(sub + 28, incr, 20);
+    CHECK_EQ(nv_ioctl(&t, vic, IOWR(0, 1, 52), sub), 0);
+
+    const uint8_t *dy = m + BUF_AT + DY * 0x1000, *dc = m + BUF_AT + DC * 0x1000;
+    bool same = true;
+    for (uint32_t y = 0; y < H; y++)
+        for (uint32_t x = 0; x < W; x++)
+            same = same && dy[y * 256 + x] == (uint8_t)(x * 3 + y * 7);
+    for (uint32_t y = 0; y < H / 2; y++)
+        for (uint32_t x = 0; x < W; x++)
+            same = same && dc[y * 256 + x] == (uint8_t)(200 - x - y * 5);
+    CHECK(same);
+}

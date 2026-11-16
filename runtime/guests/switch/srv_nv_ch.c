@@ -1,9 +1,10 @@
 /**
  * @file srv_nv_ch.c
  * @brief Channel devices (/dev/nvhost-gpu, -vic, -nvdec, -nvjpg, -nvenc) and
- * the debug devices. No command buffer is executed: a submit advances the
- * channel's syncpoint and marks it complete, so a guest waiting on the
- * returned fence never hangs.
+ * the debug devices. A submit to the VIC or NVDEC channel runs its command
+ * buffers on the host1x command processor (host1x.c) before it returns;
+ * every submit then marks its syncpoint increments complete, so a guest
+ * waiting on the returned fence sees the work done.
  *
  * Ioctl numbers, argument layouts and results follow Ryujinx (MIT,
  * Copyright (c) Ryujinx Team and Contributors) NvHostChannelDeviceFile,
@@ -11,7 +12,7 @@
  * GetErrorInfo and GetErrorNotification follow libnx (ISC, Copyright (c)
  * libnx Authors) nvioctl numbers.
  */
-#include "nv.h"
+#include "host1x.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,7 @@ typedef struct ch_priv {
     int32_t nvmap_fd;
     uint64_t user_data;
     hos_revent *events[3];
+    h1x_stream stream;
 } ch_priv;
 
 typedef struct get_parameter {
@@ -97,6 +99,7 @@ void nv_ch_reset(void)
     memset(dev_syncpoints, 0, sizeof dev_syncpoints);
     if (host1x_inited)
         nv_va_destroy(&host1x);
+    h1x_reset();
     host1x_inited = false;
 }
 
@@ -238,7 +241,6 @@ static int32_t ch_unmap_command_buffer(nv_file *f, nv_args *a)
 
 static int32_t ch_submit(nv_file *f, nv_args *a)
 {
-    (void)f;
     submit_header h;
     memcpy(&h, a->data, sizeof h);
     if (h.cmdbufs < 0 || h.relocs < 0 || h.syncpt_incrs < 0 || h.fences < 0)
@@ -252,7 +254,8 @@ static int32_t ch_submit(nv_file *f, nv_args *a)
     for (int32_t i = 0; i < h.cmdbufs; i++) {
         cmd_buffer cb;
         memcpy(&cb, a->data + cmds_at + (size_t)i * sizeof cb, sizeof cb);
-        if (!nv_map_get(cb.mem))
+        nv_map *m = nv_map_get(cb.mem);
+        if (!m || cb.words < 0 || (cb.offset & 3) || (uint64_t)cb.offset + (uint64_t)cb.words * 4 > m->size)
             return NVE_INVALID_INPUT;
     }
     for (int32_t i = 0; i < h.syncpt_incrs; i++) {
@@ -267,6 +270,13 @@ static int32_t ch_submit(nv_file *f, nv_args *a)
         uint32_t threshold = nv_sync_max_add(si.id, si.incrs);
         if (i < h.fences)
             memcpy(a->data + fences_at + (size_t)i * 4, &threshold, 4);
+    }
+    for (int32_t i = 0; i < h.cmdbufs; i++) {
+        cmd_buffer cb;
+        memcpy(&cb, a->data + cmds_at + (size_t)i * sizeof cb, sizeof cb);
+        nv_map *m = nv_map_get(cb.mem);
+        if (m->addr && (f->dev == &nv_dev_vic || f->dev == &nv_dev_nvdec))
+            h1x_run(&priv_of(f)->stream, (const uint32_t *)(void *)(hos_mem() + m->addr + cb.offset), (uint32_t)cb.words);
     }
     for (int32_t i = 0; i < h.syncpt_incrs; i++) {
         syncpt_incr si;

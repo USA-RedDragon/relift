@@ -8,7 +8,8 @@
  * and Contributors, Ryujinx.HLE/HOS/Services/Nv) and the Linux ioctl
  * encoding used by libnx (ISC, Copyright (c) libnx Authors). Nothing
  * executes on a GPU: work submitted to a channel completes when it is
- * submitted, address spaces only keep the bookkeeping of virtual ranges, and
+ * submitted (VIC and NVDEC work runs on the CPU at that point, see
+ * host1x.h), address spaces only keep the bookkeeping of virtual ranges, and
  * nvmap keeps the guest addresses the buffers were allocated at.
  */
 #ifndef RELIFT_NV_H
@@ -242,6 +243,8 @@ typedef struct nv_map {
 
 /** @brief The nvmap handle id, or NULL. nv lock held. */
 nv_map *nv_map_get(int32_t id);
+/** @brief The handle whose host1x mapping holds DMA address addr, or NULL. nv lock held. */
+nv_map *nv_map_by_dma(uint64_t addr);
 /** @brief Frees every nvmap handle. nv lock held. */
 void nv_map_reset(void);
 

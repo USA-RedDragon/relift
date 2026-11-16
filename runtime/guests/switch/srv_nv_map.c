@@ -75,6 +75,16 @@ nv_map *nv_map_get(int32_t id)
     return i < tab_cap ? tab[i] : NULL;
 }
 
+nv_map *nv_map_by_dma(uint64_t addr)
+{
+    for (uint32_t i = 0; i < tab_cap; i++) {
+        nv_map *m = tab[i];
+        if (m && m->dma_addr && addr >= m->dma_addr && addr - m->dma_addr < m->size)
+            return m;
+    }
+    return NULL;
+}
+
 void nv_map_reset(void)
 {
     for (uint32_t i = 0; i < tab_cap; i++)
