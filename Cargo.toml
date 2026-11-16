@@ -33,6 +33,7 @@ relift-gba-analyze = { path = "guests/gba/analyze" }
 relift-gba-formats = { path = "guests/gba/formats" }
 relift-gba-tools = { path = "guests/gba/tools" }
 relift-nds-formats = { path = "guests/nds/formats" }
+relift-nds-tools = { path = "guests/nds/tools" }
 relift-sms-formats = { path = "guests/sms/formats" }
 relift-sms-tools = { path = "guests/sms/tools" }
 relift-emit = { path = "core/emit" }

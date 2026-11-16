@@ -1,0 +1,20 @@
+[package]
+name = "relift-nds-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+relift-cache = { workspace = true }
+relift-nds-formats = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+relift-proc = { workspace = true }
+serde_json = { workspace = true }

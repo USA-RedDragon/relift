@@ -1213,6 +1213,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-nds-formats"
+version = "0.1.0"
+dependencies = [
+ "sha2 0.11.1",
+]
+
+[[package]]
+name = "relift-nds-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "relift-cache",
+ "relift-nds-formats",
+ "relift-proc",
+ "serde_json",
+]
+
+[[package]]
 name = "relift-override"
 version = "0.1.0"
 dependencies = [
