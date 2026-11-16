@@ -28,8 +28,70 @@ enum {
     NDS_WATCH_SWRAM = NDS_WATCH_MAIN + RL_NDS_MAIN_SIZE / NDS_LINE,
     NDS_WATCH_WRAM7 = NDS_WATCH_SWRAM + RL_NDS_SWRAM_SIZE / NDS_LINE,
     NDS_WATCH_ITCM = NDS_WATCH_WRAM7 + RL_NDS_WRAM7_SIZE / NDS_LINE,
-    NDS_WATCH_LINES = NDS_WATCH_ITCM + RL_CP15_ITCM_SIZE / NDS_LINE,
+    NDS_WATCH_VRAM = NDS_WATCH_ITCM + RL_CP15_ITCM_SIZE / NDS_LINE,
+    NDS_WATCH_LINES = NDS_WATCH_VRAM + RL_NDS_VRAM_SIZE / NDS_LINE,
 };
+
+/** @brief The video RAM banks A to I. */
+enum {
+    NDS_BANK_A,
+    NDS_BANK_B,
+    NDS_BANK_C,
+    NDS_BANK_D,
+    NDS_BANK_E,
+    NDS_BANK_F,
+    NDS_BANK_G,
+    NDS_BANK_H,
+    NDS_BANK_I,
+    NDS_BANKS
+};
+
+/** @brief The views of video RAM (vram.c): what the CPUs and the engines see. */
+enum {
+    /** @brief The ARM9's plain access, 0x06800000 mirrored every 1 MiB. */
+    NDS_V_LCDC,
+    /** @brief Engine A BG (512 KiB) and engine B BG (128 KiB), also the ARM9's 0x06000000 and 0x06200000. */
+    NDS_V_BGA,
+    NDS_V_BGB,
+    /** @brief Engine A OBJ (256 KiB) and engine B OBJ (128 KiB), 0x06400000 and 0x06600000. */
+    NDS_V_OBJA,
+    NDS_V_OBJB,
+    /** @brief The ARM7's 0x06000000 (C and D as work RAM, 256 KiB). */
+    NDS_V_ARM7,
+    /** @brief The four 128 KiB texture slots and the six 16 KiB texture palette slots of the 3D engine. */
+    NDS_V_TEX,
+    NDS_V_TEXPAL,
+    /** @brief The extended palettes: BG (four 8 KiB slots) and OBJ (8 KiB) of each engine. */
+    NDS_V_BGEXTA,
+    NDS_V_OBJEXTA,
+    NDS_V_BGEXTB,
+    NDS_V_OBJEXTB,
+    NDS_VIEWS
+};
+/** @brief Pages of all views together. */
+#define NDS_VPAGES 194u
+
+/** @brief One page of a view: the banks that answer it. */
+typedef struct nds_vpage {
+    /** @brief The page's first byte when exactly one bank answers it, else NULL. */
+    uint8_t *p;
+    /** @brief One bit per bank that answers the page. */
+    uint16_t banks;
+    /** @brief For each bank of banks, the offset in rl_nds.vram of the page's first byte. */
+    uint32_t at[NDS_BANKS];
+} nds_vpage;
+
+/** @brief Where a view's pages sit in rl_nds.vpg. */
+typedef struct nds_vview {
+    /** @brief Index of its first page. */
+    uint16_t first;
+    /** @brief Page count minus one (a power of two minus one). */
+    uint16_t pages;
+    /** @brief log2 of the page size. */
+    uint8_t shift;
+    /** @brief The page size minus one. */
+    uint32_t mask;
+} nds_vview;
 
 /** @brief The interrupt controller of one CPU. */
 typedef struct nds_irq {
@@ -89,6 +151,8 @@ typedef enum nds_kind {
     NDS_K_NONE,
     /** @brief Memory at nds_where.p. */
     NDS_K_MEM,
+    /** @brief A video RAM page where several banks overlap (nds_vram_read_slow). */
+    NDS_K_VRAM,
     /** @brief The CPU's I/O registers. */
     NDS_K_IO,
     /** @brief A BIOS region: a high-level stub with no image, reads 0. */
@@ -138,7 +202,13 @@ struct rl_nds {
     /** @brief EXMEMCNT of the ARM9 and the ARM7's own bits 0 to 6. */
     uint16_t exmem[2];
     uint8_t postflg[2];
-    uint8_t vramcnt[10];
+    /** @brief VRAMCNT_A to VRAMCNT_I (WRAMCNT sits between G and H in the I/O map). */
+    uint8_t vramcnt[NDS_BANKS];
+    /** @brief VRAMSTAT of the ARM7: bit 0 for C, bit 1 for D given to it. */
+    uint8_t vramstat;
+    /** @brief The page tables of the video RAM views. */
+    nds_vpage vpg[NDS_VPAGES];
+    nds_vview vview[NDS_VIEWS];
     /** @brief The ARM7 wrote HALTCNT: the store ends in a halt. */
     bool halt_req;
     /** @brief The CPU waits in rl_nds_halt. */
@@ -210,6 +280,35 @@ static inline void nds_watch_store(rl_nds *m, const uint8_t *p)
 
 /** @brief Decodes addr (aligned) for cpu; code true for an instruction fetch, write for a store. */
 nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write);
+/** @brief True when a byte store of cpu at addr is dropped (the ARM9's palette, video RAM and OAM take halfwords and words only). */
+bool nds_drops_byte(unsigned cpu, uint32_t addr);
+/** @brief Rebuilds every view's page table from VRAMCNT. */
+void nds_vram_rebuild(rl_nds *m);
+/** @brief A write of VRAMCNT of bank b. */
+void nds_vram_write_cnt(rl_nds *m, unsigned b, uint8_t v);
+/** @brief A read of size bytes at addr of view, the OR of every bank that answers it (0 for none). */
+uint32_t nds_vram_read_slow(const rl_nds *m, unsigned view, uint32_t addr, unsigned size);
+/** @brief A write of size bytes at addr of view to every bank that answers it. */
+void nds_vram_write_slow(rl_nds *m, unsigned view, uint32_t addr, unsigned size, uint32_t value);
+/** @brief The view the CPU's 0x06xxxxxx address addr goes to. */
+unsigned nds_vram_cpu_view(unsigned cpu, uint32_t addr);
+/** @brief The first byte of bank b in rl_nds.vram. */
+uint8_t *nds_vram_bank(rl_nds *m, unsigned b);
+/** @brief The page of view at addr (the address's low bits select it, mirrored over the view). */
+static inline const nds_vpage *nds_vram_page(const rl_nds *m, unsigned view, uint32_t addr)
+{
+    const nds_vview *v = &m->vview[view];
+    return &m->vpg[v->first + ((addr >> v->shift) & v->pages)];
+}
+/** @brief A read of size bytes (1, 2 or 4, aligned) at addr of view, as an engine sees it. */
+static inline uint32_t nds_vram_rd(const rl_nds *m, unsigned view, uint32_t addr, unsigned size)
+{
+    const nds_vpage *pg = nds_vram_page(m, view, addr);
+    if (pg->p)
+        return nds_ld(pg->p + (addr & m->vview[view].mask), size);
+    return pg->banks ? nds_vram_read_slow(m, view, addr, size) : 0;
+}
+
 /** @brief Rebuilds the GBA slot rows of the cost table from EXMEMCNT. */
 void nds_costs_rebuild(rl_nds *m);
 /** @brief The open bus value of the GBA slot for cpu at addr. */

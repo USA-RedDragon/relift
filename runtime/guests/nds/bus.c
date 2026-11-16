@@ -47,6 +47,8 @@ static uint32_t bus_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, 
     switch (w.kind) {
     case NDS_K_MEM:
         return nds_ld(w.p, size);
+    case NDS_K_VRAM:
+        return nds_vram_read_slow(m, nds_vram_cpu_view(cpu, addr), addr, size);
     case NDS_K_IO:
         if (m->sched)
             return (uint32_t)rl_sched_read(m->cpu[cpu], nds_io_key(cpu, addr), size);
@@ -104,9 +106,13 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     if (nds_shared(cpu, addr))
         nds_order(m, cpu);
     nds_where w = nds_decode(m, cpu, addr, false, true);
+    if (size == 1 && nds_drops_byte(cpu, addr))
+        w.kind = NDS_K_NONE;
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
         nds_watch_store(m, w.p);
+    } else if (w.kind == NDS_K_VRAM) {
+        nds_vram_write_slow(m, nds_vram_cpu_view(cpu, addr), addr, size, value);
     } else if (w.kind == NDS_K_IO) {
         if (m->sched)
             rl_sched_write(m->cpu[cpu], nds_io_key(cpu, addr), size, value);

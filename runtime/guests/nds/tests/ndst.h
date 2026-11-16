@@ -29,6 +29,13 @@ void ndst_to(ndst *t, unsigned cpu, uint64_t tick);
 /** @brief Moves both clocks to tick. */
 void ndst_both(ndst *t, uint64_t tick);
 
+/**
+ * @brief Runs the op stream ops (scene.h) as untimed ARM9 accesses; the
+ * values its reads return go to out (at most max). Returns how many reads
+ * there were.
+ */
+uint32_t ndst_scene(ndst *t, const uint32_t *ops, uint32_t *out, uint32_t max);
+
 /** @brief An ARM9 untimed read of size bytes. */
 static inline uint32_t r9(ndst *t, uint32_t a, unsigned size) { return rl_nds_read(t->m, RL_NDS_ARM9, a, size); }
 /** @brief An ARM7 untimed read of size bytes. */

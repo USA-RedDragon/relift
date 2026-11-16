@@ -139,23 +139,19 @@ TEST(bios_regions_are_stubs_and_undefined_regions_read_zero)
     CHECK(!rl_nds_ordered(t->m, RL_NDS_ARM7, 0x00000000u));
 }
 
-TEST(palette_vram_and_oam_are_plain_storage_on_the_arm9)
+TEST(palette_and_oam_mirror_and_take_no_bytes_from_the_arm9)
 {
     ndst *t = ndst_new();
     w9(t, 0x050007FEu, 2, 0x7FFF);
     CHECK_EQ(r9(t, 0x05FFFFFEu, 2), 0x7FFF);
     w9(t, 0x070003F0u, 4, 0x01020304u);
     CHECK_EQ(r9(t, 0x07000BF0u, 4), 0x01020304u);
-    w9(t, 0x06000000u, 4, 0xA0A0A0A0u);
-    w9(t, 0x06200000u, 4, 0xB0B0B0B0u);
-    w9(t, 0x06400000u, 4, 0xC0C0C0C0u);
-    w9(t, 0x06600000u, 4, 0xD0D0D0D0u);
-    w9(t, 0x06800000u, 4, 0xE0E0E0E0u);
-    CHECK_EQ(r9(t, 0x06080000u, 4), 0xA0A0A0A0u);
-    CHECK_EQ(r9(t, 0x06220000u, 4), 0xB0B0B0B0u);
-    CHECK_EQ(r9(t, 0x06440000u, 4), 0xC0C0C0C0u);
-    CHECK_EQ(r9(t, 0x06620000u, 4), 0xD0D0D0D0u);
-    CHECK_EQ(r9(t, 0x06900000u, 4), 0xE0E0E0E0u);
+    w9(t, 0x070003F0u, 1, 0xFF);
+    w9(t, 0x05000000u, 1, 0xFF);
+    CHECK_EQ(r9(t, 0x070003F0u, 4), 0x01020304u);
+    CHECK_EQ(r9(t, 0x05000000u, 4), 0);
+    for (uint32_t a = 0x06000000u; a < 0x07000000u; a += 0x40000u)
+        CHECK_EQ(r9(t, a, 4), 0);
     CHECK_EQ(r7(t, 0x06000000u, 4), 0);
     CHECK(!rl_nds_ordered(t->m, RL_NDS_ARM9, 0x06000000u));
     CHECK(rl_nds_ordered(t->m, RL_NDS_ARM7, 0x06000000u));

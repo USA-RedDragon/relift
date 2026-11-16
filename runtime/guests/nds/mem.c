@@ -12,19 +12,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** @brief Offsets of the five video RAM windows in rl_nds.vram and their masks. */
-static const struct {
-    uint32_t base, mask;
-} vram_win[5] = {
-    {0x000000, 0x7FFFF}, {0x080000, 0x1FFFF}, {0x0A0000, 0x3FFFF}, {0x0E0000, 0x1FFFF}, {0x100000, 0xFFFFF},
-};
-
-static uint8_t *vram_at(rl_nds *m, uint32_t addr)
+/** @brief The decode of cpu's video RAM address addr through its view's page table. */
+static nds_where vram_at(rl_nds *m, unsigned cpu, uint32_t addr)
 {
-    unsigned w = (addr >> 21) & 7;
-    if (w > 4)
-        w = 4;
-    return &m->vram[vram_win[w].base + (addr & vram_win[w].mask)];
+    unsigned v = nds_vram_cpu_view(cpu, addr);
+    const nds_vpage *pg = nds_vram_page(m, v, addr);
+    if (pg->p)
+        return (nds_where){.p = pg->p + (addr & m->vview[v].mask), .kind = NDS_K_MEM};
+    return (nds_where){.kind = pg->banks ? NDS_K_VRAM : NDS_K_NONE};
 }
 
 /** @brief The shared work RAM bank cpu sees at addr, or NULL when it has none (WRAMCNT). */
@@ -67,7 +62,7 @@ static nds_where decode9(rl_nds *m, uint32_t addr, bool code, bool write)
     case 0x05:
         return at(&m->pal[addr & (RL_NDS_PAL_SIZE - 1)], false);
     case 0x06:
-        return at(vram_at(m, addr), false);
+        return vram_at(m, RL_NDS_ARM9, addr);
     case 0x07:
         return at(&m->oam[addr & (RL_NDS_OAM_SIZE - 1)], false);
     case 0x08:
@@ -94,6 +89,8 @@ static nds_where decode7(rl_nds *m, uint32_t addr)
     }
     case 0x04:
         return (nds_where){.kind = addr < 0x04800000u ? NDS_K_IO : NDS_K_NONE};
+    case 0x06:
+        return vram_at(m, RL_NDS_ARM7, addr);
     case 0x08:
     case 0x09:
     case 0x0A:
@@ -106,6 +103,12 @@ static nds_where decode7(rl_nds *m, uint32_t addr)
 nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write)
 {
     return cpu == RL_NDS_ARM9 ? decode9(m, addr, code, write) : decode7(m, addr);
+}
+
+bool nds_drops_byte(unsigned cpu, uint32_t addr)
+{
+    unsigned r = addr >> 24;
+    return cpu == RL_NDS_ARM9 && r >= 0x05 && r <= 0x07;
 }
 
 bool nds_shared(unsigned cpu, uint32_t addr)
@@ -225,6 +228,7 @@ rl_nds *rl_nds_create(void)
     rl_arm32_cp15_reset(&m->cp15);
     rl_arm32_cp15_tcm(&m->cp15, &m->tcm);
     nds_io_reset(m);
+    nds_vram_rebuild(m);
     nds_costs_rebuild(m);
     return m;
 }
@@ -272,6 +276,8 @@ uint32_t rl_nds_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size)
     switch (w.kind) {
     case NDS_K_MEM:
         return nds_ld(w.p, size);
+    case NDS_K_VRAM:
+        return nds_vram_read_slow(m, nds_vram_cpu_view(cpu, addr), addr, size);
     case NDS_K_IO:
         return io_untimed_read(m, cpu, addr, size);
     case NDS_K_SLOT:
@@ -285,10 +291,14 @@ void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
 {
     addr &= ~(size - 1);
     value &= nds_mask(size);
+    if (size == 1 && nds_drops_byte(cpu, addr))
+        return;
     nds_where w = nds_decode(m, cpu, addr, false, true);
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
         nds_watch_store(m, w.p);
+    } else if (w.kind == NDS_K_VRAM) {
+        nds_vram_write_slow(m, nds_vram_cpu_view(cpu, addr), addr, size, value);
     } else if (w.kind == NDS_K_IO) {
         io_untimed_write(m, cpu, addr, size, value);
         m->halt_req = false;
@@ -319,6 +329,7 @@ int nds_watch_line(const rl_nds *m, const uint8_t *p)
         {offsetof(rl_nds, swram), RL_NDS_SWRAM_SIZE, NDS_WATCH_SWRAM},
         {offsetof(rl_nds, wram7), RL_NDS_WRAM7_SIZE, NDS_WATCH_WRAM7},
         {offsetof(rl_nds, itcm), RL_CP15_ITCM_SIZE, NDS_WATCH_ITCM},
+        {offsetof(rl_nds, vram), RL_NDS_VRAM_SIZE, NDS_WATCH_VRAM},
     };
     uintptr_t at = (uintptr_t)p - (uintptr_t)m;
     for (size_t i = 0; i < sizeof mems / sizeof mems[0]; i++)

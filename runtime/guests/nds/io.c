@@ -68,7 +68,7 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
         return exmem_read(m, cpu) | (cpu == RL_NDS_ARM7 ? regs_word(m, cpu, off) & 0xFFFF0000u : 0);
     case 0x240:
         if (cpu == RL_NDS_ARM7)
-            return (uint32_t)m->wramcnt << 8;
+            return m->vramstat | (uint32_t)m->wramcnt << 8;
         return (uint32_t)m->vramcnt[0] | (uint32_t)m->vramcnt[1] << 8 | (uint32_t)m->vramcnt[2] << 16 |
                (uint32_t)m->vramcnt[3] << 24;
     case 0x244:
@@ -129,9 +129,9 @@ static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t 
             if (r == 7)
                 m->wramcnt = b & 3;
             else if (r < 7)
-                m->vramcnt[r] = b;
+                nds_vram_write_cnt(m, r, b);
             else if (r < 10)
-                m->vramcnt[r - 1] = b;
+                nds_vram_write_cnt(m, r - 1, b);
         }
         return;
     case 0x300:
@@ -168,6 +168,7 @@ void nds_io_reset(rl_nds *m)
     m->exmem[0] = m->exmem[1] = 0;
     m->postflg[0] = m->postflg[1] = 0;
     memset(m->vramcnt, 0, sizeof m->vramcnt);
+    nds_vram_rebuild(m);
     m->halt_req = false;
     nds_irq_reset(m);
     nds_ipc_reset(m);

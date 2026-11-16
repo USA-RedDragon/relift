@@ -49,8 +49,8 @@ enum {
     RL_NDS_WRAM7_SIZE = 0x10000,
     RL_NDS_PAL_SIZE = 0x800,
     RL_NDS_OAM_SIZE = 0x800,
-    /** @brief The plain video RAM store: the five 2 MiB windows of 0x06000000 packed (512, 128, 256, 128 KiB and 1 MiB). */
-    RL_NDS_VRAM_SIZE = 0x200000,
+    /** @brief The video RAM banks A to I one after the other, as the ARM9's LCDC window shows them (656 KiB). */
+    RL_NDS_VRAM_SIZE = 0xA4000,
 };
 
 /** @brief The memories of the machine. */
@@ -67,7 +67,7 @@ typedef enum rl_nds_region {
     RL_NDS_DTCM,
     /** @brief Standard palettes, 2 KiB. */
     RL_NDS_PAL,
-    /** @brief Video RAM as plain storage (RL_NDS_VRAM_SIZE) until VRAM banking exists. */
+    /** @brief Video RAM, the banks A to I in their LCDC order (RL_NDS_VRAM_SIZE). */
     RL_NDS_VRAM,
     /** @brief Object attribute memory, 2 KiB. */
     RL_NDS_OAM,
@@ -151,10 +151,10 @@ uint8_t *rl_nds_mem(rl_nds *m, rl_nds_region r, size_t *len);
 bool rl_nds_halt_lost(rl_nds *m, unsigned cpu);
 
 /**
- * @brief Watches the code memory (main RAM, shared and ARM7 work RAM, ITCM)
- * that cpu fetches the len bytes at addr from now: from then on every write
- * there, by either CPU, timed or not, moves the code epoch. Lines of 32
- * bytes; nothing for addresses outside code memory.
+ * @brief Watches the code memory (main RAM, shared and ARM7 work RAM, ITCM,
+ * video RAM) that cpu fetches the len bytes at addr from now: from then on
+ * every write there, by either CPU, timed or not, moves the code epoch.
+ * Lines of 32 bytes; nothing for addresses outside code memory.
  */
 void rl_nds_code_watch(rl_nds *m, unsigned cpu, uint32_t addr, uint32_t len);
 /** @brief The number of writes to watched code memory so far. */
