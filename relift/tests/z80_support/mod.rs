@@ -60,7 +60,8 @@ impl Sets {
 /// both ways of a conditional, the vector of an interrupt entry (a function
 /// entry), the taken half of a conditional call or
 /// return, the instruction after a call. A call target is a function entry;
-/// blocks joined by jumps and fall-through share a function. Addresses for
+/// blocks joined by jumps and fall-through share a function, except that a
+/// jump to a function entry is a tail call. Addresses for
 /// which `external` holds are not lifted (the program supplies them).
 pub fn discover(
     mem: &[u8],
@@ -134,6 +135,9 @@ pub fn discover(
     let index: HashMap<u64, usize> = keys.iter().enumerate().map(|(i, k)| (*k, i)).collect();
     let mut sets = Sets((0..keys.len()).collect());
     for (a, b) in &jumps {
+        if entries.contains(b) {
+            continue;
+        }
         if let (Some(i), Some(j)) = (index.get(a), index.get(b)) {
             sets.join(*i, *j);
         }
