@@ -31,31 +31,31 @@ fn directed(mode: u32, neg: bool) -> Option<bool> {
 }
 
 impl Ctx {
-    fn sh(&mut self, opc: u16, a: u32, k: u32) -> u32 {
+    pub(crate) fn sh(&mut self, opc: u16, a: u32, k: u32) -> u32 {
         let k = self.kc(k);
         self.ib(opc, a, k)
     }
 
-    fn and_k(&mut self, a: u32, k: u32) -> u32 {
+    pub(crate) fn and_k(&mut self, a: u32, k: u32) -> u32 {
         let k = self.kc(k);
         self.ib(op::BITWISE_AND, a, k)
     }
 
-    fn cmp_k(&mut self, opc: u16, a: u32, k: u32) -> u32 {
+    pub(crate) fn cmp_k(&mut self, opc: u16, a: u32, k: u32) -> u32 {
         let k = self.kc(k);
         self.icmp_op(opc, a, k)
     }
 
-    fn lnot(&mut self, a: u32) -> u32 {
+    pub(crate) fn lnot(&mut self, a: u32) -> u32 {
         self.not_if(a, true)
     }
 
-    fn land(&mut self, a: u32, b: u32) -> u32 {
+    pub(crate) fn land(&mut self, a: u32, b: u32) -> u32 {
         let t = self.boolt();
         self.m.emit(op::LOGICAL_AND, t, &[a, b])
     }
 
-    fn lor(&mut self, a: u32, b: u32) -> u32 {
+    pub(crate) fn lor(&mut self, a: u32, b: u32) -> u32 {
         let t = self.boolt();
         self.m.emit(op::LOGICAL_OR, t, &[a, b])
     }
