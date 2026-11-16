@@ -24,7 +24,10 @@
 //! control to a test it copied there, gets a budget of its own for that
 //! code; when the path ends there it goes on, with its memory but unknown
 //! registers, at the ROM targets of the jumps that code holds, so the
-//! driver's next round copies its next test. After a `halt` in RAM the
+//! driver's next round copies its next test. When that code goes back to
+//! ROM itself, the path goes on with the budget it had before the jump
+//! and the steps it ran in RAM, and after [`MAX_LAUNCHES`] such jumps its
+//! jumps into RAM get no budget of their own. After a `halt` in RAM the
 //! decoding also goes on where the HALT bug ends the instruction after it,
 //! which reads its own opcode again as its first operand byte and so ends
 //! one byte early. A `halt` or `ei` with the
@@ -313,6 +316,8 @@ struct Path {
     launch: Option<Launch>,
     nops: u32,
     ram_fork: bool,
+    /// Jumps from ROM into RAM that got a budget of their own.
+    launched: usize,
     dma: Option<Dma>,
     /// The CGB's VRAM DMA source and destination registers, `$FF51` to
     /// `$FF54`.
@@ -1701,7 +1706,13 @@ impl Machine<'_> {
                     p.pc = t;
                 };
                 let jumped = |p: &mut Path, t: u16, f: &mut Found| {
-                    if pc < 0x8000 && is_ram(t) && p.main && p.launch.is_none() {
+                    if pc < 0x8000
+                        && is_ram(t)
+                        && p.main
+                        && p.launch.is_none()
+                        && p.launched < MAX_LAUNCHES
+                    {
+                        p.launched += 1;
                         p.launch = Some(Launch {
                             exits: self.image(p, f, t),
                             start: p.steps,
@@ -1709,7 +1720,9 @@ impl Machine<'_> {
                         });
                         p.limit = p.limit.saturating_add(LAUNCH_STEPS);
                     } else if pc >= 0x8000 && t < 0x8000 {
-                        p.launch = None;
+                        if let Some(l) = p.launch.take() {
+                            p.limit = l.limit.saturating_add(p.steps - l.start);
+                        }
                         p.free = true;
                     }
                 };
@@ -1840,7 +1853,9 @@ impl Machine<'_> {
                                     fr.at = p.steps;
                                 }
                                 if pc >= 0x8000 && t < 0x8000 {
-                                    p.launch = None;
+                                    if let Some(l) = p.launch.take() {
+                                        p.limit = l.limit.saturating_add(p.steps - l.start);
+                                    }
                                     p.free = true;
                                 }
                                 p.pc = t;
@@ -1987,6 +2002,7 @@ impl Machine<'_> {
             launch: None,
             nops: 0,
             ram_fork: false,
+            launched: 0,
             dma: None,
             hdma: [None; 4],
         }
