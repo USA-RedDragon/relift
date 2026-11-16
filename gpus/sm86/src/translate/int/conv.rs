@@ -623,6 +623,7 @@ fn i2f(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 fn f2f(c: &mut Ctx, i: &Inst) -> Res<()> {
+    Ctx::mods_ok(i, &["FTZ", "F16", "F32", "F64", "BF16", "RM", "RP", "RZ"])?;
     let ftz = i.has("FTZ");
     let mode = rounding(i);
     let tys: Vec<&str> = i
