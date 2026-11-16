@@ -186,6 +186,31 @@ fn warp_paths_follow_the_host() {
 }
 
 #[test]
+fn ldsm_alone_plans_a_warp_path() {
+    let mut b = Vec::new();
+    b.extend(word(
+        0x83b,
+        4,
+        &[
+            (16, 8, 8),
+            (24, 8, 4),
+            (40, 24, 0x40),
+            (72, 2, 2),
+            (78, 2, 0),
+        ],
+    ));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    assert!(text_of(&p)[0].starts_with("LDSM"), "{:?}", text_of(&p));
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    assert_eq!(s.interface.host.warp_ops, 1);
+    let s = on(&p, HostProfile::minimal());
+    assert_eq!(s.interface.host.warp, WarpPath::Shared);
+    assert!(!spirv_ops(&s.spirv).contains(&GROUP_SHUFFLE));
+}
+
+#[test]
 fn divergent_warp_operations_are_reported() {
     let p = warp_program(true);
     assert!(p.decode()[0].as_ref().is_ok_and(|i| i.guard.is_some()));

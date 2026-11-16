@@ -68,7 +68,7 @@ pub(crate) fn shfl_is_quad(i: &Inst) -> bool {
 pub(crate) fn warp_op(i: &Inst) -> Option<bool> {
     match i.mnemonic {
         "SHFL" => Some(shfl_is_quad(i)),
-        "VOTE" | "VOTEU" | "REDUX" | "MATCH" => Some(false),
+        "VOTE" | "VOTEU" | "REDUX" | "MATCH" | "LDSM" => Some(false),
         "BMOV" if reads_active(i) => Some(false),
         "S2R" | "S2UR" | "CS2R" => match i.ops.get(1) {
             Some(Operand::Sym(s))
