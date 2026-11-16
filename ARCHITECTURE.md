@@ -237,7 +237,7 @@ All of these run in `cargo test` and in CI's checks job.
 | `std::process::Command::new` only in `relift-proc`; `fs::write`, `File::create`, `OpenOptions::open`, `fs::copy`, `io::copy` only in `relift-cache` | `clippy.toml` (clippy, `-D warnings` in CI) |
 | The funnel opt-out appears once per owning crate and nowhere else; no crate has its own `clippy.toml` | `relift/tests/funnels.rs` |
 | No GPL, AGPL or LGPL crate; crates.io only | `deny.toml` (`cargo deny check` in CI) |
-| The generated config table in `README.md` and `relift.example.toml` match the settings struct | CI step "generated config docs are current"; `relift/tests/cli.rs`: `the_example_config_loads` |
+| The generated config table in `docs/configuration.md` and `relift.example.toml` match the settings struct | CI step "generated config docs are current"; `relift/tests/cli.rs`: `the_example_config_loads` |
 | The C runtime core (`runtime/core`) includes no header of `runtime/cpus` or `runtime/guests` and spells no guest OS or CPU word outside `runtime/charter/allow.txt` | `runtime/charter/check.py` (`make -C runtime charter`, the Runtime workflow's charter job); each layer's test binary links nothing above it |
 
 The cut edges are folder rules read from each member's manifest path, so a
