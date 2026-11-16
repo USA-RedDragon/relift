@@ -6,7 +6,8 @@
 # from a copy of this working tree: the macOS tests, the macOS and iOS cross
 # builds of the Game Boy and Game Boy Advance programs, and relift for both Apple targets (the CI image builds those on
 # Linux). With CI_MAC empty or the host unreachable they are reported as
-# skipped. Jobs named image-* need docker and the pinned
+# skipped. A job that takes longer than the timeout-minutes of the workflow
+# job it stands for is killed, with its children, and fails. Jobs named image-* need docker and the pinned
 # rust-cross image (about 16 GB unpacked); without docker, or without the
 # image and room to pull it, they are reported as skipped. A skip never
 # fails the run but is always printed with its reason.
@@ -46,9 +47,29 @@ elif ! docker image inspect "$image" >/dev/null 2>&1; then
   [ "${free:-0}" -ge 24 ] || image_skip="the rust-cross image is not pulled and only ${free:-0} GB are free (it needs about 16 GB)"
 fi
 
+# limit_minutes NAME: the timeout-minutes of the workflow job that runs NAME.
+limit_minutes() {
+  local wf
+  case $1 in
+    checks | gb-corpus | generated | workflows | appimage) wf=ci.yaml:$1 ;;
+    mac-tests) wf=ci.yaml:macos ;;
+    image-*) wf=ci.yaml:cross ;;
+    runtime-charter) wf=runtime.yaml:charter ;;
+    runtime-tests) wf=runtime.yaml:c-tests ;;
+    release-guard) wf=cross.yaml:release-guard ;;
+    mac-cross-*) wf=cross.yaml:macos ;;
+    cross-*) wf=cross.yaml:linux ;;
+    mac-release-*) wf=release-mac.yaml:relift ;;
+  esac
+  awk -v want="${wf#*:}" '
+    /^  [A-Za-z0-9_-]+:$/ { in_job = ($1 == want ":") }
+    in_job && $1 == "timeout-minutes:" { print $2; exit }
+  ' "$ROOT/.github/workflows/${wf%%:*}"
+}
+
 # on_mac CMD: run CMD on the mac in the copied tree, with its own work dirs.
 on_mac() {
-  ssh -o BatchMode=yes "$CI_MAC" "eval \"\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || true)\"
+  ssh -tt -o BatchMode=yes "$CI_MAC" "eval \"\$(/opt/homebrew/bin/brew shellenv 2>/dev/null || true)\"
     cd \"\$HOME/$mac_dir/src\" && export CI_WORK=\"\$HOME/$mac_dir/work\" CARGO_TARGET_DIR=\"\$HOME/$mac_dir/target\" CARGO_BUILD_JOBS=4 && $1"
 }
 
@@ -78,9 +99,29 @@ for j in "${jobs[@]}"; do
   (
     s=$(date +%s)
     set +e
-    job "$j" >"$logs/$j.log" 2>&1
+    limit=$(limit_minutes "$j")
+    set -m
+    job "$j" >"$logs/$j.log" 2>&1 &
+    pid=$!
+    killed=
+    while kill -0 "$pid" 2>/dev/null; do
+      if [ -n "$limit" ] && [ $(($(date +%s) - s)) -ge $((limit * 60)) ]; then
+        kill -TERM -- "-$pid" 2>/dev/null
+        sleep 3
+        kill -KILL -- "-$pid" 2>/dev/null
+        killed=1
+        break
+      fi
+      sleep 1
+    done
+    wait "$pid" 2>/dev/null
     rc=$?
+    set +m
     set -e
+    if [ -n "$killed" ]; then
+      echo "killed after $limit minutes (the workflow's timeout-minutes)" >>"$logs/$j.log"
+      rc=1
+    fi
     case $rc in
       0) r=ok ;;
       77) r=SKIP ;;
