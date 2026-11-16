@@ -5,6 +5,7 @@
 #ifndef RELIFT_NDS_INT_H
 #define RELIFT_NDS_INT_H
 
+#include "gpu2d.h"
 #include "nds.h"
 
 /** @brief A tick that never comes. */
@@ -160,6 +161,51 @@ typedef struct nds_lcd {
     rl_event ev;
 } nds_lcd;
 
+/** @brief Pixels the main memory display FIFO holds. */
+#define NDS_FIFO_PX 512u
+
+/**
+ * @brief The 3D engine's line hook: fills out with line y of the 3D layer
+ * (256 pixels, 18-bit color in bits 0 to 17 and alpha 0 to 31 in bits 24
+ * to 28, alpha 0 transparent) and returns true, or returns false when it
+ * has no picture.
+ */
+typedef bool nds_line3d_fn(void *user, unsigned y, uint32_t *out);
+
+/** @brief The display device (disp.c). */
+typedef struct nds_disp {
+    nds_eng eng[2];
+    /** @brief POWCNT1. */
+    uint16_t powcnt;
+    /** @brief DISPCAPCNT, and true while a capture runs (from line 0 to VBlank). */
+    uint32_t capcnt;
+    bool capturing;
+    /** @brief The main memory display FIFO. */
+    uint16_t fifo[NDS_FIFO_PX];
+    uint16_t fifo_rd, fifo_n;
+    /** @brief The 3D layer of the line, its hook, and whether the hook gave a picture. */
+    uint32_t l3d[NDS_W];
+    nds_line3d_fn *line3d_fn;
+    void *line3d_user;
+    bool l3d_on;
+    /** @brief Forced blank of each engine at each line's render tick (a line shows white two lines on as well). */
+    bool fb[2][RL_NDS_LINES];
+    /** @brief The next line to process and the tick it starts at. */
+    unsigned line;
+    uint64_t t0;
+    /** @brief The frame being drawn and the last finished one: both screens, top first, 18-bit pixels. */
+    uint32_t frame[NDS_W * NDS_H * 2];
+    uint32_t last[NDS_W * NDS_H * 2];
+    bool have;
+    uint64_t frames;
+    rl_nds_frame_fn *frame_fn;
+    void *frame_user;
+    /** @brief True while lines are drawn (the frame hook runs inside). */
+    bool busy;
+    /** @brief The start of VBlank, which hands over the frame. */
+    rl_event ev;
+} nds_disp;
+
 /** @brief What an address decodes to. */
 typedef enum nds_kind {
     /** @brief Nothing: reads 0, writes are dropped. */
@@ -241,12 +287,14 @@ struct rl_nds {
     nds_timer tm[2][4];
     nds_math math;
     nds_lcd lcd;
+    nds_disp disp;
 
     /** @brief The tick from which main RAM is free. */
     uint64_t ram_free;
     rl_nds_costs costs;
 
     nds_dev d_io;
+    nds_dev d_disp;
 };
 
 /** @brief The low size bytes set (size 1, 2 or 4). */
@@ -298,6 +346,12 @@ static inline void nds_watch_store(rl_nds *m, const uint8_t *p)
 nds_where nds_decode(rl_nds *m, unsigned cpu, uint32_t addr, bool code, bool write);
 /** @brief True when a byte store of cpu at addr is dropped (the ARM9's palette, video RAM and OAM take halfwords and words only). */
 bool nds_drops_byte(unsigned cpu, uint32_t addr);
+/** @brief True when the display can see a store of cpu at addr (the ARM9's palette, video RAM and OAM). */
+static inline bool nds_seen_by_display(unsigned cpu, uint32_t addr)
+{
+    unsigned r = addr >> 24;
+    return cpu == RL_NDS_ARM9 && r >= 0x05 && r <= 0x07;
+}
 /** @brief Rebuilds every view's page table from VRAMCNT. */
 void nds_vram_rebuild(rl_nds *m);
 /** @brief A write of VRAMCNT of bank b. */
@@ -378,6 +432,25 @@ uint64_t nds_lcd_pos(const rl_nds *m, uint64_t t);
 uint32_t nds_lcd_read(const rl_nds *m, unsigned cpu, uint64_t now);
 /** @brief A write of the mask bits of v to cpu's DISPSTAT and VCOUNT word at tick now. */
 void nds_lcd_write(rl_nds *m, unsigned cpu, uint32_t v, uint32_t mask, uint64_t now);
+
+/** @brief Power-on state of the display. */
+void nds_disp_reset(rl_nds *m);
+/** @brief Adds the display device to the scheduler. */
+int nds_disp_add(rl_nds *m);
+/** @brief Lines the display up with the display timing at tick now and posts the start of VBlank. */
+void nds_disp_resync(rl_nds *m, uint64_t now);
+/** @brief Draws every line whose render tick is at or before to. */
+void nds_disp_catch_up(rl_nds *m, uint64_t to);
+/** @brief Brings the display to tick now through the scheduler (before a write it could see). */
+void nds_disp_sync(rl_nds *m, uint64_t now);
+/** @brief True when the ARM9's I/O word at off belongs to the display (both engines, capture, the FIFO, POWCNT1). */
+bool nds_disp_reg(unsigned cpu, uint32_t off);
+/** @brief A display register word. */
+uint32_t nds_disp_read(rl_nds *m, uint32_t off);
+/** @brief A write of the mask bits of v to a display register word. */
+void nds_disp_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask);
+/** @brief Sets the 3D engine's line hook (NULL: the 3D layer is transparent). */
+void nds_disp_set_3d(rl_nds *m, nds_line3d_fn *fn, void *user);
 
 /** @brief Power-on state of the eight timers. */
 void nds_timer_reset(rl_nds *m);

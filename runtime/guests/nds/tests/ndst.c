@@ -64,6 +64,14 @@ uint32_t ndst_scene(ndst *t, const uint32_t *p, uint32_t *out, uint32_t max)
                 rl_nds_write(t->m, RL_NDS_ARM9, a + 2 * i, 2, v + d * i);
             break;
         }
+        case OP_RAND32: {
+            uint32_t c = *p++, x = *p++, mask = *p++;
+            for (uint32_t i = 0; i < c; i++) {
+                x = x * 1664525u + 1013904223u;
+                rl_nds_write(t->m, RL_NDS_ARM9, a + 4 * i, 4, x & mask);
+            }
+            break;
+        }
         case OP_COPY32: {
             uint32_t c = *p++;
             for (uint32_t i = 0; i < c; i++)

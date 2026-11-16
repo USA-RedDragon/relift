@@ -24,6 +24,8 @@ enum {
     OP_R32 = 9,
     OP_R16 = 10,
     OP_R8 = 11,
+    /** @brief Words of a linear congruential sequence: x = x * 1664525 + 1013904223 from the seed, each new x stored ANDed with a mask. */
+    OP_RAND32 = 15,
 };
 
 #define W32(a, v) OP_W32, (uint32_t)(a), (uint32_t)(v)
@@ -34,6 +36,7 @@ enum {
 #define RAMP16(a, n, v, d) OP_RAMP16, (uint32_t)(a), (uint32_t)(n), (uint32_t)(v), (uint32_t)(d)
 #define COPY32(a, n) OP_COPY32, (uint32_t)(a), (uint32_t)(n)
 #define WAITLINE(n) OP_WAITLINE, (uint32_t)(n)
+#define RAND32(a, n, seed, mask) OP_RAND32, (uint32_t)(a), (uint32_t)(n), (uint32_t)(seed), (uint32_t)(mask)
 #define RD32(a) OP_R32, (uint32_t)(a)
 #define RD16(a) OP_R16, (uint32_t)(a)
 #define RD8(a) OP_R8, (uint32_t)(a)

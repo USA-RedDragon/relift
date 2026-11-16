@@ -204,6 +204,32 @@ enum {
     RL_NDS_IRQ_WIFI = 1u << 24,
 };
 
+/** @brief Pixels of a screen's line and lines of a screen. */
+#define RL_NDS_SCREEN_W 256u
+#define RL_NDS_SCREEN_H 192u
+
+/**
+ * @brief Called once per frame, at the render tick of the first VBlank line
+ * (the HBlank edge of line 192), with the finished frame: both
+ * screens, the top one first, RL_NDS_SCREEN_W x RL_NDS_SCREEN_H each, one
+ * 18-bit color per pixel (red bits 0 to 5, green 6 to 11, blue 12 to 17).
+ */
+typedef void rl_nds_frame_fn(void *user, const uint32_t *pixels, uint64_t when);
+/**
+ * @brief Sets the frame hook (NULL for none). While a hook is set the
+ * display keeps an event queued, so halted CPUs never count as halted for
+ * good; without one the display draws only when something reads it.
+ */
+void rl_nds_set_frame_hook(rl_nds *m, rl_nds_frame_fn *fn, void *user);
+/** @brief Frames finished so far (the display caught up to the ARM9's tick). */
+uint64_t rl_nds_frames(rl_nds *m);
+/** @brief The last finished frame (as the frame hook gets it), or NULL before the first. */
+const uint32_t *rl_nds_frame(rl_nds *m);
+/** @brief FNV-1a 64 of a frame's 6-bit channels, red, green, blue per pixel. */
+uint64_t rl_nds_frame_hash(const uint32_t *pixels);
+/** @brief Converts a frame to 8-bit RGB (3 bytes per pixel), each channel c expanded as c << 2 | c >> 4. */
+void rl_nds_frame_rgb(const uint32_t *pixels, uint8_t *rgb);
+
 /** @brief The display line (VCOUNT) at the ARM9's current tick. */
 unsigned rl_nds_vcount(const rl_nds *m);
 

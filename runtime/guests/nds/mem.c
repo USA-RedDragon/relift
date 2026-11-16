@@ -249,6 +249,7 @@ int rl_nds_attach(rl_nds *m, rl_sched *s, rl_sched_cpu *arm9, rl_sched_cpu *arm7
     }
     nds_timer_attach(m);
     nds_lcd_attach(m);
+    nds_disp_resync(m, nds_now(m, RL_NDS_ARM9));
     return 0;
 }
 
@@ -294,6 +295,8 @@ void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     value &= nds_mask(size);
     if (size == 1 && nds_drops_byte(cpu, addr))
         return;
+    if (nds_seen_by_display(cpu, addr))
+        nds_disp_sync(m, nds_now(m, cpu));
     nds_where w = nds_decode(m, cpu, addr, false, true);
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);

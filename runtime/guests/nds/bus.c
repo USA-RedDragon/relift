@@ -108,6 +108,8 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     nds_where w = nds_decode(m, cpu, addr, false, true);
     if (size == 1 && nds_drops_byte(cpu, addr))
         w.kind = NDS_K_NONE;
+    else if (nds_seen_by_display(cpu, addr))
+        nds_disp_sync(m, nds_now(m, cpu));
     if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
         nds_watch_store(m, w.p);

@@ -118,8 +118,10 @@ void nds_lcd_write(rl_nds *m, unsigned cpu, uint32_t v, uint32_t mask, uint64_t 
         unsigned line = (unsigned)(p / RL_NDS_LINE_TICKS);
         unsigned want = (unsigned)(((line & ~(mask >> 16)) | ((v & mask) >> 16)) & 0x1FF);
         if (want < RL_NDS_LINES && want != line) {
+            nds_disp_sync(m, now);
             uint64_t q = (uint64_t)want * RL_NDS_LINE_TICKS + p % RL_NDS_LINE_TICKS;
             l->origin = (now + RL_NDS_FRAME_TICKS - q % RL_NDS_FRAME_TICKS) % RL_NDS_FRAME_TICKS;
+            nds_disp_resync(m, now);
         }
     }
     repost_from(m, now);

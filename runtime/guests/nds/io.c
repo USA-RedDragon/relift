@@ -50,6 +50,8 @@ static bool math_reg(unsigned cpu, uint32_t off) { return cpu == RL_NDS_ARM9 && 
 
 static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 {
+    if (nds_disp_reg(cpu, off))
+        return nds_disp_read(m, off);
     if (off >= 0x100 && off < 0x110)
         return nds_timer_read(m, cpu, off, now);
     if (math_reg(cpu, off))
@@ -92,6 +94,10 @@ static uint32_t read32(rl_nds *m, unsigned cpu, uint32_t off, uint64_t now)
 
 static void write32(rl_nds *m, unsigned cpu, uint32_t off, uint32_t v, uint32_t mask, uint64_t now)
 {
+    if (nds_disp_reg(cpu, off)) {
+        nds_disp_write(m, off, v, mask);
+        return;
+    }
     if (off >= 0x100 && off < 0x110) {
         nds_timer_write(m, cpu, off, v, mask, now);
         return;
@@ -181,6 +187,7 @@ void nds_io_reset(rl_nds *m)
     nds_timer_reset(m);
     nds_math_reset(m);
     nds_lcd_reset(m);
+    nds_disp_reset(m);
 }
 
 static uint64_t io_read(rl_device *d, uint64_t addr, uint32_t size, uint64_t now)
@@ -199,10 +206,10 @@ int nds_io_attach(rl_nds *m)
 {
     m->d_io = (nds_dev){.dev = {.name = "nds io", .read = io_read, .write = io_write, .line = RL_LINE_NONE}, .m = m};
     m->d_io.dev.opaque = &m->d_io;
-    if (rl_sched_add_device(m->sched, &m->d_io.dev) != 0)
+    if (rl_sched_add_device(m->sched, &m->d_io.dev) != 0 || nds_disp_add(m) != 0)
         return -1;
     for (unsigned cpu = 0; cpu < 2; cpu++)
-        if (rl_sched_map(m->sched, nds_io_key(cpu, 0x04000000u), 0x01000000u, &m->d_io.dev, 0) != 0)
+        if (rl_sched_map(m->sched, nds_io_key(cpu, 0x04000000u), 0x01000000u, &m->d_io.dev, rl_device_bit(&m->d_disp.dev)) != 0)
             return -1;
     return 0;
 }
