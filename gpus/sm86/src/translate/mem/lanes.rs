@@ -33,6 +33,8 @@ const SEM_ACQUIRE_RELEASE: u32 = 0x8;
 const SEM_WORKGROUP: u32 = 0x100;
 const WORKGROUP: u32 = 4;
 const CAP_GROUP_NON_UNIFORM: u32 = 61;
+const CAP_VOTE: u32 = 62;
+const CAP_ARITHMETIC: u32 = 63;
 const CAP_BALLOT: u32 = 64;
 const CAP_SHUFFLE: u32 = 65;
 const CAP_CLUSTERED: u32 = 67;
@@ -465,6 +467,8 @@ impl Ctx {
                 }
             }
             _ => {
+                self.cap(CAP_GROUP_NON_UNIFORM);
+                self.cap(CAP_VOTE);
                 let scope = self.m.c_u32(SCOPE_SUBGROUP);
                 self.m.emit(o, b, &[scope, p])
             }
@@ -485,6 +489,8 @@ impl Ctx {
                 self.lcmp(op::I_EQUAL, m, act)
             }
             _ => {
+                self.cap(CAP_GROUP_NON_UNIFORM);
+                self.cap(CAP_VOTE);
                 let scope = self.m.c_u32(SCOPE_SUBGROUP);
                 self.m.emit(spv::GROUP_ALL_EQUAL, b, &[scope, v])
             }
@@ -517,6 +523,8 @@ impl Ctx {
                 self.m.emit(o, u, &[scope, CLUSTERED_REDUCE, v, k32])
             }
             _ => {
+                self.cap(CAP_GROUP_NON_UNIFORM);
+                self.cap(CAP_ARITHMETIC);
                 let scope = self.m.c_u32(SCOPE_SUBGROUP);
                 self.m.emit(o, u, &[scope, 0, v])
             }

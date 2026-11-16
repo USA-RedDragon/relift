@@ -17,9 +17,6 @@ const SEM_ACQUIRE_RELEASE: u32 = 0x8;
 const SEM_UNIFORM: u32 = 0x40;
 const SEM_WORKGROUP: u32 = 0x100;
 const SEM_CROSS_WORKGROUP: u32 = 0x200;
-const CAP_GROUP_NON_UNIFORM: u32 = 61;
-const CAP_VOTE: u32 = 62;
-const CAP_ARITHMETIC: u32 = 63;
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
@@ -49,6 +46,12 @@ impl Ctx {
 }
 
 fn lane_mask(c: &mut Ctx, name: &str) -> Option<u32> {
+    if !matches!(
+        name,
+        "SR_EQMASK" | "SR_LTMASK" | "SR_LEMASK" | "SR_GEMASK" | "SR_GTMASK"
+    ) {
+        return None;
+    }
     let lane = c.lane_id();
     let one = c.m.c_u32(1);
     let eq = c.bin(op::SHIFT_LEFT_LOGICAL, one, lane);
@@ -204,8 +207,6 @@ fn vote(c: &mut Ctx, i: &Inst) -> Res<()> {
         [p, s] => (None, p, s),
         _ => return bad("VOTE operands"),
     };
-    c.cap(CAP_GROUP_NON_UNIFORM);
-    c.cap(CAP_VOTE);
     let p = c.pred_operand(ps)?;
     if let Some(d) = dst {
         let m = c.ballot(p);
@@ -252,8 +253,6 @@ fn redux(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         return bad("REDUX operation");
     };
-    c.cap(CAP_GROUP_NON_UNIFORM);
-    c.cap(CAP_ARITHMETIC);
     let v = c.usrc(&i.ops[1])?;
     let r = c.reduce(o, v);
     c.store_dst(&i.ops[0], r)
@@ -295,8 +294,6 @@ fn match_(c: &mut Ctx, i: &Inst) -> Res<()> {
     if !i.has("ALL") || i.ops.len() != 3 {
         return bad("MATCH form");
     }
-    c.cap(CAP_GROUP_NON_UNIFORM);
-    c.cap(CAP_VOTE);
     let (lo, hi) = if i.has("U64") {
         c.src_pair(&i.ops[2])?
     } else {

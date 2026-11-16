@@ -197,6 +197,45 @@ fn divergent_warp_operations_are_reported() {
     assert!(s.interface.host.inexact.is_empty());
 }
 
+fn capabilities(words: &[u32]) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        if words[k] & 0xffff == 17 {
+            out.push(words[k + 1]);
+        }
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    out
+}
+
+const GROUP_NON_UNIFORM_CAPS: std::ops::RangeInclusive<u32> = 61..=68;
+
+#[test]
+fn subgroup_capabilities_follow_the_operations_emitted() {
+    let mut b = Vec::new();
+    b.extend(word(0x119, 1, &[(16, 8, 2), (72, 8, 0x21)]));
+    exit_and_halt(&mut b);
+    let s = on(&Program::parse(&b), HostProfile::nvidia());
+    let caps = capabilities(&s.spirv);
+    assert!(
+        !caps.iter().any(|c| GROUP_NON_UNIFORM_CAPS.contains(c)),
+        "S2R SR_TID.X: {caps:?}"
+    );
+    let s = on(&warp_program(false), HostProfile::lavapipe());
+    assert_eq!(s.interface.host.warp, WarpPath::Shared);
+    let caps = capabilities(&s.spirv);
+    assert!(
+        !caps.iter().any(|c| GROUP_NON_UNIFORM_CAPS.contains(c)),
+        "shared path: {caps:?}"
+    );
+    let s = on(&warp_program(false), HostProfile::nvidia());
+    let caps = capabilities(&s.spirv);
+    for c in [61, 62, 63, 64, 65] {
+        assert!(caps.contains(&c), "subgroup path lacks {c}: {caps:?}");
+    }
+}
+
 #[test]
 fn clock_without_a_host_clock_counts() {
     let mut b = Vec::new();
