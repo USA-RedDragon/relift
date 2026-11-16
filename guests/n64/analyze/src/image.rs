@@ -44,6 +44,9 @@ impl Sources<'_> {
 pub enum SegmentOrigin {
     /// The boot image: `ROM[0x1000..]` at the entry point, 1 MiB.
     Boot,
+    /// The first 4 KiB of the ROM, which the PIF copies to SP DMEM before
+    /// it starts the CPU at the boot code there (`0xA4000040`).
+    BootCode,
     /// A loadable segment of an ELF image the boot code loads.
     Elf,
     /// A PI DMA from the cartridge with constant operands, made by the
@@ -66,6 +69,12 @@ pub enum SegmentOrigin {
         /// The offset of the table entry in its source.
         at: u32,
     },
+    /// Words a loop with constant operands copies to RDRAM, the loop at
+    /// this address.
+    Copy {
+        /// The address of the loop head.
+        site: u32,
+    },
     /// An exception vector trampoline placed at a vector address, where a
     /// program copies it.
     Vector {
@@ -83,12 +92,24 @@ pub struct Segment {
     pub offset: u32,
     /// Their length.
     pub len: u32,
-    /// The kseg0 address the first byte is linked at; `None` for a region
-    /// whose link address is not known, which is followed only by its own
-    /// relative branches.
+    /// The kseg0 address the first byte is linked at (kseg1 for the boot
+    /// code in SP memory); `None` for a region whose link address is not
+    /// known, which is followed only by its own relative branches.
     pub link: Option<u32>,
     /// Why it exists.
     pub origin: SegmentOrigin,
+}
+
+/// The physical address of SP DMEM, where the boot code runs.
+pub(crate) const SP_MEM_BASE: u32 = 0x0400_0000;
+/// The physical end of SP IMEM.
+pub(crate) const SP_MEM_END: u32 = 0x0400_2000;
+
+/// Whether code linked at the kseg0 or kseg1 address `link` runs where it
+/// is linked: in RDRAM, or in SP memory.
+pub(crate) fn in_place(link: u32, rdram_end: u32) -> bool {
+    let p = link & crate::val::PHYS;
+    p < rdram_end || (SP_MEM_BASE..SP_MEM_END).contains(&p)
 }
 
 /// Where a segment with no link address is placed for the analysis.

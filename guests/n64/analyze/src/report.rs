@@ -24,6 +24,8 @@ pub enum Boot {
 pub enum Origin {
     /// The entry point.
     Entry,
+    /// The boot code's entry, where the PIF starts the CPU.
+    Boot,
     /// The target of an exception vector trampoline (a jump through
     /// `k0` or `k1` to a constant).
     Exception,
@@ -44,6 +46,7 @@ impl Origin {
     pub fn name(self) -> &'static str {
         match self {
             Origin::Entry => "entry",
+            Origin::Boot => "boot",
             Origin::Exception => "exception",
             Origin::Call => "call",
             Origin::Tail => "tail",

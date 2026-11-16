@@ -13,7 +13,7 @@ use relift_n64_formats::{Cic, Rom};
 use crate::boot;
 use crate::eval;
 use crate::func::{self, DmaConst, Env, FnRun, Loc, Summary, valid};
-use crate::image::{FLAT_BASE, Image, Segment, SegmentOrigin, Source, Sources};
+use crate::image::{FLAT_BASE, Image, Segment, SegmentOrigin, Source, Sources, in_place};
 use crate::report::{
     Function, Origin, PiDma, Report, RspImage, RspOrigin, Stats, Unit, Unresolved, fnv,
 };
@@ -114,6 +114,32 @@ pub fn analyze_with(rom: &[u8], opts: Options) -> Result<Report, AnalyzeError> {
             .into_iter()
             .filter(|v| !known.contains(v))
             .collect();
+        let outside: Vec<u32> = d
+            .runs()
+            .flat_map(|(_, r)| r.outside.iter().map(|a| a & PHYS))
+            .collect();
+        for (_, run) in d.runs() {
+            for &(site, c) in &run.copies {
+                if !outside.iter().any(|a| (c.dram..c.dram + c.len).contains(a)) {
+                    continue;
+                }
+                let from = &d.image.segs[c.seg as usize];
+                let seg = Segment {
+                    source: from.source,
+                    offset: from.offset + c.rel,
+                    len: c.len,
+                    link: Some(0x8000_0000 | c.dram),
+                    origin: SegmentOrigin::Copy { site },
+                };
+                let dup = known
+                    .iter()
+                    .chain(&new)
+                    .any(|k| k.offset == seg.offset && k.len == seg.len && k.link == seg.link);
+                if !dup {
+                    new.push(seg);
+                }
+            }
+        }
         for (loc, run) in d.runs() {
             for (site, dma) in &run.dma {
                 if let DmaConst::Pi { dram, cart, len } = *dma
@@ -320,6 +346,11 @@ impl<'a> Driver<'a> {
         }
         for s in segs {
             self.root((s, entry), Origin::Entry);
+        }
+        for i in 0..self.image.segs.len() as u32 {
+            if self.image.segs[i as usize].origin == SegmentOrigin::BootCode {
+                self.root((i, boot::CODE_ENTRY), Origin::Boot);
+            }
         }
         for i in 0..self.image.segs.len() as u32 {
             if self.image.segs[i as usize].shared() {
@@ -590,7 +621,7 @@ impl<'a> Driver<'a> {
             let a = s.offset as usize / 4;
             let f = &found[i];
             let masks = match s.link {
-                Some(l) if l & PHYS >= RDRAM_END => scan::reloc_masks(&w.w[a..a + f.len()], l),
+                Some(l) if !in_place(l, RDRAM_END) => scan::reloc_masks(&w.w[a..a + f.len()], l),
                 _ => vec![0; f.len()],
             };
             let mut j = 0;

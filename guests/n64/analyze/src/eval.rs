@@ -63,6 +63,21 @@ pub(crate) struct Out {
     /// Physical base addresses of loads and stores through a constant or
     /// a table index: data, not code.
     pub bases: Vec<u32>,
+    /// The loads and stores at constant addresses, in order.
+    pub mem: Vec<Access>,
+}
+
+/// A load or store at a constant address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Access {
+    /// The physical address.
+    pub addr: u32,
+    /// The size in bytes.
+    pub n: u8,
+    /// Whether it is a store.
+    pub store: bool,
+    /// The value loaded or stored.
+    pub val: Abs,
 }
 
 /// Reads `n` bytes of the image at a physical address, recording the read.
@@ -324,6 +339,7 @@ pub(crate) fn eval(b: &Block, st: &State, read: &mut Reader<'_>) -> Out {
         data: Vec::new(),
         consts: Vec::new(),
         bases: Vec::new(),
+        mem: Vec::new(),
     };
     let mut cx = Ctx {
         b,
@@ -433,16 +449,19 @@ pub(crate) fn eval(b: &Block, st: &State, read: &mut Reader<'_>) -> Out {
             Op::Load { addr, .. } | Op::IoLoad { addr, .. } => {
                 let a = cx.get(*addr);
                 base_of(&mut out, a);
-                Ev::A(if unmapped {
+                let v = if unmapped {
                     Abs::Top
                 } else {
                     load(&mut out, a, w / 8, read)
-                })
+                };
+                access(&mut out, a, w / 8, false, v);
+                Ev::A(v)
             }
             Op::Store { addr, value, .. } | Op::IoStore { addr, value, .. } => {
                 base_of(&mut out, cx.get(*addr));
+                let n = (cx.width(*value) / 8) as u8;
                 if !unmapped {
-                    let n = (cx.width(*value) / 8) as u8;
+                    access(&mut out, cx.get(*addr), u32::from(n), true, cx.get(*value));
                     store(&mut out, cx.get(*addr), n, cx.get(*value));
                 }
                 Ev::A(Abs::Top)
@@ -518,6 +537,17 @@ fn sext(x: u64) -> u128 {
 pub(crate) fn code_like(k: u128) -> Option<u32> {
     let ok = k >> 32 == 0 || k >> 32 == 0xFFFF_FFFF;
     (ok && (k as u32) >> 30 == 2 && k & 3 == 0).then_some(k as u32)
+}
+
+fn access(out: &mut Out, addr: Abs, n: u32, store: bool, val: Abs) {
+    if let Abs::K(a) = addr {
+        out.mem.push(Access {
+            addr: a as u32 & PHYS,
+            n: n as u8,
+            store,
+            val,
+        });
+    }
 }
 
 fn base_of(out: &mut Out, a: Abs) {

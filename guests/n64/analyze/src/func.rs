@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use relift_cpu_mips::lift;
-use relift_ir::Block;
+use relift_ir::{Block, Next};
 
 use crate::eval::{self, Dma, End};
 use crate::image::Image;
@@ -54,6 +54,20 @@ pub(crate) enum DmaConst {
     Sp { mem: u32, dram: u32, len: u32 },
 }
 
+/// What a loop with constant operands copies: words of a segment, read in
+/// order, stored in order at an RDRAM address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Copy {
+    /// The segment read.
+    pub seg: u32,
+    /// The offset of the first word read in the segment.
+    pub rel: u32,
+    /// The RDRAM physical address of the first word stored.
+    pub dram: u32,
+    /// The length in bytes.
+    pub len: u32,
+}
+
 /// What the analysis keeps of one run.
 #[derive(Default)]
 pub(crate) struct FnRun {
@@ -79,6 +93,10 @@ pub(crate) struct FnRun {
     pub sp_imem: Vec<u32>,
     /// Jump tables: site, physical base, entries followed.
     pub tables: Vec<(u32, u32, u32)>,
+    /// Word copy loops with constant operands: the loop head and the copy.
+    pub copies: Vec<(u32, Copy)>,
+    /// Constant transfer targets that no segment holds.
+    pub outside: Vec<u32>,
     /// A path reached a word that does not lift.
     pub invalid: bool,
     /// The run stopped at its step limit.
@@ -108,13 +126,25 @@ const MAX_STEPS: usize = 400_000;
 /// The most entries a jump table gives.
 const MAX_TABLE: u32 = 256;
 /// The most zero words a path runs through.
-const MAX_ZEROS: u8 = 16;
+const MAX_ZEROS: u8 = 32;
+/// The longest loop body, in bytes, a copy loop may have.
+const COPY_BODY: u32 = 0x100;
+/// The most blocks a copy loop is run for.
+const COPY_STEPS: usize = 1 << 16;
+/// The fewest words a copy loop moves to count as one.
+const COPY_MIN: u32 = 8;
+/// The physical end of RDRAM.
+const RDRAM_END: u32 = 0x0080_0000;
 
 struct Run<'a> {
     env: &'a Env<'a>,
     seg: u32,
     entry: u32,
     states: HashMap<u32, State>,
+    /// The first state that reached each instruction, before any merge.
+    first: HashMap<u32, State>,
+    /// The loop heads a copy was looked for at.
+    tried: HashSet<u32>,
     work: Vec<u32>,
     blocks: HashMap<u32, Option<Rc<Block>>>,
     returns: Vec<(State, u64)>,
@@ -137,6 +167,8 @@ pub(crate) fn run(env: &Env<'_>, entry: Loc) -> FnRun {
         seg: entry.0,
         entry: entry.1,
         states: HashMap::new(),
+        first: HashMap::new(),
+        tried: HashSet::new(),
         work: vec![entry.1],
         blocks: HashMap::new(),
         returns: Vec::new(),
@@ -236,6 +268,7 @@ impl Run<'_> {
                 }
             }
             None => {
+                self.first.insert(to, st.clone());
                 self.states.insert(to, st);
                 self.work.push(to);
             }
@@ -285,6 +318,15 @@ impl Run<'_> {
             self.dma(pc, *d);
         }
         let after = pc.wrapping_add(block.len);
+        if let Next::Select {
+            taken, not_taken, ..
+        } = block.exit.next
+            && taken as u32 <= pc
+            && pc - taken as u32 <= COPY_BODY
+            && not_taken as u32 == after
+        {
+            self.copy_loop(taken as u32, after);
+        }
         match out.end {
             End::Raise => return,
             End::Syscall => {
@@ -341,6 +383,87 @@ impl Run<'_> {
                     }
                 }
             }
+        }
+    }
+
+    /// Runs the loop from `head` to `exit` on the values that first
+    /// reached it; when every iteration's next instruction is known and the
+    /// loop only loads words of a segment in order and stores each one at
+    /// the next word of RDRAM, records the copy.
+    fn copy_loop(&mut self, head: u32, exit: u32) {
+        if !self.tried.insert(head) {
+            return;
+        }
+        let Some(mut st) = self.first.get(&head).cloned() else {
+            return;
+        };
+        let (seg, image) = (self.seg, self.env.image);
+        let mut moved: Vec<(u32, u32, u32)> = Vec::new();
+        let mut last: Option<(u32, u32, u128)> = None;
+        let mut pc = head;
+        for _ in 0..COPY_STEPS {
+            if pc == exit {
+                return self.copied(head, &moved);
+            }
+            if pc < head || pc > exit {
+                return;
+            }
+            let Some(block) = self.block(pc) else {
+                return;
+            };
+            let mut reads: Vec<(u32, u32, u32)> = Vec::new();
+            let out = eval::eval(&block, &st, &mut |pa, n| {
+                let (v, s, rel) = image.read(seg, pa, n)?;
+                reads.push((pa, s, rel));
+                Some(v)
+            });
+            if out.end != End::Exit || !out.dma.is_empty() {
+                return;
+            }
+            for a in &out.mem {
+                match (a.store, a.val) {
+                    (false, Abs::K(v)) if a.n == 4 => {
+                        let Some(&(_, s, rel)) = reads.iter().find(|r| r.0 == a.addr) else {
+                            return;
+                        };
+                        last = Some((s, rel, v & 0xFFFF_FFFF));
+                    }
+                    (true, Abs::K(v)) if a.n == 4 && a.addr < RDRAM_END => match last.take() {
+                        Some((s, rel, w)) if w == v & 0xFFFF_FFFF => moved.push((s, rel, a.addr)),
+                        _ => return,
+                    },
+                    _ => return,
+                }
+            }
+            let [Abs::K(t)] = out.targets[..] else {
+                return;
+            };
+            st = out.st;
+            pc = t as u32;
+        }
+    }
+
+    /// Records `moved` (segment, offset read, address stored, per word)
+    /// as a copy when it is one run of words.
+    fn copied(&mut self, head: u32, moved: &[(u32, u32, u32)]) {
+        let Some(&(seg, rel, dram)) = moved.first() else {
+            return;
+        };
+        let n = moved.len() as u32;
+        let in_order = moved
+            .iter()
+            .zip(0u32..)
+            .all(|(m, i)| *m == (seg, rel + 4 * i, dram + 4 * i));
+        if n >= COPY_MIN && in_order {
+            self.out.copies.push((
+                head,
+                Copy {
+                    seg,
+                    rel,
+                    dram,
+                    len: 4 * n,
+                },
+            ));
         }
     }
 
@@ -440,6 +563,7 @@ impl Run<'_> {
         let segs = self.env.image.targets(self.seg, addr);
         if segs.is_empty() && self.env.image.segs[self.seg as usize].shared() {
             self.unresolved(site, UnresolvedKind::Outside, format!("{addr:#010x}"));
+            self.out.outside.push(addr);
         }
         segs.into_iter().map(|s| (s, addr)).collect()
     }

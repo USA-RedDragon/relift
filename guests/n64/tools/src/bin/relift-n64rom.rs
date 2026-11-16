@@ -201,6 +201,8 @@ fn source_text(s: Source) -> String {
 fn segment_json(s: &Segment) -> Value {
     let origin = match s.origin {
         SegmentOrigin::Boot => json!("boot"),
+        SegmentOrigin::BootCode => json!("boot_code"),
+        SegmentOrigin::Copy { site } => json!({"copy": hex8(site)}),
         SegmentOrigin::Elf => json!("elf"),
         SegmentOrigin::PiDma { site } => json!({"pi_dma": hex8(site)}),
         SegmentOrigin::Region { votes } => json!({"region": votes}),

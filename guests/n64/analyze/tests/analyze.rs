@@ -48,6 +48,12 @@ fn sw(rt: u32, off: i16, base: u32) -> u32 {
 fn beq(rs: u32, rt: u32, off: i16) -> u32 {
     i(0x04, rs, rt, off as u16)
 }
+fn bne(rs: u32, rt: u32, off: i16) -> u32 {
+    i(0x05, rs, rt, off as u16)
+}
+fn sltu(rd: u32, rs: u32, rt: u32) -> u32 {
+    r(rs, rt, rd, 0, 0x2B)
+}
 fn jal(t: u32) -> u32 {
     3 << 26 | (t >> 2 & 0x03FF_FFFF)
 }
@@ -738,4 +744,62 @@ fn a_microcode_overlay_dma_gives_its_imem_layout() {
         (0x80, at(ovl) as u32, 0x80)
     );
     assert_eq!((with.parts[0].imem, with.parts[0].len), (0, 0x80));
+}
+
+#[test]
+fn the_boot_code_is_rooted_in_dmem_and_its_copy_loop_places_code() {
+    let mut b = rom(ENTRY, 0x10_2000);
+    let stub = 0x8000_0100;
+    let mut boot = Vec::new();
+    boot.extend(li(T0, 0xA400_0100));
+    boot.extend(li(T1, 0xA000_0100));
+    boot.extend(li(T2, 0xA400_0140));
+    boot.extend([
+        lw(V0, 0, T0),
+        addiu(T0, T0, 4),
+        sltu(AT, T0, T2),
+        addiu(T1, T1, 4),
+        bne(AT, ZERO, -5),
+        sw(V0, -4, T1),
+    ]);
+    boot.extend(li(T0, stub));
+    boot.extend([jr(T0), NOP]);
+    put(&mut b, 0x40, &boot);
+    let mut code = vec![addiu(V0, ZERO, 1)];
+    code.extend(li(T0, ENTRY));
+    code.extend([jr(T0), NOP]);
+    code.resize(16, NOP);
+    put(&mut b, 0x100, &code);
+    put(&mut b, at(ENTRY), &[jr(RA), NOP]);
+    let rep = run(&b);
+    assert_eq!(function(&rep, 0xA400_0040), Some(Origin::Boot));
+    assert!(
+        rep.segments
+            .iter()
+            .any(|s| s.origin == SegmentOrigin::BootCode && s.link == Some(0xA400_0000))
+    );
+    assert!(found(&rep, 0xA400_0040 + 4 * boot.len() as u32 - 4));
+    assert!(rep.segments.iter().any(|s| {
+        matches!(s.origin, SegmentOrigin::Copy { .. })
+            && s.link == Some(stub)
+            && s.offset == 0x100
+            && s.len == 0x40
+    }));
+    assert!(found(&rep, stub), "the code the loop copies");
+    assert!(found(&rep, stub + 16), "its jump to the entry");
+    assert_eq!(function(&rep, ENTRY), Some(Origin::Entry));
+}
+
+#[test]
+fn boot_code_of_an_unknown_variant_is_not_followed() {
+    let mut b = rom(ENTRY, 0x10_2000);
+    put(&mut b, at(ENTRY), &[jr(RA), NOP]);
+    let rep = analyze_with(&b, Options { cic: None }).expect("the analysis runs");
+    assert_eq!(rep.boot, Boot::Unknown);
+    assert!(
+        !rep.segments
+            .iter()
+            .any(|s| s.origin == SegmentOrigin::BootCode)
+    );
+    assert_eq!(function(&rep, ENTRY), Some(Origin::Entry));
 }

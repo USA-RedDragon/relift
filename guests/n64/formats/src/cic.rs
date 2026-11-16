@@ -1,7 +1,7 @@
 //! The boot variant (CIC), named by a CRC-32 of the boot code area.
 //!
-//! The bytes at `0x40..0x1000` are only hashed; relift does not read or
-//! interpret the boot code. The hash values are public facts from the
+//! Here the bytes at `0x40..0x1000` are only hashed; the analysis
+//! (`relift-n64-analyze`) lifts the boot code of a known variant. The hash values are public facts from the
 //! n64brew documentation and from emulator sources.
 
 use crate::checksum::crc32;

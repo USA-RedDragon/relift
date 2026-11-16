@@ -14,8 +14,16 @@
 //!   `ROM[0x1000..]`, 1 MiB, at the entry point it computes from the
 //!   header word (6103 and 6106 subtract 1 and 2 MiB). An unknown variant
 //!   that finds an ELF executable on a 256-byte boundary in the first MiB
-//!   places its loadable segments ([`Boot::Elf`]). The boot code itself is
-//!   never read.
+//!   places its loadable segments ([`Boot::Elf`]). The boot code of a known
+//!   variant is a segment of its own, the ROM's first 4 KiB in SP DMEM,
+//!   rooted where the PIF starts the CPU (`0xA4000040`,
+//!   [`Origin::Boot`]); the boot code of an unknown variant is not followed.
+//! - Copies: a loop whose operands are constants on the path that first
+//!   reaches it, run on those values, that loads words of a segment in
+//!   order and stores each at the next word of RDRAM (at least 8 words)
+//!   places them there as a segment when a transfer elsewhere targets an
+//!   address in the copy that no segment holds (the boot code moves its
+//!   last steps to RDRAM this way).
 //! - Calls: a transfer that writes the address after its delay slot to a
 //!   register. The code after a call is reached when the callee has a
 //!   path back to its entry return address; the registers every return

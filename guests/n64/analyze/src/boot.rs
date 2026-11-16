@@ -1,11 +1,23 @@
-//! How the boot code places the game: the boot variant's rule, or the
-//! loadable segments of an ELF image that a boot code not known by its
-//! hash loads.
+//! The boot code and how it places the game.
+//!
+//! The PIF copies the first 4 KiB of the ROM to SP DMEM and starts the CPU
+//! at `0xA4000040`, the boot code there. For a boot variant known by its
+//! hash, that code is lifted like any other, rooted at that address, and
+//! runs at startup. Where it loads the game is also given as a segment, so
+//! the game's code is found without following the boot code's transfers:
+//! the boot variant's rule, or the loadable segments of an ELF image that
+//! a boot code not known by its hash loads (such a boot code is not
+//! lifted; the runtime then boots the game at a high level).
 
 use relift_n64_formats::{Cic, Rom};
 
 use crate::image::{Segment, SegmentOrigin, Source};
 use crate::report::Boot;
+
+/// The bytes the PIF copies to SP DMEM.
+pub(crate) const CODE_LEN: u32 = 0x1000;
+/// Where the PIF starts the CPU: the boot code in SP DMEM.
+pub const CODE_ENTRY: u32 = 0xA400_0040;
 
 /// The ROM offset of the boot image.
 pub(crate) const BOOT_OFFSET: u32 = 0x1000;
@@ -15,8 +27,23 @@ pub(crate) const BOOT_LEN: u32 = 0x10_0000;
 /// offset up to this one.
 const ELF_SEARCH_END: usize = 0x10_0000;
 
-/// The boot model, the entry point and the segments it loads.
+/// The boot model, the entry point and the segments it loads, with the
+/// boot code's segment last.
 pub(crate) fn boot(rom: &Rom, cic: Option<Cic>) -> (Boot, u32, Vec<Segment>) {
+    let (kind, entry, mut segs) = game(rom, cic);
+    if matches!(kind, Boot::Standard(_)) && rom.bytes.len() >= CODE_LEN as usize {
+        segs.push(Segment {
+            source: Source::Rom,
+            offset: 0,
+            len: CODE_LEN,
+            link: Some(CODE_ENTRY & !0xFFF),
+            origin: SegmentOrigin::BootCode,
+        });
+    }
+    (kind, entry, segs)
+}
+
+fn game(rom: &Rom, cic: Option<Cic>) -> (Boot, u32, Vec<Segment>) {
     let bytes = &rom.bytes;
     let header_entry = rom.header().entry;
     let standard = |entry: u32| {
