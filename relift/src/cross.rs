@@ -6,7 +6,7 @@ use crate::import::BoxError;
 use crate::runtime_link::Extras;
 use crate::settings::Settings;
 use crate::{android, ios};
-use relift_gb::program::Entry;
+use relift_guest::Entry;
 
 /// A target other than this host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

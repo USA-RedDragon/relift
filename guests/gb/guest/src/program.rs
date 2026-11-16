@@ -492,18 +492,7 @@ pub struct Program<'a> {
     pub learn: &'a str,
 }
 
-/// How the program enters, and where a bare save name lives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Entry {
-    /// `main`, with `save` a path.
-    Main,
-    /// `SDL_main` in the shared library of an Android app, with `save` a
-    /// file name in the app's files directory.
-    Android,
-    /// `rl_ios_main`, which the iOS glue's `main` runs once the app has
-    /// launched, with `save` a file name in the app's Documents.
-    Ios,
-}
+pub use relift_guest::Entry;
 
 fn c_string(s: &str) -> String {
     let mut o = String::from("\"");

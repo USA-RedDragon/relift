@@ -478,7 +478,7 @@ pub fn build(
                     save: &save,
                     entry: cross
                         .as_ref()
-                        .map_or(relift_gb::program::Entry::Main, cross::Build::entry),
+                        .map_or(relift_guest::Entry::Main, cross::Build::entry),
                     learn: &learn.display().to_string(),
                 },
             ),

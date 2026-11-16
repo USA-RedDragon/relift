@@ -4,6 +4,20 @@
 pub mod blob;
 pub mod toy;
 
+/// How a handheld guest's program enters, and where a bare save name
+/// lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    /// `main`, with `save` a path.
+    Main,
+    /// `SDL_main` in the shared library of an Android app, with `save` a
+    /// file name in the app's files directory.
+    Android,
+    /// `rl_ios_main`, which the iOS glue's `main` runs once the app has
+    /// launched, with `save` a file name in the app's Documents.
+    Ios,
+}
+
 use relift_ir::{Block, CryptoOp, FpOp, Reg, RegFile, Width};
 
 /// How a guest turns its own symbol names into host names.
