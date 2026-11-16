@@ -85,6 +85,10 @@ typedef struct vkf_swap {
     void *cap_ptr;
     VkCommandBuffer cap_cmd;
     VkFence cap_fence;
+    /** @brief The writer thread still reads cap_ptr (vkf_capture_queue). */
+    bool cap_busy;
+    /** @brief 1 + the guest image the last capture copies from, until acquire waits for that copy; 0 for none. */
+    uint32_t cap_img;
     vkf_overlay *ov;
     VkSemaphore again;
     pthread_mutex_t lock;
@@ -536,6 +540,8 @@ static void swap_free(vkf_swap *s)
         DFN(s, vkFreeMemory)(s->dev, s->mem[i], NULL);
         DFN(s, vkDestroyFence)(s->dev, s->done[i], NULL);
     }
+    if (s->cap_buf)
+        vkf_capture_flush();
     if (s->cap_fence)
         DFN(s, vkDestroyFence)(s->dev, s->cap_fence, NULL);
     if (s->cap_buf)
@@ -761,7 +767,7 @@ static bool any_held(const vkf_swap *s)
 
 static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkFence fence, uint32_t *index)
 {
-    int64_t start = now_ns();
+    int64_t start = now_ns(), slept = 0, host_ns = 0, fence_ns = 0;
     VkResult r = VK_SUCCESS;
     pthread_mutex_lock(&s->lock);
     for (;;) {
@@ -812,22 +818,31 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             pthread_mutex_unlock(&s->lock);
             struct timespec ts = { (time_t)(d / 1000000000ll), (long)(d % 1000000000ll) };
             nanosleep(&ts, NULL);
+            slept += now_ns() - now;
             pthread_mutex_lock(&s->lock);
             continue;
         }
         if (s->busy[i]) {
+            int64_t f0 = now_ns();
             r = DFN(s, vkWaitForFences)(s->dev, 1, &s->done[i], VK_TRUE, timeout);
+            fence_ns += now_ns() - f0;
             if (r != VK_SUCCESS)
                 break;
             DFN(s, vkResetFences)(s->dev, 1, &s->done[i]);
             s->busy[i] = false;
+        }
+        if (s->cap_img == i + 1) {
+            DFN(s, vkWaitForFences)(s->dev, 1, &s->cap_fence, VK_TRUE, UINT64_MAX);
+            s->cap_img = 0;
         }
         uint32_t hi = 0;
         if (s->offscreen) {
             hi = i % s->host_n;
             r = VK_SUCCESS;
         } else {
+            int64_t h0 = now_ns();
             r = DFN(s, vkAcquireNextImageKHR)(s->dev, s->host, timeout, sem, fence, &hi);
+            host_ns += now_ns() - h0;
         }
         if (r == VK_ERROR_OUT_OF_DATE_KHR && !any_held(s)) {
             s->stale = true;
@@ -851,6 +866,8 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
         break;
     }
     pthread_mutex_unlock(&s->lock);
+    if (vi_trace_on())
+        vi_trace('A', (uint64_t)start, (uint64_t)slept, (uint64_t)host_ns | (uint64_t)fence_ns << 32);
     return r;
 }
 
@@ -1045,6 +1062,8 @@ static void show(vkf_swap *s, uint32_t i)
     int64_t at = vi_vsync_after(now_ns());
     if (at < s->last_shown + VI_VSYNC_NS)
         at = s->last_shown + VI_VSYNC_NS;
+    if (vi_trace_on())
+        vi_trace('P', (uint64_t)at, (uint64_t)s->last_shown, i | (uint64_t)s->n << 8);
     s->last_shown = at;
     if (s->any_shown && s->shown != i)
         s->free_at[s->shown] = at;
@@ -1097,6 +1116,23 @@ static bool capture_ready(vkf_swap *s)
     return true;
 }
 
+static void capture_copied(void *arg)
+{
+    vkf_swap *s = arg;
+    DFN(s, vkWaitForFences)(s->dev, 1, &s->cap_fence, VK_TRUE, UINT64_MAX);
+}
+
+static void capture_written(void *arg)
+{
+    vkf_swap *s = arg;
+    __atomic_store_n(&s->cap_busy, false, __ATOMIC_RELEASE);
+}
+
+/**
+ * @brief Copies guest image i to the capture buffer after the present's blit
+ * (queue order: the barrier waits for all earlier commands, the blit and its
+ * semaphore waits included) and leaves the wait and the PNG to the writer.
+ */
 static void capture(vkf_swap *s, VkQueue q, uint32_t i, uint64_t frame)
 {
     bool bgra = s->format == VK_FORMAT_B8G8R8A8_UNORM || s->format == VK_FORMAT_B8G8R8A8_SRGB;
@@ -1104,7 +1140,9 @@ static void capture(vkf_swap *s, VkQueue q, uint32_t i, uint64_t frame)
                 s->format == VK_FORMAT_A8B8G8R8_UNORM_PACK32 || s->format == VK_FORMAT_A8B8G8R8_SRGB_PACK32;
     if ((!bgra && !rgba) || !capture_ready(s))
         return;
-    DFN(s, vkWaitForFences)(s->dev, 1, &s->done[i], VK_TRUE, UINT64_MAX);
+    if (__atomic_load_n(&s->cap_busy, __ATOMIC_ACQUIRE))
+        vkf_capture_flush();
+    uint64_t at = rl_clock_ns();
     VkCommandBuffer cb = s->cap_cmd;
     DFN(s, vkResetCommandBuffer)(cb, 0);
     VkCommandBufferBeginInfo bi = {
@@ -1112,8 +1150,9 @@ static void capture(vkf_swap *s, VkQueue q, uint32_t i, uint64_t frame)
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
     DFN(s, vkBeginCommandBuffer)(cb, &bi);
-    barrier(s, cb, s->img[i], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0,
-            VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    barrier(s, cb, s->img[i], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy region = {
         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
         .imageExtent = { s->extent.width, s->extent.height, 1 },
@@ -1126,9 +1165,21 @@ static void capture(vkf_swap *s, VkQueue q, uint32_t i, uint64_t frame)
     DFN(s, vkResetFences)(s->dev, 1, &s->cap_fence);
     if (DFN(s, vkQueueSubmit)(q, 1, &si, s->cap_fence) < 0)
         return;
-    DFN(s, vkWaitForFences)(s->dev, 1, &s->cap_fence, VK_TRUE, UINT64_MAX);
-    vkf_capture_write(frame, rl_clock_ns(), s->extent.width, s->extent.height, s->cap_ptr,
-                      (size_t)s->extent.width * 4, bgra);
+    s->cap_busy = true;
+    s->cap_img = i + 1;
+    vkf_capture_job job = {
+        .frame = frame,
+        .guest_ns = at,
+        .w = s->extent.width,
+        .h = s->extent.height,
+        .stride = (size_t)s->extent.width * 4,
+        .bgra = bgra,
+        .px = s->cap_ptr,
+        .ready = capture_copied,
+        .done = capture_written,
+        .arg = s,
+    };
+    vkf_capture_queue(&job);
 }
 
 static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkSemaphore *waits, uint32_t nwaits,
@@ -1160,7 +1211,9 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .signalSemaphoreCount = s->offscreen ? 0 : 1,
         .pSignalSemaphores = &s->ready[hi],
     };
+    int64_t t_s = vi_trace_now();
     r = DFN(s, vkQueueSubmit)(q, 1, &si, s->done[i]);
+    int64_t t_h = vi_trace_now();
     s->held[i] = false;
     if (r < 0)
         goto out;
@@ -1177,7 +1230,10 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
         .pSwapchains = &s->host,
         .pImageIndices = &hi,
     };
+    int64_t t_x = vi_trace_now();
     r = s->offscreen ? VK_SUCCESS : DFN(s, vkQueuePresentKHR)(q, &pi);
+    if (t_s)
+        vi_trace('H', (uint64_t)(t_h - t_s), (uint64_t)(t_x - t_h), (uint64_t)(vi_trace_now() - t_x));
     show(s, i);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && suboptimal_stale(s)))
         s->stale = true;
@@ -1261,6 +1317,7 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
     }
     vkf_wait_enter(&k, 1);
     vkf_queue_enter(&k);
+    int64_t t_q = vi_trace_now();
     uint32_t nwaits = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, waitSemaphoreCount));
     uint64_t gwaits = vkf_g64(&k, g + offsetof(VkPresentInfoKHR, pWaitSemaphores));
     uint32_t nsw = vkf_g32(&k, g + offsetof(VkPresentInfoKHR, swapchainCount));
@@ -1283,7 +1340,10 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
                 repaint(s, q, vkf_g32(&k, gidx));
     }
     vkf_queue_unlock(&k);
+    int64_t t_p = vi_trace_now();
     vkf_wait_return(&k);
+    if (t_q)
+        vi_trace('Q', (uint64_t)(t_q - k.trace_t0), (uint64_t)(t_p - t_q), (uint64_t)(vi_trace_now() - t_p));
     c->x[0] = (uint32_t)all;
     return vkf_end(&k);
 }

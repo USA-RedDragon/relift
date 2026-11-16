@@ -467,4 +467,26 @@ bool vkf_capture_due(uint64_t *frame);
 bool vkf_capture_write(uint64_t frame, uint64_t guest_ns, uint32_t w, uint32_t h, const uint8_t *px, size_t stride,
                        bool bgra);
 
+/** @brief One capture for the writer thread: the pixels, and the calls around their use. */
+typedef struct vkf_capture_job {
+    uint64_t frame, guest_ns;
+    uint32_t w, h;
+    size_t stride;
+    bool bgra;
+    const uint8_t *px;
+    /** @brief Called on the writer thread before px is read (waits for the GPU copy); may be NULL. */
+    void (*ready)(void *arg);
+    /** @brief Called on the writer thread once px is no longer needed; may be NULL. */
+    void (*done)(void *arg);
+    void *arg;
+} vkf_capture_job;
+/**
+ * @brief Hands a capture to the writer thread and returns without waiting
+ * for it, so a capture costs the presenting thread no frames. Waits only
+ * when the writer is several captures behind.
+ */
+void vkf_capture_queue(const vkf_capture_job *job);
+/** @brief Waits until every queued capture is written. */
+void vkf_capture_flush(void);
+
 #endif

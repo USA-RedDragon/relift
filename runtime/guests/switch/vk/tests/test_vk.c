@@ -339,6 +339,67 @@ TEST(vk_thunk_table)
     CHECK(rl_dispatch_find(ci) != NULL);
 }
 
+static int g_cap_gate, g_cap_done;
+
+static void cap_gate_wait(void *arg)
+{
+    (void)arg;
+    while (!__atomic_load_n(&g_cap_gate, __ATOMIC_ACQUIRE)) {
+        struct timespec ts = { 0, 1000000 };
+        nanosleep(&ts, NULL);
+    }
+}
+
+static void cap_mark_done(void *arg)
+{
+    (void)arg;
+    __atomic_store_n(&g_cap_done, 1, __ATOMIC_RELEASE);
+}
+
+static int cap_files(const char *dir, char *path, size_t n)
+{
+    DIR *dp = opendir(dir);
+    int count = 0;
+    struct dirent *e;
+    while (dp && (e = readdir(dp)))
+        if (!strncmp(e->d_name, "frame-", 6)) {
+            snprintf(path, n, "%s/%s", dir, e->d_name);
+            count++;
+        }
+    if (dp)
+        closedir(dp);
+    return count;
+}
+
+TEST(vk_capture_is_written_off_the_presenting_thread)
+{
+    char dir[512], path[1024] = { 0 };
+    const char *tmp = getenv("TMPDIR");
+    snprintf(dir, sizeof dir, "%s/relift-vk-capture-async-%d", tmp && *tmp ? tmp : "/tmp", (int)getpid());
+    rl_vk_capture(dir);
+    static const uint8_t px[2 * 2 * 4] = { 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255 };
+    g_cap_gate = g_cap_done = 0;
+    vkf_capture_job job = { .frame = 7, .guest_ns = 1000000, .w = 2, .h = 2, .stride = 8, .px = px,
+                            .ready = cap_gate_wait, .done = cap_mark_done };
+    vkf_capture_queue(&job);
+    CHECK_EQ(cap_files(dir, path, sizeof path), 0);
+    CHECK_EQ(__atomic_load_n(&g_cap_done, __ATOMIC_ACQUIRE), 0);
+    __atomic_store_n(&g_cap_gate, 1, __ATOMIC_RELEASE);
+    vkf_capture_flush();
+    CHECK_EQ(__atomic_load_n(&g_cap_done, __ATOMIC_ACQUIRE), 1);
+    CHECK_EQ(cap_files(dir, path, sizeof path), 1);
+    CHECK(strstr(path, "frame-000007-00000001ms.png") != NULL);
+    FILE *f = fopen(path, "rb");
+    uint8_t head[8] = { 0 };
+    CHECK(f && fread(head, 1, 8, f) == 8);
+    if (f)
+        fclose(f);
+    CHECK(!memcmp(head, "\x89PNG\r\n\x1a\n", 8));
+    remove(path);
+    rmdir(dir);
+    rl_vk_capture(NULL);
+}
+
 TEST(vk_instance_and_physical_devices)
 {
     CHECK_EQ(boot(NULL), 0);

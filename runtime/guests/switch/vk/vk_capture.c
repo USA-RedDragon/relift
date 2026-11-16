@@ -3,7 +3,9 @@
  * @brief Debug capture of presented guest images: with RELIFT_VK_CAPTURE set
  * to <dir>[:N], every Nth vkQueuePresentKHR writes the guest swapchain image
  * as an 8-bit RGB PNG named frame-<frame number>-<guest ms>ms.png. Off by
- * default. The PNG uses stored (uncompressed) deflate blocks.
+ * default. The PNG uses stored (uncompressed) deflate blocks. A writer
+ * thread waits for the GPU copy and writes the file, so the present that
+ * takes the capture does not wait for either.
  */
 #include "vkf.h"
 #include "hostio.h"
@@ -54,8 +56,76 @@ static void set_spec(const char *spec)
            g_cap_every == 1 ? "" : "s", g_cap_dir);
 }
 
+#define QUEUE_MAX 4u
+
+static pthread_mutex_t g_q_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_q_work = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_q_room = PTHREAD_COND_INITIALIZER;
+static vkf_capture_job g_q[QUEUE_MAX];
+static uint32_t g_q_head, g_q_count, g_q_busy;
+static bool g_q_started;
+
+static void *writer_main(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&g_q_lock);
+    for (;;) {
+        while (!g_q_count)
+            pthread_cond_wait(&g_q_work, &g_q_lock);
+        vkf_capture_job j = g_q[g_q_head];
+        g_q_head = (g_q_head + 1) % QUEUE_MAX;
+        g_q_count--;
+        g_q_busy++;
+        pthread_mutex_unlock(&g_q_lock);
+        if (j.ready)
+            j.ready(j.arg);
+        vkf_capture_write(j.frame, j.guest_ns, j.w, j.h, j.px, j.stride, j.bgra);
+        if (j.done)
+            j.done(j.arg);
+        pthread_mutex_lock(&g_q_lock);
+        g_q_busy--;
+        pthread_cond_broadcast(&g_q_room);
+    }
+    return NULL;
+}
+
+void vkf_capture_queue(const vkf_capture_job *job)
+{
+    pthread_mutex_lock(&g_q_lock);
+    if (!g_q_started) {
+        pthread_t t;
+        g_q_started = pthread_create(&t, NULL, writer_main, NULL) == 0;
+        if (g_q_started)
+            pthread_detach(t);
+    }
+    if (!g_q_started) {
+        pthread_mutex_unlock(&g_q_lock);
+        if (job->ready)
+            job->ready(job->arg);
+        vkf_capture_write(job->frame, job->guest_ns, job->w, job->h, job->px, job->stride, job->bgra);
+        if (job->done)
+            job->done(job->arg);
+        return;
+    }
+    while (g_q_count == QUEUE_MAX)
+        pthread_cond_wait(&g_q_room, &g_q_lock);
+    g_q[(g_q_head + g_q_count) % QUEUE_MAX] = *job;
+    g_q_count++;
+    pthread_cond_signal(&g_q_work);
+    pthread_mutex_unlock(&g_q_lock);
+}
+
+void vkf_capture_flush(void)
+{
+    pthread_mutex_lock(&g_q_lock);
+    while (g_q_count || g_q_busy)
+        pthread_cond_wait(&g_q_room, &g_q_lock);
+    pthread_mutex_unlock(&g_q_lock);
+}
+
 void rl_vk_capture(const char *spec)
 {
+    vkf_capture_flush();
     pthread_mutex_lock(&g_cap_lock);
     set_spec(spec);
     g_cap_read = true;
