@@ -1112,8 +1112,9 @@ are also call boundaries. [inferred]
     FPCR` giving the default: values are known bits, pointers at a known
     offset from the stack a root function runs on (or a stack it switches
     to), and the function addresses PLT and GOT words hold. A root starts
-    with nothing known; callees are inlined (a few levels, the functions
-    the search climbed through at any depth); calls it does not follow
+    with nothing known; callees are inlined (the functions that reach a
+    write within six calls at any depth, others a few levels below the
+    nearest of those); calls it does not follow
     keep the callee-saved registers and sp (AAPCS64) and change only memory
     whose address escaped; landing pads start from what each such call
     leaves. A write whose value comes from the root's arguments, such as
@@ -1142,8 +1143,8 @@ are also call boundaries. [inferred]
     code takes and ends at the next one; a load overlapping an object whose
     address escaped (to memory, to a call the analysis does not follow, to
     another thread) gives an unknown value, and an address computed from a
-    stack pointer with an unknown offset makes every object of that stack
-    escaped. A pointer stored to tracked stack memory escapes when that
+    pointer with an unknown offset makes the object it points into
+    escaped (an untaken local lies in the object before it). A pointer stored to tracked stack memory escapes when that
     memory does. A callee reads its callers' frame records (through x29)
     only to unwind, so the frame pointer does not escape at a call.
   - A computed jump without known targets, a call to a resume point

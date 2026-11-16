@@ -81,14 +81,13 @@ enum Byte {
 /// to memory, or to other threads through either) gives an unknown value.
 /// Stores through unknown addresses therefore only reach escaped objects,
 /// and calls the analysis does not follow change only those. An address
-/// computed from a stack pointer with an unknown offset may reach any
-/// object of that stack, so it makes all of them escaped (wild).
+/// computed from a pointer with an unknown offset reaches only the object
+/// the pointer points into, so it makes that object escaped.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Mem {
     bytes: BTreeMap<(Base, i64), Byte>,
     escaped: BTreeSet<(Base, i64)>,
     taken: BTreeSet<(Base, i64)>,
-    wild: BTreeSet<Base>,
 }
 
 impl Mem {
@@ -99,13 +98,6 @@ impl Mem {
     pub(super) fn escape(&mut self, b: Base, off: i64) {
         self.taken.insert((b, off));
         self.escaped.insert((b, off));
-    }
-
-    /// Marks every object of base `b` as escaped: the code computed an
-    /// address from one of them that the analysis does not know, which may
-    /// reach any of them.
-    pub(super) fn wild(&mut self, b: Base) {
-        self.wild.insert(b);
     }
 
     /// Makes the pointers stored in escaped objects escape, until no more
@@ -135,16 +127,12 @@ impl Mem {
         self.bytes.retain(|k, _| k.0 != b);
         self.escaped.retain(|k| k.0 != b);
         self.taken.retain(|k| k.0 != b);
-        self.wild.remove(&b);
     }
 
     /// Whether a load of `n` bytes at `off` may read an object whose
     /// address escaped: one that starts at the last taken address at or
     /// below an escaped one and ends at the next taken address above it.
     fn tainted(&self, b: Base, off: i64, n: i64) -> bool {
-        if self.wild.contains(&b) {
-            return true;
-        }
         let end = off.saturating_add(n);
         self.escaped.iter().filter(|e| e.0 == b).any(|&(_, e)| {
             let start = self
@@ -233,7 +221,6 @@ impl Mem {
             bytes,
             escaped: self.escaped.union(&o.escaped).copied().collect(),
             taken: self.taken.union(&o.taken).copied().collect(),
-            wild: self.wild.union(&o.wild).copied().collect(),
         }
     }
 }

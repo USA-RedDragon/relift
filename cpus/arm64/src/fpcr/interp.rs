@@ -38,7 +38,9 @@ impl St {
 
 /// One frame of the inlined call tree: the context it was called from (or
 /// none for the root), the call's address and return address, the
-/// function whose code runs (a tail call changes it), and the depth.
+/// function whose code runs (a tail call changes it), and the depth below
+/// the nearest frame of a function that must be followed (one that
+/// reaches a write), so the callees of those get the full inline depth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Frame {
     parent: Option<u32>,
@@ -271,9 +273,9 @@ impl<'a> Interp<'a> {
     /// follow: it returns to the frame's caller.
     fn opaque_tail(&mut self, fr: u32, st: &St) {
         let after = opaque(st);
-        self.throw(fr, &after);
         let f = self.frames[fr as usize];
         if let Some(parent) = f.parent {
+            self.throw(parent, f.call, &after);
             self.flow((parent, f.ret), after);
         }
     }
@@ -326,27 +328,27 @@ impl<'a> Interp<'a> {
                 call: pc,
                 ret,
                 func: t,
-                depth: f.depth + 1,
+                depth: if must { 0 } else { f.depth + 1 },
             });
             self.flow((callee, t), st.clone());
         }
         if opaque_call {
             let after = opaque(st);
-            self.throw(fr, &after);
+            self.throw(fr, pc, &after);
             self.flow((fr, ret), after);
         }
     }
 
-    /// A call the analysis does not follow may throw: the landing pads of
-    /// its frame and of every frame above it may run, with the memory as
-    /// the call left it and each frame's callee-saved registers as they
-    /// were at its call.
-    fn throw(&mut self, fr: u32, after: &St) {
+    /// A call at `pc` in frame `fr` that the analysis does not follow may
+    /// throw: the landing pad serving the call, and those serving each call
+    /// of the frames above it, may run, with the memory as the call left it
+    /// and each frame's callee-saved registers as they were at its call.
+    fn throw(&mut self, fr: u32, pc: u64, after: &St) {
         let mut seed = after.clone();
-        let mut at = Some(fr);
-        while let Some(c) = at {
+        let mut at = Some((fr, pc));
+        while let Some((c, site)) = at {
             let f = self.frames[c as usize];
-            for p in (self.code.pads)(f.func) {
+            for p in (self.code.pads)(site) {
                 self.flow((c, p), seed.clone());
             }
             let Some(parent) = f.parent else {
@@ -361,7 +363,7 @@ impl<'a> Interp<'a> {
                 regs,
                 mem: seed.mem.clone(),
             };
-            at = Some(parent);
+            at = Some((parent, f.call));
         }
     }
 
@@ -411,9 +413,7 @@ impl<'a> Interp<'a> {
             };
             if !matches!(r, V::Ptr(..)) && w.bits() >= 64 && consumes_pointers(&inst.op) {
                 for x in inst.op.operands() {
-                    if let V::Ptr(pb, _) = vals[x.index()] {
-                        st.mem.wild(pb);
-                    }
+                    escape_value(st, vals[x.index()]);
                 }
             }
             vals.push(r);
@@ -428,6 +428,7 @@ impl<'a> Interp<'a> {
         if r == regs::FPCR.index() {
             let (zero, _) = v.bits(w);
             let ok = zero & GUEST == GUEST;
+
             let e = self.out.sites.entry(pc).or_insert(true);
             *e &= ok;
             return;

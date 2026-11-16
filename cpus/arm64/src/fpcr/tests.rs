@@ -17,7 +17,8 @@ const MOV_W8_RP: u32 = 0x52a00808;
 const STR_W8_SP: u32 = 0xb90003e8;
 const STR_W8_SP_8: u32 = 0xb9000be8;
 const NOP: u32 = 0xd503201f;
-const ADD_X9_SP_X10: u32 = 0x8b2a63e9;
+const ADD_X9_X0_X10: u32 = 0x8b0a0009;
+const ADD_X9_X1_X10: u32 = 0x8b0a0029;
 const STR_W8_X9: u32 = 0xb9000128;
 const PUSH_X0_X1: u32 = 0xa9bf07e0;
 const POP_X0_X1: u32 = 0xa8c107e0;
@@ -50,7 +51,7 @@ fn bl(from: u64, to: u64) -> u32 {
 struct Prog {
     words: BTreeMap<u64, u32>,
     entries: BTreeSet<u64>,
-    pads: BTreeMap<u64, Vec<u64>>,
+    pads: Vec<(u64, u64, u64)>,
     callers: BTreeMap<u64, Vec<u64>>,
     escaped: BTreeSet<u64>,
 }
@@ -86,7 +87,13 @@ impl Prog {
         let slot = |_: u64| None;
         let table = |_: u64| None;
         let is_entry = |a: u64| self.entries.contains(&a);
-        let pads = |a: u64| self.pads.get(&a).cloned().unwrap_or_default();
+        let pads = |a: u64| {
+            self.pads
+                .iter()
+                .filter(|p| a >= p.0 && a < p.0 + p.1)
+                .map(|p| p.2)
+                .collect()
+        };
         let host = |_: u64| Host::Guest;
         let code = Code {
             block: &block,
@@ -217,6 +224,21 @@ fn a_restore_of_a_saved_environment_keeps_the_default() {
 }
 
 #[test]
+fn a_save_deeper_than_the_inline_depth_is_followed() {
+    let mut p = guarded(&[BLR_X8]);
+    let mut at = SAVE;
+    for k in 0..4u64 {
+        let w = 0x3000 + 0x100 * k;
+        p.func(w, &[PUSH_FRAME, MOV_X29_SP, bl(w + 8, at), POP_FRAME, RET]);
+        p.calls(w, at);
+        at = w;
+    }
+    p.words.insert(CALLER + 12, bl(CALLER + 12, at));
+    p.calls(CALLER, at);
+    assert!(p.constant());
+}
+
+#[test]
 fn a_saved_environment_whose_address_escapes_is_not_trusted() {
     assert!(!guarded(&[ADD_X0_SP_8, BLR_X8]).constant());
 }
@@ -232,8 +254,13 @@ fn an_environment_overwritten_before_the_restore_is_not() {
 }
 
 #[test]
-fn a_store_at_an_unknown_offset_from_the_stack_may_reach_the_environment() {
-    assert!(!guarded(&[MOV_W8_RP, ADD_X9_SP_X10, STR_W8_X9]).constant());
+fn a_store_at_an_unknown_offset_from_the_environment_may_reach_it() {
+    assert!(!guarded(&[MOV_W8_RP, ADD_X0_SP_8, ADD_X9_X0_X10, STR_W8_X9]).constant());
+}
+
+#[test]
+fn a_store_at_an_unknown_offset_from_another_object_does_not_reach_it() {
+    assert!(guarded(&[MOV_W8_RP, MOV_X1_SP, ADD_X9_X1_X10, STR_W8_X9]).constant());
 }
 
 #[test]
@@ -249,7 +276,19 @@ fn a_landing_pad_restores_what_the_guarded_call_left() {
     let pad = CALLER + 0x100;
     p.func(pad, &[ADD_X0_SP_8, bl(pad + 4, RESTORE), POP_FRAME, RET]);
     p.entries.remove(&pad);
-    p.pads.insert(CALLER, vec![pad]);
+    p.pads.push((CALLER + 16, 4, pad));
+    p.calls(CALLER, RESTORE);
+    assert!(p.constant());
+}
+
+#[test]
+fn a_landing_pad_starts_only_from_the_calls_it_serves() {
+    let mut p = guarded(&[BLR_X8]);
+    p.words.insert(CALLER + 4, BLR_X8);
+    let pad = CALLER + 0x100;
+    p.func(pad, &[ADD_X0_SP_8, bl(pad + 4, RESTORE), POP_FRAME, RET]);
+    p.entries.remove(&pad);
+    p.pads.push((CALLER + 16, 4, pad));
     p.calls(CALLER, RESTORE);
     assert!(p.constant());
 }
@@ -261,7 +300,7 @@ fn a_landing_pad_reached_before_the_save_is_not() {
     let pad = CALLER + 0x100;
     p.func(pad, &[ADD_X0_SP_8, bl(pad + 4, RESTORE), POP_FRAME, RET]);
     p.entries.remove(&pad);
-    p.pads.insert(CALLER, vec![pad]);
+    p.pads.push((CALLER + 4, 16, pad));
     p.calls(CALLER, RESTORE);
     assert!(!p.constant());
 }

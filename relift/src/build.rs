@@ -406,7 +406,7 @@ fn emit_modules(
         }
         let flags = fpsr.begin_module(i, &module, &layout, visits, &cpu, &overrides);
         if fpsr.has_linkage() {
-            fpcr.add_module(p, &layout, &flags, &overrides, &swapped);
+            fpcr.add_module(p, &module, &layout, &flags, &overrides, &swapped);
         }
         let summaries = std::sync::Mutex::new(Vec::new());
         let summarized: Vec<std::sync::atomic::AtomicBool> = heads

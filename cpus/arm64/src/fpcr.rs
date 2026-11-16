@@ -14,7 +14,8 @@
 //! values (known bits, pointers at an offset from a stack base, the
 //! function addresses loader-filled words hold) with `MRS FPCR` giving the
 //! default, from a root function's entry with nothing known, inlining the
-//! callees, and asks at each reached `MSR FPCR` whether the guest bits
+//! callees (every function that reaches a write, others a few levels below
+//! the nearest such frame), and asks at each reached `MSR FPCR` whether the guest bits
 //! written are known zero. A write that depends on the root's arguments
 //! (`fesetround(mode)`, or `fesetenv(env)` restoring an environment saved
 //! by `fegetenv` on the caller's stack) is decided at the callers instead:
@@ -27,8 +28,8 @@
 //! only through addresses derived from that object's own address (see
 //! [`value::Mem`]); calls the analysis does not follow change only objects
 //! whose address escaped and the caller-saved registers (AAPCS64). A
-//! landing pad starts from what every call the analysis does not follow
-//! leaves. A computed jump without known targets, a resume point (`setjmp`)
+//! landing pad starts from what each call it serves leaves, when the
+//! analysis does not follow that call. A computed jump without known targets, a resume point (`setjmp`)
 //! or too much code stops a root without a result.
 
 mod interp;
@@ -72,7 +73,7 @@ pub struct Code<'a> {
     pub table: &'a dyn Fn(u64) -> Option<Vec<u64>>,
     /// Whether an address is a function entry.
     pub is_entry: &'a dyn Fn(u64) -> bool,
-    /// The landing pads of the function at an entry.
+    /// The landing pads that serve the call at an address.
     pub pads: &'a dyn Fn(u64) -> Vec<u64>,
     /// What runs at an entry.
     pub host: &'a dyn Fn(u64) -> Host,
@@ -164,6 +165,7 @@ pub fn prove(
         }
         todo.extend(fns.iter().map(|&f| (f, 0)));
     }
+    let reach = reaching(callers, sites);
     loop {
         while let Some((f, up)) = todo.pop_front() {
             if out.roots.contains(&f)
@@ -172,8 +174,7 @@ pub fn prove(
             {
                 continue;
             }
-            let failed: BTreeSet<u64> = out.climbed.keys().copied().collect();
-            let must = |t: u64| failed.contains(&t);
+            let must = |t: u64| t != f && reach.contains(&t);
             let r = check_tries(code, f, &must);
             if r.proven() {
                 out.roots.insert(f);
@@ -195,11 +196,10 @@ pub fn prove(
             }
         }
         // A root checked before a later climb did not yet inline the
-        // functions climbed through since; check every root again.
-        let failed: BTreeSet<u64> = out.climbed.keys().copied().collect();
+        // functions the search visited since; check every root again.
         let mut again = false;
         for f in out.roots.clone() {
-            let must = |t: u64| failed.contains(&t);
+            let must = |t: u64| t != f && reach.contains(&t);
             let r = check_tries(code, f, &must);
             if !r.proven() {
                 out.roots.remove(&f);
@@ -218,6 +218,30 @@ pub fn prove(
             return out;
         }
     }
+}
+
+/// The functions that reach a write within [`CLIMB`] calls: the functions
+/// holding one and their callers. A root inlines them at any depth (a
+/// callee that saves the environment the root later restores must be
+/// followed even when it proves on its own).
+fn reaching(
+    callers: &dyn Fn(u64) -> Option<Vec<u64>>,
+    sites: &BTreeMap<u64, BTreeSet<u64>>,
+) -> BTreeSet<u64> {
+    let mut out: BTreeSet<u64> = sites.values().flatten().copied().collect();
+    let mut level: Vec<u64> = out.iter().copied().collect();
+    for _ in 0..CLIMB {
+        let mut next = Vec::new();
+        for f in level {
+            for c in callers(f).unwrap_or_default() {
+                if out.insert(c) {
+                    next.push(c);
+                }
+            }
+        }
+        level = next;
+    }
+    out
 }
 
 fn climb(

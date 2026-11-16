@@ -246,14 +246,20 @@ fn fde_pads(img: &[u8], at: usize, data_base: usize, base: u64) -> Vec<Pad> {
     call_sites(img, lsda as usize, start, data_base)
         .unwrap_or_default()
         .into_iter()
-        .map(|(site, pad)| Pad {
+        .map(|(site, len, pad)| Pad {
             site: base.wrapping_add(site),
+            len,
             addr: base.wrapping_add(pad),
         })
         .collect()
 }
 
-fn call_sites(img: &[u8], lsda: usize, start: u64, data_base: usize) -> Option<Vec<(u64, u64)>> {
+fn call_sites(
+    img: &[u8],
+    lsda: usize,
+    start: u64,
+    data_base: usize,
+) -> Option<Vec<(u64, u64, u64)>> {
     let mut r = Reader { img, at: lsda };
     let lp_enc = r.u8()?;
     let lp_start = if lp_enc == 0xff {
@@ -271,11 +277,11 @@ fn call_sites(img: &[u8], lsda: usize, start: u64, data_base: usize) -> Option<V
     let mut out = Vec::new();
     while r.at < end {
         let site = r.encoded(cs_enc & 0x0f, data_base)?;
-        let _len = r.encoded(cs_enc & 0x0f, data_base)?;
+        let len = r.encoded(cs_enc & 0x0f, data_base)?;
         let pad = r.encoded(cs_enc & 0x0f, data_base)?;
         r.uleb()?;
         if pad != 0 {
-            out.push((start.wrapping_add(site), lp_start.wrapping_add(pad)));
+            out.push((start.wrapping_add(site), len, lp_start.wrapping_add(pad)));
         }
     }
     Some(out)
@@ -339,10 +345,12 @@ mod tests {
             [
                 Pad {
                     site: 0x8000_1010,
+                    len: 4,
                     addr: 0x8000_1030
                 },
                 Pad {
                     site: 0x8000_1024,
+                    len: 4,
                     addr: 0x8000_1034
                 },
             ]

@@ -40,6 +40,7 @@ struct Mod {
     outlines: Vec<Outline>,
     hosts: BTreeMap<u64, Host>,
     via: BTreeMap<u64, u64>,
+    pads: Vec<relift_guest::Pad>,
 }
 
 /// The FPCR proof of one build.
@@ -57,6 +58,10 @@ pub struct Plan {
     /// The census, for the build log.
     pub report: String,
 }
+
+/// The longest call-site range of an unwind table looked through: one
+/// function's code.
+const CALL_SITE_SPAN: u64 = 1 << 24;
 
 /// The functions that find a function by its name at run time.
 const LOOKUPS: [&str; 4] = [
@@ -101,13 +106,14 @@ fn branch_target(w: u32, pc: u64) -> Option<u64> {
 }
 
 impl Fpcr {
-    /// Keeps what the proof needs of module `p` (outlined as `layout`,
-    /// with `flags` from the FPSR analysis's linkage pass), whose host
-    /// overrides are `overrides` and whose functions in `swapped` run mod
+    /// Keeps what the proof needs of module `p` (as `module`, outlined as
+    /// `layout`, with `flags` from the FPSR analysis's linkage pass), whose
+    /// host overrides are `overrides` and whose functions in `swapped` run mod
     /// variants instead.
     pub fn add_module(
         &mut self,
         p: &Placed,
+        module: &relift_guest::Module,
         layout: &Layout,
         flags: &ModuleFlags,
         overrides: &[relift_emit::Override],
@@ -136,6 +142,7 @@ impl Fpcr {
             outlines: layout.functions.values().cloned().collect(),
             hosts,
             via: flags.via().clone(),
+            pads: module.pads.clone(),
         });
         if has {
             self.sites += 1;
@@ -178,13 +185,12 @@ impl Fpcr {
             .iter()
             .flat_map(|m| m.outlines.iter().map(|o| o.entry))
             .collect();
-        let pads: HashMap<u64, Vec<u64>> = self
+        let mut pads: Vec<relift_guest::Pad> = self
             .mods
             .iter()
-            .flat_map(|m| m.outlines.iter())
-            .filter(|o| !o.pads.is_empty())
-            .map(|o| (o.entry, o.pads.iter().copied().collect()))
+            .flat_map(|m| m.pads.iter().copied())
             .collect();
+        pads.sort_unstable();
         let tables: HashMap<u64, Vec<u64>> = self
             .mods
             .iter()
@@ -207,7 +213,16 @@ impl Fpcr {
         };
         let table = |pc: u64| tables.get(&pc).cloned();
         let is_entry = |a: u64| entries.contains(&a);
-        let pads_of = |e: u64| pads.get(&e).cloned().unwrap_or_default();
+        let pads_of = |pc: u64| -> Vec<u64> {
+            let end = pads.partition_point(|p| p.site <= pc);
+            pads[..end]
+                .iter()
+                .rev()
+                .take_while(|p| pc - p.site < CALL_SITE_SPAN)
+                .filter(|p| pc - p.site < p.len)
+                .map(|p| p.addr)
+                .collect()
+        };
         let host = |e: u64| {
             self.module_of(e)
                 .and_then(|m| m.hosts.get(&e).copied())

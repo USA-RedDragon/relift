@@ -294,6 +294,8 @@ pub struct Root {
 pub struct Pad {
     /// The first address of the call-site range the pad serves.
     pub site: u64,
+    /// The length of the call-site range in bytes.
+    pub len: u64,
     /// The landing pad.
     pub addr: u64,
 }

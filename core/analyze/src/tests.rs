@@ -726,6 +726,7 @@ fn a_landing_pad_that_serves_a_call_joins_the_function() {
     assert!(!plain.functions[&BASE].insts.contains_key(&(BASE + 8)));
     m.pads = vec![Pad {
         site: BASE,
+        len: 4,
         addr: BASE + 8,
     }];
     let a = discover(&Toy, &m);
@@ -740,6 +741,7 @@ fn a_pad_whose_site_is_in_no_function_is_ignored() {
     let mut m = module(&[word(0x03, 0, 0), word(0x03, 0, 0)], &[], &[BASE]);
     m.pads = vec![Pad {
         site: BASE + 0x100,
+        len: 4,
         addr: BASE + 4,
     }];
     let a = discover(&Toy, &m);
