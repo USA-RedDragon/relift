@@ -105,3 +105,72 @@ fn a_release_build_stops_at_unlifted_code_with_a_report_naming_the_jump() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// An MBC1 cartridge whose code at `0x150` maps bank 1 (`ld a, 1; ld
+/// ($2000), a`) and calls `0x4000` there; bank 1 builds an address from the
+/// joypad register and jumps to it (`jp hl` at `0x400B`), into work RAM.
+fn banked_rom() -> Vec<u8> {
+    let mut rom = synth::rom(&synth::Spec {
+        cart_type: 0x01,
+        rom_size: 0x01,
+        ..synth::Spec::default()
+    });
+    let fixed = [0x3E, 0x01, 0xEA, 0x00, 0x20, 0xCD, 0x00, 0x40, 0x18, 0xFE];
+    rom[0x150..0x150 + fixed.len()].copy_from_slice(&fixed);
+    let bank1 = [
+        0x3E, 0x30, 0xE0, 0x00, 0xF0, 0x00, 0xE6, 0x0F, 0x26, 0xC0, 0x6F, 0xE9,
+    ];
+    rom[0x4000..0x4000 + bank1.len()].copy_from_slice(&bank1);
+    synth::fix_checksums(&mut rom);
+    rom
+}
+
+#[test]
+fn a_miss_from_a_switchable_bank_names_the_site_in_its_bank() {
+    if relift_build::find_tool("clang").is_none() {
+        eprintln!("skipped: no clang on PATH");
+        return;
+    }
+    let root = tiny::scratch("e2e-gb-bank-miss");
+    let project = root.join("game");
+    std::fs::create_dir_all(&project).expect("the project dir is creatable");
+    let image = root.join("bank.gb");
+    relift_cache::write_if_changed(&image, &banked_rom()).expect("the ROM is writable");
+    let cache = root.join("cache").display().to_string();
+    let image = image.display().to_string();
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "import", &image]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = tiny::relift(&project, &["--cache-dir", &cache, "-j", "4", "build"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let host = root.join("cache/projects/game/build/host");
+    let reports = root.join("reports");
+    let out = relift_proc::command(host.join(format!("game{}", std::env::consts::EXE_SUFFIX)))
+        .args(["--headless", "--no-save", "--no-audio", "--frames", "5"])
+        .env("RELIFT_REPORT_DIR", &reports)
+        .output()
+        .expect("the game runs");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(70), "{err}");
+    let file = std::fs::read_dir(&reports)
+        .expect("a report folder")
+        .next()
+        .expect("a report")
+        .unwrap()
+        .path();
+    let report = std::fs::read_to_string(&file).unwrap();
+    for want in [
+        "\nkind: missed code\n",
+        "\ntransfer: jump\ntarget: 0xc00f\n",
+        "\nsite: 0x400b bank001+0x400b\nsite function: 0x4001 bank001+0x4001 gb_b001_4001",
+    ] {
+        assert!(report.contains(want), "{want:?} in\n{report}");
+    }
+}

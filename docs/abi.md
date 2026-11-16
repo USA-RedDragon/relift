@@ -703,7 +703,10 @@ shared library on every host.
 
 A miss writes a stop report (section 11, stop reports) and ends the guest
 with `RL_PEND_EXIT_PROCESS` and status `RL_EXIT_SOFTWARE` (70). Shipped
-builds never load code at run time. [decided]
+builds never load code at run time. A release Game Boy build stops the
+same way at the first instruction without a lifted body (it has no CPU
+interpreter), and names the transfer site in the bank that was mapped;
+a `--dev` build runs it on the device library's CPU. [decided]
 
 Computed transfers that leave no host frame are emitted as
 `RL_JUMP(target, site);` (`abi_core.h`): the CPU layer's `rl_jump_find`
