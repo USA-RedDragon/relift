@@ -10,9 +10,9 @@
 //! ([`analyze_multiboot`]).
 
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
-use relift_cpu_arm32_analyze::{BiosCall, Dma, Kind, Platform, Profile, discover, discover_with};
+use relift_cpu_arm32_analyze::{BiosCall, Config, Dma, Kind, Platform, Profile, discover};
 use relift_gba_formats::header::{MAX_ROM, MULTIBOOT_BASE, MULTIBOOT_ENTRY};
 use relift_gba_formats::rom::OFFSET_MASK;
 use relift_gba_formats::{Error as FormatError, Header};
@@ -187,12 +187,12 @@ pub fn analyze_with(rom: &[u8], hints: &[Loc]) -> Result<Report, AnalyzeError> {
         return Err(AnalyzeError::TooLarge(rom.len()));
     }
     Header::parse(rom).map_err(AnalyzeError::Format)?;
-    Ok(discover_with(
-        &Gba { rom },
-        Vec::new(),
-        &[Loc::rom(RESET, false)],
-        hints,
-    ))
+    let config = Config {
+        roots: vec![Loc::rom(RESET, false)],
+        hints: hints.to_vec(),
+        ..Config::default()
+    };
+    Ok(discover(&Gba { rom }, &config))
 }
 
 /// Find the functions of the multiboot image `rom` as the BIOS runs it:
@@ -219,7 +219,12 @@ pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
         kind: CopyKind::Load,
         src: None,
         dst: MULTIBOOT_BASE,
-        bytes: Rc::from(rom),
+        bytes: Arc::from(rom),
     };
-    Ok(discover(&Gba { rom: &[] }, vec![load], &[site]))
+    let config = Config {
+        loads: vec![load],
+        roots: vec![site],
+        ..Config::default()
+    };
+    Ok(discover(&Gba { rom: &[] }, &config))
 }

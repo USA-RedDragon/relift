@@ -4,11 +4,12 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use relift_cpu_arm32::decode::Encoding;
 use relift_cpu_arm32::lift::{self, LiftError};
 use relift_cpu_arm32::regs;
-use relift_ir::{Block, Flow};
+use relift_ir::{Block, Flow, Next, Op, Value};
 
 use crate::eval::{self, DmaStart, Out};
 use crate::image::Image;
@@ -239,6 +240,8 @@ pub(crate) struct FnRun {
     pub writes: bool,
     /// Some call passes an argument on to a callee that writes.
     pub spec: bool,
+    /// Code addresses in RAM no copy holds that transfers lead to.
+    pub outside: Vec<Loc>,
 }
 
 struct Run<'a> {
@@ -295,8 +298,74 @@ fn refine(st: &State, c: u32, holds: bool) -> Option<State> {
 /// The most entries a table without a bound check is read for.
 const MAX_TABLE: u32 = 4096;
 
-fn is_bx(e: Encoding) -> bool {
-    matches!(e, Encoding::BX_A1 | Encoding::BX_T1 | Encoding::BXV4_T1)
+/// Whether `b` takes the state from bit 0 of the address it jumps to
+/// (`BX`; on ARMv5 also `BLX` with a register and the loads of the PC):
+/// it writes the Thumb bit with bit 0 of a value the target is computed
+/// from.
+pub(crate) fn interworks(b: &Block) -> bool {
+    let Next::Dynamic(target) = b.exit.next else {
+        return false;
+    };
+    let op = |v: Value| b.insts.get(v.index()).map(|i| &i.op);
+    let Some(mut t) = b.insts.iter().rev().find_map(|i| match i.op {
+        Op::Set(r, v) if r == regs::T => Some(v),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let kept = |v: Value| matches!(op(v), Some(Op::Get(r)) if *r == regs::T);
+    loop {
+        match op(t) {
+            Some(Op::Extract(x, 0)) => return feeds(b, *x, target),
+            Some(Op::Select(_, x, y)) if kept(*y) => t = *x,
+            Some(Op::Select(_, x, y)) if kept(*x) => t = *y,
+            _ => return false,
+        }
+    }
+}
+
+/// Whether `to` is computed from `from` in `b`.
+fn feeds(b: &Block, from: Value, to: Value) -> bool {
+    let mut seen = HashSet::new();
+    let mut work = vec![to];
+    while let Some(v) = work.pop() {
+        if v == from {
+            return true;
+        }
+        if seen.insert(v.index())
+            && let Some(i) = b.insts.get(v.index())
+        {
+            work.extend(i.op.operands());
+        }
+    }
+    false
+}
+
+/// Whether the instruction at `loc` opens a stack frame, as a function's
+/// first instruction does: it saves the link register on the stack, or
+/// lowers the stack pointer without storing.
+pub(crate) fn opens_frame(image: &Image<'_>, loc: Loc) -> bool {
+    let Some(word) = image.fetch(loc) else {
+        return false;
+    };
+    let Ok(l) = lift::lift_for(word, loc.addr, loc.thumb, image.platform.profile()) else {
+        return false;
+    };
+    let block = relift_ir::simplify(&l.block);
+    let st = State::entry(loc.thumb);
+    let out = eval::eval(&block, loc, &st, image, false, None);
+    if out.may_skip || !out.may_run {
+        return false;
+    }
+    let saves_lr = out.st.stack.values().any(|v| {
+        *v == Abs::S(Sym {
+            base: Base::Entry(LR),
+            off: 0,
+            align: 0,
+        })
+    });
+    let lowers = out.st.reg(SP).stack_off().is_some_and(|o| o < 0);
+    saves_lr || lowers && out.st.stack.is_empty()
 }
 
 /// Runs the function at `entry`; jumps whose table check failed (in
@@ -493,6 +562,7 @@ impl Run<'_> {
             return;
         }
         let link = Self::linked(&out.st, loc);
+        let bx = interworks(block);
         match out.flow {
             Flow::Call { .. } => {
                 for t in out.targets.clone() {
@@ -501,7 +571,7 @@ impl Run<'_> {
             }
             _ => {
                 for t in out.targets.clone() {
-                    self.jump(loc, enc, t, &out, link);
+                    self.jump(loc, enc, bx, t, &out, link);
                 }
             }
         }
@@ -638,7 +708,7 @@ impl Run<'_> {
             kind,
             src: Some(src),
             dst,
-            bytes: Rc::from(bytes),
+            bytes: Arc::from(bytes),
         });
     }
 
@@ -687,6 +757,9 @@ impl Run<'_> {
         match locs(self.env.image, at, addr, thumb) {
             Ok(v) => v,
             Err(k) => {
+                if k == UnresolvedKind::RamNoCopy {
+                    self.out.outside.push(Loc::rom(addr, thumb));
+                }
                 self.unresolved(at, k, format!("{addr:#010x}"));
                 Vec::new()
             }
@@ -757,6 +830,12 @@ impl Run<'_> {
             s.returns |= cs.returns;
             s.keep &= cs.keep;
             s.psr &= cs.psr;
+        }
+        if !s.returns
+            && self.env.image.platform.external(v as u32)
+            && locs(self.env.image, site, v as u32, thumb).is_err()
+        {
+            s = Summary::new(true, AAPCS_KEEP);
         }
         self.resume(site, st, s);
     }
@@ -964,7 +1043,10 @@ impl Run<'_> {
             .copied()
             .filter(|a| self.env.image.is_ram(*a))
             .collect();
-        if ram.is_empty() || !(ks.iter().any(|a| self.env.image.is_source(*a)) || ram.len() > 1) {
+        let image = ks.iter().any(|a| self.env.image.is_source(*a));
+        if !(self.env.image.options.image_calls && image)
+            && (ram.is_empty() || !(image || ram.len() > 1))
+        {
             return false;
         }
         let key = (callee, args);
@@ -985,7 +1067,7 @@ impl Run<'_> {
                     kind: CopyKind::Run,
                     src: None,
                     dst: *dst,
-                    bytes: Rc::from(bytes.as_slice()),
+                    bytes: Arc::from(bytes.as_slice()),
                 });
             }
         }
@@ -1170,7 +1252,7 @@ impl Run<'_> {
         s
     }
 
-    fn jump(&mut self, site: Loc, enc: Encoding, t: Abs, out: &Out, link: bool) {
+    fn jump(&mut self, site: Loc, enc: Encoding, bx: bool, t: Abs, out: &Out, link: bool) {
         let st = &out.st;
         if link && !matches!(t, Abs::K(v) if v as u32 == Self::fall_loc(site).addr) {
             self.out.linked.insert(site);
@@ -1229,14 +1311,14 @@ impl Run<'_> {
                 ..
             }) if !link => {
                 let own = self.out.summary.get_or_insert(Summary::new(false, 0x7FFF));
-                own.via.get_or_insert((r, is_bx(enc)));
+                own.via.get_or_insert((r, bx));
             }
             Abs::Tab { base, stride, n } if link => {
-                let thumb = if is_bx(enc) { None } else { Some(site.thumb) };
+                let thumb = if bx { None } else { Some(site.thumb) };
                 self.tab_transfer(site, (base, stride, n), thumb, st, link);
             }
             Abs::Tab { base, stride, n } => {
-                let thumb = if is_bx(enc) { None } else { Some(site.thumb) };
+                let thumb = if bx { None } else { Some(site.thumb) };
                 let es = self.table_entries(base, stride, n, thumb);
                 if es.is_empty() {
                     self.unresolved(
@@ -1262,8 +1344,8 @@ impl Run<'_> {
                 off: 0,
                 ..
             }) => {
-                let thumb = if is_bx(enc) { None } else { st.thumb() };
-                if thumb.is_none() && !is_bx(enc) {
+                let thumb = if bx { None } else { st.thumb() };
+                if thumb.is_none() && !bx {
                     self.unresolved(site, UnresolvedKind::UnknownState, format!("[{a:#010x}]"));
                     return;
                 }

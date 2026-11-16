@@ -70,4 +70,27 @@ pub trait Platform {
     /// The copy an immediate DMA transfer makes: source, destination and
     /// length in bytes; `None` when it makes none discovery can prove.
     fn dma(&self, d: &Dma) -> Option<(u32, u32, u32)>;
+
+    /// The image as segments, base and bytes, for the scan of every image
+    /// word ([`crate::Options::scan_words`]); where segments overlap, the
+    /// last one holding an address is the one it is in.
+    fn segments(&self) -> Vec<(u32, &[u8])> {
+        Vec::new()
+    }
+
+    /// Whether `addr` is code of another unit, analyzed in a run of its
+    /// own: a call there returns and keeps what the procedure call
+    /// standard keeps.
+    fn external(&self, addr: u32) -> bool {
+        let _ = addr;
+        false
+    }
+
+    /// Whether code at `addr` is this run's to find through the code
+    /// addresses it takes: in a run of one unit over others, the
+    /// candidates in the others are left to their own runs.
+    fn owns(&self, addr: u32) -> bool {
+        let _ = addr;
+        true
+    }
 }

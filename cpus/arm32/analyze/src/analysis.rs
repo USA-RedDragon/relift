@@ -2,8 +2,9 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
+use crate::config::Config;
 use crate::func::{self, Env, FnRun, Lifted, Summary};
 use crate::image::Image;
 use crate::loc::Loc;
@@ -18,27 +19,19 @@ const MAX_ROUNDS: usize = 8;
 /// Function runs per function before the fixed point gives up.
 const MAX_RUNS_PER_FUNCTION: usize = 1024;
 
-/// Finds the functions of the code on `platform` reachable from `roots`
-/// (each an [`Origin::Entry`]), with `loads` already in RAM: images a
-/// loader put there, of kind [`CopyKind::Load`], which the roots may name
-/// by index.
+/// Finds the functions of the code on `platform` reachable from the
+/// roots of `config`, and from its seeds that open a stack frame.
 #[must_use]
-pub fn discover(platform: &dyn Platform, loads: Vec<RamCopy>, roots: &[Loc]) -> Report {
-    discover_with(platform, loads, roots, &[])
-}
-
-/// As [`discover`], with `hints` as roots too: code addresses a run reached
-/// that discovery did not (the hints of a stop report, [`Origin::Hint`]).
-#[must_use]
-pub fn discover_with(
-    platform: &dyn Platform,
-    loads: Vec<RamCopy>,
-    roots: &[Loc],
-    hints: &[Loc],
-) -> Report {
-    let mut image = Image::new(platform);
-    image.copies = loads;
-    run(image, roots, hints)
+pub fn discover(platform: &dyn Platform, config: &Config) -> Report {
+    let mut image = Image::new(platform, config.options);
+    image.copies.clone_from(&config.loads);
+    let mut roots = config.roots.clone();
+    for &l in &config.seeds {
+        if !roots.contains(&l) && func::opens_frame(&image, l) {
+            roots.push(l);
+        }
+    }
+    run(image, &roots, &config.hints)
 }
 
 /// The field stores of one run that keep the same bits: the first store,
@@ -530,7 +523,7 @@ impl<'a> Driver<'a> {
             kind: CopyKind::Rewrite(b),
             src: None,
             dst,
-            bytes: Rc::from(bytes),
+            bytes: Arc::from(bytes),
         });
         self.version += 1;
         Some(i)
@@ -735,6 +728,7 @@ impl<'a> Driver<'a> {
                 },
             );
             unresolved.extend(r.unresolved.iter().cloned());
+            rep.outside.extend(r.outside.iter().copied());
             swis.extend(r.swis.iter().copied());
             rep.data.extend(r.data.iter().copied());
             if self.roots.get(l) == Some(&Origin::Irq) {

@@ -1,6 +1,7 @@
 //! The bytes code and constants come from: the platform's code image and
 //! the proven copies to RAM.
 
+use crate::config::Options;
 use crate::loc::Loc;
 use crate::platform::{Kind, Platform};
 use crate::report::{CopyKind, RamCopy};
@@ -8,6 +9,7 @@ use crate::report::{CopyKind, RamCopy};
 #[derive(Clone)]
 pub(crate) struct Image<'a> {
     pub platform: &'a dyn Platform,
+    pub options: Options,
     pub copies: Vec<RamCopy>,
 }
 
@@ -18,9 +20,10 @@ fn le(b: &[u8]) -> u32 {
 }
 
 impl<'a> Image<'a> {
-    pub(crate) fn new(platform: &'a dyn Platform) -> Image<'a> {
+    pub(crate) fn new(platform: &'a dyn Platform, options: Options) -> Image<'a> {
         Image {
             platform,
+            options,
             copies: Vec::new(),
         }
     }

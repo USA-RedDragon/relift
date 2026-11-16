@@ -94,6 +94,7 @@
 
 mod analysis;
 mod conc;
+mod config;
 mod eval;
 mod func;
 mod image;
@@ -102,7 +103,8 @@ mod platform;
 mod report;
 mod val;
 
-pub use analysis::{discover, discover_with};
+pub use analysis::discover;
+pub use config::{Config, Options};
 pub use loc::Loc;
 pub use platform::{BiosCall, Dma, Kind, Platform};
 pub use relift_cpu_arm32::decode::Profile;

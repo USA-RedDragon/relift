@@ -51,7 +51,7 @@ pub struct RamCopy {
     /// The RAM destination address.
     pub dst: u32,
     /// The bytes written.
-    pub bytes: std::rc::Rc<[u8]>,
+    pub bytes: std::sync::Arc<[u8]>,
 }
 
 impl RamCopy {
@@ -238,6 +238,9 @@ pub struct Report {
     pub data: BTreeSet<(u32, u8)>,
     /// Instructions that overlap a constant read as data.
     pub conflicts: Vec<Loc>,
+    /// Code addresses, with their state, that transfers lead to in RAM no
+    /// copy holds: code another run (a unit loaded at run time) holds.
+    pub outside: BTreeSet<Loc>,
 }
 
 impl Report {
