@@ -72,6 +72,7 @@ const NONE: &[&str] = &[];
 /// absence walks still cover them.
 const STANDALONE: &[&str] = &[
     "relift-cpu-arm32",
+    "relift-cpu-mips",
     "relift-cpu-z80",
     "relift-cpu-rsp",
     "relift-emit-wasm",
