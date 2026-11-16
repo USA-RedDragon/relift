@@ -33,8 +33,20 @@
 //! invocation: a fragment is discarded, any other stage returns without
 //! its outputs, so a missed case shows instead of running the wrong one.
 //!
+//! BAR waits for every thread of the CTA that has not exited, and a lane
+//! that exited counts as arrived (measured on SM86); lanes of one warp at
+//! two BAR sites hang. OpControlBarrier instead needs every invocation of
+//! the workgroup at the same instruction. So each BAR must lie where the
+//! whole workgroup runs: not in a block that a branch with a condition
+//! that may differ between invocations can make some of them skip (the
+//! blocks between the branch and its post-dominator), not under such a
+//! guard, and not after a varying EXIT. Which values are uniform comes
+//! from the `uniform` module; anything else is rejected with the reason.
+//!
 //! A graph this cannot express (irreducible, recursive calls) is rejected
 //! with the reason.
+
+mod uniform;
 
 use super::{Code, Ctx, Res, bad};
 use crate::Operand;
@@ -1129,6 +1141,107 @@ impl Graph {
         Ok(())
     }
 
+    /// Checks that every BAR runs where all the workgroup's invocations
+    /// run it (see the module documentation).
+    fn check_barriers(&mut self, code: &Code) -> Res<()> {
+        let insts = &code.insts;
+        let n = self.blocks.len();
+        let mut partial = vec![false; n];
+        let mut exited = vec![false; n];
+        loop {
+            let entry = self.varying(code, &partial);
+            let mut p = partial.clone();
+            let mut e = exited.clone();
+            for b in 0..n {
+                let Some(mut v) = entry[b] else { continue };
+                let blk = &self.blocks[b];
+                for i in &insts[blk.first..blk.end] {
+                    uniform::step(i, partial[b], &mut v);
+                }
+                let (uniform, exits) = match &blk.term {
+                    Term::Jump(_) => (true, false),
+                    Term::Branch(conds, t, f) => {
+                        (v.uniform_all(conds), terminal(*t) || terminal(*f))
+                    }
+                    Term::Switch(Sel::Reg(r), ..) => (v.uniform_reg(*r, false), false),
+                    Term::Switch(Sel::UReg(r), ..) => (v.uniform_reg(*r, true), false),
+                };
+                if uniform {
+                    continue;
+                }
+                let stop = if exits { None } else { self.ipdom(None, b) };
+                let mut work = self.succs[b].clone();
+                let mut seen = vec![false; n];
+                while let Some(u) = work.pop() {
+                    if seen[u] || Some(u) == stop {
+                        continue;
+                    }
+                    seen[u] = true;
+                    let marks = if exits { &mut e } else { &mut p };
+                    marks[u] = true;
+                    work.extend(self.succs[u].iter().copied());
+                }
+            }
+            if p == partial && e == exited {
+                for b in 0..n {
+                    let Some(mut v) = entry[b] else { continue };
+                    let blk = &self.blocks[b];
+                    for (k, i) in insts.iter().enumerate().take(blk.end).skip(blk.first) {
+                        if i.mnemonic == "BAR" {
+                            let guard = i.guard.iter().cloned().collect::<Vec<_>>();
+                            if partial[b] || !v.uniform_all(&guard) {
+                                return bad(format!(
+                                    "BAR at {:#x} in non-uniform control flow",
+                                    16 * k
+                                ));
+                            }
+                            if exited[b] {
+                                return bad(format!(
+                                    "BAR at {:#x} after an EXIT only some invocations take",
+                                    16 * k
+                                ));
+                            }
+                        }
+                        uniform::step(i, partial[b], &mut v);
+                    }
+                }
+                return Ok(());
+            }
+            partial = p;
+            exited = e;
+        }
+    }
+
+    /// What may vary between invocations at the start of each block
+    /// (`None` where nothing reaches it), with the blocks in `partial` run
+    /// by only some invocations.
+    fn varying(&self, code: &Code, partial: &[bool]) -> Vec<Option<uniform::Varying>> {
+        let n = self.blocks.len();
+        let mut entry: Vec<Option<uniform::Varying>> = vec![None; n];
+        entry[0] = Some(uniform::Varying::default());
+        let mut work = vec![0];
+        while let Some(b) = work.pop() {
+            let Some(mut v) = entry[b] else { continue };
+            let blk = &self.blocks[b];
+            for k in blk.first..blk.end {
+                uniform::step(&code.insts[k], partial[b], &mut v);
+            }
+            for &s in &self.succs[b] {
+                let changed = match &mut entry[s] {
+                    Some(old) => old.join(&v),
+                    slot @ None => {
+                        *slot = Some(v);
+                        true
+                    }
+                };
+                if changed {
+                    work.push(s);
+                }
+            }
+        }
+        entry
+    }
+
     /// Instruction `t` lies on the chain of merges that starts at `b`, or
     /// the lanes of `b` never reach it.
     fn merges_at(&mut self, b: usize, t: usize) -> bool {
@@ -1156,6 +1269,9 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32) -> Res<()> {
     let mut g = Graph::new(blocks)?;
     if c.iface.host.max_reconvergence {
         g.check_reconvergence(code)?;
+    }
+    if code.insts.iter().any(|i| i.mnemonic == "BAR") {
+        g.check_barriers(code)?;
     }
     let mut e = Emit {
         g,
