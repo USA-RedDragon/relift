@@ -171,7 +171,7 @@ fn cbuf_words(i: &Inst) -> Res<(u32, Option<(u32, bool)>)> {
     let mut sub = None;
     for m in &i.mods {
         match *m {
-            "32" => {}
+            "32" | "IS" => {}
             "64" => n = 2,
             "128" => n = 4,
             "U8" => sub = Some((8, false)),
@@ -202,12 +202,14 @@ fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
         ("ULDC", 0xb9) => None,
         ("ULDC", _) => Some(c.load_ureg(w.get(24, 6) as u8)),
         _ => {
-            if w.get(78, 2) != 0 {
-                return bad("LDC indexed-bank mode");
-            }
             let r = w.get(24, 8) as u8;
             if r == 255 { None } else { Some(c.load_reg(r)) }
         }
+    };
+    let segmented = match (i.mnemonic, w.get(78, 2)) {
+        ("ULDC", _) | (_, 0) => false,
+        (_, 2) => true,
+        _ => return bad("LDC indexed-bank mode"),
     };
     let u = c.u32t();
     let mut words = Vec::new();
@@ -225,7 +227,11 @@ fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
             Some(r) => {
                 let k = c.m.c_u32(o as u32);
                 let a = c.m.emit(op::I_ADD, u, &[r, k]);
-                c.load_cbuf_dyn(bank, a)?
+                if segmented {
+                    load_cbuf_segmented(c, bank, a)?
+                } else {
+                    c.load_cbuf_dyn(bank, a)?
+                }
             }
         });
     }
@@ -259,6 +265,26 @@ fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
         }
     }
     Ok(())
+}
+
+/// LDC.IS: the bank is the instruction's bank plus the address bits above
+/// the low 16, which are the offset. Only that bank and the next are read;
+/// an address that reaches further reads zero.
+fn load_cbuf_segmented(c: &mut Ctx, bank: u32, a: u32) -> Res<u32> {
+    let u = c.u32t();
+    let k16 = c.m.c_u32(16);
+    let sel = c.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[a, k16]);
+    let mask = c.m.c_u32(0xffff);
+    let off = c.m.emit(op::BITWISE_AND, u, &[a, mask]);
+    let mut r = c.m.c_u32(0);
+    for k in (0..2).filter(|k| bank + k <= 17) {
+        let v = c.load_cbuf_dyn(bank + k, off)?;
+        let kk = c.m.c_u32(k);
+        let b = c.boolt();
+        let hit = c.m.emit(op::I_EQUAL, b, &[sel, kk]);
+        r = c.select(u, hit, v, r);
+    }
+    Ok(r)
 }
 
 fn r2ur(c: &mut Ctx, i: &Inst) -> Res<()> {

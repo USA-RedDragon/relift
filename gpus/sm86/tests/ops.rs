@@ -167,3 +167,12 @@ fn spirv_ops(words: &[u32]) -> Vec<u32> {
     }
     ops
 }
+
+#[test]
+fn ldc_segmented_reads_the_next_bank() {
+    let p = program(&[w(0x000e_2200_0000_8800, 0x0080_0000_0607_7b82)]);
+    let shown = p.decode()[0].as_ref().map(|i| i.to_string()).unwrap();
+    assert!(shown.starts_with("LDC.IS R7, c[0x2][R6]"), "{shown}");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.interface.cbufs.contains(&2) && s.interface.cbufs.contains(&3));
+}
