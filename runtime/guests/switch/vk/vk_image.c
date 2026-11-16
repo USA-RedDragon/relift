@@ -661,6 +661,11 @@ void vkf_note_execute(vkf_call *k)
     vkf_dev *d = k->obj->dev;
     uint32_t n = (uint32_t)k->c->x[1];
     uint64_t g = k->c->x[2];
+    for (uint32_t i = 0; g && i < n; i++) {
+        vkf_obj *o = vkf_obj_of(vkf_g64(k, g + 8ull * i), VKG_KIND_VkCommandBuffer);
+        if (o && o->as_primary && rl_once(0x5457494e45580000ull))
+            rl_log(RL_LOG_ERROR, "vk", "vkCmdExecuteCommands: a secondary the guest began without inheritance info runs as a primary");
+    }
     if (!d->decoding || !g || !n)
         return;
     VkCommandBuffer cb = k->obj->host;

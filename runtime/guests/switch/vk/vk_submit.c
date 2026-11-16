@@ -11,8 +11,11 @@
  * done, and so then the primary is not pending either.
  *
  * The console driver also begins a secondary without inheritance info, which
- * a game does and Vulkan does not allow; such a begin reaches the host with
- * empty inheritance info (no render pass, no queries).
+ * a game does and Vulkan does not allow, and records whole render passes in
+ * it, which Vulkan allows only in a primary (the Adreno 830 driver faults
+ * executing such a secondary). Such a begin records into a primary twin of
+ * the buffer instead, from the same pool, which the submit takes as it is;
+ * a later begin with inheritance info goes back to the secondary.
  */
 #include "vkf.h"
 
@@ -37,16 +40,36 @@ int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
         return vkf_bad_handle(&k, VKG_vkBeginCommandBuffer, c->x[0]);
     VkCommandBufferBeginInfo *bi = vkg_ain_VkCommandBufferBeginInfo(&k, c->x[1], 1);
     vkf_obj *o = k.obj;
-    vkf_decode_cb_reset(k.fns, o->parent->host, o->dev, cb, false);
     if (o->secondary && bi) {
+        bool primary = !bi->pInheritanceInfo && !(bi->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT);
+        if (primary && !o->other) {
+            VkCommandBufferAllocateInfo ai = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = (VkCommandPool)(uintptr_t)o->pool,
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1,
+            };
+            VkCommandBuffer twin = NULL;
+            if (VKF_FN(k.fns, vkAllocateCommandBuffers)(o->parent->host, &ai, &twin) >= 0) {
+                o->other = twin;
+                if (rl_once(0x5457494e00000000ull))
+                    rl_log(RL_LOG_INFO, "vk", "the guest begins secondary command buffers as primaries; they record into primaries");
+            }
+        }
+        if (o->other && primary != o->as_primary) {
+            vkf_obj_swap_twin(o);
+            o->as_primary = primary;
+            cb = o->host;
+        }
         o->begin_flags = bi->flags;
         o->gen = __atomic_add_fetch(&g_begins, 1, __ATOMIC_RELAXED);
-        if (!bi->pInheritanceInfo) {
+        if (!o->as_primary && !bi->pInheritanceInfo) {
             VkCommandBufferInheritanceInfo *inh = vkf_alloc(&k, sizeof *inh);
             *inh = (VkCommandBufferInheritanceInfo){ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO };
             bi->pInheritanceInfo = inh;
         }
     }
+    vkf_decode_cb_reset(k.fns, o->parent->host, o->dev, cb, false);
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBeginCommandBuffer, VKF_FN(k.fns, vkBeginCommandBuffer)(cb, bi));
     return vkf_end(&k);
 }
@@ -54,7 +77,7 @@ int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
 static VkCommandBuffer wrapped(vkf_call *k, VkDevice dev, vkf_dev *d, VkCommandBuffer cb)
 {
     vkf_obj *o = vkf_obj_find_host(VKG_KIND_VkCommandBuffer, cb);
-    if (!o || !o->secondary)
+    if (!o || !o->secondary || o->as_primary)
         return cb;
     if (o->begin_flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
         if (rl_once(0x5345434F4E440000ull))

@@ -2257,17 +2257,41 @@ TEST(vk_set_layout_bindings_reach_the_host_in_order)
 }
 
 static PFN_vkBeginCommandBuffer g_real_begin;
-static bool g_begin_inherits;
+static bool g_begin_inherits, g_begin_bare;
+static VkCommandBuffer g_begin_cb;
 
 static VkResult seen_begin(VkCommandBuffer cb, const VkCommandBufferBeginInfo *bi)
 {
+    g_begin_cb = cb;
+    g_begin_bare = !bi->pInheritanceInfo;
     g_begin_inherits = bi->pInheritanceInfo &&
                        bi->pInheritanceInfo->sType == VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO &&
                        !bi->pInheritanceInfo->renderPass;
     return g_real_begin(cb, bi);
 }
 
-TEST(vk_secondary_begun_without_inheritance_info_gets_it)
+static void record_fill_bare(uint64_t cb, uint64_t buf, uint32_t value, const VkCommandBufferInheritanceInfo *inh)
+{
+    VkCommandBufferBeginInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pInheritanceInfo = inh ? GP(gput(inh, sizeof *inh)) : NULL,
+    };
+    uint64_t gbi = gput(&bi, sizeof bi);
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gbi)), VK_SUCCESS);
+    if (!inh)
+        CHECK_EQ(g64(gbi + 24), 0);
+    G("vkCmdFillBuffer", cb, buf, 0, VK_WHOLE_SIZE, value);
+    VkMemoryBarrier mb = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+    };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
+      gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+}
+
+TEST(vk_secondary_begun_without_inheritance_info_records_into_a_primary)
 {
     CHECK_EQ(boot(NULL), 0);
     CHECK(make_instance(NULL, 0, 0) != 0);
@@ -2287,9 +2311,9 @@ TEST(vk_secondary_begun_without_inheritance_info_gets_it)
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = (VkCommandPool)GP(g64(gpool)),
         .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
-        .commandBufferCount = 1,
+        .commandBufferCount = 2,
     };
-    uint64_t gcb = galloc(8);
+    uint64_t gcb = galloc(16);
     CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
     uint64_t cb = g64(gcb);
     VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -2298,24 +2322,31 @@ TEST(vk_secondary_begun_without_inheritance_info_gets_it)
     uint64_t fence = g64(gf);
     vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
     CHECK(o != NULL);
+    void *secondary = o->host;
     g_real_begin = (PFN_vkBeginCommandBuffer)o->fns->f[VKG_vkBeginCommandBuffer];
     o->fns->f[VKG_vkBeginCommandBuffer] = (void (*)(void))seen_begin;
-    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    uint64_t gbi = gput(&bi, sizeof bi);
-    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gbi)), VK_SUCCESS);
-    o->fns->f[VKG_vkBeginCommandBuffer] = (void (*)(void))g_real_begin;
-    CHECK(g_begin_inherits);
-    CHECK_EQ(g64(gbi + 24), 0);
-    G("vkCmdFillBuffer", cb, b.buf, 0, VK_WHOLE_SIZE, 0x33333333u);
-    VkMemoryBarrier mb = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
-    };
-    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
-      gput(&mb, sizeof mb), 0, 0, 0, 0);
-    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    record_fill_bare(cb, b.buf, 0x33333333u, NULL);
+    CHECK(g_begin_bare);
+    CHECK(o->as_primary);
+    CHECK(o->host != secondary && o->other == secondary);
+    CHECK(g_begin_cb == o->host);
+    CHECK(vkf_obj_find_host(VKG_KIND_VkCommandBuffer, o->host) == o);
+    CHECK(vkf_obj_find_host(VKG_KIND_VkCommandBuffer, secondary) == NULL);
     CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, false), 0x33333333u);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, true), 0x33333333u);
+    VkCommandBufferInheritanceInfo inh = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO };
+    record_fill_bare(cb, b.buf, 0x44444444u, &inh);
+    CHECK(g_begin_inherits);
+    CHECK(!o->as_primary);
+    CHECK(o->host == secondary && g_begin_cb == secondary);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, false), 0x44444444u);
+    record_fill_bare(cb, b.buf, 0x55555555u, NULL);
+    CHECK(o->as_primary && g_begin_bare);
+    CHECK_EQ(submit_and_read(dev, queue, cb, fence, &b, false), 0x55555555u);
+    o->fns->f[VKG_vkBeginCommandBuffer] = (void (*)(void))g_real_begin;
+    G("vkFreeCommandBuffers", dev, g64(gpool), 1, gcb);
+    record_fill_bare(g64(gcb + 8), b.buf, 0x66666666u, NULL);
+    CHECK_EQ(submit_and_read(dev, queue, g64(gcb + 8), fence, &b, false), 0x66666666u);
     G("vkDestroyFence", dev, fence, 0);
     G("vkDestroyCommandPool", dev, g64(gpool), 0);
     G("vkDestroyBuffer", dev, b.buf, 0);

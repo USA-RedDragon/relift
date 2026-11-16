@@ -50,6 +50,14 @@ typedef struct vkf_obj {
     uint32_t begin_flags;
     /** @brief Secondary command buffers: a number unique to the last vkBeginCommandBuffer. */
     uint64_t gen;
+    /**
+     * @brief Secondary command buffers: the host buffer of the other level, a primary from the same pool made the
+     * first time the guest begins the buffer as a primary (no inheritance info), or the secondary while that primary
+     * is in use. NULL until then.
+     */
+    void *other;
+    /** @brief Secondary command buffers: host is the primary twin, since the last begin had no inheritance info. */
+    bool as_primary;
     /** @brief Instances: their state. */
     vkf_inst *inst;
     /** @brief Devices, queues and command buffers: the device state. */
@@ -315,6 +323,8 @@ void vkf_obj_remove(vkf_obj *o);
 void vkf_obj_remove_children(vkf_obj *owner);
 /** @brief The object of a host handle, NULL when unknown. */
 vkf_obj *vkf_obj_find_host(uint32_t kind, const void *host);
+/** @brief Swaps a command buffer's host handle with its other-level twin (o->other), keeping the by-host lookup. */
+void vkf_obj_swap_twin(vkf_obj *o);
 
 /** @brief Unwraps the call's first dispatchable handle and takes its function table. */
 void *vkf_first(vkf_call *k, uint32_t kind, uint64_t g);

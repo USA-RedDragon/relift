@@ -324,6 +324,18 @@ void vkf_obj_remove_children(vkf_obj *owner)
     pthread_mutex_unlock(&vkf.lock);
 }
 
+void vkf_obj_swap_twin(vkf_obj *o)
+{
+    pthread_mutex_lock(&vkf.lock);
+    void *old = o->host;
+    o->host = o->other;
+    o->other = old;
+    if (vkf_map_get(g_by_host[o->kind], (uint64_t)(uintptr_t)old) == o)
+        vkf_map_put(g_by_host[o->kind], (uint64_t)(uintptr_t)old, NULL);
+    vkf_map_put(g_by_host[o->kind], (uint64_t)(uintptr_t)o->host, o);
+    pthread_mutex_unlock(&vkf.lock);
+}
+
 vkf_obj *vkf_obj_find_host(uint32_t kind, const void *host)
 {
     pthread_mutex_lock(&vkf.lock);
@@ -1089,8 +1101,13 @@ int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
         vkf_obj *o = vkf_obj_of(vkf_g64(&k, g + 8u * i), VKG_KIND_VkCommandBuffer);
         if (o)
             vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->host, true);
+        if (o && o->other) {
+            VkCommandBuffer twin = o->other;
+            vkf_decode_cb_reset(k.fns, dev, k.obj->dev, twin, true);
+            VKF_FN(k.fns, vkFreeCommandBuffers)(dev, pool, 1, &twin);
+        }
         if (o && o->secondary)
-            vkf_wrap_drop(k.fns, dev, k.obj->dev, o->host);
+            vkf_wrap_drop(k.fns, dev, k.obj->dev, o->as_primary ? o->other : o->host);
         vkf_obj_remove(o);
     }
     return vkf_end(&k);
@@ -1111,8 +1128,10 @@ int vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem)
             vkf_obj *o = g_slots[s / CHUNK_SLOTS] ? g_slots[s / CHUNK_SLOTS][s % CHUNK_SLOTS] : NULL;
             if (o && o->kind == VKG_KIND_VkCommandBuffer && o->pool == pool && o->parent == k.obj) {
                 vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->host, true);
+                if (o->other)
+                    vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->other, true);
                 if (o->secondary)
-                    vkf_wrap_drop(k.fns, dev, k.obj->dev, o->host);
+                    vkf_wrap_drop(k.fns, dev, k.obj->dev, o->as_primary ? o->other : o->host);
                 remove_locked(o);
             }
         }

@@ -158,8 +158,14 @@ of its own instead that runs the secondary with `vkCmdExecuteCommands`,
 recorded again whenever the guest has begun the secondary again since.
 Secondaries that continue a render pass are passed through with a warning.
 A secondary the guest begins without inheritance info, which the console
-driver accepts and Vulkan does not, reaches the host with empty inheritance
-info; Turnip reads it unchecked.
+driver accepts and Vulkan does not, is used as a primary: the game records
+whole render passes in it, which Vulkan allows only in a primary, and the
+Adreno 830 driver faults in `vkCmdExecuteCommands` running such a secondary
+through a wrapper. Such a begin records into a primary twin of the buffer
+(allocated from the same pool on first use), which a submit takes as it is;
+a later begin with inheritance info goes back to the secondary, and a
+`vkCmdExecuteCommands` of a buffer recorded as a primary is logged as an
+error.
 
 ## Formats
 
