@@ -58,8 +58,49 @@ TEST(gsv_boots_and_opens_nvdrv2)
     CHECK_EQ(tipc(c, h, 201, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 202, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 1402, NULL, 0, 0), 0);
+    CHECK_EQ(tipc(c, h, 115, NULL, 0, 2), 0);
+    CHECK_EQ(tipc(c, h, 1101, NULL, 0, 0), 0);
+    CHECK_EQ(tipc(c, h, 1102, NULL, 0, 0), 0);
+    CHECK_EQ(tipc(c, h, 497, NULL, 0, 2), 0);
+    CHECK_EQ(tipc(c, h, 401, NULL, 0, 0), 0);
+    CHECK_EQ(tipc(c, h, 402, NULL, 0, 0), 0);
     CHECK_EQ(tipc(c, h, 4, &proc, 1, 2), SF_RESULT_INVALID_HEADER);
     CHECK_EQ(tipc(c, h, 999, NULL, 0, 0), SF_RESULT_UNKNOWN_COMMAND);
+}
+
+TEST(gsv_syncpt_area_has_the_header_the_sdk_checks)
+{
+    rl_hos_config cfg;
+    rl_hos_default_config(&cfg);
+    rl_hos_switch2_config(&cfg);
+    rl_ctx *c = t_boot(&cfg);
+    uint64_t heap = t_heap(c, 0x200000);
+    uint32_t h = supervisor(c, heap);
+    CHECK(h != 0);
+    uint64_t b = heap + 0x100000;
+    uint32_t tm[2];
+    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, b, 0x1000, 3, 0, 0), 0);
+    tm[0] = (uint32_t)c->x[1];
+    CHECK_EQ(t_svc(c, SVC_CREATE_TRANSFER_MEMORY, 0, b + 0x1000, 0x2000, 1, 0, 0), 0);
+    tm[1] = (uint32_t)c->x[1];
+    tc_req q = tc_new(204);
+    q.tipc = true;
+    q.ncopy = 2;
+    q.copy[0] = tm[0];
+    q.copy[1] = tm[1];
+    tc_put32(&q, 1);
+    tc_put32(&q, 0x1ff);
+    tc_put64(&q, 0x1000);
+    tc_put64(&q, 0x2000);
+    tc_res r = tc_send(c, (tc_obj){ .handle = h }, q);
+    CHECK_EQ(r.svc_rc, 0);
+    CHECK_EQ(r.result, 0);
+    CHECK_EQ(r.ncopy, 2);
+    const uint32_t *hdr = (const uint32_t *)(const void *)(t_mem() + b + 0x1000);
+    CHECK_EQ(hdr[0], 1);
+    CHECK((hdr[2] + 64) / 64 - 1 < 64);
+    CHECK(hdr[3] < 0x2000 && hdr[5] < 0x2000 && hdr[7] < 0x2000);
+    CHECK(hdr[4] < 0x1000 && hdr[6] < 0x1000);
 }
 
 TEST(gsv_is_not_on_the_switch)

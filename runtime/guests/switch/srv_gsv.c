@@ -12,6 +12,8 @@
  */
 #include "services.h"
 
+#include <string.h>
+
 /** @brief BootWithTransferMemory: transfer memory handle, aruid, size. */
 static rl_result boot_with_transfer_memory(rl_ipc_req *r)
 {
@@ -58,8 +60,30 @@ static rl_result syncpt_ping(rl_ipc_req *r)
     return KR_SUCCESS;
 }
 
+/**
+ * @brief SyncptSession 1 (unnamed): a u32 below 0x400 that the SDK passes
+ * back, capped at 63, to command 21. Its meaning is not known; 0 here.
+ */
+static rl_result syncpt_cmd_1(rl_ipc_req *r)
+{
+    uint32_t *out = rl_ipc_out(r, 4);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = 0;
+    return KR_SUCCESS;
+}
+
+/** @brief SyncptSession 21 (unnamed): takes the u32 from command 1. */
+static rl_result syncpt_cmd_21(rl_ipc_req *r)
+{
+    uint32_t v;
+    return rl_srv_in(r, &v, 4) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
+}
+
 static const rl_ipc_cmd syncpt_cmds[] = {
     { 0, "Ping", syncpt_ping },
+    { 1, "Cmd1", syncpt_cmd_1 },
+    { 21, "Cmd21", syncpt_cmd_21 },
 };
 
 static const rl_ipc_class syncpt_class = { "nn::gsv::SyncptSession", syncpt_cmds,
@@ -81,12 +105,33 @@ static rl_result push_session(rl_ipc_req *r, const rl_ipc_class *cls)
 /** @brief InitializeSyncptContext: no input, a SyncptSession. */
 static rl_result initialize_syncpt_context(rl_ipc_req *r) { return push_session(r, &syncpt_class); }
 
+/** @brief Header of the sync point area gsv 204 lays out in the second (read-only) transfer memory. */
+typedef struct syncpt_header {
+    /** @brief Layout version; the SDK aborts unless it is 1. */
+    uint32_t version;
+    uint32_t reserved;
+    /** @brief Counters whose values the area holds; the SDK asks SyncptSession for the others. */
+    uint32_t counters;
+    /** @brief Offset in this area of the u64 value per counter (all ones: no value, a wait ends at once). */
+    uint32_t values;
+    /** @brief Offset in the first (writable) transfer memory of an area the client writes. */
+    uint32_t client0;
+    /** @brief Offset in this area of a per-counter bitmap. */
+    uint32_t bitmap0;
+    /** @brief Offset in the first transfer memory of a second client area. */
+    uint32_t client1;
+    /** @brief Offset in this area of a second per-counter bitmap. */
+    uint32_t bitmap1;
+} syncpt_header;
+
 /**
- * @brief Command 204 (syncpt context, unnamed): two transfer memories (the
- * SDK lends 0x1000 bytes read-write and 0x2000 read-only), u32 1, u32
- * 0x1ff and their two sizes; answers two handles. The SDK keeps them as
- * events of the sync point context, so they are readable events here,
- * never signaled until relift's sync points use them.
+ * @brief Command 204 (syncpt context, unnamed): transfer memories W (0x1000
+ * bytes, writable) and R (0x2000 bytes, read-only, right after W), u32 1,
+ * u32 0x1ff and their sizes; answers two events. The server lays out R:
+ * a syncpt_header, then the tables it points at. Layout read from the
+ * SDK's nn::syncpt::sdk, which reads counters below `counters` from R and
+ * asks SyncptSession for the rest. relift's GPU signals no counter through
+ * this area, so it holds none.
  */
 static rl_result syncpt_cmd_204(rl_ipc_req *r)
 {
@@ -96,16 +141,59 @@ static rl_result syncpt_cmd_204(rl_ipc_req *r)
     } in;
     if (!rl_srv_in(r, &in, sizeof in) || r->n_in_copy < 2)
         return SF_RESULT_INVALID_HEADER;
-    for (int i = 0; i < 2; i++) {
+    hos_lock();
+    hos_tmem *ro = (hos_tmem *)(void *)hos_handle_get(r->in_copy[1], KOBJ_TRANSFER_MEMORY);
+    hos_unlock();
+    if (!ro)
+        return KR_INVALID_HANDLE;
+    rl_result rc = KR_SUCCESS;
+    if (ro->size < 0x400) {
+        rc = SF_RESULT_INVALID_HEADER;
+    } else {
+        uint8_t area[0x400];
+        memset(area, 0, sizeof area);
+        syncpt_header h = { 1, 0, 0, 0x100, 0, 0x200, 0x800, 0x300 };
+        memcpy(area, &h, sizeof h);
+        memset(area + h.values, 0xff, 8);
+        rl_vm_kernel_write(&hos.vm, ro->addr, area, sizeof area);
+    }
+    hos_kobj_unref(&ro->obj);
+    for (int i = 0; rc == KR_SUCCESS && i < 2; i++) {
         hos_revent *e = rl_hos_event_create();
         if (!e)
             return KR_OUT_OF_RESOURCE;
-        rl_result rc = rl_ipc_push_copy(r, &e->obj);
+        rc = rl_ipc_push_copy(r, &e->obj);
         hos_kobj_unref(&e->obj);
-        if (rc != KR_SUCCESS)
-            return rc;
     }
+    return rc;
+}
+
+/**
+ * @brief BootNativeMemoryManagement: takes the u64 MemoryBlockModeBits the
+ * SDK asks for and answers the bits in effect, which nn::gs keeps and tests
+ * (bit 1) before each native memory block. The modes asked for are granted.
+ */
+static rl_result boot_native_memory_management(rl_ipc_req *r)
+{
+    uint64_t bits;
+    if (!rl_srv_in(r, &bits, 8))
+        return SF_RESULT_INVALID_HEADER;
+    uint64_t *out = rl_ipc_out(r, 8);
+    if (!out)
+        return SF_RESULT_INVALID_HEADER;
+    *out = bits;
     return KR_SUCCESS;
+}
+
+static const rl_ipc_class gpu_session_class = { "nn::gsv::GpuSession", NULL, 0, 0, NULL };
+
+/** @brief CreateGpuSessionWithRemoteMemory: u64 version; a GpuSession. */
+static rl_result create_gpu_session(rl_ipc_req *r)
+{
+    uint64_t version;
+    if (!rl_srv_in(r, &version, 8))
+        return SF_RESULT_INVALID_HEADER;
+    return push_session(r, &gpu_session_class);
 }
 
 static const rl_ipc_cmd user_session_cmds[] = {
@@ -113,9 +201,31 @@ static const rl_ipc_cmd user_session_cmds[] = {
     { 4, "BootWithRemoteMemory", boot_with_remote_memory },
     { 11, "SetCurrentProcessHandle", set_current_process_handle },
     { 101, "CreateContext", rl_srv_stub_ok },
+    { 115, "BootNativeMemoryManagement", boot_native_memory_management },
     { 201, "CreateSyncptContext", rl_srv_stub_ok },
     { 202, "InitializeSyncptContext", initialize_syncpt_context },
     { 204, "Cmd204", syncpt_cmd_204 },
+    { 301, "CreateDisplayContext", rl_srv_stub_ok },
+    { 303, "DestroyDisplayContext", rl_srv_stub_ok },
+    { 401, "CreateGpuContext", rl_srv_stub_ok },
+    { 402, "InitializeGpuContext", rl_srv_stub_ok },
+    { 403, "DestroyGpuContext", rl_srv_stub_ok },
+    { 601, "CreateCameraContext", rl_srv_stub_ok },
+    { 603, "DestroyCameraContext", rl_srv_stub_ok },
+    { 901, "CreateVideoDecoderContext", rl_srv_stub_ok },
+    { 903, "DestroyVideoDecoderContext", rl_srv_stub_ok },
+    { 497, "CreateGpuSessionWithRemoteMemory", create_gpu_session },
+    { 1001, "CreateVideoEncoderContext", rl_srv_stub_ok },
+    { 1003, "DestroyVideoEncoderContext", rl_srv_stub_ok },
+    { 1101, "CreateGraphicsFrameContext", rl_srv_stub_ok },
+    { 1102, "InitializeGraphicsFrameContext", rl_srv_stub_ok },
+    { 1111, "SetGraphicsFrameLengthMode", rl_srv_stub_ok },
+    { 1112, "SetGraphicsFrameRestartMode", rl_srv_stub_ok },
+    { 1113, "SetGraphicsFrameGpuTimesliceMode", rl_srv_stub_ok },
+    { 1201, "CreateChatContext", rl_srv_stub_ok },
+    { 1203, "DestroyChatContext", rl_srv_stub_ok },
+    { 1301, "CreateAdrawContext", rl_srv_stub_ok },
+    { 1302, "InitializeAdrawContext", rl_srv_stub_ok },
     { 1402, "CreateNvDrv2UserSessionWithRemoteMemory", create_nvdrv2_user_session },
     { 1501, "CreateInterModuleImageContext", rl_srv_stub_ok },
     { 1502, "InitializeInterModuleImageContext", rl_srv_stub_ok },
