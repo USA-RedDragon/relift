@@ -264,8 +264,12 @@ static void report(host *H, rl_ctx *c)
     printf("vi origin=%06x width=%u control=%04x\n", rl_n64_vi_reg(H->run.m, 1), rl_n64_vi_reg(H->run.m, 2),
            rl_n64_vi_reg(H->run.m, 0));
     const uint8_t *sp = rl_n64_spmem(H->run.m);
+    uint8_t *rdram = malloc(RL_N64_RDRAM_SIZE);
+    if (!rdram)
+        return;
+    rl_n64_rdram_get(H->run.m, 0, rdram, RL_N64_RDRAM_SIZE);
     printf("mem rdram=%016llx dmem=%016llx imem=%016llx\n",
-           (unsigned long long)fnv(0xCBF29CE484222325ull, rl_n64_rdram(H->run.m), RL_N64_RDRAM_SIZE),
+           (unsigned long long)fnv(0xCBF29CE484222325ull, rdram, RL_N64_RDRAM_SIZE),
            (unsigned long long)fnv(0xCBF29CE484222325ull, sp, 0x1000),
            (unsigned long long)fnv(0xCBF29CE484222325ull, sp + 0x1000, 0x1000));
     fflush(stdout);
@@ -274,7 +278,7 @@ static void report(host *H, rl_ctx *c)
             const char *ext;
             const uint8_t *p;
             size_t n;
-        } parts[3] = {{"rdram", rl_n64_rdram(H->run.m), RL_N64_RDRAM_SIZE}, {"dmem", sp, 0x1000}, {"imem", sp + 0x1000, 0x1000}};
+        } parts[3] = {{"rdram", rdram, RL_N64_RDRAM_SIZE}, {"dmem", sp, 0x1000}, {"imem", sp + 0x1000, 0x1000}};
         for (int i = 0; i < 3; i++) {
             char path[4096];
             snprintf(path, sizeof path, "%s.%s", H->dump, parts[i].ext);
@@ -285,6 +289,7 @@ static void report(host *H, rl_ctx *c)
                 fclose(f);
         }
     }
+    free(rdram);
 }
 
 static void on_frame(void *user, rl_n64 *m)

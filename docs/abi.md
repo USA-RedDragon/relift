@@ -2124,11 +2124,17 @@ layer `runtime/cpus/mips` and the Nintendo 64 machine in
   guest layer's).
 - Loads and stores are I/O accesses of kind `Any` on physical addresses.
   The N64 map makes RDRAM (below 8 MiB) plain memory, read and written in
-  place through `mem` (the RDRAM base) with the raw accessors `rl_ldN` and
-  `rl_stN` (host byte order; the lifted code swaps for the guest's
-  big-endian data), and passes every other address to the machine
-  (`rl_n64_cpu_read`, `rl_n64_cpu_write`, whose values are the bytes in host
-  order). An access the instruction makes only under a condition (a likely
+  place through `mem` (the RDRAM base), and passes every other address to
+  the machine (`rl_n64_cpu_read`, `rl_n64_cpu_write`, whose values are the
+  bytes in host order). RDRAM holds the guest's big-endian data as
+  host-order 32-bit words, the layout of N64 emulators and of parallel-rdp
+  (the frontend's `ram_words`): a word is `rl_ld32` and `rl_st32` with no
+  swap, a halfword is at its address XOR 2, a byte at its address XOR 3, a
+  doubleword is its two words in address order (`rl_e_rot32`), and an
+  access of 3, 5, 6 or 7 bytes (the cases of LWL, LDL and their kin) goes
+  byte by byte. The runtime reads and writes RDRAM bytes through
+  `rl_n64_rdram_get` and `rl_n64_rdram_put`; dumps and hashes of RDRAM are
+  in the guest's byte order. An access the instruction makes only under a condition (a likely
   branch's delay slot, SC, the cases of LWL and its kin) first leaves through
   its TLB guard when its address is not in RDRAM, so the slow path makes it
   exactly and a device never sees an annulled access. The runtime's own

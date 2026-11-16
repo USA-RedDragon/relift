@@ -11,6 +11,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief Whether the n guest bytes of RDRAM at a equal b. */
+static bool ram_eq(rl_n64 *m, uint32_t a, const uint8_t *b, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t v;
+        rl_n64_rdram_get(m, a + i, &v, 1);
+        if (v != b[i])
+            return false;
+    }
+    return true;
+}
+
 typedef struct mach {
     rl_sched *s;
     rl_sched_cpu *k;
@@ -82,7 +94,7 @@ TEST(n64_rdram_is_big_endian_and_narrow_register_reads_take_their_bytes)
 {
     mach t = mach_new(0x2000);
     rl_n64_write(t.m, 0x100u, 4, 0x11223344u);
-    CHECK_EQ(rl_n64_rdram(t.m)[0x100], 0x11);
+    CHECK_EQ(rl_n64_rdram(t.m)[(0x100) ^ 3], 0x11);
     CHECK_EQ(rl_n64_read(t.m, 0x102u, 2), 0x3344u);
     CHECK_EQ(rl_n64_read(t.m, 0x04300004u, 1), 0x02u);
     CHECK_EQ(rl_n64_read(t.m, 0x04300007u, 1), 0x02u);
@@ -102,7 +114,7 @@ TEST(n64_pi_dma_copies_the_cartridge_and_raises_its_interrupt_later)
     rl_n64_write(t.m, 0x04600000u, 4, 0x2000u);
     rl_n64_write(t.m, 0x04600004u, 4, 0x10001000u);
     rl_n64_write(t.m, 0x0460000Cu, 4, 0xFFFu);
-    CHECK_EQ(memcmp(rl_n64_rdram(t.m) + 0x2000, t.rom + 0x1000, 0x1000), 0);
+    CHECK(ram_eq(t.m, 0x2000, t.rom + 0x1000, 0x1000));
     CHECK_EQ(rl_n64_read(t.m, 0x04600010u, 4) & 1u, 1u);
     CHECK_EQ(rl_n64_read(t.m, 0x04600000u, 4), 0x3000u);
     CHECK_EQ(rl_n64_read(t.m, 0x04600004u, 4), 0x10002000u);
@@ -137,7 +149,7 @@ TEST(n64_sp_dma_moves_rows_between_rdram_and_dmem)
 {
     mach t = mach_new(0x2000);
     for (unsigned i = 0; i < 64; i++)
-        rl_n64_rdram(t.m)[0x8000 + i] = (uint8_t)i;
+        rl_n64_rdram(t.m)[(0x8000 + i) ^ 3] = (uint8_t)i;
     rl_n64_write(t.m, 0x04040000u, 4, 0x0100u);
     rl_n64_write(t.m, 0x04040004u, 4, 0x8000u);
     rl_n64_write(t.m, 0x04040008u, 4, (8u << 20) | (1u << 12) | 15u);
@@ -176,10 +188,12 @@ static void rdp_command(void *user, const uint32_t *w, unsigned n)
 
 static void rdp_sync(void *user) { ((rdp_seen *)user)->syncs++; }
 
-static void put64(uint8_t *p, uint64_t v)
+static void put64(rl_n64 *m, uint32_t a, uint64_t v)
 {
-    for (int i = 0; i < 8; i++)
-        p[i] = (uint8_t)(v >> (56 - 8 * i));
+    for (int i = 0; i < 8; i++) {
+        uint8_t b = (uint8_t)(v >> (56 - 8 * i));
+        rl_n64_rdram_put(m, a + (uint32_t)i, &b, 1);
+    }
 }
 
 TEST(n64_dp_runs_whole_commands_and_raises_its_interrupt_at_sync_full)
@@ -188,13 +202,12 @@ TEST(n64_dp_runs_whole_commands_and_raises_its_interrupt_at_sync_full)
     mach t = mach_new(0x2000);
     rdp_seen r = {0};
     rl_n64_set_rdp(t.m, &ops, &r);
-    uint8_t *ram = rl_n64_rdram(t.m);
-    put64(ram + 0x1000, 0x3600000000000000ull);
-    put64(ram + 0x1008, 0x0800000000000001ull);
-    put64(ram + 0x1010, 0);
-    put64(ram + 0x1018, 0);
-    put64(ram + 0x1020, 0);
-    put64(ram + 0x1028, 0x2900000000000000ull);
+    put64(t.m, 0x1000, 0x3600000000000000ull);
+    put64(t.m, 0x1008, 0x0800000000000001ull);
+    put64(t.m, 0x1010, 0);
+    put64(t.m, 0x1018, 0);
+    put64(t.m, 0x1020, 0);
+    put64(t.m, 0x1028, 0x2900000000000000ull);
     rl_n64_write(t.m, 0x04100000u, 4, 0x1000u);
     rl_n64_write(t.m, 0x04100004u, 4, 0x1018u);
     CHECK_EQ(r.commands, 1);
@@ -260,8 +273,8 @@ TEST(n64_framebuffer_reads_rgba5551_and_rgba8888_raw)
     mach t = mach_new(0x2000);
     vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
     uint8_t *ram = rl_n64_rdram(t.m);
-    ram[0x1000] = 0xF8;
-    ram[0x1001] = 0x01;
+    ram[(0x1000) ^ 3] = 0xF8;
+    ram[(0x1001) ^ 3] = 0x01;
     static uint8_t rgb[640 * 576 * 3];
     uint32_t w = 0, h = 0;
     CHECK(rl_n64_framebuffer(t.m, rgb, &w, &h));
@@ -271,9 +284,9 @@ TEST(n64_framebuffer_reads_rgba5551_and_rgba8888_raw)
     CHECK_EQ(rgb[1], 0);
     vi_ntsc(t.m, 0x3003u, 0x2000u, 640u, 0x200u);
     rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
-    ram[0x2000] = 1;
-    ram[0x2001] = 2;
-    ram[0x2002] = 3;
+    ram[(0x2000) ^ 3] = 1;
+    ram[(0x2001) ^ 3] = 2;
+    ram[(0x2002) ^ 3] = 3;
     CHECK(rl_n64_framebuffer(t.m, rgb, &w, &h));
     CHECK_EQ(w, 640);
     CHECK_EQ(rgb[0], 1);
@@ -298,8 +311,8 @@ TEST(n64_scanout_places_the_picture_in_the_ntsc_output)
     CHECK(!rl_n64_scanout(t.m, rgb, &w, &h));
     vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
     uint8_t *ram = rl_n64_rdram(t.m);
-    ram[0x1008] = 0xF8;
-    ram[0x1009] = 0x01;
+    ram[(0x1008) ^ 3] = 0xF8;
+    ram[(0x1009) ^ 3] = 0x01;
     CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
     CHECK_EQ(w, 640);
     CHECK_EQ(h, 480);
@@ -319,9 +332,9 @@ TEST(n64_scanout_scales_with_the_scale_registers)
     vi_ntsc(t.m, 0x3003u, 0x2000u, 640u, 0x200u);
     uint8_t *ram = rl_n64_rdram(t.m);
     for (unsigned i = 0; i < 32; i++) {
-        ram[0x2000 + i * 4 + 0] = (uint8_t)(10 + i);
-        ram[0x2000 + i * 4 + 1] = 0;
-        ram[0x2000 + i * 4 + 2] = 0;
+        ram[(0x2000 + i * 4 + 0) ^ 3] = (uint8_t)(10 + i);
+        ram[(0x2000 + i * 4 + 1) ^ 3] = 0;
+        ram[(0x2000 + i * 4 + 2) ^ 3] = 0;
     }
     rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
     CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
@@ -346,8 +359,8 @@ TEST(n64_scanout_of_an_interlaced_picture_draws_one_field_per_frame)
     rl_n64_write(t.m, 0x04400018u, 4, 0x20Cu);
     uint8_t *ram = rl_n64_rdram(t.m);
     for (unsigned i = 0; i < 640u * 480u; i++) {
-        ram[0x2000 + i * 4u] = (uint8_t)(i / 640u);
-        ram[0x2000 + i * 4u + 2u] = 1;
+        ram[(0x2000 + i * 4u) ^ 3] = (uint8_t)(i / 640u);
+        ram[(0x2000 + i * 4u + 2u) ^ 3] = 1;
     }
     rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
     CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
@@ -388,8 +401,7 @@ TEST(n64_boot_places_the_game_and_the_boot_words)
     t.rom[0x3E] = 'E';
     rl_n64_boot_info b = {.cic = 6102, .entry = 0x80000400u};
     rl_n64_boot(t.m, &b);
-    uint8_t *ram = rl_n64_rdram(t.m);
-    CHECK_EQ(memcmp(ram + 0x400, t.rom + 0x1000, 0x100000), 0);
+    CHECK(ram_eq(t.m, 0x400, t.rom + 0x1000, 0x100000));
     CHECK_EQ(rl_n64_read(t.m, 0x318u, 4), RL_N64_RDRAM_SIZE);
     CHECK_EQ(rl_n64_read(t.m, 0x300u, 4), 1u);
     CHECK_EQ(rl_n64_read(t.m, 0x04000000u, 4), 0x80371240u);

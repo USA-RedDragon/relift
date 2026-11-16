@@ -149,10 +149,10 @@ TEST(n64_ai_hands_out_one_frame_per_output_period_and_the_samples_it_read)
     rl_n64_write(t.m, AI_DACRATE, 4, 1103);
     uint8_t *ram = rl_n64_rdram(t.m);
     for (unsigned i = 0; i < 2000; i++) {
-        ram[BUF + i * 4u] = 0x03;
-        ram[BUF + i * 4u + 1u] = 0xE8;
-        ram[BUF + i * 4u + 2u] = 0xF8;
-        ram[BUF + i * 4u + 3u] = 0x30;
+        ram[(BUF + i * 4u) ^ 3] = 0x03;
+        ram[(BUF + i * 4u + 1u) ^ 3] = 0xE8;
+        ram[(BUF + i * 4u + 2u) ^ 3] = 0xF8;
+        ram[(BUF + i * 4u + 3u) ^ 3] = 0x30;
     }
     rl_n64_write(t.m, AI_CONTROL, 4, 1);
     play(&t, BUF, 8000);
@@ -193,8 +193,8 @@ TEST(n64_ai_the_second_buffer_keeps_the_8k_address_carry_of_the_first)
     rl_n64_write(t.m, AI_DACRATE, 4, 1103);
     uint8_t *ram = rl_n64_rdram(t.m);
     for (unsigned i = 0; i < 4; i++) {
-        ram[0x6000 + i * 4u] = 0x22;
-        ram[0x8000 + i * 4u] = 0x33;
+        ram[(0x6000 + i * 4u) ^ 3] = 0x22;
+        ram[(0x8000 + i * 4u) ^ 3] = 0x33;
     }
     rl_n64_write(t.m, AI_CONTROL, 4, 1);
     play(&t, 0x2000u - 8u, 8);

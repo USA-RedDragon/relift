@@ -134,13 +134,17 @@ static void dump_rdram(rl_n64_run *r)
         return;
     char path[4096];
     snprintf(path, sizeof path, "%s.rdram", r->dump);
-    FILE *f = fopen(path, "wb");
-    if (!f || fwrite(rl_n64_rdram(r->m), 1, RL_N64_RDRAM_SIZE, f) != RL_N64_RDRAM_SIZE)
+    uint8_t *bytes = malloc(RL_N64_RDRAM_SIZE);
+    FILE *f = bytes ? fopen(path, "wb") : NULL;
+    if (f)
+        rl_n64_rdram_get(r->m, 0, bytes, RL_N64_RDRAM_SIZE);
+    if (!f || fwrite(bytes, 1, RL_N64_RDRAM_SIZE, f) != RL_N64_RDRAM_SIZE)
         rl_log(RL_LOG_ERROR, "n64", "could not write %s", path);
     else
         rl_log(RL_LOG_ERROR, "n64", "wrote RDRAM to %s", path);
     if (f)
         fclose(f);
+    free(bytes);
 }
 
 static int entry_check(rl_ctx *c, uint8_t *mem)
@@ -346,7 +350,7 @@ int rl_n64_run_init(rl_n64_run *r, rl_n64 *m, uint32_t cic, uint32_t entry)
     } else {
         rl_n64_boot_info b = {.cic = cic, .entry = entry};
         rl_n64_boot(m, &b);
-        boot_cpu(r->c, cic, rl_n64_rdram(m)[0x303] == 0, 0xA4001550u);
+        boot_cpu(r->c, cic, rl_n64_rdram(m)[0x303 ^ 3] == 0, 0xA4001550u);
         r->entry = sext(entry);
     }
     rl_mips_set_count(r->c, 0);

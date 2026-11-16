@@ -195,7 +195,7 @@ void rl_n64_pif_dma_read(rl_n64 *m, uint32_t a, uint32_t dram)
     if (!(m->pif_ram[CMD_BYTE] & CMD_CHALLENGE))
         joy_run(m);
     for (uint32_t i = 0; i < 64; i += 4)
-        st32(m->rdram + ((dram + i) & (RL_N64_RDRAM_SIZE - 1u)), rl_n64_pif_read(m, a + i));
+        rl_n64_wr32(m, dram + i, rl_n64_pif_read(m, a + i));
     rl_n64_code_written(m, dram & (RL_N64_RDRAM_SIZE - 1u), 64);
 }
 
@@ -204,7 +204,7 @@ void rl_n64_pif_dma_write(rl_n64 *m, uint32_t a, uint32_t dram)
     for (uint32_t i = 0; i < 64; i += 4) {
         uint32_t at = (a + i) & 0x7FFu;
         if (at >= 0x7C0u)
-            st32(m->pif_ram + (at - 0x7C0u), ld32(m->rdram + ((dram + i) & (RL_N64_RDRAM_SIZE - 1u))));
+            st32(m->pif_ram + (at - 0x7C0u), rl_n64_rd32(m, dram + i));
     }
     written(m);
 }

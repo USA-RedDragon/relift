@@ -175,7 +175,10 @@ static bool matches(rl_n64 *m, uint32_t i)
         return fnv(m->spmem + (p & 0x1FFFu), r->len) == r->hash;
     if (p + r->len > RL_N64_RDRAM_SIZE)
         return false;
-    return fnv(m->rdram + p, r->len) == r->hash;
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (uint32_t k = 0; k < r->len; k++)
+        h = (h ^ rl_n64_rd8(m, p + k)) * 0x100000001B3ull;
+    return h == r->hash;
 }
 
 static void bind(rl_n64 *m, uint32_t i)

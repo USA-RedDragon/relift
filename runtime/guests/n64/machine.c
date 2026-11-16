@@ -102,6 +102,18 @@ int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k)
 }
 
 uint8_t *rl_n64_rdram(rl_n64 *m) { return m->rdram; }
+
+void rl_n64_rdram_get(const rl_n64 *m, uint32_t a, uint8_t *out, uint32_t len)
+{
+    for (uint32_t i = 0; i < len; i++)
+        out[i] = rl_n64_rd8(m, a + i);
+}
+
+void rl_n64_rdram_put(rl_n64 *m, uint32_t a, const uint8_t *in, uint32_t len)
+{
+    for (uint32_t i = 0; i < len; i++)
+        rl_n64_wr8(m, a + i, in[i]);
+}
 uint8_t *rl_n64_spmem(rl_n64 *m) { return m->spmem; }
 const rl_n64_stats *rl_n64_get_stats(const rl_n64 *m) { return &m->stats; }
 
@@ -252,7 +264,7 @@ uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size)
     if (paddr < RL_N64_RDRAM_SIZE) {
         uint64_t v = 0;
         for (uint32_t i = 0; i < size; i++)
-            v = v << 8 | m->rdram[(paddr + i) & (RL_N64_RDRAM_SIZE - 1u)];
+            v = v << 8 | rl_n64_rd8(m, paddr + i);
         return v;
     }
     rl_n64_sp_catch_up(m, rl_n64_now(m));
@@ -270,7 +282,7 @@ void rl_n64_write(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t value)
     paddr &= 0x1FFFFFFFu;
     if (paddr < RL_N64_RDRAM_SIZE) {
         for (uint32_t i = 0; i < size; i++)
-            m->rdram[(paddr + i) & (RL_N64_RDRAM_SIZE - 1u)] = (uint8_t)(value >> (8u * (size - 1u - i)));
+            rl_n64_wr8(m, paddr + i, (uint8_t)(value >> (8u * (size - 1u - i))));
         return;
     }
     rl_n64_sp_catch_up(m, rl_n64_now(m));
@@ -322,7 +334,7 @@ void rl_n64_boot(rl_n64 *m, const rl_n64_boot_info *b)
         len = (uint32_t)(m->rom_len - 0x1000u);
     if (dram + len > RL_N64_RDRAM_SIZE)
         len = dram < RL_N64_RDRAM_SIZE ? RL_N64_RDRAM_SIZE - dram : 0;
-    memcpy(m->rdram + dram, m->rom + 0x1000u, len);
+    rl_n64_rdram_put(m, dram, m->rom + 0x1000u, len);
     rl_n64_code_loaded(m, 0, 0x1000u, dram, len);
     m->pi.dram = (dram + len) & 0xFFFFFEu;
     m->pi.cart = 0x10001000u + len;
@@ -332,10 +344,10 @@ void rl_n64_boot(rl_n64 *m, const rl_n64_boot_info *b)
                                         m->rom[0x3E] == 'X' || m->rom[0x3E] == 'Y')
                       ? 0u
                       : 1u;
-    st32(m->rdram + 0x300u, tv);
-    st32(m->rdram + 0x304u, 0);
-    st32(m->rdram + 0x308u, 0xB0000000u);
-    st32(m->rdram + 0x30Cu, 0);
-    st32(m->rdram + 0x314u, 0);
-    st32(m->rdram + (b->cic == 6105 ? 0x3F0u : 0x318u), RL_N64_RDRAM_SIZE);
+    rl_n64_wr32(m, 0x300u, tv);
+    rl_n64_wr32(m, 0x304u, 0);
+    rl_n64_wr32(m, 0x308u, 0xB0000000u);
+    rl_n64_wr32(m, 0x30Cu, 0);
+    rl_n64_wr32(m, 0x314u, 0);
+    rl_n64_wr32(m, (b->cic == 6105 ? 0x3F0u : 0x318u), RL_N64_RDRAM_SIZE);
 }

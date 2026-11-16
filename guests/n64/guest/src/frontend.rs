@@ -500,6 +500,10 @@ impl Frontend for N64 {
         ("rl_n64_cpu_read", "rl_n64_cpu_write")
     }
 
+    fn ram_words(&self) -> bool {
+        true
+    }
+
     fn fp_state(&self) -> Vec<Reg> {
         Vec::new()
     }

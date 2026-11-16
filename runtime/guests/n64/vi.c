@@ -51,7 +51,7 @@ static uint64_t cycles_of(rl_n64 *m, uint32_t n)
 static uint32_t pixel16(const rl_n64 *m, uint32_t a)
 {
     a &= RL_N64_RDRAM_SIZE - 2u;
-    uint32_t v = (uint32_t)m->rdram[a] << 8 | m->rdram[a + 1u];
+    uint32_t v = (uint32_t)rl_n64_rd8(m, a) << 8 | rl_n64_rd8(m, a + 1u);
     uint32_t r = v >> 11 & 31u, g = v >> 6 & 31u, b = v >> 1 & 31u;
     return (r << 3 | r >> 2) << 16 | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2);
 }
@@ -60,7 +60,7 @@ static uint32_t pixel16(const rl_n64 *m, uint32_t a)
 static uint32_t pixel32(const rl_n64 *m, uint32_t a)
 {
     a &= RL_N64_RDRAM_SIZE - 4u;
-    return (uint32_t)m->rdram[a] << 16 | (uint32_t)m->rdram[a + 1u] << 8 | m->rdram[a + 2u];
+    return rl_n64_rd32(m, a) >> 8;
 }
 
 static void frame(rl_n64 *m)

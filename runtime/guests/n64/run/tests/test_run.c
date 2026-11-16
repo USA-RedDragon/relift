@@ -13,6 +13,18 @@
 
 #include <string.h>
 
+/** @brief Whether the n guest bytes of RDRAM at a equal b. */
+static bool ram_eq(rl_n64 *m, uint32_t a, const uint8_t *b, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t v;
+        rl_n64_rdram_get(m, a + i, &v, 1);
+        if (v != b[i])
+            return false;
+    }
+    return true;
+}
+
 static const rl_guest_desc test_guest = {
     .name = "n64-run-test",
     .page_size = 0x1000,
@@ -177,7 +189,7 @@ TEST(n64_run_boots_with_the_registers_the_boot_code_leaves)
     CHECK_EQ(c->r[20], 1u);
     CHECK_EQ(c->cp0_status, 0x34000000u);
     CHECK_EQ(rl_n64_read(mach, 0x318u, 4), RL_N64_RDRAM_SIZE);
-    CHECK_EQ(memcmp(rl_n64_rdram(mach) + 0x1000, rom + 0x1000, 0x100000), 0);
+    CHECK(ram_eq(mach, 0x1000, rom + 0x1000, 0x100000));
 }
 
 TEST(n64_run_binds_code_by_its_hash_at_the_first_entry)
@@ -199,7 +211,7 @@ TEST(n64_run_binds_code_by_its_hash_at_the_first_entry)
 TEST(n64_run_changed_bytes_are_missed_code)
 {
     CHECK(boot(fns_main, 1) == 0);
-    rl_n64_rdram(mach)[0x1004] ^= 1u;
+    rl_n64_rdram(mach)[(0x1004) ^ 3] ^= 1u;
     CHECK_EQ(rl_n64_run_start(&run), RL_PENDING);
     CHECK_EQ(hs.mains, 0);
     CHECK_EQ(rl_n64_get_stats(mach)->mismatches, 1u);

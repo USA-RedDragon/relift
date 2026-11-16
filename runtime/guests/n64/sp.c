@@ -54,9 +54,9 @@ static void dma_row(rl_n64 *m)
         uint32_t s = bank | ((d->mem + k) & 0xFFFu);
         uint32_t r = (d->dram + k) & (RL_N64_RDRAM_SIZE - 1u);
         if (m->sp.busy_wr)
-            m->rdram[r] = m->spmem[s];
+            rl_n64_wr8(m, r, m->spmem[s]);
         else
-            m->spmem[s] = m->rdram[r];
+            m->spmem[s] = rl_n64_rd8(m, r);
     }
     d->mem = bank | ((d->mem + n) & 0xFFFu);
     d->dram = (d->dram + n) & 0xFFFFF8u;
@@ -334,8 +334,8 @@ static void dp_render(rl_n64 *m)
             q[i] = be32(m->spmem + (current & 0xFFCu));
             q[i + 1] = be32(m->spmem + ((current + 4u) & 0xFFCu));
         } else {
-            q[i] = be32(m->rdram + (current & (RL_N64_RDRAM_SIZE - 4u)));
-            q[i + 1] = be32(m->rdram + ((current + 4u) & (RL_N64_RDRAM_SIZE - 4u)));
+            q[i] = rl_n64_rd32(m, current);
+            q[i + 1] = rl_n64_rd32(m, current + 4u);
         }
     }
     const rl_n64_rdp_ops *ops = m->dp.ops;

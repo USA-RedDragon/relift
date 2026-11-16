@@ -86,9 +86,9 @@ static void sample(rl_n64 *m)
     if (m->ai.count && m->ai.len[0] && m->ai.enable) {
         m->ai.addr[0] = (m->ai.addr[0] & 0x1FFFu) | (((m->ai.addr[0] >> 13) + m->ai.carry) & 0x7FFu) << 13;
         uint32_t a = m->ai.addr[0] & (RL_N64_RDRAM_SIZE - 4u);
-        const uint8_t *p = m->rdram + a;
-        m->ai.left = (int32_t)(int16_t)((uint32_t)p[0] << 8 | p[1]) * 256;
-        m->ai.right = (int32_t)(int16_t)((uint32_t)p[2] << 8 | p[3]) * 256;
+        uint32_t w = rl_n64_rd32(m, a);
+        m->ai.left = (int32_t)(int16_t)(w >> 16) * 256;
+        m->ai.right = (int32_t)(int16_t)w * 256;
         uint32_t low = (m->ai.addr[0] + 4u) & 0x1FFFu;
         m->ai.addr[0] = (m->ai.addr[0] & ~0x1FFFu) | low;
         m->ai.carry = low == 0;

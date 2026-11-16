@@ -13,6 +13,25 @@
 #include <string.h>
 #include <unistd.h>
 
+/** @brief Whether the n guest bytes of RDRAM at a equal b. */
+static bool ram_eq(rl_n64 *m, uint32_t a, const uint8_t *b, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t v;
+        rl_n64_rdram_get(m, a + i, &v, 1);
+        if (v != b[i])
+            return false;
+    }
+    return true;
+}
+
+/** @brief Sets the n guest bytes of RDRAM at a to v. */
+static void ram_set(rl_n64 *m, uint32_t a, uint8_t v, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++)
+        rl_n64_rdram_put(m, a + i, &v, 1);
+}
+
 enum {
     SI_DRAM = 0x04800000u,
     SI_PIF_RD = 0x04800004u,
@@ -84,7 +103,7 @@ static void eeprom_block(mach *t, const uint8_t *cmd, unsigned n, uint8_t *reply
     memcpy(b + 4, cmd, n);
     b[4 + n] = 0xFE;
     b[63] = 1;
-    memcpy(rl_n64_rdram(t->m) + 0x1000, b, 64);
+    rl_n64_rdram_put(t->m, 0x1000, b, 64);
     rl_n64_write(t->m, SI_DRAM, 4, 0x1000);
     rl_n64_write(t->m, SI_PIF_WR, 4, PIF_RAM);
     advance(t, 7000);
@@ -93,7 +112,7 @@ static void eeprom_block(mach *t, const uint8_t *cmd, unsigned n, uint8_t *reply
     rl_n64_write(t->m, SI_PIF_RD, 4, PIF_RAM);
     advance(t, 100000);
     rl_n64_write(t->m, SI_STATUS, 4, 0);
-    memcpy(reply, rl_n64_rdram(t->m) + 0x2000 + 4, n);
+    rl_n64_rdram_get(t->m, 0x2000 + 4, reply, n);
 }
 
 TEST(n64_sram_answers_at_domain_2_and_mirrors_every_32_kib)
@@ -132,11 +151,15 @@ TEST(n64_sram_by_dma_in_both_directions)
     mach t;
     mach_new(&t);
     for (unsigned i = 0; i < 64; i++)
-        rl_n64_rdram(t.m)[0x3000 + i] = (uint8_t)(i * 3 + 1);
+        rl_n64_rdram(t.m)[(0x3000 + i) ^ 3] = (uint8_t)(i * 3 + 1);
     pi_dma(&t, true, 0x3000, SRAM + 0x100, 64);
-    memset(rl_n64_rdram(t.m) + 0x4000, 0, 64);
+    ram_set(t.m, 0x4000, 0, 64);
     pi_dma(&t, false, 0x4000, SRAM + 0x100, 64);
-    CHECK_EQ(memcmp(rl_n64_rdram(t.m) + 0x3000, rl_n64_rdram(t.m) + 0x4000, 64), 0);
+    {
+        uint8_t x_[64];
+        rl_n64_rdram_get(t.m, 0x3000, x_, 64);
+        CHECK(ram_eq(t.m, 0x4000, x_, 64));
+    }
     CHECK_EQ(rl_n64_read(t.m, SRAM + 0x100, 4), 0x0104070Au);
     mach_free(&t);
 }
@@ -152,7 +175,7 @@ TEST(n64_the_first_write_to_the_flash_command_register_makes_the_chip_answer)
     CHECK_EQ(rl_n64_read(t.m, SRAM, 4), 0x11118001u);
     pi_dma(&t, false, 0x5000, SRAM, 8);
     const uint8_t id[8] = {0x11, 0x11, 0x80, 0x01, 0x00, 0xC2, 0x00, 0x1D};
-    CHECK_EQ(memcmp(rl_n64_rdram(t.m) + 0x5000, id, 8), 0);
+    CHECK(ram_eq(t.m, 0x5000, id, 8));
     flash_cmd(&t, 0xF0000000u);
     CHECK_EQ(rl_n64_read(t.m, SRAM + 0x20, 4), 0xFFFFFFFFu);
     mach_free(&t);
@@ -176,7 +199,7 @@ TEST(n64_flash_erase_program_and_status_take_their_time)
     CHECK_EQ(rl_n64_read(t.m, SRAM, 4) & 0xFFFFu, 0x008Cu);
 
     for (unsigned i = 0; i < 128; i++)
-        rl_n64_rdram(t.m)[0x3000 + i] = (uint8_t)(0xF0 | (i & 15));
+        rl_n64_rdram(t.m)[(0x3000 + i) ^ 3] = (uint8_t)(0xF0 | (i & 15));
     flash_cmd(&t, 0xF0000000u);
     flash_cmd(&t, 0xB4000000u);
     pi_dma(&t, true, 0x3000, SRAM, 128);
@@ -185,12 +208,16 @@ TEST(n64_flash_erase_program_and_status_take_their_time)
     advance(&t, 4 * MS);
     CHECK_EQ(rl_n64_read(t.m, SRAM, 4) & 0xFFFFu, 0x008Cu);
     flash_cmd(&t, 0xF0000000u);
-    memset(rl_n64_rdram(t.m) + 0x4000, 0, 256);
+    ram_set(t.m, 0x4000, 0, 256);
     pi_dma(&t, false, 0x4000, SRAM + 0xC000, 128);
-    CHECK_EQ(memcmp(rl_n64_rdram(t.m) + 0x3000, rl_n64_rdram(t.m) + 0x4000, 128), 0);
+    {
+        uint8_t x_[128];
+        rl_n64_rdram_get(t.m, 0x3000, x_, 128);
+        CHECK(ram_eq(t.m, 0x4000, x_, 128));
+    }
     CHECK_EQ(rl_n64_read(t.m, SRAM + 0xC000 + 128, 4), 0xFFFFFFFFu);
 
-    memset(rl_n64_rdram(t.m) + 0x3000, 0x3C, 128);
+    ram_set(t.m, 0x3000, 0x3C, 128);
     flash_cmd(&t, 0xB4000000u);
     pi_dma(&t, true, 0x3000, SRAM, 128);
     flash_cmd(&t, 0xA5000000u | (3u * 128u));

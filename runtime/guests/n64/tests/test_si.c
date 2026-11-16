@@ -54,7 +54,7 @@ static void advance(mach *t, uint64_t n)
 /** @brief Sends the 64-byte block through an SI DMA to the PIF and waits for it. */
 static void send_block(mach *t, const uint8_t *block)
 {
-    memcpy(rl_n64_rdram(t->m) + BLOCK, block, 64);
+    rl_n64_rdram_put(t->m, BLOCK, block, 64);
     rl_n64_write(t->m, SI_DRAM, 4, BLOCK);
     rl_n64_write(t->m, SI_PIF_WR, 4, PIF_RAM);
     advance(t, 4065u * 3u / 2u);
@@ -72,7 +72,7 @@ static uint64_t read_block(mach *t, uint8_t *out)
         waited++;
     }
     rl_n64_write(t->m, SI_STATUS, 4, 0);
-    memcpy(out, rl_n64_rdram(t->m) + REPLY, 64);
+    rl_n64_rdram_get(t->m, REPLY, out, 64);
     return waited;
 }
 
@@ -89,7 +89,7 @@ TEST(n64_si_dma_to_the_pif_takes_its_time_then_raises_the_interrupt)
     block_new(block);
     block[0] = 0xFE;
     block[63] = 0;
-    memcpy(rl_n64_rdram(t.m) + BLOCK, block, 64);
+    rl_n64_rdram_put(t.m, BLOCK, block, 64);
     rl_n64_write(t.m, SI_DRAM, 4, BLOCK);
     rl_n64_write(t.m, SI_PIF_WR, 4, PIF_RAM);
     CHECK_EQ(rl_n64_read(t.m, SI_STATUS, 4), 0x0411u);
@@ -128,7 +128,7 @@ TEST(n64_si_dma_from_the_pif_lasts_as_long_as_the_block_on_the_wire)
     CHECK_EQ(rl_n64_irq_pending(t.m), 0);
     advance(&t, 1);
     CHECK_EQ(rl_n64_irq_pending(t.m), RL_N64_IRQ_SI);
-    CHECK_EQ(rl_n64_rdram(t.m)[REPLY + 3], 0x05);
+    CHECK_EQ(rl_n64_rdram(t.m)[(REPLY + 3) ^ 3], 0x05);
     mach_free(&t);
 }
 

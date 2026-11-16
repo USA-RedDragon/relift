@@ -105,8 +105,18 @@ RL_RUNTIME_API rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len);
 RL_RUNTIME_API void rl_n64_destroy(rl_n64 *m);
 /** @brief Attaches the machine to scheduler s, whose CPU k it serves, and starts VI. Returns 0 or -1. */
 RL_RUNTIME_API int rl_n64_attach(rl_n64 *m, rl_sched *s, rl_sched_cpu *k);
-/** @brief RDRAM, RL_N64_RDRAM_SIZE bytes in the guest's byte order: the base lifted code addresses physical memory from. */
+/**
+ * @brief RDRAM, RL_N64_RDRAM_SIZE bytes: the base lifted code addresses
+ * physical memory from. It holds the guest's big-endian data as host-order
+ * 32-bit words (the layout of N64 emulators and parallel-rdp): the guest
+ * byte at address a is at a ^ 3. Read and write bytes with rl_n64_rdram_get
+ * and rl_n64_rdram_put.
+ */
 RL_RUNTIME_API uint8_t *rl_n64_rdram(rl_n64 *m);
+/** @brief Copies len guest bytes of RDRAM from address a (wrapping) to out, in the guest's order. */
+RL_RUNTIME_API void rl_n64_rdram_get(const rl_n64 *m, uint32_t a, uint8_t *out, uint32_t len);
+/** @brief Copies len guest bytes from in to RDRAM at address a (wrapping). */
+RL_RUNTIME_API void rl_n64_rdram_put(rl_n64 *m, uint32_t a, const uint8_t *in, uint32_t len);
 /** @brief SP DMEM (0x1000 bytes) followed by IMEM (0x1000 bytes). */
 RL_RUNTIME_API uint8_t *rl_n64_spmem(rl_n64 *m);
 /** @brief The counters. */

@@ -92,7 +92,7 @@ static void dma_write(rl_n64 *m)
             length -= 2;
         }
         for (int32_t i = 0; i < cur - misalign; i++)
-            m->rdram[m->pi.dram++ & (RL_N64_RDRAM_SIZE - 1u)] = buf[i];
+            rl_n64_wr8(m, m->pi.dram++, buf[i]);
         m->pi.dram = (m->pi.dram + 7u) & ~7u;
         m->pi.wr_len = (uint32_t)(cur <= 8 ? 127 - misalign : 127);
         max_block = row_end < 8 ? 128 - misalign : 128;
@@ -115,7 +115,7 @@ static void dma_read(rl_n64 *m)
         if (a && (cursor & page_mask) == 0)
             rl_n64_bus_select(m, cursor);
         uint32_t d = m->pi.dram + a;
-        uint16_t v = (uint16_t)(m->rdram[d & (RL_N64_RDRAM_SIZE - 1u)] << 8 | m->rdram[(d + 1u) & (RL_N64_RDRAM_SIZE - 1u)]);
+        uint16_t v = (uint16_t)(rl_n64_rd8(m, d) << 8 | rl_n64_rd8(m, d + 1u));
         rl_n64_bus_write_half(m, v);
     }
 }

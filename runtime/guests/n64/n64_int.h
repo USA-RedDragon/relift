@@ -9,6 +9,8 @@
 
 #include "core.h"
 
+#include <string.h>
+
 /** @brief One PI domain's bus timing. */
 typedef struct n64_bsd {
     uint8_t latency;
@@ -248,6 +250,20 @@ struct rl_n64 {
 
 /** @brief The CPU's tick now. */
 uint64_t rl_n64_now(const rl_n64 *m);
+/** @brief The guest byte of RDRAM at address a (wrapping): RDRAM holds host-order 32-bit words. */
+static inline uint8_t rl_n64_rd8(const rl_n64 *m, uint32_t a) { return m->rdram[(a ^ 3u) & (RL_N64_RDRAM_SIZE - 1u)]; }
+/** @brief Writes the guest byte v of RDRAM at address a (wrapping). */
+static inline void rl_n64_wr8(rl_n64 *m, uint32_t a, uint8_t v) { m->rdram[(a ^ 3u) & (RL_N64_RDRAM_SIZE - 1u)] = v; }
+/** @brief The 32-bit word of RDRAM at a (a multiple of 4). */
+static inline uint32_t rl_n64_rd32(const rl_n64 *m, uint32_t a)
+{
+    uint32_t w;
+    memcpy(&w, m->rdram + (a & (RL_N64_RDRAM_SIZE - 4u)), 4);
+    return w;
+}
+/** @brief Writes the 32-bit word v of RDRAM at a (a multiple of 4). */
+static inline void rl_n64_wr32(rl_n64 *m, uint32_t a, uint32_t v) { memcpy(m->rdram + (a & (RL_N64_RDRAM_SIZE - 4u)), &v, 4); }
+
 /** @brief Sets bits of MI_INTR. */
 void rl_n64_mi_raise(rl_n64 *m, uint32_t bits);
 /** @brief Clears bits of MI_INTR. */
