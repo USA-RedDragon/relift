@@ -18,8 +18,10 @@
 #include "vkf.h"
 
 #include <relift/settings.h>
+#include <relift/touchpad.h>
 
 #include <dirent.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1288,6 +1290,127 @@ TEST(vk_a_lost_host_surface_is_made_again_behind_the_guest)
     G("vkDestroyInstance", g_inst, 0);
     if (!tested)
         fprintf(stderr, "  no host device presents to a headless surface: lost surface test skipped\n");
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+static PFN_vkQueuePresentKHR g_real_present;
+static uint32_t g_suboptimal_presents;
+
+static VkResult suboptimal_present(VkQueue q, const VkPresentInfoKHR *pi)
+{
+    VkResult r = g_real_present(q, pi);
+    if (++g_suboptimal_presents >= 4 && rl_touchpad_paused())
+        rl_touchpad_back();
+    return r == VK_SUCCESS ? VK_SUBOPTIMAL_KHR : r;
+}
+
+static void *resume_later(void *arg)
+{
+    (void)arg;
+    struct timespec d = { 0, 50000000 };
+    for (int i = 0; i < 60 && rl_touchpad_paused(); i++)
+        nanosleep(&d, NULL);
+    if (rl_touchpad_paused())
+        rl_touchpad_back();
+    return NULL;
+}
+
+static const rl_touchpad_item g_pause_items[] = { { .shape = RL_TOUCHPAD_MENU, .x = 0.5f, .y = 0.05f, .w = 0.1f, .h = 0.05f } };
+static const rl_touchpad_guest g_pause_guest = {
+    .name = "vktest",
+    .picture_width = 64,
+    .picture_height = 64,
+    .portrait = { 64, 64, g_pause_items, 1, NULL, 0 },
+    .landscape = { 64, 64, g_pause_items, 1, NULL, 0 },
+};
+
+TEST(vk_a_paused_frame_repaints_through_suboptimal_presents)
+{
+    g_losable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
+    CHECK_EQ(boot(&g_losable), 0);
+    rl_touchpad_declare(&g_pause_guest);
+    rl_touchpad_set_touch_screen(true);
+    rl_touchpad_view(64, 64, 1.0f, NULL);
+    const char *exts[] = { "VK_KHR_surface", "VK_NN_vi_surface" };
+    CHECK(make_instance(exts, 2, 0) != 0);
+    VkViSurfaceCreateInfoNN sci = { .sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, .window = GP(galloc(64)) };
+    uint64_t gs = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateViSurfaceNN", g_inst, gput(&sci, sizeof sci), 0, gs)), VK_SUCCESS);
+    uint64_t surface = g64(gs);
+    uint64_t pds[8];
+    uint32_t np = physical_devices(pds, 8);
+    unsigned tested = 0;
+    for (uint32_t p = 0; p < np && !tested; p++) {
+        uint32_t qf = queue_family(pds[p], VK_QUEUE_GRAPHICS_BIT);
+        uint64_t gsup = galloc(4);
+        if (qf == UINT32_MAX || VKR(G("vkGetPhysicalDeviceSurfaceSupportKHR", pds[p], qf, surface, gsup)) != VK_SUCCESS ||
+            !g32(gsup))
+            continue;
+        const char *dexts[] = { "VK_KHR_swapchain" };
+        uint64_t dev = make_device(pds[p], qf, dexts, 1);
+        CHECK(dev != 0);
+        VkSwapchainCreateInfoKHR swci = {
+            .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            .surface = (VkSurfaceKHR)GP(surface),
+            .minImageCount = 2,
+            .imageFormat = VK_FORMAT_R8G8B8A8_UNORM,
+            .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+            .imageExtent = { 64, 64 },
+            .imageArrayLayers = 1,
+            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+            .clipped = VK_TRUE,
+        };
+        uint64_t gsw = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateSwapchainKHR", dev, gput(&swci, sizeof swci), 0, gsw)), VK_SUCCESS);
+        uint64_t sw = g64(gsw);
+        vkf_obj *d = vkf_obj_of(dev, VKG_KIND_VkDevice);
+        g_real_present = (PFN_vkQueuePresentKHR)d->fns->f[VKG_vkQueuePresentKHR];
+        d->fns->f[VKG_vkQueuePresentKHR] = (void (*)(void))suboptimal_present;
+        VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        uint64_t gf = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateFence", dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+        uint64_t fence = g64(gf), gidx = galloc(4);
+        CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, UINT64_MAX, 0, fence, gidx)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+        uint64_t gq = galloc(8);
+        G("vkGetDeviceQueue", dev, qf, 0, gq);
+        uint64_t queue = g64(gq);
+        uint32_t idx = g32(gidx), made0 = 0, made = 0, hw, hh;
+        CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made0));
+        VkPresentInfoKHR pi = {
+            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .swapchainCount = 1,
+            .pSwapchains = GP(gput(&sw, 8)),
+            .pImageIndices = GP(gput(&idx, 4)),
+        };
+        g_suboptimal_presents = 0;
+        rl_touchpad_back();
+        CHECK(rl_touchpad_paused());
+        pthread_t watchdog;
+        CHECK_EQ(pthread_create(&watchdog, NULL, resume_later, NULL), 0);
+        CHECK_EQ(VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi))), VK_SUCCESS);
+        pthread_join(watchdog, NULL);
+        CHECK(!rl_touchpad_paused());
+        CHECK(rl_vk_swapchain_repaints(sw) >= 3);
+        CHECK(g_suboptimal_presents >= 4);
+        CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made));
+        CHECK_EQ(made, made0);
+        d->fns->f[VKG_vkQueuePresentKHR] = (void (*)(void))g_real_present;
+        CHECK_EQ(VKR(G("vkDeviceWaitIdle", dev)), VK_SUCCESS);
+        G("vkDestroyFence", dev, fence, 0);
+        G("vkDestroySwapchainKHR", dev, sw, 0);
+        G("vkDestroyDevice", dev, 0);
+        tested++;
+    }
+    G("vkDestroySurfaceKHR", g_inst, surface, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    rl_touchpad_reset();
+    if (!tested)
+        fprintf(stderr, "  no host device presents to a headless surface: paused repaint test skipped\n");
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 

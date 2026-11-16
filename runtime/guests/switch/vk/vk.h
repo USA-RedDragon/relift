@@ -156,6 +156,8 @@ RL_RUNTIME_API uint64_t rl_vk_guest_addr(const char *name);
 RL_RUNTIME_API uint32_t rl_vk_live_handles(void);
 /** @brief Size of the host swapchain behind a guest swapchain and how many host swapchains it has had (tests). */
 RL_RUNTIME_API bool rl_vk_swapchain_host(uint64_t guest_swapchain, uint32_t *width, uint32_t *height, uint32_t *creations);
+/** @brief How many times the paused frame of a guest swapchain was shown again, for tests. */
+RL_RUNTIME_API uint32_t rl_vk_swapchain_repaints(uint64_t guest_swapchain);
 /** @brief Sets the capture spec as RELIFT_VK_CAPTURE would (<dir>[:N]); NULL or "" turns capture off. Restarts the frame count. */
 RL_RUNTIME_API void rl_vk_capture(const char *spec);
 /** @brief The map mode the device behind a guest VkDevice handle uses, or -1. */

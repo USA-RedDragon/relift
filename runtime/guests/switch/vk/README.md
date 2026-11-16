@@ -336,7 +336,12 @@ when the app goes to the background) drops the host swapchain; presents
 until a new one exists drop their frame, and acquire waits, asking the
 provider (`rl_vk_surface_provider.recreate`) at most every 100 ms for a new
 host surface on the same window, then builds a host swapchain on it. The
-guest never sees the loss. Guest swapchain
+guest never sees the loss. While the on-screen controller pauses the game
+inside its present, the present shows the paused frame again with the
+overlay on top; a suboptimal result there keeps the host swapchain unless the
+surface needs a new one, as in a present (on a display turned from its
+native orientation every present is suboptimal, and the sheet froze after its
+first frame). Guest swapchain
 handles are ids from the layer (`0x57` in the top byte). Commands on
 swapchains the layer does not implement (`vkGetSwapchainStatusKHR`, shared,
 counter and timing queries, `vkWaitForPresentKHR`) look up as NULL.

@@ -110,6 +110,8 @@ typedef struct vkf_swap {
     VkSemaphore again;
     /** @brief The id of the last host present (VK_KHR_present_id). */
     uint64_t present_id;
+    /** @brief Repaints of a paused frame, for tests. */
+    uint32_t repaints;
     pthread_mutex_t lock;
 } vkf_swap;
 
@@ -1383,11 +1385,21 @@ out:
 
 /**
  * @brief Shows guest image i again with the overlay as it is now, while the on-screen controller pauses the game
- * (the guest thread waits inside its present). Lock not held.
+ * (the guest thread waits inside its present). A suboptimal result that only asks for the rotation the presentation
+ * engine already does (every present on a display turned from its native orientation) keeps the host swapchain, as a
+ * present does; one that needs a new host swapchain, or a lost surface, gets it here, since the paused game makes no
+ * acquire that would. Lock not held.
  */
 static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
 {
     pthread_mutex_lock(&s->lock);
+    if (!s->offscreen && (!s->host || s->stale || s->lost) && !any_held(s)) {
+        int64_t at = now_ns();
+        if (at >= s->renew_at || !s->lost) {
+            DFN(s, vkQueueWaitIdle)(q);
+            host_create(s);
+        }
+    }
     if (!s->host || s->stale || s->lost || !s->pool || i >= s->n) {
         pthread_mutex_unlock(&s->lock);
         return;
@@ -1433,10 +1445,11 @@ static void repaint(vkf_swap *s, VkQueue q, uint32_t i)
             r = DFN(s, vkQueuePresentKHR)(q, &pi);
         }
     }
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && suboptimal_stale(s)))
         s->stale = true;
     if (r == VK_ERROR_SURFACE_LOST_KHR)
         lose(s);
+    s->repaints++;
     pthread_mutex_unlock(&s->lock);
 }
 
@@ -1483,6 +1496,17 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
         vi_trace('Q', (uint64_t)(t_q - k.trace_t0), (uint64_t)(t_p - t_q), (uint64_t)(vi_trace_now() - t_p));
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueuePresentKHR, all);
     return vkf_end(&k);
+}
+
+uint32_t rl_vk_swapchain_repaints(uint64_t guest_swapchain)
+{
+    vkf_swap *s = swap_of(guest_swapchain, NULL);
+    if (!s)
+        return 0;
+    pthread_mutex_lock(&s->lock);
+    uint32_t n = s->repaints;
+    pthread_mutex_unlock(&s->lock);
+    return n;
 }
 
 bool rl_vk_swapchain_host(uint64_t guest_swapchain, uint32_t *width, uint32_t *height, uint32_t *creations)
