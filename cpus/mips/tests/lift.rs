@@ -2,10 +2,10 @@
 //! group, delay slots, likely branches, the FPU fast path and its guards.
 
 use relift_cpu_mips::decode::{self, Encoding};
-use relift_cpu_mips::lift::{self, EXC_GUARD, Exc, FP_SLOW, IN_DELAY, LiftError};
+use relift_cpu_mips::lift::{self, EXC_GUARD, Exc, FP_SLOW, IN_DELAY, LiftError, Options};
 use relift_cpu_mips::regs;
 use relift_ir::interp::{self, Error, FlatMemory, Intrinsics, State};
-use relift_ir::{Flow, Reg};
+use relift_ir::{Block, Flow, IoKind, Op, Reg};
 
 /// A kseg0 address; physical 0x1000.
 const PC: u64 = 0xFFFF_FFFF_8000_1000;
@@ -381,4 +381,116 @@ fn cop1_fast_path_and_guards() {
     );
     c.put(regs::CP0_STATUS, STATUS & !0x2000_0000);
     assert_eq!(c.run(cop1(0x10, 2, 1, 3, 0)), exc(Exc::CpU), "CU1 clear");
+}
+
+#[test]
+fn cvt_from_a_long_beyond_2_55_takes_the_slow_path() {
+    for funct in [0x20u32, 0x21] {
+        let insn = cop1(0x15, 0, 1, 2, funct);
+        for (x, slow) in [
+            (1i64 << 55, true),
+            ((1i64 << 55) - 1, false),
+            (-(1i64 << 55), false),
+            (-(1i64 << 55) - 1, true),
+            (i64::MIN, true),
+            (-5, false),
+        ] {
+            let mut c = Cpu::new();
+            c.put(regs::fpr(1), x as u64);
+            let want = if slow {
+                End::Trap(FP_SLOW)
+            } else {
+                End::Next(PC + 4)
+            };
+            assert_eq!(c.run(insn), want, "{x:#x} funct {funct:#x}");
+        }
+    }
+}
+
+fn ops(b: &Block) -> Vec<&Op> {
+    b.insts.iter().map(|i| &i.op).collect()
+}
+
+#[test]
+fn memory_goes_through_io_accesses_and_each_instruction_ticks() {
+    let l = lift::lift(PC, i_type(0x23, 1, 2, 0), 0).expect("lifts");
+    let o = ops(&l.block);
+    assert!(o.iter().any(|o| matches!(
+        o,
+        Op::IoLoad {
+            kind: IoKind::Any,
+            ..
+        }
+    )));
+    assert!(
+        !o.iter()
+            .any(|o| matches!(o, Op::Load { .. } | Op::Store { .. }))
+    );
+    assert!(o.iter().any(|o| matches!(o, Op::Tick(1))));
+    assert!(
+        !o.iter().any(|o| matches!(o, Op::Select(..))),
+        "the address check proves the load's condition"
+    );
+    let l = lift::lift(PC, i_type(0x2b, 1, 2, 0), 0).expect("lifts");
+    let o = ops(&l.block);
+    assert!(o.iter().any(|o| matches!(
+        o,
+        Op::IoStore {
+            kind: IoKind::Any,
+            ..
+        }
+    )));
+    assert!(
+        !o.iter().any(|o| matches!(o, Op::IoLoad { .. })),
+        "a plain SW reads nothing"
+    );
+    let l = lift::lift(PC, i_type(0x04, 0, 0, 3), i_type(0x23, 1, 2, 0)).expect("lifts");
+    assert!(ops(&l.block).iter().any(|o| matches!(o, Op::Tick(2))));
+}
+
+#[test]
+fn a_conditional_access_off_plain_memory_leaves_first() {
+    let opts = Options {
+        plain_below: Some(0x0080_0000),
+    };
+    let sw = i_type(0x2b, 4, 5, 0);
+    let l = lift::lift_with(PC, i_type(0x14, 1, 0, 3), sw, opts).expect("lifts");
+    l.block.verify().expect("verifies");
+    let tlbs = EXC_GUARD + Exc::TLBS.code() + IN_DELAY;
+    let o = ops(&l.block);
+    let guard = o
+        .iter()
+        .rposition(|o| matches!(o, Op::Guard(_, c) if *c == tlbs))
+        .expect("a device guard");
+    let store = o
+        .iter()
+        .position(|o| matches!(o, Op::IoStore { .. }))
+        .expect("a store");
+    assert!(guard < store);
+    let mut c = Cpu::new();
+    c.set_gpr(1, 1);
+    c.set_gpr(4, DATA);
+    c.set_gpr(5, 7);
+    let st = interp::run(&l.block, &mut c.st, &mut c.mem, &mut Runtime).expect("runs");
+    assert_eq!(st.next, PC + 8, "plain memory: annulled in place");
+    assert_eq!(&c.mem.bytes[0x2000..0x2004], &[0; 4]);
+    c.set_gpr(1, 0);
+    let st = interp::run(&l.block, &mut c.st, &mut c.mem, &mut Runtime).expect("runs");
+    assert_eq!(st.next, PC + 16);
+    assert_eq!(&c.mem.bytes[0x2000..0x2004], &[0, 0, 0, 7]);
+    c.set_gpr(4, 0xFFFF_FFFF_A440_0010);
+    let st = interp::run(&l.block, &mut c.st, &mut c.mem, &mut Runtime).expect("runs");
+    assert_eq!(st.flow, Flow::Trap(tlbs), "a device register leaves");
+    let plain = lift::lift(PC, i_type(0x14, 1, 0, 3), sw).expect("lifts");
+    let count = |b: &Block| {
+        ops(b)
+            .iter()
+            .filter(|o| matches!(o, Op::Guard(_, c) if *c == tlbs))
+            .count()
+    };
+    assert_eq!(
+        count(&plain.block) + 1,
+        count(&l.block),
+        "without a limit every address is plain memory"
+    );
 }

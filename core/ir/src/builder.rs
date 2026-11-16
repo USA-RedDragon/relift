@@ -53,6 +53,11 @@ impl Builder {
         self.pc
     }
 
+    /// The operation that defined `v`, if `v` is a value of this block.
+    pub fn op(&self, v: Value) -> Option<&Op> {
+        self.insts.get(v.index()).map(|i| &i.op)
+    }
+
     /// The address width.
     pub fn addr_width(&self) -> Width {
         self.addr_width

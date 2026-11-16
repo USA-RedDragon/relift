@@ -9,7 +9,7 @@ use relift_ir::{Block, Builder, Exit, Flow, Next, Width};
 
 use crate::decode::{self, Encoding};
 use crate::regs;
-pub use rt::{EXC_GUARD, Exc, FP_SLOW, IN_DELAY, St, Sys};
+pub use rt::{EXC_GUARD, Exc, FP_SLOW, IN_DELAY, Options, St, Sys};
 
 /// Why an instruction did not lift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,13 +66,20 @@ fn template(word: u32) -> Result<(Encoding, GenFn), LiftError> {
     Ok((enc, f))
 }
 
-/// Lifts the instruction `word` at `pc`. When it has a delay slot, `slot`
-/// (the word at `pc + 4`) is lifted into the same block; otherwise `slot` is
-/// not read.
+/// Lifts the instruction `word` at `pc` with the default [`Options`]. When
+/// it has a delay slot, `slot` (the word at `pc + 4`) is lifted into the
+/// same block; otherwise `slot` is not read.
 pub fn lift(pc: u64, word: u32, slot: u32) -> Result<Lifted, LiftError> {
+    lift_with(pc, word, slot, Options::default())
+}
+
+/// As [`lift`], with `opts`. The block ends in a tick of one cycle per
+/// instruction it holds (a branch and its delay slot are two, also when
+/// the slot is annulled).
+pub fn lift_with(pc: u64, word: u32, slot: u32, opts: Options) -> Result<Lifted, LiftError> {
     let (enc, f) = template(word)?;
     let mut b = Builder::new(regs::regs(), Width::W64, pc);
-    let mut st = St::new(pc);
+    let mut st = St::with_options(pc, opts);
     f(word, &mut b, &mut st)?;
     let mut encs = vec![enc];
     let mut len = 4;
@@ -88,6 +95,7 @@ pub fn lift(pc: u64, word: u32, slot: u32) -> Result<Lifted, LiftError> {
             sf(slot, &mut b, &mut st)?;
         }
     }
+    b.tick(len / 4);
     st.finish(&mut b);
     let after = pc.wrapping_add(u64::from(len));
     let next = match st.branch_target() {

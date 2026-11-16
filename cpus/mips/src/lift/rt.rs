@@ -12,6 +12,15 @@
 //! - Addresses in kseg0 and kseg1 translate to `vaddr & 0x1FFF_FFFF`; any
 //!   other address leaves through a TLBL or TLBS guard (the TLB is the
 //!   runtime's).
+//! - Loads and stores are I/O accesses of kind `Any`: the guest's I/O map
+//!   decides at run time which physical addresses are plain memory. An
+//!   access the instruction makes only under a condition (the delay slot of
+//!   a likely branch, SC) reads and writes back plain memory unconditionally,
+//!   selecting the old value; with [`Options::plain_below`] set, such an
+//!   access to an address at or above it leaves first through the TLBL or
+//!   TLBS guard, whose slow path makes it exactly.
+//! - A condition that an earlier guard of the block already proved (the
+//!   address error check before a load) is not a condition.
 //! - COP1 arithmetic is one IR `FpOp` on the fast path, normal inputs to
 //!   normal results with round-to-nearest and no enabled exceptions.
 //!   Everything else leaves through the [`FP_SLOW`] guard (plus
@@ -24,7 +33,9 @@
 //!   instructions and CACHE are `mips_tlb(op, run)` and `mips_cache(op,
 //!   vaddr, run)`, where `run` is 1 when the instruction is not annulled.
 
-use relift_ir::{BinOp, Builder, CmpOp, Endian, FpOp, FpRound, Order, Reg, Value, Width};
+use relift_ir::{
+    BinOp, Builder, CmpOp, Endian, FpOp, FpRound, IoKind, Op, Reg, UnOp, Value, Width,
+};
 
 use crate::regs;
 
@@ -151,8 +162,19 @@ pub enum Sys {
     Cp0Sync,
 }
 
+/// How the lifter treats memory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Options {
+    /// Physical addresses below this are plain memory, where a read has no
+    /// effect; a conditional access to any other address leaves through
+    /// its guard. `None`: every address is plain memory.
+    pub plain_below: Option<u64>,
+}
+
 /// The lift-time state of one block.
 pub struct St {
+    opts: Options,
+    proved: Vec<Value>,
     pc: u64,
     in_delay: bool,
     pending: Vec<(Reg, Value)>,
@@ -168,7 +190,14 @@ pub struct St {
 impl St {
     /// The state for the instruction at `pc`.
     pub fn new(pc: u64) -> St {
+        St::with_options(pc, Options::default())
+    }
+
+    /// The state for the instruction at `pc`, lifted with `opts`.
+    pub fn with_options(pc: u64, opts: Options) -> St {
         St {
+            opts,
+            proved: Vec::new(),
             pc,
             in_delay: false,
             pending: Vec::new(),
@@ -224,8 +253,34 @@ impl St {
         &self.sys
     }
 
+    /// Whether `v` is 1 whenever the block gets past its earlier guards.
+    fn holds(&self, b: &Builder, v: Value) -> bool {
+        match b.op(v) {
+            Some(Op::Un(UnOp::Not, x)) => self.proved.contains(x),
+            Some(Op::Bin(BinOp::And, x, y)) => {
+                let (x, y) = (*x, *y);
+                self.holds(b, x) && self.holds(b, y)
+            }
+            _ => false,
+        }
+    }
+
+    /// `g` without the parts the earlier guards proved.
+    fn simplify(&self, b: &Builder, g: Option<Value>) -> Option<Value> {
+        let v = g?;
+        if self.holds(b, v) {
+            return None;
+        }
+        match b.op(v) {
+            Some(Op::Bin(BinOp::And, x, y)) if self.holds(b, *x) => Some(*y),
+            Some(Op::Bin(BinOp::And, x, y)) if self.holds(b, *y) => Some(*x),
+            _ => Some(v),
+        }
+    }
+
     /// The template guard `g` and the slot guard together.
     fn guard(&self, b: &mut Builder, g: Option<Value>) -> Option<Value> {
+        let g = self.simplify(b, g);
         match (g, self.slot_guard) {
             (Some(x), Some(y)) => Some(b.and(x, y)),
             (x, None) => x,
@@ -240,6 +295,9 @@ impl St {
             None => bad,
         };
         b.guard(c, code);
+        if self.simplify(b, g).is_none() {
+            self.proved.push(bad);
+        }
     }
 
     fn exc_code(&self, e: Exc) -> u32 {
@@ -342,7 +400,14 @@ impl St {
                 let t = b.konst(Width::W1, 1);
                 b.guard(t, code);
             }
-            Some(c) => b.guard(c, code),
+            Some(c) => {
+                b.guard(c, code);
+                if let Some(g) = g
+                    && self.simplify(b, Some(g)) == Some(g)
+                {
+                    self.proved.push(g);
+                }
+            }
         }
     }
 
@@ -418,29 +483,46 @@ impl St {
         b.bin(BinOp::And, va, m)
     }
 
-    /// A big-endian load of `n` bytes at `pa`. Loads have no effect the
-    /// block must order, so one under a guard runs unconditionally.
+    /// Leaves through the guard `code` when the access at `pa` is
+    /// conditional (`g`) and may not be plain memory.
+    fn device_exit(&mut self, b: &mut Builder, pa: Value, g: Option<Value>, code: Exc) {
+        let (Some(_), Some(limit)) = (g, self.opts.plain_below) else {
+            return;
+        };
+        let k = b.konst(Width::W64, u128::from(limit));
+        let dev = b.cmp(CmpOp::Ule, k, pa);
+        let code = self.exc_code(code);
+        b.guard(dev, code);
+    }
+
+    /// A big-endian load of `n` bytes at `pa` under `g`. A load of plain
+    /// memory has no effect the block must order, so one under a guard
+    /// runs unconditionally.
     pub fn load(
         &mut self,
         b: &mut Builder,
         pa: Value,
         n: u32,
         _ll: bool,
-        _g: Option<Value>,
+        g: Option<Value>,
     ) -> Value {
-        b.load(pa, Width::new(8 * n), Endian::Big, Order::Plain)
+        let g = self.guard(b, g);
+        self.device_exit(b, pa, g, Exc::TLBL);
+        b.io_load(pa, Width::new(8 * n), Endian::Big, IoKind::Any)
     }
 
     /// A big-endian store of `n` bytes of `v` at `pa` under `g`.
     pub fn store(&mut self, b: &mut Builder, pa: Value, n: u32, v: Value, g: Option<Value>) {
-        let v = match self.guard(b, g) {
+        let g = self.guard(b, g);
+        self.device_exit(b, pa, g, Exc::TLBS);
+        let v = match g {
             Some(c) => {
-                let old = b.load(pa, Width::new(8 * n), Endian::Big, Order::Plain);
+                let old = b.io_load(pa, Width::new(8 * n), Endian::Big, IoKind::Any);
                 b.select(c, v, old)
             }
             None => v,
         };
-        b.store(pa, v, Endian::Big, Order::Plain);
+        b.io_store(pa, v, Endian::Big, IoKind::Any);
     }
 
     /// SC and SCD: the overlay calls this only when LLbit is set, and the
@@ -525,6 +607,10 @@ impl St {
             let rm = b.extract(fcr, 0, Width::new(2));
             let z = b.konst(Width::new(2), 0);
             let c = b.cmp(CmpOp::Ne, rm, z);
+            slow = b.or(slow, c);
+        }
+        if fmt == 0x15 && matches!(op, 32 | 33) {
+            let c = long_out_of_range(b, x);
             slow = b.or(slow, c);
         }
         if !int_src {
@@ -676,6 +762,19 @@ fn int_out_of_range(b: &mut Builder, x: Value, w: Width, wide: bool) -> Value {
     let e = b.extract(x, mb, Width::new(eb));
     let lim = b.konst(Width::new(eb), bias + if wide { 53 } else { 31 });
     b.cmp(CmpOp::Ule, lim, e)
+}
+
+/// 1 when converting the 64-bit integer `x` to a float is an unimplemented
+/// operation on the VR4300: `x >= 2^55` or `x < -2^55`, that is, bits 55
+/// to 63 are not all equal.
+fn long_out_of_range(b: &mut Builder, x: Value) -> Value {
+    let top = b.extract(x, 55, Width::new(9));
+    let zero = b.konst(Width::new(9), 0);
+    let ones = b.konst(Width::new(9), 0x1FF);
+    let pos = b.cmp(CmpOp::Eq, top, zero);
+    let neg = b.cmp(CmpOp::Eq, top, ones);
+    let ok = b.or(pos, neg);
+    b.not(ok)
 }
 
 /// 1 when the result `r` is zero but the operand `x` is not: an underflow
