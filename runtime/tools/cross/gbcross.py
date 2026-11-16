@@ -163,12 +163,15 @@ def host_build(args, env):
             sys.exit(f"{' '.join(cmd)}: exit {r.returncode}\n{r.stdout}{r.stderr}")
     cache = env["RELIFT_CACHE_DIR"]
     game = glob.glob(os.path.join(cache, "projects", "*", "build", "host", "build.ninja"))
-    runtime = glob.glob(os.path.join(cache, "gb-runtime", "*", "build.ninja"))
     if not game and not shutil.which("ninja"):
         raise Missing("ninja, which relift needs to leave its compile commands for this script: apt install ninja-build, or brew install ninja")
-    if len(game) != 1 or len(runtime) != 1:
-        sys.exit(f"{cache}: expected one game and one runtime build.ninja, found {game} {runtime}")
-    return game[0], runtime[0]
+    if len(game) != 1:
+        sys.exit(f"{cache}: expected one game build.ninja, found {game}")
+    m = re.search(r"gb-runtime/([0-9a-f]+)/runtime\.o", open(game[0]).read())
+    runtime = m and os.path.join(cache, "gb-runtime", m.group(1), "build.ninja")
+    if not runtime or not os.path.isfile(runtime):
+        sys.exit(f"{game[0]}: links no runtime build that has a build.ninja")
+    return game[0], runtime
 
 
 def device_library(args, tool, env):
