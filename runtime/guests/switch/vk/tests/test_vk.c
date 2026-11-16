@@ -1658,6 +1658,245 @@ static uint64_t boot_fake(void (*tweak)(VkPhysicalDeviceLimits *), int drop_feat
     return physical_devices(&pd, 1) ? pd : 0;
 }
 
+/* A fake host driver: the real one without VK_EXT_headless_surface (NVIDIA's), counting surface calls that reach it. */
+static PFN_vkEnumerateInstanceExtensionProperties g_real_inst_exts;
+static PFN_vkCreateInstance g_real_create_instance;
+static PFN_vkDestroySurfaceKHR g_real_destroy_surface;
+static PFN_vkGetPhysicalDeviceSurfaceFormats2KHR g_real_formats2;
+static PFN_vkGetPhysicalDevicePresentRectanglesKHR g_real_rects;
+static unsigned g_host_surface_calls;
+
+static VkResult noheadless_inst_exts(const char *layer, uint32_t *n, VkExtensionProperties *p)
+{
+    uint32_t all = 0;
+    VkResult r = g_real_inst_exts(layer, &all, NULL);
+    if (r < 0)
+        return r;
+    VkExtensionProperties *e = calloc(all + 1, sizeof *e);
+    r = g_real_inst_exts(layer, &all, e);
+    uint32_t m = 0;
+    for (uint32_t i = 0; i < all; i++)
+        if (strcmp(e[i].extensionName, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME))
+            e[m++] = e[i];
+    if (!p)
+        *n = m;
+    else {
+        uint32_t w = *n < m ? *n : m;
+        memcpy(p, e, w * sizeof *e);
+        r = w < m ? VK_INCOMPLETE : r;
+        *n = w;
+    }
+    free(e);
+    return r;
+}
+
+static VkResult noheadless_create_instance(const VkInstanceCreateInfo *ci, const VkAllocationCallbacks *a, VkInstance *out)
+{
+    for (uint32_t i = 0; i < ci->enabledExtensionCount; i++)
+        if (!strcmp(ci->ppEnabledExtensionNames[i], VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME))
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+    return g_real_create_instance(ci, a, out);
+}
+
+static void counting_destroy_surface(VkInstance inst, VkSurfaceKHR s, const VkAllocationCallbacks *a)
+{
+    if (s) {
+        g_host_surface_calls++;
+        g_real_destroy_surface(inst, s, a);
+    }
+}
+
+static VkResult counting_formats2(VkPhysicalDevice pd, const VkPhysicalDeviceSurfaceInfo2KHR *i, uint32_t *n, VkSurfaceFormat2KHR *f)
+{
+    g_host_surface_calls++;
+    return g_real_formats2(pd, i, n, f);
+}
+
+static VkResult counting_rects(VkPhysicalDevice pd, VkSurfaceKHR s, uint32_t *n, VkRect2D *r)
+{
+    g_host_surface_calls++;
+    return g_real_rects(pd, s, n, r);
+}
+
+static void *noheadless_gipa(void *inst, const char *name)
+{
+    if (!strcmp(name, "vkCreateHeadlessSurfaceEXT"))
+        return NULL;
+    void *r = g_real_gipa(inst, name);
+    if (!r)
+        return r;
+    void (*f)(void) = NULL;
+    if (!strcmp(name, "vkEnumerateInstanceExtensionProperties"))
+        memcpy(&g_real_inst_exts, &r, sizeof r), f = (void (*)(void))noheadless_inst_exts;
+    else if (!strcmp(name, "vkCreateInstance"))
+        memcpy(&g_real_create_instance, &r, sizeof r), f = (void (*)(void))noheadless_create_instance;
+    else if (!strcmp(name, "vkDestroySurfaceKHR"))
+        memcpy(&g_real_destroy_surface, &r, sizeof r), f = (void (*)(void))counting_destroy_surface;
+    else if (!strcmp(name, "vkGetPhysicalDeviceSurfaceFormats2KHR"))
+        memcpy(&g_real_formats2, &r, sizeof r), f = (void (*)(void))counting_formats2;
+    else if (!strcmp(name, "vkGetPhysicalDevicePresentRectanglesKHR"))
+        memcpy(&g_real_rects, &r, sizeof r), f = (void (*)(void))counting_rects;
+    if (f)
+        memcpy(&r, &f, sizeof r);
+    return r;
+}
+
+TEST(vk_vi_surface_works_offscreen_without_headless_surface)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    void *(*fg)(void *, const char *) = noheadless_gipa;
+    void *fake;
+    memcpy(&fake, &fg, sizeof fake);
+    rl_vk_surface_provider offscreen = *rl_vk_headless_surfaces();
+    offscreen.extent = resizable_extent;
+    g_host_w = g_host_h = 64;
+    g_host_gen = 0;
+    g_host_surface_calls = 0;
+    CHECK_EQ(boot_with(&offscreen, fake), 0);
+    uint64_t gn = galloc(4);
+    CHECK_EQ(VKR(G("vkEnumerateInstanceExtensionProperties", 0, gn, 0)), VK_SUCCESS);
+    uint32_t n = g32(gn);
+    uint64_t props = galloc(n * sizeof(VkExtensionProperties));
+    CHECK_EQ(VKR(G("vkEnumerateInstanceExtensionProperties", 0, gn, props)), VK_SUCCESS);
+    bool vi = false;
+    for (uint32_t i = 0; i < g32(gn); i++)
+        vi = vi || !strcmp((const char *)g_mem + props + i * sizeof(VkExtensionProperties), "VK_NN_vi_surface");
+    CHECK(vi);
+    const char *exts[] = { "VK_KHR_surface", "VK_KHR_get_surface_capabilities2", "VK_NN_vi_surface" };
+    CHECK(make_instance(exts, 3, 0) != 0);
+    CHECK(gipa(g_inst, "vkCreateViSurfaceNN") != 0);
+    VkViSurfaceCreateInfoNN sci = { .sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, .window = GP(galloc(64)) };
+    uint64_t gs = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateViSurfaceNN", g_inst, gput(&sci, sizeof sci), 0, gs)), VK_SUCCESS);
+    uint64_t surface = g64(gs);
+    CHECK(surface != 0);
+    uint64_t pds[8];
+    CHECK_EQ(physical_devices(pds, 8), 1);
+    char name[256];
+    device_name(pds[0], name);
+    uint32_t qf = queue_family(pds[0], VK_QUEUE_GRAPHICS_BIT);
+    CHECK(qf != UINT32_MAX);
+    uint64_t gsup = galloc(4);
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceSupportKHR", pds[0], qf, surface, gsup)), VK_SUCCESS);
+    CHECK_EQ(g32(gsup), VK_TRUE);
+    uint64_t gcaps = galloc(sizeof(VkSurfaceCapabilitiesKHR));
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", pds[0], surface, gcaps)), VK_SUCCESS);
+    VkSurfaceCapabilitiesKHR caps;
+    memcpy(&caps, g_mem + gcaps, sizeof caps);
+    CHECK_EQ(caps.currentExtent.width, 64);
+    CHECK_EQ(caps.currentExtent.height, 64);
+    uint64_t gfn = galloc(4), gfmts = galloc(2 * sizeof(VkSurfaceFormatKHR));
+    rl_st32(g_mem, gfn, 2);
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceFormatsKHR", pds[0], surface, gfn, gfmts)), VK_SUCCESS);
+    CHECK_EQ(g32(gfn), 2);
+    CHECK_EQ(g32(gfmts), VK_FORMAT_R8G8B8A8_SRGB);
+    VkPhysicalDeviceSurfaceInfo2KHR si2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR, .surface = (VkSurfaceKHR)GP(surface) };
+    uint64_t gsi2 = gput(&si2, sizeof si2);
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceFormats2KHR", pds[0], gsi2, gfn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(gfn), 2);
+    VkSurfaceFormat2KHR f2[2] = { { .sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR }, { .sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR } };
+    uint64_t gf2 = gput(f2, sizeof f2);
+    CHECK_EQ(VKR(G("vkGetPhysicalDeviceSurfaceFormats2KHR", pds[0], gsi2, gfn, gf2)), VK_SUCCESS);
+    CHECK_EQ(g32(gf2 + offsetof(VkSurfaceFormat2KHR, surfaceFormat)), VK_FORMAT_R8G8B8A8_SRGB);
+    CHECK_EQ(g32(gf2 + sizeof(VkSurfaceFormat2KHR) + offsetof(VkSurfaceFormat2KHR, surfaceFormat)), VK_FORMAT_R8G8B8A8_UNORM);
+    uint64_t grn = galloc(4), grects = galloc(4 * sizeof(VkRect2D));
+    CHECK_EQ(VKR(G("vkGetPhysicalDevicePresentRectanglesKHR", pds[0], surface, grn, 0)), VK_SUCCESS);
+    CHECK_EQ(g32(grn), 1);
+    CHECK_EQ(VKR(G("vkGetPhysicalDevicePresentRectanglesKHR", pds[0], surface, grn, grects)), VK_SUCCESS);
+    CHECK_EQ(g32(grects + offsetof(VkRect2D, extent)), 64);
+    const char *dexts[] = { "VK_KHR_swapchain" };
+    uint64_t dev = make_device(pds[0], qf, dexts, 1);
+    CHECK(dev != 0);
+    uint64_t gmodes = galloc(4);
+    CHECK_EQ(VKR(G("vkGetDeviceGroupSurfacePresentModesKHR", dev, surface, gmodes)), VK_SUCCESS);
+    CHECK_EQ(g32(gmodes), VK_DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR);
+    VkSwapchainCreateInfoKHR swci = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = (VkSurfaceKHR)GP(surface),
+        .minImageCount = 2,
+        .imageFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageExtent = { 64, 64 },
+        .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+        .clipped = VK_TRUE,
+    };
+    uint64_t gsw = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateSwapchainKHR", dev, gput(&swci, sizeof swci), 0, gsw)), VK_SUCCESS);
+    uint64_t sw = g64(gsw);
+    uint64_t gin = galloc(4);
+    CHECK_EQ(VKR(G("vkGetSwapchainImagesKHR", dev, sw, gin, 0)), VK_SUCCESS);
+    uint64_t gimgs = galloc(8ull * g32(gin));
+    CHECK_EQ(VKR(G("vkGetSwapchainImagesKHR", dev, sw, gin, gimgs)), VK_SUCCESS);
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    uint64_t gf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFence", dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+    uint64_t fence = g64(gf), gidx = galloc(4);
+    CHECK_EQ(VKR(G("vkAcquireNextImageKHR", dev, sw, UINT64_MAX, 0, fence, gidx)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+    uint32_t idx = g32(gidx);
+    uint64_t image = g64(gimgs + 8ull * idx);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, qf, 0, gq);
+    uint64_t queue = g64(gq);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = qf };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+    barrier(cb, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkClearColorValue color = { .float32 = { 0.0f, 0.5f, 1.0f, 1.0f } };
+    VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    G("vkCmdClearColorImage", cb, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, gput(&color, sizeof color), 1, gput(&range, sizeof range));
+    barrier(cb, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", queue)), VK_SUCCESS);
+    VkPresentInfoKHR pi = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .swapchainCount = 1,
+        .pSwapchains = GP(gput(&sw, 8)),
+        .pImageIndices = GP(gput(&idx, 4)),
+    };
+    char cap[512];
+    const char *tmp = getenv("TMPDIR");
+    snprintf(cap, sizeof cap, "%s/relift-vk-capture-nh-%d", tmp && *tmp ? tmp : "/tmp", (int)getpid());
+    uint64_t frames = vi_guest_frames();
+    rl_vk_capture(cap);
+    CHECK_EQ(VKR(G("vkQueuePresentKHR", queue, gput(&pi, sizeof pi))), VK_SUCCESS);
+    rl_vk_capture(NULL);
+    CHECK_EQ(vi_guest_frames(), frames + 1);
+    CHECK(capture_is_the_clear_color(cap, VK_FORMAT_R8G8B8A8_UNORM));
+    uint32_t hw = 0, hh = 0, made = 0;
+    CHECK(rl_vk_swapchain_host(sw, &hw, &hh, &made));
+    CHECK_EQ(hw, 64);
+    fprintf(stderr, "  %s: presented offscreen without VK_EXT_headless_surface\n", name);
+    CHECK_EQ(VKR(G("vkDeviceWaitIdle", dev)), VK_SUCCESS);
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyFence", dev, fence, 0);
+    G("vkDestroySwapchainKHR", dev, sw, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroySurfaceKHR", g_inst, surface, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(g_host_surface_calls, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
 static int32_t create_device(uint64_t pd, uint64_t features, uint64_t *dev)
 {
     float prio = 1.0f;

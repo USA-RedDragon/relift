@@ -435,7 +435,8 @@ clear of an image copied into a mapped buffer and read back through guest
 memory in each map mode, guest-written mapped memory copied by the GPU, faults on
 unmapped ranges, a debug messenger calling guest code, `VK_NN_vi_surface` to a
 headless swapchain with a present and a host resize that recreates the host
-swapchain behind the guest's, bad handles and unknown structs, and the Switch's
+swapchain behind the guest's, the same offscreen on a fake host without
+`VK_EXT_headless_surface` (no surface call reaches the host), bad handles and unknown structs, and the Switch's
 properties on a fake host (the real driver with the Switch's limits, then made
 smaller or larger, or with a feature taken away): which values the guest
 sees, which calls fail and when `vkCreateDevice` does. The decoded formats
