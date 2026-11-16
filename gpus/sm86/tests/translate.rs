@@ -592,3 +592,33 @@ fn indexed_ipa_selects_among_the_sph_inputs() {
     assert_eq!(s.interface.inputs.len(), 3);
     assert_eq!(count_op(&s.spirv, 169), 12, "one select per component");
 }
+
+#[test]
+fn quad_swizzle_add_translates_in_both_stages() {
+    for fragment in [false, true] {
+        let mut b = if fragment {
+            sph(2, 5, &[(18, 0xf)])
+        } else {
+            Vec::new()
+        };
+        b.extend(word(
+            0x022,
+            4,
+            &[
+                (16, 8, 0),
+                (24, 8, 1),
+                (64, 8, 2),
+                (32, 8, 0xe4),
+                (80, 1, 1),
+            ],
+        ));
+        exit_and_halt(&mut b);
+        let p = Program::parse(&b);
+        assert!(
+            p.decode()[0]
+                .as_ref()
+                .is_ok_and(|i| i.mnemonic == "FSWZADD")
+        );
+        translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    }
+}

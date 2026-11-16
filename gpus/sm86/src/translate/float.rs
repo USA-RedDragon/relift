@@ -12,6 +12,7 @@
 
 use super::{Ctx, Res, bad};
 use crate::Inst;
+use crate::program::Stage;
 use crate::spirv::{glsl, op};
 
 const NO_CONTRACTION: u32 = 42;
@@ -45,6 +46,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "FSETP" => fsetp(c, i),
         "FSET" => fset(c, i),
         "FRND" => frnd(c, i),
+        "FSWZADD" => fswzadd(c, i),
         _ => return None,
     })
 }
@@ -646,4 +648,71 @@ fn fset(c: &mut Ctx, i: &Inst) -> Res<()> {
 
 fn frnd(c: &mut Ctx, i: &Inst) -> Res<()> {
     super::int::conv::frnd(c, i)
+}
+
+/// The invocation's position in its 2x2 quad: in a fragment shader from the
+/// pixel's parity (lane 0 top left, 1 top right, 2 bottom left, 3 bottom
+/// right, as the hardware packs quads), which needs no subgroup; elsewhere
+/// from the lane id.
+fn quad_lane(c: &mut Ctx) -> u32 {
+    let u = c.u32t();
+    let one = c.m.c_u32(1);
+    if c.stage != Stage::Fragment {
+        let l = c.lane_id();
+        let three = c.m.c_u32(3);
+        return c.m.emit(op::BITWISE_AND, u, &[l, three]);
+    }
+    let f = c.f32t();
+    let v4 = c.m.t_vec(f, 4);
+    let fc = c.builtin(15, super::INPUT, v4);
+    let p = c.m.t_ptr(super::INPUT, f);
+    let mut bits = Vec::new();
+    for k in 0..2 {
+        let ki = c.m.c_u32(k);
+        let ptr = c.m.emit(op::ACCESS_CHAIN, p, &[fc, ki]);
+        let x = c.m.emit(op::LOAD, f, &[ptr]);
+        let xi = c.m.emit(op::CONVERT_F_TO_U, u, &[x]);
+        bits.push(c.m.emit(op::BITWISE_AND, u, &[xi, one]));
+    }
+    let y2 = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[bits[1], one]);
+    c.m.emit(op::BITWISE_OR, u, &[bits[0], y2])
+}
+
+/// FSWZADD: per quad lane, `a + b`, `a - b`, `b - a` or `+0 + b`, picked
+/// by the lane's two bits of the control byte (lane 0 takes the top two
+/// bits), with the instruction's rounding.
+fn fswzadd(c: &mut Ctx, i: &Inst) -> Res<()> {
+    Ctx::mods_ok(i, &["FTZ", "NDV", "RZ", "RM", "RP"])?;
+    let mode = round_of(i);
+    let ftz = i.has("FTZ");
+    let a = c.fsrc(&i.ops[1])?;
+    let b = c.fsrc(&i.ops[2])?;
+    let ctl = c.word.get(32, 8);
+    let lane = quad_lane(c);
+    let u = c.u32t();
+    let f = c.f32t();
+    let two = c.m.c_u32(2);
+    let three_l = c.m.c_u32(3);
+    let rev = c.m.emit(op::I_SUB, u, &[three_l, lane]);
+    let sh = c.m.emit(op::I_MUL, u, &[rev, two]);
+    let k = c.m.c_u32(ctl);
+    let code = c.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[k, sh]);
+    let three = c.m.c_u32(3);
+    let code = c.m.emit(op::BITWISE_AND, u, &[code, three]);
+    let bt = c.boolt();
+    let na = c.fneg(a);
+    let nb = c.fneg(b);
+    let zero = c.m.c_f32(0);
+    let one_c = c.m.c_u32(1);
+    let two_c = c.m.c_u32(2);
+    let three_c = c.m.c_u32(3);
+    let is1 = c.m.emit(op::I_EQUAL, bt, &[code, one_c]);
+    let is2 = c.m.emit(op::I_EQUAL, bt, &[code, two_c]);
+    let is3 = c.m.emit(op::I_EQUAL, bt, &[code, three_c]);
+    let x = c.select(f, is2, na, a);
+    let x = c.select(f, is3, zero, x);
+    let y = c.select(f, is1, nb, b);
+    let r = c.fadd_round(x, y, mode, ftz);
+    let bits = c.as_bits(r);
+    c.store_dst(&i.ops[0], bits)
 }
