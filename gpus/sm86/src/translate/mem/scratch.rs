@@ -10,7 +10,7 @@
 //! window in bytes (four times [`LOCAL_SPEC`]'s value). Sub-word stores are atomic AND/OR on the containing word so that
 //! lanes writing neighbouring bytes do not lose each other's updates.
 
-use super::{Addr, addr_operand, mods_of, spv, store_words};
+use super::{Addr, Size, addr_operand, mods_of, spv, store_words};
 use crate::Inst;
 use crate::spirv::op;
 use crate::translate::{Ctx, Res, bad};
@@ -38,6 +38,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "LDL" => load(c, i, Space::Local),
         "STS" => store(c, i, Space::Shared),
         "STL" => store(c, i, Space::Local),
+        "LDSM" => ldsm(c, i),
         _ => return None,
     })
 }
@@ -176,5 +177,66 @@ fn store(c: &mut Ctx, i: &Inst, sp: Space) -> Res<()> {
         let p = c.scratch_word(sp, addr, k);
         c.m.emit_void(op::STORE, &[p, v]);
     }
+    Ok(())
+}
+
+/// LDSM: each of up to four 8x8 matrices of 16-bit elements has its eight
+/// row addresses in eight consecutive lanes (matrix `m` in lanes `8m` to
+/// `8m + 7`); lane `t` gets the pair of elements in row `t / 4` at columns
+/// `2 * (t % 4)` and the next, or with `MT88` the pair in rows `2 * (t % 4)`
+/// and the next at column `t / 4`.
+fn ldsm(c: &mut Ctx, i: &Inst) -> Res<()> {
+    let mut count = 1;
+    let mut trans = false;
+    for m in &i.mods {
+        match *m {
+            "16" | "M88" => {}
+            "MT88" => trans = true,
+            "2" => count = 2,
+            "4" => count = 4,
+            _ => return bad(format!("LDSM.{m}")),
+        }
+    }
+    let d = Ctx::dst_reg(&i.ops[0])?;
+    let a = addr_operand(i, 1)?;
+    let addr = c.scratch_address(&a, 16, Space::Shared)?;
+    let u = c.u32t();
+    let lane = c.lane_id();
+    let two = c.m.c_u32(2);
+    let three = c.m.c_u32(3);
+    let one = c.m.c_u32(1);
+    let sixteen = c.m.c_u32(16);
+    let row = c.m.emit(op::SHIFT_RIGHT_LOGICAL, u, &[lane, two]);
+    let quad = c.m.emit(op::BITWISE_AND, u, &[lane, three]);
+    let mut vals = Vec::new();
+    for m in 0..count {
+        let base = c.m.c_u32(8 * m);
+        let v = if trans {
+            let pair = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[quad, one]);
+            let mut half = [0; 2];
+            for (k, h) in half.iter_mut().enumerate() {
+                let first = c.m.emit(op::I_ADD, u, &[base, pair]);
+                let kk = c.m.c_u32(k as u32);
+                let src = c.m.emit(op::I_ADD, u, &[first, kk]);
+                let ra = c.shuffle_from(addr, src);
+                let col = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[row, one]);
+                let at = c.m.emit(op::I_ADD, u, &[ra, col]);
+                let p = c.scratch_word(Space::Shared, at, 0);
+                let w = c.m.emit(op::LOAD, u, &[p]);
+                *h = c.extract_sub(w, at, Size::U16);
+            }
+            let hi = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[half[1], sixteen]);
+            c.m.emit(op::BITWISE_OR, u, &[half[0], hi])
+        } else {
+            let src = c.m.emit(op::I_ADD, u, &[base, row]);
+            let ra = c.shuffle_from(addr, src);
+            let col = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[quad, two]);
+            let at = c.m.emit(op::I_ADD, u, &[ra, col]);
+            let p = c.scratch_word(Space::Shared, at, 0);
+            c.m.emit(op::LOAD, u, &[p])
+        };
+        vals.push(v);
+    }
+    store_words(c, d, &vals);
     Ok(())
 }

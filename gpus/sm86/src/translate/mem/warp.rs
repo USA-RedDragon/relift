@@ -63,6 +63,15 @@ impl Ctx {
         self.m.emit(op::COMPOSITE_EXTRACT, u, &[b, 0])
     }
 
+    /// `val` as held by subgroup invocation `lane`.
+    pub(super) fn shuffle_from(&mut self, val: u32, lane: u32) -> u32 {
+        self.cap(CAP_GROUP_NON_UNIFORM);
+        self.cap(CAP_SHUFFLE);
+        let u = self.u32t();
+        let scope = self.m.c_u32(SCOPE_SUBGROUP);
+        self.m.emit(spv::GROUP_SHUFFLE, u, &[scope, val, lane])
+    }
+
     fn bin(&mut self, o: u16, a: u32, b: u32) -> u32 {
         let u = self.u32t();
         self.m.emit(o, u, &[a, b])

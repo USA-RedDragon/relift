@@ -213,3 +213,35 @@ fn match_any_compares_every_lane() {
     let shuffles = spirv_ops(&s.spirv).iter().filter(|&&o| o == 345).count();
     assert_eq!(shuffles, 64);
 }
+
+#[test]
+fn ldsm_gathers_rows_across_lanes() {
+    let ldsm = |shape: u64, count: u64| {
+        word(
+            0x83b,
+            4,
+            &[
+                (16, 8, 8),
+                (24, 8, 4),
+                (40, 24, 0x40),
+                (72, 2, count),
+                (78, 2, shape),
+            ],
+        )
+    };
+    for (shape, count, name, shuffles) in [
+        (0, 2, "LDSM.16.M88.4 R8", 4),
+        (1, 2, "LDSM.16.MT88.4 R8", 8),
+        (0, 1, "LDSM.16.M88.2 R8", 2),
+        (1, 0, "LDSM.16.MT88 R8", 2),
+    ] {
+        let s = run(&[ldsm(shape, count)], &[name]);
+        let ops = spirv_ops(&s.spirv);
+        assert_eq!(
+            ops.iter().filter(|o| **o == 345).count(),
+            shuffles,
+            "{name}"
+        );
+        assert!(s.interface.shared_bytes >= 0x50, "{name}");
+    }
+}
