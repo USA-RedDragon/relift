@@ -21,6 +21,7 @@
 #include <relift/touchpad.h>
 
 #include <dirent.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -3649,4 +3650,244 @@ TEST(vk_bc_a_host_without_bc_shows_the_switch_features)
     CHECK_EQ(bc_upload_scene(pd, dev, 0), 0);
     finish(dev);
     rl_settings_reset();
+}
+
+/**
+ * @brief SPIR-V (glslc -O) of a compute shader whose storage images declare
+ * rg32f: binding 1 is read into the buffer at binding 2 and binding 0 gets
+ * vec4(0.25, 0.75, 0.5, 1.0). A game's SMAA edge pass declares rg32f on an
+ * R8G8B8A8_UNORM view the same way.
+ *
+ *   layout(binding = 0, rg32f) uniform image2D dst;
+ *   layout(binding = 1, rg32f) uniform readonly image2D src;
+ *   layout(binding = 2) buffer Out { vec4 loaded; };
+ *   void main() { loaded = imageLoad(src, ivec2(0)); imageStore(dst, ivec2(0), vec4(0.25, 0.75, 0.5, 1.0)); }
+ */
+static const uint32_t g_rg32f_comp[] = {
+    0x07230203, 0x00010300, 0x000d000b, 0x00000021, 0x00000000, 0x00020011, 0x00000001, 0x00020011,
+    0x00000031, 0x0006000b, 0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
+    0x00000000, 0x00000001, 0x0005000f, 0x00000005, 0x00000004, 0x6e69616d, 0x00000000, 0x00060010,
+    0x00000004, 0x00000011, 0x00000001, 0x00000001, 0x00000001, 0x00030047, 0x00000008, 0x00000002,
+    0x00050048, 0x00000008, 0x00000000, 0x00000023, 0x00000000, 0x00040047, 0x0000000a, 0x00000021,
+    0x00000002, 0x00040047, 0x0000000a, 0x00000022, 0x00000000, 0x00030047, 0x0000000f, 0x00000018,
+    0x00040047, 0x0000000f, 0x00000021, 0x00000001, 0x00040047, 0x0000000f, 0x00000022, 0x00000000,
+    0x00040047, 0x00000016, 0x00000021, 0x00000000, 0x00040047, 0x00000016, 0x00000022, 0x00000000,
+    0x00040047, 0x00000020, 0x0000000b, 0x00000019, 0x00020013, 0x00000002, 0x00030021, 0x00000003,
+    0x00000002, 0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007, 0x00000006, 0x00000004,
+    0x0003001e, 0x00000008, 0x00000007, 0x00040020, 0x00000009, 0x0000000c, 0x00000008, 0x0004003b,
+    0x00000009, 0x0000000a, 0x0000000c, 0x00040015, 0x0000000b, 0x00000020, 0x00000001, 0x0004002b,
+    0x0000000b, 0x0000000c, 0x00000000, 0x00090019, 0x0000000d, 0x00000006, 0x00000001, 0x00000000,
+    0x00000000, 0x00000000, 0x00000002, 0x00000006, 0x00040020, 0x0000000e, 0x00000000, 0x0000000d,
+    0x0004003b, 0x0000000e, 0x0000000f, 0x00000000, 0x00040017, 0x00000011, 0x0000000b, 0x00000002,
+    0x0005002c, 0x00000011, 0x00000012, 0x0000000c, 0x0000000c, 0x00040020, 0x00000014, 0x0000000c,
+    0x00000007, 0x0004003b, 0x0000000e, 0x00000016, 0x00000000, 0x0004002b, 0x00000006, 0x00000018,
+    0x3e800000, 0x0004002b, 0x00000006, 0x00000019, 0x3f400000, 0x0004002b, 0x00000006, 0x0000001a,
+    0x3f000000, 0x0004002b, 0x00000006, 0x0000001b, 0x3f800000, 0x0007002c, 0x00000007, 0x0000001c,
+    0x00000018, 0x00000019, 0x0000001a, 0x0000001b, 0x00040015, 0x0000001d, 0x00000020, 0x00000000,
+    0x00040017, 0x0000001e, 0x0000001d, 0x00000003, 0x0004002b, 0x0000001d, 0x0000001f, 0x00000001,
+    0x0006002c, 0x0000001e, 0x00000020, 0x0000001f, 0x0000001f, 0x0000001f, 0x00050036, 0x00000002,
+    0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005, 0x0004003d, 0x0000000d, 0x00000010,
+    0x0000000f, 0x00050062, 0x00000007, 0x00000013, 0x00000010, 0x00000012, 0x00050041, 0x00000014,
+    0x00000015, 0x0000000a, 0x0000000c, 0x0003003e, 0x00000015, 0x00000013, 0x0004003d, 0x0000000d,
+    0x00000017, 0x00000016, 0x00040063, 0x00000017, 0x00000012, 0x0000001c, 0x000100fd, 0x00010038,
+};
+
+/** @brief A 1x1 R8G8B8A8_UNORM storage image, its memory and a view of the same format. */
+static void storage_texel(uint64_t pd, uint64_t dev, uint64_t *image, uint64_t *mem, uint64_t *view)
+{
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = { 1, 1, 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    };
+    uint64_t gi = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImage", dev, gput(&ici, sizeof ici), 0, gi)), VK_SUCCESS);
+    *image = g64(gi);
+    VkMemoryRequirements req;
+    *mem = bind_image(pd, dev, *image, &req);
+    CHECK(*mem != 0);
+    VkImageViewCreateInfo vci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = (VkImage)GP(*image),
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    uint64_t gv = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateImageView", dev, gput(&vci, sizeof vci), 0, gv)), VK_SUCCESS);
+    *view = g64(gv);
+}
+
+/**
+ * @brief A storage image whose shader format (rg32f) is not its view's
+ * (R8G8B8A8_UNORM) is stored and loaded in the view's format, all four
+ * components, as on the console: Maxwell's formatted surface store and load
+ * take the format from the surface descriptor, and the shader has none. A
+ * host that took the shader's format instead would fail here.
+ */
+TEST(vk_storage_image_access_takes_the_views_format_not_the_shaders)
+{
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t pd = pds[0];
+    uint64_t dev = make_device(pd, queue_family(pd, 0), NULL, 0);
+    CHECK(dev != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", dev, 0, 0, gq);
+    uint64_t queue = g64(gq);
+    mapped_buf out;
+    CHECK_EQ(make_mapped(pd, dev, 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, &out), 0);
+    memset(g_mem + out.ptr, 0, 64);
+    uint64_t img[2], imem[2], view[2];
+    storage_texel(pd, dev, &img[0], &imem[0], &view[0]);
+    storage_texel(pd, dev, &img[1], &imem[1], &view[1]);
+
+    VkDescriptorSetLayoutBinding b[3] = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL },
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL },
+        { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL },
+    };
+    VkDescriptorSetLayoutCreateInfo lci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 3,
+        .pBindings = GP(gput(b, sizeof b)),
+    };
+    uint64_t gdsl = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateDescriptorSetLayout", dev, gput(&lci, sizeof lci), 0, gdsl)), VK_SUCCESS);
+    VkPipelineLayoutCreateInfo plci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = GP(gdsl),
+    };
+    uint64_t gpl = galloc(8);
+    CHECK_EQ(VKR(G("vkCreatePipelineLayout", dev, gput(&plci, sizeof plci), 0, gpl)), VK_SUCCESS);
+    VkShaderModuleCreateInfo smci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = sizeof g_rg32f_comp,
+        .pCode = GP(gput(g_rg32f_comp, sizeof g_rg32f_comp)),
+    };
+    uint64_t gsm = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateShaderModule", dev, gput(&smci, sizeof smci), 0, gsm)), VK_SUCCESS);
+    VkComputePipelineCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                   .module = (VkShaderModule)GP(g64(gsm)), .pName = GP(gstr("main")) },
+        .layout = (VkPipelineLayout)GP(g64(gpl)),
+    };
+    uint64_t gpipe = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateComputePipelines", dev, 0, 1, gput(&cpci, sizeof cpci), 0, gpipe)), VK_SUCCESS);
+    VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } };
+    VkDescriptorPoolCreateInfo dpci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 2,
+        .pPoolSizes = GP(gput(ps, sizeof ps)),
+    };
+    uint64_t gdp = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateDescriptorPool", dev, gput(&dpci, sizeof dpci), 0, gdp)), VK_SUCCESS);
+    VkDescriptorSetAllocateInfo dsai = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = (VkDescriptorPool)GP(g64(gdp)),
+        .descriptorSetCount = 1,
+        .pSetLayouts = GP(gdsl),
+    };
+    uint64_t gds = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateDescriptorSets", dev, gput(&dsai, sizeof dsai), gds)), VK_SUCCESS);
+    VkDescriptorImageInfo ii[2] = {
+        { NULL, (VkImageView)GP(view[0]), VK_IMAGE_LAYOUT_GENERAL },
+        { NULL, (VkImageView)GP(view[1]), VK_IMAGE_LAYOUT_GENERAL },
+    };
+    VkDescriptorBufferInfo bi = { (VkBuffer)GP(out.buf), 0, 64 };
+    VkWriteDescriptorSet w[3] = {
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = (VkDescriptorSet)GP(g64(gds)), .dstBinding = 0, .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = GP(gput(&ii[0], sizeof ii[0])) },
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = (VkDescriptorSet)GP(g64(gds)), .dstBinding = 1, .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = GP(gput(&ii[1], sizeof ii[1])) },
+        { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = (VkDescriptorSet)GP(g64(gds)), .dstBinding = 2, .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = GP(gput(&bi, sizeof bi)) },
+    };
+    G("vkUpdateDescriptorSets", dev, 3, gput(w, sizeof w), 0, 0);
+
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(g64(gpool)),
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo cbbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&cbbi, sizeof cbbi))), VK_SUCCESS);
+    VkImageMemoryBarrier ib[2];
+    for (int i = 0; i < 2; i++)
+        ib[i] = (VkImageMemoryBarrier){ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                                        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                                        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                        .image = (VkImage)GP(img[i]),
+                                        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 2, gput(ib, sizeof ib));
+    VkClearColorValue c0 = { .float32 = { 0.1f, 0.2f, 0.3f, 0.4f } };
+    VkClearColorValue c1 = { .float32 = { 0.2f, 0.4f, 0.6f, 0.8f } };
+    VkImageSubresourceRange r = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    uint64_t gr = gput(&r, sizeof r);
+    G("vkCmdClearColorImage", cb, img[0], VK_IMAGE_LAYOUT_GENERAL, gput(&c0, sizeof c0), 1, gr);
+    G("vkCmdClearColorImage", cb, img[1], VK_IMAGE_LAYOUT_GENERAL, gput(&c1, sizeof c1), 1, gr);
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                           .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    G("vkCmdBindPipeline", cb, VK_PIPELINE_BIND_POINT_COMPUTE, g64(gpipe));
+    G("vkCmdBindDescriptorSets", cb, VK_PIPELINE_BIND_POINT_COMPUTE, g64(gpl), 0, 1, gds, 0, 0);
+    G("vkCmdDispatch", cb, 1, 1, 1);
+    mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_HOST_READ_BIT;
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
+      gput(&mb, sizeof mb), 0, 0, 0, 0);
+    VkBufferImageCopy bic = { .bufferOffset = 32, .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { 1, 1, 1 } };
+    G("vkCmdCopyImageToBuffer", cb, img[0], VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, gput(&bic, sizeof bic));
+    mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gcb) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", queue)), VK_SUCCESS);
+    float loaded[4];
+    memcpy(loaded, g_mem + out.ptr, sizeof loaded);
+    const uint8_t *st = g_mem + out.ptr + 32;
+    fprintf(stderr, "  stored %u %u %u %u, loaded %.4f %.4f %.4f %.4f\n", st[0], st[1], st[2], st[3], loaded[0], loaded[1], loaded[2],
+            loaded[3]);
+    CHECK(st[0] == 64 && st[1] == 191 && (st[2] == 127 || st[2] == 128) && st[3] == 255);
+    for (int i = 0; i < 4; i++)
+        CHECK(fabsf(loaded[i] - (float)(i + 1) * 0.2f) < 0.003f);
+
+    G("vkDestroyCommandPool", dev, g64(gpool), 0);
+    G("vkDestroyDescriptorPool", dev, g64(gdp), 0);
+    G("vkDestroyPipeline", dev, g64(gpipe), 0);
+    G("vkDestroyShaderModule", dev, g64(gsm), 0);
+    G("vkDestroyPipelineLayout", dev, g64(gpl), 0);
+    G("vkDestroyDescriptorSetLayout", dev, g64(gdsl), 0);
+    for (int i = 0; i < 2; i++) {
+        G("vkDestroyImageView", dev, view[i], 0);
+        G("vkDestroyImage", dev, img[i], 0);
+        G("vkFreeMemory", dev, imem[i], 0);
+    }
+    G("vkDestroyBuffer", dev, out.buf, 0);
+    G("vkFreeMemory", dev, out.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
 }
