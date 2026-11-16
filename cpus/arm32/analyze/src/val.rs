@@ -268,6 +268,35 @@ impl State {
         self.dma = [Abs::Top; DMA_HALVES];
         self.held.clear();
     }
+
+    /// Forgets the frame words a callee can reach: each local whose
+    /// address a register or a stack word holds, from that address up to
+    /// the registers the function saved (the words that hold an entry
+    /// register) or the entry stack pointer.
+    pub(crate) fn forget_reachable_locals(&mut self) {
+        let shown: Vec<i32> = self
+            .regs
+            .iter()
+            .take(15)
+            .enumerate()
+            .filter(|(i, _)| *i != usize::from(SP))
+            .map(|(_, v)| *v)
+            .chain(self.stack.values().copied())
+            .filter_map(Abs::stack_off)
+            .filter(|o| *o < 0)
+            .collect();
+        for o in shown {
+            let end = self
+                .stack
+                .range(o..0)
+                .find(|(_, v)| matches!(v, Abs::S(Sym { base: Base::Entry(r), off: 0, .. }) if (4..15).contains(r)))
+                .map_or(0, |(k, _)| *k);
+            let gone: Vec<i32> = self.stack.range(o & !3..end).map(|(k, _)| *k).collect();
+            for k in gone {
+                self.stack.remove(&k);
+            }
+        }
+    }
 }
 
 /// `a + off` at 32 bits.

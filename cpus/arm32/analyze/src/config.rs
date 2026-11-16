@@ -27,6 +27,12 @@ pub struct Options {
     /// A call with constant arguments is run when one names the image,
     /// even when none names RAM.
     pub image_calls: bool,
+    /// A call may write every local of the caller's frame it can reach:
+    /// a word whose address a register or a stack word holds at the call,
+    /// up to the registers the caller saved. The code after the call
+    /// reads those words as unknown (a flag a callee or an interrupt
+    /// clears through a pointer it was given).
+    pub reachable_locals: bool,
 }
 
 /// The input of one discovery run.

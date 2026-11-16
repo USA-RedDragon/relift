@@ -776,6 +776,9 @@ impl Run<'_> {
             return;
         }
         let mut after = st.clone();
+        if self.env.image.options.reachable_locals {
+            after.forget_reachable_locals();
+        }
         after.clobber(s.keep, s.psr);
         let mut t = after.regs.clone();
         t[relift_cpu_arm32::regs::T.index()] = Abs::K(u128::from(site.thumb));

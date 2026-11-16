@@ -153,6 +153,7 @@ fn all() -> Options {
         scan_words: true,
         switches: true,
         image_calls: true,
+        reachable_locals: true,
     }
 }
 
@@ -366,4 +367,40 @@ fn calls_into_another_unit_seed_its_run() {
         !found(&seeded, arm(OTHER + 0x100)),
         "a seed must open a stack frame"
     );
+}
+
+#[test]
+fn a_call_may_clear_a_flag_it_was_given_the_address_of() {
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            0xE24D_D008,
+            0xE3A0_4001,
+            0xE58D_4004,
+            0xE28D_0004,
+            a_bl(BASE + 0x14, BASE + 0x100),
+            0xE59D_0004,
+            0xE350_0000,
+            0x1AFF_FFFC,
+            0xE28D_D008,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(BASE + 0x100, &[A_BX_LR]);
+    let off = m.run(Options::default(), arm(BASE));
+    assert!(
+        !found(&off, arm(BASE + 0x24)),
+        "control: the flag reads as the 1 stored"
+    );
+    let on = m.run(
+        Options {
+            reachable_locals: true,
+            ..Options::default()
+        },
+        arm(BASE),
+    );
+    assert!(found(&on, arm(BASE + 0x24)));
+    assert!(on.functions[&arm(BASE)].returns);
 }
