@@ -39,7 +39,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         "MATCH" => match_(c, i),
         "BAR" => bar(c, i),
         "MEMBAR" => membar(c, i),
-        "ERRBAR" | "CCTL" | "CCTLL" | "CCTLT" => Ok(()),
+        "ERRBAR" | "CCTL" | "CCTLL" | "CCTLT" | "LDGDEPBAR" => Ok(()),
         _ => return None,
     })
 }
@@ -289,7 +289,43 @@ fn redux(c: &mut Ctx, i: &Inst) -> Res<()> {
     c.store_dst(&i.ops[0], r)
 }
 
+fn match_any(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.ops.len() != 2 {
+        return bad("MATCH operands");
+    }
+    c.cap(CAP_GROUP_NON_UNIFORM);
+    c.cap(CAP_SHUFFLE);
+    let (lo, hi) = if i.has("U64") {
+        c.src_pair(&i.ops[1])?
+    } else {
+        (c.usrc(&i.ops[1])?, c.m.c_u32(0))
+    };
+    let u = c.u32t();
+    let scope = c.m.c_u32(SCOPE_SUBGROUP);
+    let mut mask = c.m.c_u32(0);
+    for k in 0..32 {
+        let lane = c.m.c_u32(k);
+        let l = c.m.emit(spv::GROUP_SHUFFLE, u, &[scope, lo, lane]);
+        let h = c.m.emit(spv::GROUP_SHUFFLE, u, &[scope, hi, lane]);
+        let el = c.cmp(op::I_EQUAL, l, lo);
+        let eh = c.cmp(op::I_EQUAL, h, hi);
+        let b = c.boolt();
+        let eq = c.m.emit(op::LOGICAL_AND, b, &[el, eh]);
+        let bit = c.m.c_u32(1 << k);
+        let zero = c.m.c_u32(0);
+        let v = c.select(u, eq, bit, zero);
+        mask = c.bin(op::BITWISE_OR, mask, v);
+    }
+    let t = c.m.c_bool(true);
+    let live = c.ballot(t);
+    let mask = c.bin(op::BITWISE_AND, mask, live);
+    c.store_dst(&i.ops[0], mask)
+}
+
 fn match_(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.has("ANY") {
+        return match_any(c, i);
+    }
     if !i.has("ALL") || i.ops.len() != 3 {
         return bad("MATCH form");
     }

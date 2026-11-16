@@ -205,3 +205,11 @@ fn lane_masks_read_the_subgroup_invocation() {
     let s = run(&[s2r], &["SR_LTMASK"]);
     assert!(!spirv_ops(&s.spirv).is_empty());
 }
+
+#[test]
+fn match_any_compares_every_lane() {
+    let m = word(0x1a1, 1, &[(16, 8, 4), (24, 8, 2), (79, 1, 1)]);
+    let s = run(&[m], &["MATCH.ANY"]);
+    let shuffles = spirv_ops(&s.spirv).iter().filter(|&&o| o == 345).count();
+    assert_eq!(shuffles, 64);
+}
