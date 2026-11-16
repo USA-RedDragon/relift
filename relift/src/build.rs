@@ -1949,15 +1949,7 @@ fn package(settings: &Settings, req: &PackageRequest<'_>, ui: &mut Ui) -> Result
     }
     if let Some(a) = req.android {
         let l = crate::android::launcher(req.exe, req.name, label)?;
-        let apk = crate::android::package(
-            a,
-            req.exe,
-            req.name,
-            &l.label,
-            &l.icons,
-            data_manifest.as_deref(),
-            ui,
-        )?;
+        let apk = crate::android::package(a, req.exe, req.name, &l, data_manifest.as_deref(), ui)?;
         ui.summary(&Line::new().text(format!("  apk: {}", apk.display())));
         return Ok(());
     }

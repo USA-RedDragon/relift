@@ -20,153 +20,34 @@ pub const MIN_API: u32 = 30;
 
 /// The activity class of the APK: SDL's activity plus launch arguments and
 /// environment variables from the intent, the haptic tick of the on-screen
-/// controller, and the manifest's landscape orientation kept (SDL asks for
-/// any orientation the user allows when its window is resizable, which put
-/// the game in portrait on a device held upright).
+/// controller, the game's settings pages, and the manifest's landscape
+/// orientation kept (SDL asks for any orientation the user allows when its
+/// window is resizable, which put the game in portrait on a device held
+/// upright).
 const ACTIVITY: &str = "dev.relift.app.MainActivity";
 
-const ACTIVITY_JAVA: &str = r#"package dev.relift.app;
+/// The Java sources of the app, compiled into `classes.dex` with SDL3's
+/// own classes.
+const JAVA: [(&str, &str); 7] = [
+    (
+        "MainActivity",
+        include_str!("android/java/MainActivity.java"),
+    ),
+    (
+        "SettingsActivity",
+        include_str!("android/java/SettingsActivity.java"),
+    ),
+    ("Ui", include_str!("android/java/Ui.java")),
+    ("Drivers", include_str!("android/java/Drivers.java")),
+    ("Catalog", include_str!("android/java/Catalog.java")),
+    ("GpuProbe", include_str!("android/java/GpuProbe.java")),
+    ("Restarter", include_str!("android/java/Restarter.java")),
+];
 
-import android.content.pm.ActivityInfo;
-import android.os.Build;
-import android.os.Bundle;
-import android.util.Log;
-import android.view.HapticFeedbackConstants;
-import android.view.KeyEvent;
-import android.window.OnBackInvokedCallback;
-import android.window.OnBackInvokedDispatcher;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
-import org.json.JSONObject;
-import org.libsdl.app.SDLActivity;
-
-public class MainActivity extends SDLActivity implements Runnable, OnBackInvokedCallback {
-    @Override
-    protected void onCreate(Bundle state) {
-        super.onCreate(state);
-        if (Build.VERSION.SDK_INT >= 33) {
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this);
-        }
-    }
-
-    @Override
-    public void setOrientationBis(int w, int h, boolean resizable, String hint) {
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-    }
-
-    @Override
-    public void onBackInvoked() {
-        onNativeKeyDown(KeyEvent.KEYCODE_BACK);
-        onNativeKeyUp(KeyEvent.KEYCODE_BACK);
-    }
-
-    @Override
-    protected String[] getArguments() {
-        String e = getIntent().getStringExtra("relift_env");
-        if (e != null) {
-            for (String kv : e.trim().split("\\s+")) {
-                int i = kv.indexOf('=');
-                if (i > 0) {
-                    nativeSetenv(kv.substring(0, i), kv.substring(i + 1));
-                }
-            }
-        }
-        getExternalFilesDir(null);
-        installGpuDriver(getIntent().getStringExtra("relift_gpu_driver_install"));
-        ArrayList<String> args = new ArrayList<>();
-        String driver = getIntent().getStringExtra("relift_gpu_driver");
-        if (driver != null && !driver.trim().isEmpty()) {
-            args.add("--relift-set");
-            args.add("video.gpu_driver=" + driver.trim());
-        }
-        String a = getIntent().getStringExtra("relift_args");
-        if (a != null && !a.trim().isEmpty()) {
-            args.addAll(Arrays.asList(a.trim().split("\\s+")));
-        }
-        return args.toArray(new String[0]);
-    }
-
-    private void installGpuDriver(String zip) {
-        if (zip == null || zip.isEmpty()) {
-            return;
-        }
-        File ext = getExternalFilesDir(null);
-        File src = new File(zip);
-        if (!src.isAbsolute() && ext != null) {
-            src = new File(ext, zip);
-        }
-        String name = src.getName().replaceAll("\\.zip$", "").replaceAll("[^A-Za-z0-9._-]", "_");
-        File root = new File(getFilesDir(), "gpu_drivers");
-        File tmp = new File(root, ".new-" + name);
-        File dest = new File(root, name);
-        try {
-            if (name.isEmpty() || name.startsWith(".") || name.equals("system") || name.length() >= 96) {
-                throw new IOException("not a usable package name: " + name);
-            }
-            delete(tmp);
-            if (!tmp.mkdirs()) {
-                throw new IOException("cannot make " + tmp);
-            }
-            try (ZipInputStream in = new ZipInputStream(new FileInputStream(src))) {
-                byte[] buf = new byte[1 << 16];
-                for (ZipEntry e; (e = in.getNextEntry()) != null; ) {
-                    String n = e.getName();
-                    if (e.isDirectory() || n.contains("/") || n.contains("\\") || n.startsWith(".")) {
-                        continue;
-                    }
-                    File f = new File(tmp, n);
-                    try (OutputStream out = new FileOutputStream(f)) {
-                        for (int r; (r = in.read(buf)) > 0; ) {
-                            out.write(buf, 0, r);
-                        }
-                    }
-                    f.setReadOnly();
-                }
-            }
-            String lib = new JSONObject(new String(Files.readAllBytes(new File(tmp, "meta.json").toPath()), "UTF-8"))
-                    .getString("libraryName");
-            if (lib.contains("/") || lib.startsWith(".") || !new File(tmp, lib).isFile()) {
-                throw new IOException("meta.json names no library of the package");
-            }
-            delete(dest);
-            if (!tmp.renameTo(dest)) {
-                throw new IOException("cannot move the package to " + dest);
-            }
-            Log.i("relift", "GPU driver package " + name + " installed (" + lib + ")");
-        } catch (Exception e) {
-            delete(tmp);
-            Log.e("relift", "GPU driver package " + zip + " not installed: " + e);
-        }
-    }
-
-    private static void delete(File f) {
-        File[] kids = f.listFiles();
-        if (kids != null) {
-            for (File k : kids) {
-                delete(k);
-            }
-        }
-        f.delete();
-    }
-
-    public void reliftHaptic() {
-        runOnUiThread(this);
-    }
-
-    @Override
-    public void run() {
-        getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-    }
-}
-"#;
+/// The drivers Get drivers offers, shipped as the asset `gpu_drivers.json`
+/// in APKs of games that draw with Vulkan. The app downloads an entry only
+/// from its https URL and installs it only when the file's SHA-256 matches.
+pub const GPU_DRIVERS_JSON: &str = include_str!("android/gpu_drivers.json");
 
 /// One Android target: the name `--target` takes and what the toolchains
 /// call it.
@@ -527,6 +408,32 @@ pub struct Apk<'a> {
     pub output: &'a Path,
     /// The game data manifest, shipped as an asset (crate::datamanifest).
     pub data_manifest: Option<&'a [u8]>,
+    /// What the settings pages say about the game.
+    pub about: &'a About,
+}
+
+/// What the settings pages say about the game and offer for it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct About {
+    /// The platform's name, such as `Switch`.
+    pub platform: String,
+    /// The game's version, or empty.
+    pub version: String,
+    /// The game draws with Vulkan, so a GPU driver can be chosen for it.
+    pub vulkan: bool,
+}
+
+/// The name the settings pages give a guest platform.
+#[must_use]
+pub fn platform_name(platform: &str) -> &str {
+    match platform {
+        "switch" => "Switch",
+        "gb" => "Game Boy",
+        "gbc" => "Game Boy Color",
+        "gba" => "Game Boy Advance",
+        "nds" => "Nintendo DS",
+        other => other,
+    }
 }
 
 /// How an APK is signed.
@@ -581,12 +488,14 @@ impl Signing {
     }
 }
 
-fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
-    let label = a
-        .label
-        .replace('&', "&amp;")
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;")
         .replace('<', "&lt;")
-        .replace('"', "&quot;");
+        .replace('"', "&quot;")
+}
+
+fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
+    let label = xml(a.label);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}" android:versionCode="1" android:versionName="1.0">
@@ -594,18 +503,33 @@ fn manifest(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> String {
   <uses-feature android:glEsVersion="0x00020000"/>
   <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
   <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
-  <application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+  {internet}<application android:label="{label}"{icon} android:extractNativeLibs="false" android:debuggable="{debuggable}" android:allowBackup="false" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+    <meta-data android:name="relift.gpu_driver" android:value="{vulkan}"/>
+    <meta-data android:name="relift.platform" android:value="{platform}"/>
+    <meta-data android:name="relift.game_version" android:value="{version}"/>
     <activity android:name="{ACTIVITY}" android:exported="true" android:launchMode="singleInstance" android:screenOrientation="sensorLandscape" android:configChanges="layoutDirection|locale|fontScale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
+      <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
     </activity>
+    <activity android:name="dev.relift.app.SettingsActivity" android:exported="false" android:taskAffinity="{package}.settings" android:excludeFromRecents="true" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"/>
+    <activity android:name="dev.relift.app.Restarter" android:exported="false" android:process=":restart" android:taskAffinity="{package}.restart" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+    <service android:name="dev.relift.app.GpuProbe" android:exported="false" android:process=":gpucheck"/>
   </application>
 </manifest>
 "#,
         package = a.package,
         target = sdk.target_sdk,
+        internet = if a.about.vulkan {
+            "<uses-permission android:name=\"android.permission.INTERNET\"/>\n  <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>\n  "
+        } else {
+            ""
+        },
+        vulkan = a.about.vulkan,
+        platform = xml(&a.about.platform),
+        version = xml(&a.about.version),
         icon = if a.icons.is_empty() {
             ""
         } else {
@@ -657,8 +581,7 @@ pub fn package(
     a: &AndroidBuild,
     exe: &Path,
     name: &str,
-    label: &str,
-    icons: &[(&'static str, Vec<u8>)],
+    launcher: &Launcher,
     data_manifest: Option<&[u8]>,
     ui: &mut Ui,
 ) -> Result<PathBuf, BoxError> {
@@ -669,14 +592,15 @@ pub fn package(
     build_apk(
         &Apk {
             package: &a.package,
-            label,
-            icons,
+            label: &launcher.label,
+            icons: &launcher.icons,
             target: a.target,
             program: exe,
             deps: &a.deps,
             work: &dir.join("apk"),
             output: &apk,
             data_manifest,
+            about: &launcher.about,
         },
         &a.sdk,
         &a.ndk,
@@ -700,6 +624,8 @@ pub struct Launcher {
     pub label: String,
     /// A density folder and the PNG bytes for each size.
     pub icons: Vec<(&'static str, Vec<u8>)>,
+    /// What the settings pages say about the game.
+    pub about: About,
 }
 
 /// The launcher of the program `exe`, from the identity it embeds: its
@@ -716,7 +642,32 @@ pub fn launcher(exe: &Path, seed: &str, label: &str) -> Result<Launcher, BoxErro
     Ok(Launcher {
         label: crate::appimage::display_name(&info, label),
         icons: crate::icon::launcher_pngs(info.identity.icon.as_ref(), seed),
+        about: About {
+            platform: platform_name(&info.identity.platform).to_string(),
+            version: info.identity.version.clone().unwrap_or_default(),
+            vulkan: info.identity.platform == "switch",
+        },
     })
+}
+
+/// The strings the manifest and the shortcuts name.
+const STRINGS_XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="game_settings">Game settings</string>
+</resources>
+"#;
+
+/// The Game settings shortcut on a long press of the game's icon.
+fn shortcuts_xml(package: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+  <shortcut android:shortcutId="game_settings" android:enabled="true" android:icon="@mipmap/ic_launcher" android:shortcutShortLabel="@string/game_settings" android:shortcutLongLabel="@string/game_settings">
+    <intent android:action="android.intent.action.VIEW" android:targetPackage="{package}" android:targetClass="dev.relift.app.SettingsActivity"/>
+  </shortcut>
+</shortcuts>
+"#
+    )
 }
 
 /// Links the manifest and the resources of the APK into `res/` of its work
@@ -742,6 +693,26 @@ fn link_resources(a: &Apk<'_>, sdk: &Sdk, debuggable: bool) -> Result<(), BoxErr
         )?;
         compiled.push(flat.join(format!("{dir}_ic_launcher.png.flat")));
     }
+    let values = a.work.join("values").join("values");
+    std::fs::create_dir_all(&values)?;
+    let strings = values.join("strings.xml");
+    relift_cache::write_if_changed(&strings, STRINGS_XML.as_bytes())?;
+    let xml_dir = a.work.join("values").join("xml");
+    std::fs::create_dir_all(&xml_dir)?;
+    let shortcuts = xml_dir.join("shortcuts.xml");
+    relift_cache::write_if_changed(&shortcuts, shortcuts_xml(a.package).as_bytes())?;
+    for f in [&strings, &shortcuts] {
+        run(
+            relift_proc::command(&sdk.aapt2)
+                .arg("compile")
+                .arg(f)
+                .arg("-o")
+                .arg(&flat),
+            "aapt2 compile",
+        )?;
+    }
+    compiled.push(flat.join("values_strings.arsc.flat"));
+    compiled.push(flat.join("xml_shortcuts.xml.flat"));
     run(
         relift_proc::command(&sdk.aapt2)
             .arg("link")
@@ -825,14 +796,61 @@ pub fn check_page_alignment(apk: &[u8]) -> Result<(), BoxError> {
 /// # Errors
 ///
 /// A tool fails; its output is in the message.
+fn classes(dir: &Path) -> Result<Vec<PathBuf>, BoxError> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "class"))
+        .collect();
+    v.sort();
+    Ok(v)
+}
+
+/// The compiled XML resources aapt2 wrote under `res/res` besides the icons.
+fn compiled_resources(w: &Path) -> Result<Vec<(String, Vec<u8>)>, BoxError> {
+    let mut out = Vec::new();
+    let base = w.join("res/res");
+    let Ok(dirs) = std::fs::read_dir(&base) else {
+        return Ok(out);
+    };
+    let mut dirs: Vec<PathBuf> = dirs.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    dirs.sort();
+    for d in dirs {
+        let dn = d
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if !dn.starts_with("xml") {
+            continue;
+        }
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&d)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .collect();
+        files.sort();
+        for f in files {
+            let n = f
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            out.push((format!("res/{dn}/{n}"), std::fs::read(&f)?));
+        }
+    }
+    Ok(out)
+}
+
 pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result<(), BoxError> {
     let w = a.work;
     let _ = std::fs::remove_dir_all(w);
     for d in ["java", "classes", "dex", "res"] {
         std::fs::create_dir_all(w.join(d))?;
     }
-    let java = w.join("java").join("MainActivity.java");
-    relift_cache::write_if_changed(&java, ACTIVITY_JAVA.as_bytes())?;
+    let mut sources = Vec::new();
+    for (class, text) in JAVA {
+        let f = w.join("java").join(format!("{class}.java"));
+        relift_cache::write_if_changed(&f, text.as_bytes())?;
+        sources.push(f);
+    }
     let cp = format!(
         "{}{}{}",
         sdk.android_jar.display(),
@@ -843,7 +861,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
         relift_proc::command(&sdk.javac)
             .args(["--release", "11", "-Xlint:-options", "-cp", &cp, "-d"])
             .arg(w.join("classes"))
-            .arg(&java),
+            .args(&sources),
         "javac",
     )?;
     run(
@@ -852,7 +870,7 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
             .arg(&sdk.android_jar)
             .arg("--output")
             .arg(w.join("dex"))
-            .arg(w.join("classes/dev/relift/app/MainActivity.class"))
+            .args(classes(&w.join("classes/dev/relift/app"))?)
             .arg(&a.deps.sdl3_jar),
         "d8",
     )?;
@@ -905,6 +923,15 @@ pub fn build_apk(a: &Apk<'_>, sdk: &Sdk, ndk: &Ndk, signing: &Signing) -> Result
     }
     if let Some(m) = a.data_manifest {
         z.add(&format!("assets/{}", crate::datamanifest::FILE), m.to_vec());
+    }
+    if a.about.vulkan {
+        z.add(
+            "assets/gpu_drivers.json",
+            GPU_DRIVERS_JSON.as_bytes().to_vec(),
+        );
+    }
+    for (name, data) in compiled_resources(w)? {
+        z.add(&name, data);
     }
     for (name, text) in a.deps.adrenotools.iter().flat_map(|t| &t.licenses) {
         z.add(&format!("assets/licenses/{name}.txt"), std::fs::read(text)?);
@@ -965,7 +992,7 @@ mod tests {
 
     #[test]
     fn the_activity_keeps_the_landscape_orientation() {
-        assert!(ACTIVITY_JAVA.contains(
+        assert!(JAVA[0].1.contains(
             "public void setOrientationBis(int w, int h, boolean resizable, String hint) {\n        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);"
         ));
     }
@@ -1055,6 +1082,11 @@ mod tests {
             work: Path::new("w"),
             output: Path::new("o"),
             data_manifest: None,
+            about: &About {
+                platform: "Switch".into(),
+                version: "1.0.2".into(),
+                vulkan: true,
+            },
         };
         let m = manifest(&a, &sdk, true);
         assert!(m.contains("package=\"dev.relift.game.x\""));
@@ -1062,5 +1094,22 @@ mod tests {
         assert!(m.contains("android:name=\"dev.relift.app.MainActivity\""));
         assert!(m.contains("A &amp; &quot;B&quot;"));
         assert!(m.contains("android:debuggable=\"true\""));
+        assert!(m.contains("android.permission.INTERNET"));
+        assert!(m.contains("android:name=\"relift.gpu_driver\" android:value=\"true\""));
+        assert!(m.contains("android:process=\":gpucheck\""));
+    }
+
+    #[test]
+    fn the_driver_list_is_https_with_a_checksum_per_entry() {
+        let v: serde_json::Value = serde_json::from_str(GPU_DRIVERS_JSON).unwrap();
+        let list = v["drivers"].as_array().unwrap();
+        assert!(!list.is_empty());
+        for d in list {
+            assert!(d["url"].as_str().unwrap().starts_with("https://"));
+            let sha = d["sha256"].as_str().unwrap();
+            assert_eq!(sha.len(), 64);
+            assert!(sha.bytes().all(|c| c.is_ascii_hexdigit()));
+            assert!(d["size"].as_u64().unwrap() > 0);
+        }
     }
 }

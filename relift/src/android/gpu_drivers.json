@@ -1,0 +1,14 @@
+{
+  "drivers": [
+    {
+      "name": "Turnip v26.0.0 R8",
+      "version": "26.0.0",
+      "author": "K11MCH1",
+      "size": 3478359,
+      "works_with": ["Adreno 730", "Adreno 740", "Adreno 750"],
+      "license": "MIT",
+      "url": "https://github.com/K11MCH1/AdrenoToolsDrivers/releases/download/v26.0.0-rc08/Turnip_v26.0.0_R8.zip",
+      "sha256": "e634db0f929e2205e95511c769071817d0390180ec72c8e690bc76375e813715"
+    }
+  ]
+}
