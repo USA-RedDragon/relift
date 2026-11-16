@@ -15,7 +15,9 @@
  * ROMs): a line is drawn at its HBlank edge, and a line also shows white
  * when forced blank was on at the render tick two lines before. A capture
  * reads source B from video RAM only when the bank DISPCNT selects is given
- * to LCDC, and the VRAM and FIFO displays leave bit 15 out of green.
+ * to LCDC, and the VRAM and FIFO displays leave bit 15 out of green. With
+ * POWCNT1 bit 0 clear both screens are black; an engine whose power bit is
+ * clear shows black (A) or white (B) through its master brightness.
  */
 #include "nds_int.h"
 
@@ -107,10 +109,14 @@ static void draw(rl_nds *m, nds_disp *d, unsigned y)
     for (unsigned n = 0; n < 2; n++) {
         nds_eng *e = &d->eng[n];
         uint32_t *o = dst[n];
-        bool powered = d->powcnt & (n ? 0x200u : 0x2u);
-        if (!powered || !(d->powcnt & 1)) {
+        if (!(d->powcnt & 1)) {
             for (unsigned x = 0; x < NDS_W; x++)
                 o[x] = 0;
+            continue;
+        }
+        if (!(d->powcnt & (n ? 0x200u : 0x2u))) {
+            for (unsigned x = 0; x < NDS_W; x++)
+                o[x] = nds_eng_bright(e, n ? WHITE : 0);
             continue;
         }
         nds_eng_line(m, e, y, d->l3d_on && n == 0 ? d->l3d : NULL);
