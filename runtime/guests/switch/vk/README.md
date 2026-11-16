@@ -169,13 +169,45 @@ error.
 
 ## Formats
 
+### 24-bit depth
+
 The console has `VK_FORMAT_D24_UNORM_S8_UINT` and
-`VK_FORMAT_X8_D24_UNORM_PACK32`, and a game may view an image as D24S8 even
-after the queries told it to use another depth format. MoltenVK on Apple GPUs
-without 24-bit depth reports both unsupported, yet creates images of them as
-`D32_SFLOAT_S8_UINT` and `D32_SFLOAT`. On that driver the format queries
-(`vk_format.c`) answer for the format it will use, so the game creates its
-depth images in a format its D24S8 views can share.
+`VK_FORMAT_X8_D24_UNORM_PACK32`, and games rely on them: one views an image as
+D24S8 after the queries told it to use another depth format, and a game built
+on The Forge stops when D24S8 reports no sampling. AMD GPUs (RADV, AMDVLK) and
+Apple GPUs have no 24-bit depth. On such a host (`vk_format.c`) the queries
+answer for `D32_SFLOAT_S8_UINT` and `D32_SFLOAT`, and images, image views,
+render pass attachments, image format lists, pipeline and inheritance
+rendering formats reach the host with those formats. Every 24-bit depth value
+is exact in 32-bit float, so depth tests and sampled depth match. A constant
+depth bias is in units of 2^-24 on D24 but of the primitive's float ulp on
+D32; on a substituted attachment the layer gives it as an absolute offset of
+constant x 2^-24 through `VK_EXT_depth_bias_control` (float representation,
+exact), in pipelines with static bias and for `vkCmdSetDepthBias`, whose
+values each command buffer keeps and gives again at each render pass,
+subpass and dynamic rendering begin. Depth-aspect copies from a buffer go
+through the decode path below (24-bit words to float, at submit); stencil
+copies are unchanged. Depth-aspect copies to a buffer give D32 float texels,
+not packed 24-bit ones, and are logged once.
+
+### Storage image formats
+
+A storage image or texel buffer access on the console takes its format from
+the view bound (Maxwell's formatted surface loads and stores carry none), and
+games declare one format in the shader and bind a view of another (one game's
+SMAA edge pass declares rg32f on an `R8G8B8A8_UNORM` view). In Vulkan that is
+undefined: NVIDIA and llvmpipe write all four components in the view's
+format, RADV only the shader format's two. With the formatless storage
+features on the host, `vk_spirv.c` rewrites each storage `OpTypeImage` format
+to Unknown and adds the two formatless capabilities, so every host uses the
+view's format. Image types that atomics use keep their format, and so do
+image types written with fewer than four components (DXC writes a `float2`
+as two), since a formatless write must cover every component of the view.
+
+Open question for a hardware test: what the console stores in B and A when a
+shader writes two components through a two-component format to an RGBA8
+view (zero and one, zero and zero, or the old texel). Today RADV writes zero
+and zero, NVIDIA its own choice; that game's SMAA reads only R and G.
 
 ### Compressed formats the host cannot sample
 
