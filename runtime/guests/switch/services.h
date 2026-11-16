@@ -61,6 +61,8 @@ void rl_srv_install_acc(void);
 void rl_srv_install_mm(void);
 /** @brief Registers csrng, the random number service. */
 void rl_srv_install_csrng(void);
+/** @brief Registers ectx:aw, the error context writer, and notif:a, the alarm notifications. */
+void rl_srv_install_ectx(void);
 
 /** @brief Registers every service of this file's group with sm:. Called by rl_hos_init. */
 RL_RUNTIME_API void rl_srv_install_all(void);
