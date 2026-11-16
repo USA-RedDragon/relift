@@ -23,6 +23,11 @@ RL_RUNTIME_API const rl_cpu_desc *rl_arm32_cpu(void);
 
 /** @brief The CPSR of c. */
 RL_RUNTIME_API uint32_t rl_arm32_cpsr(const rl_ctx *c);
+
+/** @brief The guest layer's answer to a code fetch whose waits entry is 0 (rl_arm32_fetch_slow). */
+typedef int64_t rl_arm32_fetch_fn(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq);
+/** @brief Installs the fetch hook; NULL makes such fetches cost one cycle. */
+RL_RUNTIME_API void rl_arm32_set_fetch_hook(rl_arm32_fetch_fn *fn);
 /**
  * @brief Writes the whole CPSR: flags, masks, Thumb bit, reserved bits and
  * mode, swapping r8 to r14 with the banks when the mode changes. Mode bits

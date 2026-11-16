@@ -109,6 +109,15 @@ uint32_t rl_arm32_cpsr(const rl_ctx *c)
            (uint32_t)c->i << 7 | (uint32_t)c->f << 6 | (uint32_t)c->t << 5 | (c->m & 0x1Fu);
 }
 
+static rl_arm32_fetch_fn *g_fetch;
+
+void rl_arm32_set_fetch_hook(rl_arm32_fetch_fn *fn) { g_fetch = fn; }
+
+int64_t rl_arm32_fetch_slow(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
+{
+    return g_fetch ? g_fetch(c, addr, log2, seq) : 1;
+}
+
 static void apply_mask(rl_ctx *c) { rl_set_irq_mask(c, g_other_lines | (c->i ? 0u : g_irq_lines)); }
 
 void rl_arm32_set_lines(rl_ctx *c, uint64_t irq, uint64_t other)

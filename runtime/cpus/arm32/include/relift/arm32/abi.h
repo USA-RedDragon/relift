@@ -112,7 +112,8 @@ struct rl_ctx {
     void *machine;
     /**
      * @brief Cycles of one access by region: waits[(addr >> 24) * 6 + log2(size) * 2 + seq] for
-     * addresses below 0x10000000 (the guest layer's table), or NULL for one cycle everywhere.
+     * addresses below 0x10000000 (the guest layer's table), or NULL for one cycle everywhere. An
+     * entry of 0 asks the guest layer's fetch hook (rl_arm32_fetch_slow), as a cache does.
      */
     const uint8_t *waits;
     /** @brief Bit r set: a sequential code fetch from region r costs one cycle (a prefetch buffer keeps up). */
@@ -231,14 +232,22 @@ static inline void rl_arm32_call(rl_ctx *c, uint32_t ret)
     c->depth++;
 }
 
+/**
+ * @brief The cycles of a code fetch of 1 << log2 bytes at addr whose
+ * region's entry in waits is 0, from the guest layer's fetch hook
+ * (rl_arm32_set_fetch_hook), which may also charge the clock itself.
+ */
+RL_RUNTIME_API int64_t rl_arm32_fetch_slow(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq);
+
 /** @brief Cycles of an access of 1 << log2 bytes at addr. */
-static inline int64_t rl_arm32_wait(const rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
+static inline int64_t rl_arm32_wait(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
 {
     if (!c->waits || addr >= 0x10000000u)
         return 1;
     if (seq && (c->fast_fetch >> (addr >> 24) & 1u))
         return 1;
-    return c->waits[(addr >> 24) * 6u + log2 * 2u + seq];
+    uint8_t w = c->waits[(addr >> 24) * 6u + log2 * 2u + seq];
+    return w ? w : rl_arm32_fetch_slow(c, addr, log2, seq);
 }
 
 /**
@@ -248,7 +257,8 @@ static inline int64_t rl_arm32_wait(const rl_ctx *c, uint32_t addr, unsigned log
  */
 static inline void rl_arm32_fetch(rl_ctx *c, uint32_t pc, unsigned thumb)
 {
-    c->time.budget -= rl_arm32_wait(c, pc, thumb ? 1u : 2u, 1u);
+    int64_t w = rl_arm32_wait(c, pc, thumb ? 1u : 2u, 1u);
+    c->time.budget -= w;
     c->data_open = 0;
 }
 
@@ -258,7 +268,9 @@ static inline void rl_arm32_refill(rl_ctx *c, uint32_t target, unsigned thumb, u
     if (!taken)
         return;
     unsigned w = thumb ? 1u : 2u;
-    c->time.budget -= rl_arm32_wait(c, target, w, 0u) + rl_arm32_wait(c, target, w, 1u);
+    int64_t n = rl_arm32_wait(c, target, w, 0u);
+    n += rl_arm32_wait(c, target, w, 1u);
+    c->time.budget -= n;
 }
 
 /**
