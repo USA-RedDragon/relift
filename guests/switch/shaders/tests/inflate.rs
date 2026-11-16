@@ -95,6 +95,72 @@ fn raw_deflate_without_the_wrapper() {
     assert_eq!(used, FIXED.len() - 6);
 }
 
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
+    let mut v = seed.to_vec();
+    for _ in 0..1 + rng.below(4) {
+        match rng.below(5) {
+            0 if !v.is_empty() => {
+                let i = rng.below(v.len());
+                v[i] ^= 1 << rng.below(8);
+            }
+            1 if !v.is_empty() => {
+                let i = rng.below(v.len());
+                v[i] = rng.next() as u8;
+            }
+            2 => v.truncate(rng.below(v.len() + 1)),
+            3 => {
+                let i = rng.below(v.len() + 1);
+                v.insert(i, rng.next() as u8);
+            }
+            _ => {
+                let n = rng.below(64);
+                v.extend((0..n).map(|_| rng.next() as u8));
+            }
+        }
+    }
+    v
+}
+
+/// A bounded fuzz pass: random and mutated streams never panic, never
+/// give more than the limit and never claim more input than they had.
+#[test]
+fn random_and_mutated_streams_fail_cleanly() {
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let seeds = [STORED, FIXED, DYNAMIC];
+    for i in 0..30_000 {
+        let input = if i % 4 == 0 {
+            let n = rng.below(256);
+            (0..n).map(|_| rng.next() as u8).collect()
+        } else {
+            mutate(&mut rng, seeds[i % 3])
+        };
+        let limit = [0, 1, 64, 1 << 12, 1 << 20][rng.below(5)];
+        if let Ok((out, used)) = zlib(&input, limit) {
+            assert!(out.len() <= limit && used <= input.len(), "{input:02x?}");
+        }
+        if let Some(raw) = input.get(2..)
+            && let Ok((out, used)) = inflate(raw, limit)
+        {
+            assert!(out.len() <= limit && used <= raw.len(), "{input:02x?}");
+        }
+    }
+}
+
 #[test]
 fn bad_input_is_an_error() {
     let mut bad = FIXED.to_vec();
