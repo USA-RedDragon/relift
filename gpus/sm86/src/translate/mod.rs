@@ -296,7 +296,7 @@ impl Ctx {
         if let Some(&v) = self.cbufs.get(&bank) {
             return Ok(v);
         }
-        if bank > 17 {
+        if bank > 31 {
             return bad(format!("constant bank c[{bank:#x}]"));
         }
         let st = match self.cbuf_block {
@@ -324,9 +324,11 @@ impl Ctx {
         Ok(var)
     }
 
-    /// One 32-bit word of constant bank `bank` at constant byte offset `off`.
+    /// One 32-bit word of constant bank `bank` at constant byte offset `off`,
+    /// taken modulo 64 KiB (the decoder prints the 16-bit field signed).
     pub fn load_cbuf(&mut self, bank: u32, off: i64) -> Res<u32> {
-        if off < 0 || off % 4 != 0 || off >= i64::from(CBUF_VEC4S) * 16 {
+        let off = off & 0xffff;
+        if off % 4 != 0 {
             return bad(format!("cbuf offset {off:#x}"));
         }
         let var = self.cbuf_var(bank)?;

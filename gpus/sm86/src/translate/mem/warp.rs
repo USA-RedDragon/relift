@@ -18,7 +18,6 @@ const SCOPE_DEVICE: u32 = 1;
 const SCOPE_WORKGROUP: u32 = 2;
 const SCOPE_SUBGROUP: u32 = 3;
 const SEM_ACQUIRE_RELEASE: u32 = 0x8;
-const SEM_SEQ_CST: u32 = 0x10;
 const SEM_UNIFORM: u32 = 0x40;
 const SEM_WORKGROUP: u32 = 0x100;
 const SEM_CROSS_WORKGROUP: u32 = 0x200;
@@ -45,7 +44,7 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
 }
 
 impl Ctx {
-    fn lane_id(&mut self) -> u32 {
+    pub(crate) fn lane_id(&mut self) -> u32 {
         self.cap(CAP_GROUP_NON_UNIFORM);
         let u = self.u32t();
         let var = self.builtin(BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID, INPUT, u);
@@ -372,17 +371,15 @@ fn bar(c: &mut Ctx, i: &Inst) -> Res<()> {
     Ok(())
 }
 
+/// MEMBAR. Vulkan has no sequentially consistent fence, so MEMBAR.SC is
+/// an acquire-release fence too.
 fn membar(c: &mut Ctx, i: &Inst) -> Res<()> {
     let scope = if i.has("CTA") {
         SCOPE_WORKGROUP
     } else {
         SCOPE_DEVICE
     };
-    let order = if i.has("SC") {
-        SEM_SEQ_CST
-    } else {
-        SEM_ACQUIRE_RELEASE
-    };
+    let order = SEM_ACQUIRE_RELEASE;
     let s = c.m.c_u32(scope);
     let sem =
         c.m.c_u32(order | SEM_UNIFORM | SEM_WORKGROUP | SEM_CROSS_WORKGROUP);

@@ -189,7 +189,7 @@ fn ldc(c: &mut Ctx, i: &Inst) -> Res<()> {
         words.push(match index {
             None => {
                 if o % 4 != 0 {
-                    let base = c.m.c_u32(o as u32);
+                    let base = c.m.c_u32((o & 0xffff) as u32);
                     c.load_cbuf_dyn(bank, base)?
                 } else {
                     c.load_cbuf(bank, o)?

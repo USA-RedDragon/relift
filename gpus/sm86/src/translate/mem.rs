@@ -100,7 +100,7 @@ pub(crate) fn parse_addr(s: &str, wide_default: bool) -> Res<Addr> {
         rest.remove(0);
     }
     for t in rest.split('+') {
-        if t == "RZ" || t == "RZ.X4" || t == "RZ.X8" || t == "RZ.X16" {
+        if t.is_empty() || t == "RZ" || t == "RZ.X4" || t == "RZ.X8" || t == "RZ.X16" {
             continue;
         }
         if let Some(h) = t.strip_prefix("-0x") {
