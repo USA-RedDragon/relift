@@ -781,3 +781,49 @@ pub(crate) fn frnd(c: &mut Ctx, i: &Inst) -> Res<()> {
     let out = if half { c.f32_to_f16(rb, 0, false) } else { rb };
     c.store_dst(&i.ops[0], out)
 }
+
+/// MUFU.EX2.F16: the device cuts the exponential toward zero to half
+/// precision, with overflow giving infinity. An integer or negligible exponent
+/// gives an exact power of two or one, which the single-precision `exp2`
+/// may miss by an ulp.
+pub(crate) fn mufu16(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.mods.as_slice() != ["EX2", "F16"] {
+        return bad(format!("MUFU {:?}", i.mods));
+    }
+    let (v, m) = c.raw(&i.ops[1])?;
+    if m.not {
+        return bad("MUFU source modifiers");
+    }
+    let h = pick(c, v, m.swz, 16, false)?;
+    let h = if m.abs { c.and_k(h, 0x7fff) } else { h };
+    let h = if m.neg {
+        c.sh(op::BITWISE_XOR, h, 0x8000)
+    } else {
+        h
+    };
+    let xb = c.f16_to_f32(h, false);
+    let f = c.f32t();
+    let x = c.as_float(xb);
+    let r = c.ext(f, glsl::EXP2, &[x]);
+    let rb = c.as_bits(r);
+    let fl = c.ext(f, glsl::FLOOR, &[x]);
+    let t = c.boolt();
+    let is_int = c.m.emit(op::F_ORD_EQUAL, t, &[fl, x]);
+    let ax = c.ext(f, glsl::F_ABS, &[x]);
+    let tiny_k = c.m.c_f32(2.0f32.powi(-24).to_bits());
+    let tiny = c.m.emit(op::F_ORD_LESS_THAN_EQUAL, t, &[ax, tiny_k]);
+    let close = c.lor(is_int, tiny);
+    let near = c.f32_to_f16(rb, 0, false);
+    let down = c.f32_to_f16(rb, 3, false);
+    let inf = c.kc(0x7c00);
+    let max = c.kc(0x7bff);
+    let is_max = c.icmp_op(op::I_EQUAL, down, max);
+    let big = {
+        let k = c.m.c_f32(65536.0f32.to_bits());
+        c.m.emit(op::F_ORD_GREATER_THAN_EQUAL, t, &[r, k])
+    };
+    let over = c.land(is_max, big);
+    let down = c.bpick(over, inf, down);
+    let out = c.bpick(close, near, down);
+    c.store_dst(&i.ops[0], out)
+}

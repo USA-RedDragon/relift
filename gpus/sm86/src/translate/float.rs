@@ -545,6 +545,9 @@ fn arith(c: &mut Ctx, i: &Inst) -> Res<()> {
 }
 
 fn mufu(c: &mut Ctx, i: &Inst) -> Res<()> {
+    if i.has("F16") {
+        return super::int::conv::mufu16(c, i);
+    }
     let f = c.f32t();
     let a = c.fsrc(&i.ops[1])?;
     let kind = i.mods.first().copied().unwrap_or("");
