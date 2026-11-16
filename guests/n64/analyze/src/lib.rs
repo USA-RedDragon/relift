@@ -40,7 +40,9 @@
 //!   four instructions from a `LUI` that write only `k0` and `k1` and jump
 //!   through a register to a constant), and every constant code address a
 //!   run computes that no run reached, while new ones appear
-//!   ([`Origin::AddressTaken`]).
+//!   ([`Origin::AddressTaken`]). Each trampoline also becomes a segment at
+//!   every exception vector, where programs copy it, so the vectors are
+//!   lifted code the runtime binds once the copy is in RDRAM.
 //! - Scan: every source is scanned for dense code regions (32-word
 //!   windows where 29 words decode, fewer than half are zero and one is a
 //!   branch). The parts of a region that a boot or DMA segment holds use

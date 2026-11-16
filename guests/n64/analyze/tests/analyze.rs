@@ -341,6 +341,17 @@ fn an_exception_trampoline_roots_its_handler() {
     put(&mut b, at(h), &[addiu(V0, ZERO, 1), eret()]);
     let rep = run(&b);
     assert_eq!(function(&rep, h), Some(Origin::Exception));
+    let off = at(ENTRY + 0x100) as u32;
+    for v in [0x8000_0000, 0x8000_0080, 0x8000_0100, 0x8000_0180] {
+        let entry = if v == 0x8000_0100 { 0xA000_0100 } else { v };
+        assert_eq!(function(&rep, entry), Some(Origin::Exception), "{v:08x}");
+        assert!(
+            rep.units
+                .iter()
+                .any(|u| u.link == Some(v) && u.offset == off && u.len == 16),
+            "the trampoline is a unit linked at {v:08x}"
+        );
+    }
 }
 
 /// A run of functions linked at `base` that call each other: each has a

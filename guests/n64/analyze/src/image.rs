@@ -58,6 +58,12 @@ pub enum SegmentOrigin {
         /// The votes for the link address (zero when not linked).
         votes: u32,
     },
+    /// An exception vector trampoline placed at a vector address, where a
+    /// program copies it.
+    Vector {
+        /// The trampoline's address in the segment it was found in.
+        from: u32,
+    },
 }
 
 /// A run of source bytes placed at a link address.

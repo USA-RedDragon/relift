@@ -108,7 +108,10 @@ pub fn analyze_with(rom: &[u8], opts: Options) -> Result<Report, AnalyzeError> {
         });
         d.start(entry, &taken, &[])?;
         taken.extend(d.taken());
-        let mut new = Vec::new();
+        let mut new: Vec<Segment> = vector_copies(&d.image)
+            .into_iter()
+            .filter(|v| !known.contains(v))
+            .collect();
         for (loc, run) in d.runs() {
             for (site, dma) in &run.dma {
                 if let DmaConst::Pi { dram, cart, len } = *dma
@@ -311,7 +314,7 @@ impl<'a> Driver<'a> {
                         self.root((i, v), Origin::Exception);
                     }
                 }
-                for t in trampolines(&self.image, i) {
+                for (_, _, t) in trampolines(&self.image, i) {
                     for s in self.image.targets(i, t) {
                         self.root((s, t), Origin::Exception);
                     }
@@ -710,11 +713,12 @@ impl<'a> Driver<'a> {
     }
 }
 
-/// The trampoline targets of segment `seg`: a run of up to four
-/// instructions from a `LUI` that writes only `k0` and `k1` and ends in a
-/// jump through a register to a constant, the shape of an exception
-/// vector that a program copies to the vector addresses.
-fn trampolines(image: &Image<'_>, seg: u32) -> Vec<u32> {
+/// The trampolines of segment `seg` as (address, length in bytes, target):
+/// a run of up to four instructions from a `LUI` that writes only `k0` and
+/// `k1` and ends in a jump through a register to a constant, with its delay
+/// slot, the shape of an exception vector that a program copies to the
+/// vector addresses.
+fn trampolines(image: &Image<'_>, seg: u32) -> Vec<(u32, u32, u32)> {
     let s = &image.segs[seg as usize];
     let mut out = Vec::new();
     for rel in (0..s.len).step_by(4) {
@@ -742,7 +746,7 @@ fn trampolines(image: &Image<'_>, seg: u32) -> Vec<u32> {
             match l.block.exit.next {
                 Next::Dynamic(_) => {
                     if let [crate::val::Abs::K(t)] = o.targets[..] {
-                        out.push(t as u32);
+                        out.push((pc0, pc.wrapping_add(8).wrapping_sub(pc0), t as u32));
                     }
                     break;
                 }
@@ -756,5 +760,35 @@ fn trampolines(image: &Image<'_>, seg: u32) -> Vec<u32> {
     }
     out.sort_unstable();
     out.dedup();
+    out
+}
+
+/// The segments that place each trampoline of the shared segments of
+/// `image` at every exception vector, for the copies a program makes.
+fn vector_copies(image: &Image<'_>) -> Vec<Segment> {
+    let mut out: Vec<Segment> = Vec::new();
+    for i in 0..image.segs.len() as u32 {
+        let s = &image.segs[i as usize];
+        if !s.shared() || matches!(s.origin, SegmentOrigin::Vector { .. }) {
+            continue;
+        }
+        for (at, len, _) in trampolines(image, i) {
+            let Some(offset) = s.source_offset(at) else {
+                continue;
+            };
+            for v in VECTORS {
+                let seg = Segment {
+                    source: s.source,
+                    offset,
+                    len,
+                    link: Some(v & !0x2000_0000),
+                    origin: SegmentOrigin::Vector { from: at },
+                };
+                if !out.contains(&seg) {
+                    out.push(seg);
+                }
+            }
+        }
+    }
     out
 }
