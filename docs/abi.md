@@ -2211,8 +2211,15 @@ the machine's SP interface drives through `runtime/guests/n64/run`.
   link of `JAL`, `JALR`, `BGEZAL` and `BLTZAL` adds it, and the absolute
   targets of `J`, `JAL`, `JR` and `JALR` subtract it. The build cuts each
   run of RSP code the analysis finds into images of at most 4 KiB that
-  overlap by 8 bytes. An image of all 4 KiB runs across the end of IMEM:
+  overlap by 8 bytes, and lifts each IMEM layout the analysis finds a
+  microcode making (its own code with the overlays its DMAs load over it)
+  as an image at IMEM 0. An image of all 4 KiB runs across the end of IMEM:
   the delay slot of its last word is its first word.
+- In a layout image, a branch or fall-through to a word that a DMA of the
+  microcode may overwrite, or that the layout does not know, goes through
+  `rl_indirect` (all of them when the analysis could not follow every path
+  and DMA), and the word is no successor of the block, so the layer checks
+  the bytes there on entry and binds the image of what IMEM holds.
 - Each instruction charges one cycle (a branch and its delay slot two) and
   every block ends in a sync point whose slow path is `rl_rsp_sync`: it goes
   on while the slice has cycles left and the RSP runs, and otherwise stores

@@ -15,7 +15,11 @@ every CPU access outside RDRAM and at a slice event while it runs.
 - **Images.** At most 4 KiB of RSP code each, lifted at its own offsets so
   it runs at any IMEM address: the unit, the length, the bytes and three
   successor entries per word (the words its block goes to without a
-  computed jump, and whether it holds a delay slot).
+  computed jump, and whether it holds a delay slot). The build lifts the
+  runs of RSP code the analysis finds and each IMEM layout a microcode
+  makes with its overlays; in a layout image a branch into IMEM the
+  microcode's DMAs may overwrite is no successor and goes through dispatch.
+  In an image of all 4 KiB the delay slot of the last word is word 0.
 - **Binding.** Every IMEM word has a dispatch slot. At an unbound word every
   image word equal to IMEM's there is a candidate (image, base), found
   through an index of every image word by value; a slot

@@ -22,6 +22,14 @@
 //! its bytes and, per word, the words its block goes to without a computed
 //! jump, so the layer checks the bytes in IMEM against the image before it
 //! enters lifted code there.
+//!
+//! Each [`relift_n64_analyze::RspLayout`] (an IMEM layout a microcode makes
+//! with the overlays its own DMAs load) becomes an image at IMEM 0 too. In
+//! it a branch or fall-through to a word the microcode's DMAs may overwrite
+//! (or that the layout does not know) goes through dispatch and is no
+//! successor, so the image binds where IMEM holds its bytes and the layer
+//! checks the overwritten words on their own. An image of all 4 KiB wraps:
+//! the delay slot of its last word is its first.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -524,9 +532,86 @@ fn pieces(images: &[RspImage]) -> Vec<(Source, u32, u32)> {
     out
 }
 
+/// One image to lift: where its bytes come from, the bytes, which words are
+/// code and which a transfer enters only through dispatch.
+struct Plan {
+    source: Source,
+    offset: u32,
+    bytes: Vec<u8>,
+    /// Per word: it is code of the image.
+    known: Vec<bool>,
+    /// Per word: a branch or fall-through there goes through dispatch.
+    cut: Vec<bool>,
+}
+
+/// The images of the IMEM layouts of `report`: each at IMEM 0, up to its
+/// last known word, with the words a DMA of its microcode may overwrite
+/// (all, when the analysis could not tell) and the words it does not know
+/// entered only through dispatch.
+fn layout_plans<'a>(src: &dyn Fn(Source) -> &'a [u8], report: &Report) -> Vec<Plan> {
+    let mut out = Vec::new();
+    for l in &report.rsp_layouts {
+        let Some(first) = l.parts.first() else {
+            continue;
+        };
+        let end = l.parts.iter().map(|p| p.imem + p.len).max().unwrap_or(0);
+        let words = (end / 4) as usize;
+        let mut bytes = vec![0u8; end as usize];
+        let mut known = vec![false; words];
+        for p in &l.parts {
+            let Some(b) = src(p.source).get(p.offset as usize..(p.offset + p.len) as usize) else {
+                continue;
+            };
+            bytes[p.imem as usize..(p.imem + p.len) as usize].copy_from_slice(b);
+            for k in p.imem / 4..(p.imem + p.len) / 4 {
+                known[k as usize] = true;
+            }
+        }
+        let cut = (0..words)
+            .map(|k| {
+                let a = 4 * k as u32;
+                l.unknown || !known[k] || l.ranges.iter().any(|&(lo, hi)| (lo..hi).contains(&a))
+            })
+            .collect();
+        out.push(Plan {
+            source: first.source,
+            offset: first.offset,
+            bytes,
+            known,
+            cut,
+        });
+    }
+    out
+}
+
+/// Sends the constant targets of `b`'s exit that `cut` holds through
+/// dispatch: the transfer becomes a computed one, which `rl_indirect`
+/// enters after the layer checks the bytes there.
+fn cut_exit(b: &mut Block, cut: impl Fn(u64) -> bool) {
+    let sync = matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)).then(|| b.insts.pop());
+    match b.exit.next {
+        Next::Const(t) if matches!(b.exit.flow, Flow::Jump) && cut(t) => {
+            b.exit.next = Next::Dynamic(konst(b, t));
+        }
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } if matches!(b.exit.flow, Flow::Jump) && (cut(taken) || cut(not_taken)) => {
+            let t = konst(b, taken);
+            let n = konst(b, not_taken);
+            b.exit.next = Next::Dynamic(push(b, Op::Select(cond, t, n), Some(Width::W32)));
+        }
+        _ => {}
+    }
+    b.insts.extend(sync.flatten());
+}
+
 /// Lifts every RSP image of `report` (the analysis of the big-endian image
-/// `rom`) as relocatable images of at most 4 KiB, one unit each;
-/// `image_id` identifies the ROM to the runtime.
+/// `rom`), one unit each: the runs of RSP code as relocatable images of at
+/// most 4 KiB, and each IMEM layout the microcodes make (with their
+/// overlays) as an image at IMEM 0. `image_id` identifies the ROM to the
+/// runtime.
 #[must_use]
 pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Images {
     let streams: Vec<Vec<u8>> = report
@@ -534,132 +619,172 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Images {
         .iter()
         .map(|s| s.kind.decode(&rom[s.offset..]).unwrap_or_default())
         .collect();
-    let fe = Rsp;
-    let mut out = Images::default();
-    for (source, start, len) in pieces(&report.rsp) {
-        let src = source_bytes(rom, &streams, source);
-        let Some(bytes) = src.get(start as usize..(start + len) as usize) else {
+    let src = |s: Source| source_bytes(rom, &streams, s);
+    let mut ranges: Vec<RspImage> = report.rsp.clone();
+    ranges.extend(report.rsp_layouts.iter().flat_map(|l| {
+        l.parts.iter().map(|p| RspImage {
+            source: p.source,
+            offset: p.offset,
+            len: p.len,
+            imem: Some(p.imem),
+            hash: 0,
+            origin: relift_n64_analyze::RspOrigin::Scan,
+        })
+    }));
+    let mut plans: Vec<Plan> = Vec::new();
+    for (source, start, len) in pieces(&ranges) {
+        let Some(bytes) = src(source).get(start as usize..(start + len) as usize) else {
             continue;
         };
-        let k = out.images.len();
-        let base = 0u64;
-        let end = u64::from(len);
-        let mut blocks: Blocks = BTreeMap::new();
-        let mut raws: BTreeMap<u64, u64> = BTreeMap::new();
-        for off in (0..len as usize).step_by(4) {
-            let pc = base + off as u64;
-            let w = be32(bytes, off);
-            let slot = if off + 8 <= len as usize {
-                be32(bytes, off + 4)
-            } else if len == IMEM_SIZE {
-                be32(bytes, 0)
-            } else {
-                0
-            };
-            let r = fe.lift_at(pc, w, slot);
-            if let Err(e) = &r {
-                out.unlifted.push(Unlifted {
-                    image: k,
-                    pc,
-                    failure: e.clone(),
-                });
-            }
-            raws.insert(pc, u64::from(w) | (u64::from(slot) << 32));
-            blocks.insert(pc, r);
-        }
-        out.instructions += blocks.len();
-        let mut succ = Vec::with_capacity(3 * blocks.len());
-        for r in blocks.values() {
-            match r {
-                Ok(b) => succ.extend(succ_of(b, base, end)),
-                Err(_) => succ.extend([NO_SUCC, NO_SUCC, 0]),
-            }
-        }
-        let mut covered: BTreeSet<u64> = BTreeSet::new();
-        let mut fns: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
-        let none = BTreeSet::new();
-        let first = reach(&blocks, base, &none);
-        covered.extend(&first);
-        fns.insert(base, first);
-        let pcs: Vec<u64> = blocks.keys().copied().collect();
-        for pc in pcs {
-            if covered.contains(&pc) {
-                continue;
-            }
-            let r = reach(&blocks, pc, &covered);
-            covered.extend(&r);
-            fns.insert(pc, r);
-        }
-        let functions: Vec<Function<'_>> = fns
-            .iter()
-            .map(|(&entry, pcs)| {
-                let last = pcs
-                    .iter()
-                    .copied()
-                    .filter(|p| *p >= entry)
-                    .max()
-                    .unwrap_or(entry);
-                Function {
-                    entry,
-                    name: format!("n64_rsp{k}_{entry:03x}"),
-                    guest_name: None,
-                    span: last - entry + 4,
-                    insts: pcs
-                        .iter()
-                        .map(|pc| {
-                            let i = match &blocks[pc] {
-                                Ok(block) => Insn::Lifted {
-                                    block,
-                                    raw: raws[pc],
-                                },
-                                Err(e) => Insn::Failed(e),
-                            };
-                            (*pc, i)
-                        })
-                        .collect(),
-                    tables: BTreeMap::new(),
-                    pads: BTreeSet::new(),
-                }
-            })
-            .collect();
-        let symbol = unit_symbol(k);
-        let hash = fnv(bytes);
-        let opts = Options {
-            unit_name: format!("rsp{k}"),
-            unit_symbol: symbol.clone(),
-            module_base: base,
-            io_map: IoMap::default(),
-            image_id,
-            enter_anywhere: Some(u64::MAX),
-            entry_ranges: true,
-            ..Options::default()
-        };
-        let output = relift_emit::emit(&fe, &functions, &[], &opts);
-        for (pc, insn) in undefined_in(&output) {
-            if !out.unlifted.iter().any(|u| u.image == k && u.pc == pc) {
-                out.unlifted.push(Unlifted {
-                    image: k,
-                    pc,
-                    failure: LiftFailure {
-                        insn: u64::from(insn),
-                        message: "the emitter has no C form of it".into(),
-                    },
-                });
-            }
-        }
-        out.images.push(Image {
+        let words = (len / 4) as usize;
+        plans.push(Plan {
             source,
             offset: start,
-            hash,
-            symbol,
-            dir: format!("rsp{k}"),
-            output,
-            functions: functions.len(),
             bytes: bytes.to_vec(),
-            succ,
+            known: vec![true; words],
+            cut: vec![false; words],
         });
     }
+    plans.extend(layout_plans(&src, report));
+    let mut out = Images::default();
+    for plan in plans {
+        lift_plan(&mut out, plan, image_id);
+    }
     out
+}
+
+/// Lifts `plan` as the next image of `out`.
+fn lift_plan(out: &mut Images, plan: Plan, image_id: [u8; 32]) {
+    let fe = Rsp;
+    let Plan {
+        source,
+        offset: start,
+        bytes,
+        known,
+        cut,
+    } = plan;
+    let len = bytes.len() as u32;
+    let k = out.images.len();
+    let base = 0u64;
+    let end = u64::from(len);
+    let words = known.len();
+    let whole = len == IMEM_SIZE;
+    let is_cut = |t: u64| {
+        let i = ((t & 0xFFF) / 4) as usize;
+        t < end && cut.get(i).copied().unwrap_or(false) || whole && t == end && cut[0]
+    };
+    let mut blocks: Blocks = BTreeMap::new();
+    let mut raws: BTreeMap<u64, u64> = BTreeMap::new();
+    for i in (0..words).filter(|i| known[*i]) {
+        let off = 4 * i;
+        let pc = base + off as u64;
+        let w = be32(&bytes, off);
+        let slot = match (i + 1 < words, whole) {
+            (true, _) => be32(&bytes, off + 4),
+            (false, true) => be32(&bytes, 0),
+            (false, false) => 0,
+        };
+        let mut r = fe.lift_at(pc, w, slot);
+        match &mut r {
+            Err(e) => out.unlifted.push(Unlifted {
+                image: k,
+                pc,
+                failure: e.clone(),
+            }),
+            Ok(b) => cut_exit(b, is_cut),
+        }
+        raws.insert(pc, u64::from(w) | (u64::from(slot) << 32));
+        blocks.insert(pc, r);
+    }
+    out.instructions += blocks.len();
+    let mut succ = Vec::with_capacity(3 * words);
+    for i in 0..words {
+        match blocks.get(&(4 * i as u64)) {
+            Some(Ok(b)) => succ.extend(succ_of(b, base, end)),
+            _ => succ.extend([NO_SUCC, NO_SUCC, 0]),
+        }
+    }
+    let mut covered: BTreeSet<u64> = BTreeSet::new();
+    let mut fns: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
+    let pcs: Vec<u64> = blocks.keys().copied().collect();
+    for pc in pcs {
+        if covered.contains(&pc) {
+            continue;
+        }
+        let r = reach(&blocks, pc, &covered);
+        covered.extend(&r);
+        fns.insert(pc, r);
+    }
+    let functions: Vec<Function<'_>> = fns
+        .iter()
+        .map(|(&entry, pcs)| {
+            let last = pcs
+                .iter()
+                .copied()
+                .filter(|p| *p >= entry)
+                .max()
+                .unwrap_or(entry);
+            Function {
+                entry,
+                name: format!("n64_rsp{k}_{entry:03x}"),
+                guest_name: None,
+                span: last - entry + 4,
+                insts: pcs
+                    .iter()
+                    .map(|pc| {
+                        let i = match &blocks[pc] {
+                            Ok(block) => Insn::Lifted {
+                                block,
+                                raw: raws[pc],
+                            },
+                            Err(e) => Insn::Failed(e),
+                        };
+                        (*pc, i)
+                    })
+                    .collect(),
+                tables: BTreeMap::new(),
+                pads: BTreeSet::new(),
+            }
+        })
+        .collect();
+    let symbol = unit_symbol(k);
+    let hash = fnv(&bytes);
+    let opts = Options {
+        unit_name: format!("rsp{k}"),
+        unit_symbol: symbol.clone(),
+        module_base: base,
+        io_map: IoMap::default(),
+        image_id,
+        enter_anywhere: Some(u64::MAX),
+        entry_ranges: true,
+        ..Options::default()
+    };
+    let output = relift_emit::emit(&fe, &functions, &[], &opts);
+    for (pc, insn) in undefined_in(&output) {
+        if !out.unlifted.iter().any(|u| u.image == k && u.pc == pc) {
+            out.unlifted.push(Unlifted {
+                image: k,
+                pc,
+                failure: LiftFailure {
+                    insn: u64::from(insn),
+                    message: "the emitter has no C form of it".into(),
+                },
+            });
+        }
+    }
+    let nfns = functions.len();
+    drop(functions);
+    out.images.push(Image {
+        source,
+        offset: start,
+        hash,
+        symbol,
+        dir: format!("rsp{k}"),
+        output,
+        functions: nfns,
+        bytes,
+        succ,
+    });
 }
 
 /// `rsp_images.c`: the `rl_rsp_image` of every image and the list the program
@@ -836,6 +961,26 @@ mod tests {
                 (Source::Stream(2), 0x10, 0x20),
             ]
         );
+    }
+
+    #[test]
+    fn a_branch_into_imem_a_dma_may_overwrite_goes_through_dispatch() {
+        let beq = 0x1000_0004;
+        let add = 0x0022_1820;
+        let mut b = Rsp.lift_at(0x100, beq, add).expect("lifts");
+        cut_exit(&mut b, |t| {
+            (0x100..0x200).contains(&(t & 0xFFF)) && t != 0x108
+        });
+        b.verify().expect("verifies");
+        assert!(matches!(b.exit.next, Next::Dynamic(_)));
+        assert!(matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)));
+        assert_eq!(succ_of(&b, 0, 0x1000), [NO_SUCC, NO_SUCC, SUCC_SLOT]);
+        let mut b = Rsp.lift_at(0x100, add, 0).expect("lifts");
+        cut_exit(&mut b, |t| t == 0x200);
+        assert_eq!(succ_of(&b, 0, 0x1000), [0x41, NO_SUCC, 0]);
+        cut_exit(&mut b, |t| t == 0x104);
+        assert!(matches!(b.exit.next, Next::Dynamic(_)));
+        assert_eq!(succ_of(&b, 0, 0x1000), [NO_SUCC, NO_SUCC, 0]);
     }
 
     #[test]
