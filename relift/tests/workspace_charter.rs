@@ -243,6 +243,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-gpu-sm86",
+        band: 2,
+        why: "the SM86 (Ampere) SASS decoder and a SASS to SPIR-V translator; reads instruction words only",
+        normal: NONE,
+        dev: &["relift-cache"],
+        build: NONE,
+    },
+    Charter {
         member: "relift-gb-formats",
         band: 2,
         why: "the Game Boy cartridge format: header, mapper kinds, size codes, checksums and bank layout; reads bytes only",
@@ -503,6 +511,8 @@ const CHARTERS: &[Charter] = &[
 enum Folder {
     Core,
     Cpus,
+    /// `gpus/<gpu>`, a GPU shader decoder and translator.
+    Gpus,
     /// `guests/<name>/*`; each name is its own guest.
     Guest(String),
     /// `testguest/`, a guest of its own.
@@ -520,6 +530,7 @@ impl Folder {
         match parts.as_slice() {
             ["core", _] => Folder::Core,
             ["cpus", _] => Folder::Cpus,
+            ["gpus", _] => Folder::Gpus,
             ["guests", name, _] => Folder::Guest((*name).to_string()),
             ["testguest"] => Folder::TestGuest,
             ["override", _] => Folder::Override,
