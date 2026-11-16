@@ -1171,6 +1171,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-n64-analyze"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-mips",
+ "relift-cpu-rsp",
+ "relift-ir",
+ "relift-n64-formats",
+]
+
+[[package]]
 name = "relift-n64-formats"
 version = "0.1.0"
 
@@ -1180,6 +1190,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-n64-analyze",
  "relift-n64-formats",
  "relift-proc",
  "serde_json",
