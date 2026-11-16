@@ -22,6 +22,26 @@ pub enum Denorm {
     Unknown,
 }
 
+/// The subgroup size a stage can count on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Warp {
+    /// 32, fixed or required through `requiredSubgroupSize` with full
+    /// subgroups.
+    Fixed32,
+    /// 32 in practice, but the size cannot be required: the runtime must
+    /// check it at start-up.
+    Unchecked32,
+    /// A multiple of 32 (64 or 128), fixed or required: a guest warp is a
+    /// 32-lane cluster of a subgroup.
+    Wide,
+    /// A fixed size below 32.
+    Narrow(u32),
+    /// Not controllable and possibly below 32.
+    Varies,
+    /// No subgroup operations in the stage.
+    Absent,
+}
+
 /// The device clock a shader can read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Clock {
@@ -37,16 +57,12 @@ pub enum Clock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostProfile {
     pub name: &'static str,
-    /// Compute shaders can run with 32-wide full subgroups (a required
-    /// subgroup size of 32, or a fixed native size of 32).
-    pub warp32_compute: bool,
-    /// Fragment shaders can run with 32-wide subgroups.
-    pub warp32_fragment: bool,
-    /// Vertex and other graphics stages can run with 32-wide subgroups.
-    pub warp32_graphics: bool,
-    /// The 32-wide size is native but not guaranteed by the API: the runtime
-    /// must check it at start-up and refuse the device otherwise.
-    pub warp32_needs_check: bool,
+    /// Subgroups in compute shaders.
+    pub warp_compute: Warp,
+    /// Subgroups in fragment shaders.
+    pub warp_fragment: Warp,
+    /// Subgroups in the other graphics stages.
+    pub warp_graphics: Warp,
     /// Subgroup quad operations in the fragment stage.
     pub quad_fragment: bool,
     /// `OpDemoteToHelperInvocation` keeps a demoted invocation running as a
@@ -97,10 +113,9 @@ impl HostProfile {
     pub fn nvidia() -> HostProfile {
         HostProfile {
             name: "nvidia",
-            warp32_compute: true,
-            warp32_fragment: true,
-            warp32_graphics: true,
-            warp32_needs_check: false,
+            warp_compute: Warp::Fixed32,
+            warp_fragment: Warp::Fixed32,
+            warp_graphics: Warp::Fixed32,
             quad_fragment: true,
             demote: true,
             bda: true,
@@ -126,7 +141,7 @@ impl HostProfile {
     pub fn radv() -> HostProfile {
         HostProfile {
             name: "radv",
-            warp32_graphics: false,
+            warp_graphics: Warp::Varies,
             denorm: Denorm::Unknown,
             denorm_preserve_mode: true,
             denorm_flush_mode: true,
@@ -144,7 +159,7 @@ impl HostProfile {
     pub fn amd_pro() -> HostProfile {
         HostProfile {
             name: "amd_pro",
-            warp32_fragment: false,
+            warp_fragment: Warp::Varies,
             max_shared_bytes: 32768,
             clock: Clock::None,
             ..HostProfile::radv()
@@ -156,7 +171,7 @@ impl HostProfile {
     pub fn anv() -> HostProfile {
         HostProfile {
             name: "anv",
-            warp32_fragment: false,
+            warp_fragment: Warp::Varies,
             int64_atomics_shared: false,
             clock: Clock::Subgroup,
             max_shared_bytes: 49152,
@@ -173,10 +188,9 @@ impl HostProfile {
     pub fn moltenvk() -> HostProfile {
         HostProfile {
             name: "moltenvk",
-            warp32_compute: true,
-            warp32_fragment: true,
-            warp32_graphics: false,
-            warp32_needs_check: true,
+            warp_compute: Warp::Unchecked32,
+            warp_fragment: Warp::Unchecked32,
+            warp_graphics: Warp::Absent,
             quad_fragment: true,
             demote: false,
             bda: true,
@@ -202,10 +216,9 @@ impl HostProfile {
     pub fn adreno() -> HostProfile {
         HostProfile {
             name: "adreno",
-            warp32_compute: false,
-            warp32_fragment: false,
-            warp32_graphics: false,
-            warp32_needs_check: false,
+            warp_compute: Warp::Wide,
+            warp_fragment: Warp::Wide,
+            warp_graphics: Warp::Absent,
             quad_fragment: true,
             demote: true,
             bda: true,
@@ -231,6 +244,7 @@ impl HostProfile {
     pub fn turnip() -> HostProfile {
         HostProfile {
             name: "turnip",
+            warp_graphics: Warp::Wide,
             int64_atomics_buffer: false,
             int64_atomics_image: false,
             max_samplers: 1 << 20,
@@ -245,6 +259,9 @@ impl HostProfile {
     pub fn mali() -> HostProfile {
         HostProfile {
             name: "mali",
+            warp_compute: Warp::Narrow(16),
+            warp_fragment: Warp::Narrow(16),
+            warp_graphics: Warp::Narrow(16),
             int64_atomics_shared: true,
             denorm_preserve_mode: true,
             clock: Clock::None,
@@ -262,10 +279,9 @@ impl HostProfile {
     pub fn lavapipe() -> HostProfile {
         HostProfile {
             name: "lavapipe",
-            warp32_compute: false,
-            warp32_fragment: false,
-            warp32_graphics: false,
-            warp32_needs_check: false,
+            warp_compute: Warp::Narrow(8),
+            warp_fragment: Warp::Narrow(8),
+            warp_graphics: Warp::Absent,
             quad_fragment: true,
             demote: true,
             bda: true,
@@ -319,10 +335,9 @@ impl HostProfile {
     pub fn minimal() -> HostProfile {
         HostProfile {
             name: "minimal",
-            warp32_compute: false,
-            warp32_fragment: false,
-            warp32_graphics: false,
-            warp32_needs_check: false,
+            warp_compute: Warp::Varies,
+            warp_fragment: Warp::Absent,
+            warp_graphics: Warp::Absent,
             quad_fragment: false,
             demote: false,
             bda: false,
@@ -353,12 +368,19 @@ pub enum WarpPath {
     /// Subgroup operations: the runtime must run the stage with full
     /// 32-wide subgroups.
     Subgroup,
-    /// Quad operations or the fragment position only: exact on any device
-    /// with quad operations.
+    /// Quad-local operations only, through quads of the host's
+    /// subgroups: exact on any device with quad operations.
     Quad,
+    /// 32-lane clusters of a wider subgroup: the runtime must run the
+    /// stage with full subgroups of a multiple of 32.
+    Cluster,
     /// Workgroup memory lane arrays and barriers: a guest warp is 32
-    /// consecutive local invocations.
-    Emulated,
+    /// consecutive local invocations. Needs every warp operation in
+    /// workgroup-uniform control flow.
+    Shared,
+    /// The host's own subgroups, which are not 32 wide: not exact (listed
+    /// in [`HostReport::inexact`]).
+    Host,
 }
 
 /// How global memory is addressed.

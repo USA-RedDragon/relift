@@ -218,7 +218,7 @@ fn ldsm(c: &mut Ctx, i: &Inst) -> Res<()> {
                 let first = c.m.emit(op::I_ADD, u, &[base, pair]);
                 let kk = c.m.c_u32(k as u32);
                 let src = c.m.emit(op::I_ADD, u, &[first, kk]);
-                let ra = c.shuffle_from(addr, src);
+                let ra = c.shuffle(addr, src);
                 let col = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[row, one]);
                 let at = c.m.emit(op::I_ADD, u, &[ra, col]);
                 let p = c.scratch_word(Space::Shared, at, 0);
@@ -229,7 +229,7 @@ fn ldsm(c: &mut Ctx, i: &Inst) -> Res<()> {
             c.m.emit(op::BITWISE_OR, u, &[half[0], hi])
         } else {
             let src = c.m.emit(op::I_ADD, u, &[base, row]);
-            let ra = c.shuffle_from(addr, src);
+            let ra = c.shuffle(addr, src);
             let col = c.m.emit(op::SHIFT_LEFT_LOGICAL, u, &[quad, two]);
             let at = c.m.emit(op::I_ADD, u, &[ra, col]);
             let p = c.scratch_word(Space::Shared, at, 0);

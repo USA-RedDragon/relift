@@ -12,6 +12,8 @@
 //! barriers, special registers).
 
 mod atomic;
+mod clock;
+pub(crate) mod lanes;
 mod scratch;
 mod warp;
 

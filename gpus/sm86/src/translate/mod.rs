@@ -19,7 +19,7 @@ mod tex;
 pub use host::{
     Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, GUEST_MEMORY_SET, GlobalPath,
     HostProfile, HostReport, LOCK_BINDING, LOCK_WORDS, SEGMENT_SHIFT_DEFAULT, SEGMENT_SHIFT_SPEC,
-    WarpPath,
+    Warp, WarpPath,
 };
 pub use tex::{
     Dim, ImageDim, ImageKind, Kind, SAMPLER_BINDING, TEXTURE_KIND_SPEC, image_binding,
@@ -179,6 +179,8 @@ pub(crate) struct Ctx {
     pub denorm: denorm::State,
     /// Helper functions, emitted after `main`.
     pub funcs: Vec<u32>,
+    /// The last clock value read, low and high words.
+    pub clock_vars: Option<(u32, u32)>,
 }
 
 impl Ctx {
@@ -643,9 +645,11 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
         host: o.host.clone(),
         denorm: denorm::State::default(),
         funcs: Vec::new(),
+        clock_vars: None,
     };
     c.iface.host.host = o.host.name;
     c.denorm_plan(&code.insts);
+    c.warp_plan(&code.insts);
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);
     let main = c.m.id();

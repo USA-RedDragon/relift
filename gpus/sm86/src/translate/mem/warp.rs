@@ -1,22 +1,18 @@
 //! Warp and block level operations: SHFL, VOTE, VOTEU, REDUX, MATCH, the
 //! barriers and fences, and the special registers that describe a lane.
 //!
-//! A warp is a Vulkan subgroup, so the translated shader only means what the
-//! guest meant when the device runs it with a subgroup size of 32 (the
-//! runtime must require that size for any program that reads
-//! `SR_LANEID` or uses these instructions). Lane `n` is the subgroup
-//! invocation `n`. Block barriers become workgroup barriers whatever their
-//! id; partial barriers (an arrival count) are not supported.
+//! The lanes of a warp come from [`super::lanes`], which maps them to the
+//! host's subgroups or to workgroup memory as the host profile allows.
+//! Block barriers become workgroup barriers whatever their id; partial
+//! barriers (an arrival count) are not supported.
 
 use super::spv;
 use crate::spirv::op;
-use crate::translate::{Ctx, INPUT, Res, bad};
+use crate::translate::{Ctx, Res, bad};
 use crate::{Inst, Operand};
 
-const BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID: u32 = 41;
 const SCOPE_DEVICE: u32 = 1;
 const SCOPE_WORKGROUP: u32 = 2;
-const SCOPE_SUBGROUP: u32 = 3;
 const SEM_ACQUIRE_RELEASE: u32 = 0x8;
 const SEM_UNIFORM: u32 = 0x40;
 const SEM_WORKGROUP: u32 = 0x100;
@@ -24,9 +20,6 @@ const SEM_CROSS_WORKGROUP: u32 = 0x200;
 const CAP_GROUP_NON_UNIFORM: u32 = 61;
 const CAP_VOTE: u32 = 62;
 const CAP_ARITHMETIC: u32 = 63;
-const CAP_BALLOT: u32 = 64;
-const CAP_SHUFFLE: u32 = 65;
-const CAP_SHADER_CLOCK: u32 = 5055;
 
 pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     Some(match i.mnemonic {
@@ -44,34 +37,6 @@ pub(crate) fn inst(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
 }
 
 impl Ctx {
-    pub(crate) fn lane_id(&mut self) -> u32 {
-        self.cap(CAP_GROUP_NON_UNIFORM);
-        let u = self.u32t();
-        let var = self.builtin(BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID, INPUT, u);
-        self.m.emit(op::LOAD, u, &[var])
-    }
-
-    /// The 32-bit mask of lanes for which `pred` holds, among the lanes
-    /// that are active.
-    fn ballot(&mut self, pred: u32) -> u32 {
-        self.cap(CAP_GROUP_NON_UNIFORM);
-        self.cap(CAP_BALLOT);
-        let u = self.u32t();
-        let v4 = self.m.t_vec(u, 4);
-        let scope = self.m.c_u32(SCOPE_SUBGROUP);
-        let b = self.m.emit(spv::GROUP_BALLOT, v4, &[scope, pred]);
-        self.m.emit(op::COMPOSITE_EXTRACT, u, &[b, 0])
-    }
-
-    /// `val` as held by subgroup invocation `lane`.
-    pub(super) fn shuffle_from(&mut self, val: u32, lane: u32) -> u32 {
-        self.cap(CAP_GROUP_NON_UNIFORM);
-        self.cap(CAP_SHUFFLE);
-        let u = self.u32t();
-        let scope = self.m.c_u32(SCOPE_SUBGROUP);
-        self.m.emit(spv::GROUP_SHUFFLE, u, &[scope, val, lane])
-    }
-
     fn bin(&mut self, o: u16, a: u32, b: u32) -> u32 {
         let u = self.u32t();
         self.m.emit(o, u, &[a, b])
@@ -111,11 +76,14 @@ fn s2r(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     };
     let v = match name.as_str() {
         "SR_LANEID" => c.lane_id(),
-        "SR_CLOCKLO" | "SR_CLOCK" => {
-            let (lo, _) = clock(c);
-            lo
-        }
-        "SR_CLOCKHI" => clock(c).1,
+        "SR_CLOCKLO" | "SR_CLOCK" => match c.guest_clock() {
+            Ok((lo, _)) => lo,
+            Err(e) => return Some(Err(e)),
+        },
+        "SR_CLOCKHI" => match c.guest_clock() {
+            Ok((_, hi)) => hi,
+            Err(e) => return Some(Err(e)),
+        },
         "SR_SMEMSZ" => {
             let words = c.m.spec_u32(
                 super::scratch::SHARED_DEFAULT_WORDS,
@@ -144,25 +112,15 @@ fn cs2r(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
     if !matches!(name.as_str(), "SR_CLOCKLO" | "SR_CLOCK") {
         return None;
     }
-    let (lo, hi) = clock(c);
+    let (lo, hi) = match c.guest_clock() {
+        Ok(v) => v,
+        Err(e) => return Some(Err(e)),
+    };
     Some(if i.has("32") {
         c.store_dst(&i.ops[0], lo)
     } else {
         c.store_pair(&i.ops[0], lo, hi)
     })
-}
-
-/// The SM clock as (low, high) words, from the shader clock extension.
-fn clock(c: &mut Ctx) -> (u32, u32) {
-    c.cap(CAP_SHADER_CLOCK);
-    c.exts.insert("SPV_KHR_shader_clock");
-    let u = c.u32t();
-    let v2 = c.m.t_vec(u, 2);
-    let scope = c.m.c_u32(SCOPE_DEVICE);
-    let t = c.m.emit(spv::READ_CLOCK, v2, &[scope]);
-    let lo = c.m.emit(op::COMPOSITE_EXTRACT, u, &[t, 0]);
-    let hi = c.m.emit(op::COMPOSITE_EXTRACT, u, &[t, 1]);
-    (lo, hi)
 }
 
 fn shfl(c: &mut Ctx, i: &Inst) -> Res<()> {
@@ -185,12 +143,17 @@ fn shfl(c: &mut Ctx, i: &Inst) -> Res<()> {
     let Some(mode) = mode else {
         return bad("SHFL mode");
     };
-    c.cap(CAP_GROUP_NON_UNIFORM);
-    c.cap(CAP_SHUFFLE);
     let a = c.usrc(&i.ops[2])?;
     let b = c.usrc(&i.ops[3])?;
     let cl = c.usrc(&i.ops[4])?;
+    let quad = c.quad_only() && super::lanes::shfl_is_quad(i);
     let lane = c.lane_id();
+    let lane = if quad {
+        let k3 = c.m.c_u32(3);
+        c.bin(op::BITWISE_AND, lane, k3)
+    } else {
+        lane
+    };
     let k31 = c.m.c_u32(31);
     let k8 = c.m.c_u32(8);
     let bval = c.bin(op::BITWISE_AND, b, k31);
@@ -225,8 +188,11 @@ fn shfl(c: &mut Ctx, i: &Inst) -> Res<()> {
         }
     };
     let src = c.select(u, valid, j, lane);
-    let scope = c.m.c_u32(SCOPE_SUBGROUP);
-    let v = c.m.emit(spv::GROUP_SHUFFLE, u, &[scope, a, src]);
+    let v = if quad {
+        c.quad_shuffle(a, src)
+    } else {
+        c.shuffle(a, src)
+    };
     c.store_reg(d, v);
     c.store_pred(pd, valid);
     Ok(())
@@ -254,9 +220,7 @@ fn vote(c: &mut Ctx, i: &Inst) -> Res<()> {
     } else {
         return bad("VOTE mode");
     };
-    let b = c.boolt();
-    let scope = c.m.c_u32(SCOPE_SUBGROUP);
-    let r = c.m.emit(o, b, &[scope, p]);
+    let r = c.vote(o, p);
     c.store_pdst(pd, r)
 }
 
@@ -291,9 +255,7 @@ fn redux(c: &mut Ctx, i: &Inst) -> Res<()> {
     c.cap(CAP_GROUP_NON_UNIFORM);
     c.cap(CAP_ARITHMETIC);
     let v = c.usrc(&i.ops[1])?;
-    let u = c.u32t();
-    let scope = c.m.c_u32(SCOPE_SUBGROUP);
-    let r = c.m.emit(o, u, &[scope, 0, v]);
+    let r = c.reduce(o, v);
     c.store_dst(&i.ops[0], r)
 }
 
@@ -301,20 +263,17 @@ fn match_any(c: &mut Ctx, i: &Inst) -> Res<()> {
     if i.ops.len() != 2 {
         return bad("MATCH operands");
     }
-    c.cap(CAP_GROUP_NON_UNIFORM);
-    c.cap(CAP_SHUFFLE);
     let (lo, hi) = if i.has("U64") {
         c.src_pair(&i.ops[1])?
     } else {
         (c.usrc(&i.ops[1])?, c.m.c_u32(0))
     };
     let u = c.u32t();
-    let scope = c.m.c_u32(SCOPE_SUBGROUP);
+    let ls = c.gather(lo);
+    let hs = c.gather(hi);
     let mut mask = c.m.c_u32(0);
     for k in 0..32 {
-        let lane = c.m.c_u32(k);
-        let l = c.m.emit(spv::GROUP_SHUFFLE, u, &[scope, lo, lane]);
-        let h = c.m.emit(spv::GROUP_SHUFFLE, u, &[scope, hi, lane]);
+        let (l, h) = (ls[k as usize], hs[k as usize]);
         let el = c.cmp(op::I_EQUAL, l, lo);
         let eh = c.cmp(op::I_EQUAL, h, hi);
         let b = c.boolt();
@@ -324,8 +283,7 @@ fn match_any(c: &mut Ctx, i: &Inst) -> Res<()> {
         let v = c.select(u, eq, bit, zero);
         mask = c.bin(op::BITWISE_OR, mask, v);
     }
-    let t = c.m.c_bool(true);
-    let live = c.ballot(t);
+    let live = c.active();
     let mask = c.bin(op::BITWISE_AND, mask, live);
     c.store_dst(&i.ops[0], mask)
 }
@@ -345,14 +303,12 @@ fn match_(c: &mut Ctx, i: &Inst) -> Res<()> {
         (c.usrc(&i.ops[2])?, c.m.c_u32(0))
     };
     let b = c.boolt();
-    let scope = c.m.c_u32(SCOPE_SUBGROUP);
-    let e0 = c.m.emit(spv::GROUP_ALL_EQUAL, b, &[scope, lo]);
-    let e1 = c.m.emit(spv::GROUP_ALL_EQUAL, b, &[scope, hi]);
+    let e0 = c.all_equal(lo);
+    let e1 = c.all_equal(hi);
     let eq = c.m.emit(op::LOGICAL_AND, b, &[e0, e1]);
     c.store_pdst(&i.ops[0], eq)?;
     if !matches!(i.ops[1], Operand::Reg(255, _)) {
-        let t = c.m.c_bool(true);
-        let all = c.ballot(t);
+        let all = c.active();
         let zero = c.m.c_u32(0);
         let u = c.u32t();
         let m = c.select(u, eq, all, zero);

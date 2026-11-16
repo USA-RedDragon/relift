@@ -167,6 +167,7 @@ pub mod glsl {
     pub const S_MAX: u32 = 42;
     pub const PACK_HALF_2X16: u32 = 58;
     pub const UNPACK_HALF_2X16: u32 = 62;
+    pub const FIND_I_LSB: u32 = 73;
     pub const FIND_S_MSB: u32 = 74;
     pub const FIND_U_MSB: u32 = 75;
     pub const S_CLAMP: u32 = 45;

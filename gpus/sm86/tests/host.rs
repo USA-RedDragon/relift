@@ -1,5 +1,7 @@
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{Denorm, HostProfile, Options, translate_with};
+use relift_gpu_sm86::translate::{
+    ClockPath, Denorm, HostProfile, Options, WarpPath, translate_with,
+};
 
 fn word(op: u32, form: u32, fields: &[(u32, u32, u64)]) -> [u8; 16] {
     let mut w: u128 =
@@ -99,4 +101,113 @@ fn unknown_hosts_repair_both_forms() {
         assert_eq!(s.interface.host.denorm_fixups, 1);
         assert_eq!(s.interface.host.host, "moltenvk");
     }
+}
+
+fn spirv_ops(words: &[u32]) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut k = 5;
+    while k < words.len() {
+        out.push(words[k] & 0xffff);
+        k += ((words[k] >> 16) as usize).max(1);
+    }
+    out
+}
+
+fn warp_program(guarded_exit: bool) -> Program {
+    let mut b = Vec::new();
+    if guarded_exit {
+        b.extend(word(0x14d, 4, &[(12, 3, 0), (87, 3, 7)]));
+    }
+    b.extend(word(
+        0x189,
+        1,
+        &[
+            (16, 8, 2),
+            (24, 8, 3),
+            (32, 8, 4),
+            (58, 2, 3),
+            (64, 8, 5),
+            (81, 3, 7),
+        ],
+    ));
+    b.extend(word(
+        0x006,
+        1,
+        &[(16, 8, 6), (72, 2, 1), (81, 3, 7), (87, 3, 7)],
+    ));
+    b.extend(word(0x3c4, 1, &[(16, 8, 7), (24, 8, 2), (78, 3, 4)]));
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+fn on(p: &Program, host: HostProfile) -> relift_gpu_sm86::translate::Shader {
+    translate_with(
+        p,
+        &Options {
+            host,
+            ..Options::default()
+        },
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
+const CONTROL_BARRIER: u32 = 224;
+const GROUP_SHUFFLE: u32 = 345;
+const GROUP_BALLOT: u32 = 339;
+const VECTOR_EXTRACT_DYNAMIC: u32 = 77;
+const READ_CLOCK: u32 = 5056;
+
+#[test]
+fn warp_paths_follow_the_host() {
+    let p = warp_program(false);
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    assert!(!s.interface.host.check_warp32);
+    assert_eq!(s.interface.host.warp_ops, 3);
+    let s = on(&p, HostProfile::moltenvk());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    assert!(s.interface.host.check_warp32);
+    let s = on(&p, HostProfile::adreno());
+    assert_eq!(s.interface.host.warp, WarpPath::Cluster);
+    assert!(spirv_ops(&s.spirv).contains(&VECTOR_EXTRACT_DYNAMIC));
+    for h in [
+        HostProfile::lavapipe(),
+        HostProfile::mali(),
+        HostProfile::minimal(),
+    ] {
+        let s = on(&p, h);
+        assert_eq!(s.interface.host.warp, WarpPath::Shared);
+        assert!(s.interface.host.inexact.is_empty());
+        let ops = spirv_ops(&s.spirv);
+        assert!(!ops.contains(&GROUP_SHUFFLE));
+        assert!(!ops.contains(&GROUP_BALLOT));
+        assert!(ops.iter().filter(|&&o| o == CONTROL_BARRIER).count() >= 6);
+    }
+}
+
+#[test]
+fn divergent_warp_operations_are_reported() {
+    let p = warp_program(true);
+    assert!(p.decode()[0].as_ref().is_ok_and(|i| i.guard.is_some()));
+    let s = on(&p, HostProfile::lavapipe());
+    assert_eq!(s.interface.host.warp, WarpPath::Host);
+    assert_eq!(s.interface.host.inexact.len(), 1);
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.warp, WarpPath::Subgroup);
+    assert!(s.interface.host.inexact.is_empty());
+}
+
+#[test]
+fn clock_without_a_host_clock_counts() {
+    let mut b = Vec::new();
+    b.extend(word(0x805, 1, &[(16, 8, 2), (72, 8, 0x50)]));
+    exit_and_halt(&mut b);
+    let p = Program::parse(&b);
+    let s = on(&p, HostProfile::nvidia());
+    assert_eq!(s.interface.host.clock, ClockPath::Device);
+    assert!(spirv_ops(&s.spirv).contains(&READ_CLOCK));
+    let s = on(&p, HostProfile::moltenvk());
+    assert_eq!(s.interface.host.clock, ClockPath::Counter);
+    assert!(!spirv_ops(&s.spirv).contains(&READ_CLOCK));
+    assert!(s.interface.cbufs.contains(&0));
 }
