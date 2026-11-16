@@ -1,8 +1,10 @@
 //! Block-local optimization passes.
 
+use std::collections::HashMap;
+
 use crate::interp::{eval_bin, eval_cmp, eval_un};
 use crate::{
-    AddrClass, BinOp, Block, CmpOp, Exit, ExtKind, Inst, IoKind, IoMap, Next, Op, Order, UnOp,
+    AddrClass, BinOp, Block, CmpOp, Exit, ExtKind, Inst, IoKind, IoMap, Next, Op, Order, Reg, UnOp,
     Value, Width,
 };
 
@@ -345,6 +347,81 @@ pub fn classify_io(block: &Block, map: &IoMap) -> Block {
         inst.op = op;
     }
     out
+}
+
+/// The block that runs `head` and then `tail`: `head`'s address and length
+/// with `tail`'s exit, for a `head` that always goes on to `tail`.
+///
+/// A read of a register after a write of it becomes the written value, and
+/// only the last write of each register stays, so the result behaves in
+/// the interpreter as `head` followed by `tail`.
+pub fn fuse(head: &Block, tail: &Block) -> Block {
+    let mut insts: Vec<Inst> = Vec::with_capacity(head.insts.len() + tail.insts.len());
+    let mut written: HashMap<Reg, (Value, usize)> = HashMap::new();
+    let mut map = Vec::new();
+    let mut dead = vec![false; head.insts.len() + tail.insts.len()];
+    for part in [head, tail] {
+        map = vec![0u32; part.insts.len()];
+        for (i, inst) in part.insts.iter().enumerate() {
+            let op = remap(&inst.op, &map);
+            match op {
+                Op::Get(r) => {
+                    if let Some((v, _)) = written.get(&r) {
+                        map[i] = v.0;
+                        continue;
+                    }
+                }
+                Op::Set(r, v) => {
+                    if let Some((_, at)) = written.insert(r, (v, insts.len())) {
+                        dead[at] = true;
+                    }
+                }
+                _ => {}
+            }
+            map[i] = insts.len() as u32;
+            insts.push(Inst {
+                op,
+                width: inst.width,
+            });
+        }
+    }
+    let mut place = vec![0u32; insts.len()];
+    let mut kept: Vec<Inst> = Vec::with_capacity(insts.len());
+    for (i, inst) in insts.iter().enumerate() {
+        if !dead[i] {
+            place[i] = kept.len() as u32;
+            kept.push(Inst {
+                op: remap(&inst.op, &place),
+                width: inst.width,
+            });
+        }
+    }
+    let r = |v: Value| Value(place[map[v.index()] as usize]);
+    let next = match tail.exit.next {
+        Next::Const(a) => Next::Const(a),
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } => Next::Select {
+            cond: r(cond),
+            taken,
+            not_taken,
+        },
+        Next::Dynamic(v) => Next::Dynamic(r(v)),
+    };
+    Block {
+        regs: head.regs,
+        addr_width: head.addr_width,
+        pc: head.pc,
+        len: head.len,
+        insts: kept,
+        exit: Exit {
+            next,
+            flow: tail.exit.flow,
+        },
+        bank: head.bank,
+    }
 }
 
 /// The values of `block` that are constant: built from [`Op::Const`] by

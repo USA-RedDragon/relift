@@ -613,3 +613,67 @@ fn binary16_to_integer_saturates_at_every_width() {
     assert_eq!(to(u, 0x7bff, 16), 0xffe0);
     assert_eq!(to(s, 0x7bff, 64), 65504);
 }
+
+#[test]
+fn a_fused_block_behaves_as_its_two_blocks_in_turn() {
+    let mut h = Builder::new(file(), Width::W64, 0x100);
+    let a = h.get(Reg(0));
+    let k = h.konst(Width::W64, 3);
+    let s = h.add(a, k);
+    h.set(Reg(0), s);
+    h.set(Reg(1), a);
+    let at = h.konst(Width::W64, 0x1008);
+    h.store(at, s, Endian::Little, Order::Plain);
+    let head = h.jump(4, 0x200);
+    let mut t = Builder::new(file(), Width::W64, 0x200);
+    let a = t.get(Reg(0));
+    let b = t.get(Reg(1));
+    let at = t.konst(Width::W64, 0x1008);
+    let m = t.load(at, Width::W64, Endian::Little, Order::Plain);
+    let s = t.add(a, m);
+    t.set(Reg(1), s);
+    let c = t.cmp(CmpOp::Ult, b, s);
+    t.set(Reg(2), c);
+    let tail = t.finish(
+        4,
+        Exit {
+            next: Next::Dynamic(b),
+            flow: Flow::Return,
+        },
+    );
+    let fused = relift_ir::fuse(&head, &tail);
+    fused.verify().expect("verifies");
+    assert_eq!(
+        (fused.pc, fused.len, fused.exit.flow),
+        (0x100, 4, Flow::Return)
+    );
+    let sets = |r: u16| {
+        fused
+            .insts
+            .iter()
+            .filter(|i| matches!(i.op, Op::Set(Reg(x), _) if x == r))
+            .count()
+    };
+    assert_eq!((sets(0), sets(1), sets(2)), (1, 1, 1));
+    assert!(
+        !fused
+            .insts
+            .iter()
+            .skip(1)
+            .any(|i| matches!(i.op, Op::Get(_)))
+    );
+    let start = || {
+        let mut s = State::new(4);
+        s.regs[0] = 0x40;
+        s.regs[1] = 9;
+        (s, mem())
+    };
+    let (mut s1, mut m1) = start();
+    run(&head, &mut s1, &mut m1).expect("runs");
+    let two = run(&tail, &mut s1, &mut m1).expect("runs");
+    let (mut s2, mut m2) = start();
+    let one = run(&fused, &mut s2, &mut m2).expect("runs");
+    assert_eq!((one.next, one.flow), (two.next, two.flow));
+    assert_eq!(s1.regs, s2.regs);
+    assert_eq!(m1.bytes, m2.bytes);
+}

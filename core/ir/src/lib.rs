@@ -48,6 +48,6 @@ pub use ops::{
     AtomicOp, BinOp, Call, CmpOp, CryptoOp, Endian, ExtKind, FpArgs, FpOp, FpRound, IoKind, Konst,
     LaneArgs, Op, Order, UnOp, Value, Width,
 };
-pub use opt::{classify_io, dce, simplify};
+pub use opt::{classify_io, dce, fuse, simplify};
 pub use regs::{Reg, RegDecl, RegFile};
 pub use text::{ParseError, parse};

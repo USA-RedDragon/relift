@@ -18,12 +18,14 @@
 mod binary;
 mod consts;
 mod incremental;
+mod inline;
 mod slots;
 mod tables;
 mod transfers;
 
 pub use binary::{FORMAT, from_bytes, to_bytes};
 pub use incremental::{Reuse, rediscover, stale, touching};
+pub use inline::{inline_body, inline_transfers};
 pub use slots::{SlotUses, slot_uses};
 pub use transfers::{Source, Transfer, TransferKind, unresolved_transfers};
 

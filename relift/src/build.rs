@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use relift_analyze::{EntryKind, Insn, Outline, Progress};
 use relift_build::{Compile, Event, Plan};
@@ -492,6 +493,22 @@ fn emit_modules(
         if fpsr.has_linkage() {
             fpcr.add_module(p, &module, &layout, &flags, &overrides, &swapped);
         }
+        let replaced: BTreeSet<u64> = overrides.iter().map(|o| o.entry).collect();
+        let short: Vec<&Outline> = keep
+            .iter()
+            .map(|&k| all[k])
+            .filter(|o| {
+                o.runs.iter().map(|r| r.1 as usize).sum::<usize>() <= INLINE_MAX
+                    && !replaced.contains(&o.entry)
+            })
+            .collect();
+        let bodies: BTreeMap<u64, Vec<Arc<relift_ir::Block>>> =
+            relift_analyze::each_lifted(&cpu, &module, &short, |o, f| {
+                Some((o.entry, relift_analyze::inline_body(f, INLINE_MAX)?))
+            })
+            .into_iter()
+            .flatten()
+            .collect();
         let summaries = std::sync::Mutex::new(Vec::new());
         let summarized: Vec<std::sync::atomic::AtomicBool> = heads
             .iter()
@@ -504,8 +521,10 @@ fn emit_modules(
             relift_analyze::lift_each(&cpu, &module, &group, &mut |_, f| {
                 let k = ks[n];
                 n += 1;
-                let mut e = emit_function(f, &heads[k], &raw);
-                e.guesses = guesses(f, slots, &slot_set);
+                let inlined = relift_analyze::inline_transfers(f, &bodies);
+                let body = inlined.as_ref().unwrap_or(f);
+                let mut e = emit_function(body, &heads[k], &raw);
+                e.guesses = guesses(body, slots, &slot_set);
                 let first = !summarized[k].swap(true, std::sync::atomic::Ordering::Relaxed);
                 if first && let Some(s) = fpsr_now.function(&flags, &module, all[keep[k]], f) {
                     summaries
@@ -695,6 +714,10 @@ fn callable(
 /// The modules whose hooked flag lifted code reads
 /// (`RL_SWITCH_HOOKED_MODULES`, `runtime/guests/switch/loader.h`).
 const HOOKED_MODULES: usize = 32;
+
+/// The most instructions of a function that runs in place at the calls and
+/// jumps to it ([`relift_analyze::inline_transfers`]).
+const INLINE_MAX: usize = 8;
 
 /// The declaration of the flags [`HOOKED_MODULES`] counts.
 const GUESS_DECL: &str = "RL_RUNTIME_API extern uint8_t rl_switch_hooked[];\n";
