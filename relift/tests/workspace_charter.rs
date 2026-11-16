@@ -518,7 +518,7 @@ const CHARTERS: &[Charter] = &[
             "uds_windows",
             "zstd",
         ],
-        dev: NONE,
+        dev: &["relift-cpu-z80"],
         build: NONE,
     },
     Charter {

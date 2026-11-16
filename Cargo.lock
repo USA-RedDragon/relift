@@ -878,6 +878,7 @@ dependencies = [
  "relift-cache",
  "relift-cpu-arm64",
  "relift-cpu-sm83",
+ "relift-cpu-z80",
  "relift-diff",
  "relift-emit",
  "relift-gb",
