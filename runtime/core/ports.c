@@ -167,7 +167,7 @@ static bool find_in(const port *p, const char *id, uint32_t *idx)
     return false;
 }
 
-static char *dup(const char *s)
+static char *dup_str(const char *s)
 {
     size_t n = strlen(s) + 1;
     char *r = malloc(n);
@@ -297,8 +297,8 @@ bool rl_ports_declare(const rl_port_decl *ports, uint32_t count)
             g_ports = np;
             p = &g_ports[g_nports++];
             memset(p, 0, sizeof *p);
-            p->id = dup(d->id);
-            p->kind = dup(d->kind);
+            p->id = dup_str(d->id);
+            p->kind = dup_str(d->kind);
             p->pad = pad_of(d->id);
         }
         control *nc = realloc(p->c, (p->n + d->count) * sizeof *nc);
@@ -310,9 +310,9 @@ bool rl_ports_declare(const rl_port_decl *ports, uint32_t count)
         for (uint32_t j = 0; j < d->count; j++) {
             control *c = &p->c[p->n++];
             memset(c, 0, sizeof *c);
-            c->id = dup(d->controls[j].id);
+            c->id = dup_str(d->controls[j].id);
             c->kind = d->controls[j].kind;
-            c->defaults = d->controls[j].defaults ? dup(d->controls[j].defaults) : NULL;
+            c->defaults = d->controls[j].defaults ? dup_str(d->controls[j].defaults) : NULL;
             parse_list(c->defaults, c->b, &c->nb);
             c->twin = -1;
             declare_setting(p, c);

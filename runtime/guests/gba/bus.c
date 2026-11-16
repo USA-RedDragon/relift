@@ -235,7 +235,7 @@ static void plain_cost(rl_gba *g, uint32_t addr, unsigned size)
     }
 }
 
-static uint32_t dup(uint32_t v, unsigned size) { return size == 4 ? v : size == 2 ? v * 0x10001u : v * 0x01010101u; }
+static uint32_t lane_dup(uint32_t v, unsigned size) { return size == 4 ? v : size == 2 ? v * 0x10001u : v * 0x01010101u; }
 
 uint32_t gba_bus_read(rl_gba *g, gba_who who, uint32_t addr, unsigned size, bool seq)
 {
@@ -256,7 +256,7 @@ uint32_t gba_bus_read(rl_gba *g, gba_who who, uint32_t addr, unsigned size, bool
         plain_cost(g, addr, size);
         v = gba_mem_read(g, addr, size);
     }
-    g->mdr = dup(v, size);
+    g->mdr = lane_dup(v, size);
     return v;
 }
 
@@ -337,7 +337,7 @@ static uint32_t fetch_timed(rl_gba *g, uint32_t addr, unsigned size, bool seq)
     }
     pf_sync(g, size, addr);
     v = rom_timed(g, addr, size, burst);
-    g->mdr = dup(v, size);
+    g->mdr = lane_dup(v, size);
     return v;
 }
 

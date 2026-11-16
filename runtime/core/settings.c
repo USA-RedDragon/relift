@@ -86,7 +86,7 @@ static void value_free(value *v)
     memset(v, 0, sizeof *v);
 }
 
-static char *dup(const char *s)
+static char *dup_str(const char *s)
 {
     size_t n = strlen(s) + 1;
     char *p = malloc(n);
@@ -272,14 +272,14 @@ static bool parse_value(const rl_setting_def *d, const char *t, value *out, char
         break;
     }
     case RL_SETTING_STRING:
-        v.s = dup(t);
+        v.s = dup_str(t);
         break;
     case RL_SETTING_BINDING:
         if (!rl_ports_valid_binding(t)) {
             snprintf(err, errsz, "'%s' is not a comma separated list of host inputs such as gamepad:south,key:z", t);
             return false;
         }
-        v.s = dup(t);
+        v.s = dup_str(t);
         break;
     }
     if ((d->type == RL_SETTING_STRING || d->type == RL_SETTING_BINDING) && !v.s) {
@@ -432,7 +432,7 @@ static bool add_mod(const char *path)
         rl_log(RL_LOG_WARN, "settings", "more than %u mods; %s ignored", RL_SETTINGS_MODS_MAX, path);
         return false;
     }
-    char *p = dup(path);
+    char *p = dup_str(path);
     if (!p)
         return false;
     g_mods[g_nmods++] = p;
@@ -782,13 +782,13 @@ static char *json_value(const rl_setting_def *d, const value *v)
     char num[64];
     switch (d->type) {
     case RL_SETTING_BOOL:
-        return dup(v->i ? "true" : "false");
+        return dup_str(v->i ? "true" : "false");
     case RL_SETTING_INT:
         snprintf(num, sizeof num, "%lld", (long long)v->i);
-        return dup(num);
+        return dup_str(num);
     case RL_SETTING_FLOAT:
         snprintf(num, sizeof num, "%.17g", v->f);
-        return dup(num);
+        return dup_str(num);
     default:
         break;
     }
@@ -862,7 +862,7 @@ bool rl_settings_save(const char *key, const char *val)
             return false;
         }
         e = ne;
-        e[n].key = dup(key);
+        e[n].key = dup_str(key);
         e[n].raw = NULL;
         n++;
     }
@@ -940,7 +940,7 @@ int rl_settings_args(int argc, char *const *argv)
         file_flag = true;
         pthread_mutex_lock(&g_lock);
         free(g_file);
-        g_file = dup(v);
+        g_file = dup_str(v);
         pthread_mutex_unlock(&g_lock);
         if ((n = rl_settings_load_file(v)) > 0)
             applied += n;
@@ -1044,7 +1044,7 @@ static const value *effective(slot *s, value *dflt)
             char err[256];
             value_free(&s->envval);
             free(s->env_text);
-            s->env_text = dup(e);
+            s->env_text = dup_str(e);
             s->env_warned = false;
             if (!parse_value(d, e, &s->envval, err, sizeof err) && !s->env_warned) {
                 s->env_warned = true;
@@ -1291,7 +1291,7 @@ void rl_settings_set_app(const char *app)
 {
     pthread_mutex_lock(&g_lock);
     free(g_app);
-    g_app = app && *app ? dup(app) : NULL;
+    g_app = app && *app ? dup_str(app) : NULL;
     pthread_mutex_unlock(&g_lock);
 }
 
