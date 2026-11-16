@@ -142,7 +142,7 @@ static void bootSkip() {
   N::rdram.updateMapping();
   N::ri.io.mode = 0x0e; N::ri.io.config = 0x40; N::ri.io.currentLoad = 0x40; N::ri.io.select = 0x14; N::ri.io.refresh = 0x00063634;
   N::ri.io.latency = 1; N::ri.io.currentLoaded = 1;
-  N::pi.bsd1.latency = g_romBE[3]; N::pi.bsd1.pulseWidth = g_romBE[2]; N::pi.bsd1.pageSize = g_romBE[1] & 15; N::pi.bsd1.releaseDuration = g_romBE[0] & 3;
+  N::pi.bsd1.latency = g_romBE[3]; N::pi.bsd1.pulseWidth = g_romBE[2]; N::pi.bsd1.pageSize = g_romBE[1] & 15; N::pi.bsd1.releaseDuration = g_romBE[1] >> 4 & 3;
   for(uint32_t i = 0; i < 0x1000; i += 4) {
     uint32_t w = g_romBE[i] << 24 | g_romBE[i + 1] << 16 | g_romBE[i + 2] << 8 | g_romBE[i + 3];
     N::rsp.dmem.write<N::Word>(i, w);
