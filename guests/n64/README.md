@@ -65,6 +65,15 @@ the game changed are written. EEPROM is reported as 16 Kbit unless a 512-byte
 `.eep` exists; a game that only addresses blocks below 64 works the same
 either way. The Controller Pak is absent.
 
+The picture is what VI scans out (ares' software path: 640 by 480, or 576
+for a PAL cartridge, scaled and window-clipped by the video registers, one
+field per frame when interlaced; no anti-aliasing, dither, divot or gamma)
+and is presented at the guest's own frame rate. `--png FILE` writes the last
+frame's picture, `--raw-png FILE` the raw framebuffer. The sound is AI's DMA
+read at the DAC's rate and resampled to 44100 Hz: it plays through the
+audio output in a window, `--wav FILE` captures it (also headless) and
+`--no-audio` opens no output.
+
 Tests build their input with `synth`; no game data is used.
 `relift/tests/e2e_n64.rs` builds and runs a synthetic ROM that loads a
 routine with a PI DMA and calls it.

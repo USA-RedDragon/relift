@@ -2263,6 +2263,62 @@ cartridge's save memory (ported from ares, ISC; see its `NOTICE`).
   latch, which holds the address. A CPU word write to the bus keeps the PI
   busy for 400 ares clocks and a PI DMA to domain 2 writes the save memory.
 
+### VI and AI: the video and audio output
+
+`runtime/guests/n64` runs VI and AI as closed-form device models that catch
+up to the CPU's tick on a register access and at their events (ported from
+ares, ISC; see its `NOTICE`), and hands their output to the core's window
+and audio layers through `runtime/guests/n64/run`.
+
+- VI: the registers, the line counter with its field bit and leap pattern,
+  the line duration from `VI_H_SYNC` (the leap line from `VI_H_SYNC_LEAP`),
+  the lines of a field from `VI_V_SYNC`, the interrupt at `VI_V_INTR` in
+  progressive and interlaced modes, and the frame edge at the start line of
+  `VI_V_VIDEO`. The video clock is 48681818 Hz (NTSC) or 49656530 Hz (PAL, a
+  cartridge header region code of D, F, H, I, L, P, S, U, W, X, Y or Z); the
+  frame rate is whatever the registers make it (about 59.83 Hz for the
+  usual NTSC values) and a VI that is off makes a frame every 200 lines of
+  0x800 clocks.
+- Scan-out (`rl_n64_scanout`) is ares' software path, with no RDP: the
+  output is 640 by 480 (NTSC) or 640 by 576 (PAL) RGB; the lines and columns
+  inside `VI_V_VIDEO` and `VI_H_VIDEO` are drawn (clamped to the output
+  window, 8 columns off the left edge and 7 off the right as ares does),
+  each pixel read from RDRAM through `VI_X_SCALE` and `VI_Y_SCALE` (steps of
+  1/1024 of a pixel in x and 1/2048 in y, with the subpixel offsets) as RGBA5551 or RGBA8888 (the
+  alpha dropped, 5 bits widened by replication), and with `VI_CONTROL`'s
+  serrate bit only the lines of the current field are drawn, the others
+  keeping the last picture. `rl_n64_framebuffer` is the raw buffer: origin,
+  width and the visible size, no scaling.
+- Not modeled in the picture: anti-aliasing, dither, divot and gamma
+  (`VI_CONTROL` bits 2 to 4 and 8 and 9 are kept and ignored, as in ares'
+  software path), the color burst and sync timing registers (kept, never
+  used).
+- The program presents the picture with `rl_window_present_rgb` at each
+  frame, paced to the guest's own clock (the CPU cycles between frames at
+  93.75 MHz), so a 59.83 Hz picture is presented at 59.83 Hz and a headless
+  run does not sleep. `--png FILE` is the picture of the last frame; `--raw-png
+  FILE` the raw framebuffer.
+- AI: `AI_DRAM_ADDR` and `AI_LEN` fill a two-entry FIFO (a write with it
+  full is ignored; a length is a multiple of 8 below 256 KiB), `AI_CONTROL`
+  enables the DMA, a write of `AI_STATUS` clears the interrupt, and a read
+  of any other register gives the length left in the playing buffer.
+  `AI_STATUS` has full (bits 0 and 31), busy (bit 30), enabled (bit 25) and
+  the two bits ares keeps at 1 (20 and 24). The interrupt rises when a
+  buffer is queued into an empty FIFO and when the second buffer starts.
+  The DAC takes a stereo word every (video clock / (`AI_DACRATE` + 1))
+  clock, 44100 Hz until the rate is written; the DMA address wraps its low
+  13 bits with the carry into the upper part delayed one sample, so the
+  carry of the last sample of a buffer reaches the next buffer's address
+  (the console's 8 KiB address bug). With nothing playing the DAC level
+  decays to silence.
+- The machine resamples the DAC's samples to `RL_N64_AUDIO_RATE` (44100 Hz,
+  linear interpolation, fixed point) into a ring and the program hands
+  them to `rl_audio_open` per frame; the frames made match the time that
+  has passed, silence included. `--wav FILE` captures the sound (16-bit
+  stereo) and `--no-audio` opens no output; headless runs capture without an
+  output, and `--frames N` prints the frame count, peak and hash of the
+  sound on stderr.
+
 ### The Z80 layer
 
 `runtime/cpus/z80` (`relift/z80/abi.h`) is the CPU layer of the Z80

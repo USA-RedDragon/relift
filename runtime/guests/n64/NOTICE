@@ -26,10 +26,14 @@ eeprom.c  the EEPROM joybus commands
 bus.c     the CPU's read latency of the RCP and the PI bus
                                    n64/memory/io.hpp, bus.hpp, n64/pi/bus.hpp
 vi.c      the VI registers, the line counter, field and leap pattern, the
-          interrupt line rules, the frame edge
+          interrupt line rules, the frame edge, the scan-out's window,
+          guard band, scaling and field lines
                                    n64/vi/vi.cpp, io.cpp
+ai.c      the AI registers, the DMA FIFO, the address carry, the
+          interrupt at the start of each buffer, the DAC's rate and decay
+                                   n64/ai/ai.cpp, io.cpp
 
-machine.c (MI, RI, AI, the boot words), save.c and code.c are
+machine.c (MI, RI, the boot words), save.c and code.c are
 relift's own, written from the public n64brew documentation.
 
 ----------------------------------------------------------------------
