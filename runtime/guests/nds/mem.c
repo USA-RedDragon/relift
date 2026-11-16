@@ -231,6 +231,7 @@ rl_nds *rl_nds_create(void)
     if (!m)
         return NULL;
     rl_arm32_cp15_reset(&m->cp15);
+    nds_cache_reset(m);
     rl_arm32_cp15_tcm(&m->cp15, &m->tcm);
     nds_io_reset(m);
     nds_vram_rebuild(m);
@@ -416,5 +417,8 @@ unsigned rl_nds_cp15_write(rl_nds *m, uint32_t key, uint32_t value)
     unsigned what = rl_arm32_cp15_write(&m->cp15, key, value);
     if (what & RL_CP15_CHANGED_TCM)
         rl_arm32_cp15_tcm(&m->cp15, &m->tcm);
+    if (what & RL_CP15_CHANGED_MPU)
+        nds_cache_mpu(m);
+    nds_cache_op(m, key, value);
     return what;
 }

@@ -74,7 +74,15 @@ static void stop_halted(rl_nds_arm *k)
 /** @brief The memory map changed under the code without a write: every entry checks its bytes again. */
 static void code_moved(rl_nds_run *r) { memset(r->seen, 0, (size_t)r->fn_total * sizeof r->seen[0]); }
 
-/** @brief Fills the code fetch table of k from the machine's costs. */
+/** @brief The ARM9's fetches from main RAM: through the instruction cache when the protection unit makes them cacheable. */
+static int64_t fetch9(rl_ctx *c, uint32_t addr, unsigned log2, unsigned seq)
+{
+    (void)seq;
+    rl_nds_arm *k = cpu_of(c);
+    return rl_nds_code_cost(k->run->m, addr, 1u << log2);
+}
+
+/** @brief Fills the code fetch table of k from the machine's costs (main RAM on the ARM9 goes to fetch9). */
 static void build_waits(rl_nds_arm *k)
 {
     const rl_nds_costs *t = rl_nds_cost_table(k->run->m);
@@ -89,7 +97,11 @@ static void build_waits(rl_nds_arm *k)
                 unsigned cyc = arm9 ? ticks : (ticks + 1u) / 2u;
                 if (arm9 && tcm.itcm_on && ((uint64_t)r << 24) < tcm.itcm_size)
                     cyc = 1;
-                k->waits[r * 6u + l * 2u + s] = (uint8_t)(cyc ? cyc : 1u);
+                else if (arm9 && r == 0x02)
+                    cyc = 0;
+                else if (!cyc)
+                    cyc = 1;
+                k->waits[r * 6u + l * 2u + s] = (uint8_t)cyc;
             }
     k->c->waits = k->waits;
     k->c->fast_fetch = 0;
@@ -678,6 +690,7 @@ int rl_nds_run_init(rl_nds_run *r, const rl_nds_program *p)
         rl_arm32_set_lines(k->c, 0, 1ull << RL_NDS_LINE_WAKE9 | 1ull << RL_NDS_LINE_WAKE7);
     }
     rl_arm32_set_miss(unfound);
+    rl_arm32_set_fetch_hook(fetch9);
     boot_regs(&r->cpu[RL_NDS_ARM9], 0x03002F7Cu, 0x03003F80u, 0x03003FC0u);
     boot_regs(&r->cpu[RL_NDS_ARM7], 0x0380FD80u, 0x0380FF80u, 0x0380FFC0u);
     return 0;

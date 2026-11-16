@@ -120,6 +120,13 @@ uint64_t rl_nds_now(const rl_nds *m, unsigned cpu);
  */
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq);
 /**
+ * @brief The cost in ticks of an ARM9 code fetch at addr that lifted code
+ * makes without reading the bytes: a cached fetch charges the instruction
+ * cache's hit or line fill to the clock itself and gives 0, an uncached one
+ * waits for the write buffer and gives the region's cost.
+ */
+unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size);
+/**
  * @brief A data read of size bytes (1, 2 or 4) at addr, aligned down; seq
  * true for the second and later words of LDM. Waits for the other CPU when
  * the access is ordered (rl_nds_ordered), stalls on a busy main RAM,

@@ -4,6 +4,9 @@
  * the order of shared accesses between the two CPUs (order.c), main RAM
  * contention and the cost of each access.
  *
+ * ARM9 accesses that the protection unit makes cacheable or bufferable go
+ * through the cache and write buffer costs (cache.c) instead.
+ *
  * Fresh C from GBATEK ("DS Memory Timings": external accesses of the ARM9
  * are delayed to the bus clock; one CPU at a time is on the main memory
  * bus, EXMEMCNT bit 15 says which one wins a tie).
@@ -102,6 +105,18 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
             nds_charge(m, cpu, 1);
             return nds_ld(p, size);
         }
+        if (nds_cache_attr(m, addr) & (code ? NDS_ATTR_IC : NDS_ATTR_DC)) {
+            nds_where w = nds_decode(m, cpu, addr, code, false);
+            if (w.kind == NDS_K_MEM || w.kind == NDS_K_BIOS) {
+                if (nds_dma_live(m, cpu))
+                    nds_dma_wait(m, cpu);
+                if (nds_shared(cpu, addr))
+                    nds_order(m, cpu);
+                nds_cache_read(m, addr, code);
+                return bus_read(m, cpu, addr, size, w);
+            }
+        }
+        nds_cache_before_bus(m);
         edge(m, cpu);
     }
     if (nds_dma_live(m, cpu))
@@ -112,6 +127,16 @@ static uint32_t timed_read(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size
     uint32_t v = bus_read(m, cpu, addr, size, w);
     finish(m, cpu, w.main, nds_cost(m, cpu, code ? RL_NDS_CODE : RL_NDS_DATA, addr, size, seq && !(code && cpu == RL_NDS_ARM9)));
     return v;
+}
+
+unsigned rl_nds_code_cost(rl_nds *m, uint32_t addr, unsigned size)
+{
+    if (nds_cache_attr(m, addr) & NDS_ATTR_IC) {
+        nds_cache_read(m, addr, true);
+        return 0;
+    }
+    nds_cache_before_bus(m);
+    return nds_cost(m, RL_NDS_ARM9, RL_NDS_CODE, addr, size, false);
 }
 
 uint32_t rl_nds_fetch(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, bool seq)
@@ -136,6 +161,25 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
             nds_watch_store(m, p);
             return;
         }
+        unsigned at = nds_cache_attr(m, addr);
+        nds_where w = nds_decode(m, cpu, addr, false, true);
+        if (w.kind == NDS_K_MEM && w.p && (at & (NDS_ATTR_WB | NDS_ATTR_DC))) {
+            if (nds_dma_live(m, cpu))
+                nds_dma_wait(m, cpu);
+            if (nds_shared(cpu, addr))
+                nds_order(m, cpu);
+            if (nds_seen_by_display(cpu, addr))
+                nds_disp_sync(m, nds_now(m, cpu));
+            nds_st(w.p, size, value);
+            nds_watch_store(m, w.p);
+            bool back = (at & NDS_ATTR_DC) && (at & NDS_ATTR_WB);
+            if (!((at & NDS_ATTR_DC) && nds_cache_write_hit(m, addr, back))) {
+                nds_cache_buffer(m, addr, nds_cost(m, cpu, RL_NDS_DATA, addr, size, seq));
+                nds_charge(m, cpu, 1);
+            }
+            return;
+        }
+        nds_cache_before_bus(m);
         edge(m, cpu);
     }
     if (nds_dma_live(m, cpu))

@@ -289,6 +289,36 @@ typedef struct nds_keypad {
     rl_nds_input in;
 } nds_keypad;
 
+/** @brief Sets of the ARM9's instruction (8 KiB) and data (4 KiB) caches: four ways of 32-byte lines. */
+#define NDS_ICACHE_SETS 64u
+#define NDS_DCACHE_SETS 32u
+/** @brief Entries of the ARM9's write buffer. */
+#define NDS_WB_ENTRIES 8u
+
+/** @brief Region attributes of a 4 KiB page: instruction cacheable, data cacheable, bufferable. */
+enum { NDS_ATTR_IC = 1, NDS_ATTR_DC = 2, NDS_ATTR_WB = 4 };
+
+/** @brief The tags of one ARM9 cache (sized for the larger one). */
+typedef struct nds_cache_side {
+    uint32_t tag[NDS_ICACHE_SETS][4];
+    uint8_t valid[NDS_ICACHE_SETS];
+    uint8_t dirty[NDS_ICACHE_SETS];
+    uint8_t next[NDS_ICACHE_SETS];
+} nds_cache_side;
+
+/** @brief The ARM9's caches, write buffer and region attributes (cache.c). */
+typedef struct nds_cache_state {
+    nds_cache_side i, d;
+    /** @brief The pseudo-random replacement's state. */
+    uint32_t lfsr;
+    /** @brief The write buffer: the tick each entry is written by, oldest first, and the last one's. */
+    uint64_t wb_done[NDS_WB_ENTRIES];
+    uint8_t wb_head, wb_n;
+    uint64_t wb_last;
+    /** @brief NDS_ATTR_ bits per 4 KiB page from the protection regions (the highest region wins). */
+    uint8_t attr[1u << 20];
+} nds_cache_state;
+
 /** @brief The machine. */
 struct rl_nds {
     uint8_t main[RL_NDS_MAIN_SIZE];
@@ -307,6 +337,7 @@ struct rl_nds {
 
     rl_arm32_cp15 cp15;
     rl_arm32_tcm tcm;
+    nds_cache_state cache;
 
     uint8_t wramcnt;
     /** @brief EXMEMCNT of the ARM9 and the ARM7's own bits 0 to 6. */
@@ -594,6 +625,23 @@ bool nds_sys_has(uint32_t off);
 uint32_t nds_sys_read(rl_nds *m, uint32_t off);
 /** @brief A write of the mask bits of v to one of them. */
 void nds_sys_write(rl_nds *m, uint32_t off, uint32_t v, uint32_t mask);
+
+/** @brief Empties the caches and the write buffer and reads the regions. */
+void nds_cache_reset(rl_nds *m);
+/** @brief Rebuilds the page attributes after a protection unit change. */
+void nds_cache_mpu(rl_nds *m);
+/** @brief The NDS_ATTR_ bits of addr with the cache enables of the control register. */
+unsigned nds_cache_attr(const rl_nds *m, uint32_t addr);
+/** @brief Charges a cached read of addr: a hit, or a line fill after the write buffer drains (and the write-back of a dirty victim). */
+void nds_cache_read(rl_nds *m, uint32_t addr, bool code);
+/** @brief A store hit in a write-back line: marks it dirty and charges the hit; false on a miss or a write-through line. */
+bool nds_cache_write_hit(rl_nds *m, uint32_t addr, bool write_back);
+/** @brief Queues a buffered write of ticks bus time to addr, stalling while the buffer is full. */
+void nds_cache_buffer(rl_nds *m, uint32_t addr, unsigned ticks);
+/** @brief Waits until the write buffer is empty (before an access that goes to the bus). */
+void nds_cache_before_bus(rl_nds *m);
+/** @brief A CP15 c7 cache operation (MCR key, value). */
+void nds_cache_op(rl_nds *m, uint32_t key, uint32_t v);
 
 /** @brief The access cost in ticks of cpu (kind RL_NDS_CODE or RL_NDS_DATA) at addr. */
 unsigned nds_cost(const rl_nds *m, unsigned cpu, unsigned kind, uint32_t addr, unsigned size, bool seq);
