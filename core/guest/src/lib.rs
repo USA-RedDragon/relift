@@ -49,7 +49,7 @@ pub enum Home {
     /// keeps flags in locals only; the flags-stored build packs them there at
     /// every boundary.
     Flag {
-        /// The C lvalue of the packed word, such as `c->nzcv`.
+        /// The C lvalue of the packed word, such as `c->f`.
         word: String,
         /// The bit of the flag in that word.
         bit: u32,

@@ -80,10 +80,7 @@ impl Frontend for Arm64 {
         match i {
             0..=30 => Home::Field(format!("c->x[{i}]")),
             31 => Home::Field("c->sp".into()),
-            32..=35 => Home::Flag {
-                word: "c->nzcv".into(),
-                bit: 31 - (i as u32 - 32),
-            },
+            32..=35 => Home::Field(format!("c->nzcv[{}]", i - 32)),
             36..=67 => Home::Field(format!("c->v[{}].q", i - 36)),
             _ if reg == regs::FPCR => Home::Field("c->fpcr".into()),
             _ if reg == regs::FPSR => Home::Field("c->fpsr".into()),
@@ -315,13 +312,7 @@ mod tests {
         let f = ARM64;
         assert_eq!(f.home(regs::x(30)), Home::Field("c->x[30]".into()));
         assert_eq!(f.home(regs::SP), Home::Field("c->sp".into()));
-        assert_eq!(
-            f.home(regs::V),
-            Home::Flag {
-                word: "c->nzcv".into(),
-                bit: 28
-            }
-        );
+        assert_eq!(f.home(regs::V), Home::Field("c->nzcv[3]".into()));
         assert_eq!(f.home(regs::vreg(31)), Home::Field("c->v[31].q".into()));
         assert_eq!(
             f.home(regs::TPIDRRO_EL0),

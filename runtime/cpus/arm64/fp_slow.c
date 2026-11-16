@@ -230,7 +230,7 @@ static int scalar_cmp(rl_ctx *c, uint64_t pc, uint32_t insn)
     if (!fp_width(w) || (opc2 & 7u) || ((insn >> 14) & 3u))
         return unsupported(c, pc, insn);
     uint64_t b = (opc2 & 8u) ? 0 : read_scalar(c, w, rm);
-    c->nzcv = rl_fpn_compare(w, read_scalar(c, w, rn), b, (opc2 & 16u) != 0, fpcr_for(c, w), &c->fpsr);
+    rl_set_nzcv(c, rl_fpn_compare(w, read_scalar(c, w, rn), b, (opc2 & 16u) != 0, fpcr_for(c, w), &c->fpsr));
     return RL_OK;
 }
 
@@ -240,10 +240,10 @@ static int scalar_ccmp(rl_ctx *c, uint64_t pc, uint32_t insn)
     unsigned cond = (insn >> 12) & 15u;
     if (!fp_width(w))
         return unsupported(c, pc, insn);
-    if (cond_holds(c->nzcv, cond))
-        c->nzcv = rl_fpn_compare(w, read_scalar(c, w, rn), read_scalar(c, w, rm), (insn >> 4) & 1u, fpcr_for(c, w), &c->fpsr);
+    if (cond_holds(rl_nzcv(c), cond))
+        rl_set_nzcv(c, rl_fpn_compare(w, read_scalar(c, w, rn), read_scalar(c, w, rm), (insn >> 4) & 1u, fpcr_for(c, w), &c->fpsr));
     else
-        c->nzcv = (insn & 15u) << 28;
+        rl_set_nzcv(c, (insn & 15u) << 28);
     return RL_OK;
 }
 
@@ -252,7 +252,7 @@ static int scalar_sel(rl_ctx *c, uint64_t pc, uint32_t insn)
     unsigned w = type_bits((insn >> 22) & 3u), rm = (insn >> 16) & 31u, rn = (insn >> 5) & 31u, rd = insn & 31u;
     if (!fp_width(w))
         return unsupported(c, pc, insn);
-    write_scalar(c, w, rd, read_scalar(c, w, cond_holds(c->nzcv, (insn >> 12) & 15u) ? rn : rm));
+    write_scalar(c, w, rd, read_scalar(c, w, cond_holds(rl_nzcv(c), (insn >> 12) & 15u) ? rn : rm));
     return RL_OK;
 }
 

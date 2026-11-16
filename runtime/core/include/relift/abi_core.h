@@ -61,7 +61,7 @@
 #endif
 
 /** @brief Contract version. A hot-loaded unit with a different value is refused. */
-#define RL_ABI_VERSION 8u
+#define RL_ABI_VERSION 9u
 
 /** @brief Lifted function return on a CPU without a link register: normal return to the caller. A CPU with one returns where its return went instead (docs/abi.md section 5.4). */
 #define RL_OK 0

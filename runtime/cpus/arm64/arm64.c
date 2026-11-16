@@ -91,7 +91,7 @@ static void regs(const rl_ctx *c, char *buf, size_t n)
     if (k < n)
         snprintf(buf + k, n - k,
                  "sp  %016llx  pc  %016llx  nzcv %08x  fpcr %08x  fpsr %08x\ntpidr_el0 %016llx  tpidrro_el0 %016llx\n",
-                 (unsigned long long)c->sp, (unsigned long long)c->pc, c->nzcv, c->fpcr, c->fpsr,
+                 (unsigned long long)c->sp, (unsigned long long)c->pc, rl_nzcv(c), c->fpcr, c->fpsr,
                  (unsigned long long)c->tpidr_el0, (unsigned long long)c->tpidrro_el0);
 }
 

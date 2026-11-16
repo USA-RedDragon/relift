@@ -47,7 +47,7 @@ static rl_ctx *run(uint32_t insn, uint32_t fpcr, rl_u128 v0, rl_u128 v1, rl_u128
     c->v[2].q = v2;
     c->fpcr = fpcr;
     c->fpsr = 0;
-    c->nzcv = 0;
+    rl_set_nzcv(c, 0);
     if (rl_fp_slow(c, rl_mem_base(), 0x10000, insn) != RL_OK)
         return NULL;
     return c;
@@ -59,7 +59,7 @@ TEST(fp_slow_hw_frecpe_scalar)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x000000003eaa8000u));
     CHECK_EQ(c->fpsr, 0x0u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_frecpe_denormal_overflows)
@@ -68,7 +68,7 @@ TEST(fp_slow_hw_frecpe_denormal_overflows)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x000000007f800000u));
     CHECK_EQ(c->fpsr, 0x14u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_frecpe_denormal_rz_gives_max)
@@ -77,7 +77,7 @@ TEST(fp_slow_hw_frecpe_denormal_rz_gives_max)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x00000000ff7fffffu));
     CHECK_EQ(c->fpsr, 0x14u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_frecpe_fz_flushes_input)
@@ -86,7 +86,7 @@ TEST(fp_slow_hw_frecpe_fz_flushes_input)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x000000007f800000u));
     CHECK_EQ(c->fpsr, 0x82u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_frecpe_tiny_result_fz)
@@ -95,7 +95,7 @@ TEST(fp_slow_hw_frecpe_tiny_result_fz)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x0000000000000000u));
     CHECK_EQ(c->fpsr, 0x8u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_frecps_vector)
@@ -104,7 +104,7 @@ TEST(fp_slow_hw_frecps_vector)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x7fc0000040000000u, 0x400000003f800000u));
     CHECK_EQ(c->fpsr, 0x1u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_frsqrts_vector)
@@ -113,7 +113,7 @@ TEST(fp_slow_hw_frsqrts_vector)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x3f7fffff3fc00000u, 0x3fc000003f800000u));
     CHECK_EQ(c->fpsr, 0x10u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fmaxnmv)
@@ -122,7 +122,7 @@ TEST(fp_slow_hw_fmaxnmv)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x0000000040000000u));
     CHECK_EQ(c->fpsr, 0x0u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fminv_nan)
@@ -131,7 +131,7 @@ TEST(fp_slow_hw_fminv_nan)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x000000007fc00001u));
     CHECK_EQ(c->fpsr, 0x1u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_faddp_scalar_rp)
@@ -140,7 +140,7 @@ TEST(fp_slow_hw_faddp_scalar_rp)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x000000003f800001u));
     CHECK_EQ(c->fpsr, 0x10u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fmla_by_element)
@@ -149,7 +149,7 @@ TEST(fp_slow_hw_fmla_by_element)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0xff80000080000001u, 0x4040000040000000u));
     CHECK_EQ(c->fpsr, 0x10u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fcmlt_zero_fz)
@@ -158,7 +158,7 @@ TEST(fp_slow_hw_fcmlt_zero_fz)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0xffffffff00000000u, 0x0000000000000000u));
     CHECK_EQ(c->fpsr, 0x81u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fcvtn_rz)
@@ -167,7 +167,7 @@ TEST(fp_slow_hw_fcvtn_rz)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x7e0000007bff3c00u));
     CHECK_EQ(c->fpsr, 0x19u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fcvtl_ahp)
@@ -176,7 +176,7 @@ TEST(fp_slow_hw_fcvtl_ahp)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0xc780000033800000u, 0x47c0200047800000u));
     CHECK_EQ(c->fpsr, 0x0u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }
 
 TEST(fp_slow_hw_fcmp_zero_fz_denormal)
@@ -185,7 +185,7 @@ TEST(fp_slow_hw_fcmp_zero_fz_denormal)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x0000000000000000u, 0x0000000000000000u));
     CHECK_EQ(c->fpsr, 0x80u);
-    CHECK_EQ(c->nzcv, 0x60000000u);
+    CHECK_EQ(rl_nzcv(c), 0x60000000u);
 }
 
 TEST(fp_slow_hw_scvtf_fixed_vector)
@@ -194,5 +194,5 @@ TEST(fp_slow_hw_scvtf_fixed_vector)
     CHECK(c != NULL);
     CHECK(c->v[0].q == Q(0x3ec000004d7fffffu, 0xbe0000003e000000u));
     CHECK_EQ(c->fpsr, 0x10u);
-    CHECK_EQ(c->nzcv, 0x0u);
+    CHECK_EQ(rl_nzcv(c), 0x0u);
 }

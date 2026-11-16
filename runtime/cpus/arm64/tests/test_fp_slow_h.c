@@ -162,24 +162,24 @@ TEST(fp_slow_half_compare)
     c->v[1].h[0] = 0x3C00;
     c->v[2].h[0] = 0x4000;
     CHECK_EQ(run(c, 0x1EE22020u), RL_OK); /* fcmp h1, h2 */
-    CHECK_EQ(c->nzcv, 0x80000000u);
+    CHECK_EQ(rl_nzcv(c), 0x80000000u);
     CHECK_EQ(run(c, 0x1EE02038u), RL_OK); /* fcmpe h1, #0.0 */
-    CHECK_EQ(c->nzcv, 0x20000000u);
+    CHECK_EQ(rl_nzcv(c), 0x20000000u);
     c->v[1].h[0] = 0x7E00;
     CHECK_EQ(run(c, 0x1EE22020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x30000000u);
+    CHECK_EQ(rl_nzcv(c), 0x30000000u);
     CHECK_EQ(c->fpsr, 0);
     CHECK_EQ(run(c, 0x1EE02038u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x30000000u);
+    CHECK_EQ(rl_nzcv(c), 0x30000000u);
     CHECK_EQ(c->fpsr, IOC);
     /* fccmp h1, h2, #0, eq: the condition decides between the compare and #0. */
     c->v[1].h[0] = 0x3C00;
-    c->nzcv = 0;
+    rl_set_nzcv(c, 0);
     CHECK_EQ(run(c, 0x1EE20420u), RL_OK);
-    CHECK_EQ(c->nzcv, 0);
-    c->nzcv = 0x40000000u;
+    CHECK_EQ(rl_nzcv(c), 0);
+    rl_set_nzcv(c, 0x40000000u);
     CHECK_EQ(run(c, 0x1EE20420u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x80000000u);
+    CHECK_EQ(rl_nzcv(c), 0x80000000u);
 }
 
 TEST(fp_slow_half_int_and_fixed)

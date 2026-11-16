@@ -47,7 +47,7 @@ int main(void)
         memcpy(c.x, in.x, sizeof c.x);
         c.sp = in.sp;
         memcpy(c.v, in.v, sizeof c.v);
-        c.nzcv = in.nzcv;
+        rl_set_nzcv(&c, in.nzcv);
         c.fpcr = in.fpcr;
         c.fpsr = in.fpsr;
         g_fatal = 0;
@@ -64,7 +64,7 @@ int main(void)
         memcpy(out.x, c.x, sizeof out.x);
         out.sp = c.sp;
         out.pc = pc + 4;
-        out.nzcv = c.nzcv;
+        out.nzcv = rl_nzcv(&c);
         out.fpcr = c.fpcr;
         out.fpsr = c.fpsr;
         memcpy(out.v, c.v, sizeof out.v);

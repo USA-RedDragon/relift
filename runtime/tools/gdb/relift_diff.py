@@ -63,7 +63,9 @@ def context(c):
     b = read(c, CTX_SIZE)
     regs = [("x%d" % i, struct.unpack_from("<Q", b, X_OFF + 8 * i)[0]) for i in range(31)]
     regs.append(("sp", struct.unpack_from("<Q", b, SP_OFF)[0]))
-    nzcv, fpcr = struct.unpack_from("<II", b, NZCV_OFF)
+    flags = struct.unpack_from("<4B", b, NZCV_OFF)
+    nzcv = sum(f << (31 - i) for i, f in enumerate(flags))
+    (fpcr,) = struct.unpack_from("<I", b, FPCR_OFF)
     tp, tpro = struct.unpack_from("<QQ", b, TPIDR_OFF)
     regs += [("nzcv", nzcv), ("fpcr", fpcr), ("tpidr_el0", tp), ("tpidrro_el0", tpro)]
     for i in range(32):

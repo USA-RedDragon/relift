@@ -134,8 +134,8 @@ struct rl_ctx {
     rl_v128 v[32];
     /** @brief Target guest address of the current indirect call or jump; read by rl_dispatch_miss. */
     uint64_t pc;
-    /** @brief NZCV in the MRS NZCV layout (bits 31..28). Stored only where docs/abi.md says. */
-    uint32_t nzcv;
+    /** @brief N, Z, C and V in that order, one byte each, 0 or 1. Stored only where docs/abi.md says. */
+    uint8_t nzcv[4];
     /** @brief FPCR. */
     uint32_t fpcr;
     /** @brief FPSR. */
@@ -194,6 +194,11 @@ _Static_assert(offsetof(rl_ctx, thread) == RL_ARM64_COMMON_OFFSET + offsetof(rl_
 _Static_assert(offsetof(rl_ctx, disp_table) == RL_ARM64_COMMON_OFFSET + offsetof(rl_ctx_common, disp_table), "common disp_table");
 _Static_assert(offsetof(rl_ctx, disp_lo) == RL_ARM64_COMMON_OFFSET + offsetof(rl_ctx_common, disp_lo), "common disp_lo");
 _Static_assert(offsetof(rl_ctx, disp_count) == RL_ARM64_COMMON_OFFSET + offsetof(rl_ctx_common, disp_count), "common disp_count");
+
+/** @brief NZCV of the context in the MRS NZCV layout (bits 31 to 28). */
+static inline uint32_t rl_nzcv(const rl_ctx *c) { return (uint32_t)c->nzcv[0] << 31 | (uint32_t)c->nzcv[1] << 30 | (uint32_t)c->nzcv[2] << 29 | (uint32_t)c->nzcv[3] << 28; }
+/** @brief Sets NZCV of the context from the MRS NZCV layout. */
+static inline void rl_set_nzcv(rl_ctx *c, uint32_t v) { for (int i = 0; i < 4; i++) c->nzcv[i] = (v >> (31 - i)) & 1u; }
 
 /** @brief Plain guest load, 1 byte. A64 guest data is little-endian, like every supported host, so plain accesses copy bytes as they are. */
 static inline uint8_t rl_ld8(const uint8_t *mem, uint64_t a) { return mem[a]; }

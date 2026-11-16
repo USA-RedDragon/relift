@@ -91,6 +91,7 @@ pub fn slots() -> Vec<Slot> {
                         "c->tpidr_el0" => Slot::Word(99),
                         "c->tpidrro_el0" => Slot::Word(100),
                         "RL_FP_FLAGS_ON" => Slot::Zero,
+                        s if s.starts_with("c->nzcv[") => Slot::Flag(31 - idx(s) as u32),
                         s if s.starts_with("c->x[") => Slot::Word(idx(s)),
                         s if s.starts_with("c->v[") => Slot::Wide(32 + 2 * idx(s)),
                         s if s.starts_with("rl_pac_keys[") => Slot::Word(PAC_KEYS + idx(s)),
@@ -287,7 +288,7 @@ static void load(rl_ctx *c, const uint64_t *r)
         memcpy(&c->v[i].b[0], &r[32 + 2 * i], 8);
         memcpy(&c->v[i].b[8], &r[33 + 2 * i], 8);
     }
-    c->nzcv = (uint32_t)r[96];
+    rl_set_nzcv(c, (uint32_t)r[96]);
     c->fpcr = (uint32_t)r[97];
     c->fpsr = (uint32_t)r[98];
     c->tpidr_el0 = r[99];
@@ -307,7 +308,7 @@ static void save(const rl_ctx *c, uint64_t *r)
         memcpy(&r[32 + 2 * i], &c->v[i].b[0], 8);
         memcpy(&r[33 + 2 * i], &c->v[i].b[8], 8);
     }
-    r[96] = c->nzcv;
+    r[96] = rl_nzcv(c);
     r[97] = c->fpcr;
     r[98] = c->fpsr;
     r[99] = c->tpidr_el0;

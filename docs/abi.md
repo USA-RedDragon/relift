@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 8.
+Contract version: `RL_ABI_VERSION` 9.
 
 ## 0. Runtime layers
 
@@ -201,7 +201,7 @@ their offsets to it, and the A64 descriptor gives the core offset 840.
 | 248 | `sp` | |
 | 256 | `v[32]` | 16 bytes each, union of lanes |
 | 768 | `pc` | target of the current indirect call or jump |
-| 776 | `nzcv` | packed, MRS NZCV layout |
+| 776 | `nzcv[4]` | N, Z, C, V: one byte each, 0 or 1 |
 | 780 | `fpcr` | |
 | 784 | `fpsr` | |
 | 788 | reserved | |
@@ -228,12 +228,13 @@ Reasons:
   of `__int128`, `d`, `s`, `h`, `b` lanes matches that and needs no type
   punning beyond what C11 allows for unions. d8-d15 for exceptions are
   `v[8..15].d[0]`. [verified: Sail prototype]
-- **NZCV packed, stored rarely.** Flags live in four C locals inside a
+- **NZCV one byte per flag, stored rarely.** Flags live in four C locals inside a
   function, and clang deletes them where they are dead (zero cost in the
   plain build). The context field is written only by MSR NZCV, by the
   full-state build at every boundary, and by the runtime when it captures a
-  thread (svc, fault). Packed in the MRS layout because MRS and MSR then copy
-  it as is and the full-state build stores one word. NZCV is not live across
+  thread (svc, fault). One byte per flag (N, Z, C, V, each 0 or 1), so a
+  boundary stores and loads each flag with one byte move and no shifts or
+  masks; `rl_nzcv` and `rl_set_nzcv` give the MRS layout. NZCV is not live across
   calls and returns in the plain build; AAPCS64 says it is not preserved,
   and the checker's full-state build catches code that relies on it.
   [verified: slice prototype, flag cost 0 in the plain build, full-state

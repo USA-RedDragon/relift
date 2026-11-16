@@ -184,7 +184,7 @@ int main(int argc, char **argv)
             slow++;
             continue;
         }
-        int same = fa == (b.fpsr & 0x9Fu) && !memcmp(a.x, b.x, sizeof a.x) && !memcmp(a.v, b.v, sizeof a.v) && a.nzcv == b.nzcv;
+        int same = fa == (b.fpsr & 0x9Fu) && !memcmp(a.x, b.x, sizeof a.x) && !memcmp(a.v, b.v, sizeof a.v) && !memcmp(a.nzcv, b.nzcv, sizeof a.nzcv);
         if (!same) {
             bad++;
             int vi = -1;

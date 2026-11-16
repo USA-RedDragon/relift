@@ -252,21 +252,21 @@ TEST(fp_slow_compare_sets_nzcv)
     c->v[1].s[0] = 0x3F800000u;
     c->v[2].s[0] = 0x40000000u;
     CHECK_EQ(run(c, 0x1E222020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x80000000u);
+    CHECK_EQ(rl_nzcv(c), 0x80000000u);
     c->v[2].s[0] = 0x3F800000u;
     CHECK_EQ(run(c, 0x1E222020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x60000000u);
+    CHECK_EQ(rl_nzcv(c), 0x60000000u);
     c->v[2].s[0] = 0;
     CHECK_EQ(run(c, 0x1E222020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x20000000u);
+    CHECK_EQ(rl_nzcv(c), 0x20000000u);
     CHECK_EQ(run(c, 0x1E202028u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x20000000u);
+    CHECK_EQ(rl_nzcv(c), 0x20000000u);
     c->v[2].s[0] = 0x7FC00000u;
     CHECK_EQ(run(c, 0x1E222020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x30000000u);
+    CHECK_EQ(rl_nzcv(c), 0x30000000u);
     CHECK_EQ(c->fpsr, 0);
     CHECK_EQ(run(c, 0x1E222030u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x30000000u);
+    CHECK_EQ(rl_nzcv(c), 0x30000000u);
     CHECK_EQ(c->fpsr, IOC);
     c->fpsr = 0;
     c->v[2].s[0] = 0x7F800001u;
@@ -281,12 +281,12 @@ TEST(fp_slow_compare_double_and_flush)
     c->v[1].d[0] = 1;
     c->v[2].d[0] = 0;
     CHECK_EQ(run(c, 0x1E622020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x60000000u);
+    CHECK_EQ(rl_nzcv(c), 0x60000000u);
     CHECK_EQ(c->fpsr, IDC);
     c->v[1].d[0] = 0x4000000000000000ull;
     c->v[2].d[0] = 0x3FF0000000000000ull;
     CHECK_EQ(run(c, 0x1E622020u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x20000000u);
+    CHECK_EQ(rl_nzcv(c), 0x20000000u);
 }
 
 TEST(fp_slow_conditional_compare_and_select)
@@ -295,15 +295,15 @@ TEST(fp_slow_conditional_compare_and_select)
     CHECK(c != NULL);
     c->v[1].s[0] = 0x3F800000u;
     c->v[2].s[0] = 0x40000000u;
-    c->nzcv = 0x40000000u;
+    rl_set_nzcv(c, 0x40000000u);
     CHECK_EQ(run(c, 0x1E220425u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x80000000u);
-    c->nzcv = 0;
+    CHECK_EQ(rl_nzcv(c), 0x80000000u);
+    rl_set_nzcv(c, 0);
     CHECK_EQ(run(c, 0x1E220425u), RL_OK);
-    CHECK_EQ(c->nzcv, 0x50000000u);
+    CHECK_EQ(rl_nzcv(c), 0x50000000u);
     CHECK_EQ(run(c, 0x1E221C20u), RL_OK);
     CHECK_EQ(c->v[0].s[0], 0x40000000u);
-    c->nzcv = 0;
+    rl_set_nzcv(c, 0);
     CHECK_EQ(run(c, 0x1E221C20u), RL_OK);
     CHECK_EQ(c->v[0].s[0], 0x3F800000u);
 }
