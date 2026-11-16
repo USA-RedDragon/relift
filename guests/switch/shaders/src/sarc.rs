@@ -23,12 +23,17 @@ pub fn is_sarc(b: &[u8]) -> bool {
     b.starts_with(b"SARC")
 }
 
+/// The longest member name, terminator excluded.
+pub const MAX_NAME: usize = 0x400;
+
 /// The members of a SARC archive: name (the hash in hex when the archive
-/// stores no name) and bytes, clamped to the archive.
+/// stores no name) and bytes, clamped to the archive. The name table is
+/// indexed once, so the cost is linear in the archive.
 ///
 /// # Errors
 ///
-/// The tables run past the end of `b`.
+/// The tables run past the end of `b`, or a name is not terminated
+/// inside the name table within [`MAX_NAME`] bytes.
 pub fn members(b: &[u8]) -> Result<Vec<(String, &[u8])>> {
     let le = b.get(6..8) == Some(&[0xFF, 0xFE]);
     let header = usize::from(u16_at(b, 4, le)?);
@@ -36,6 +41,12 @@ pub fn members(b: &[u8]) -> Result<Vec<(String, &[u8])>> {
     let count = usize::from(u16_at(b, header + 6, le)?);
     let nodes = header + 12;
     let names = nodes + count * 16 + 8;
+    let table = b.get(names..data.min(b.len())).unwrap_or(&[]);
+    let ends: Vec<usize> = table
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &c)| (c == 0).then_some(i))
+        .collect();
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let at = nodes + i * 16;
@@ -44,12 +55,14 @@ pub fn members(b: &[u8]) -> Result<Vec<(String, &[u8])>> {
         let start = u32_at(b, at + 8, le)? as usize;
         let end = u32_at(b, at + 12, le)? as usize;
         let name = if attr & 0x0100_0000 != 0 {
-            let no = names + (attr & 0xFFFF) as usize * 4;
-            let Some(tail) = b.get(no..) else {
-                return malformed("SARC: a name runs past the end");
-            };
-            let len = tail.iter().position(|&c| c == 0).unwrap_or(tail.len());
-            String::from_utf8_lossy(&tail[..len]).into_owned()
+            let no = (attr & 0xFFFF) as usize * 4;
+            let nul = ends.get(ends.partition_point(|&e| e < no)).copied();
+            match nul {
+                Some(nul) if nul - no <= MAX_NAME => {
+                    String::from_utf8_lossy(&table[no..nul]).into_owned()
+                }
+                _ => return malformed("SARC: a name is not terminated in the name table"),
+            }
         } else {
             format!("{hash:08x}")
         };
