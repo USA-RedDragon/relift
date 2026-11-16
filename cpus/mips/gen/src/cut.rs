@@ -1,5 +1,5 @@
 //! The VR4300 cut line: the Sail functions and registers the generator
-//! replaces with calls on the lifter's `St` (`cpus/mips/src/lift/rt.rs`).
+//! replaces with calls on the lifter's `St` (`cpus/mips/src/vr4300/lift/rt.rs`).
 //! Everything VR4300-specific that can be said in Sail is in the overlay
 //! (`vr4300.sail`); what is here is guest state access, branches and delay
 //! slots, address translation, the bus, exceptions and the FPU.

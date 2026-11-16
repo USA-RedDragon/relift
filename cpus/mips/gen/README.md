@@ -1,6 +1,6 @@
 # VR4300 lifting templates from Sail
 
-`src/decode/generated.rs` (the decode table) and `src/lift/generated/*.rs`
+`src/vr4300/decode/generated.rs` (the decode table) and `src/vr4300/lift/generated/*.rs`
 (one Rust function per encoding, one file per class: `int`, `ldst`,
 `branch`, `system`, `cop1`) are generated from the MIPS part of the Sail
 CHERI-MIPS model (sail-cheri-mips, BSD-2-Clause, see `NOTICE-sail-cheri-mips`)
@@ -30,7 +30,7 @@ conversions and compares, with the FR=0 and FR=1 register views.
 The functions in `src/cut.rs` are written by hand: register access, the
 delay-slot and branch state, address translation, the bus, exceptions, the
 coprocessor usable checks, the FPU operations and the CP0 effects the
-runtime owns. Their run-time side is `St` in `src/lift/rt.rs`.
+runtime owns. Their run-time side is `St` in `src/vr4300/lift/rt.rs`.
 
 ## Regenerate
 

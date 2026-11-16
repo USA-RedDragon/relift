@@ -5,8 +5,8 @@ cpus/sm83/src/lift/sail/generated.rs linguist-generated=true
 cpus/arm32/src/decode/generated.rs linguist-generated=true
 cpus/arm32/src/lift/generated/*.rs linguist-generated=true
 cpus/arm32/src/lift/generated/mod.rs -linguist-generated
-cpus/mips/src/decode/generated.rs linguist-generated=true
-cpus/mips/src/lift/generated/*.rs linguist-generated=true
-cpus/mips/src/lift/generated/mod.rs -linguist-generated
+cpus/mips/src/*/decode/generated.rs linguist-generated=true
+cpus/mips/src/*/lift/generated/*.rs linguist-generated=true
+cpus/mips/src/*/lift/generated/mod.rs -linguist-generated
 runtime/guests/gba/tests/vectors_console.h linguist-generated=true
 runtime/guests/gba/tests/vectors_io.h linguist-generated=true

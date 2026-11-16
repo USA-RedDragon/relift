@@ -8,7 +8,7 @@
  *
  * Every lifted translation unit for a VR4300 guest includes this header.
  * The register slots follow relift-cpu-mips's register file
- * (cpus/mips/src/regs.rs): RL_MIPS_SLOTS lists them in slot order with the
+ * (cpus/mips/src/vr4300/regs.rs): RL_MIPS_SLOTS lists them in slot order with the
  * context field that holds each one and its IR width, and
  * cpus/mips/tests/ctx_layout.rs checks the list against the register file.
  * Any change to a type, layout, signature or constant here bumps
@@ -191,7 +191,7 @@ enum {
     RL_MIPS_FCR_MASK = 0x0183FFFFu,
 };
 
-/** @brief The guard codes of relift-cpu-mips (cpus/mips/src/lift/rt.rs): EXC + ExcCode, FP_SLOW, plus IN_DELAY in a delay slot. */
+/** @brief The guard codes of relift-cpu-mips (cpus/mips/src/vr4300/lift/rt.rs): EXC + ExcCode, FP_SLOW, plus IN_DELAY in a delay slot. */
 enum {
     RL_MIPS_GUARD_EXC = 0x1000,
     RL_MIPS_GUARD_IN_DELAY = 0x100,

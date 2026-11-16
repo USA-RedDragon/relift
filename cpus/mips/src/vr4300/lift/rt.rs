@@ -37,7 +37,7 @@ use relift_ir::{
     BinOp, Builder, CmpOp, Endian, FpOp, FpRound, IoKind, Op, Reg, UnOp, Value, Width,
 };
 
-use crate::regs;
+use crate::vr4300::regs;
 
 /// Where a branch goes when it is taken.
 #[derive(Clone, Copy, Debug)]

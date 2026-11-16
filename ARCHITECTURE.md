@@ -56,8 +56,8 @@ list of hard rules; read it before changing anything.
   sail-arm's AArch32 part and the overlay `cpus/arm32/gen/armv4t.sail`
   (`cpus/arm32/gen/README.md`), which carries the ARM7TDMI rules where the
   Armv8 model differs, and the same CI job checks them. The VR4300 table
-  and templates (`cpus/mips/src/decode/generated.rs`,
-  `cpus/mips/src/lift/generated/*.rs`) come from sail-cheri-mips's MIPS
+  and templates (`cpus/mips/src/vr4300/decode/generated.rs`,
+  `cpus/mips/src/vr4300/lift/generated/*.rs`) come from sail-cheri-mips's MIPS
   model and the overlay `cpus/mips/gen/vr4300.sail`
   (`cpus/mips/gen/README.md`), which carries the VR4300 rules and all of
   COP1, with their notice next to the crate manifest; the same job checks

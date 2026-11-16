@@ -7,8 +7,8 @@ use std::fmt;
 
 use relift_ir::{Block, Builder, Exit, Flow, Next, Width};
 
-use crate::decode::{self, Encoding};
-use crate::regs;
+use super::decode::{self, Encoding};
+use super::regs;
 pub use rt::{EXC_GUARD, Exc, FP_SLOW, IN_DELAY, Options, St, Sys};
 
 /// Why an instruction did not lift.
