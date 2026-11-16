@@ -9,7 +9,7 @@ memory access, exclusives, barriers, dispatch lookup, system instructions,
 floating point), which includes the first. Lifted A64 code includes only the
 A64 header and builds with `-Iruntime/core/include
 -Iruntime/cpus/arm64/include`. This file gives the reason for each choice.
-Contract version: `RL_ABI_VERSION` 5.
+Contract version: `RL_ABI_VERSION` 6.
 
 ## 0. Runtime layers
 
@@ -389,8 +389,8 @@ no one function or file grows past what clang can compile in a few GB.
   load, paired with the release store at registration (section 6).
   [inferred]
 - **Tail calls (B to another function, BR resolved to a function):**
-  `RL_MUSTTAIL return F_<target>(c, mem);` or
-  `RL_MUSTTAIL return rl_indirect(c, target)(c, mem);`. `musttail` makes
+  `RL_MUSTTAIL return F_<target>(c, mem);` or, through dispatch,
+  `RL_JUMP(target, site);` (section 6, shipped builds). `musttail` makes
   the host stack not grow for guest tail-call chains. No pending check:
   the callee's code is returned as is. [verified: clang 23 emits `jmp`/`b`
   on x86-64 Linux, x86-64 Windows gnu and arm64; probe ran 10 million
@@ -485,8 +485,10 @@ has a dispatch slot that is not empty, so no guest jump can miss.
   lifts as a trap. The program lists the maps (`rl_switch_program.code_maps`),
   and the loader, after registering every unit hot first, calls
   `rl_code_maps_register`, which checks each slot against the units and the
-  table, refuses any disagreement, and stores `rl_dispatch_trap` in every
-  trap slot (it reports the target and stops). In a dev build each cold slot
+  table and refuses any disagreement. Trap slots stay empty, so a dispatch
+  there is a miss, and the miss path names the class (`rl_code_class`): the
+  stop report says the target holds no instruction, and a dev build does not
+  ask relift to lift it. In a dev build each cold slot
   first holds `rl_dispatch_cold`, which logs the first dispatch there
   (`first entry to cold code at <address> (<module>+<offset>)`) and puts
   the cold function back.
@@ -560,12 +562,18 @@ and reads the target from `c->pc`.
 3. Send `RL_DEV_LIFT` with the target, the call site, the guest thread id,
    the reason (`RL_MISS_CALL`, `RL_MISS_JUMP`, `RL_MISS_ENTRY`,
    `RL_MISS_RESUME`) and the thread's floating-point mode
-   (`rl_dev_lift_req.fp_mode`; the FPCR for A64). `site` and `reason` are best
-   effort and relift must not depend on them: at a miss the runtime only
-   knows `c->pc` (`rl_indirect` stores nothing else), so it cannot tell an
-   indirect call from an indirect jump (it sends `RL_MISS_CALL`), and the
-   site is 0 when unknown and lost after a tail call. No ABI version bump.
-   [verified: hot-load prototype sends `RL_MISS_CALL` and site 0]
+   (`rl_dev_lift_req.fp_mode`; the FPCR for A64). `site` is the guest
+   address of the transferring instruction, 0 when unknown, and `reason`
+   says how the miss was entered: `RL_MISS_JUMP` for a transfer that leaves
+   no host frame (`RL_JUMP` hands its site constant to the cold
+   `rl_dispatch_jump_miss`), `RL_MISS_CALL` for a computed call (the
+   dispatcher's host return address lies in lifted code, and the CPU layer
+   reads the site from the return address the call set: x30 - 4 on A64, the
+   top of the shadow stack on arm32, the return address on the guest stack
+   on SM83), `RL_MISS_ENTRY` for an entry from the runtime (thread start,
+   interrupt, redirect), `RL_MISS_RESUME` for a landing pad. relift uses
+   them for its log only. [verified: `arm64_dispatch_through_lookup`,
+   `core_stop_report_takes_a_call_site_from_the_cpu`, e2e_hotload]
 4. relift lifts the target and all code newly reachable from it, compiles
    **one** shared library for the whole request, adds the target to the
    hint list in `game.toml`, and answers `RL_DEV_LIFT_REPLY`: status,
@@ -579,8 +587,8 @@ and reads the target from `c->pc`.
    refuses the unit unless `abi_version == RL_ABI_VERSION`,
    `ctx_size == sizeof(rl_ctx)` and `image_id` matches. It then stores
    each entry into an empty table slot with a release store (existing
-   entries win, except `RL_FN_OVERRIDE`), and adds the unit's functions and
-   line map to the crash map.
+   entries win, except `RL_FN_OVERRIDE`), and adds the unit's function maps
+   to the crash map.
 6. Release the lock and `RL_MUSTTAIL return rl_lookup(c, c->pc)(c, mem);`.
 
 Only the missing thread waits; other guest threads keep running, because
@@ -618,8 +626,8 @@ it]:
   directory, written by the lifting step) and, per request, discovers from
   the target past those entries only (`relift_analyze::discover_more`): a
   direct call from new code to a known function goes through `rl_indirect`
-  with a constant target, since the unit cannot name the program's
-  symbols. The new entries join the known set for later requests.
+  with a constant target (a direct jump through `RL_JUMP`), since the unit
+  cannot name the program's symbols. The new entries join the known set for later requests.
 - A unit is compiled with the flags of lifted code plus `-fPIC
   -fvisibility=hidden -DRL_HOTLOAD`, with FPSR flags
   (`-DRL_FP_FLAGS -ffp-exception-behavior=strict`) whenever any function of
@@ -637,8 +645,8 @@ payload length) and a fixed payload struct; replies add `path_len` and
 by `_Static_assert`. Binary because the runtime is C and the socket is local
 to one machine. [inferred]
 
-**Hot-loaded code** calls everything outside itself through `rl_indirect`,
-never by symbol, so it does not need the main program's lifted symbols. It
+**Hot-loaded code** calls everything outside itself through `rl_indirect`
+and jumps there through `RL_JUMP`, never by symbol, so it does not need the main program's lifted symbols. It
 calls runtime entry points by name: in dev builds the runtime is a shared
 library (`librelift_rt`) that both the program and hot-loaded units link
 against. Shipped builds link it statically (`RL_STATIC_RUNTIME` on
@@ -677,7 +685,8 @@ Windows). [verified: hot-load prototype]
 
 **Registration ABI** (`rl_unit`): ABI version, `sizeof(rl_ctx)`, 32-byte
 image id, sorted `rl_fn_entry` array (guest address, guest size, flags,
-host function), optional line map, code base, name, and the function maps of its shards
+host function), a line map field no build fills yet (section 11, still to
+come), code base, name, and the function maps of its shards
 (section 11). The same record
 describes statically linked code: the emitted program file holds the unit
 table and passes it to the loader in `rl_switch_program` (`units` and
@@ -692,10 +701,19 @@ shared library on every host.
 
 ### Shipped builds
 
-`rl_dispatch_miss` prints the target, the call site, the guest and host
-backtraces and the module offset, writes the same to the log file, and
-ends the process (`RL_PEND_EXIT_PROCESS`). Shipped builds never load code
-at run time. [decided]
+A miss writes a stop report (section 11, stop reports) and ends the guest
+with `RL_PEND_EXIT_PROCESS` and status `RL_EXIT_SOFTWARE` (70). Shipped
+builds never load code at run time. [decided]
+
+Computed transfers that leave no host frame are emitted as
+`RL_JUMP(target, site);` (`abi_core.h`): the CPU layer's `rl_jump_find`
+stores the target in `c->pc` and loads the table slot; a full slot is a tail
+call, an empty one stores the site constant in `c->pend.pc` (unused while
+`pend.kind` is `RL_PEND_NONE`) and tail-calls `rl_dispatch_jump_miss`. The
+constant lives on the cold branch only, so the hot path is a load, a test and
+a jump, against a load, a select and a jump for the former
+`rl_indirect(c, target)(c, mem)`. Computed calls keep `rl_indirect`, whose
+miss is a host call from the lifted caller.
 
 ## 7. Exceptions
 
@@ -1591,6 +1609,118 @@ only on the C library and the host OS.
 ...
 ```
 
+### Stop reports
+
+`rl_report_stop` (`runtime/core/report.c`) writes the report of every fatal
+guest stop: missed code, a target that holds no instruction (a trap slot),
+an undefined or unsupported instruction (`rl_guest_stop_at`), a breakpoint,
+a trap, a landing pad without a case (`rl_bad_resume`) and every other
+`rl_guest_fatal`. It formats into static buffers (no heap), and one report
+at a time is written. The report goes to a new file
+`relift-stop-<UTC date>-<time>-<pid>.txt` (created exclusively; a second
+report of the same second gets `-1`, `-2` and so on before `.txt`) in the
+report folder: `rl_report_set_dir`, which the Android glue points at
+`reports` in the app's files folder and the iOS glue at `reports` in its
+Documents, where the Files app shows it; else `RELIFT_REPORT_DIR`; else, in
+a shipped build only, `reports` in the app's user folder beside its
+settings and saves (app `relift` when the program names none),
+`$XDG_DATA_HOME/<app>` on Linux, `Application Support` on macOS,
+`%APPDATA%` on Windows. A dev build (`RL_HOTLOAD`, or `RL_DEV_RUN` in a
+`relift run` of a Game Boy or GBA project) writes a file only to a folder
+set one of the first two ways, and `cargo` runs and the CI scripts set
+`RELIFT_REPORT_DIR` to a folder of their own (`.cargo/config.toml`,
+`scripts/ci/lib.sh`), so tests leave nothing in the user's folders. The log
+gets one error line, `[relift error stop] <kind>: <summary>; report written
+to <file>`, and at `RELIFT_LOG` info or below the whole report follows on
+stderr. stderr is logcat on Android and the app's console on iOS; on Apple
+hosts each line also goes to `os_log`. The format is plain text, one `key:
+value` per line, and `relift report` reads it:
+
+```
+relift stop report 1
+kind: missed code
+summary: no function at guest 0x8000040
+relift: 0.1.0
+game: switch 0100000000001234 version 0
+code mods: none
+build: 0c490fe372813308
+guest: switch
+program: 0100000000001234
+module: main base 0x8000000 size 0x1020 build 5c5a...
+guest layer: switch
+cpu: arm64
+image: 1d2a4728...
+pid: 4242
+thread: 4243
+time: 1794801317
+transfer: call
+target: 0x8000040 main+0x40
+target code: not lifted (outside every lifted function)
+target where: main text segment
+target words 0x8000040: d2800221 d65f03c0 ...
+site: 0x800001c main+0x1c
+site function: 0x8000000 main+0x0 _ZN5guest4main11fn_00000000E +0x1c
+site words 0x800000c: d2800089 9b097d08 10ffff6a 8b080148 d63f0100 ...
+caller function: 0x8000000 main+0x0 _ZN5guest4main11fn_00000000E (host _ZN5guest4main11fn_00000000E+0x95)
+registers:
+  x0  0000000008001000  x1  0000000000008000  ...
+  sp  0000000398000000  pc  0000000008000040  nzcv 00000000  fpcr 00000000  fpsr 00000000
+guest backtrace: lifted frames, innermost first; tail calls leave no frame
+  #0 0x8000000 main+0x0 _ZN5guest4main11fn_00000000E
+host backtrace:
+  #0 0x559b68d68c88 game+0xa2c88
+  ...
+end of report
+```
+
+- The header lines come from the program (`rl_report_info`: the generated
+  info file gives `relift`, `game`, `code mods` and `build`, a digest of the
+  embedded info document), the core (`mods`: bundled mods that are on) and
+  the guest layer (`guest`, `module` lines with base, size and build id).
+  `build` tells builds of one game with another relift, other code mods or
+  another settings schema apart; it does not identify the emitted code
+  itself (two builds with other emit settings of one relift share it).
+  `image` is the hash of the guest images the code was lifted from, the
+  value hot-loaded units must match; together with `relift` they say what
+  the program was built from.
+- A host fault in lifted code (SIGSEGV, SIGBUS, SIGILL, or the Windows
+  exceptions) prints the crash report of the crash handler above and also
+  writes its text to `relift-crash-<unix time>-<pid>.txt` in the same
+  folder, with async-signal-safe calls only (the folder is worked out ahead,
+  in `rl_fault_install` and `rl_report_set_dir`). It is the crash format,
+  not a stop report: `relift report` does not read it.
+- `transfer` is `call`, `jump`, `entry`, `resume` or `none` (a stop at an
+  instruction, then `at:` replaces `target:`). `site` is exact for jumps
+  (`RL_JUMP`) and computed calls; it is `unknown` for an entry from the
+  runtime and for the resume of a landing pad, which no guest instruction
+  makes (the emitter passes `RL_SITE_NONE`).
+- `target code` says what the build knew: lifted, no instruction (a trap
+  slot of the code map: padding or data), not lifted inside a module's code
+  map or a lifted function's extent, or outside every lifted function.
+  `target where` is the guest layer's place (Switch: module segment; GBA:
+  memory region; Game Boy: region, ROM bank and file offset). The words are
+  read through the guest layer's `peek`, which never faults.
+- `registers` is the CPU layer's `regs` (A64: x0 to x30, sp, pc, NZCV, FPCR,
+  FPSR, the thread pointers; arm32: r0 to r14, pc, CPSR and the open host
+  frames' return addresses; SM83: the summary). The guest backtrace is the
+  host frame walk of the stopping thread (`rl_crash_capture`) through the
+  function maps.
+- No UI shows the report; a crash dialog would be a UI change.
+- `RELIFT_FORCE_MISS=<hex address>[,...]` empties those dispatch slots
+  before the first guest thread runs, so a test or a developer can reach
+  the miss path of any build at a chosen target (for a Switch game, an
+  address-taken entry of `entries.txt` reached only through a computed
+  call).
+
+`relift report <file>` (in the project directory, or with `--build-dir`)
+prints the report's transfer, the guest instructions around the site and at
+the target (llvm-mc for A64 and arm32 when it is on `PATH`, the opcode
+table for SM83), the guest backtrace, the site's lifted C from the build's
+`c/` folder and what `entries.txt` and `unlifted.txt` say about the target,
+and adds the target as a root for the next build: a `[hints]` entry in
+`game.toml` (Switch, as `relift run` does for hot-loaded code). `--no-hint`
+only prints.
+
 ### Still to come
 
 - The host-offset to guest-address line map (`rl_line_entry`), produced by
@@ -1620,6 +1750,10 @@ only on the C library and the host OS.
 - Version 5 added `RL_FN_RANGE`, the code maps (`rl_code_map`, `enum rl_code_class`,
   `RL_CODE_PAGE_SLOTS`, `RL_CODE_MAP_VERSION`, section 5.2) and
   `rl_dispatch_trap` and `rl_dispatch_cold`.
+- Version 6 added `RL_JUMP`, `rl_jump_find`, `rl_find` and
+  `rl_dispatch_jump_miss` (section 6, shipped builds): lifted code's computed
+  jumps now call the runtime there. `rl_dispatch_trap` is gone; trap slots
+  stay empty.
 - Hot-loaded units carry `abi_version`, `ctx_size` and `image_id`; the
   runtime refuses a unit if any differs (section 6). The dev hello carries
   the runtime's version and image id, so relift refuses to serve a
@@ -1915,12 +2049,12 @@ CPU layer `runtime/cpus/arm32` and the glue in `runtime/guests/gba/run`.
   runs there as on the console's BIOS.
 - ARMv4T has no return instruction. A lifted call (BL, the second half of a
   Thumb BL pair, `MOV LR,PC` then `BX`) pushes its return address on the
-  context's frame stack (`rl_arm32_call`), and `rl_indirect` to the address
-  on top returns from the host frame. A computed jump anywhere else goes
-  through dispatch; a redirect (`rl_arm32_redirect`, SoftReset) restarts the
-  run loop with no open frame.
-- Missed code stops the program with the crash report; hot-loading for this
-  guest is open.
+  context's frame stack (`rl_arm32_call`), and a transfer to the address on
+  top (`rl_indirect`, or `rl_jump_find` in `RL_JUMP`) returns from the host
+  frame. A computed jump anywhere else goes through dispatch; a redirect
+  (`rl_arm32_redirect`, SoftReset) restarts the run loop with no open frame.
+- Missed code stops the program with a stop report (section 11);
+  hot-loading for this guest is open.
 
 ### The VR4300
 
