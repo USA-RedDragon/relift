@@ -286,9 +286,10 @@ void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     addr &= ~(size - 1);
     value &= nds_mask(size);
     nds_where w = nds_decode(m, cpu, addr, false, true);
-    if (w.kind == NDS_K_MEM && w.p)
+    if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
-    else if (w.kind == NDS_K_IO) {
+        nds_watch_store(m, w.p);
+    } else if (w.kind == NDS_K_IO) {
         io_untimed_write(m, cpu, addr, size, value);
         m->halt_req = false;
     }
@@ -307,6 +308,76 @@ uint8_t *rl_nds_mem(rl_nds *m, rl_nds_region r, size_t *len)
         *len = sizes[r];
     return p[r];
 }
+
+int nds_watch_line(const rl_nds *m, const uint8_t *p)
+{
+    static const struct {
+        size_t off, len;
+        int first;
+    } mems[] = {
+        {offsetof(rl_nds, main), RL_NDS_MAIN_SIZE, NDS_WATCH_MAIN},
+        {offsetof(rl_nds, swram), RL_NDS_SWRAM_SIZE, NDS_WATCH_SWRAM},
+        {offsetof(rl_nds, wram7), RL_NDS_WRAM7_SIZE, NDS_WATCH_WRAM7},
+        {offsetof(rl_nds, itcm), RL_CP15_ITCM_SIZE, NDS_WATCH_ITCM},
+    };
+    uintptr_t at = (uintptr_t)p - (uintptr_t)m;
+    for (size_t i = 0; i < sizeof mems / sizeof mems[0]; i++)
+        if (at - mems[i].off < mems[i].len)
+            return mems[i].first + (int)((at - mems[i].off) / NDS_LINE);
+    return -1;
+}
+
+/** @brief The host byte of cpu's code fetch at addr, or NULL when no memory answers it. */
+static const uint8_t *code_at(rl_nds *m, unsigned cpu, uint32_t addr)
+{
+    nds_where w = nds_decode(m, cpu, addr, true, false);
+    return w.kind == NDS_K_MEM ? w.p : NULL;
+}
+
+void rl_nds_code_read(rl_nds *m, unsigned cpu, uint32_t addr, uint8_t *out, uint32_t len)
+{
+    for (uint32_t i = 0; i < len;) {
+        uint32_t a = addr + i;
+        uint32_t n = NDS_LINE - (a & (NDS_LINE - 1));
+        if (n > len - i)
+            n = len - i;
+        const uint8_t *p = code_at(m, cpu, a);
+        if (p)
+            memcpy(out + i, p, n);
+        else
+            memset(out + i, 0, n);
+        i += n;
+    }
+}
+
+bool rl_nds_code_equal(rl_nds *m, unsigned cpu, uint32_t addr, const uint8_t *want, uint32_t len)
+{
+    for (uint32_t i = 0; i < len;) {
+        uint32_t a = addr + i;
+        uint32_t n = NDS_LINE - (a & (NDS_LINE - 1));
+        if (n > len - i)
+            n = len - i;
+        const uint8_t *p = code_at(m, cpu, a);
+        if (!p || memcmp(p, want + i, n) != 0)
+            return false;
+        i += n;
+    }
+    return true;
+}
+
+void rl_nds_code_watch(rl_nds *m, unsigned cpu, uint32_t addr, uint32_t len)
+{
+    for (uint32_t i = 0; i < len;) {
+        uint32_t a = addr + i;
+        const uint8_t *p = code_at(m, cpu, a);
+        int l = p ? nds_watch_line(m, p) : -1;
+        if (l >= 0)
+            m->watch[l >> 3] |= (uint8_t)(1u << (l & 7));
+        i += NDS_LINE - (a & (NDS_LINE - 1));
+    }
+}
+
+uint64_t rl_nds_code_epoch(const rl_nds *m) { return m->code_epoch; }
 
 const rl_arm32_cp15 *rl_nds_cp15(const rl_nds *m) { return &m->cp15; }
 

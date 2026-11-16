@@ -143,6 +143,27 @@ void rl_nds_write(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
 /** @brief The backing store of a region and its length. */
 uint8_t *rl_nds_mem(rl_nds *m, rl_nds_region r, size_t *len);
 
+/**
+ * @brief True once after a HALTCNT store of cpu whose halt nothing could
+ * wake (the other CPU is gone and no event is queued); the store returned
+ * without a halt.
+ */
+bool rl_nds_halt_lost(rl_nds *m, unsigned cpu);
+
+/**
+ * @brief Watches the code memory (main RAM, shared and ARM7 work RAM, ITCM)
+ * that cpu fetches the len bytes at addr from now: from then on every write
+ * there, by either CPU, timed or not, moves the code epoch. Lines of 32
+ * bytes; nothing for addresses outside code memory.
+ */
+void rl_nds_code_watch(rl_nds *m, unsigned cpu, uint32_t addr, uint32_t len);
+/** @brief The number of writes to watched code memory so far. */
+uint64_t rl_nds_code_epoch(const rl_nds *m);
+/** @brief True when the len bytes cpu fetches as code at addr now are want (an address no memory answers never matches). */
+bool rl_nds_code_equal(rl_nds *m, unsigned cpu, uint32_t addr, const uint8_t *want, uint32_t len);
+/** @brief Copies the len bytes cpu fetches as code at addr into out, zero where no memory answers. */
+void rl_nds_code_read(rl_nds *m, unsigned cpu, uint32_t addr, uint8_t *out, uint32_t len);
+
 /** @brief The ARM9's CP15 registers (read-only; write them with rl_nds_cp15_write). */
 const rl_arm32_cp15 *rl_nds_cp15(const rl_nds *m);
 /**

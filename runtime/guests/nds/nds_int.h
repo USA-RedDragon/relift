@@ -20,6 +20,17 @@
 /** @brief Offset of IPCFIFORECV from the I/O base. */
 #define NDS_FIFORECV 0x100000u
 
+/** @brief Bytes of one watched line of code memory. */
+#define NDS_LINE 32u
+/** @brief First watch line of each code memory: main RAM, shared work RAM, ARM7 work RAM, ITCM. */
+enum {
+    NDS_WATCH_MAIN = 0,
+    NDS_WATCH_SWRAM = NDS_WATCH_MAIN + RL_NDS_MAIN_SIZE / NDS_LINE,
+    NDS_WATCH_WRAM7 = NDS_WATCH_SWRAM + RL_NDS_SWRAM_SIZE / NDS_LINE,
+    NDS_WATCH_ITCM = NDS_WATCH_WRAM7 + RL_NDS_WRAM7_SIZE / NDS_LINE,
+    NDS_WATCH_LINES = NDS_WATCH_ITCM + RL_CP15_ITCM_SIZE / NDS_LINE,
+};
+
 /** @brief The interrupt controller of one CPU. */
 typedef struct nds_irq {
     uint32_t ie, iflag;
@@ -132,6 +143,13 @@ struct rl_nds {
     bool halt_req;
     /** @brief The CPU waits in rl_nds_halt. */
     bool halted[2];
+    /** @brief A HALTCNT halt of the CPU found nothing that could wake it (rl_nds_halt_lost). */
+    bool halt_lost[2];
+
+    /** @brief One bit per NDS_LINE bytes of code memory (NDS_WATCH_*): lifted code was checked against it. */
+    uint8_t watch[NDS_WATCH_LINES / 8];
+    /** @brief Writes to watched lines so far (rl_nds_code_epoch). */
+    uint64_t code_epoch;
 
     nds_irq irq[2];
     nds_ipc ipc;
@@ -178,6 +196,16 @@ static inline uint8_t *nds_tcm(rl_nds *m, uint32_t addr, bool code, bool write)
     if (!code && t->dtcm_on && (uint64_t)(addr - t->dtcm_base) < t->dtcm_size && (write || !t->dtcm_load))
         return &m->dtcm[addr & (RL_CP15_DTCM_SIZE - 1)];
     return NULL;
+}
+
+/** @brief The watch line of the code memory byte p, or -1 when p is not in code memory. */
+int nds_watch_line(const rl_nds *m, const uint8_t *p);
+/** @brief A store to the bytes at p: moves the code epoch when they are in a watched line. */
+static inline void nds_watch_store(rl_nds *m, const uint8_t *p)
+{
+    int l = nds_watch_line(m, p);
+    if (l >= 0 && (m->watch[l >> 3] >> (l & 7) & 1u))
+        m->code_epoch++;
 }
 
 /** @brief Decodes addr (aligned) for cpu; code true for an instruction fetch, write for a store. */

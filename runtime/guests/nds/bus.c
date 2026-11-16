@@ -96,6 +96,7 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
         if (p) {
             nds_charge(m, cpu, 1);
             nds_st(p, size, value);
+            nds_watch_store(m, p);
             return;
         }
         edge(m, cpu);
@@ -103,9 +104,10 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     if (nds_shared(cpu, addr))
         nds_order(m, cpu);
     nds_where w = nds_decode(m, cpu, addr, false, true);
-    if (w.kind == NDS_K_MEM && w.p)
+    if (w.kind == NDS_K_MEM && w.p) {
         nds_st(w.p, size, value);
-    else if (w.kind == NDS_K_IO) {
+        nds_watch_store(m, w.p);
+    } else if (w.kind == NDS_K_IO) {
         if (m->sched)
             rl_sched_write(m->cpu[cpu], nds_io_key(cpu, addr), size, value);
         else
@@ -114,8 +116,17 @@ void rl_nds_store(rl_nds *m, unsigned cpu, uint32_t addr, unsigned size, uint32_
     finish(m, cpu, w.main, cost(m, cpu, RL_NDS_DATA, addr, size, seq));
     if (m->halt_req) {
         m->halt_req = false;
-        rl_nds_halt(m, cpu);
+        if (!rl_nds_halt(m, cpu))
+            m->halt_lost[cpu] = true;
     }
+}
+
+bool rl_nds_halt_lost(rl_nds *m, unsigned cpu)
+{
+    if (cpu > 1 || !m->halt_lost[cpu])
+        return false;
+    m->halt_lost[cpu] = false;
+    return true;
 }
 
 void rl_nds_idle(rl_nds *m, unsigned cpu, unsigned ticks) { nds_charge(m, cpu, ticks); }
