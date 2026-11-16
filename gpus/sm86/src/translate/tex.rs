@@ -884,8 +884,8 @@ fn coord_slots(d: Dim) -> Vec<Slot> {
 
 /// Float coordinates of a sample. The hardware takes cube coordinates as
 /// already divided by the major axis (the compiler normalizes them first)
-/// and does not divide again, so the major component becomes exactly ±1
-/// for Vulkan's divide to keep the other two as given.
+/// and does not divide again, so the major component becomes exactly 1 or
+/// -1 for Vulkan's divide to keep the other two as given.
 fn float_coords(c: &mut Ctx, s: &Srcs, d: Dim) -> Res<Vec<u32>> {
     let mut v = Vec::new();
     for k in 0..d.coords() as u8 {
@@ -1046,6 +1046,9 @@ fn tld(c: &mut Ctx) -> Res<()> {
         return bad("TLD.CL");
     }
     let lod = w.get(87, 3);
+    if lod != 1 && lod != 3 {
+        return bad("TLD LOD mode");
+    }
     let aoffi = w.bit(76);
     let d = match (w.get(61, 3), ms) {
         (0, false) => Dim::D1,
