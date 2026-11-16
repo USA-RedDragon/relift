@@ -575,6 +575,33 @@ fn ktgl_entries_whole_and_in_zlib_chunks() {
 }
 
 #[test]
+fn ktgl_names_match_in_any_case() {
+    let (mut files, expected) = ktgl_files();
+    for (p, _) in &mut files {
+        *p = match p.as_str() {
+            "romfs/kt/root.rdb" => "romfs/kt/ROOT.RDB".into(),
+            "romfs/kt/root.rdx" => "romfs/kt/Root.Rdx".into(),
+            "romfs/kt/0x00001111.fdata" => "romfs/kt/0x00001111.FDATA".into(),
+            other => other.to_string(),
+        };
+    }
+    files.push((
+        "romfs/kt/alone.rdb".into(),
+        ktgl::build_rdb(ktgl::TYPE_S2G, &[]),
+    ));
+    let root = scratch("ktgl-case");
+    put(&root.join("tree"), &files);
+    let r = scan(
+        &DirSource::new(&root.join("tree")),
+        &root.join("out"),
+        &opts(&root.join("cache")),
+    )
+    .expect("scans");
+    assert_eq!(found(&r), expected);
+    assert_eq!(r.errors["KTGL: an .rdb has no .rdx beside it"].count, 1);
+}
+
+#[test]
 fn a_ktgl_entry_length_that_wraps_is_reported() {
     let (mut files, expected) = ktgl_files();
     let mut bad = ktgl::build_entry(ktgl::TYPE_S2G, 0, &[0u8; 12]);

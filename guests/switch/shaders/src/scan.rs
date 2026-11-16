@@ -627,6 +627,39 @@ impl Job {
     }
 }
 
+/// The input files by package and path: an exact match first, then one
+/// that differs only in ASCII case, since an index names its `.rdx` and
+/// `.fdata` files in a case of its own.
+struct Paths<'a> {
+    exact: HashMap<(usize, &'a str), &'a SourceFile>,
+    folded: HashMap<(usize, String), &'a SourceFile>,
+}
+
+impl<'a> Paths<'a> {
+    fn new(files: &'a [SourceFile]) -> Paths<'a> {
+        let mut folded = HashMap::new();
+        for f in files {
+            folded
+                .entry((f.pkg, f.path.to_ascii_lowercase()))
+                .or_insert(f);
+        }
+        Paths {
+            exact: files
+                .iter()
+                .map(|f| ((f.pkg, f.path.as_str()), f))
+                .collect(),
+            folded,
+        }
+    }
+
+    fn get(&self, pkg: usize, path: &str) -> Option<&'a SourceFile> {
+        self.exact
+            .get(&(pkg, path))
+            .or_else(|| self.folded.get(&(pkg, path.to_ascii_lowercase())))
+            .copied()
+    }
+}
+
 fn load_dicts(source: &dyn Source, files: &[SourceFile]) -> Result<zst::Dicts> {
     let mut dicts = zst::Dicts::new();
     for f in files {
@@ -684,23 +717,21 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         packages: source.has_packages(),
         salt: salt(source.has_packages(), opts.package),
     };
-    let by_path: HashMap<(usize, &str), &SourceFile> = files
-        .iter()
-        .map(|f| ((f.pkg, f.path.as_str()), f))
-        .collect();
+    let paths = Paths::new(&files);
     let mut jobs: Vec<Job> = Vec::new();
     let mut plans: Vec<(&SourceFile, &SourceFile)> = Vec::new();
+    let mut extra: Vec<(String, String)> = Vec::new();
     for f in &files {
         if f.path.to_ascii_lowercase().ends_with(".rdb") {
             let rdx = format!("{}.rdx", &f.path[..f.path.len() - 4]);
-            if let Some(x) = by_path.get(&(f.pkg, rdx.as_str())) {
-                plans.push((f, x));
+            match paths.get(f.pkg, &rdx) {
+                Some(x) => plans.push((f, x)),
+                None => extra.push(("KTGL: an .rdb has no .rdx beside it".into(), f.path.clone())),
             }
         } else if let Some(c) = classify(&f.path) {
             jobs.push(Job::File(f.clone(), c));
         }
     }
-    let mut extra: Vec<(String, String)> = Vec::new();
     let planned = relift_proc::workers::parallel(&plans, |&(rdb, rdx)| plan_rdb(&cx, rdb, rdx));
     let mut groups: BTreeMap<(usize, String), Vec<(u32, u32)>> = BTreeMap::new();
     for (&(rdb, _), plan) in plans.iter().zip(planned) {
@@ -727,11 +758,12 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
                 format!("MountPoint_{mnt}/")
             };
             let name = format!("{pre}{sub}0x{id:08x}.fdata");
-            let found = (0..=rdb.pkg)
-                .rev()
-                .find_map(|p| by_path.get(&(p, name.as_str())).map(|f| f.pkg));
+            let found = (0..=rdb.pkg).rev().find_map(|p| paths.get(p, &name));
             match found {
-                Some(p) => groups.entry((p, name)).or_default().push((off, size)),
+                Some(f) => groups
+                    .entry((f.pkg, f.path.clone()))
+                    .or_default()
+                    .push((off, size)),
                 None => extra.push(("KTGL: the .fdata is not in the input".into(), name)),
             }
         }
@@ -739,7 +771,7 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
     for ((pkg, name), mut entries) in groups {
         entries.sort_unstable();
         entries.dedup();
-        if let Some(f) = by_path.get(&(pkg, name.as_str())) {
+        if let Some(f) = paths.get(pkg, &name) {
             jobs.push(Job::Fdata(Fdata {
                 file: (*f).clone(),
                 entries,
