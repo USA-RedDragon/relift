@@ -968,6 +968,9 @@ impl Run<'_> {
                 UnresolvedKind::IndirectJump,
                 format!("table {base:#010x} has no code address"),
             );
+            if linked {
+                self.resume(site, st, Summary::opaque());
+            }
             return Summary::opaque();
         }
         let mut s = Summary::new(false, 0x7FFF);
