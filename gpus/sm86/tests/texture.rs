@@ -146,6 +146,41 @@ fn constant_offsets_stay_constant() {
     assert!(samples.iter().all(|i| i[5] & 8 != 0));
 }
 
+/// `@P0 BRA` forward by `skip` instructions.
+fn bra_p0(skip: u64) -> [u8; 16] {
+    word(0x147, 4, &[(12, 4, 0), (34, 48, 4 * skip), (87, 3, 7)])
+}
+
+/// An offset register that moves set before a branch reaches on every
+/// path is a constant; one that a path reaches unset is not.
+#[test]
+fn offsets_set_in_an_earlier_block_stay_constant() {
+    let t = tex(0x160, &[(61, 3, 1), (76, 1, 1), (87, 3, 1)]);
+    let s = compute(&[mov(4, 0xf1), bra_p0(1), mov(9, 0), t]);
+    let samples = insts(&s.spirv, 88);
+    assert!(!samples.is_empty() && samples.iter().all(|i| i[5] & 8 != 0));
+    let s = compute(&[mov(4, 0xf1), bra_p0(1), mov(4, 0xf1), t]);
+    assert!(insts(&s.spirv, 88).iter().all(|i| i[5] & 8 != 0));
+    for body in [
+        vec![bra_p0(1), mov(4, 0xf1), t],
+        vec![mov(4, 0xf1), bra_p0(1), mov(4, 0x12), t],
+        vec![
+            mov(4, 0xf1),
+            word(
+                0x002,
+                4,
+                &[(12, 4, 0), (16, 8, 4), (32, 32, 0x12), (72, 4, 0xf)],
+            ),
+            t,
+        ],
+    ] {
+        let mut b: Vec<u8> = body.iter().flatten().copied().collect();
+        exit_and_halt(&mut b);
+        let e = translate(&Program::parse(&b)).err().map(|e| e.to_string());
+        assert!(e.is_some_and(|e| e.contains("offsets")), "{body:?}");
+    }
+}
+
 #[test]
 fn run_time_sample_offsets_are_rejected() {
     for w in [

@@ -56,9 +56,10 @@
 //! # Limits
 //!
 //! Vulkan allows a non-constant texel offset only for gathers, so a TEX or
-//! TXD offset must be a constant that a block-local MOV sets (a
-//! ConstOffset, in texels of each level sampled, as on the guest); other
-//! offsets are rejected. Implicit LODs, biases and TMML take derivatives
+//! TXD offset must be a constant (a ConstOffset, in texels of each level
+//! sampled, as on the guest): the immediate that unpredicated moves leave
+//! in the register on every path to the instruction (see `Prep::known`);
+//! other offsets are rejected. Implicit LODs, biases and TMML take derivatives
 //! across quads of lanes in fragment and compute programs (see
 //! [`Ctx::quad_derivatives`]) and are rejected in vertex programs. TXQ
 //! needs the handle to be sampled elsewhere in the program with one
@@ -201,7 +202,7 @@ const TEX_DIMS: [Option<Dim>; 8] = [
 
 /// Facts about the whole program that single instructions need: the
 /// dimension each bound handle is sampled with (for TXQ) and the
-/// immediates that block-local moves leave in registers (texel offsets).
+/// immediates that moves leave in registers on every path (texel offsets).
 #[derive(Default)]
 pub(crate) struct Prep {
     /// `None` when instructions name the handle with different dimensions.
@@ -210,6 +211,103 @@ pub(crate) struct Prep {
     imm: Vec<Option<(u8, u32)>>,
     writes: Vec<Vec<(u8, u8)>>,
     vars: BTreeMap<u32, u32>,
+    /// Instructions that may run just before each instruction; `None` when
+    /// the program has control flow this does not follow (indirect
+    /// branches, calls, BREAK).
+    preds: Option<Vec<Vec<usize>>>,
+    /// The registers each instruction names, each with how many registers
+    /// from it the instruction may write (see [`tuple_width`]).
+    names: Vec<Vec<(u8, u8)>>,
+}
+
+/// The registers an instruction's text names: `R` and digits not after a
+/// letter, digit or underscore (so not `UR4` or `SR_TID`).
+fn named_regs(i: &Inst) -> Vec<u8> {
+    let t = i.to_string();
+    let b = t.as_bytes();
+    let mut v = Vec::new();
+    for k in 0..b.len() {
+        if b[k] != b'R' || (k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_')) {
+            continue;
+        }
+        let digits: String = t[k + 1..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if let Ok(r) = digits.parse::<u8>() {
+            v.push(r);
+        }
+    }
+    v
+}
+
+/// How many registers from each one it names an instruction may write: four
+/// for anything that may write a register tuple (memory and matrix
+/// operations, 64-bit and wider forms, CS2R), one otherwise.
+fn tuple_width(i: &Inst) -> u8 {
+    let wide = i
+        .mods
+        .iter()
+        .any(|m| m.contains("64") || m.contains("128") || m.contains("WIDE"));
+    let tuples = i.mnemonic.starts_with("LD")
+        || i.mnemonic.starts_with("AT")
+        || i.mnemonic.starts_with('D')
+        || i.mnemonic.starts_with("SU")
+        || i.mnemonic.contains("MMA")
+        || matches!(
+            i.mnemonic,
+            "ALD" | "IPA" | "RED" | "CS2R" | "SHFL" | "MATCH"
+        );
+    if wide || tuples { 4 } else { 1 }
+}
+
+/// The instructions that may run right after each one, or `None` for
+/// control flow that is not followed.
+fn successors(insts: &[Inst]) -> Option<Vec<Vec<usize>>> {
+    let n = insts.len();
+    let mut s = vec![Vec::new(); n];
+    for (k, i) in insts.iter().enumerate() {
+        let guarded = i.guard.is_some()
+            || i.ops
+                .iter()
+                .any(|o| matches!(o, Operand::Pred(p, not) if *p != 7 || *not));
+        match i.mnemonic {
+            "BRA" => {
+                for o in &i.ops {
+                    match o {
+                        Operand::Target(t) => {
+                            let t = usize::try_from(*t / 16).ok().filter(|&t| t < n)?;
+                            s[k].push(t);
+                        }
+                        Operand::Pred(..) | Operand::UPred(..) => {}
+                        _ => return None,
+                    }
+                }
+                if guarded || !i.mods.is_empty() {
+                    s[k].push(k + 1);
+                }
+            }
+            "EXIT" | "KILL" if !guarded => {}
+            // The translation sends a BRX to the next instruction and to
+            // instructions after a transfer (see `cfg::brx_targets`); every
+            // instruction after a transfer is a superset of those.
+            "BRX" | "BRXU" => {
+                s[k].push(k + 1);
+                s[k].extend((1..n).filter(|&m| {
+                    matches!(
+                        insts[m - 1].mnemonic,
+                        "BRA" | "EXIT" | "KILL" | "BRX" | "BRXU" | "RET"
+                    )
+                }));
+            }
+            "JMP" | "JMX" | "CALL" | "RET" | "BREAK" | "BPT" | "RTT" => {
+                return None;
+            }
+            _ => s[k].push(k + 1),
+        }
+        s[k].retain(|&t| t < n);
+    }
+    Some(s)
 }
 
 fn is_texture(m: &str) -> bool {
@@ -231,6 +329,22 @@ impl Prep {
             starts: vec![false; n + 1],
             imm: vec![None; n],
             writes: vec![Vec::new(); n],
+            names: insts
+                .iter()
+                .map(|i| {
+                    let w = tuple_width(i);
+                    named_regs(i).into_iter().map(|r| (r, w)).collect()
+                })
+                .collect(),
+            preds: successors(insts).map(|s| {
+                let mut p = vec![Vec::new(); n];
+                for (k, ts) in s.iter().enumerate() {
+                    for &t in ts {
+                        p[t].push(k);
+                    }
+                }
+                p
+            }),
             ..Prep::default()
         };
         p.starts[0] = true;
@@ -288,6 +402,21 @@ impl Prep {
                 .filter(|r| *r != 255)
                 .map(|r| (r, 4))
                 .collect();
+            if is_texture(i.mnemonic) || i.mnemonic.starts_with("SU") {
+                // The destinations come first: Rd2 and Rd of a texture
+                // instruction, two registers each at most; Rd of a surface
+                // one, up to four.
+                let (n, w) = if is_texture(i.mnemonic) {
+                    (2, 2)
+                } else {
+                    (1, 4)
+                };
+                let dsts = i.ops.iter().filter_map(|o| match o {
+                    Operand::Reg(r, _) => Some(*r),
+                    _ => None,
+                });
+                p.names[k] = dsts.take(n).filter(|&r| r != 255).map(|r| (r, w)).collect();
+            }
             if i.guard.is_none() {
                 let mov = match (i.mnemonic, i.ops.as_slice()) {
                     ("MOV", [Operand::Reg(d, _), v]) => imm_of(v).map(|v| (*d, v)),
@@ -329,9 +458,48 @@ impl Prep {
         p
     }
 
-    /// The value register `r` holds before instruction `k`, when an
-    /// unpredicated move of an immediate in the same block sets it.
+    /// The value register `r` holds before instruction `k`: the immediate
+    /// that unpredicated moves leave in it on every path that reaches `k`,
+    /// with no other instruction that names `r` between. The paths follow
+    /// the program's branches; without them (see [`successors`]) only the
+    /// block of `k` counts.
     fn known(&self, k: usize, r: u8) -> Option<u32> {
+        let Some(preds) = &self.preds else {
+            return self.known_in_block(k, r);
+        };
+        let names = |j: usize| {
+            self.names[j]
+                .iter()
+                .any(|&(q, w)| r >= q && u32::from(r) < u32::from(q) + u32::from(w))
+        };
+        let mut seen = vec![false; preds.len()];
+        let mut todo = vec![k];
+        let mut value = None;
+        while let Some(at) = todo.pop() {
+            if preds[at].is_empty() {
+                return None;
+            }
+            for &j in &preds[at] {
+                if std::mem::replace(&mut seen[j], true) {
+                    continue;
+                }
+                match self.imm[j] {
+                    Some((d, v)) if d == r => {
+                        if value.is_some_and(|x| x != v) {
+                            return None;
+                        }
+                        value = Some(v);
+                    }
+                    _ if names(j) => return None,
+                    _ => todo.push(j),
+                }
+            }
+        }
+        value
+    }
+
+    /// [`Prep::known`] within the block of `k` only.
+    fn known_in_block(&self, k: usize, r: u8) -> Option<u32> {
         let mut j = k;
         loop {
             if j == 0 || self.starts.get(j).copied().unwrap_or(true) {
