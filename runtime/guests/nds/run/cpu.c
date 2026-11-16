@@ -112,7 +112,7 @@ void rl_nds_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
     rl_nds_store(k->run->m, k->id, a, size, (uint32_t)value, seq);
     if (rl_nds_halt_lost(k->run->m, k->id))
         stop_halted(k);
-    if (k->id == RL_NDS_ARM9 && a <= 0x04000247u && a + size > 0x04000247u)
+    if (k->id == RL_NDS_ARM9 && a <= 0x04000249u && a + size > 0x04000240u)
         code_moved(k->run);
     clip(k);
 }
