@@ -1,6 +1,8 @@
 //! The bytes code and constants come from: the platform's code image and
 //! the proven copies to RAM.
 
+use std::collections::HashSet;
+
 use crate::config::Options;
 use crate::loc::Loc;
 use crate::platform::{Kind, Platform};
@@ -11,6 +13,9 @@ pub(crate) struct Image<'a> {
     pub platform: &'a dyn Platform,
     pub options: Options,
     pub copies: Vec<RamCopy>,
+    /// The image bytes discovered code stores to at constant addresses:
+    /// variables, whose image bytes are only their first values.
+    pub written: HashSet<u32>,
 }
 
 fn le(b: &[u8]) -> u32 {
@@ -25,7 +30,13 @@ impl<'a> Image<'a> {
             platform,
             options,
             copies: Vec::new(),
+            written: HashSet::new(),
         }
+    }
+
+    /// Whether code stores to one of the image bytes `addr..addr + n`.
+    pub(crate) fn variable(&self, addr: u32, n: u32) -> bool {
+        (0..n).any(|i| self.written.contains(&addr.wrapping_add(i)))
     }
 
     /// What `addr` holds.

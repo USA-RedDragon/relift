@@ -432,3 +432,52 @@ fn a_call_is_noreturn_only_when_its_callee_is() {
         "control: a call to a loop that never leaves does not return"
     );
 }
+
+#[test]
+fn an_image_word_code_stores_to_is_a_variable() {
+    let flag = BASE + 0x800;
+    let mut m = Machine::new(Profile::V5te);
+    m.arm(
+        BASE,
+        &[
+            A_PUSH_R4_LR,
+            a_ldr_lit(4, BASE + 4, BASE + 0x100),
+            0xE594_0000,
+            0xE350_0000,
+            0x0A00_0001,
+            A_MOV_R0_1,
+            A_POP_R4_PC,
+            A_MOV_R0_1,
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(BASE + 0x100, &[flag]);
+    let never = m.run(Options::default(), arm(BASE));
+    assert!(
+        !found(&never, arm(BASE + 0x14)),
+        "control: an image word no code stores to keeps its value"
+    );
+    m.arm(
+        BASE + 0x200,
+        &[
+            a_ldr_lit(1, BASE + 0x200, BASE + 0x210),
+            0xE581_0000,
+            A_BX_LR,
+        ],
+    );
+    m.arm(
+        BASE + 0x40,
+        &[
+            A_PUSH_R4_LR,
+            a_bl(BASE + 0x44, BASE + 0x200),
+            a_bl(BASE + 0x48, BASE),
+            A_POP_R4_PC,
+        ],
+    );
+    m.arm(BASE + 0x210, &[flag]);
+    let stored = m.run(Options::default(), arm(BASE + 0x40));
+    assert!(
+        found(&stored, arm(BASE + 0x14)),
+        "a store makes the word a variable: its first value is no constant"
+    );
+}

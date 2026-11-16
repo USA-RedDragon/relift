@@ -242,6 +242,8 @@ pub(crate) struct FnRun {
     pub spec: bool,
     /// Code addresses in RAM no copy holds that transfers lead to.
     pub outside: Vec<Loc>,
+    /// Stores to constant image addresses: address and size.
+    pub image_writes: Vec<(u32, u8)>,
 }
 
 struct Run<'a> {
@@ -604,6 +606,7 @@ impl Run<'_> {
             if a.k().is_none() && a.stack_off().is_none() {
                 self.out.ptr_store = true;
             }
+            self.image_write(a, n);
             self.ram_store(loc, a, n, v);
             if n == 4 {
                 self.store(a, v);
@@ -611,6 +614,16 @@ impl Run<'_> {
         }
         for d in &out.dma {
             self.dma(loc, d);
+        }
+    }
+
+    /// A store of `n` bytes at `a`, noted when `a` is a constant address
+    /// in the image.
+    fn image_write(&mut self, a: Abs, n: u8) {
+        if let Some(a) = a.k32()
+            && self.env.image.kind(a) == Kind::Image
+        {
+            self.out.image_writes.push((a, n));
         }
     }
 
@@ -660,6 +673,8 @@ impl Run<'_> {
                     if self.env.image.platform.irq_vector(a) {
                         self.out.irq.push(v);
                     }
+                } else if self.env.image.kind(a) == Kind::Image && a % 4 == 0 {
+                    self.out.ptr_stores.push((a, v));
                 }
             }
             (a, v) if (is_param(a) || a.k().is_some()) && (is_param(v) || v.k().is_some()) => {
@@ -680,6 +695,7 @@ impl Run<'_> {
                 }
                 PEffect::Store(a, v) => {
                     let (a, v) = (subst(a, st), subst(v, st));
+                    self.image_write(a, 4);
                     self.ram_store(site, a, 4, v);
                     self.store(a, v);
                 }
@@ -1224,9 +1240,11 @@ impl Run<'_> {
         self.resume(site, st, Summary::opaque());
     }
 
-    /// A transfer through the RAM word at `a`: every constant discovered
-    /// code stores there. `thumb` is the target state, `None` when the
-    /// transfer interworks.
+    /// A transfer through the RAM word at `a`, or the image variable at
+    /// `a` ([`Image::variable`]): to every constant discovered code stores
+    /// there and the variable's first value, but zero (a null pointer,
+    /// which a program tests before it calls). `thumb` is the target
+    /// state, `None` when the transfer interworks.
     fn pointer(
         &mut self,
         site: Loc,
@@ -1236,12 +1254,21 @@ impl Run<'_> {
         linked: bool,
     ) -> Summary {
         self.out.reads.insert(a);
-        let vals: Vec<u32> = self
+        let first = (self.env.image.kind(a) == Kind::Image)
+            .then(|| self.env.image.read(None, a, 4))
+            .flatten();
+        let mut vals: Vec<u32> = self
             .env
             .ptrs
             .get(&a)
-            .map(|s| s.iter().copied().collect())
-            .unwrap_or_default();
+            .into_iter()
+            .flatten()
+            .copied()
+            .chain(first)
+            .filter(|v| *v != 0)
+            .collect();
+        vals.sort_unstable();
+        vals.dedup();
         if vals.is_empty() {
             self.unresolved(site, UnresolvedKind::PointerNoStore, format!("[{a:#010x}]"));
             if linked {

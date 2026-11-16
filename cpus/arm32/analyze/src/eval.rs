@@ -627,6 +627,13 @@ fn load(
                 return Abs::K(v);
             }
             let r = image.kind(a);
+            if r == Kind::Image && !literal && image.variable(a, n) {
+                out.data.push((a, n as u8));
+                if n == 4 && a.is_multiple_of(4) {
+                    return Abs::sym(Base::Mem(a), 0);
+                }
+                return Abs::Top;
+            }
             let own = literal && loc.copy.is_some() && r == Kind::Ram;
             if (r == Kind::Image || own)
                 && let Some(v) = image.read(loc.copy, a, n)

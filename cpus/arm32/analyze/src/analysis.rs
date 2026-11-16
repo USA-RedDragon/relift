@@ -67,7 +67,7 @@ type FieldGroup = (Loc, u32, Vec<(u32, u32)>);
 /// once the code is: when one found falls inside a table that was read
 /// past it, the discovery starts again with it known, until no table is
 /// read past a stop.
-fn run(image: Image<'_>, roots: &[Loc], hints: &[Loc]) -> Report {
+fn run(mut image: Image<'_>, roots: &[Loc], hints: &[Loc]) -> Report {
     let mut stops = BTreeSet::new();
     let mut cache = RefCell::new(HashMap::new());
     let mut conc = RefCell::new(HashMap::new());
@@ -96,6 +96,7 @@ fn run(image: Image<'_>, roots: &[Loc], hints: &[Loc]) -> Report {
         }
         stops = std::mem::take(&mut d.stops);
         stops.extend(found);
+        image.written = std::mem::take(&mut d.image.written);
         cache = std::mem::take(&mut d.cache);
         conc = std::mem::take(&mut d.conc);
     }
@@ -692,7 +693,7 @@ impl<'a> Driver<'a> {
         }
     }
 
-    fn absorb(&mut self, f: Loc, run: FnRun) {
+    fn absorb(&mut self, f: Loc, mut run: FnRun) {
         if !run.bad_tables.is_empty() {
             self.no_tables.extend(run.bad_tables.iter().copied());
             self.queue.insert(f);
@@ -765,7 +766,9 @@ impl<'a> Driver<'a> {
         for &v in &run.irq {
             new_irq |= self.irq.insert(v);
         }
+        let writes = std::mem::take(&mut run.image_writes);
         self.runs.insert(f, run);
+        self.image_writes(&writes);
         if new_copy {
             let waiting: Vec<Loc> = self
                 .runs
@@ -787,6 +790,35 @@ impl<'a> Driver<'a> {
         if new_copy || new_irq {
             self.resolve_irq();
         }
+    }
+
+    /// Takes the image bytes `writes` store to as variables; runs again the
+    /// functions that read any new one as a constant.
+    fn image_writes(&mut self, writes: &[(u32, u8)]) {
+        let mut new: HashSet<u32> = HashSet::new();
+        for &(a, n) in writes {
+            for i in 0..u32::from(n) {
+                let b = a.wrapping_add(i);
+                if self.image.written.insert(b) {
+                    new.insert(b);
+                }
+            }
+        }
+        if new.is_empty() {
+            return;
+        }
+        self.version += 1;
+        let readers: Vec<Loc> = self
+            .runs
+            .iter()
+            .filter(|(_, r)| {
+                r.data
+                    .iter()
+                    .any(|&(a, n)| (0..u32::from(n)).any(|i| new.contains(&a.wrapping_add(i))))
+            })
+            .map(|(l, _)| *l)
+            .collect();
+        self.queue.extend(readers);
     }
 
     /// Adds constant words stored in RAM, and what they reach through the
