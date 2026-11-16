@@ -20,6 +20,7 @@ mod mma;
 mod mufu;
 mod simt;
 mod tex;
+mod uniform;
 
 pub use host::{
     Atomic64Path, CLOCK_SEED_OFFSET, Clock, ClockPath, Denorm, GUEST_MEMORY_SET, GlobalPath,
@@ -215,6 +216,9 @@ pub(crate) struct Ctx {
     pub mem: mem::order::Plan,
     /// The warp emulation state on [`WarpPath::Simt`].
     pub simt: Option<simt::State>,
+    /// Instructions (by index) whose warp operation gives the same result
+    /// in any warp (see [`uniform`]), translated per lane.
+    pub invariant: BTreeSet<usize>,
 }
 
 impl Ctx {
@@ -748,13 +752,14 @@ fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
         divergent: Vec::new(),
         mem: mem::order::Plan::default(),
         simt: None,
+        invariant: BTreeSet::new(),
     };
     c.iface.host.host = o.host.name;
     c.io.color_kinds = o.color_kinds.clone();
     c.io.vtg.pipe = o.pipeline.clone();
     io::vtg::prescan(&mut c, &code.insts)?;
     c.denorm_plan(&code.insts);
-    c.warp_plan(&code.insts, code.fast_paths);
+    c.warp_plan(&code);
     c.mem_plan(&code.insts);
     let void = c.m.t_void();
     let fnt = c.m.t_fn(void);

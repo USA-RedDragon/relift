@@ -629,7 +629,12 @@ impl Emit<'_> {
         for k in blk.first..blk.end {
             let i = &code.insts[k];
             let (w, pc) = (code.words[k], 16 * k as u64);
-            match kind(i) {
+            let kind = if c.invariant.contains(&k) {
+                Kind::Lane(Mem::None)
+            } else {
+                kind(i)
+            };
+            match kind {
                 Kind::Lane(m) => {
                     if m != Mem::None && (write || (m == Mem::Write && read)) {
                         flush(c, &mut run, None)?;

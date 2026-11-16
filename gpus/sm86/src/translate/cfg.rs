@@ -516,6 +516,50 @@ pub(crate) fn build(code: &Code) -> Res<Vec<Block>> {
         .collect()
 }
 
+/// One basic block for analyses: the instructions it runs (without the
+/// transfer that ends it), its successors (`None` is the exit), and what
+/// picks among them: branch conditions or a switch selector.
+pub(crate) struct FlowBlock {
+    pub insts: std::ops::Range<usize>,
+    pub succs: Vec<Option<usize>>,
+    pub conds: Vec<Operand>,
+    pub selector: Option<Operand>,
+}
+
+/// The blocks the translation emits, subroutines inlined, entry first.
+pub(crate) fn flow(code: &Code) -> Res<Vec<FlowBlock>> {
+    let reg = |s: Sel| match s {
+        Sel::Reg(n) => Operand::Reg(n, Default::default()),
+        Sel::UReg(n) => Operand::UReg(n, Default::default()),
+    };
+    let blk = |b: usize| (!terminal(b)).then_some(b);
+    build(code)?
+        .into_iter()
+        .map(|b| {
+            let (succs, conds, selector) = match b.term {
+                Term::Jump(t) => (vec![blk(t)], Vec::new(), None),
+                Term::Branch(c, t, f) => (vec![blk(t), blk(f)], c, None),
+                Term::Switch(sel, _, cases) => (
+                    cases
+                        .iter()
+                        .map(|&(_, t)| blk(t))
+                        .chain(std::iter::once(None))
+                        .collect(),
+                    Vec::new(),
+                    Some(reg(sel)),
+                ),
+                Term::Set(..) | Term::Dispatch(..) => return bad("shared join before analysis"),
+            };
+            Ok(FlowBlock {
+                insts: b.first..b.end,
+                succs,
+                conds,
+                selector,
+            })
+        })
+        .collect()
+}
+
 /// Immediate dominators of a graph given by successor lists, by Cooper,
 /// Harvey and Kennedy's iteration; `None` for nodes `entry` cannot reach.
 fn idoms(succ: &[Vec<usize>], entry: usize) -> Vec<Option<usize>> {

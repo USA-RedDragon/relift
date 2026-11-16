@@ -47,24 +47,27 @@ const WORDS_KEY: u32 = 0x2_0011;
 const CLUSTERED_REDUCE: u32 = 3;
 
 /// The SHFL operand pattern stays inside a 2x2 quad: the segment mask
-/// covers lane bits 2 to 4 (and a butterfly flips only bits 0 and 1), or a
-/// butterfly of bits 0 and 1 over the whole warp.
+/// covers lane bits 2 to 4, so the source lane keeps the quad bits of the
+/// lane whatever the lane operand (a butterfly must also flip only bits 0
+/// and 1), or a butterfly of bits 0 and 1 over the whole warp.
 pub(crate) fn shfl_is_quad(i: &Inst) -> bool {
     let imm = |k: usize| match i.ops.get(k) {
         Some(Operand::Int(v)) => Some(*v as u64),
         Some(Operand::Hex(v)) => Some(*v),
         _ => None,
     };
-    let (Some(b), Some(c)) = (imm(3), imm(4)) else {
+    let Some(c) = imm(4) else {
         return false;
     };
     let seg = (c >> 8) & 0x1f;
     let clamp = c & 0x1f;
-    let bfly = i.has("BFLY");
-    if bfly && b & 0x1f >= 4 {
-        return false;
+    if !i.has("BFLY") {
+        return seg & 0x1c == 0x1c;
     }
-    seg & 0x1c == 0x1c || (bfly && seg == 0 && clamp == 0x1f)
+    let Some(b) = imm(3) else {
+        return false;
+    };
+    b & 0x1f < 4 && (seg & 0x1c == 0x1c || (seg == 0 && clamp == 0x1f))
 }
 
 /// A warp operation, and whether it stays in a quad.
@@ -262,13 +265,18 @@ pub(crate) fn divergent(insts: &[Inst]) -> Vec<bool> {
 
 impl Ctx {
     /// Picks how warp operations are carried out, from the stage's
-    /// subgroups and where the operations sit. `fast_paths` counts the
-    /// BRA.DIV and BRA.CONV taken as converged.
-    pub(crate) fn warp_plan(&mut self, insts: &[Inst], fast_paths: usize) {
+    /// subgroups and where the operations sit. The BRA.DIV and BRA.CONV
+    /// taken as converged are counted in `code.fast_paths`.
+    pub(crate) fn warp_plan(&mut self, code: &crate::translate::Code) {
+        let insts = &code.insts;
+        let fast_paths = code.fast_paths;
         self.divergent = divergent(insts);
+        self.invariant = crate::translate::uniform::invariant_votes(code);
+        self.iface.host.warp_invariant = self.invariant.len() as u32;
         let ops: Vec<(usize, bool)> = insts
             .iter()
             .enumerate()
+            .filter(|(k, _)| !self.invariant.contains(k))
             .filter(|&(k, _)| {
                 let free = self.stage == Stage::TessEval && tess_coord_lane(insts, k);
                 if free {

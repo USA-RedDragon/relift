@@ -490,8 +490,11 @@ pub struct HostReport {
     pub host: &'static str,
     pub warp: WarpPath,
     /// Warp operations (SHFL, VOTE, REDUX, MATCH, lane masks, SR_LANEID)
-    /// translated.
+    /// translated through the warp path.
     pub warp_ops: u32,
+    /// Votes on a draw-uniform predicate: the same result in any warp the
+    /// guest could form, so translated per lane on every host.
+    pub warp_invariant: u32,
     /// Workgroup memory the warp emulation adds, in bytes per guest warp.
     pub warp_shared_bytes_per_warp: u32,
     /// Denormal execution mode requested (`None`: the device default).

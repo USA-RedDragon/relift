@@ -214,6 +214,10 @@ fn vote(c: &mut Ctx, i: &Inst) -> Res<()> {
         _ => return bad("VOTE operands"),
     };
     let p = c.pred_operand(ps)?;
+    if c.invariant.contains(&((c.pc / 16) as usize)) {
+        let r = if i.has("EQ") { c.m.c_bool(true) } else { p };
+        return c.store_pdst(pd, r);
+    }
     if let Some(d) = dst {
         let m = c.ballot(p);
         c.store_dst(d, m)?;
