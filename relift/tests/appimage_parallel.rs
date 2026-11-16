@@ -101,19 +101,35 @@ fn parallel_builds_package_with_the_pinned_runtime() {
 }
 
 #[test]
-fn concurrent_processes_do_not_share_scratch() {
+fn a_scratch_dir_survives_another_process_making_it() {
+    const CHILD: &str = "RELIFT_SCRATCH_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let dir = tiny::scratch("scratch-probe");
+        let marker = dir.join(std::process::id().to_string());
+        relift_cache::write_if_changed(&marker, b"x").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert!(marker.exists(), "{} was wiped", dir.display());
+        return;
+    }
     let exe = std::env::current_exe().expect("the test binary path");
-    let run = || {
-        std::process::Command::new(&exe)
-            .args(["--exact", "parallel_builds_package_with_the_pinned_runtime"])
-            .output()
-            .expect("the test binary runs")
+    let start = {
+        let exe = exe.clone();
+        move || {
+            relift_proc::command(&exe)
+                .args([
+                    "--exact",
+                    "a_scratch_dir_survives_another_process_making_it",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .expect("the test binary runs")
+        }
     };
-    let outs: Vec<_> = std::thread::scope(|s| {
-        let hs: Vec<_> = (0..2).map(|_| s.spawn(run)).collect();
-        hs.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-    for out in &outs {
+    let first = std::thread::spawn(start.clone());
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let second = start();
+    let first = first.join().unwrap();
+    for out in [first, second] {
         assert!(
             out.status.success(),
             "{}",
