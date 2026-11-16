@@ -123,14 +123,7 @@ pub fn run(settings: &Settings, req: &Request<'_>, ui: &mut Ui) -> Result<u8, Bo
         .arg("--args")
         .arg(&built.exe)
         .env("RELIFT_DIFF_ENGINE", engine);
-    let romfs = import.join("romfs");
-    if romfs.is_dir() {
-        cmd.env("RELIFT_ROMFS", &romfs);
-    }
-    let dlc = import.join("dlc");
-    if dlc.is_dir() {
-        cmd.env("RELIFT_DLC", &dlc);
-    }
+    crate::gamedata::set_env(&mut cmd, &import);
     let status = cmd.status()?;
     Ok(u8::try_from(status.code().unwrap_or(128)).unwrap_or(1))
 }

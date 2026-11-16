@@ -1,19 +1,19 @@
-//! The game data manifest of a mobile app: every file of the imported romfs
-//! and DLC with its size and SHA-256, so the app can tell at start whether
+//! The game data manifest of a mobile app: every file of game data the app
+//! is given, with its size and SHA-256, so the app can tell at start whether
 //! the data it was given is complete (`runtime/core/include/relift/datacheck.h`),
 //! and `relift push` can check what it copied.
 //!
-//! One line per file: `<size> <sha256 hex> <root>/<path>`, root `romfs` or
-//! `dlc`, sorted by path. Hashes are kept in `<work>/data-hashes.tsv` by
-//! path, size and modification time, so a rebuild hashes only what changed.
+//! The data is one plain RomFS image per romfs (crate::gamedata): `romfs.img`
+//! for the game, `dlc/<title id>/<index>/romfs.img` for each DLC. One line per
+//! image: `<size> <sha256 hex> <name>`, sorted by name. Hashes are kept in
+//! `<work>/data-digests.tsv` by the source's size and modification time, so a
+//! rebuild reads the data again only after it changed.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
-
-use sha2::{Digest, Sha256};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use crate::import::BoxError;
 
@@ -23,101 +23,30 @@ pub const FILE: &str = "data-manifest.txt";
 /// One file the manifest lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// `romfs/<path>` or `dlc/<path>`, with `/` separators.
+    /// `romfs.img` or `dlc/<title id>/<index>/romfs.img`.
     pub name: String,
     pub size: u64,
     pub sha256: String,
 }
 
-fn files(root: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> std::io::Result<()> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for e in std::fs::read_dir(&d)? {
-            let e = e?;
-            let t = e.file_type()?;
-            let p = e.path();
-            if t.is_dir() {
-                stack.push(p);
-            } else if t.is_file() {
-                let rel = p.strip_prefix(root).unwrap_or(&p);
-                let rel: Vec<String> = rel
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                    .collect();
-                out.push((format!("{prefix}/{}", rel.join("/")), p));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn hash_file(p: &Path) -> std::io::Result<String> {
-    let mut f = std::fs::File::open(p)?;
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-    }
-    let mut s = String::with_capacity(64);
-    for b in h.finalize() {
-        let _ = write!(s, "{b:02x}");
-    }
-    Ok(s)
-}
-
-fn stamp(p: &Path) -> std::io::Result<(u64, u128)> {
-    let m = std::fs::metadata(p)?;
-    let t = m
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    Ok((m.len(), t))
-}
-
-/// The entries for the romfs and DLC folders of `import` (each optional),
-/// hashing only files whose size or time changed since `work`'s cache.
+/// The entries for the romfs and DLC of `import`, each as its plain image,
+/// hashing only what changed since `work`'s cache.
 ///
 /// # Errors
 ///
-/// A folder or file cannot be read, or the cache cannot be written.
+/// A romfs cannot be read, or the cache cannot be written.
 pub fn entries(import: &Path, work: &Path) -> Result<Vec<Entry>, BoxError> {
-    let mut list = Vec::new();
-    for root in ["romfs", "dlc"] {
-        let d = import.join(root);
-        if d.is_dir() {
-            files(&d, root, &mut list)?;
-        }
+    let cache = work.join("data-digests.tsv");
+    let mut out = Vec::new();
+    for u in crate::gamedata::units(import)? {
+        let (size, sha256) = crate::gamedata::image_digest(&u, &cache)?;
+        out.push(Entry {
+            name: u.image_name(),
+            size,
+            sha256,
+        });
     }
-    list.sort();
-    let cache_path = work.join("data-hashes.tsv");
-    let mut cache: BTreeMap<String, (u64, u128, String)> = BTreeMap::new();
-    if let Ok(text) = std::fs::read_to_string(&cache_path) {
-        for l in text.lines() {
-            let f: Vec<&str> = l.splitn(4, '\t').collect();
-            if let [size, time, hash, name] = f[..]
-                && let (Ok(size), Ok(time)) = (size.parse(), time.parse())
-            {
-                cache.insert(name.to_string(), (size, time, hash.to_string()));
-            }
-        }
-    }
-    let mut out = Vec::with_capacity(list.len());
-    let mut kept = String::new();
-    for (name, path) in list {
-        let (size, time) = stamp(&path)?;
-        let sha256 = match cache.get(&name) {
-            Some((s, t, h)) if *s == size && *t == time => h.clone(),
-            _ => hash_file(&path)?,
-        };
-        let _ = writeln!(kept, "{size}\t{time}\t{sha256}\t{name}");
-        out.push(Entry { name, size, sha256 });
-    }
-    std::fs::create_dir_all(work)?;
-    relift_cache::write_if_changed(&cache_path, kept.as_bytes())?;
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 
@@ -180,6 +109,7 @@ pub fn mismatches<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest;
 
     fn tmp(tag: &str) -> PathBuf {
         let d = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -192,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn lists_romfs_and_dlc_with_sizes_and_hashes_and_round_trips() {
+    fn lists_one_image_per_romfs_with_size_and_hash_and_round_trips() {
         let d = tmp("list");
         let import = d.join("import");
         std::fs::create_dir_all(import.join("romfs/a")).unwrap();
@@ -202,12 +132,16 @@ mod tests {
         relift_cache::write_if_changed(&import.join("dlc/0100/0/romfs/d"), b"dd").unwrap();
         let e = entries(&import, &d.join("work")).unwrap();
         let names: Vec<&str> = e.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["dlc/0100/0/romfs/d", "romfs/a/x.bin", "romfs/top"]);
-        assert_eq!(e[1].size, 3);
-        assert_eq!(
-            e[1].sha256,
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
+        assert_eq!(names, ["dlc/0100/0/romfs.img", "romfs.img"]);
+        let out = d.join("out");
+        crate::gamedata::write_images(&import, &out, false).unwrap();
+        let img = std::fs::read(out.join("romfs.img")).unwrap();
+        assert_eq!(e[1].size, img.len() as u64);
+        let want: String = sha2::Sha256::digest(&img)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(e[1].sha256, want);
         assert_eq!(parse(&text(&e)).unwrap(), e);
         let again = entries(&import, &d.join("work")).unwrap();
         assert_eq!(again, e);

@@ -1,19 +1,20 @@
-//! `relift push`: copies a project's game data (the imported romfs and DLC)
-//! onto a phone where the app built by `relift build --target <t>` reads it,
-//! and checks every file against the data manifest (crate::datamanifest).
+//! `relift push`: copies a project's game data onto a phone where the app
+//! built by `relift build --target <t>` reads it, and checks every file
+//! against the data manifest (crate::datamanifest). The data is one plain
+//! RomFS image per romfs (`romfs.img`, `dlc/<title id>/<index>/romfs.img`;
+//! crate::gamedata), written beside the build first when the import holds
+//! the romfs as a map or a tree, so a game with hundreds of thousands of
+//! romfs files is a handful of copies.
 //!
-//! - iOS: into the app's Documents (`romfs/`, `dlc/`) with `xcrun devicectl`,
-//!   one folder of at most [`CHUNK`] files per copy, since one copy of a
-//!   large tree can end early without an error. The device's file list is
-//!   then compared with the manifest, missing or short files are copied
-//!   again, and what is still wrong fails the push, naming the first file.
+//! - iOS: into the app's Documents with `xcrun devicectl`, one copy per
+//!   image. The device's file list is then compared with the manifest,
+//!   missing or short files are copied again, and what is still wrong fails
+//!   the push, naming the first file.
 //! - Android: into the app's external files folder with `adb push`, checked
-//!   the same way with `stat` on the device, one stream of names through
-//!   `xargs` (one `find -exec ... +` overflows the device shell's argument
-//!   list on a large tree). `adb push` makes its folders the shell's, mode
-//!   2770, which the app cannot enter, so every folder under the data that
-//!   the app does not own is opened to all (`a+rx`; the files are already
-//!   readable by all) and checked again.
+//!   the same way with `stat` on the device. `adb push` makes its folders
+//!   the shell's, mode 2770, which the app cannot enter, so every folder
+//!   under the data that the app does not own is opened to all (`a+rx`; the
+//!   files are already readable by all) and checked again.
 //!
 //! The app checks the data against the same manifest at start, so data a
 //! push did not finish never runs.
@@ -21,57 +22,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use relift_switch_formats::romfs_image::{self, Found, IMAGE_NAME};
+
 use crate::datamanifest::{self, Entry};
 use crate::import::BoxError;
 use crate::settings::Settings;
 use crate::ui::Ui;
 use relift_progress::Line;
 
-/// The most files one device copy carries.
-pub const CHUNK: usize = 1500;
 const ROUNDS: usize = 3;
-
-/// The folders of `root` (relative to `base`) to copy one at a time so that
-/// none holds more than `limit` files, and the loose files of folders that
-/// had to be split.
-fn chunks(base: &Path, rel: &str, limit: usize) -> std::io::Result<(Vec<String>, Vec<String>)> {
-    let dir = base.join(rel);
-    let mut n = 0usize;
-    let mut stack = vec![dir.clone()];
-    while let Some(d) = stack.pop() {
-        for e in std::fs::read_dir(&d)? {
-            let e = e?;
-            if e.file_type()?.is_dir() {
-                stack.push(e.path());
-            } else {
-                n += 1;
-            }
-        }
-    }
-    let mut kids = Vec::new();
-    let mut loose = Vec::new();
-    for e in std::fs::read_dir(&dir)? {
-        let e = e?;
-        let name = e.file_name().to_string_lossy().into_owned();
-        if e.file_type()?.is_dir() {
-            kids.push(format!("{rel}/{name}"));
-        } else {
-            loose.push(format!("{rel}/{name}"));
-        }
-    }
-    if n <= limit || kids.is_empty() {
-        return Ok((vec![rel.to_string()], Vec::new()));
-    }
-    kids.sort();
-    loose.sort();
-    let mut dirs = Vec::new();
-    for k in kids {
-        let (d, l) = chunks(base, &k, limit)?;
-        dirs.extend(d);
-        loose.extend(l);
-    }
-    Ok((dirs, loose))
-}
 
 /// A phone the data goes to.
 trait Device {
@@ -141,7 +100,7 @@ fn walk_json<'a>(v: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Value>)
 }
 
 /// The files of a `devicectl device info files --json-output` listing of
-/// `Documents/<root>`, named `<root>/<path>`.
+/// `Documents/<root>`, named `<root>/<path>` (`<path>` for an empty root).
 fn ios_listing(json: &str, root: &str) -> Result<BTreeMap<String, u64>, BoxError> {
     let v: serde_json::Value = serde_json::from_str(json)?;
     let mut all = Vec::new();
@@ -158,7 +117,12 @@ fn ios_listing(json: &str, root: &str) -> Result<BTreeMap<String, u64>, BoxError
             continue;
         };
         if !dir {
-            out.insert(format!("{root}/{rel}"), size);
+            let name = if root.is_empty() {
+                rel.to_string()
+            } else {
+                format!("{root}/{rel}")
+            };
+            out.insert(name, size);
         }
     }
     Ok(out)
@@ -180,21 +144,24 @@ impl Device for Ios {
 
     fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError> {
         let mut out = BTreeMap::new();
-        for root in ["romfs", "dlc"] {
-            let json = self.work.join(format!("push-{root}.json"));
+        for (root, sub) in [("", "Documents"), ("dlc", "Documents/dlc")] {
+            let json = self.work.join(format!(
+                "push-{}.json",
+                if root.is_empty() { "top" } else { root }
+            ));
             let _ = std::fs::remove_file(&json);
             let _ = relift_proc::command("xcrun")
                 .args(["devicectl", "device", "info", "files"])
                 .args(self.base())
-                .args([
-                    "--subdirectory",
-                    &format!("Documents/{root}"),
-                    "--json-output",
-                ])
+                .args(["--subdirectory", sub, "--json-output"])
                 .arg(&json)
                 .output();
             if let Ok(text) = std::fs::read_to_string(&json) {
-                out.extend(ios_listing(&text, root)?);
+                out.extend(
+                    ios_listing(&text, root)?
+                        .into_iter()
+                        .filter(|(n, _)| is_data_name(n)),
+                );
             }
         }
         Ok(out)
@@ -280,9 +247,15 @@ fn android_names(text: &str, dir: &str) -> Vec<String> {
         .collect()
 }
 
-/// The data folders under `dir` that exist, for a device shell `for` list.
+/// Whether `name` (relative to the data folder) is game data a manifest
+/// lists: the game's image or a file under `dlc/`.
+fn is_data_name(name: &str) -> bool {
+    name == IMAGE_NAME || name.starts_with("dlc/")
+}
+
+/// The data under `dir`, for a device shell `for` list.
 fn android_roots(dir: &str) -> String {
-    format!("'{dir}'/romfs '{dir}'/dlc")
+    format!("'{dir}'/{IMAGE_NAME} '{dir}'/dlc")
 }
 
 /// The device command that prints `<size> <path>` for every data file: one
@@ -290,7 +263,7 @@ fn android_roots(dir: &str) -> String {
 /// in one argument list at a time.
 fn android_sizes_command(dir: &str) -> String {
     format!(
-        "for r in {}; do [ -d \"$r\" ] || continue; find \"$r\" -type f -print0 | xargs -0 -r stat -c '%s %n' || exit 1; done",
+        "for r in {}; do [ -e \"$r\" ] || continue; find \"$r\" -type f -print0 | xargs -0 -r stat -c '%s %n' || exit 1; done",
         android_roots(dir)
     )
 }
@@ -335,9 +308,39 @@ fn opened(dev: &dyn Device) -> Result<(), BoxError> {
     }
 }
 
+/// The local file of every manifest entry: the import's own plain image
+/// where it has one, else the image written into `<work>/data` from the
+/// map or tree (only where it changed).
+fn local_images(
+    import: &Path,
+    work: &Path,
+    ui: &mut Ui,
+) -> Result<BTreeMap<String, PathBuf>, BoxError> {
+    let mut out = BTreeMap::new();
+    for u in crate::gamedata::units(import)? {
+        let name = u.image_name();
+        let path = match &u.found {
+            Found::Image(p) => p.clone(),
+            _ => {
+                let dst = work.join("data").join(&name);
+                ui.note(&Line::new().text(format!(
+                    "writing {} from {}",
+                    dst.display(),
+                    u.found.path().display()
+                )));
+                romfs_image::flatten(u.found.path(), &dst, &mut |_| {})
+                    .map_err(|e| format!("{}: {e}", u.found.path().display()))?;
+                dst
+            }
+        };
+        out.insert(name, path);
+    }
+    Ok(out)
+}
+
 fn push_to(
     dev: &dyn Device,
-    import: &Path,
+    local: &BTreeMap<String, PathBuf>,
     entries: &[Entry],
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
@@ -347,34 +350,17 @@ fn push_to(
         if bad.is_empty() {
             return opened(dev);
         }
-        let mut dirty: Vec<String> = Vec::new();
-        for root in ["romfs", "dlc"] {
-            if !import.join(root).is_dir() {
-                continue;
-            }
-            let (dirs, loose) = chunks(import, root, CHUNK)?;
-            for d in dirs {
-                if bad
-                    .iter()
-                    .any(|(e, _)| e.name.starts_with(&format!("{d}/")))
-                {
-                    dirty.push(d);
-                }
-            }
-            for f in loose {
-                if bad.iter().any(|(e, _)| e.name == f) {
-                    dirty.push(f);
-                }
-            }
-        }
         ui.note(&Line::new().text(format!(
-            "push round {}: {} files differ, copying {} folders",
+            "push round {}: copying {} of {} files",
             round + 1,
             bad.len(),
-            dirty.len()
+            entries.len()
         )));
-        for d in &dirty {
-            dev.copy(&import.join(d), d)?;
+        for (e, _) in &bad {
+            let src = local
+                .get(&e.name)
+                .ok_or_else(|| format!("{}: no local file to copy", e.name))?;
+            dev.copy(src, &e.name)?;
         }
         have = dev.sizes()?;
     }
@@ -412,8 +398,9 @@ pub fn run_push(
     ui.begin(row, "push");
     let entries = datamanifest::entries(&import, &work)?;
     if entries.is_empty() {
-        return Err(format!("{}: no romfs or dlc folder to push", import.display()).into());
+        return Err(format!("{}: no romfs or dlc to push", import.display()).into());
     }
+    let local = local_images(&import, &work, ui)?;
     let bytes: u64 = entries.iter().map(|e| e.size).sum();
     let what = match crate::cross::target(target)? {
         Some(crate::cross::Target::Ios(_)) => {
@@ -431,7 +418,7 @@ pub fn run_push(
                 bundle: bundle.clone(),
                 work: work.clone(),
             };
-            push_to(&dev, &import, &entries, ui)?;
+            push_to(&dev, &local, &entries, ui)?;
             format!("{bundle} Documents")
         }
         Some(crate::cross::Target::Android(_)) => {
@@ -446,7 +433,7 @@ pub fn run_push(
                 serial: device.map(String::from),
                 dir: dir.clone(),
             };
-            push_to(&dev, &import, &entries, ui)?;
+            push_to(&dev, &local, &entries, ui)?;
             dir
         }
         None => return Err("relift push needs --target ios-arm64 or android-arm64".into()),
@@ -521,9 +508,14 @@ mod tests {
         let j = r#"{"result":{"files":[
             {"relativePath":"as","resources":{"isDirectory":true},"metadata":{"size":96}},
             {"relativePath":"as/boot.asb","resources":{"isDirectory":false},"metadata":{"size":30864}}]}}"#;
-        let m = ios_listing(j, "romfs").unwrap();
+        let m = ios_listing(j, "dlc").unwrap();
         assert_eq!(m.len(), 1);
-        assert_eq!(m["romfs/as/boot.asb"], 30864);
+        assert_eq!(m["dlc/as/boot.asb"], 30864);
+        let top = r#"{"result":{"files":[
+            {"relativePath":"romfs.img","resources":{"isDirectory":false},"metadata":{"size":7}}]}}"#;
+        assert_eq!(ios_listing(top, "").unwrap()["romfs.img"], 7);
+        assert!(is_data_name("romfs.img") && is_data_name("dlc/01/0/romfs.img"));
+        assert!(!is_data_name("save/x"));
     }
 
     #[test]
@@ -553,12 +545,12 @@ mod tests {
             .join("target")
             .join(format!("relift-push-sizes-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(d.join("romfs/a b")).unwrap();
+        std::fs::create_dir_all(d.join("dlc/a b")).unwrap();
         for i in 0..3000 {
-            relift_cache::write_if_changed(&d.join(format!("romfs/a b/file {i:05}")), b"xy")
-                .unwrap();
+            relift_cache::write_if_changed(&d.join(format!("dlc/a b/file {i:05}")), b"xy").unwrap();
         }
-        relift_cache::write_if_changed(&d.join("romfs/top"), b"xyz").unwrap();
+        relift_cache::write_if_changed(&d.join("romfs.img"), b"xyz").unwrap();
+        relift_cache::write_if_changed(&d.join("other"), b"o").unwrap();
         let dir = d.to_str().unwrap();
         let out = relift_proc::command("sh")
             .arg("-c")
@@ -572,8 +564,8 @@ mod tests {
         );
         let m = android_listing(&String::from_utf8_lossy(&out.stdout), dir);
         assert_eq!(m.len(), 3001);
-        assert_eq!(m["romfs/a b/file 02999"], 2);
-        assert_eq!(m["romfs/top"], 3);
+        assert_eq!(m["dlc/a b/file 02999"], 2);
+        assert_eq!(m["romfs.img"], 3);
         std::fs::remove_dir_all(&d).unwrap();
     }
 
@@ -601,10 +593,14 @@ mod tests {
         files: BTreeMap<String, u64>,
         closed: Vec<String>,
         opened: std::cell::Cell<usize>,
+        copied: std::cell::RefCell<Vec<(PathBuf, String)>>,
     }
 
     impl Device for Fake {
-        fn copy(&self, _: &Path, _: &str) -> Result<(), BoxError> {
+        fn copy(&self, local: &Path, remote: &str) -> Result<(), BoxError> {
+            self.copied
+                .borrow_mut()
+                .push((local.to_path_buf(), remote.to_string()));
             Ok(())
         }
         fn sizes(&self) -> Result<BTreeMap<String, u64>, BoxError> {
@@ -619,7 +615,7 @@ mod tests {
     #[test]
     fn a_push_whose_files_match_still_opens_the_folders_and_fails_on_closed_ones() {
         let entries = [Entry {
-            name: "romfs/a".into(),
+            name: "romfs.img".into(),
             size: 3,
             sha256: String::new(),
         }];
@@ -632,41 +628,64 @@ mod tests {
             relift_progress::Verbosity::Quiet,
         );
         let ok = Fake {
-            files: [("romfs/a".to_string(), 3)].into(),
+            files: [("romfs.img".to_string(), 3)].into(),
             closed: Vec::new(),
             opened: 0.into(),
+            copied: Vec::new().into(),
         };
-        push_to(&ok, Path::new("/nonexistent"), &entries, &mut ui).unwrap();
+        let local = BTreeMap::new();
+        push_to(&ok, &local, &entries, &mut ui).unwrap();
         assert_eq!(ok.opened.get(), 1);
+        assert!(ok.copied.borrow().is_empty());
         let closed = Fake {
-            closed: vec!["romfs".into()],
+            closed: vec!["dlc".into()],
             ..ok
         };
-        let e = push_to(&closed, Path::new("/nonexistent"), &entries, &mut ui).unwrap_err();
-        assert!(e.to_string().contains("first: romfs"), "{e}");
+        let e = push_to(&closed, &local, &entries, &mut ui).unwrap_err();
+        assert!(e.to_string().contains("first: dlc"), "{e}");
     }
 
     #[test]
-    fn big_folders_split_into_chunks_with_their_loose_files() {
-        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("target")
-            .join(format!("relift-push-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        for (i, sub) in ["romfs/a", "romfs/b"].iter().enumerate() {
-            std::fs::create_dir_all(d.join(sub)).unwrap();
-            for f in 0..3 {
-                relift_cache::write_if_changed(&d.join(sub).join(format!("{i}{f}")), b"x").unwrap();
-            }
-        }
-        relift_cache::write_if_changed(&d.join("romfs/top"), b"x").unwrap();
-        assert_eq!(
-            chunks(&d, "romfs", 10).unwrap(),
-            (vec!["romfs".into()], vec![])
+    fn a_push_copies_each_image_that_differs_and_names_what_stays_wrong() {
+        let entries = [
+            Entry {
+                name: "dlc/01/0/romfs.img".into(),
+                size: 2,
+                sha256: String::new(),
+            },
+            Entry {
+                name: "romfs.img".into(),
+                size: 3,
+                sha256: String::new(),
+            },
+        ];
+        let mut ui = relift_progress::Reporter::new(
+            std::io::stderr(),
+            Box::new(relift_progress::ManualClock::new()),
+            relift_progress::Mode::Plain,
+            false,
+            80,
+            relift_progress::Verbosity::Quiet,
         );
-        let (dirs, loose) = chunks(&d, "romfs", 4).unwrap();
-        assert_eq!(dirs, ["romfs/a", "romfs/b"]);
-        assert_eq!(loose, ["romfs/top"]);
-        std::fs::remove_dir_all(&d).unwrap();
+        let dev = Fake {
+            files: [("dlc/01/0/romfs.img".to_string(), 2)].into(),
+            closed: Vec::new(),
+            opened: 0.into(),
+            copied: Vec::new().into(),
+        };
+        let local: BTreeMap<String, PathBuf> = [
+            ("romfs.img".to_string(), PathBuf::from("/w/romfs.img")),
+            ("dlc/01/0/romfs.img".to_string(), PathBuf::from("/w/d.img")),
+        ]
+        .into();
+        let e = push_to(&dev, &local, &entries, &mut ui).unwrap_err();
+        assert!(e.to_string().contains("romfs.img is missing"), "{e}");
+        let copied = dev.copied.borrow();
+        assert_eq!(copied.len(), ROUNDS);
+        assert!(
+            copied
+                .iter()
+                .all(|(l, r)| l == Path::new("/w/romfs.img") && r == "romfs.img")
+        );
     }
 }

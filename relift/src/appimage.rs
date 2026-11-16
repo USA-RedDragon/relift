@@ -5,7 +5,7 @@
 //! `relift build` makes the program as before, then lays out an AppDir
 //! (`AppRun`, the desktop file, the icon, `usr/bin/<game>`, the shared
 //! libraries it needs under `usr/lib`, the self-description, the licenses
-//! of what is bundled, and the romfs and DLC trees a Switch game reads) and
+//! of what is bundled, and the romfs and DLC images a Switch game reads) and
 //! gives it to `appimagetool`, which adds the type 2 runtime and a squashfs
 //! image.
 //!
@@ -110,8 +110,8 @@ pub struct Request<'a> {
     pub name: &'a str,
     /// The built program.
     pub exe: &'a Path,
-    /// The import directory of a Switch game, whose `romfs/` and `dlc/` go
-    /// into the AppImage.
+    /// The import directory of a Switch game, whose romfs and DLC go into
+    /// the AppImage as plain images (crate::gamedata).
     pub import: Option<&'a Path>,
 }
 
@@ -240,20 +240,6 @@ pub fn resolve(exe: &Path, extra: &[PathBuf]) -> Result<Vec<Bundled>, BoxError> 
     Ok(found)
 }
 
-pub(crate) fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for e in std::fs::read_dir(from)? {
-        let e = e?;
-        let dest = to.join(e.file_name());
-        if e.path().is_dir() {
-            copy_tree(&e.path(), &dest)?;
-        } else {
-            relift_cache::write_if_changed(&dest, &std::fs::read(e.path())?)?;
-        }
-    }
-    Ok(())
-}
-
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -293,7 +279,9 @@ pub fn app_run(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> St
         _ => {}
     }
     if has_romfs {
-        s.push_str(": \"${RELIFT_ROMFS:=$HERE/usr/share/relift/romfs}\"\nexport RELIFT_ROMFS\n");
+        s.push_str(
+            ": \"${RELIFT_ROMFS:=$HERE/usr/share/relift/romfs.img}\"\nexport RELIFT_ROMFS\n",
+        );
     }
     if has_dlc {
         s.push_str(": \"${RELIFT_DLC:=$HERE/usr/share/relift/dlc}\"\nexport RELIFT_DLC\n");
@@ -418,23 +406,16 @@ pub fn layout(req: &Request, info: &Info, dir: &Path) -> Result<Packaged, BoxErr
         relift_cache::write_if_changed(&lib.join(&b.soname), &std::fs::read(&b.path)?)?;
         glibc = glibc.max(elfdeps::read(&std::fs::read(&b.path)?)?.glibc);
     }
-    let romfs = req.import.map(|i| i.join("romfs")).filter(|p| p.is_dir());
-    let dlc = req.import.map(|i| i.join("dlc")).filter(|p| p.is_dir());
     let share = dir.join("usr/share/relift");
     std::fs::create_dir_all(&share)?;
-    if let Some(r) = &romfs {
-        copy_tree(r, &share.join("romfs"))?;
-    }
-    if let Some(d) = &dlc {
-        copy_tree(d, &share.join("dlc"))?;
-    }
+    let (romfs, dlc) = match req.import {
+        Some(i) => crate::gamedata::write_images(i, &share, false)?,
+        None => (false, false),
+    };
     relift_cache::write_if_changed(&dir.join(INFO_PATH), &info.to_bytes())?;
     write_licenses(dir, &slug, &name, &bundled)?;
     let run = dir.join("AppRun");
-    relift_cache::write_if_changed(
-        &run,
-        app_run(&slug, platform, romfs.is_some(), dlc.is_some()).as_bytes(),
-    )?;
+    relift_cache::write_if_changed(&run, app_run(&slug, platform, romfs, dlc).as_bytes())?;
     set_mode(&run, 0o755)?;
     set_mode(&exe_dest, 0o755)?;
     relift_cache::write_if_changed(
@@ -639,7 +620,7 @@ mod tests {
     fn app_run_sets_the_per_user_folder_by_platform() {
         let sw = app_run("g", "switch", true, false);
         assert!(sw.contains("RELIFT_SAVE:=$DATA/save"));
-        assert!(sw.contains("RELIFT_ROMFS:=$HERE/usr/share/relift/romfs"));
+        assert!(sw.contains("RELIFT_ROMFS:=$HERE/usr/share/relift/romfs.img"));
         assert!(!sw.contains("RELIFT_DLC"));
         let gb = app_run("g", "gbc", false, false);
         assert!(gb.contains("--save \"$DATA/\"'g'\".sav\""));
@@ -700,7 +681,7 @@ mod tests {
             "my-game.png",
             ".DirIcon",
             "usr/bin/my-game",
-            "usr/share/relift/romfs/a.bin",
+            "usr/share/relift/romfs.img",
             "usr/share/licenses/my-game/BUNDLED.txt",
             "usr/share/licenses/my-game/relift-LICENSE",
             "usr/share/licenses/my-game/type2-runtime-LICENSE",

@@ -1302,7 +1302,7 @@ fn lift_and_emit(
 ) -> Result<EmitRecord, BoxError> {
     let import = import_dir(settings)?;
     let (mut loaded, npdm) = load_slots(&import)?;
-    let closed = crate::closed::check(npdm.as_ref(), &[import.join("romfs"), import.join("dlc")])?;
+    let closed = crate::closed::check(npdm.as_ref(), &import)?;
     if let Some(n) = closed {
         ui.note(&Line::new().text(n));
     }
@@ -2275,14 +2275,7 @@ pub fn run_run(
         crate::devsock::bind(&sock).map_err(|e| format!("dev socket {}: {e}", sock.display()))?;
     let mut cmd = relift_proc::command(&built.exe);
     cmd.env(crate::dev::SOCKET_ENV, &sock);
-    let romfs = import.join("romfs");
-    if romfs.is_dir() {
-        cmd.env("RELIFT_ROMFS", &romfs);
-    }
-    let dlc = import.join("dlc");
-    if dlc.is_dir() {
-        cmd.env("RELIFT_DLC", &dlc);
-    }
+    crate::gamedata::set_env(&mut cmd, &import);
     if trace_os {
         cmd.env("RELIFT_TRACE_OS", "1");
     }

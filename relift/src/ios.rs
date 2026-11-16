@@ -689,8 +689,9 @@ pub struct Contents<'a> {
     pub home: &'a Home,
     /// The game data manifest (crate::datamanifest), when there is data.
     pub data_manifest: Option<&'a [u8]>,
-    /// The import folder whose romfs and dlc go into the bundle, cloned
-    /// (APFS), or `None` when the data goes to Documents later.
+    /// The import folder whose romfs and DLC go into the bundle as plain
+    /// images (a plain image is cloned on APFS), or `None` when the data
+    /// goes to Documents later.
     pub data: Option<&'a Path>,
 }
 
@@ -728,16 +729,8 @@ pub fn package(b: &IosBuild, c: &Contents<'_>, ui: &mut Ui) -> Result<PathBuf, B
     if let Some(m) = data_manifest {
         relift_cache::write_if_changed(&app.join(crate::datamanifest::FILE), m)?;
     }
-    for root in ["romfs", "dlc"] {
-        if let Some(src) = data.map(|d| d.join(root)).filter(|d| d.is_dir()) {
-            run(
-                relift_proc::command("cp")
-                    .arg("-cR")
-                    .arg(&src)
-                    .arg(app.join(root)),
-                "cp -c (APFS clone of the game data)",
-            )?;
-        }
+    if let Some(d) = data {
+        crate::gamedata::write_images(d, &app, true)?;
     }
     for (n, png) in &home.icons {
         relift_cache::write_if_changed(&app.join(n), png)?;

@@ -11,6 +11,7 @@ use relift_info::{
 };
 use relift_input::PortSet;
 use relift_switch::program::Placed;
+use relift_switch_formats::romfs_image::Found;
 use sha2::{Digest, Sha256};
 
 use crate::game_settings;
@@ -313,18 +314,22 @@ pub fn switch_document(
             .to_string(),
         version: r.get("version").and_then(|v| v.as_str()).map(String::from),
     });
-    let romfs = import.join("romfs");
     let mut info = Info::new(env!("CARGO_PKG_VERSION"));
     info.identity = id;
     info.needs = Needs {
-        romfs: if romfs.is_dir() {
-            Some(TreeNeed {
+        romfs: match crate::gamedata::romfs(import) {
+            Some(Found::Tree(romfs)) => Some(TreeNeed {
                 hash: tree_hash_cached(&romfs, Some(&import.with_file_name("romfs-hashes.txt")))?,
-            })
-        } else {
-            None
+            }),
+            Some(found) => Some(TreeNeed {
+                hash: crate::gamedata::tree_hash(
+                    &found,
+                    &import.with_file_name("romfs-digests.tsv"),
+                )?,
+            }),
+            None => None,
         },
-        dlc: import.join("dlc").is_dir(),
+        dlc: crate::gamedata::dlc(import).is_some(),
         save_folder: true,
     };
     info.mods = Mods {

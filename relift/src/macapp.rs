@@ -5,7 +5,8 @@
 //! the per-user folders, the libraries it links (SDL3, MoltenVK and what
 //! they link, from outside `/usr/lib` and `/System`) into
 //! `Contents/Frameworks` with their install names rewritten to `@rpath`, and
-//! the import's `romfs/` and `dlc/` into `Contents/Resources`, beside the
+//! the import's romfs and DLC as plain images (crate::gamedata) into
+//! `Contents/Resources`, beside the
 //! game's icon (`AppIcon.icns`); `Info.plist` names the bundle with the
 //! game's title. Everything is
 //! then signed inside out: with the configured identity under the hardened
@@ -170,7 +171,7 @@ pub fn launcher(slug: &str, platform: &str, has_romfs: bool, has_dlc: bool) -> S
         _ => {}
     }
     if has_romfs {
-        s.push_str(": \"${RELIFT_ROMFS:=$HERE/../Resources/romfs}\"\nexport RELIFT_ROMFS\n");
+        s.push_str(": \"${RELIFT_ROMFS:=$HERE/../Resources/romfs.img}\"\nexport RELIFT_ROMFS\n");
     }
     if has_dlc {
         s.push_str(": \"${RELIFT_DLC:=$HERE/../Resources/dlc}\"\nexport RELIFT_DLC\n");
@@ -451,23 +452,14 @@ fn assemble(job: &Job, out: &Path, scratch: &Path, ui: &mut Ui) -> Result<Packag
             "install_name_tool -add_rpath",
         )?;
     }
-    let romfs = req.import.map(|i| i.join("romfs")).filter(|p| p.is_dir());
-    let dlc = req.import.map(|i| i.join("dlc")).filter(|p| p.is_dir());
-    for (src, dest) in [(&romfs, "romfs"), (&dlc, "dlc")] {
-        if let Some(s) = src {
-            crate::appimage::copy_tree(s, &resources.join(dest))?;
-        }
-    }
+    let (romfs, dlc) = match req.import {
+        Some(i) => crate::gamedata::write_images(i, &resources, true)?,
+        None => (false, false),
+    };
     let script = macos.join(slug);
     relift_cache::write_if_changed(
         &script,
-        launcher(
-            slug,
-            info.identity.platform.as_str(),
-            romfs.is_some(),
-            dlc.is_some(),
-        )
-        .as_bytes(),
+        launcher(slug, info.identity.platform.as_str(), romfs, dlc).as_bytes(),
     )?;
     crate::appimage::set_mode(&script, 0o755)?;
     relift_cache::write_if_changed(
@@ -589,7 +581,7 @@ mod tests {
         assert!(gb.contains("--save \"$DATA/\"'g'\".sav\""));
         assert!(gb.ends_with("\"$@\"\n"));
         let sw = launcher("g", "switch", true, true);
-        assert!(sw.contains("RELIFT_ROMFS:=$HERE/../Resources/romfs"));
+        assert!(sw.contains("RELIFT_ROMFS:=$HERE/../Resources/romfs.img"));
         assert!(sw.contains("RELIFT_DLC"));
     }
 
