@@ -265,3 +265,82 @@ fn a_texel_written_over_a_uniform_register_is_not_uniform() {
     assert_eq!(s.interface.host.warp_invariant, 0);
     assert_eq!(s.interface.host.warp_ops, 1);
 }
+
+/// `PLOP3.LUT Pd, PT, PT, PT, UP0, lut, 0x0`: a copy of UP0 (lut 0x80) or
+/// of its negation (lut 0x40).
+fn plop3_of_up0(d: u64, lut: u64) -> [u8; 16] {
+    word(
+        0x01c,
+        4,
+        &[
+            (81, 3, d),
+            (84, 3, 7),
+            (87, 3, 7),
+            (77, 3, 7),
+            (67, 1, 1),
+            (68, 3, 0),
+            (72, 5, lut >> 3),
+            (64, 3, lut & 7),
+        ],
+    )
+}
+
+/// The shape of the compiler's branch on a uniform predicate: `VOTEU.ANY
+/// UP0, P1` of a draw-uniform P1, copied into P0 and P5 (its negation);
+/// R0, which holds the lane id, is replaced where UP0 is false by a guarded move and where it is
+/// true on the fall-through path; then P0 is reused before the output.
+/// The guarded move and the branch name different copies of UP0, so only
+/// following the copies shows R0 replaced on every path.
+fn vote_copies() -> Program {
+    let mut b = sph(5, 0x1);
+    b.extend(s2r(0, 0));
+    b.extend(mov_imm(5, 11));
+    b.extend(isetp_cbuf());
+    b.extend(word(
+        0x086,
+        0,
+        &[(16, 6, 63), (72, 2, 1), (81, 3, 0), (87, 3, 1)],
+    ));
+    b.extend(plop3_of_up0(5, 0x40));
+    b.extend(plop3_of_up0(0, 0x80));
+    b.extend(word(
+        0x002,
+        1,
+        &[(12, 4, 8), (16, 8, 0), (32, 8, 8), (72, 4, 0xf)],
+    ));
+    b.extend(word(0x947, 4, &[(12, 4, 5), (34, 48, 4), (87, 3, 7)]));
+    b.extend(word(
+        0x002,
+        1,
+        &[(16, 8, 0), (32, 8, 9), (72, 4, 0xf), (87, 3, 7)],
+    ));
+    b.extend(isetp_eq(0, 2, 3));
+    exit_and_halt(&mut b);
+    Program::parse(&b)
+}
+
+#[test]
+fn guards_follow_predicate_copies() {
+    let p = vote_copies();
+    let t = text_of(&p);
+    assert_eq!(
+        &t[3..9],
+        [
+            "VOTEU.ANY UP0, P1",
+            "PLOP3.LUT P5, PT, PT, PT, UP0, 0x40, 0x0",
+            "PLOP3.LUT P0, PT, PT, PT, UP0, 0x80, 0x0",
+            "@!P0 MOV R0, R8",
+            "@P5 BRA 0x90",
+            "MOV R0, R9",
+        ],
+        "{t:?}"
+    );
+    let s = on(&p, HostProfile::lavapipe());
+    assert_eq!(
+        s.interface.host.warp,
+        WarpPath::Invariant,
+        "{:?}",
+        s.interface.host
+    );
+    assert!(s.interface.host.inexact.is_empty());
+}

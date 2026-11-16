@@ -21,6 +21,10 @@
 //! between it and its immediate post-dominator quad-position or varying
 //! there (the lanes rejoin with values from different paths).
 //!
+//! Predicates that `PLOP3` copies from another one (or its negation) are
+//! followed back to that one, so a guard and a branch that test two copies
+//! of a predicate agree on which lanes they name.
+//!
 //! The idioms:
 //!
 //! - a vote on a uniform predicate gives the predicate (ANY, ALL) or true
@@ -153,6 +157,9 @@ struct St {
     ur: Vec<Cls>,
     p: [Cls; 8],
     up: [Cls; 8],
+    /// Predicates that hold another one's value (or its negation when the
+    /// flag is clear), from `PLOP3` copies: (copy, original, same).
+    alias: Vec<(Loc, Loc, bool)>,
 }
 
 impl St {
@@ -162,7 +169,22 @@ impl St {
             ur: vec![c; 64],
             p: [c; 8],
             up: [c; 8],
+            alias: Vec::new(),
         }
+    }
+
+    /// The predicate `l` names and the polarity it reads it with, through
+    /// the copies `PLOP3` made.
+    fn root(&self, l: Loc, pol: bool) -> (Loc, bool) {
+        match self.alias.iter().find(|a| a.0 == l) {
+            Some(&(_, o, same)) => (o, pol == same),
+            None => (l, pol),
+        }
+    }
+
+    /// Forgets the copies of and from predicate `l`, which is written.
+    fn unalias(&mut self, l: Loc) {
+        self.alias.retain(|a| a.0 != l && a.1 != l);
     }
 
     fn get(&self, l: Loc) -> Cls {
@@ -214,6 +236,7 @@ impl St {
         for (a, b) in self.up.iter_mut().zip(&o.up) {
             *a = a.join(*b);
         }
+        self.alias.retain(|a| o.alias.contains(a));
     }
 }
 
@@ -480,6 +503,9 @@ fn defs(i: &Inst) -> (Vec<Loc>, Vec<Loc>) {
     if matches!(i.mnemonic, "VOTE" | "VOTEU") {
         let n = i.ops.len().saturating_sub(1);
         return (i.ops.iter().take(n).filter_map(loc).collect(), maybe);
+    }
+    if matches!(i.mnemonic, "PLOP3" | "UPLOP3") {
+        return (i.ops.iter().take(2).filter_map(loc).collect(), maybe);
     }
     let Some(first) = i.ops.first().and_then(loc) else {
         return (Vec::new(), maybe);
@@ -1072,7 +1098,7 @@ impl Walk<'_> {
         let g = i.guard.as_ref().map_or(Cls::U, |g| cls(s, g));
         let under = match &i.guard {
             Some(o @ (Operand::Pred(_, neg) | Operand::UPred(_, neg))) => {
-                loc(o).map(|l| (l, !*neg))
+                loc(o).map(|l| s.root(l, !*neg))
             }
             _ => None,
         };
@@ -1179,6 +1205,11 @@ impl Walk<'_> {
                 s.set(l, Cls::Cond(p, pol));
             }
         }
+        let copy = if guarded { None } else { plop3_copy(i) };
+        let copy = copy.map(|(d, o, same)| {
+            let (o, same) = s.root(o, same);
+            (d, o, same)
+        });
         for (l, c) in writes {
             if matches!(l, Loc::P(_) | Loc::Up(_)) && !matches!(l, Loc::P(7) | Loc::Up(7)) {
                 s.each(|_, x| {
@@ -1186,10 +1217,53 @@ impl Walk<'_> {
                         *x = Cls::Bad;
                     }
                 });
+                s.unalias(l);
             }
             s.set(l, c);
         }
+        if let Some(a) = copy.filter(|a| a.0 != a.1) {
+            s.alias.push(a);
+        }
     }
+}
+
+/// `PLOP3.LUT Pd, PT, a, b, c` whose result is one source predicate or its
+/// negation (the others being constant): (Pd, that source, whether Pd
+/// equals it).
+fn plop3_copy(i: &Inst) -> Option<(Loc, Loc, bool)> {
+    if !matches!(i.mnemonic, "PLOP3" | "UPLOP3") {
+        return None;
+    }
+    let [d, d2, a, b, c, lut, ..] = i.ops.as_slice() else {
+        return None;
+    };
+    if !matches!(d2, Operand::Pred(7, false) | Operand::UPred(7, false)) {
+        return None;
+    }
+    let lut = match lut {
+        Operand::Hex(v) => *v as u32,
+        Operand::Int(v) => u32::try_from(*v).ok()?,
+        _ => return None,
+    };
+    let mut fixed = [None; 3];
+    let mut var = None;
+    for (k, o) in [a, b, c].into_iter().enumerate() {
+        match o {
+            Operand::Pred(7, neg) | Operand::UPred(7, neg) => fixed[k] = Some(!*neg),
+            Operand::Pred(_, neg) | Operand::UPred(_, neg) if var.is_none() => {
+                var = Some((k, loc(o)?, *neg));
+            }
+            _ => return None,
+        }
+    }
+    let (k, src, neg) = var?;
+    let eval = |x: bool| {
+        let bit = |j: usize| u32::from(if j == k { x } else { fixed[j].unwrap_or(false) });
+        lut >> (bit(0) << 2 | bit(1) << 1 | bit(2)) & 1 == 1
+    };
+    let (f0, f1) = (eval(false), eval(true));
+    let d = loc(d)?;
+    (f0 != f1).then_some((d, src, f1 != neg))
 }
 
 /// What every lane that takes successor `e` of the block knows: the
@@ -1334,7 +1408,7 @@ pub(crate) fn plan(code: &Code, outputs: &[u8]) -> Plan {
             }
             for (e, t) in succ[v].iter().enumerate().filter(|&(_, &t)| t < n) {
                 let mut inc = s.clone();
-                if let Some((p, holds)) = edge_fact(&blocks[v], e)
+                if let Some((p, holds)) = edge_fact(&blocks[v], e).map(|(p, h)| s.root(p, h))
                     && succ[v].iter().filter(|&x| x == t).count() == 1
                 {
                     inc.each(|_, c| {
