@@ -67,6 +67,7 @@ struct rl_n64 {
     const uint8_t *rom;
     size_t rom_len;
     uint8_t *rdram;
+    bool pal;
     uint8_t spmem[0x2000];
     uint8_t pif_ram[64];
     rl_sched *s;
@@ -199,6 +200,9 @@ struct rl_n64 {
         uint64_t next;
         uint64_t frac;
         uint64_t sys;
+        uint8_t *screen;
+        uint32_t screen_w, screen_h;
+        bool screen_ready;
         rl_event line;
         rl_n64_frame_hook *hook;
         void *hook_user;

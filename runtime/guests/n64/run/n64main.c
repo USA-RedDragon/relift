@@ -30,6 +30,7 @@ typedef struct host {
     bool quit;
     rl_window *win;
     const char *png;
+    const char *raw_png;
     const char *png_dir;
     uint32_t png_every;
     const char *dump;
@@ -37,6 +38,7 @@ typedef struct host {
     uint8_t rgb[MAX_W * MAX_H * 3];
     uint32_t w, h;
     bool have;
+    bool framed;
     char save[4096];
 } host;
 
@@ -135,7 +137,15 @@ static bool write_png(const char *path, const uint8_t *rgb, uint32_t w, uint32_t
     return ok;
 }
 
+/** @brief Takes the picture VI outputs now. */
 static void scan(host *H) { H->have = rl_n64_scanout(H->run.m, H->rgb, &H->w, &H->h); }
+
+/** @brief The picture of the last frame: the one the frame hook took, else the picture now. */
+static void last_picture(host *H)
+{
+    if (!H->framed)
+        scan(H);
+}
 
 static void save_now(host *H)
 {
@@ -173,7 +183,7 @@ static void report(host *H, rl_ctx *c)
 {
     char buf[1024];
     rl_mips_cpu()->describe(c, buf, sizeof buf);
-    scan(H);
+    last_picture(H);
     uint64_t fb = H->have ? fnv(0xCBF29CE484222325ull, H->rgb, (size_t)H->w * H->h * 3) : 0;
     printf("frames %u fb %ux%u hash %016llx\n", H->frames, H->have ? H->w : 0, H->have ? H->h : 0,
            (unsigned long long)fb);
@@ -211,15 +221,17 @@ static void on_frame(void *user, rl_n64 *m)
     rl_ports_script_frame(H->frames);
     if (H->save[0] && rl_n64_save_poll(m, H->save, RL_N64_HZ) < 0)
         rl_log(RL_LOG_WARN, "n64", "could not write the save %s", H->save);
-    if (H->png_dir && H->frames % H->png_every == 0) {
+    if (H->png_dir || H->png || H->win) {
         scan(H);
+        H->framed = H->have;
+    }
+    if (H->png_dir && H->frames % H->png_every == 0) {
         char path[4096];
         snprintf(path, sizeof path, "%s/frame%06u.png", H->png_dir, H->frames);
         if (H->have && !write_png(path, H->rgb, H->w, H->h))
             rl_log(RL_LOG_WARN, "n64", "could not write %s", path);
     }
     if (H->win) {
-        scan(H);
         if (H->have)
             rl_window_present_rgb(H->win, H->rgb, H->w, H->h);
         uint64_t t = now_ns();
@@ -238,9 +250,15 @@ static void on_frame(void *user, rl_n64 *m)
 static void finish(host *H)
 {
     if (H->png) {
-        scan(H);
+        last_picture(H);
         if (H->have && !write_png(H->png, H->rgb, H->w, H->h))
             fprintf(stderr, "relift-n64: could not write %s\n", H->png);
+    }
+    if (H->raw_png) {
+        static uint8_t raw[MAX_W * MAX_H * 3];
+        uint32_t w = 0, h = 0;
+        if (rl_n64_framebuffer(H->run.m, raw, &w, &h) && !write_png(H->raw_png, raw, w, h))
+            fprintf(stderr, "relift-n64: could not write %s\n", H->raw_png);
     }
     save_now(H);
     if (H->stats)
@@ -307,6 +325,8 @@ int rl_n64_main(const rl_n64_program *p, int argc, char **argv)
             H.stop_frames = (uint32_t)strtoul(arg_value(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--png"))
             H.png = arg_value(argc, argv, &i);
+        else if (!strcmp(a, "--raw-png"))
+            H.raw_png = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png-dir"))
             H.png_dir = arg_value(argc, argv, &i);
         else if (!strcmp(a, "--png-every"))

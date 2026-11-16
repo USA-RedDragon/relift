@@ -42,7 +42,7 @@ typedef struct rl_n64_program {
  * @brief Runs the ROM in a window (the SDL3 backend when built and a display
  * exists) or headless. Options: --headless, --frames N (stop at the start of
  * the Nth VI frame and print the frame count, the hash of the scanned-out
- * framebuffer, its size, the registers and hashes of RDRAM, DMEM and IMEM), --png FILE (the
+ * framebuffer, its size, the registers and hashes of RDRAM, DMEM and IMEM), --png FILE (the VI picture at exit; --raw-png FILE the raw
  * framebuffer at exit), --png-dir DIR with --png-every N (every Nth frame),
  * --dump PREFIX (PREFIX.rdram, .dmem and .imem at the stop; RDRAM when CPU
  * code is missed, IMEM and DMEM when RSP code is),

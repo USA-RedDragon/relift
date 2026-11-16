@@ -202,12 +202,22 @@ RL_RUNTIME_API bool rl_n64_save_path(char *out, size_t size, const char *rom_pat
 RL_RUNTIME_API void rl_n64_declare_settings(void);
 
 /**
- * @brief The framebuffer VI scans out, read raw from RDRAM with the VI
- * registers (origin, width, the visible size from the video and scale
- * registers; RGBA5551 or RGBA8888): writes width * height RGB pixels to rgb
- * (room for 640 * 576 * 3 bytes) and the size. Returns false when VI is off.
+ * @brief The picture VI outputs now, as ares' software path draws it: the
+ * lines and columns the video registers give inside the 640 by 480 (NTSC) or
+ * 640 by 576 (PAL) output, read from RDRAM through the scale registers
+ * (RGBA5551 or RGBA8888, the guard band at the edges, no filters), the lines
+ * of the other field kept from the last picture when VI interlaces. Writes
+ * width * height RGB pixels to rgb (room for 640 * 576 * 3 bytes) and the
+ * size. Returns false when VI has never been on.
  */
 RL_RUNTIME_API bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height);
+/**
+ * @brief The framebuffer VI points at, read raw from RDRAM with its origin,
+ * width and the visible size from the video and scale registers, no scaling
+ * and no window: writes width * height RGB pixels to rgb (room for 640 * 576
+ * * 3 bytes) and the size. Returns false when VI is off.
+ */
+RL_RUNTIME_API bool rl_n64_framebuffer(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height);
 
 /**
  * @brief How the machine runs the RSP; the run layer's RSP layer fills it

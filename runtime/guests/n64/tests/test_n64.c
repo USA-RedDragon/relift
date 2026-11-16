@@ -200,7 +200,7 @@ TEST(n64_vi_counts_lines_and_interrupts_at_its_line)
     mach_free(&t);
 }
 
-TEST(n64_scanout_reads_rgba5551_and_rgba8888)
+TEST(n64_framebuffer_reads_rgba5551_and_rgba8888_raw)
 {
     mach t = mach_new(0x2000);
     vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
@@ -209,7 +209,7 @@ TEST(n64_scanout_reads_rgba5551_and_rgba8888)
     ram[0x1001] = 0x01;
     static uint8_t rgb[640 * 576 * 3];
     uint32_t w = 0, h = 0;
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_framebuffer(t.m, rgb, &w, &h));
     CHECK_EQ(w, 320);
     CHECK_EQ(h, 237);
     CHECK_EQ(rgb[0], 0xFF);
@@ -219,12 +219,111 @@ TEST(n64_scanout_reads_rgba5551_and_rgba8888)
     ram[0x2000] = 1;
     ram[0x2001] = 2;
     ram[0x2002] = 3;
-    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK(rl_n64_framebuffer(t.m, rgb, &w, &h));
     CHECK_EQ(w, 640);
     CHECK_EQ(rgb[0], 1);
     CHECK_EQ(rgb[2], 3);
     rl_n64_write(t.m, 0x04400000u, 4, 0);
+    CHECK(!rl_n64_framebuffer(t.m, rgb, &w, &h));
+    mach_free(&t);
+}
+
+/** @brief The RGB of output pixel (x, y). */
+static uint32_t out_px(const uint8_t *rgb, uint32_t w, uint32_t x, uint32_t y)
+{
+    const uint8_t *p = rgb + ((size_t)y * w + x) * 3u;
+    return (uint32_t)p[0] << 16 | (uint32_t)p[1] << 8 | p[2];
+}
+
+TEST(n64_scanout_places_the_picture_in_the_ntsc_output)
+{
+    mach t = mach_new(0x2000);
+    static uint8_t rgb[640 * 576 * 3];
+    uint32_t w = 0, h = 0;
     CHECK(!rl_n64_scanout(t.m, rgb, &w, &h));
+    vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
+    uint8_t *ram = rl_n64_rdram(t.m);
+    ram[0x1008] = 0xF8;
+    ram[0x1009] = 0x01;
+    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK_EQ(w, 640);
+    CHECK_EQ(h, 480);
+    CHECK_EQ(out_px(rgb, w, 8u, 3u), 0xFF0000u);
+    CHECK_EQ(out_px(rgb, w, 9u, 3u), 0xFF0000u);
+    CHECK_EQ(out_px(rgb, w, 7u, 3u), 0u);
+    CHECK_EQ(out_px(rgb, w, 10u, 3u), 0u);
+    CHECK_EQ(out_px(rgb, w, 8u, 2u), 0u);
+    mach_free(&t);
+}
+
+TEST(n64_scanout_scales_with_the_scale_registers)
+{
+    mach t = mach_new(0x2000);
+    static uint8_t rgb[640 * 576 * 3];
+    uint32_t w = 0, h = 0;
+    vi_ntsc(t.m, 0x3003u, 0x2000u, 640u, 0x200u);
+    uint8_t *ram = rl_n64_rdram(t.m);
+    for (unsigned i = 0; i < 32; i++) {
+        ram[0x2000 + i * 4 + 0] = (uint8_t)(10 + i);
+        ram[0x2000 + i * 4 + 1] = 0;
+        ram[0x2000 + i * 4 + 2] = 0;
+    }
+    rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
+    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK_EQ(out_px(rgb, w, 8u, 3u), 18u << 16);
+    CHECK_EQ(out_px(rgb, w, 9u, 3u), 19u << 16);
+    CHECK_EQ(out_px(rgb, w, 13u, 3u), 23u << 16);
+    rl_n64_write(t.m, 0x04400030u, 4, 0x200u);
+    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK_EQ(out_px(rgb, w, 8u, 3u), 14u << 16);
+    CHECK_EQ(out_px(rgb, w, 9u, 3u), 14u << 16);
+    CHECK_EQ(out_px(rgb, w, 10u, 3u), 15u << 16);
+    CHECK_EQ(out_px(rgb, w, 15u, 3u), 17u << 16);
+    mach_free(&t);
+}
+
+TEST(n64_scanout_of_an_interlaced_picture_draws_one_field_per_frame)
+{
+    mach t = mach_new(0x2000);
+    static uint8_t rgb[640 * 576 * 3];
+    uint32_t w = 0, h = 0;
+    vi_ntsc(t.m, 0x3003u | 0x40u, 0x2000u, 640u, 0x200u);
+    rl_n64_write(t.m, 0x04400018u, 4, 0x20Cu);
+    uint8_t *ram = rl_n64_rdram(t.m);
+    for (unsigned i = 0; i < 640u * 480u; i++) {
+        ram[0x2000 + i * 4u] = (uint8_t)(i / 640u);
+        ram[0x2000 + i * 4u + 2u] = 1;
+    }
+    rl_n64_write(t.m, 0x04400030u, 4, 0x400u);
+    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    uint32_t drawn = 0, blank = 0;
+    for (uint32_t y = 4; y < 20; y++) {
+        if (out_px(rgb, w, 20, y))
+            drawn++;
+        else
+            blank++;
+    }
+    CHECK_EQ(drawn, 8);
+    CHECK_EQ(blank, 8);
+    mach_free(&t);
+}
+
+TEST(n64_pal_roms_scan_out_640_by_576)
+{
+    mach t = mach_new(0x2000);
+    t.rom[0x3E] = 'P';
+    rl_n64_destroy(t.m);
+    rl_sched_destroy(t.s);
+    t.s = rl_sched_create(NULL);
+    t.k = rl_sched_add_cpu(t.s, 1);
+    t.m = rl_n64_create(t.rom, 0x2000);
+    rl_n64_attach(t.m, t.s, t.k);
+    static uint8_t rgb[640 * 576 * 3];
+    uint32_t w = 0, h = 0;
+    vi_ntsc(t.m, 0x3002u, 0x1000u, 320u, 0x200u);
+    CHECK(rl_n64_scanout(t.m, rgb, &w, &h));
+    CHECK_EQ(w, 640);
+    CHECK_EQ(h, 576);
     mach_free(&t);
 }
 

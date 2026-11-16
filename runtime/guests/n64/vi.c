@@ -2,14 +2,16 @@
  * @file vi.c
  * @brief VI: the registers, the line counter with its field and leap
  * pattern, the interrupt at the line VI_V_INTR names, the frame edge and the
- * raw scan-out of the framebuffer (RGBA5551 and RGBA8888 read from RDRAM,
- * no filters).
+ * scan-out of the framebuffer (RGBA5551 and RGBA8888 read from RDRAM
+ * through the scale registers into the video output, as ares' software path
+ * does, no filters) and the raw framebuffer.
  *
  * The line counter runs in closed form: a read, a write or the line event
  * catch it up to the CPU's tick. The line rules (the duration of each line,
  * the field toggle, the interrupt in progressive and interlaced modes, the
- * frame at the start line, a VI that is off counting 0x800-clock lines) are
- * ported from ares (n64/vi/vi.cpp and io.cpp), which carries this notice:
+ * frame at the start line, a VI that is off counting 0x800-clock lines, the
+ * scan-out's window, guard band, scaling and field lines) are ported from
+ * ares (n64/vi/vi.cpp and io.cpp), which carries this notice:
  *
  * Copyright (c) 2004-2025 ares team, Near et al
  *
@@ -27,8 +29,11 @@
  */
 #include "n64_int.h"
 
-/** @brief The NTSC video clock, in Hz. */
-#define VIDEO_HZ 48681818u
+/** @brief The NTSC and PAL video clocks, in Hz. */
+#define VIDEO_HZ_NTSC 48681818u
+#define VIDEO_HZ_PAL 49656530u
+
+static uint32_t video_hz(const rl_n64 *m) { return m->pal ? VIDEO_HZ_PAL : VIDEO_HZ_NTSC; }
 
 static bool active(const rl_n64 *m) { return (m->vi.control & 3u) != 0; }
 
@@ -36,8 +41,24 @@ static bool active(const rl_n64 *m) { return (m->vi.control & 3u) != 0; }
 static uint64_t cycles_of(rl_n64 *m, uint32_t n)
 {
     uint64_t scaled = (uint64_t)n * RL_N64_HZ + m->vi.frac;
-    m->vi.frac = scaled % VIDEO_HZ;
-    return scaled / VIDEO_HZ;
+    m->vi.frac = scaled % video_hz(m);
+    return scaled / video_hz(m);
+}
+
+/** @brief The RGB of the RGBA5551 pixel at RDRAM address a, as 0xRRGGBB. */
+static uint32_t pixel16(const rl_n64 *m, uint32_t a)
+{
+    a &= RL_N64_RDRAM_SIZE - 2u;
+    uint32_t v = (uint32_t)m->rdram[a] << 8 | m->rdram[a + 1u];
+    uint32_t r = v >> 11 & 31u, g = v >> 6 & 31u, b = v >> 1 & 31u;
+    return (r << 3 | r >> 2) << 16 | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2);
+}
+
+/** @brief The RGB of the RGBA8888 pixel at RDRAM address a, as 0xRRGGBB. */
+static uint32_t pixel32(const rl_n64 *m, uint32_t a)
+{
+    a &= RL_N64_RDRAM_SIZE - 4u;
+    return (uint32_t)m->rdram[a] << 16 | (uint32_t)m->rdram[a + 1u] << 8 | m->rdram[a + 2u];
 }
 
 static void frame(rl_n64 *m)
@@ -218,7 +239,7 @@ void rl_n64_vi_write(rl_n64 *m, unsigned i, uint32_t v)
     }
 }
 
-bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
+bool rl_n64_framebuffer(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
 {
     uint32_t depth = m->vi.control & 3u, stride = m->vi.width & 0xFFFu;
     if (depth < 2 || !stride)
@@ -235,25 +256,82 @@ bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
     if (!h || h > 576u)
         h = 240u;
     uint32_t base = m->vi.origin & 0xFFFFFFu;
-    const uint8_t *ram = m->rdram;
     for (uint32_t y = 0; y < h; y++)
         for (uint32_t x = 0; x < w; x++) {
+            uint32_t rgb24 = depth == 2 ? pixel16(m, base + (y * stride + x) * 2u) : pixel32(m, base + (y * stride + x) * 4u);
             uint8_t *o = rgb + ((size_t)y * w + x) * 3u;
-            if (depth == 2) {
-                uint32_t a = (base + (y * stride + x) * 2u) & (RL_N64_RDRAM_SIZE - 2u);
-                uint32_t v = (uint32_t)ram[a] << 8 | ram[a + 1u];
-                uint32_t r = v >> 11 & 31u, g = v >> 6 & 31u, b = v >> 1 & 31u;
-                o[0] = (uint8_t)(r << 3 | r >> 2);
-                o[1] = (uint8_t)(g << 3 | g >> 2);
-                o[2] = (uint8_t)(b << 3 | b >> 2);
-            } else {
-                uint32_t a = (base + (y * stride + x) * 4u) & (RL_N64_RDRAM_SIZE - 4u);
-                o[0] = ram[a];
-                o[1] = ram[a + 1u];
-                o[2] = ram[a + 2u];
-            }
+            o[0] = (uint8_t)(rgb24 >> 16);
+            o[1] = (uint8_t)(rgb24 >> 8);
+            o[2] = (uint8_t)rgb24;
         }
     *width = w;
     *height = h;
+    return true;
+}
+
+/** @brief Draws the lines of the picture the window and scale registers describe into the output, the lines of the other field kept as they were when VI interlaces. */
+static void refresh(rl_n64 *m)
+{
+    uint32_t hscan_start = m->pal ? 128u : 108u, vscan_start = m->pal ? 44u : 34u;
+    uint32_t hscan_len = 640u, vscan_len = m->pal ? 576u : 480u;
+    uint32_t hscan_stop = hscan_start + hscan_len, vscan_stop = vscan_start + vscan_len;
+    uint32_t hstart = (m->vi.h_video >> 16) & 0x3FFu, hend = m->vi.h_video & 0x3FFu;
+    uint32_t vstart = (m->vi.v_video >> 16) & 0x3FFu, vend = m->vi.v_video & 0x3FFu;
+    uint32_t xscale = m->vi.x_scale & 0xFFFu, xsub = (m->vi.x_scale >> 16) & 0xFFFu;
+    uint32_t yscale = m->vi.y_scale & 0xFFFu, ysub = (m->vi.y_scale >> 16) & 0xFFFu;
+    uint32_t pitch = m->vi.width & 0xFFFu, origin = m->vi.origin & 0xFFFFFFu;
+    bool serrate = (m->vi.control >> 6) & 1u;
+    bool bpp16 = (m->vi.control & 3u) == 2u;
+
+    int32_t dy0 = (int32_t)vstart, dy1 = (int32_t)vend;
+    if (dy1 < dy0)
+        dy1 = (int32_t)vscan_stop;
+    int32_t dx0 = (int32_t)hstart, dx1 = (int32_t)hend;
+    if (dy0 < (int32_t)vscan_start)
+        dy0 = (int32_t)vscan_start;
+    if (dy1 > (int32_t)vscan_stop)
+        dy1 = (int32_t)vscan_stop;
+    if (dx0 < (int32_t)hscan_start)
+        dx0 = (int32_t)hscan_start;
+    if (dx1 > (int32_t)hscan_stop)
+        dx1 = (int32_t)hscan_stop;
+    if (dx0 >= (int32_t)hscan_start)
+        dx0 += 8;
+    if (dx1 < (int32_t)hscan_stop)
+        dx1 -= 7;
+
+    uint32_t y0 = ysub + yscale * (uint32_t)(dy0 - (int32_t)vstart);
+    for (int32_t dy = dy0; dy < dy1; dy++) {
+        if (!serrate || (uint32_t)(dy & 1) == !m->vi.field) {
+            uint32_t row = origin + (y0 >> 11) * pitch * (bpp16 ? 2u : 4u);
+            uint8_t *line = m->vi.screen + (size_t)(dy - (int32_t)vscan_start) * hscan_len * 3u;
+            uint32_t x0 = xsub + xscale * (uint32_t)(dx0 - (int32_t)hstart);
+            for (int32_t dx = dx0; dx < dx1; dx++) {
+                uint32_t rgb24 = bpp16 ? pixel16(m, row + (x0 >> 10) * 2u) : pixel32(m, row + (x0 >> 10) * 4u);
+                uint8_t *o = line + (size_t)(dx - (int32_t)hscan_start) * 3u;
+                o[0] = (uint8_t)(rgb24 >> 16);
+                o[1] = (uint8_t)(rgb24 >> 8);
+                o[2] = (uint8_t)rgb24;
+                x0 += xscale;
+            }
+        }
+        y0 += yscale;
+    }
+    m->vi.screen_w = hscan_len;
+    m->vi.screen_h = vscan_len;
+    m->vi.screen_ready = true;
+}
+
+bool rl_n64_scanout(rl_n64 *m, uint8_t *rgb, uint32_t *width, uint32_t *height)
+{
+    if (!m->vi.screen)
+        return false;
+    if (active(m))
+        refresh(m);
+    if (!m->vi.screen_ready)
+        return false;
+    memcpy(rgb, m->vi.screen, (size_t)m->vi.screen_w * m->vi.screen_h * 3u);
+    *width = m->vi.screen_w;
+    *height = m->vi.screen_h;
     return true;
 }

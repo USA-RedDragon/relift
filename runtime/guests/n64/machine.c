@@ -46,12 +46,16 @@ rl_n64 *rl_n64_create(const uint8_t *rom, size_t rom_len)
     if (!m)
         return NULL;
     m->rdram = calloc(1, RL_N64_RDRAM_SIZE);
-    if (!m->rdram) {
+    m->vi.screen = calloc(1, (size_t)640u * 576u * 3u);
+    if (!m->rdram || !m->vi.screen) {
+        free(m->rdram);
+        free(m->vi.screen);
         free(m);
         return NULL;
     }
     m->rom = rom;
     m->rom_len = rom_len;
+    m->pal = rom_len > 0x3E && strchr("DFHILPSUWXYZ", rom[0x3E]) && rom[0x3E];
     rl_n64_sp_init(m);
     rl_n64_pif_init(m);
     rl_n64_cart_init(m);
@@ -74,6 +78,7 @@ void rl_n64_destroy(rl_n64 *m)
     free(m->code.order);
     free(m->code.filled);
     free(m->rdram);
+    free(m->vi.screen);
     free(m);
 }
 
