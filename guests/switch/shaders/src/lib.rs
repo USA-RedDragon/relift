@@ -20,6 +20,7 @@ pub mod cubin;
 pub mod error;
 pub mod inflate;
 pub mod ktgl;
+pub mod mesh;
 pub mod sarc;
 pub mod scan;
 pub mod source;

@@ -12,7 +12,11 @@ relift-shaders scan game.nup --out shaders/ [--cache cache/] [-j 8] [--package 0
 
 `--out` gets `<sha256>.bin` per program, `manifest.json` (per program: `kind`
 `sph` (graphics) or `cs` (compute), `stage` from the SPH, `sph` header size,
-`size`, `n` times found, up to four `srcs`) and `summary.json` (counts, the
+`size`, `n` times found, up to four `srcs`), `meshes.json` (each BNSH
+program with a task or mesh stage: the SHA-256 of its `fragment`, `task` and
+`mesh` programs, their GLSLC headers `task_glslc` and `mesh_glslc`, which
+hold the pipeline state the SPH lacks, and the mesh stage's `primitive_sph`)
+and `summary.json` (counts, the
 containers seen, and errors such as a missing zstd dictionary or a zstd frame
 that decodes past 1 GiB, which is reported rather than cut short). The cache
 defaults to `<out>/.cache`. A `--package` that holds no file is an error.

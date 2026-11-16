@@ -27,7 +27,7 @@ use crate::sha256_hex;
 use crate::source::{SNIFF_WHOLE, Source, SourceFile};
 use crate::{cubin, ktgl, sarc, zst};
 
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 const MAX_DEPTH: u32 = 6;
 const MAX_SRCS: usize = 4;
 const GAP: u64 = 256 << 10;
@@ -114,11 +114,18 @@ pub struct Report {
     pub containers: BTreeMap<String, u64>,
     /// Errors by message.
     pub errors: BTreeMap<String, ErrorSummary>,
+    /// Task and mesh pipelines of BNSH archives, unique (see [`crate::mesh`]).
+    pub meshes: Vec<Value>,
     /// Counters.
     pub stats: Stats,
 }
 
 impl Report {
+    /// The task and mesh pipelines, as `meshes.json` holds them.
+    pub fn meshes_json(&self) -> Value {
+        Value::Array(self.meshes.clone())
+    }
+
     /// The manifest: per program SHA-256 its kind, stage, sizes, count and
     /// up to four sources.
     pub fn manifest_json(&self) -> Value {
@@ -163,6 +170,7 @@ struct Out {
     programs: BTreeMap<String, Program>,
     containers: BTreeMap<String, u64>,
     errors: Vec<(String, String)>,
+    meshes: Vec<Value>,
 }
 
 impl Out {
@@ -182,7 +190,7 @@ impl Out {
             .iter()
             .map(|(sha, p)| json!([sha, p.kind.name(), p.stage, p.sph, p.size, p.n, p.srcs]))
             .collect();
-        json!({"v": CACHE_VERSION, "programs": programs, "containers": self.containers, "errors": self.errors})
+        json!({"v": CACHE_VERSION, "programs": programs, "containers": self.containers, "errors": self.errors, "meshes": self.meshes})
     }
 
     fn from_json(v: &Value) -> Option<Out> {
@@ -220,6 +228,7 @@ impl Out {
                 e.get(1)?.as_str()?.to_string(),
             ));
         }
+        out.meshes = v.get("meshes")?.as_array()?.clone();
         Some(out)
     }
 }
@@ -348,7 +357,11 @@ impl Ctx<'_> {
         } else if b.get(0x10..0x14) == Some(&carve::PROGRAM_MAGIC) {
             out.container("sead-bin", 1);
         }
-        out.container("bnsh", find_all(b, b"BNSH").count() as u64);
+        let bnsh = find_all(b, b"BNSH").count() as u64;
+        out.container("bnsh", bnsh);
+        if bnsh > 0 {
+            out.meshes.extend(crate::mesh::pipelines(b));
+        }
         let cubins = cubin::find(b);
         out.container("fatbin", cubins.fatbins);
         out.container("cubin", cubins.cubins.len() as u64);
@@ -870,10 +883,13 @@ pub fn scan(source: &dyn Source, out_dir: &Path, opts: &Options) -> Result<Repor
         for (k, n) in out.containers {
             *report.containers.entry(k).or_default() += n;
         }
+        report.meshes.extend(out.meshes);
         for (msg, at) in out.errors {
             add_error(&mut report, msg, at);
         }
     }
+    report.meshes.sort_by_key(Value::to_string);
+    report.meshes.dedup();
     report.stats = Stats {
         files: files.len() as u64,
         jobs: (jobs.len() + plans.len()) as u64,
