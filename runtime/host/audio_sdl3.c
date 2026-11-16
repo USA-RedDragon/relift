@@ -27,6 +27,9 @@ typedef struct sdl_out {
      * paused while empty gets this much silence, so playback starts with it.
      */
     uint32_t lead;
+    /** @brief Frames put into the stream in all, the lead included. */
+    uint64_t put;
+    rl_audio_clock clock;
 } sdl_out;
 
 static const rl_audio_backend g_sdl;
@@ -60,6 +63,7 @@ static rl_audio_out *sdl_open(uint32_t rate, uint32_t channels)
     if (have.freq > 0 && (uint32_t)have.freq != rate)
         device_frames = (int)((uint64_t)device_frames * rate / (uint32_t)have.freq + 1);
     o->lead = (uint32_t)device_frames + rate / 200;
+    o->clock = (rl_audio_clock){ .rate = rate, .device = (uint32_t)device_frames };
     const char *name = SDL_GetAudioDeviceName(dev);
     rl_log(RL_LOG_INFO, "audio", "SDL %s output %s, %u Hz, %u channels, device buffer %d frames", SDL_GetCurrentAudioDriver(),
            name ? name : "?", rate, channels, device_frames);
@@ -80,6 +84,7 @@ static void sdl_write(rl_audio_out *h, const int16_t *pcm, uint32_t frames)
 {
     sdl_out *o = (sdl_out *)h;
     SDL_PutAudioStreamData(o->stream, pcm, (int)(frames * o->frame_bytes));
+    o->put += frames;
 }
 
 static uint32_t sdl_held(rl_audio_out *h)
@@ -89,17 +94,26 @@ static uint32_t sdl_held(rl_audio_out *h)
     return bytes > 0 ? (uint32_t)bytes / o->frame_bytes : 0;
 }
 
-static uint32_t sdl_queued(rl_audio_out *h) { return rl_audio_lead_visible(sdl_held(h), ((sdl_out *)h)->lead); }
+static uint32_t sdl_queued(rl_audio_out *h)
+{
+    sdl_out *o = (sdl_out *)h;
+    uint64_t played = rl_audio_clock_played(&o->clock, o->put - sdl_held(h), rl_clock_ns());
+    uint64_t q = o->put - played;
+    return rl_audio_lead_visible(q > UINT32_MAX ? UINT32_MAX : (uint32_t)q, o->lead);
+}
 
 static void sdl_pause(rl_audio_out *h, bool paused)
 {
     sdl_out *o = (sdl_out *)h;
+    rl_audio_clock_run(&o->clock, !paused, o->put - sdl_held(h), rl_clock_ns());
     if (paused) {
         SDL_PauseAudioStreamDevice(o->stream);
         if (SDL_GetAudioStreamQueued(o->stream) == 0) {
             void *zero = calloc(o->lead, o->frame_bytes);
-            if (zero)
+            if (zero) {
                 SDL_PutAudioStreamData(o->stream, zero, (int)(o->lead * o->frame_bytes));
+                o->put += o->lead;
+            }
             free(zero);
         }
     } else {

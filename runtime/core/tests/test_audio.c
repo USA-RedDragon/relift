@@ -186,3 +186,18 @@ TEST(audio_lead_is_not_seen_by_the_guest)
     CHECK_EQ(rl_audio_lead_visible(0, 1264), 0);
     CHECK_EQ(rl_audio_lead_visible(1440, 0), 1440);
 }
+
+TEST(audio_clock_plays_between_device_pulls)
+{
+    rl_audio_clock c = { .rate = 48000, .device = 2048 };
+    rl_audio_clock_run(&c, true, 0, 1000000000ull);
+    CHECK_EQ(rl_audio_clock_played(&c, 2048, 1000000000ull), 0);
+    CHECK_EQ(rl_audio_clock_played(&c, 2048, 1010000000ull), 480);
+    CHECK_EQ(rl_audio_clock_played(&c, 2048, 1020000000ull), 960);
+    CHECK_EQ(rl_audio_clock_played(&c, 2048, 1060000000ull), 2048);
+    CHECK_EQ(rl_audio_clock_played(&c, 6144, 1061000000ull), 4096);
+    rl_audio_clock_run(&c, false, 6144, 1062000000ull);
+    CHECK_EQ(rl_audio_clock_played(&c, 6144, 1100000000ull), 4144);
+    rl_audio_clock_run(&c, true, 6144, 1100000000ull);
+    CHECK_EQ(rl_audio_clock_played(&c, 6144, 1100021000ull), 4145);
+}

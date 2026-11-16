@@ -85,6 +85,31 @@ RL_RUNTIME_API void rl_audio_pause(rl_audio_out *o, bool paused);
  */
 RL_RUNTIME_API uint32_t rl_audio_lead_visible(uint32_t queued, uint32_t lead);
 
+/**
+ * @brief The play position of a host output between device pulls. A host
+ * takes frames from its queue a whole device buffer at a time (1024 frames
+ * or more), so the queue drops in steps, while the frames play one by one
+ * over the buffer's length. A guest that releases its buffers as the queue
+ * drops gets them back in bursts a device buffer apart and appends in
+ * bursts. The position advances with the clock at the stream's rate and
+ * stays within one device buffer behind the frames the host has taken.
+ */
+typedef struct rl_audio_clock {
+    uint64_t played;
+    uint64_t last_ns;
+    /** @brief Nanoseconds times rate not yet counted as a frame. */
+    uint64_t carry;
+    uint32_t rate;
+    /** @brief Frames of one device buffer. */
+    uint32_t device;
+    bool running;
+} rl_audio_clock;
+
+/** @brief Frames played at now_ns, when the host has taken consumed frames from its queue in all. */
+RL_RUNTIME_API uint64_t rl_audio_clock_played(rl_audio_clock *c, uint64_t consumed, uint64_t now_ns);
+/** @brief Starts or stops the clock at now_ns (playback resumed or paused). */
+RL_RUNTIME_API void rl_audio_clock_run(rl_audio_clock *c, bool running, uint64_t consumed, uint64_t now_ns);
+
 /** @brief Records that a caller discarded frames instead of queueing them (shown in the stream's statistics). */
 RL_RUNTIME_API void rl_audio_count_drop(rl_audio_out *o, uint32_t frames);
 

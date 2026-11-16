@@ -601,6 +601,29 @@ const rl_opus_backend *rl_opus_stub_backend(void) { return &g_stub_opus; }
 
 uint32_t rl_audio_lead_visible(uint32_t queued, uint32_t lead) { return queued > lead ? queued - lead : 0; }
 
+uint64_t rl_audio_clock_played(rl_audio_clock *c, uint64_t consumed, uint64_t now_ns)
+{
+    if (c->running && now_ns > c->last_ns) {
+        uint64_t t = (now_ns - c->last_ns) * c->rate + c->carry;
+        c->played += t / 1000000000ull;
+        c->carry = t % 1000000000ull;
+    }
+    c->last_ns = now_ns;
+    if (c->played > consumed) {
+        c->played = consumed;
+        c->carry = 0;
+    }
+    if (consumed > c->device && c->played < consumed - c->device)
+        c->played = consumed - c->device;
+    return c->played;
+}
+
+void rl_audio_clock_run(rl_audio_clock *c, bool running, uint64_t consumed, uint64_t now_ns)
+{
+    rl_audio_clock_played(c, consumed, now_ns);
+    c->running = running;
+}
+
 void rl_opus_set_backend(const rl_opus_backend *b) { g_opus = b; }
 
 const rl_opus_backend *rl_opus_backend_current(void)
