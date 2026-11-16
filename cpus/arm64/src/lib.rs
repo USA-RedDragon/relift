@@ -2,6 +2,7 @@
 
 pub mod decode;
 pub mod flags;
+pub mod fpcr;
 pub mod frontend;
 pub mod lift;
 pub mod regs;
