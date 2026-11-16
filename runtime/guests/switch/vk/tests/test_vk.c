@@ -630,7 +630,7 @@ static void clear_and_read_back(int expect_mode)
             .pCommandBuffers = GP(gput(&cb, 8)),
         };
         CHECK_EQ(VKR(G("vkQueueSubmit", queue, 1, gput(&si, sizeof si), fence)), VK_SUCCESS);
-        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkWaitForFences", dev, 1, gput(&fence, 8), VK_TRUE, 10000000000ull)), VK_SUCCESS);
 
         unsigned bad = 0;
         for (uint32_t p = 0; p < W * H; p++) {
@@ -1324,6 +1324,73 @@ TEST(vk_a_lost_host_surface_is_made_again_behind_the_guest)
     G("vkDestroyInstance", g_inst, 0);
     if (!tested)
         fprintf(stderr, "  no host device presents to a headless surface: lost surface test skipped\n");
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+static VkResult failing_semaphore(VkDevice dev, const VkSemaphoreCreateInfo *ci, const VkAllocationCallbacks *a, VkSemaphore *out)
+{
+    (void)dev;
+    (void)ci;
+    (void)a;
+    (void)out;
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+TEST(vk_a_host_swapchain_without_its_semaphores_is_an_error)
+{
+    CHECK_EQ(boot(&g_losable), 0);
+    if (!vi_surface_offered()) {
+        fprintf(stderr, "  the host has no VK_EXT_headless_surface: swapchain semaphore test skipped\n");
+        return;
+    }
+    const char *exts[] = { "VK_KHR_surface", "VK_NN_vi_surface" };
+    CHECK(make_instance(exts, 2, 0) != 0);
+    VkViSurfaceCreateInfoNN sci = { .sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, .window = GP(galloc(64)) };
+    uint64_t gs = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateViSurfaceNN", g_inst, gput(&sci, sizeof sci), 0, gs)), VK_SUCCESS);
+    uint64_t surface = g64(gs);
+    uint64_t pds[8];
+    uint32_t np = physical_devices(pds, 8);
+    unsigned tested = 0;
+    for (uint32_t p = 0; p < np && !tested; p++) {
+        uint32_t qf = queue_family(pds[p], VK_QUEUE_GRAPHICS_BIT);
+        uint64_t gsup = galloc(4);
+        if (qf == UINT32_MAX || VKR(G("vkGetPhysicalDeviceSurfaceSupportKHR", pds[p], qf, surface, gsup)) != VK_SUCCESS ||
+            !g32(gsup))
+            continue;
+        const char *dexts[] = { "VK_KHR_swapchain" };
+        uint64_t dev = make_device(pds[p], qf, dexts, 1);
+        CHECK(dev != 0);
+        VkSwapchainCreateInfoKHR swci = {
+            .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            .surface = (VkSurfaceKHR)GP(surface),
+            .minImageCount = 2,
+            .imageFormat = VK_FORMAT_R8G8B8A8_UNORM,
+            .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+            .imageExtent = { 64, 64 },
+            .imageArrayLayers = 1,
+            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+            .clipped = VK_TRUE,
+        };
+        vkf_obj *d = vkf_obj_of(dev, VKG_KIND_VkDevice);
+        void (*real)(void) = d->fns->f[VKG_vkCreateSemaphore];
+        d->fns->f[VKG_vkCreateSemaphore] = (void (*)(void))failing_semaphore;
+        uint64_t gsw = galloc(8);
+        CHECK(VKR(G("vkCreateSwapchainKHR", dev, gput(&swci, sizeof swci), 0, gsw)) < 0);
+        d->fns->f[VKG_vkCreateSemaphore] = real;
+        CHECK_EQ(VKR(G("vkCreateSwapchainKHR", dev, gput(&swci, sizeof swci), 0, gsw)), VK_SUCCESS);
+        G("vkDestroySwapchainKHR", dev, g64(gsw), 0);
+        G("vkDestroyDevice", dev, 0);
+        tested++;
+    }
+    G("vkDestroySurfaceKHR", g_inst, surface, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    if (!tested)
+        fprintf(stderr, "  no host device presents to a headless surface: semaphore test skipped\n");
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 

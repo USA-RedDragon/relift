@@ -594,6 +594,23 @@ static VkResult host_create(vkf_swap *s)
         rl_log(RL_LOG_ERROR, "vk", "host swapchain %ux%u: %d", e.width, e.height, r);
         return r;
     }
+    uint32_t n = 0;
+    DFN(s, vkGetSwapchainImagesKHR)(s->dev, sw, &n, NULL);
+    if (n > HOST_MAX)
+        n = HOST_MAX;
+    VkSemaphore ready[HOST_MAX] = { 0 };
+    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    for (uint32_t i = 0; i < n && r >= 0; i++)
+        r = DFN(s, vkCreateSemaphore)(s->dev, &sci, NULL, &ready[i]);
+    if (r < 0) {
+        rl_log(RL_LOG_ERROR, "vk", "host swapchain semaphore: %d", r);
+        for (uint32_t i = 0; i < n; i++)
+            if (ready[i])
+                DFN(s, vkDestroySemaphore)(s->dev, ready[i], NULL);
+        DFN(s, vkDestroySwapchainKHR)(s->dev, sw, NULL);
+        s->stale = true;
+        return r;
+    }
     wait_all(s);
     if (s->ov) {
         DFN(s, vkDeviceWaitIdle)(s->dev);
@@ -606,14 +623,9 @@ static VkResult host_create(vkf_swap *s)
     }
     retire_semaphores(s);
     s->host = sw;
-    uint32_t n = 0;
-    DFN(s, vkGetSwapchainImagesKHR)(s->dev, sw, &n, NULL);
-    if (n > HOST_MAX)
-        n = HOST_MAX;
     DFN(s, vkGetSwapchainImagesKHR)(s->dev, sw, &n, s->host_img);
-    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     for (uint32_t i = 0; i < n; i++)
-        DFN(s, vkCreateSemaphore)(s->dev, &sci, NULL, &s->ready[i]);
+        s->ready[i] = ready[i];
     s->host_n = n;
     s->host_extent = e;
     s->host_hint = caps.currentTransform;
