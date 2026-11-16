@@ -307,6 +307,11 @@ impl St {
         self.sys.push(Sys::Cache(op));
     }
 
+    /// The instruction takes `n` cycles beyond its issue cycle under `g`.
+    pub fn cycles(&mut self, b: &mut Builder, n: u32, g: Option<Value>) {
+        self.core.cycles(b, n, g);
+    }
+
     /// A write to Status, Cause or Compare.
     pub fn cp0_sync(&mut self, _b: &mut Builder, _g: Option<Value>) {
         if !self.sys.contains(&Sys::Cp0Sync) {

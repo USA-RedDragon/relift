@@ -95,9 +95,10 @@ pub fn lift(pc: u32, word: u32, slot: u32) -> Result<Lifted, LiftError> {
     let mut st = St::new(pc);
     let body = common::lift::body(&mut b, &mut st, pc, word, slot)?;
     let exception = st.exception_static();
+    let block = common::lift::finish(b, &body);
     Ok(Lifted {
         encs: body.encs,
-        block: b.finish(body.len, body.exit),
+        block,
         exception,
     })
 }

@@ -185,7 +185,7 @@ pub(super) fn Ctc1(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftEr
 ///
 /// Split on the word bits `0x0000003f`.
 ///
-/// Cut: MIPS_Cop1Usable, MIPS_Fp, MIPS_FpCmp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
+/// Cut: MIPS_Cop1Usable, MIPS_Cycles, MIPS_Fp, MIPS_FpCmp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
 pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Cop1S;
     let w = u128::from(word);
@@ -214,6 +214,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000001 => {
@@ -239,6 +240,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000002 => {
@@ -264,6 +266,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000003 => {
@@ -289,6 +292,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 28, None);
             Ok(())
         }
         0x00000004 => {
@@ -314,6 +318,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 28, None);
             Ok(())
         }
         0x00000005 => {
@@ -401,6 +406,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v17 = b.zext(v16, Width::new(64));
             let v18 = st.fp(b, 0x8, 0x10, v14, v17, None);
             st.set_fpr(b, (s3) as u8, v18, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000009 => {
@@ -423,6 +429,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v17 = b.zext(v16, Width::new(64));
             let v18 = st.fp(b, 0x9, 0x10, v14, v17, None);
             st.set_fpr(b, (s3) as u8, v18, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000a => {
@@ -445,6 +452,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v17 = b.zext(v16, Width::new(64));
             let v18 = st.fp(b, 0xa, 0x10, v14, v17, None);
             st.set_fpr(b, (s3) as u8, v18, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000b => {
@@ -467,6 +475,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v17 = b.zext(v16, Width::new(64));
             let v18 = st.fp(b, 0xb, 0x10, v14, v17, None);
             st.set_fpr(b, (s3) as u8, v18, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000c => {
@@ -492,6 +501,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000d => {
@@ -517,6 +527,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000e => {
@@ -542,6 +553,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000f => {
@@ -567,6 +579,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000010 => {
@@ -652,6 +665,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000020 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 1, None);
             Ok(())
         }
         0x00000021 => {
@@ -709,6 +723,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000025 => {
@@ -731,6 +746,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v17 = b.zext(v16, Width::new(64));
             let v18 = st.fp(b, 0x25, 0x10, v14, v17, None);
             st.set_fpr(b, (s3) as u8, v18, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000026 => {
@@ -801,6 +817,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x0, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000031 => {
@@ -821,6 +838,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x1, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000032 => {
@@ -841,6 +859,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x2, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000033 => {
@@ -861,6 +880,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x3, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000034 => {
@@ -881,6 +901,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x4, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000035 => {
@@ -901,6 +922,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x5, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000036 => {
@@ -921,6 +943,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x6, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000037 => {
@@ -941,6 +964,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x7, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000038 => {
@@ -961,6 +985,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x8, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000039 => {
@@ -981,6 +1006,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0x9, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003a => {
@@ -1001,6 +1027,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0xa, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003b => {
@@ -1021,6 +1048,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0xb, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003c => {
@@ -1041,6 +1069,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0xc, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003d => {
@@ -1061,6 +1090,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0xd, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003e => {
@@ -1081,6 +1111,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0xe, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003f => {
@@ -1101,6 +1132,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.extract(v15, 0, Width::new(32));
             let v17 = b.zext(v16, Width::new(64));
             st.fp_cmp(b, 0xf, 0x10, v14, v17, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -1111,7 +1143,7 @@ pub(super) fn Cop1S(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
 ///
 /// Split on the word bits `0x0000003f`.
 ///
-/// Cut: MIPS_Cop1Usable, MIPS_Fp, MIPS_FpCmp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
+/// Cut: MIPS_Cop1Usable, MIPS_Cycles, MIPS_Fp, MIPS_FpCmp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
 pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Cop1D;
     let w = u128::from(word);
@@ -1133,6 +1165,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x0, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000001 => {
@@ -1151,6 +1184,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x1, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000002 => {
@@ -1169,6 +1203,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x2, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 7, None);
             Ok(())
         }
         0x00000003 => {
@@ -1187,6 +1222,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x3, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 57, None);
             Ok(())
         }
         0x00000004 => {
@@ -1205,6 +1241,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x4, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 57, None);
             Ok(())
         }
         0x00000005 => {
@@ -1274,6 +1311,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x8, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000009 => {
@@ -1292,6 +1330,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x9, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000a => {
@@ -1310,6 +1349,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0xa, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000b => {
@@ -1328,6 +1368,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0xb, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000c => {
@@ -1349,6 +1390,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000d => {
@@ -1370,6 +1412,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000e => {
@@ -1391,6 +1434,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000f => {
@@ -1412,6 +1456,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000010 => {
@@ -1513,6 +1558,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 1, None);
             Ok(())
         }
         0x00000021 => {
@@ -1549,6 +1595,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000025 => {
@@ -1567,6 +1614,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x25, 0x11, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000026 => {
@@ -1633,6 +1681,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x0, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000031 => {
@@ -1649,6 +1698,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x1, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000032 => {
@@ -1665,6 +1715,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x2, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000033 => {
@@ -1681,6 +1732,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x3, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000034 => {
@@ -1697,6 +1749,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x4, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000035 => {
@@ -1713,6 +1766,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x5, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000036 => {
@@ -1729,6 +1783,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x6, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000037 => {
@@ -1745,6 +1800,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x7, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000038 => {
@@ -1761,6 +1817,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x8, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000039 => {
@@ -1777,6 +1834,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0x9, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003a => {
@@ -1793,6 +1851,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0xa, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003b => {
@@ -1809,6 +1868,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0xb, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003c => {
@@ -1825,6 +1885,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0xc, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003d => {
@@ -1841,6 +1902,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0xd, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003e => {
@@ -1857,6 +1919,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0xe, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003f => {
@@ -1873,6 +1936,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v12 = b.select(v7, v8, v11);
             let v13 = st.fpr(b, (s1) as u8);
             st.fp_cmp(b, 0xf, 0x11, v12, v13, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -1883,7 +1947,7 @@ pub(super) fn Cop1D(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
 ///
 /// Split on the word bits `0x0000003f`.
 ///
-/// Cut: MIPS_Cop1Usable, MIPS_Fp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
+/// Cut: MIPS_Cop1Usable, MIPS_Cycles, MIPS_Fp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
 pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Cop1W;
     let w = u128::from(word);
@@ -1892,26 +1956,31 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000000 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000001 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000002 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000003 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 28, None);
             Ok(())
         }
         0x00000004 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 28, None);
             Ok(())
         }
         0x00000005 => {
@@ -1932,41 +2001,49 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000008 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000009 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000a => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000b => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000c => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000d => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000e => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000f => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000010 => {
@@ -2072,6 +2149,7 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v20 = b.konst(Width::new(32), 0x0);
             let v21 = b.concat(v20, v19);
             st.set_fpr(b, (s3) as u8, v21, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000021 => {
@@ -2094,6 +2172,7 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v17 = b.zext(v16, Width::new(64));
             let v18 = st.fp(b, 0x21, 0x14, v14, v17, None);
             st.set_fpr(b, (s3) as u8, v18, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000022 => {
@@ -2109,11 +2188,13 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000024 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000025 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000026 => {
@@ -2169,81 +2250,97 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000030 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000031 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000032 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000033 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000034 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000035 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000036 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000037 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000038 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000039 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003a => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003b => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003c => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003d => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003e => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003f => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         _ => unreachable!(),
@@ -2254,7 +2351,7 @@ pub(super) fn Cop1W(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
 ///
 /// Split on the word bits `0x0000003f`.
 ///
-/// Cut: MIPS_Cop1Usable, MIPS_Fp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
+/// Cut: MIPS_Cop1Usable, MIPS_Cycles, MIPS_Fp, MIPS_FpUnimpl, SYS, rFPR, wFPR.
 pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Cop1L;
     let w = u128::from(word);
@@ -2263,26 +2360,31 @@ pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000000 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000001 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000002 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000003 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 28, None);
             Ok(())
         }
         0x00000004 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 28, None);
             Ok(())
         }
         0x00000005 => {
@@ -2303,41 +2405,49 @@ pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000008 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000009 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000a => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000b => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000c => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000d => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000e => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x0000000f => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000010 => {
@@ -2439,6 +2549,7 @@ pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v16 = b.konst(Width::new(32), 0x0);
             let v17 = b.concat(v16, v15);
             st.set_fpr(b, (s3) as u8, v17, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000021 => {
@@ -2457,6 +2568,7 @@ pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
             let v13 = st.fpr(b, (s1) as u8);
             let v14 = st.fp(b, 0x21, 0x15, v12, v13, None);
             st.set_fpr(b, (s3) as u8, v14, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000022 => {
@@ -2472,11 +2584,13 @@ pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000024 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000025 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 4, None);
             Ok(())
         }
         0x00000026 => {
@@ -2532,81 +2646,97 @@ pub(super) fn Cop1L(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
         0x00000030 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000031 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000032 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000033 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000034 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000035 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000036 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000037 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000038 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x00000039 => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003a => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003b => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003c => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003d => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003e => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         0x0000003f => {
             st.check_cop(b, 1, None);
             st.exception(b, Exc::FPE, None, None);
+            st.cycles(b, 2, None);
             Ok(())
         }
         _ => unreachable!(),

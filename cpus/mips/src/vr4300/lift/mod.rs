@@ -94,18 +94,19 @@ pub fn lift(pc: u64, word: u32, slot: u32) -> Result<Lifted, LiftError> {
     lift_with(pc, word, slot, Options::default())
 }
 
-/// As [`lift`], with `opts`. The block ends in a tick of one cycle per
-/// instruction it holds (a branch and its delay slot are two, also when
-/// the slot is annulled).
+/// As [`lift`], with `opts`. Each instruction is followed by its tick: one
+/// issue cycle plus the overlay's `MIPS_Cycles`, none for a delay slot a
+/// likely branch annuls.
 pub fn lift_with(pc: u64, word: u32, slot: u32, opts: Options) -> Result<Lifted, LiftError> {
     let mut b = Builder::new(regs::regs(), Width::W64, pc);
     let mut st = St::with_options(pc, opts);
     let body = common::lift::body(&mut b, &mut st, pc, word, slot)?;
     let exception = st.exception_static();
     let sys = st.sys_effects().to_vec();
+    let block = common::lift::finish(b, &body);
     Ok(Lifted {
         encs: body.encs,
-        block: b.finish(body.len, body.exit),
+        block,
         exception,
         sys,
     })

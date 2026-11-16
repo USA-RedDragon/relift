@@ -45,9 +45,45 @@ val wFPR : (bits(5), bits(64)) -> unit
 
 function execute_branch(pc) = MIPS_Branch(pc)
 
+/* ---- cycles: what an instruction takes beyond its one issue cycle, as
+   ares counts them (the multiplier and divider, the FPU). Memory, cache
+   and device costs are the runtime's. */
+val MIPS_Cycles : int -> unit
+
+val fp_cycles : (bits(6), bits(5)) -> int
+function fp_cycles (funct, fmt) = {
+  let d = fmt == 0b10001;
+  let fixed = (fmt == 0b10100) | (fmt == 0b10101);
+  let n = unsigned(funct);
+  if n <= 1 then 2
+  else if n == 2 then (if d then 7 else 4)
+  else if n <= 4 then (if d then 57 else 28)
+  else if n <= 7 then 0
+  else if n <= 15 then 4
+  else if n == 32 then (if fixed then 4 else 1)
+  else if n == 33 then (if fixed then 4 else 0)
+  else if (n == 36) | (n == 37) then 4
+  else if n >= 48 then 2
+  else 0
+}
+
+val cycles : ast -> int
+function cycles (a) = match a {
+  MULT(_, _) => 4,
+  MULTU(_, _) => 4,
+  DMULT(_, _) => 7,
+  DMULTU(_, _) => 7,
+  DIV(_, _) => 36,
+  DIVU(_, _) => 36,
+  DDIV(_, _) => 68,
+  DDIVU(_, _) => 68,
+  COP1_Arith(funct, fmt, _, _, _) => fp_cycles(funct, fmt),
+  _ => 0
+}
+
 val mips_run : option(ast) -> unit
 function mips_run(x) = match x {
-  Some(a) => execute(a),
+  Some(a) => { execute(a); MIPS_Cycles(cycles(a)) },
   None() => SignalException(ResI)
 }
 

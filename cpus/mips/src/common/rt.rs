@@ -145,6 +145,7 @@ pub(crate) struct Core {
     has_slot: bool,
     jump: Option<Value>,
     exception: Option<Exc>,
+    cycles: u32,
 }
 
 impl Core {
@@ -165,6 +166,32 @@ impl Core {
             has_slot: false,
             jump: None,
             exception: None,
+            cycles: 0,
+        }
+    }
+
+    /// The instruction takes `n` cycles beyond its issue cycle under `g`:
+    /// a tick under a condition of the template at once, or cycles the
+    /// block driver adds to the instruction's own tick.
+    pub(crate) fn cycles(&mut self, b: &mut Builder, n: u32, g: Option<Value>) {
+        match self.guard(b, g) {
+            Some(c) if Some(c) != self.slot_guard => b.tick_if(c, n),
+            _ => self.cycles += n,
+        }
+    }
+
+    /// The cycles [`Core::cycles`] left for the instruction lifted last.
+    pub(crate) fn take_cycles(&mut self) -> u32 {
+        std::mem::take(&mut self.cycles)
+    }
+
+    /// Ticks the instruction lifted last: its issue cycle and the cycles
+    /// [`Core::cycles`] left. An annulled delay slot takes none.
+    pub(crate) fn tick(&mut self, b: &mut Builder) {
+        let n = 1 + self.take_cycles();
+        match self.slot_guard {
+            Some(c) => b.tick_if(c, n),
+            None => b.tick(n),
         }
     }
 

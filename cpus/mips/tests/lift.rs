@@ -445,7 +445,63 @@ fn memory_goes_through_io_accesses_and_each_instruction_ticks() {
         "a plain SW reads nothing"
     );
     let l = lift::lift(PC, i_type(0x04, 0, 0, 3), i_type(0x23, 1, 2, 0)).expect("lifts");
-    assert!(ops(&l.block).iter().any(|o| matches!(o, Op::Tick(2))));
+    let o = ops(&l.block);
+    let ticks: Vec<usize> = (0..o.len())
+        .filter(|&i| matches!(o[i], Op::Tick(1)))
+        .collect();
+    let load = o
+        .iter()
+        .position(|o| matches!(o, Op::IoLoad { .. }))
+        .expect("the slot's load");
+    assert_eq!(ticks.len(), 2, "the branch and its slot tick once each");
+    assert!(
+        ticks[0] < load && load < ticks[1],
+        "the branch ticks before its slot"
+    );
+}
+
+fn ticks(b: &Block) -> Vec<Op> {
+    b.insts
+        .iter()
+        .filter(|i| matches!(i.op, Op::Tick(_) | Op::TickIf(..)))
+        .map(|i| i.op.clone())
+        .collect()
+}
+
+#[test]
+fn the_multiplier_divider_and_fpu_take_their_cycles() {
+    let cases = [
+        (r_type(1, 2, 0, 0, 0x18), 5),
+        (r_type(1, 2, 0, 0, 0x1C), 8),
+        (r_type(1, 2, 0, 0, 0x1A), 37),
+        (r_type(1, 2, 0, 0, 0x1F), 69),
+        (r_type(1, 2, 3, 0, 0x20), 1),
+        (0x4601_0000, 3),
+        (0x4601_0002, 5),
+        (0x4621_0002, 8),
+        (0x4601_0003, 29),
+        (0x4620_0004, 58),
+        (0x4600_0005, 1),
+        (0x4620_0020, 2),
+        (0x4600_0021, 1),
+        (0x4680_0020, 5),
+        (0x4600_000D, 5),
+        (0x4601_0032, 3),
+    ];
+    for (w, n) in cases {
+        let l = lift::lift(PC, w, 0).expect("lifts");
+        assert_eq!(ticks(&l.block), [Op::Tick(n)], "{w:#010x}");
+    }
+}
+
+#[test]
+fn an_annulled_slot_takes_no_cycle() {
+    let beql = i_type(0x14, 1, 2, 3);
+    let l = lift::lift(PC, beql, r_type(1, 2, 0, 0, 0x18)).expect("lifts");
+    let t = ticks(&l.block);
+    assert_eq!(t.len(), 2);
+    assert_eq!(t[0], Op::Tick(1));
+    assert!(matches!(t[1], Op::TickIf(_, 5)), "{t:?}");
 }
 
 #[test]

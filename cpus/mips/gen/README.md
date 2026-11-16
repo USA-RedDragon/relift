@@ -36,6 +36,9 @@ alignment, SRA and SRAV, MULT, the divide-by-zero results of the DIV family,
 LWR, CACHE and the TLB instructions as cuts, and the CP0 register file. It
 adds all of COP1: the moves, BC1, the loads and stores, and the arithmetic,
 conversions and compares, with the FR=0 and FR=1 register views.
+`mips_run` charges each instruction's cycles beyond its issue cycle through
+the cut `MIPS_Cycles` (`cycles` and `fp_cycles`: the multiplier, the
+divider and the FPU, as ares counts them); the templates call `st.cycles`.
 
 `r3000a.sail` is loaded the same way. It keeps the MIPS I clauses (no
 MIPS II or III, no likely branches, no LL and SC, no TLB instructions) and

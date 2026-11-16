@@ -27,6 +27,8 @@
 //!   each template, and `MIPS_FpUnimpl`, the unimplemented-operation FPE.
 //! - CP0: `MIPS_Random`, `MIPS_Tlb`, `MIPS_Cache` and `MIPS_Cp0Sync`, state
 //!   and effects the runtime owns.
+//! - CYCLES: `MIPS_Cycles`, the cycles the instruction takes beyond its
+//!   issue cycle (known in each template).
 
 use std::cell::Cell;
 
@@ -249,6 +251,15 @@ fn value(g: &mut Gen<'_, Mips>, v: &V) -> R<String> {
 }
 
 fn cut(g: &mut Gen<'_, Mips>, name: &str, a: &[V]) -> R<Option<V>> {
+    if name == "MIPS_Cycles" {
+        let n = g.cint(&a[0])?;
+        if n > 0 {
+            g.used_cut.insert("MIPS_Cycles");
+            let gd = g.gd();
+            g.effect(format!("st.cycles(b, {n}, {gd});"));
+        }
+        return Ok(Some(V::Unit));
+    }
     let Some(&key) = CUT.iter().find(|c| **c == name) else {
         return Ok(None);
     };

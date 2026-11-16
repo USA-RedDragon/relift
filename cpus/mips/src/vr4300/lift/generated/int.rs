@@ -856,7 +856,7 @@ pub(super) fn Mtlo(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftEr
 
 /// `Mult`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Mult(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Mult;
     let w = u128::from(word);
@@ -876,12 +876,13 @@ pub(super) fn Mult(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftEr
     let v12 = b.extract(v9, 32, Width::new(32));
     let v13 = b.sext(v12, Width::new(64));
     st.set_reg(b, "HI", v13, None);
+    st.cycles(b, 4, None);
     Ok(())
 }
 
 /// `Multu`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Multu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Multu;
     let w = u128::from(word);
@@ -901,12 +902,13 @@ pub(super) fn Multu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
     let v12 = b.extract(v9, 0, Width::new(32));
     let v13 = b.sext(v12, Width::new(64));
     st.set_reg(b, "LO", v13, None);
+    st.cycles(b, 4, None);
     Ok(())
 }
 
 /// `Dmult`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Dmult(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Dmult;
     let w = u128::from(word);
@@ -922,12 +924,13 @@ pub(super) fn Dmult(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
     st.set_reg(b, "HI", v8, None);
     let v9 = b.extract(v7, 0, Width::new(64));
     st.set_reg(b, "LO", v9, None);
+    st.cycles(b, 7, None);
     Ok(())
 }
 
 /// `Dmultu`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Dmultu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Dmultu;
     let w = u128::from(word);
@@ -943,12 +946,13 @@ pub(super) fn Dmultu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), Lift
     st.set_reg(b, "HI", v8, None);
     let v9 = b.extract(v7, 0, Width::new(64));
     st.set_reg(b, "LO", v9, None);
+    st.cycles(b, 7, None);
     Ok(())
 }
 
 /// `Div`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Div(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Div;
     let w = u128::from(word);
@@ -980,12 +984,13 @@ pub(super) fn Div(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftErr
     let v25 = b.extract(v24, 0, Width::new(32));
     let v26 = b.sext(v25, Width::new(64));
     st.set_reg(b, "HI", v26, Some(v20));
+    st.cycles(b, 36, None);
     Ok(())
 }
 
 /// `Divu`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Divu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Divu;
     let w = u128::from(word);
@@ -1014,12 +1019,13 @@ pub(super) fn Divu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftEr
     let v19 = b.extract(v18, 0, Width::new(32));
     let v20 = b.sext(v19, Width::new(64));
     st.set_reg(b, "HI", v20, Some(v14));
+    st.cycles(b, 36, None);
     Ok(())
 }
 
 /// `Ddiv`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Ddiv(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Ddiv;
     let w = u128::from(word);
@@ -1046,12 +1052,13 @@ pub(super) fn Ddiv(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftEr
     let v20 = b.bin(BinOp::SRem, v4, v6);
     let v21 = b.extract(v20, 0, Width::new(64));
     st.set_reg(b, "HI", v21, Some(v17));
+    st.cycles(b, 68, None);
     Ok(())
 }
 
 /// `Ddivu`.
 ///
-/// Cut: SYS, rGPR.
+/// Cut: MIPS_Cycles, SYS, rGPR.
 pub(super) fn Ddivu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftError> {
     const ENC: Encoding = Encoding::Ddivu;
     let w = u128::from(word);
@@ -1074,6 +1081,7 @@ pub(super) fn Ddivu(word: u32, b: &mut Builder, st: &mut St) -> Result<(), LiftE
     let v13 = b.bin(BinOp::SRem, v4, v6);
     let v14 = b.extract(v13, 0, Width::new(64));
     st.set_reg(b, "HI", v14, Some(v10));
+    st.cycles(b, 68, None);
     Ok(())
 }
 
