@@ -618,6 +618,8 @@ rl_result hos_unmap_shared_memory(uint32_t h, uint64_t addr, uint64_t size);
 rl_result hos_create_transfer_memory(uint32_t *out, uint64_t addr, uint64_t size, uint32_t perm);
 /** @brief True when guest range [addr, addr+size) is mapped with the given Horizon permission bits (enum hos_perm). Lock held. */
 bool hos_user_range(uint64_t addr, uint64_t size, uint32_t perm);
+/** @brief The lowest guest address lo with [lo, addr) mapped read-write throughout (addr when the page below is not). Lock not held. */
+uint64_t hos_writable_below(uint64_t addr);
 /** @brief Memory in use for svcGetInfo 7. */
 uint64_t hos_used_memory(void);
 /** @brief Allocates a TLS slot; returns its guest address or 0. Lock held. */

@@ -9,6 +9,13 @@
  * call), copies the data below the guest sp, saves the guest registers,
  * calls the guest function and restores them. A callback from a driver
  * thread with no guest call running is logged and not delivered.
+ *
+ * The data stays inside the writable guest stack below sp and leaves
+ * CB_RESERVE bytes of it for the guest function's frames: each string gets
+ * at most half of the room still free and is cut short to fit (a host
+ * validation layer reports messages of hundreds of KiB, longer than a
+ * console thread's stack), and a callback whose fixed data does not fit is
+ * logged and not delivered.
  * VkAllocationCallbacks are never forwarded: the host driver allocates with
  * its own allocator.
  */
@@ -28,6 +35,9 @@ typedef struct vkf_cb {
     /** @brief Next record. */
     struct vkf_cb *next;
 } vkf_cb;
+
+/** @brief Guest stack bytes below the callback data kept free for the guest function's frames. */
+#define CB_RESERVE (64u << 10)
 
 static vkf_cb *g_cbs;
 static pthread_mutex_t g_cb_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -69,14 +79,45 @@ void vkf_cb_adopt(uint64_t owner)
     pthread_mutex_unlock(&g_cb_lock);
 }
 
-uint64_t vkf_push(vkf_call *k, uint64_t *sp, const void *src, size_t n)
+vkf_gstack vkf_gstack_at(uint64_t sp)
 {
-    *sp = (*sp - n) & ~(uint64_t)15;
-    memcpy(k->mem + *sp, src, n);
-    return *sp;
+    uint64_t lo = vkf_writable_below(sp);
+    uint64_t lim = sp - lo > CB_RESERVE ? lo + CB_RESERVE : sp;
+    return (vkf_gstack){ .sp = sp, .lim = lim, .fits = true };
 }
 
-static uint64_t push_str(vkf_call *k, uint64_t *sp, const char *s) { return s ? vkf_push(k, sp, s, strlen(s) + 1) : 0; }
+static uint64_t room(const vkf_gstack *st) { return st->sp - st->lim > 15 ? (st->sp - st->lim - 15) : 0; }
+
+uint64_t vkf_push(vkf_call *k, vkf_gstack *st, const void *src, size_t n)
+{
+    if (n > room(st)) {
+        st->fits = false;
+        return 0;
+    }
+    st->sp = (st->sp - n) & ~(uint64_t)15;
+    memcpy(k->mem + st->sp, src, n);
+    return st->sp;
+}
+
+static uint64_t push_str(vkf_call *k, vkf_gstack *st, const char *s)
+{
+    if (!s)
+        return 0;
+    size_t n = strlen(s), cap = (size_t)(room(st) / 2);
+    if (!cap) {
+        st->fits = false;
+        return 0;
+    }
+    if (n >= cap) {
+        n = cap - 1;
+        if (rl_once(0x4342534852540000ull))
+            rl_log(RL_LOG_INFO, "vk", "a debug message longer than the guest stack holds reaches the guest cut to %zu bytes", n);
+    }
+    st->sp = (st->sp - (n + 1)) & ~(uint64_t)15;
+    memcpy(k->mem + st->sp, s, n);
+    k->mem[st->sp + n] = 0;
+    return st->sp;
+}
 
 uint64_t vkf_guest_call(vkf_call *k, uint64_t fn, const uint64_t *args, unsigned n, uint64_t sp)
 {
@@ -111,7 +152,7 @@ static uint64_t guest_object(VkObjectType t, uint64_t h)
     return o ? vkf_id(o) : 0;
 }
 
-static uint64_t push_labels(vkf_call *k, uint64_t *sp, const VkDebugUtilsLabelEXT *l, uint32_t n)
+static uint64_t push_labels(vkf_call *k, vkf_gstack *st, const VkDebugUtilsLabelEXT *l, uint32_t n)
 {
     if (!l || !n)
         return 0;
@@ -119,9 +160,9 @@ static uint64_t push_labels(vkf_call *k, uint64_t *sp, const VkDebugUtilsLabelEX
     for (uint32_t i = 0; i < n; i++) {
         g[i] = l[i];
         g[i].pNext = NULL;
-        g[i].pLabelName = as_ptr(push_str(k, sp, l[i].pLabelName));
+        g[i].pLabelName = as_ptr(push_str(k, st, l[i].pLabelName));
     }
-    return vkf_push(k, sp, g, n * sizeof *g);
+    return vkf_push(k, st, g, n * sizeof *g);
 }
 
 static VkBool32 VKAPI_PTR utils_tramp(VkDebugUtilsMessageSeverityFlagBitsEXT sev, VkDebugUtilsMessageTypeFlagsEXT types,
@@ -133,27 +174,31 @@ static VkBool32 VKAPI_PTR utils_tramp(VkDebugUtilsMessageSeverityFlagBitsEXT sev
         rl_log(RL_LOG_INFO, "vk", "debug message on a host thread: %s", d && d->pMessage ? d->pMessage : "");
         return VK_FALSE;
     }
-    uint64_t sp = k->c->sp;
+    vkf_gstack st = vkf_gstack_at(k->c->sp);
     VkDebugUtilsMessengerCallbackDataEXT g = *d;
     g.pNext = NULL;
-    g.pMessageIdName = as_ptr(push_str(k, &sp, d->pMessageIdName));
-    g.pMessage = as_ptr(push_str(k, &sp, d->pMessage));
-    g.pQueueLabels = as_ptr(push_labels(k, &sp, d->pQueueLabels, d->queueLabelCount));
-    g.pCmdBufLabels = as_ptr(push_labels(k, &sp, d->pCmdBufLabels, d->cmdBufLabelCount));
+    g.pMessageIdName = as_ptr(push_str(k, &st, d->pMessageIdName));
+    g.pMessage = as_ptr(push_str(k, &st, d->pMessage));
+    g.pQueueLabels = as_ptr(push_labels(k, &st, d->pQueueLabels, d->queueLabelCount));
+    g.pCmdBufLabels = as_ptr(push_labels(k, &st, d->pCmdBufLabels, d->cmdBufLabelCount));
     if (d->pObjects && d->objectCount) {
         VkDebugUtilsObjectNameInfoEXT *o = vkf_alloc(k, d->objectCount * sizeof *o);
         for (uint32_t i = 0; i < d->objectCount; i++) {
             o[i] = d->pObjects[i];
             o[i].pNext = NULL;
             o[i].objectHandle = guest_object(o[i].objectType, o[i].objectHandle);
-            o[i].pObjectName = as_ptr(push_str(k, &sp, d->pObjects[i].pObjectName));
+            o[i].pObjectName = as_ptr(push_str(k, &st, d->pObjects[i].pObjectName));
         }
-        g.pObjects = as_ptr(vkf_push(k, &sp, o, d->objectCount * sizeof *o));
+        g.pObjects = as_ptr(vkf_push(k, &st, o, d->objectCount * sizeof *o));
     } else
         g.pObjects = NULL;
-    uint64_t gd = vkf_push(k, &sp, &g, sizeof g);
+    uint64_t gd = vkf_push(k, &st, &g, sizeof g);
+    if (!st.fits) {
+        rl_log(RL_LOG_INFO, "vk", "debug message too large for the guest stack, not delivered: %s", d->pMessage ? d->pMessage : "");
+        return VK_FALSE;
+    }
     uint64_t args[4] = { (uint32_t)sev, types, gd, cb->user };
-    return (VkBool32)vkf_guest_call(k, cb->fn, args, 4, sp);
+    return (VkBool32)vkf_guest_call(k, cb->fn, args, 4, st.sp);
 }
 
 static VkBool32 VKAPI_PTR report_tramp(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT type, uint64_t object, size_t location,
@@ -165,11 +210,15 @@ static VkBool32 VKAPI_PTR report_tramp(VkDebugReportFlagsEXT flags, VkDebugRepor
         rl_log(RL_LOG_INFO, "vk", "debug report on a host thread: %s", message ? message : "");
         return VK_FALSE;
     }
-    uint64_t sp = k->c->sp;
-    uint64_t gp = push_str(k, &sp, prefix);
-    uint64_t gm = push_str(k, &sp, message);
+    vkf_gstack st = vkf_gstack_at(k->c->sp);
+    uint64_t gp = push_str(k, &st, prefix);
+    uint64_t gm = push_str(k, &st, message);
+    if (!st.fits) {
+        rl_log(RL_LOG_INFO, "vk", "debug report too large for the guest stack, not delivered: %s", message ? message : "");
+        return VK_FALSE;
+    }
     uint64_t args[8] = { flags, (uint32_t)type, guest_object((VkObjectType)type, object), location, (uint32_t)code, gp, gm, cb->user };
-    return (VkBool32)vkf_guest_call(k, cb->fn, args, 8, sp);
+    return (VkBool32)vkf_guest_call(k, cb->fn, args, 8, st.sp);
 }
 
 void vkh_in_VkDebugUtilsMessengerCreateInfoEXT(vkf_call *k, VkDebugUtilsMessengerCreateInfoEXT *h, uint64_t g)

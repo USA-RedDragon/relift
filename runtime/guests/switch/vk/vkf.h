@@ -451,8 +451,20 @@ void vkf_wait_enter(vkf_call *k, uint64_t timeout);
 /** @brief Ends vkf_wait_enter: waits for the core again. Call with no host lock held. */
 void vkf_wait_return(vkf_call *k);
 
-/** @brief Copies bytes to a fresh area below the guest stack pointer *sp; returns its guest address. */
-uint64_t vkf_push(vkf_call *k, uint64_t *sp, const void *src, size_t n);
+/** @brief Guest stack room for a callback's data: pushes go down from sp and stay at or above lim. */
+typedef struct vkf_gstack {
+    /** @brief Guest stack pointer: the lowest data pushed so far. */
+    uint64_t sp;
+    /** @brief Lowest address the data may use. */
+    uint64_t lim;
+    /** @brief False once a push did not fit. */
+    bool fits;
+} vkf_gstack;
+
+/** @brief The room for callback data below sp: the writable guest stack there, less the guest function's reserve. */
+vkf_gstack vkf_gstack_at(uint64_t sp);
+/** @brief Copies bytes to a fresh area below st->sp; returns its guest address, or 0 (clearing st->fits) when they do not fit. */
+uint64_t vkf_push(vkf_call *k, vkf_gstack *st, const void *src, size_t n);
 /** @brief Calls a guest function with up to eight integer arguments on the guest stack below sp; returns x0. */
 uint64_t vkf_guest_call(vkf_call *k, uint64_t fn, const uint64_t *args, unsigned n, uint64_t sp);
 
@@ -462,6 +474,8 @@ uint64_t vkf_va_alloc(uint64_t size, uint64_t align);
 void vkf_va_free(uint64_t addr);
 /** @brief Changes the guest map through the configuration's hook. */
 int vkf_vm_set(uint64_t addr, uint64_t size, uint32_t perm, int content);
+/** @brief The lowest guest address lo with [lo, addr) mapped read-write throughout, through the configuration's hook. */
+uint64_t vkf_writable_below(uint64_t addr);
 
 /** @brief Chooses a map mode for a physical device and fills the device state; returns the extensions and features to enable. */
 void vkf_mem_device_setup(vkf_call *k, vkf_dev *d, void *phys, const char ***exts, uint32_t *n_exts, void **pnext);

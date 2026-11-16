@@ -859,7 +859,7 @@ TEST(vk_shadow_keeps_guest_writes_across_waits)
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 
-static uint64_t g_cb_calls, g_cb_user, g_cb_sev, g_cb_x19;
+static uint64_t g_cb_calls, g_cb_user, g_cb_sev, g_cb_x19, g_cb_len, g_cb_sp;
 static char g_cb_msg[256];
 
 static int guest_messenger(rl_ctx *restrict c, uint8_t *mem)
@@ -871,6 +871,8 @@ static int guest_messenger(rl_ctx *restrict c, uint8_t *mem)
     uint64_t data = c->x[2];
     uint64_t msg = rl_ld64(mem, data + offsetof(VkDebugUtilsMessengerCallbackDataEXT, pMessage));
     snprintf(g_cb_msg, sizeof g_cb_msg, "%s", (const char *)mem + msg);
+    g_cb_len = strlen((const char *)mem + msg);
+    g_cb_sp = c->sp;
     c->x[19] = 0xDEAD;
     c->x[0] = VK_FALSE;
     return RL_OK;
@@ -921,6 +923,45 @@ TEST(vk_debug_messenger_calls_guest_code)
     G("vkSubmitDebugUtilsMessageEXT", g_inst, VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
       gput(&d, sizeof d));
     CHECK_EQ(g_cb_calls, before + 1);
+    G("vkDestroyInstance", g_inst, 0);
+}
+
+TEST(vk_debug_message_longer_than_the_guest_stack_reaches_the_guest_cut_short)
+{
+    CHECK_EQ(boot(NULL), 0);
+    const rl_unit *u = &cb_unit;
+    CHECK_EQ(rl_units_register(&u, 1), 0);
+    rl_dispatch_view(g_c);
+    const char *exts[] = { "VK_EXT_debug_utils" };
+    CHECK(make_instance(exts, 1, 0) != 0);
+    VkDebugUtilsMessengerCreateInfoEXT mci = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+        .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
+        .pfnUserCallback = (PFN_vkDebugUtilsMessengerCallbackEXT)GP(CALLBACK_FN),
+    };
+    uint64_t gm = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateDebugUtilsMessengerEXT", g_inst, gput(&mci, sizeof mci), 0, gm)), VK_SUCCESS);
+    uint64_t n = 2 * STACK_SIZE;
+    uint64_t text = galloc(n + 1);
+    for (uint64_t i = 0; i < n; i++)
+        g_mem[text + i] = (uint8_t)('a' + i % 26);
+    VkDebugUtilsMessengerCallbackDataEXT d = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT,
+        .pMessageIdName = GP(gstr("relift")),
+        .pMessage = GP(text),
+    };
+    uint64_t before = g_cb_calls;
+    G("vkSubmitDebugUtilsMessageEXT", g_inst, VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT,
+      gput(&d, sizeof d));
+    CHECK_EQ(g_rc, RL_OK);
+    CHECK_EQ(g_cb_calls, before + 1);
+    fprintf(stderr, "  message of %llu bytes reached the guest as %llu, guest sp %#llx\n", (unsigned long long)n,
+            (unsigned long long)g_cb_len, (unsigned long long)g_cb_sp);
+    CHECK(g_cb_len > 0 && g_cb_len < STACK_SIZE / 2);
+    CHECK(!strncmp(g_cb_msg, "abcdefghijklmnopqrstuvwxyzabcdef", 32));
+    CHECK(g_cb_sp >= STACK + (64u << 10));
+    G("vkDestroyDebugUtilsMessengerEXT", g_inst, g64(gm), 0);
     G("vkDestroyInstance", g_inst, 0);
 }
 

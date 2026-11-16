@@ -117,6 +117,8 @@ RL_RUNTIME_API const rl_switch_hook *rl_vk_switch_hook(void);
 
 /** @brief Changes guest memory map state for the forwarding layer (the guest layer takes its own lock). */
 typedef int rl_vk_vm_set_fn(void *user, uint64_t addr, uint64_t size, uint32_t perm, int content);
+/** @brief The lowest guest address lo with [lo, addr) mapped read-write throughout. */
+typedef uint64_t rl_vk_writable_below_fn(void *user, uint64_t addr);
 
 /** @brief Settings of the forwarding layer. */
 typedef struct rl_vk_config {
@@ -134,7 +136,9 @@ typedef struct rl_vk_config {
     int map_mode;
     /** @brief Changes the guest map; NULL calls rl_vm_set on vm under the layer's own lock. */
     rl_vk_vm_set_fn *vm_set;
-    /** @brief Passed to vm_set. */
+    /** @brief Finds the writable guest stack below a guest sp, for callback data; NULL reads vm under the layer's own lock. */
+    rl_vk_writable_below_fn *writable_below;
+    /** @brief Passed to vm_set and writable_below. */
     void *vm_user;
     /** @brief Creates surfaces for VK_NN_vi_surface; NULL when the host shows nothing. */
     const rl_vk_surface_provider *surfaces;

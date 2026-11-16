@@ -493,6 +493,20 @@ bool hos_user_range(uint64_t addr, uint64_t size, uint32_t perm)
     return true;
 }
 
+uint64_t hos_writable_below(uint64_t addr)
+{
+    hos_lock();
+    uint64_t lo = addr;
+    while (lo && lo <= hos.vm.size) {
+        rl_vm_block b = rl_vm_query(&hos.vm, lo - 1);
+        if (!(state_of(&b) & MS_MAPPED) || (hos_perm(b.perm) & HOS_PERM_RW) != HOS_PERM_RW)
+            break;
+        lo = b.addr;
+    }
+    hos_unlock();
+    return lo;
+}
+
 rl_result hos_query_memory(uint64_t info_addr, uint64_t addr, uint32_t *page_info)
 {
     struct {

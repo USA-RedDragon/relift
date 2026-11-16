@@ -117,6 +117,23 @@ int vkf_vm_set(uint64_t addr, uint64_t size, uint32_t perm, int content)
     return r;
 }
 
+uint64_t vkf_writable_below(uint64_t addr)
+{
+    if (vkf.cfg.writable_below)
+        return vkf.cfg.writable_below(vkf.cfg.vm_user, addr);
+    const rl_vm *vm = vkf.cfg.vm;
+    pthread_mutex_lock(&g_vm_lock);
+    uint64_t lo = addr;
+    while (lo && lo <= vm->size) {
+        rl_vm_block b = rl_vm_query(vm, lo - 1);
+        if ((b.perm & RL_VM_RW) != RL_VM_RW)
+            break;
+        lo = b.addr;
+    }
+    pthread_mutex_unlock(&g_vm_lock);
+    return lo;
+}
+
 
 static bool has_ext(const VkExtensionProperties *p, uint32_t n, const char *name)
 {

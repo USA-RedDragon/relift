@@ -182,6 +182,12 @@ static int hook_vm_set(void *user, uint64_t addr, uint64_t size, uint32_t perm, 
     return rl_hos_reserved_set(addr, size, perm, content);
 }
 
+static uint64_t hook_writable_below(void *user, uint64_t addr)
+{
+    (void)user;
+    return hos_writable_below(addr);
+}
+
 static int hook_start(void *user, uint64_t *code_free)
 {
     (void)user;
@@ -200,6 +206,7 @@ static int hook_start(void *user, uint64_t *code_free)
         .map_size = map_size,
         .map_mode = RL_VK_MAP_AUTO,
         .vm_set = hook_vm_set,
+        .writable_below = hook_writable_below,
         .surfaces = surfaces ? surfaces : rl_vk_headless_surfaces(),
         .gipa = surfaces && b->vulkan_gipa ? b->vulkan_gipa() : NULL,
     };
