@@ -24,6 +24,16 @@
 //! vertex register they may carry (for the tessellation and geometry
 //! stages) is ignored.
 //!
+//! The instance id `a[0x2f8]` counts from 0 in each draw, without the base
+//! instance, and the vertex id `a[0x2fc]` includes the base vertex: NVK
+//! (Mesa, MIT) programs SET_GLOBAL_BASE_VERTEX_INDEX and
+//! SET_GLOBAL_BASE_INSTANCE_INDEX with the draw's bases, reads Vulkan's
+//! VertexIndex as the vertex id and builds InstanceIndex as the instance id
+//! plus the base instance (NAK sets neither `vertex_id_zero_based` nor
+//! `instance_id_includes_base_index`). So the instance id is InstanceIndex
+//! minus BaseInstance (DrawParameters: the device needs
+//! shaderDrawParameters) and the vertex id is VertexIndex.
+//!
 //! Fragment outputs (SPH word 18, four bits per render target) leave in
 //! registers from R0: four per target that has any component, then the
 //! sample mask and depth when SPH word 19 bit 0 or bit 1 asks for either.
@@ -50,6 +60,7 @@ const B_SAMPLE_MASK: u32 = 20;
 const B_FRAG_DEPTH: u32 = 22;
 const B_VERTEX_INDEX: u32 = 42;
 const B_INSTANCE_INDEX: u32 = 43;
+const B_BASE_INSTANCE: u32 = 4425;
 
 /// Location of the first fixed-function texture coordinate, after the 32
 /// generic attributes; its SPH input map starts at bit 480.
@@ -61,6 +72,7 @@ const CAP_INTERPOLATION_FUNCTION: u32 = 52;
 const CAP_MULTI_VIEWPORT: u32 = 57;
 const CAP_VIEWPORT_INDEX_LAYER: u32 = 5254;
 const CAP_DEMOTE: u32 = 5379;
+const CAP_DRAW_PARAMETERS: u32 = 4427;
 const OP_DEMOTE: u16 = 5380;
 
 /// What the stage I/O needs to know about the whole program.
@@ -134,6 +146,8 @@ enum Slot {
     Float(u32, Option<u32>),
     /// An integer built-in: pointer and its signed type.
     Int(u32),
+    /// The instance id: pointers to InstanceIndex and BaseInstance.
+    InstanceId(u32, u32),
     /// A boolean built-in: true reads as all ones.
     Bool(u32),
     /// A store the translation drops.
@@ -247,7 +261,12 @@ impl Ctx {
                 let b = self.boolt();
                 Slot::Bool(self.plain_builtin(B_FRONT_FACING, INPUT, b))
             }
-            0x2f8 if self.stage == Stage::Vertex => self.int_slot(B_INSTANCE_INDEX, INPUT),
+            0x2f8 if self.stage == Stage::Vertex => {
+                self.cap(CAP_DRAW_PARAMETERS);
+                let index = self.scalar_builtin(B_INSTANCE_INDEX, INPUT, true);
+                let base = self.scalar_builtin(B_BASE_INSTANCE, INPUT, true);
+                Slot::InstanceId(index, base)
+            }
             0x2fc if self.stage == Stage::Vertex => self.int_slot(B_VERTEX_INDEX, INPUT),
             0x80..0x280 | 0x300..0x3a0 => {
                 let loc = location(off);
@@ -303,6 +322,14 @@ impl Ctx {
                 let u = self.u32t();
                 self.m.emit(op::BITCAST, u, &[v])
             }
+            Slot::InstanceId(index, base) => {
+                let i = self.m.t_i32();
+                let index = self.m.emit(op::LOAD, i, &[index]);
+                let base = self.m.emit(op::LOAD, i, &[base]);
+                let v = self.m.emit(op::I_SUB, i, &[index, base]);
+                let u = self.u32t();
+                self.m.emit(op::BITCAST, u, &[v])
+            }
             Slot::Bool(p) => {
                 let b = self.boolt();
                 let v = self.m.emit(op::LOAD, b, &[p]);
@@ -323,7 +350,7 @@ impl Ctx {
                 let v = self.m.emit(op::BITCAST, i, &[bits]);
                 self.m.emit_void(op::STORE, &[p, v]);
             }
-            Slot::Bool(_) | Slot::Drop => {}
+            Slot::InstanceId(..) | Slot::Bool(_) | Slot::Drop => {}
         }
     }
 

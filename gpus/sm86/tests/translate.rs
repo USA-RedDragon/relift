@@ -704,6 +704,29 @@ fn vertex_system_values() {
     }
 }
 
+/// The instance id counts from 0 in each draw (NVK builds InstanceIndex
+/// as the instance id plus BaseInstance), so it reads InstanceIndex minus
+/// BaseInstance; the vertex id is VertexIndex.
+#[test]
+fn instance_id_leaves_out_the_base_instance() {
+    let mut b = sph(1, 1, &[]);
+    b.extend(word(
+        0x121,
+        1,
+        &[(16, 8, 1), (24, 8, 255), (32, 8, 255), (40, 11, 0x2f8)],
+    ));
+    exit_and_halt(&mut b);
+    let s = translate(&Program::parse(&b)).unwrap_or_else(|e| panic!("{e}"));
+    dump("instance_id", &s.spirv);
+    assert!(builtin_used(&s.spirv, 43) && builtin_used(&s.spirv, 4425));
+    assert!(s.interface.builtins.contains(&4425));
+    assert_eq!(count_op(&s.spirv, 130), 1, "one ISub");
+    assert!(
+        s.spirv.windows(2).any(|w| w == [0x0002_0011, 4427]),
+        "no DrawParameters"
+    );
+}
+
 fn count_op(words: &[u32], opcode: u32) -> usize {
     let mut k = 5;
     let mut n = 0;
