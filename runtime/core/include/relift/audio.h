@@ -54,7 +54,13 @@ RL_RUNTIME_API const rl_audio_backend *rl_audio_null_backend(void);
 RL_RUNTIME_API void rl_audio_set_backend(const rl_audio_backend *b);
 /** @brief The backend in use (the host one when built in, unless RELIFT_AUDIO=null). */
 RL_RUNTIME_API const rl_audio_backend *rl_audio_backend_current(void);
-/** @brief Opens an output stream on the current backend, paused. NULL on failure. */
+/**
+ * @brief Opens an output stream on the current backend, paused. A host backend
+ * that fails falls back to the null output. One that has not opened within
+ * RELIFT_AUDIO_OPEN_MS (default 3000) is replaced by the null output for now
+ * and attached when its open completes; frames queued always come from the
+ * null output's timing in that case. NULL only when the null output fails.
+ */
 RL_RUNTIME_API rl_audio_out *rl_audio_open(uint32_t rate, uint32_t channels);
 /** @brief Closes a stream; NULL is allowed. */
 RL_RUNTIME_API void rl_audio_close(rl_audio_out *o);

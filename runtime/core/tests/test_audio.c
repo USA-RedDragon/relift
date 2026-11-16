@@ -9,6 +9,7 @@
 
 #include "../core.h"
 
+#include <stdlib.h>
 #include <time.h>
 
 static void sleep_ms(long ms)
@@ -71,4 +72,108 @@ TEST(audio_stub_decoder_returns_silence)
     CHECK_EQ(pcm[0] | pcm[1919], 0);
     CHECK_EQ((int64_t)rl_opus_decode(d, pkt, sizeof pkt, pcm, 480), (unsigned long long)(int64_t)RL_OPUS_BUFFER_TOO_SMALL);
     rl_opus_close(d);
+}
+
+static rl_audio_out *hang_open(uint32_t rate, uint32_t channels)
+{
+    (void)rate;
+    (void)channels;
+    for (;;)
+        sleep_ms(1000);
+}
+
+static const rl_audio_backend g_hang = { .name = "hang", .open = hang_open };
+
+TEST(audio_open_survives_a_backend_that_never_returns)
+{
+    setenv("RELIFT_AUDIO_OPEN_MS", "200", 1);
+    rl_audio_set_backend(&g_hang);
+    uint64_t t0 = rl_clock_ns();
+    rl_audio_out *o = rl_audio_open(48000, 2);
+    uint64_t took = rl_clock_ns() - t0;
+    CHECK(o != NULL);
+    CHECK(o->b != &g_hang);
+    CHECK(took < 5000000000ull);
+    int16_t pcm[2 * 480] = { 0 };
+    rl_audio_write(o, pcm, 480);
+    CHECK_EQ(rl_audio_queued(o), 480);
+    rl_audio_close(o);
+}
+
+static uint64_t g_fake_frames, g_fake_pauses, g_fake_closed;
+
+static rl_audio_out *slow_open(uint32_t rate, uint32_t channels)
+{
+    (void)rate;
+    (void)channels;
+    sleep_ms(500);
+    rl_audio_out *o = calloc(1, sizeof *o);
+    return o;
+}
+
+static void slow_close(rl_audio_out *o)
+{
+    g_fake_closed++;
+    free(o);
+}
+
+static void slow_write(rl_audio_out *o, const int16_t *pcm, uint32_t frames)
+{
+    (void)o;
+    (void)pcm;
+    g_fake_frames += frames;
+}
+
+static uint32_t slow_queued(rl_audio_out *o)
+{
+    (void)o;
+    return 0;
+}
+
+static void slow_pause(rl_audio_out *o, bool paused)
+{
+    (void)o;
+    (void)paused;
+    g_fake_pauses++;
+}
+
+static const rl_audio_backend g_slow = {
+    .name = "slow",
+    .open = slow_open,
+    .close = slow_close,
+    .write = slow_write,
+    .queued = slow_queued,
+    .pause = slow_pause,
+};
+
+TEST(audio_late_open_switches_the_stream_to_the_host_backend)
+{
+    setenv("RELIFT_AUDIO_OPEN_MS", "200", 1);
+    rl_audio_set_backend(&g_slow);
+    rl_audio_out *o = rl_audio_open(48000, 2);
+    CHECK(o != NULL);
+    int16_t pcm[2 * 480] = { 0 };
+    rl_audio_pause(o, false);
+    rl_audio_write(o, pcm, 480);
+    CHECK_EQ(g_fake_frames, 0);
+    CHECK_EQ(rl_audio_queued(o) > 0, 1);
+    sleep_ms(600);
+    CHECK_EQ(g_fake_pauses, 1);
+    rl_audio_write(o, pcm, 480);
+    CHECK_EQ(g_fake_frames, 480);
+    CHECK_EQ(rl_audio_queued(o) > 0 && rl_audio_queued(o) <= 480, 1);
+    rl_audio_close(o);
+    CHECK_EQ(g_fake_closed, 1);
+}
+
+TEST(audio_late_open_after_close_is_closed_by_the_helper)
+{
+    setenv("RELIFT_AUDIO_OPEN_MS", "100", 1);
+    rl_audio_set_backend(&g_slow);
+    rl_audio_out *o = rl_audio_open(48000, 2);
+    CHECK(o != NULL);
+    rl_audio_close(o);
+    sleep_ms(600);
+    CHECK_EQ(g_fake_closed, 1);
+    CHECK_EQ(g_fake_frames, 0);
 }

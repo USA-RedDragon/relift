@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static const rl_audio_backend *g_audio;
 static const rl_opus_backend *g_opus;
@@ -173,15 +174,201 @@ static void tap_report(tap_out *t, uint64_t now)
     t->last_report_ns = now;
 }
 
+typedef struct open_job {
+    pthread_mutex_t lock;
+    pthread_cond_t done_cv;
+    const rl_audio_backend *b;
+    uint32_t rate, channels;
+    rl_audio_out *out;
+    rl_audio_out *timing;
+    rl_audio_out *host;
+    bool done, late, closed, paused;
+    int refs;
+} open_job;
+
+typedef struct late_out {
+    rl_audio_out head;
+    open_job *j;
+} late_out;
+
+static const rl_audio_backend g_late;
+
+static void job_unref(open_job *j)
+{
+    pthread_mutex_lock(&j->lock);
+    int left = --j->refs;
+    pthread_mutex_unlock(&j->lock);
+    if (left == 0) {
+        pthread_cond_destroy(&j->done_cv);
+        pthread_mutex_destroy(&j->lock);
+        free(j);
+    }
+}
+
+static void *open_job_main(void *arg)
+{
+    open_job *j = arg;
+    rl_audio_out *o = j->b->open(j->rate, j->channels);
+    if (o && !o->b)
+        o->b = j->b;
+    pthread_mutex_lock(&j->lock);
+    rl_audio_out *drop = NULL;
+    if (j->late && o && !j->closed) {
+        j->host = o;
+        if (!j->paused)
+            o->b->pause(o, false);
+        rl_log(RL_LOG_INFO, "audio", "%s output opened after the deadline, switching from the null output", j->b->name);
+    } else if (j->late) {
+        drop = o;
+    } else {
+        j->out = o;
+    }
+    j->done = true;
+    pthread_cond_signal(&j->done_cv);
+    pthread_mutex_unlock(&j->lock);
+    if (drop)
+        j->b->close(drop);
+    job_unref(j);
+    return NULL;
+}
+
+static uint32_t open_timeout_ms(void)
+{
+    const char *e = getenv("RELIFT_AUDIO_OPEN_MS");
+    if (e && *e)
+        return (uint32_t)strtoul(e, NULL, 10);
+    return 3000;
+}
+
+static void late_close(rl_audio_out *o)
+{
+    open_job *j = ((late_out *)o)->j;
+    pthread_mutex_lock(&j->lock);
+    j->closed = true;
+    rl_audio_out *host = j->host;
+    j->host = NULL;
+    pthread_mutex_unlock(&j->lock);
+    if (host)
+        host->b->close(host);
+    j->timing->b->close(j->timing);
+    job_unref(j);
+    free(o);
+}
+
+static void late_write(rl_audio_out *o, const int16_t *pcm, uint32_t frames)
+{
+    open_job *j = ((late_out *)o)->j;
+    pthread_mutex_lock(&j->lock);
+    j->timing->b->write(j->timing, pcm, frames);
+    if (j->host)
+        j->host->b->write(j->host, pcm, frames);
+    pthread_mutex_unlock(&j->lock);
+}
+
+static uint32_t late_queued(rl_audio_out *o)
+{
+    open_job *j = ((late_out *)o)->j;
+    pthread_mutex_lock(&j->lock);
+    uint32_t q = j->timing->b->queued(j->timing);
+    pthread_mutex_unlock(&j->lock);
+    return q;
+}
+
+static void late_pause(rl_audio_out *o, bool paused)
+{
+    open_job *j = ((late_out *)o)->j;
+    pthread_mutex_lock(&j->lock);
+    j->paused = paused;
+    j->timing->b->pause(j->timing, paused);
+    if (j->host)
+        j->host->b->pause(j->host, paused);
+    pthread_mutex_unlock(&j->lock);
+}
+
+static const rl_audio_backend g_late = {
+    .name = "late",
+    .close = late_close,
+    .write = late_write,
+    .queued = late_queued,
+    .pause = late_pause,
+};
+
+/**
+ * Opens on a helper thread and waits at most the open deadline, so a host
+ * backend stuck inside its library cannot stop the caller. When the deadline
+ * passes the caller gets a stream timed by the null output, exactly as if the
+ * open had failed; if the helper's open completes later, the host device is
+ * attached and receives every later write and pause. Timing (queued frames)
+ * always comes from the null output, so the switch changes nothing the guest
+ * can observe. A helper stuck inside the library is left alone.
+ */
+static rl_audio_out *open_bounded(const rl_audio_backend *b, uint32_t rate, uint32_t channels)
+{
+    open_job *j = calloc(1, sizeof *j);
+    if (!j)
+        return NULL;
+    pthread_mutex_init(&j->lock, NULL);
+    pthread_cond_init(&j->done_cv, NULL);
+    j->b = b;
+    j->rate = rate;
+    j->channels = channels;
+    j->paused = true;
+    j->refs = 2;
+    pthread_t th;
+    if (pthread_create(&th, NULL, open_job_main, j) != 0) {
+        j->refs = 1;
+        job_unref(j);
+        return NULL;
+    }
+    pthread_detach(th);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    uint32_t ms = open_timeout_ms();
+    ts.tv_sec += ms / 1000;
+    ts.tv_nsec += (long)(ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1000000000L;
+    }
+    pthread_mutex_lock(&j->lock);
+    while (!j->done && pthread_cond_timedwait(&j->done_cv, &j->lock, &ts) == 0)
+        ;
+    if (j->done) {
+        rl_audio_out *o = j->out;
+        pthread_mutex_unlock(&j->lock);
+        job_unref(j);
+        return o;
+    }
+    rl_audio_out *timing = null_open(rate, channels);
+    late_out *l = timing ? calloc(1, sizeof *l) : NULL;
+    if (!l) {
+        if (timing)
+            null_close(timing);
+        j->closed = true;
+        j->late = true;
+        pthread_mutex_unlock(&j->lock);
+        job_unref(j);
+        return NULL;
+    }
+    j->late = true;
+    j->timing = timing;
+    pthread_mutex_unlock(&j->lock);
+    rl_log(RL_LOG_WARN, "audio", "%s output did not open within %u ms, using the null output until it does", b->name, ms);
+    l->head.b = &g_late;
+    l->j = j;
+    return &l->head;
+}
+
 static rl_audio_out *tap_open(const rl_audio_backend *b, uint32_t rate, uint32_t channels)
 {
-    rl_audio_out *in = b->open(rate, channels);
+    rl_audio_out *in = b == &g_null_audio ? b->open(rate, channels) : open_bounded(b, rate, channels);
     if (!in)
         return NULL;
-    in->b = b;
+    if (!in->b)
+        in->b = b;
     tap_out *t = calloc(1, sizeof *t);
     if (!t) {
-        b->close(in);
+        in->b->close(in);
         return NULL;
     }
     t->head.b = &g_tap;
