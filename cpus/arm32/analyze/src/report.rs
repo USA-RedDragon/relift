@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::loc::{Loc, Region};
+use crate::loc::Loc;
 
 /// How a ROM-to-RAM copy was made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -71,9 +71,9 @@ impl RamCopy {
 /// Why a location is a function entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Origin {
-    /// The reset entry at `0x08000000`.
+    /// An entry the caller gives (the reset entry).
     Entry,
-    /// A constant stored to the IRQ vector at `0x03007FFC`.
+    /// A constant stored to the IRQ vector.
     Irq,
     /// The target of a call.
     Called,
@@ -131,7 +131,7 @@ pub enum UnresolvedKind {
     RamNoCopy,
     /// A transfer into the BIOS.
     Bios,
-    /// Code outside the ROM image and the copies.
+    /// Code outside the image and the copies.
     OutsideCode,
     /// An instruction that does not lift (undefined, unpredictable).
     Undefined,
@@ -221,12 +221,12 @@ pub struct RegionCoverage {
     pub bytes: usize,
 }
 
-/// The analysis of one ROM.
+/// The analysis of one image.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
     /// The functions by entry.
     pub functions: BTreeMap<Loc, Function>,
-    /// The proven ROM-to-RAM copies.
+    /// The proven copies to RAM.
     pub copies: Vec<RamCopy>,
     /// The transfers not followed.
     pub unresolved: Vec<Unresolved>,
@@ -234,7 +234,7 @@ pub struct Report {
     pub swis: Vec<Swi>,
     /// The IRQ handlers stored to the vector.
     pub irq_handlers: Vec<Loc>,
-    /// ROM and copied bytes read as constants: address and size.
+    /// Image and copied bytes read as constants: address and size.
     pub data: BTreeSet<(u32, u8)>,
     /// Instructions that overlap a constant read as data.
     pub conflicts: Vec<Loc>,
@@ -250,12 +250,13 @@ impl Report {
             .collect()
     }
 
-    /// The instructions found per region.
+    /// The instructions found per region, by the region `region` gives
+    /// for each address.
     #[must_use]
-    pub fn coverage(&self) -> BTreeMap<Region, RegionCoverage> {
-        let mut m: BTreeMap<Region, RegionCoverage> = BTreeMap::new();
+    pub fn coverage<R: Ord>(&self, region: impl Fn(u32) -> R) -> BTreeMap<R, RegionCoverage> {
+        let mut m: BTreeMap<R, RegionCoverage> = BTreeMap::new();
         for (l, n) in self.instructions() {
-            let c = m.entry(l.region()).or_default();
+            let c = m.entry(region(l.addr)).or_default();
             if l.thumb {
                 c.thumb += 1;
             } else {

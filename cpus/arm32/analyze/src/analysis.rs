@@ -2,125 +2,64 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fmt;
 use std::rc::Rc;
-
-use relift_gba_formats::header::{MAX_ROM, MULTIBOOT_BASE, MULTIBOOT_ENTRY};
-use relift_gba_formats::{Error as FormatError, Header};
 
 use crate::func::{self, Env, FnRun, Lifted, Summary};
 use crate::image::Image;
 use crate::loc::Loc;
+use crate::platform::Platform;
 use crate::report::{CopyKind, Function, Origin, RamCopy, Report, UnresolvedKind};
 use relift_cpu_arm32::regs::{self, Mode};
 
 use crate::val::{self, Abs, State};
 
-/// Why an image cannot be analyzed.
-#[derive(Debug)]
-pub enum AnalyzeError {
-    /// The header does not parse.
-    Format(FormatError),
-    /// The image is larger than the cartridge space.
-    TooLarge(usize),
-    /// The image has no multiboot entry, or is larger than work RAM.
-    NotMultiboot,
-}
-
-impl fmt::Display for AnalyzeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AnalyzeError::Format(e) => write!(f, "{e}"),
-            AnalyzeError::TooLarge(n) => {
-                write!(f, "image of {n} bytes exceeds the cartridge space")
-            }
-            AnalyzeError::NotMultiboot => {
-                f.write_str("no multiboot entry branch at 0xC0, or larger than work RAM")
-            }
-        }
-    }
-}
-
-impl std::error::Error for AnalyzeError {}
-
-/// The reset entry.
-pub const RESET: u32 = 0x0800_0000;
 /// Discovery rounds before the table stops are taken as they are.
 const MAX_ROUNDS: usize = 8;
 /// Function runs per function before the fixed point gives up.
 const MAX_RUNS_PER_FUNCTION: usize = 1024;
 
-/// Find the functions of the image `rom` run as a cartridge, from the
-/// reset entry at `0x08000000`.
-///
-/// # Errors
-///
-/// The header does not parse, or the image is larger than 32 MiB.
-pub fn analyze(rom: &[u8]) -> Result<Report, AnalyzeError> {
-    analyze_with(rom, &[])
+/// Finds the functions of the code on `platform` reachable from `roots`
+/// (each an [`Origin::Entry`]), with `loads` already in RAM: images a
+/// loader put there, of kind [`CopyKind::Load`], which the roots may name
+/// by index.
+#[must_use]
+pub fn discover(platform: &dyn Platform, loads: Vec<RamCopy>, roots: &[Loc]) -> Report {
+    discover_with(platform, loads, roots, &[])
 }
 
-/// As [`analyze`], with `hints` as roots too: code addresses a run reached
+/// As [`discover`], with `hints` as roots too: code addresses a run reached
 /// that discovery did not (the hints of a stop report, [`Origin::Hint`]).
-///
-/// # Errors
-///
-/// As [`analyze`].
-pub fn analyze_with(rom: &[u8], hints: &[Loc]) -> Result<Report, AnalyzeError> {
-    if rom.len() > MAX_ROM {
-        return Err(AnalyzeError::TooLarge(rom.len()));
-    }
-    Header::parse(rom).map_err(AnalyzeError::Format)?;
-    Ok(discover(Image::new(rom), Loc::rom(RESET, false), hints))
+#[must_use]
+pub fn discover_with(
+    platform: &dyn Platform,
+    loads: Vec<RamCopy>,
+    roots: &[Loc],
+    hints: &[Loc],
+) -> Report {
+    let mut image = Image::new(platform);
+    image.copies = loads;
+    run(image, roots, hints)
 }
 
-/// Find the functions of the multiboot image `rom` as the BIOS runs it:
-/// loaded to `0x02000000` in external work RAM and entered at its
-/// entry word at `0xC0`, with no cartridge. The image is copy 0 of the
-/// report, of kind [`crate::CopyKind::Load`].
-///
-/// # Errors
-///
-/// The header does not parse, or the image has no multiboot entry branch
-/// or does not fit work RAM.
-pub fn analyze_multiboot(rom: &[u8]) -> Result<Report, AnalyzeError> {
-    let h = Header::parse(rom).map_err(AnalyzeError::Format)?;
-    if h.multiboot_entry.is_none() {
-        return Err(AnalyzeError::NotMultiboot);
-    }
-    let mut image = Image::new(&[]);
-    let site = Loc {
-        addr: MULTIBOOT_BASE + MULTIBOOT_ENTRY as u32,
-        thumb: false,
-        copy: Some(0),
-    };
-    image.copies.push(RamCopy {
-        site,
-        kind: CopyKind::Load,
-        src: None,
-        dst: MULTIBOOT_BASE,
-        bytes: Rc::from(rom),
-    });
-    Ok(discover(image, site, &[]))
-}
-
-/// Runs discovery to its fixed point with the table stops known so far.
-/// A ROM table runs at most to the next stop, and the stops (the bases of
-/// other tables taken as constants, function entries) are only known once
-/// the code is: when one found falls inside a table that was read past it, the
-/// discovery starts again with it known, until no table is read past a
-/// stop.
 /// The field stores of one run that keep the same bits: the first store,
 /// the bits kept and each store's address and source word.
 type FieldGroup = (Loc, u32, Vec<(u32, u32)>);
 
-fn discover(image: Image<'_>, entry: Loc, hints: &[Loc]) -> Report {
+/// Runs discovery to its fixed point with the table stops known so far.
+/// An image table runs at most to the next stop, and the stops (the bases
+/// of other tables taken as constants, function entries) are only known
+/// once the code is: when one found falls inside a table that was read
+/// past it, the discovery starts again with it known, until no table is
+/// read past a stop.
+fn run(image: Image<'_>, roots: &[Loc], hints: &[Loc]) -> Report {
     let mut stops = BTreeSet::new();
     let mut cache = RefCell::new(HashMap::new());
     let mut conc = RefCell::new(HashMap::new());
     for _ in 0..MAX_ROUNDS {
         let mut d = Driver::new(image.clone(), stops, cache, conc);
-        d.add_root(entry, Origin::Entry);
+        for &r in roots {
+            d.add_root(r, Origin::Entry);
+        }
         for &h in hints {
             d.add_root(h, Origin::Hint);
         }
@@ -145,7 +84,9 @@ fn discover(image: Image<'_>, entry: Loc, hints: &[Loc]) -> Report {
         conc = std::mem::take(&mut d.conc);
     }
     let mut d = Driver::new(image, stops, cache, conc);
-    d.add_root(entry, Origin::Entry);
+    for &r in roots {
+        d.add_root(r, Origin::Entry);
+    }
     for &h in hints {
         d.add_root(h, Origin::Hint);
     }
@@ -267,7 +208,7 @@ impl<'a> Driver<'a> {
     fn resolve_irq(&mut self) {
         let addrs: Vec<u32> = self.irq.iter().copied().collect();
         for v in addrs {
-            if let Ok(ls) = func::locs(&self.image, Loc::rom(RESET, false), v & !3, false) {
+            if let Ok(ls) = func::locs(&self.image, Loc::rom(v & !3, false), v & !3, false) {
                 for l in ls {
                     self.add_root(l, Origin::Irq);
                 }
@@ -317,13 +258,13 @@ impl<'a> Driver<'a> {
         let mut scans = Vec::new();
         for &a in &words {
             let Some(v) = word(a) else { continue };
-            if v & 1 == 1 && v >> 24 == 0x08 && self.image.in_image(v & !1) {
+            if v & 1 == 1 && self.image.platform.code_addr(v & !1) {
                 cands.insert(v);
             }
             if v & 3 == 0 && self.image.in_image(v) {
                 let mut t = v;
                 while let Some(e) = word(t) {
-                    if !(e & 1 == 1 && e >> 24 == 0x08 && self.image.in_image(e & !1))
+                    if !(e & 1 == 1 && self.image.platform.code_addr(e & !1))
                         || data.contains(&t) && !words.contains(&t)
                         || t > v && self.stops.range(v + 1..=t + 3).next().is_some()
                     {

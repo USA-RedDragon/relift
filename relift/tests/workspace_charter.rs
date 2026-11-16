@@ -251,6 +251,14 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-cpu-arm32-analyze",
+        band: 2,
+        why: "function discovery for 32-bit Arm code across ARM and Thumb, over the arm32 lifter; the machine comes from a platform the guest gives",
+        normal: &["relift-cpu-arm32", "relift-ir"],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-cpu-sm83",
         band: 2,
         why: "the SM83 decoder, opcode table and frontend, over the IR and the guest contract only",
@@ -311,8 +319,12 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-gba-analyze",
         band: 2,
-        why: "Game Boy Advance function discovery across ARM and Thumb, over the ARMv4T lifter and the cartridge format; analysis only",
-        normal: &["relift-cpu-arm32", "relift-gba-formats", "relift-ir"],
+        why: "Game Boy Advance function discovery: the GBA memory map, BIOS calls, DMA and roots over the shared arm32 discovery and the cartridge format; analysis only",
+        normal: &[
+            "relift-cpu-arm32",
+            "relift-cpu-arm32-analyze",
+            "relift-gba-formats",
+        ],
         dev: &["relift-gba-formats"],
         build: NONE,
     },
@@ -687,6 +699,7 @@ impl Folder {
             ["override", _] => Folder::Override,
             ["relift"] => Folder::Tool,
             ["cpus", _, "gen"] => Folder::Generator,
+            ["cpus", _, _] => Folder::Cpus,
             _ => {
                 panic!("member at {rel} sits in no folder the charter knows; add it to Folder::of")
             }
@@ -1128,19 +1141,39 @@ fn core_reaches_no_cpu_and_no_guest() {
     report("core/ reaches no CPU and no guest", broken);
 }
 
-/// `cpus/` crates reach only `core/ir` and `core/guest` among the members.
+/// `cpus/` crates reach only `core/ir` and `core/guest` among the members;
+/// a crate in a folder under `cpus/<cpu>/` (the generator aside) may also
+/// reach its own frontend `cpus/<cpu>`, and no other CPU's.
 #[test]
 fn cpus_reach_only_ir_and_guest() {
     let ws = workspace();
     let allowed = ["core/ir", "core/guest"];
     let cpus = ws.in_folder(|f| *f == Folder::Cpus);
     assert!(!cpus.is_empty(), "control: no member under cpus/");
+    let frontend = |rel: &str| rel.split('/').take(2).collect::<Vec<_>>().join("/");
+    let parts: Vec<_> = cpus
+        .iter()
+        .filter(|(_, m)| m.rel != frontend(&m.rel))
+        .collect();
+    assert!(
+        !parts.is_empty(),
+        "control: no member in a folder under cpus/<cpu>/, so the frontend exception is never exercised"
+    );
     let mut broken = Vec::new();
     for (id, m) in &cpus {
+        let own = frontend(&m.rel);
+        let part = m.rel != own;
         let reached: Vec<_> = ws.members_reached(id);
+        if part {
+            assert!(
+                reached.iter().any(|(r, _)| r.rel == own),
+                "control: {} does not reach its frontend {own}, so the exception is not needed",
+                m.name
+            );
+        }
         for want in allowed
             .iter()
-            .filter(|_| !STANDALONE.contains(&m.name.as_str()))
+            .filter(|_| !part && !STANDALONE.contains(&m.name.as_str()))
         {
             assert!(
                 reached.iter().any(|(r, _)| r.rel == *want),
@@ -1149,7 +1182,7 @@ fn cpus_reach_only_ir_and_guest() {
             );
         }
         for (r, route) in reached {
-            if !allowed.contains(&r.rel.as_str()) {
+            if !allowed.contains(&r.rel.as_str()) && !(part && r.rel == own) {
                 broken.push(format!(
                     "{} reaches {}: {}",
                     m.name,
@@ -1159,7 +1192,10 @@ fn cpus_reach_only_ir_and_guest() {
             }
         }
     }
-    report("cpus/ reach only core/ir and core/guest", broken);
+    report(
+        "cpus/ reach only core/ir, core/guest and their own frontend",
+        broken,
+    );
 }
 
 /// No guest reaches another guest by any route. Each `guests/<name>/` is

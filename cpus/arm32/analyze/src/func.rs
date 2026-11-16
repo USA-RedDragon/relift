@@ -12,7 +12,8 @@ use relift_ir::{Block, Flow};
 
 use crate::eval::{self, DmaStart, Out};
 use crate::image::Image;
-use crate::loc::{Loc, Region};
+use crate::loc::Loc;
+use crate::platform::{BiosCall, Dma, Kind};
 use crate::report::{CopyKind, Edge, EdgeKind, RamCopy, Swi, Table, Unresolved, UnresolvedKind};
 use crate::val::{Abs, Base, LR, Psr, SP, State, Sym};
 
@@ -171,7 +172,7 @@ impl Env<'_> {
         if let Some(l) = self.cache.borrow().get(&(loc, word)) {
             return l.clone();
         }
-        let l = lift::lift(word, loc.addr, loc.thumb)
+        let l = lift::lift_for(word, loc.addr, loc.thumb, self.image.platform.profile())
             .map(|l| Rc::new((l.enc, relift_ir::simplify(&l.block))));
         self.cache.borrow_mut().insert((loc, word), l.clone());
         l
@@ -294,10 +295,6 @@ fn refine(st: &State, c: u32, holds: bool) -> Option<State> {
 /// The most entries a table without a bound check is read for.
 const MAX_TABLE: u32 = 4096;
 
-const IRQ_VECTOR: u32 = 0x0300_7FFC;
-const SWI_CPU_SET: u8 = 0x0B;
-const SWI_CPU_FAST_SET: u8 = 0x0C;
-
 fn is_bx(e: Encoding) -> bool {
     matches!(e, Encoding::BX_A1 | Encoding::BX_T1 | Encoding::BXV4_T1)
 }
@@ -332,10 +329,9 @@ pub(crate) fn locs(
     addr: u32,
     thumb: bool,
 ) -> Result<Vec<Loc>, UnresolvedKind> {
-    let reg = Region::of(addr);
-    match reg {
-        Region::Rom if image.in_image(addr) => Ok(vec![Loc::rom(addr, thumb)]),
-        Region::Ewram | Region::Iwram => {
+    match image.kind(addr) {
+        Kind::Image if image.in_image(addr) => Ok(vec![Loc::rom(addr, thumb)]),
+        Kind::Ram => {
             if let Some(c) = from.copy
                 && image.holds(c, addr)
             {
@@ -358,7 +354,7 @@ pub(crate) fn locs(
                 })
                 .collect())
         }
-        Region::Bios => Err(UnresolvedKind::Bios),
+        Kind::Bios => Err(UnresolvedKind::Bios),
         _ => Err(UnresolvedKind::OutsideCode),
     }
 }
@@ -436,7 +432,7 @@ impl Run<'_> {
                 (word >> 16) & 0xFF
             } as u8;
             self.swi(loc, number, st);
-            if !matches!(number, 0x00 | 0x26) {
+            if self.env.image.platform.bios_call(number) != BiosCall::NoReturn {
                 let mut s = st.clone();
                 for r in 0..4 {
                     s.regs[r] = Abs::Top;
@@ -522,7 +518,7 @@ impl Run<'_> {
         self.out.data.extend(out.data.iter().copied());
         for &(a, n) in &out.data {
             if n == 4
-                && Region::of(a) == Region::Rom
+                && self.env.image.kind(a) == Kind::Image
                 && let Some(v) = self.env.image.read(None, a, 4)
                 && self.env.image.in_image(v)
             {
@@ -545,7 +541,7 @@ impl Run<'_> {
     }
 
     fn ram_store(&mut self, site: Loc, a: Abs, n: u8, v: Abs) {
-        let Some(a) = a.k32().filter(|a| Region::of(*a).is_ram()) else {
+        let Some(a) = a.k32().filter(|a| self.env.image.is_ram(*a)) else {
             return;
         };
         match v {
@@ -585,10 +581,9 @@ impl Run<'_> {
         match (a, v) {
             (Abs::K(a), Abs::K(v)) => {
                 let (a, v) = (a as u32, v as u32);
-                if Region::of(a).is_ram() && a % 4 == 0 {
+                if self.env.image.is_ram(a) && a % 4 == 0 {
                     self.out.ptr_stores.push((a, v));
-                    if a & 0x00FF_7FFF == IRQ_VECTOR & 0x00FF_7FFF && Region::of(a) == Region::Iwram
-                    {
+                    if self.env.image.platform.irq_vector(a) {
                         self.out.irq.push(v);
                     }
                 }
@@ -619,27 +614,20 @@ impl Run<'_> {
     }
 
     fn dma(&mut self, loc: Loc, d: &DmaStart) {
-        let c = u32::from(d.control);
-        let timing = (c >> 12) & 3;
-        let src_ctl = (c >> 7) & 3;
-        let dst_ctl = (c >> 5) & 3;
-        if timing != 0 || src_ctl != 0 || !(dst_ctl == 0 || dst_ctl == 3) || d.channel == 0 {
-            return;
+        let dma = Dma {
+            channel: d.channel,
+            src: d.src.k32(),
+            dst: d.dst.k32(),
+            count: d.count.k32(),
+            control: d.control,
+        };
+        if let Some((src, dst, len)) = self.env.image.platform.dma(&dma) {
+            self.copy(loc, CopyKind::Dma(d.channel), src, dst, len);
         }
-        let (Some(src), Some(dst), Some(count)) = (d.src.k32(), d.dst.k32(), d.count.k32()) else {
-            return;
-        };
-        let count = match (count, d.channel) {
-            (0, 3) => 0x1_0000,
-            (0, _) => 0x4000,
-            (n, _) => n,
-        };
-        let unit = if c & 0x400 != 0 { 4 } else { 2 };
-        self.copy(loc, CopyKind::Dma(d.channel), src, dst, count * unit);
     }
 
     fn copy(&mut self, site: Loc, kind: CopyKind, src: u32, dst: u32, len: u32) {
-        if len == 0 || !Region::of(dst).is_ram() {
+        if len == 0 || !self.env.image.is_ram(dst) {
             return;
         }
         let Some(bytes) = self.env.image.source(src, len) else {
@@ -660,7 +648,8 @@ impl Run<'_> {
     }
 
     fn swi_args(&mut self, loc: Loc, number: u8, args: [Abs; 3]) {
-        if !matches!(number, SWI_CPU_SET | SWI_CPU_FAST_SET) {
+        let call = self.env.image.platform.bios_call(number);
+        if !matches!(call, BiosCall::CpuSet | BiosCall::CpuFastSet) {
             return;
         }
         let (Some(src), Some(dst), Some(ctl)) = (args[0].k32(), args[1].k32(), args[2].k32())
@@ -674,7 +663,7 @@ impl Run<'_> {
             return;
         }
         let count = ctl & 0x1F_FFFF;
-        if number == SWI_CPU_SET {
+        if call == BiosCall::CpuSet {
             let unit = if ctl & (1 << 26) != 0 { 4 } else { 2 };
             self.copy(
                 loc,
@@ -745,7 +734,7 @@ impl Run<'_> {
             let addr = |a: Abs| {
                 is_param(a)
                     || a.k32()
-                        .is_some_and(|k| Region::of(k).is_ram() || self.env.image.is_source(k))
+                        .is_some_and(|k| self.env.image.is_ram(k) || self.env.image.is_source(k))
             };
             if (cs.writes || cs.spec)
                 && (0..4).any(|r| is_param(st.reg(r)))
@@ -787,7 +776,7 @@ impl Run<'_> {
         thumb: Option<bool>,
     ) -> Vec<(u32, bool)> {
         let mut out = Vec::new();
-        let ram = Region::of(base).is_ram();
+        let ram = self.env.image.is_ram(base);
         let cut = if ram {
             u32::MAX
         } else {
@@ -832,9 +821,9 @@ impl Run<'_> {
                 }
                 let th = thumb.unwrap_or(v & 1 == 1);
                 let addr = if th { v & !1 } else { v };
-                let rom = addr >> 24 == 0x08 && self.env.image.in_image(addr);
+                let rom = self.env.image.platform.code_addr(addr);
                 let in_ram =
-                    Region::of(addr).is_ram() && !self.env.image.copies_at(addr).is_empty();
+                    self.env.image.is_ram(addr) && !self.env.image.copies_at(addr).is_empty();
                 if addr % 4 != 0 && !th || !(rom || in_ram) {
                     ok = false;
                     break;
@@ -973,7 +962,7 @@ impl Run<'_> {
         let ram: BTreeSet<u32> = ks
             .iter()
             .copied()
-            .filter(|a| Region::of(*a).is_ram())
+            .filter(|a| self.env.image.is_ram(*a))
             .collect();
         if ram.is_empty() || !(ks.iter().any(|a| self.env.image.is_source(*a)) || ram.len() > 1) {
             return false;
@@ -1012,7 +1001,7 @@ impl Run<'_> {
             || !(0..13u8).any(|r| {
                 st.reg(r)
                     .k32()
-                    .is_some_and(|a| Region::of(a).is_ram() || self.env.image.is_source(a))
+                    .is_some_and(|a| self.env.image.is_ram(a) || self.env.image.is_source(a))
             })
         {
             return;

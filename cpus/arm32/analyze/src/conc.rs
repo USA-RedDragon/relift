@@ -21,7 +21,7 @@ use relift_cpu_arm32::decode::Encoding;
 
 use crate::eval::{self, SCRATCH_STACK, Scratch};
 use crate::func::{Args, Env};
-use crate::loc::{Loc, Region};
+use crate::loc::Loc;
 use crate::val::{Abs, Base, LR, SP, State, Sym};
 
 /// The return address the run's caller leaves in `lr`.
@@ -30,7 +30,7 @@ const SENTINEL: u32 = 0x0F00_0000;
 pub(crate) const MAX_STEPS: usize = 1 << 21;
 
 fn fetch(env: &Env<'_>, m: &Scratch, loc: Loc) -> Option<u32> {
-    if loc.region().is_ram() {
+    if env.image.is_ram(loc.addr) {
         let mut v = 0u32;
         for i in (0..loc.size()).rev() {
             v = v << 8 | u32::from((*m.get(&(loc.addr + i))?)?);
@@ -68,7 +68,7 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Written
     for _ in 0..MAX_STEPS {
         if loc.addr == SENTINEL {
             return Some(Written {
-                ranges: ranges(&m),
+                ranges: ranges(env, &m),
                 moves: moves.into_iter().collect(),
             });
         }
@@ -100,7 +100,7 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Written
             }) = v
                 && n == 4
                 && w == a
-                && Region::of(a).is_ram()
+                && env.image.is_ram(a)
             {
                 moves.insert(a, s);
             }
@@ -123,10 +123,10 @@ pub(crate) fn run_call(env: &Env<'_>, callee: Loc, args: Args) -> Option<Written
     None
 }
 
-fn ranges(m: &Scratch) -> Vec<(u32, Vec<u8>)> {
+fn ranges(env: &Env<'_>, m: &Scratch) -> Vec<(u32, Vec<u8>)> {
     let ram: BTreeMap<u32, u8> = m
         .iter()
-        .filter(|(a, _)| Region::of(**a).is_ram())
+        .filter(|(a, _)| env.image.is_ram(**a))
         .filter_map(|(a, b)| Some((*a, (*b)?)))
         .collect();
     let mut out: Vec<(u32, Vec<u8>)> = Vec::new();

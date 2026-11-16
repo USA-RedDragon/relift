@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core/*", "cpus/*", "gpus/*", "cpus/arm64/gen", "cpus/arm32/gen", "cpus/mips/gen", "cpus/rsp/gen", "cpus/sm83/gen", "cpus/z80/gen", "guests/*/*", "override/*", "relift", "testguest"]
+members = ["core/*", "cpus/*", "gpus/*", "cpus/arm64/gen", "cpus/arm32/analyze", "cpus/arm32/gen", "cpus/mips/gen", "cpus/rsp/gen", "cpus/sm83/gen", "cpus/z80/gen", "guests/*/*", "override/*", "relift", "testguest"]
 exclude = ["check", "guests/gb/devices"]
 
 [workspace.package]
@@ -19,6 +19,7 @@ relift-build = { path = "core/build" }
 relift-cache = { path = "core/cache" }
 relift-cpu-arm64 = { path = "cpus/arm64" }
 relift-cpu-arm32 = { path = "cpus/arm32" }
+relift-cpu-arm32-analyze = { path = "cpus/arm32/analyze" }
 relift-cpu-mips = { path = "cpus/mips" }
 relift-cpu-rsp = { path = "cpus/rsp" }
 relift-cpu-sm83 = { path = "cpus/sm83" }

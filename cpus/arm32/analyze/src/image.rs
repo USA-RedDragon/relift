@@ -1,23 +1,14 @@
-//! The bytes code and constants come from: the ROM image and the proven
-//! ROM-to-RAM copies.
+//! The bytes code and constants come from: the platform's code image and
+//! the proven copies to RAM.
 
-use relift_gba_formats::rom::OFFSET_MASK;
-
-use crate::loc::{Loc, Region};
+use crate::loc::Loc;
+use crate::platform::{Kind, Platform};
 use crate::report::{CopyKind, RamCopy};
 
 #[derive(Clone)]
 pub(crate) struct Image<'a> {
-    rom: &'a [u8],
+    pub platform: &'a dyn Platform,
     pub copies: Vec<RamCopy>,
-}
-
-fn in_rom(rom: &[u8], addr: u32, n: u32) -> Option<usize> {
-    if !(0x08..=0x0C).contains(&(addr >> 24)) {
-        return None;
-    }
-    let off = (addr & OFFSET_MASK) as usize;
-    (off + n as usize <= rom.len()).then_some(off)
 }
 
 fn le(b: &[u8]) -> u32 {
@@ -27,24 +18,33 @@ fn le(b: &[u8]) -> u32 {
 }
 
 impl<'a> Image<'a> {
-    pub(crate) fn new(rom: &'a [u8]) -> Image<'a> {
+    pub(crate) fn new(platform: &'a dyn Platform) -> Image<'a> {
         Image {
-            rom,
+            platform,
             copies: Vec::new(),
         }
     }
 
-    /// The ROM bytes at `addr`.
+    /// What `addr` holds.
+    pub(crate) fn kind(&self, addr: u32) -> Kind {
+        self.platform.kind(addr)
+    }
+
+    /// Whether `addr` is in work RAM.
+    pub(crate) fn is_ram(&self, addr: u32) -> bool {
+        self.kind(addr) == Kind::Ram
+    }
+
+    /// The image bytes at `addr`.
     pub(crate) fn rom_bytes(&self, addr: u32, n: u32) -> Option<&'a [u8]> {
-        let off = in_rom(self.rom, addr, n)?;
-        Some(&self.rom[off..off + n as usize])
+        self.platform.image(addr, n)
     }
 
     /// Reads `n` bytes (1, 2 or 4) at `addr` as the code of `copy` sees
-    /// them, when they are in the ROM image or in that copy.
+    /// them, when they are in the image or in that copy.
     pub(crate) fn read(&self, copy: Option<u16>, addr: u32, n: u32) -> Option<u32> {
         if let Some(i) = copy
-            && Region::of(addr).is_ram()
+            && self.is_ram(addr)
         {
             let c = self.copies.get(usize::from(i))?;
             let off = addr.checked_sub(c.dst)? as usize;
@@ -58,9 +58,9 @@ impl<'a> Image<'a> {
         if !loc.addr.is_multiple_of(loc.size()) {
             return None;
         }
-        match (loc.region(), loc.copy) {
-            (Region::Rom, None) => self.read(None, loc.addr, loc.size()),
-            (Region::Ewram | Region::Iwram, Some(_)) => self.read(loc.copy, loc.addr, loc.size()),
+        match (self.kind(loc.addr), loc.copy) {
+            (Kind::Image, None) => self.read(None, loc.addr, loc.size()),
+            (Kind::Ram, Some(_)) => self.read(loc.copy, loc.addr, loc.size()),
             _ => None,
         }
     }
@@ -93,8 +93,8 @@ impl<'a> Image<'a> {
         }
     }
 
-    /// The bytes a copy can read at `src`: the ROM image, or the multiboot
-    /// image where the BIOS loaded it.
+    /// The bytes a copy can read at `src`: the image, or a loaded image
+    /// where the loader put it.
     pub(crate) fn source(&self, src: u32, n: u32) -> Option<&[u8]> {
         if let Some(b) = self.rom_bytes(src, n) {
             return Some(b);
@@ -104,13 +104,13 @@ impl<'a> Image<'a> {
         c.bytes.get(off..off + n as usize)
     }
 
-    /// Whether `addr` is in the ROM image or in a loaded multiboot image.
+    /// Whether `addr` is in the image or in a loaded image.
     pub(crate) fn is_source(&self, addr: u32) -> bool {
         self.source(addr, 1).is_some()
     }
 
-    /// Whether `addr` is a ROM address inside the image.
+    /// Whether `addr` is inside the image.
     pub(crate) fn in_image(&self, addr: u32) -> bool {
-        in_rom(self.rom, addr, 1).is_some()
+        self.rom_bytes(addr, 1).is_some()
     }
 }

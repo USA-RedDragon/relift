@@ -130,7 +130,7 @@ fn function_json(f: &Function, instructions: bool) -> Value {
 
 fn to_json(report: &Report, summary: bool, instructions: bool) -> Value {
     let regions: Vec<Value> = report
-        .coverage()
+        .coverage(Region::of)
         .iter()
         .map(|(r, c)| json!({"region": r.name(), "arm": c.arm, "thumb": c.thumb, "bytes": c.bytes}))
         .collect();
@@ -170,7 +170,7 @@ fn to_json(report: &Report, summary: bool, instructions: bool) -> Value {
 fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
     let mut out = std::io::stdout().lock();
     writeln!(out, "{} functions", report.functions.len())?;
-    for (r, c) in report.coverage() {
+    for (r, c) in report.coverage(Region::of) {
         writeln!(
             out,
             "{}: {} ARM and {} Thumb instructions, {} bytes",
@@ -196,7 +196,7 @@ fn print_text(report: &Report, summary: bool) -> Result<(), BoxError> {
     }
     if !summary {
         for f in report.functions.values() {
-            let region = f.entry.region();
+            let region = Region::of(f.entry.addr);
             let tag = if region == Region::Rom {
                 String::new()
             } else {

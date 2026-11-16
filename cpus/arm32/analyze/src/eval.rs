@@ -6,7 +6,8 @@ use relift_ir::interp::{eval_bin, eval_cmp, eval_un};
 use relift_ir::{BinOp, Block, CmpOp, ExtKind, Flow, Next, Op, Value, Width};
 
 use crate::image::Image;
-use crate::loc::{Loc, Region};
+use crate::loc::Loc;
+use crate::platform::Kind;
 use crate::val::{Abs, Base, DMA_BASE, DMA_HALVES, SP, State, Sym, UNBOUNDED, field};
 
 /// A DMA channel enabled with the register values at that point.
@@ -137,7 +138,7 @@ fn stride_of(a: Abs) -> Option<u32> {
     }
 }
 
-fn index(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
+fn index(image: &Image<'_>, op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
     if w < 32 || op != BinOp::Add {
         return None;
     }
@@ -157,7 +158,7 @@ fn index(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
             stride,
             n,
         }),
-        _ if Region::of(k) == Region::Rom || Region::of(k).is_ram() => {
+        _ if matches!(image.kind(k), Kind::Image | Kind::Ram) => {
             let stride = stride_of(x)?;
             (stride >= 4).then_some(Abs::Idx {
                 base: k,
@@ -208,12 +209,12 @@ fn scaled(op: BinOp, a: Abs, b: Abs, w: u32) -> Option<Abs> {
     })
 }
 
-fn bin(op: BinOp, a: Abs, b: Abs, w: u32) -> Abs {
+fn bin(image: &Image<'_>, op: BinOp, a: Abs, b: Abs, w: u32) -> Abs {
     use Abs::{K, S};
     if let (K(x), K(y)) = (a, b) {
         return K(eval_bin(op, x, y, wid(w)) & mask(w));
     }
-    if let Some(i) = index(op, a, b, w) {
+    if let Some(i) = index(image, op, a, b, w) {
         return i;
     }
     if let Some(i) = scaled(op, a, b, w) {
@@ -366,8 +367,8 @@ pub(crate) type Scratch = std::collections::HashMap<u32, Option<u8>>;
 /// The run's private stack, below this address.
 pub(crate) const SCRATCH_STACK: u32 = 0x0F01_0000;
 
-pub(crate) fn in_scratch(a: u32) -> bool {
-    Region::of(a).is_ram() || (SCRATCH_STACK - 0x1_0000..SCRATCH_STACK).contains(&a)
+pub(crate) fn in_scratch(image: &Image<'_>, a: u32) -> bool {
+    image.is_ram(a) || (SCRATCH_STACK - 0x1_0000..SCRATCH_STACK).contains(&a)
 }
 
 /// Whether the instruction `word` loads relative to the program counter
@@ -424,7 +425,7 @@ pub(crate) fn eval(
                 Abs::K(a) => Abs::K(eval_un(*op, a, wid(w)) & mask(w)),
                 _ => Abs::Top,
             }),
-            Op::Bin(op, x, y) => Ev::A(bin(*op, cx.get(*x), cx.get(*y), w)),
+            Op::Bin(op, x, y) => Ev::A(bin(image, *op, cx.get(*x), cx.get(*y), w)),
             Op::Cmp(op, x, y) => Ev::A(cmp(*op, cx.get(*x), cx.get(*y), cx.width(*x))),
             Op::Select(c, x, y) => {
                 let (a, bb) = (cx.get(*x), cx.get(*y));
@@ -524,6 +525,7 @@ pub(crate) fn eval(
                 let n = (cx.width(*value) / 8) as u8;
                 store(
                     &mut out,
+                    image,
                     cx.get(*addr),
                     n,
                     cx.get(*value),
@@ -597,7 +599,7 @@ fn load(
         && n == 4
         && base % 4 == 0
         && stride % 4 == 0
-        && (image.in_image(base) || Region::of(base).is_ram())
+        && (image.in_image(base) || image.is_ram(base))
     {
         return Abs::Tab {
             base,
@@ -609,10 +611,10 @@ fn load(
         Abs::K(a) => {
             let a = a as u32;
             if let Some(m) = scratch
-                && in_scratch(a)
+                && in_scratch(image, a)
             {
                 let a = a & !(n - 1);
-                if n == 4 && Region::of(a).is_ram() && (0..4).all(|i| !m.contains_key(&(a + i))) {
+                if n == 4 && image.is_ram(a) && (0..4).all(|i| !m.contains_key(&(a + i))) {
                     return Abs::sym(Base::Mem(a), 0);
                 }
                 let mut v = 0u128;
@@ -624,15 +626,15 @@ fn load(
                 }
                 return Abs::K(v);
             }
-            let r = Region::of(a);
-            let own = literal && loc.copy.is_some() && r.is_ram();
-            if (r == Region::Rom || own)
+            let r = image.kind(a);
+            let own = literal && loc.copy.is_some() && r == Kind::Ram;
+            if (r == Kind::Image || own)
                 && let Some(v) = image.read(loc.copy, a, n)
             {
                 out.data.push((a, n as u8));
                 return Abs::K(u128::from(v));
             }
-            if r.is_ram() && n == 4 && a.is_multiple_of(4) {
+            if r == Kind::Ram && n == 4 && a.is_multiple_of(4) {
                 return Abs::sym(Base::Mem(a), 0);
             }
             Abs::Top
@@ -664,7 +666,14 @@ fn other_word(a: Sym, b: Sym) -> bool {
         && a.off.wrapping_sub(b.off).is_multiple_of(4)
 }
 
-fn store(out: &mut Out, addr: Abs, n: u8, v: Abs, scratch: Option<&mut Scratch>) {
+fn store(
+    out: &mut Out,
+    image: &Image<'_>,
+    addr: Abs,
+    n: u8,
+    v: Abs,
+    scratch: Option<&mut Scratch>,
+) {
     if addr.stack_off().is_none() {
         out.stores.push((addr, n, v));
         match addr {
@@ -687,7 +696,7 @@ fn store(out: &mut Out, addr: Abs, n: u8, v: Abs, scratch: Option<&mut Scratch>)
     if let Abs::K(a) = addr {
         let a = a as u32;
         if let Some(m) = scratch
-            && in_scratch(a)
+            && in_scratch(image, a)
         {
             let a = a & !(u32::from(n) - 1);
             for i in 0..u32::from(n) {
