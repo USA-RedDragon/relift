@@ -2,11 +2,14 @@
 //! preset and run by a SPIR-V interpreter that plays a device's float
 //! behavior. Expected bits were measured with CUDA on an SM86 GPU.
 
+#[path = "../common/mod.rs"]
+mod common;
 mod eval;
 
+use common::translate_with;
 use eval::{Device, FLUSH, PRESERVE};
 use relift_gpu_sm86::program::Program;
-use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
+use relift_gpu_sm86::translate::{HostProfile, Options};
 
 const OUT: u64 = 0x1000;
 

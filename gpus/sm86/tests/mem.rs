@@ -311,7 +311,8 @@ fn tuples_past_rz_are_rejected() {
     }
 }
 
-use relift_gpu_sm86::translate::{HostProfile, Options, translate_with};
+use common::translate_with;
+use relift_gpu_sm86::translate::{HostProfile, Options};
 
 const ORDER_STRONG_SM: u64 = 5;
 const ORDER_STRONG_GPU: u64 = 7;
