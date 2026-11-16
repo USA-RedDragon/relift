@@ -17,7 +17,8 @@ every CPU access outside RDRAM and at a slice event while it runs.
   successor entries per word (the words its block goes to without a
   computed jump, and whether it holds a delay slot).
 - **Binding.** Every IMEM word has a dispatch slot. At an unbound word every
-  image word equal to IMEM's there is a candidate (image, base); a slot
+  image word equal to IMEM's there is a candidate (image, base), found
+  through an index of every image word by value; a slot
   holds lifted code, and its image's base, only after the layer checked
   that IMEM holds the image's bytes at that base at every word that code
   can reach without a computed jump. A write to IMEM (an SP

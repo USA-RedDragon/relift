@@ -23,6 +23,9 @@ struct rl_rsp {
     const rl_rsp_image *const *images;
     uint32_t count;
     rl_fn **fnmap;
+    /** Every word of every image, by its value: where to look for the images that hold an IMEM word. */
+    struct place *places;
+    uint32_t nplaces;
     const rl_rsp_bus *bus;
     void *user;
     uint64_t until;
@@ -32,7 +35,44 @@ struct rl_rsp {
     rl_rsp_stats stats;
 };
 
+/** @brief A word of an image: its value, the image and the word's index in it. */
+struct place {
+    uint32_t word;
+    uint32_t image;
+    uint32_t offset;
+};
+
 static rl_rsp *of(rl_ctx *c) { return c->rsp; }
+
+static uint32_t be_word(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
+static int place_order(const void *a, const void *b)
+{
+    const struct place *x = a, *y = b;
+    if (x->word != y->word)
+        return x->word < y->word ? -1 : 1;
+    if (x->image != y->image)
+        return x->image < y->image ? -1 : 1;
+    return x->offset < y->offset ? -1 : x->offset > y->offset;
+}
+
+static bool build_places(rl_rsp *r)
+{
+    uint32_t n = 0;
+    for (uint32_t k = 0; k < r->count; k++)
+        n += r->images[k]->len / 4u;
+    r->places = calloc(n ? n : 1, sizeof *r->places);
+    if (!r->places)
+        return false;
+    for (uint32_t k = 0; k < r->count; k++) {
+        const rl_rsp_image *im = r->images[k];
+        for (uint32_t o = 0; o < im->len / 4u; o++)
+            if (r->fnmap[k][o])
+                r->places[r->nplaces++] = (struct place){be_word(im->bytes + 4u * o), k, o};
+    }
+    qsort(r->places, r->nplaces, sizeof *r->places, place_order);
+    return true;
+}
 
 static uint64_t now(const rl_ctx *c) { return c->time.deadline - (uint64_t)c->time.budget; }
 
@@ -109,6 +149,10 @@ rl_rsp *rl_rsp_create(uint8_t *dmem, const uint8_t *imem, const rl_rsp_image *co
     r->imem = imem;
     r->images = images;
     r->count = count;
+    if (!build_places(r)) {
+        rl_rsp_destroy(r);
+        return NULL;
+    }
     r->bus = bus;
     r->user = user;
     r->c.disp = r->disp;
@@ -131,6 +175,7 @@ void rl_rsp_destroy(rl_rsp *r)
         for (uint32_t i = 0; i < r->count; i++)
             free(r->fnmap[i]);
     free(r->fnmap);
+    free(r->places);
     free(r);
 }
 
@@ -270,15 +315,19 @@ int rl_rsp_enter(rl_ctx *c, uint8_t *mem)
     c->base = 0;
     c->pc = w * 4u;
     uint32_t candidates = 0;
-    for (uint32_t k = 0; k < r->count; k++) {
-        const rl_rsp_image *im = r->images[k];
-        for (uint32_t o = 0; o < im->len / 4u; o++) {
-            if (!word_matches(r, im, o, w))
-                continue;
-            candidates++;
-            if (check(r, k, o, w))
-                RL_MUSTTAIL return rl_indirect(c, w * 4u)(c, mem);
-        }
+    uint32_t word = be_word(r->imem + w * 4u);
+    uint32_t lo = 0, hi = r->nplaces;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2u;
+        if (r->places[mid].word < word)
+            lo = mid + 1u;
+        else
+            hi = mid;
+    }
+    for (uint32_t i = lo; i < r->nplaces && r->places[i].word == word; i++) {
+        candidates++;
+        if (check(r, r->places[i].image, r->places[i].offset, w))
+            RL_MUSTTAIL return rl_indirect(c, w * 4u)(c, mem);
     }
     char why[160];
     if (candidates)
