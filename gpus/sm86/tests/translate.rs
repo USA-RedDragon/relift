@@ -1219,3 +1219,43 @@ fn bar_runs_only_where_the_whole_workgroup_does() {
         assert_eq!(e.as_deref(), Some(why), "{name}");
     }
 }
+
+fn bra_not(at: usize, to: usize, p: u64) -> [u8; 16] {
+    let mut w = bra(at, to, Some(p));
+    w[1] |= 0x80;
+    w
+}
+
+/// Sections that each may leave early to one of two shared tails, which
+/// the next section's code skips: `@!P0 BRA s; @P1 BRA x1; s: @P0 BRA x2`.
+fn early_exit_chain(sections: usize) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend(isetp(0, 0, 1, 4));
+    b.extend(isetp(1, 2, 3, 4));
+    let x1 = 2 + 3 * sections;
+    for k in 0..sections {
+        let a = 2 + 3 * k;
+        b.extend(bra_not(a, a + 2, 0));
+        b.extend(bra(a + 1, x1, Some(1)));
+        b.extend(bra(a + 2, x1 + 2, Some(0)));
+    }
+    b.extend(mov_imm(5, 1));
+    b.extend(bra(x1 + 1, x1 + 3, None));
+    b.extend(mov_imm(5, 2));
+    b.extend(exit());
+    b.extend(halt(x1 + 4));
+    b
+}
+
+#[test]
+fn shared_tails_are_dispatched_not_copied() {
+    let p = Program::parse(&early_exit_chain(2));
+    assert_eq!(text(&p)[2], "@!P0 BRA 0x40");
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(count_op(&s.spirv, 251), 0, "small chains are copied");
+    let p = Program::parse(&early_exit_chain(40));
+    let s = translate(&p).unwrap_or_else(|e| panic!("{e}"));
+    dump("early_exit_chain", &s.spirv);
+    assert!(count_op(&s.spirv, 251) >= 39);
+    assert!(s.spirv.len() < 20_000, "{} words", s.spirv.len());
+}

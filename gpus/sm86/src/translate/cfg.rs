@@ -45,6 +45,14 @@
 //! guard, and not after a varying EXIT. Which values are uniform comes
 //! from the `uniform` module; anything else is rejected with the reason.
 //!
+//! A selection whose arms meet again before its merge (an arm that leaves
+//! early to code the other arm skips) copies the shared code into each arm.
+//! When that copying grows too much, the program is structured again with
+//! the joins split: the edges into the first shared block and the early
+//! leaving edges of the region go to a new block through a selector
+//! variable, and the new block switches on it, so the selection merges
+//! there and nothing is copied.
+//!
 //! A graph this cannot express (irreducible, recursive calls) is rejected
 //! with the reason.
 
@@ -57,6 +65,7 @@ use std::collections::{HashMap, HashSet};
 
 const EXIT: usize = usize::MAX;
 const MAX_CALL_DEPTH: usize = 8;
+pub(crate) const TOO_MUCH_DUPLICATION: &str = "control flow needs too much duplication";
 
 #[derive(Clone, Copy, Debug)]
 enum Sel {
@@ -70,6 +79,41 @@ enum Term {
     Branch(Vec<Operand>, usize, usize),
     /// Jump to `selector + base`: (address, block) cases.
     Switch(Sel, u32, Vec<(u32, usize)>),
+    /// Set selector variable `var` to `value` and jump.
+    Set(usize, u32, usize),
+    /// Jump to the target the value of selector variable `var` names.
+    Dispatch(usize, Vec<usize>),
+}
+
+impl Term {
+    fn targets(&self) -> Vec<usize> {
+        match self {
+            Term::Jump(t) | Term::Set(_, _, t) => vec![*t],
+            Term::Branch(_, t, f) => vec![*t, *f],
+            Term::Switch(_, _, cases) => cases.iter().map(|c| c.1).collect(),
+            Term::Dispatch(_, ts) => ts.clone(),
+        }
+    }
+
+    fn retarget(&mut self, f: impl Fn(usize) -> usize) {
+        match self {
+            Term::Jump(t) | Term::Set(_, _, t) => *t = f(*t),
+            Term::Branch(_, t, e) => {
+                *t = f(*t);
+                *e = f(*e);
+            }
+            Term::Switch(_, _, cases) => {
+                for c in cases {
+                    c.1 = f(c.1);
+                }
+            }
+            Term::Dispatch(_, ts) => {
+                for t in ts {
+                    *t = f(*t);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -538,11 +582,7 @@ impl Graph {
         let succs: Vec<Vec<usize>> = blocks
             .iter()
             .map(|b| {
-                let mut v = match &b.term {
-                    Term::Jump(t) => vec![*t],
-                    Term::Branch(_, t, f) => vec![*t, *f],
-                    Term::Switch(_, _, cases) => cases.iter().map(|c| c.1).collect(),
-                };
+                let mut v = b.term.targets();
                 v.retain(|t| !terminal(*t));
                 let mut seen = HashSet::new();
                 v.retain(|t| seen.insert(*t));
@@ -684,6 +724,7 @@ struct Emit<'a> {
     code: &'a Code,
     used: HashSet<u32>,
     emitted: usize,
+    selectors: HashMap<usize, u32>,
 }
 
 impl Emit<'_> {
@@ -713,6 +754,14 @@ impl Emit<'_> {
             return bad("branch out of more than one loop");
         }
         Ok(Dest::Inline(t))
+    }
+
+    fn selector_var(&mut self, c: &mut Ctx, var: usize) -> u32 {
+        *self.selectors.entry(var).or_insert_with(|| {
+            let v = c.m.id();
+            c.locals.push(v);
+            v
+        })
     }
 
     fn br(&mut self, c: &mut Ctx, l: u32) {
@@ -901,7 +950,7 @@ impl Emit<'_> {
         loop {
             self.emitted += 1;
             if self.emitted > 4 * self.g.blocks.len() + 64 {
-                return bad("control flow needs too much duplication");
+                return bad(TOO_MUCH_DUPLICATION);
             }
             if let Some((body, exits)) = self.g.headers.get(&cur).cloned()
                 && lp.is_none_or(|l| l.header != cur)
@@ -971,6 +1020,27 @@ impl Emit<'_> {
             self.content(c, cur)?;
             let term = self.g.blocks[cur].term.clone();
             let (head, targets) = match term {
+                Term::Set(var, value, t) => {
+                    let v = self.selector_var(c, var);
+                    let k = c.m.c_u32(value);
+                    c.m.emit_void(op::STORE, &[v, k]);
+                    match self.resolve(t, follow, lp)? {
+                        Dest::Inline(t) => {
+                            let l = c.m.id();
+                            self.br(c, l);
+                            cur = t;
+                            label = l;
+                            continue;
+                        }
+                        d => return self.leave(c, &d),
+                    }
+                }
+                Term::Dispatch(var, ts) => {
+                    let v = self.selector_var(c, var);
+                    let u = c.u32t();
+                    let s = c.m.emit(op::LOAD, u, &[v]);
+                    (Head::Switch(s, (0..ts.len() as u32).collect()), ts)
+                }
                 Term::Jump(t) => match self.resolve(t, follow, lp)? {
                     Dest::Inline(t) => {
                         let l = c.m.id();
@@ -1173,7 +1243,8 @@ impl Graph {
                     uniform::step(i, partial[b], &mut v);
                 }
                 let (uniform, exits) = match &blk.term {
-                    Term::Jump(_) => (true, false),
+                    Term::Jump(_) | Term::Set(..) => (true, false),
+                    Term::Dispatch(_, ts) => (false, ts.iter().any(|t| terminal(*t))),
                     Term::Branch(conds, t, f) => {
                         (v.uniform_all(conds), terminal(*t) || terminal(*f))
                     }
@@ -1353,10 +1424,218 @@ fn enclosing_bsyncs(insts: &[crate::Inst], inner: usize, k: usize) -> Vec<usize>
     out
 }
 
-/// Emits the program's body, starting with label `first`.
-pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32) -> Res<()> {
+/// Blocks reachable from `from` over `succ`, not entering `stop`.
+fn reach(succ: &[Vec<usize>], from: usize, stop: &[bool]) -> Vec<bool> {
+    let mut seen = vec![false; succ.len()];
+    let mut work = vec![from];
+    while let Some(u) = work.pop() {
+        if seen[u] || stop[u] {
+            continue;
+        }
+        seen[u] = true;
+        work.extend(succ[u].iter().copied());
+    }
+    seen
+}
+
+/// Splits one shared join (see the module notes); `false` if there is
+/// none left.
+fn split_one(blocks: &mut Vec<Block>, vars: &mut usize) -> bool {
+    let n = blocks.len();
+    let all: Vec<Vec<usize>> = blocks
+        .iter()
+        .map(|b| {
+            let mut v = b.term.targets();
+            v.retain(|t| !terminal(*t));
+            v
+        })
+        .collect();
+    let idom = idoms(&all, 0);
+    let fwd: Vec<Vec<usize>> = all
+        .iter()
+        .enumerate()
+        .map(|(u, ss)| {
+            ss.iter()
+                .copied()
+                .filter(|&v| idom[u].is_none() || !dominates(&idom, v, u))
+                .collect()
+        })
+        .collect();
+    let end = n;
+    let mut rev = vec![Vec::new(); n + 1];
+    for (u, b) in blocks.iter().enumerate() {
+        let ts = b.term.targets();
+        if ts.iter().any(|t| terminal(*t)) || ts.is_empty() {
+            rev[end].push(u);
+        }
+        for &v in &all[u] {
+            rev[v].push(u);
+        }
+    }
+    let pdom = idoms(&rev, end);
+    let mut preds = vec![Vec::new(); n];
+    for (u, ss) in all.iter().enumerate() {
+        for &v in ss {
+            preds[v].push(u);
+        }
+    }
+    let mut loops: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (u, ss) in all.iter().enumerate() {
+        for &h in ss {
+            if idom[u].is_none() || !dominates(&idom, h, u) {
+                continue;
+            }
+            let mut body = vec![false; n];
+            body[h] = true;
+            let mut work = vec![u];
+            while let Some(x) = work.pop() {
+                if !body[x] {
+                    body[x] = true;
+                    work.extend(preds[x].iter().copied());
+                }
+            }
+            for (x, inl) in body.into_iter().enumerate() {
+                if inl && !loops[x].contains(&h) {
+                    loops[x].push(h);
+                }
+            }
+        }
+    }
+    let within = |a: usize, b: usize| terminal(a) || loops[a].iter().all(|h| loops[b].contains(h));
+    let mut order = Vec::new();
+    let mut seen = vec![false; n];
+    let mut stack = vec![(0usize, 0usize)];
+    seen[0] = true;
+    while let Some(&mut (u, ref mut k)) = stack.last_mut() {
+        if *k < fwd[u].len() {
+            let v = fwd[u][*k];
+            *k += 1;
+            if !seen[v] {
+                seen[v] = true;
+                stack.push((v, 0));
+            }
+        } else {
+            order.push(u);
+            stack.pop();
+        }
+    }
+    order.reverse();
+    let mut rpo = vec![usize::MAX; n];
+    for (k, &u) in order.iter().enumerate() {
+        rpo[u] = k;
+    }
+    let none = vec![false; n];
+    for &b in &order {
+        let mut arms = fwd[b].clone();
+        arms.dedup();
+        if arms.len() < 2 {
+            continue;
+        }
+        let beyond = match pdom[b].filter(|&p| p != end) {
+            Some(p) => reach(&fwd, p, &none),
+            None => none.clone(),
+        };
+        let mut hits = vec![0usize; n];
+        for &a in &arms {
+            for (u, r) in reach(&fwd, a, &beyond).into_iter().enumerate() {
+                hits[u] += usize::from(r);
+            }
+        }
+        let Some(j) = (0..n)
+            .filter(|&u| hits[u] >= 2 && u != b && !matches!(blocks[u].term, Term::Set(..)))
+            .min_by_key(|&u| rpo[u])
+        else {
+            continue;
+        };
+        if !dominates(&idom, b, j) {
+            continue;
+        }
+        let mut stop = beyond.clone();
+        stop[j] = true;
+        let from_b = reach(&fwd, b, &stop);
+        let mut back = vec![Vec::new(); n];
+        for u in (0..n).filter(|&u| from_b[u]) {
+            for &v in &fwd[u] {
+                back[v].push(u);
+            }
+        }
+        let to_j = reach(&back, j, &none);
+        let region: Vec<usize> = (0..n).filter(|&u| from_b[u] && to_j[u]).collect();
+        if region.iter().any(|&u| !dominates(&idom, b, u)) {
+            continue;
+        }
+        let inside = |t: usize| !terminal(t) && t != j && region.contains(&t);
+        let mut escapes: Vec<usize> = Vec::new();
+        let mut back_edge = false;
+        for &u in &region {
+            for t in blocks[u].term.targets() {
+                if inside(t) || t == j {
+                    continue;
+                }
+                if !terminal(t) && dominates(&idom, t, u) {
+                    back_edge = true;
+                }
+                if !escapes.contains(&t) {
+                    escapes.push(t);
+                }
+            }
+        }
+        if back_edge
+            || escapes.is_empty()
+            || region.iter().any(|&u| !within(u, j) || !within(j, u))
+            || escapes.iter().any(|&t| !within(t, j))
+        {
+            continue;
+        }
+        let var = *vars;
+        *vars += 1;
+        let d = n;
+        let mut targets = vec![j];
+        targets.extend(&escapes);
+        blocks.push(Block {
+            first: 0,
+            end: 0,
+            term: Term::Dispatch(var, targets.clone()),
+        });
+        for (k, _) in targets.iter().enumerate() {
+            blocks.push(Block {
+                first: 0,
+                end: 0,
+                term: Term::Set(var, k as u32, d),
+            });
+        }
+        for &u in &region {
+            blocks[u]
+                .term
+                .retarget(|t| match targets.iter().position(|x| *x == t) {
+                    Some(k) if t == j || !inside(t) => d + 1 + k,
+                    _ => t,
+                });
+        }
+        return true;
+    }
+    false
+}
+
+/// Splits the shared joins, a bounded number of times.
+fn split_joins(blocks: &mut Vec<Block>) {
+    let mut vars = 0;
+    let limit = 2 * blocks.len() + 16;
+    for _ in 0..limit {
+        if !split_one(blocks, &mut vars) {
+            return;
+        }
+    }
+}
+
+/// Emits the program's body, starting with label `first`; `split` splits
+/// the shared joins first.
+pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32, split: bool) -> Res<()> {
     super::io::prescan(c, &code.insts);
-    let blocks = build(code)?;
+    let mut blocks = build(code)?;
+    if split {
+        split_joins(&mut blocks);
+    }
     let mut g = Graph::new(blocks)?;
     if c.iface.host.max_reconvergence {
         g.check_reconvergence(code)?;
@@ -1369,6 +1648,7 @@ pub(crate) fn emit(c: &mut Ctx, code: &Code, first: u32) -> Res<()> {
         code,
         used: HashSet::new(),
         emitted: 0,
+        selectors: HashMap::new(),
     };
     e.region(c, 0, first, None, None)
 }

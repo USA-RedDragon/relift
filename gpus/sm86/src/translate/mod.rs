@@ -645,6 +645,15 @@ pub fn translate(p: &Program) -> Res<Shader> {
 
 /// Translates one program for the device `o.host`.
 pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
+    match translate_once(p, o, false) {
+        Err(Unsupported(e)) if e == cfg::TOO_MUCH_DUPLICATION => translate_once(p, o, true),
+        r => r,
+    }
+}
+
+/// One translation; `split` dispatches at shared joins instead of
+/// copying them (see [`cfg`]).
+fn translate_once(p: &Program, o: &Options, split: bool) -> Res<Shader> {
     let stage = p.stage();
     let code = decode_all(p)?;
     let mut m = Module::new();
@@ -698,7 +707,7 @@ pub fn translate_with(p: &Program, o: &Options) -> Res<Shader> {
     c.tcs_prologue()?;
     let body = c.m.id();
     c.m.emit_void(op::BRANCH, &[body]);
-    cfg::emit(&mut c, &code, body)?;
+    cfg::emit(&mut c, &code, body, split)?;
     c.m.emit_void(op::FUNCTION_END, &[]);
     let funcs = std::mem::take(&mut c.funcs);
     c.m.body.extend(funcs);
