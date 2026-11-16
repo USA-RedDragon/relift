@@ -4,7 +4,9 @@
  *
  * Lifted code reads and writes RDRAM directly and passes every other
  * physical address to the machine (rl_n64_cpu_read, rl_n64_cpu_write); the
- * guard slow paths use the same bus for TLB-mapped accesses. MI's interrupt
+ * guard slow paths use the same bus for TLB-mapped accesses. The device
+ * answers a read at the cycle it starts; then the cycles the machine's
+ * bus keeps the CPU waiting (rl_n64_read_stall) come off the budget. MI's interrupt
  * output is IP2; the timer (Count reaching Compare) is a scheduler event at
  * the cycle the CPU layer computes, so the sync point after it takes IP7.
  *
@@ -36,7 +38,10 @@ static rl_n64 *machine(rl_ctx *c) { return c->machine; }
 uint64_t rl_n64_cpu_read(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size)
 {
     (void)mem;
-    return rl_mips_swap(rl_n64_read(machine(c), (uint32_t)addr, size), size);
+    uint32_t stall = rl_n64_read_stall(machine(c), (uint32_t)addr);
+    uint64_t v = rl_n64_read(machine(c), (uint32_t)addr, size);
+    c->time.budget -= stall;
+    return rl_mips_swap(v, size);
 }
 
 void rl_n64_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uint64_t value)
@@ -48,7 +53,10 @@ void rl_n64_cpu_write(rl_ctx *c, uint8_t *mem, uint64_t addr, uint32_t size, uin
 static uint64_t bus_read(rl_ctx *c, uint8_t *mem, uint64_t paddr, uint32_t size)
 {
     (void)mem;
-    return rl_n64_read(machine(c), (uint32_t)paddr, size);
+    uint32_t stall = rl_n64_read_stall(machine(c), (uint32_t)paddr);
+    uint64_t v = rl_n64_read(machine(c), (uint32_t)paddr, size);
+    c->time.budget -= stall;
+    return v;
 }
 
 static void bus_write(rl_ctx *c, uint8_t *mem, uint64_t paddr, uint32_t size, uint64_t value)

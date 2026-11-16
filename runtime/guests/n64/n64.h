@@ -114,6 +114,14 @@ RL_RUNTIME_API const rl_n64_stats *rl_n64_get_stats(const rl_n64 *m);
 
 /** @brief A read of size bytes (1, 2, 4 or 8) at physical address paddr by the CPU now: the big-endian value. */
 RL_RUNTIME_API uint64_t rl_n64_read(rl_n64 *m, uint32_t paddr, uint32_t size);
+/**
+ * @brief The cycles a CPU read at physical address paddr that starts now
+ * keeps the CPU waiting (bus.c): none in RDRAM, the RCP's read latency
+ * elsewhere, plus the PI bus cycle (or the rest of a bus write in flight)
+ * in the cartridge's address space. Ask before rl_n64_read, which ends a
+ * bus write in flight.
+ */
+RL_RUNTIME_API uint32_t rl_n64_read_stall(rl_n64 *m, uint32_t paddr);
 /** @brief A write of size bytes of the big-endian value at physical address paddr by the CPU now. */
 RL_RUNTIME_API void rl_n64_write(rl_n64 *m, uint32_t paddr, uint32_t size, uint64_t value);
 /** @brief MI_INTR & MI_MASK: the sources whose interrupt is up. */

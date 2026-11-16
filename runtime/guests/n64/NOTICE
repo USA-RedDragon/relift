@@ -23,6 +23,8 @@ flash.c   the Flash chip's command set, status and ID reads, timings
                                    n64/cartridge/flash.cpp
 eeprom.c  the EEPROM joybus commands
                                    n64/cartridge/joybus.cpp
+bus.c     the CPU's read latency of the RCP and the PI bus
+                                   n64/memory/io.hpp, bus.hpp, n64/pi/bus.hpp
 vi.c      the VI registers, the line counter, field and leap pattern, the
           interrupt line rules, the frame edge
                                    n64/vi/vi.cpp, io.cpp

@@ -1,8 +1,8 @@
 /**
  * @file test_n64.c
  * @brief The Nintendo 64 machine: the memory map, MI, PI DMA and its
- * timing, SP DMA, VI's line counter and interrupt, the scan-out and the
- * high-level boot. ROMs are synthetic.
+ * timing, SP DMA, VI's line counter and interrupt, the scan-out, the CPU's
+ * read latency and the high-level boot. ROMs are synthetic.
  */
 #include "runner.h"
 
@@ -58,6 +58,23 @@ TEST(n64_mi_mask_and_version)
     rl_n64_write(t.m, 0x0430000Cu, 4, 0x0001u | 0x0004u);
     CHECK_EQ(rl_n64_read(t.m, 0x0430000Cu, 4), 0x3Cu);
     CHECK_EQ(rl_n64_irq_pending(t.m), 0);
+    mach_free(&t);
+}
+
+TEST(n64_reads_wait_for_the_rcp_and_the_pi_bus)
+{
+    mach t = mach_new(0x2000);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x00100000u), 0);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0xA4400010u), 20);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x04001000u), 20);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x1FC007FCu), 20);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x10000000u), 270);
+    rl_n64_write(t.m, 0x08000000u, 4, 0x12345678u);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x10000000u), 20 + 2 * 200);
+    advance(&t, 150);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x10000000u), 20 + 2 * 50);
+    advance(&t, 100);
+    CHECK_EQ(rl_n64_read_stall(t.m, 0x10000000u), 270);
     mach_free(&t);
 }
 
