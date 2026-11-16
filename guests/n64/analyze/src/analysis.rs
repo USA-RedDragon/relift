@@ -98,6 +98,7 @@ pub fn analyze_with(rom: &[u8], opts: Options) -> Result<Report, AnalyzeError> {
     let mut stats = Stats::default();
 
     let mut known = boot_segs;
+    known.extend(tables(&rom.bytes));
     let mut taken: BTreeSet<Loc> = BTreeSet::new();
     let rom_len = rom.bytes.len() as u32;
     loop {
@@ -157,7 +158,17 @@ pub fn analyze_with(rom: &[u8], opts: Options) -> Result<Report, AnalyzeError> {
         for r in scan::regions(w, from) {
             stats.regions += 1;
             let mut pieces = vec![r];
-            for (ki, k) in known.iter().enumerate() {
+            let tables_first = known
+                .iter()
+                .enumerate()
+                .filter(|(_, k)| matches!(k.origin, SegmentOrigin::Table { .. }))
+                .chain(
+                    known
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, k)| !matches!(k.origin, SegmentOrigin::Table { .. })),
+                );
+            for (ki, k) in tables_first {
                 if k.source != s {
                     continue;
                 }
@@ -167,6 +178,10 @@ pub fn analyze_with(rom: &[u8], opts: Options) -> Result<Report, AnalyzeError> {
                     let (ia, ib) = (a.max(ka), b.min(kb));
                     if ia < ib {
                         areas.push((ki as u32, ia - ka, ib - ka));
+                        if matches!(k.origin, SegmentOrigin::Table { .. }) {
+                            rest.push((a, b));
+                            continue;
+                        }
                         let here = k.addr(4 * (ia - ka) as u32);
                         let st = scan::starts(w, (ia, ib), here.wrapping_sub(4 * ia as u32));
                         if let Some((v, votes)) = scan::vote(w, (ia, ib), &st)
@@ -711,6 +726,76 @@ impl<'a> Driver<'a> {
         }
         out
     }
+}
+
+/// The largest segment a segment table entry may give.
+const TABLE_MAX: u32 = 0x40_0000;
+/// The most segments the segment tables give.
+const TABLE_CAP: usize = 4096;
+
+/// The segments of the ROM's segment tables: three words in a row, the
+/// start and end of a ROM range of code (at least 24 of its first 32 words
+/// decode) and a kseg0 address in RDRAM to link it at, where at least one
+/// `JAL` of the range's code reaches a function start of the range and the
+/// vote of [`scan::vote`] links the range nowhere else.
+fn tables(rom: &[u8]) -> Vec<Segment> {
+    let n = rom.len() / 4;
+    let word =
+        |i: usize| u32::from_be_bytes([rom[4 * i], rom[4 * i + 1], rom[4 * i + 2], rom[4 * i + 3]]);
+    let len = rom.len() as u32;
+    let words = Words::new(rom);
+    let mut out: Vec<Segment> = Vec::new();
+    for i in 0..n.saturating_sub(2) {
+        let (a, b, l) = (word(i), word(i + 1), word(i + 2));
+        if a < boot::BOOT_OFFSET
+            || a % 4 != 0
+            || b <= a
+            || b > len
+            || b - a > TABLE_MAX
+            || b - a < 0x40
+            || !(0x8000_0400..0x8000_0000 + RDRAM_END).contains(&l)
+            || l % 4 != 0
+        {
+            continue;
+        }
+        let first = a as usize / 4;
+        let k = (first..first + 32).filter(|&j| valid(word(j))).count();
+        if k < 24 {
+            continue;
+        }
+        let r = (first, b as usize / 4);
+        let base = l.wrapping_sub(4 * first as u32);
+        let starts_at: Vec<usize> = scan::starts(&words, r, base);
+        let starts: HashSet<u32> = starts_at
+            .iter()
+            .map(|&s| base.wrapping_add(4 * s as u32))
+            .collect();
+        let linked = (r.0..r.1).any(|j| {
+            let x = word(j);
+            x >> 26 == 3 && starts.contains(&(0x8000_0000 | (x & 0x03FF_FFFF) << 2))
+        });
+        let other = scan::vote(&words, r, &starts_at).is_some_and(|(v, _)| v != l);
+        if !linked || other {
+            continue;
+        }
+        let seg = Segment {
+            source: Source::Rom,
+            offset: a,
+            len: (b - a) & !3,
+            link: Some(l),
+            origin: SegmentOrigin::Table { at: 4 * i as u32 },
+        };
+        if !out
+            .iter()
+            .any(|s| s.offset == seg.offset && s.len == seg.len && s.link == seg.link)
+        {
+            out.push(seg);
+            if out.len() == TABLE_CAP {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// The trampolines of segment `seg` as (address, length in bytes, target):

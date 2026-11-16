@@ -58,6 +58,14 @@ pub enum SegmentOrigin {
         /// The votes for the link address (zero when not linked).
         votes: u32,
     },
+    /// A ROM range and its link address from a segment table in a source:
+    /// a word that is the range's start, the next its end, and the next a
+    /// kseg0 address, the shape a build tool's segment table gives each
+    /// segment a loader moves.
+    Table {
+        /// The offset of the table entry in its source.
+        at: u32,
+    },
     /// An exception vector trampoline placed at a vector address, where a
     /// program copies it.
     Vector {

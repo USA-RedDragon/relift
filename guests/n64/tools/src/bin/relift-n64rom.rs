@@ -205,6 +205,7 @@ fn segment_json(s: &Segment) -> Value {
         SegmentOrigin::PiDma { site } => json!({"pi_dma": hex8(site)}),
         SegmentOrigin::Region { votes } => json!({"region": votes}),
         SegmentOrigin::Vector { from } => json!({"vector": hex8(from)}),
+        SegmentOrigin::Table { at } => json!({"table": at}),
     };
     json!({
         "source": source_json(s.source),

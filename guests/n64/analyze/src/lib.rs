@@ -51,6 +51,11 @@
 //!   the most distinct targets are `V` plus the offset of a function start
 //!   of the region, with 3 votes and twice the runner-up. A region without one is
 //!   followed only through its own relative branches.
+//! - Segment tables: three words in a row that give the start and end of
+//!   a ROM range of code and a kseg0 address in RDRAM, which the range's
+//!   own `JAL`s agree with, are a segment a loader moves there (the table a
+//!   build tool writes for overlays). Its code is found like a DMA
+//!   segment's, without taking the regions it holds from other segments.
 //! - Function starts: a word that lowers the stack pointer by a constant
 //!   and the word after a return and its delay slot are roots
 //!   ([`Origin::Prologue`]). A speculative root (address-taken or

@@ -638,3 +638,46 @@ fn scalar_rsp_code_with_cop0_moves_is_found_by_the_scan() {
         rep.rsp
     );
 }
+
+#[test]
+fn a_segment_table_entry_links_an_overlay() {
+    let mut b = rom(ENTRY, 0x12_0000);
+    put(&mut b, at(ENTRY), &[jr(RA), NOP]);
+    let ovl = 0x10_8000;
+    let link = 0x8030_0000;
+    let mut code = vec![
+        addiu(SP, SP, -0x18),
+        sw(RA, 0x10, SP),
+        jal(link + 0x40),
+        NOP,
+    ];
+    code.extend([lw(RA, 0x10, SP), jr(RA), addiu(SP, SP, 0x18)]);
+    code.resize(16, NOP);
+    code.extend([
+        addiu(SP, SP, -8),
+        addiu(V0, ZERO, 1),
+        jr(RA),
+        addiu(SP, SP, 8),
+    ]);
+    for k in 0..12 {
+        code.push(addiu(T0, T0, k));
+    }
+    code.extend([jr(RA), NOP]);
+    put(&mut b, ovl, &code);
+    let len = 4 * code.len() as u32;
+    put(&mut b, 0x10_4000, &[ovl as u32, ovl as u32 + len, link]);
+    let rep = run(&b);
+    assert!(
+        rep.segments.iter().any(|s| s.link == Some(link)
+            && s.offset == ovl as u32
+            && matches!(s.origin, SegmentOrigin::Table { at: 0x10_4000 })),
+        "{:?}",
+        rep.segments
+    );
+    assert!(
+        rep.units
+            .iter()
+            .any(|u| u.link == Some(link) && u.offset == ovl as u32),
+        "the overlay is code at its table link"
+    );
+}
