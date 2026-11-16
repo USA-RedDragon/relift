@@ -292,6 +292,10 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     r->flags = d->type_flags[ai->memoryTypeIndex];
     r->mode = d->map_mode;
     bool visible = r->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    if (visible && r->mode == RL_VK_MAP_PLACED) {
+        uint64_t align = d->placed_align ? d->placed_align : 4096;
+        ai->allocationSize = (ai->allocationSize + align - 1) & ~(align - 1);
+    }
     if (visible && r->mode == RL_VK_MAP_IMPORT) {
         bool plain = !chain_has(ai->pNext, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO) &&
                      drop_optional_dedication(&k, dev, ai);

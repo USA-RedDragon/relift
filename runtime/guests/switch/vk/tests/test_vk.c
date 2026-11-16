@@ -2574,8 +2574,16 @@ static PFN_vkDeviceWaitIdle g_real_idle;
 static PFN_vkFreeCommandBuffers g_real_free_cbs;
 static PFN_vkGetFenceStatus g_real_fence_status;
 static PFN_vkDestroyCommandPool g_real_destroy_pool;
+static PFN_vkAllocateMemory g_real_alloc;
 static unsigned g_idles, g_freed, g_freed_early, g_pools_destroyed, g_pools_destroyed_early;
 static VkFence g_watch;
+static VkDeviceSize g_last_alloc;
+
+static VkResult VKAPI_PTR noting_alloc(VkDevice dev, const VkMemoryAllocateInfo *ai, const VkAllocationCallbacks *cb, VkDeviceMemory *out)
+{
+    g_last_alloc = ai->allocationSize;
+    return g_real_alloc(dev, ai, cb, out);
+}
 
 static VkResult VKAPI_PTR counting_idle(VkDevice dev)
 {
@@ -2616,6 +2624,8 @@ static void *counting_gdpa(void *dev, const char *name)
         memcpy(&g_real_destroy_pool, &r, sizeof r), f = (void (*)(void))counting_destroy_pool;
     else if (r && !strcmp(name, "vkGetFenceStatus"))
         memcpy(&g_real_fence_status, &r, sizeof r);
+    else if (r && !strcmp(name, "vkAllocateMemory"))
+        memcpy(&g_real_alloc, &r, sizeof r), f = (void (*)(void))noting_alloc;
     if (f)
         memcpy(&r, &f, sizeof r);
     return r;
@@ -2689,6 +2699,30 @@ static void submit_and_free(free_rig *r, uint32_t value, uint64_t fence)
     VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
     CHECK_EQ(VKR(G("vkQueueSubmit", r->queue, 1, gput(&si, sizeof si), fence)), VK_SUCCESS);
     G("vkFreeCommandBuffers", r->dev, r->pool, 1, gcb);
+}
+
+/**
+ * @brief In placed mode a mapped allocation reaches the host rounded up to
+ * the placed-map alignment: a whole-size placed map of an allocation that is
+ * not a multiple of it is invalid (VUID-VkMemoryMapInfo-flags-09651).
+ */
+TEST(vk_placed_memory_is_allocated_in_whole_placed_pages)
+{
+    free_rig r;
+    free_rig_up(&r);
+    vkf_dev *d = vkf_obj_of(r.dev, VKG_KIND_VkDevice)->dev;
+    if (d->map_mode != RL_VK_MAP_PLACED) {
+        fprintf(stderr, "  skipped: the device does not map placed\n");
+        free_rig_down(&r);
+        return;
+    }
+    uint64_t align = d->placed_align ? d->placed_align : 4096;
+    fprintf(stderr, "  64-byte buffer memory reached the host as %llu bytes (placed alignment %llu)\n", (unsigned long long)g_last_alloc,
+            (unsigned long long)align);
+    CHECK(g_last_alloc >= 64);
+    CHECK_EQ(g_last_alloc % align, 0);
+    CHECK(r.b.ptr != 0);
+    free_rig_down(&r);
 }
 
 TEST(vk_a_submitted_secondary_freed_at_once_is_freed_when_its_submit_is_done)
