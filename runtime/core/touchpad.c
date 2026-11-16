@@ -640,6 +640,11 @@ static void open_ui(int ui)
     for (int i = 0; i < FINGERS; i++)
         if (g.f[i].on)
             g.f[i].own = OWN_NONE;
+    if ((ui == UI_HOST || g.ui == UI_HOST) && g.cv.px) {
+        g.cv.x0 = g.cv.y0 = 0;
+        g.cv.x1 = (int32_t)g.cv.w;
+        g.cv.y1 = (int32_t)g.cv.h;
+    }
     g.ui = ui;
     g.dirty = true;
     if (ui == UI_NONE)
