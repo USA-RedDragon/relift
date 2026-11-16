@@ -2681,8 +2681,11 @@ another host thread ends instead of one the code counts down.
   a loop holding a call, a trap, a computed jump or another loop, or a loop
   that waits on memory; every computed jump; and a jump or call to the
   block's own or a lower address outside the function (recursion, a tail
-  call back). Returns, traps and indirect calls are not. Other frontends
-  emit nothing.
+  call back). Returns, traps and indirect calls are not, and neither is a
+  call or jump back to a lifted function that leaves only by returning (no
+  call, tail call or computed jump, every instruction lifted): no cycle of
+  transfers passes through such a function, and its own loops carry their
+  own checks. Other frontends emit nothing.
 - **A loop that waits on memory** is one whose jump back or a branch out
   of it decides on a value that comes, through the loop's instructions
   before it in address order, from a load, an exclusive access or an

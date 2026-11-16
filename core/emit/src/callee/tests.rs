@@ -145,6 +145,7 @@ fn targets(fns: &[Function<'_>], overrides: &[u64]) -> BTreeMap<u64, Target> {
                 resume_point: false,
                 declare: true,
                 keeps: 0,
+                leaf: false,
             };
             (f.entry, target)
         })
@@ -158,6 +159,7 @@ fn targets(fns: &[Function<'_>], overrides: &[u64]) -> BTreeMap<u64, Target> {
                 resume_point: false,
                 declare: true,
                 keeps: 0,
+                leaf: false,
             },
         );
     }

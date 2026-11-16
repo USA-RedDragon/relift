@@ -83,6 +83,9 @@ pub(crate) struct Prog {
     entry: Option<u32>,
     /// Where the function resumes with the context the unwinder installed.
     seeds: Vec<u32>,
+    /// Whether it leaves only by returning: no call, tail call or computed
+    /// jump, and every instruction lifted.
+    pub(crate) leaf: bool,
 }
 
 impl Prog {
@@ -127,6 +130,7 @@ pub(crate) fn program(
         .map(|(k, &pc)| (pc, k as u32))
         .collect();
     let clock = fe.clock().is_some();
+    p.leaf = true;
     let jump = |t: u64| match index.get(&t) {
         Some(&k) => Succ::Edge(k),
         None if targets.get(&t).is_some_and(|t| t.lifted) => Succ::Tail(t),
@@ -134,6 +138,7 @@ pub(crate) fn program(
     };
     for (pc, i) in &f.insts {
         let Insn::Lifted { block, .. } = i else {
+            p.leaf = false;
             // The frontend's undefined call never returns `RL_OK`.
             p.nodes.push(Node {
                 sets: p.sets.len() as u32,
@@ -237,6 +242,17 @@ pub(crate) fn program(
                 p.succs.push(Succ::Any);
             }
         }
+        p.leaf &= match (b.exit.flow, b.exit.next) {
+            (Flow::Return | Flow::Trap(_), _) => true,
+            (Flow::Call { .. }, _) | (Flow::Jump, Next::Dynamic(_)) => false,
+            (Flow::Jump, Next::Const(t)) => index.contains_key(&t),
+            (
+                Flow::Jump,
+                Next::Select {
+                    taken, not_taken, ..
+                },
+            ) => index.contains_key(&taken) && index.contains_key(&not_taken),
+        };
         p.nodes.push(Node {
             sets: p.sets.len() as u32,
             succs: p.succs.len() as u32,

@@ -222,6 +222,12 @@ impl Ctx<'_> {
         Some((t, target.name.clone(), range.cond.as_str()))
     }
 
+    /// Whether `t` is the entry of a lifted function that leaves only by
+    /// returning, so that no cycle of transfers passes through it.
+    fn leaf(&self, t: u64) -> bool {
+        self.targets.get(&t).is_some_and(|t| t.leaf)
+    }
+
     /// The stores of the dirty registers before a jump on the same line.
     fn lead(&self) -> String {
         let s = self.store(&self.dirty);
@@ -876,12 +882,12 @@ fn preempts(cx: &Ctx<'_>, b: &Block) -> bool {
         } else if cx.inside(t) {
             loop_has_work(cx, t, b.pc) || waits(cx, t, b)
         } else {
-            true
+            !cx.leaf(t)
         }
     };
     match (b.exit.flow, b.exit.next) {
         (Flow::Return | Flow::Trap(_), _) => false,
-        (Flow::Call { .. }, Next::Const(t)) => back(t),
+        (Flow::Call { .. }, Next::Const(t)) => back(t) && !cx.leaf(t),
         (Flow::Call { .. }, _) => false,
         (Flow::Jump, Next::Const(t)) => jump(t),
         (
@@ -1128,12 +1134,12 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
         let rl = cx.reload(cx.plan.exit_live(b.pc));
         s.push_str(&time::sync(cx.fe, b, &next_expr(b, &val), &out_store, &rl));
     }
-    // A guessed computed jump forward leaves before the preemption check,
-    // as a direct jump forward has none.
+    // A guessed computed jump leaves before the preemption check when a
+    // direct jump to the guess would have none.
     let mut guessed = false;
     if let (Flow::Jump, Next::Dynamic(v)) = (b.exit.flow, b.exit.next)
         && let Some((t, _, cond)) = cx.guess(b.pc)
-        && t > b.pc
+        && (t > b.pc || cx.leaf(t))
     {
         let cond = format!("{} == UINT64_C({t:#x}) && {cond}", val(v));
         let j = cx.jump(t);

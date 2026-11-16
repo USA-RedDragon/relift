@@ -285,6 +285,9 @@ pub(crate) struct Target {
     pub(crate) declare: bool,
     /// The callee-saved registers it returns unchanged ([`callee`]).
     pub(crate) keeps: callee::Keeps,
+    /// Whether it leaves only by returning ([`callee::Prog::leaf`]): no
+    /// cycle of transfers passes through it.
+    pub(crate) leaf: bool,
 }
 
 /// Emits the functions `fns` and the overrides `overrides` with frontend `fe`.
@@ -523,6 +526,7 @@ fn emit_core(
                     resume_point: false,
                     declare: true,
                     keeps: 0,
+                    leaf: false,
                 },
             )
         })
@@ -536,6 +540,7 @@ fn emit_core(
                 resume_point: o.resume_point,
                 declare: o.declare,
                 keeps: 0,
+                leaf: false,
             },
         );
     }
@@ -552,6 +557,7 @@ fn emit_core(
                     resume_point: o.resume_point,
                     declare: o.declare,
                     keeps: 0,
+                    leaf: false,
                 },
             );
         }
@@ -562,6 +568,7 @@ fn emit_core(
         for (e, k) in callee::solve(&shape, &progs) {
             if let Some(t) = targets.get_mut(&e).filter(|t| t.lifted) {
                 t.keeps = k;
+                t.leaf = progs[&e].leaf;
             }
         }
     }

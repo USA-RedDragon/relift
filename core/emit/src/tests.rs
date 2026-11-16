@@ -211,6 +211,9 @@ impl Frontend for Toyx {
             elsewhere: "rl_ret_elsewhere",
         })
     }
+    fn callee_saved(&self) -> Vec<Reg> {
+        vec![Reg(3)]
+    }
     fn fp_state(&self) -> Vec<Reg> {
         Toy.fp_state()
     }
@@ -1829,4 +1832,30 @@ fn a_guessed_computed_jump_goes_to_its_guess_by_name_under_the_condition() {
     );
     assert!(!at(0x10c).contains("0x300"), "{s}");
     assert_eq!(s.matches("RL_JUMP(r2, ").count(), 3, "{s}");
+}
+
+#[test]
+fn a_call_or_jump_back_to_a_leaf_is_no_preemption_point() {
+    let code = [
+        word(0x03, 0, 0),    // 0x100 ret: a leaf
+        branch(0x02, 0, -1), // 0x104 bl 0x100
+        branch(0x01, 0, -2), // 0x108 b 0x100
+        branch(0x02, 0, -2), // 0x10c bl 0x104: not a leaf
+        word(0x03, 0, 0),    // 0x110 ret
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [
+        function(0x100, &blocks[0..1]),
+        function(0x104, &blocks[1..2]),
+        function(0x108, &blocks[2..3]),
+        function(0x10c, &blocks[3..5]),
+    ];
+    let s = shard(&emit(&PREEMPT, &fns, &[], &Options::default())).to_string();
+    let at = |pc: u64| {
+        let from = s.find(&format!("L_{pc:x}: {{")).expect("label");
+        s[from..from + s[from..].find("\n}\n").expect("end")].to_string()
+    };
+    assert!(!at(0x104).contains("rl_time_spent"), "{s}");
+    assert!(!at(0x108).contains("rl_time_spent"), "{s}");
+    assert!(at(0x10c).contains("rl_time_spent"), "{s}");
 }
