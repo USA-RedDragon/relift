@@ -83,8 +83,6 @@ RL_RUNTIME_API void rl_mips_set_ip(rl_ctx *c, uint32_t ip);
 RL_RUNTIME_API uint64_t rl_mips_irq_enter(rl_ctx *c, uint64_t next, uint32_t ip);
 /** @brief An rl_irq_return_hook: where the handler's ERET went. */
 RL_RUNTIME_API uint64_t rl_mips_irq_return(rl_ctx *c, uint8_t *mem, uint64_t expected);
-/** @brief ERET's state change: clears ERL (going to ErrorEPC) or else EXL (going to EPC), and LLbit. Returns the target. */
-RL_RUNTIME_API uint64_t rl_mips_eret(rl_ctx *c);
 
 /** @brief Sets Count to value at the current cycle. */
 RL_RUNTIME_API void rl_mips_set_count(rl_ctx *c, uint32_t value);

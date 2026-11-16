@@ -440,6 +440,8 @@ static inline void rl_mips_call(rl_ctx *c, uint64_t ret)
  * stack does not grow with each switch.
  */
 RL_RUNTIME_API rl_fn rl_mips_eret_to(rl_ctx *c, uint64_t target);
+/** @brief ERET's state change: clears ERL (going to ErrorEPC) or else EXL (going to EPC), and LLbit. Returns the target; a frontend that leaves before ERET's lifted effects passes it to rl_mips_eret_to. */
+RL_RUNTIME_API uint64_t rl_mips_eret(rl_ctx *c);
 
 /**
  * @brief The intrinsic mips_fcr31(op, fmt, fcr31, a, b): FCR31 after the
