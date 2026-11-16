@@ -390,6 +390,18 @@ static rl_result sc_switch2_setting(rl_ipc_req *r)
     return rl_srv_in(r, &on, 1) ? KR_SUCCESS : SF_RESULT_INVALID_HEADER;
 }
 
+/** @brief GetGraphicsSupervisor (Switch 2 only): a copy handle to the gsv UserSession. */
+static rl_result sc_get_graphics_supervisor(rl_ipc_req *r)
+{
+    if (!hos_switch2())
+        return SF_RESULT_UNKNOWN_COMMAND;
+    uint32_t h;
+    rl_result rc = rl_gsv_open_user_session(&h);
+    if (rc == KR_SUCCESS)
+        r->out_copy[r->n_out_copy++] = h;
+    return rc;
+}
+
 static const rl_ipc_cmd sc_cmds[] = {
     { 0, "Exit", sc_exit },
     RL_SRV_STUB(1, "LockExit"),
@@ -421,6 +433,7 @@ static const rl_ipc_cmd sc_cmds[] = {
     { 100, "SetAlbumImageTakenNotificationEnabled", sc_set_album_image_taken_notification_enabled },
     { 120, "SaveCurrentScreenshot", sc_save_current_screenshot },
     { 130, "SetRecordVolumeMuted", sc_set_record_volume_muted },
+    { 2000, "GetGraphicsSupervisor", sc_get_graphics_supervisor },
     { 2400, "SetRtcScreenSharingAudioEnabled", sc_switch2_setting },
 };
 

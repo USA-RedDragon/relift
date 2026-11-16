@@ -61,6 +61,10 @@ void rl_srv_install_acc(void);
 void rl_srv_install_mm(void);
 /** @brief Registers csrng, the random number service. */
 void rl_srv_install_csrng(void);
+/** @brief Opens a session to a new INvDrv2User (Switch 2 nvdrv), for gsv's CreateNvDrv2UserSession*. */
+rl_result rl_srv_nv2_open(uint32_t *handle);
+/** @brief Opens a session to a new gsv UserSession (Switch 2), for am's GetGraphicsSupervisor. */
+rl_result rl_gsv_open_user_session(uint32_t *handle);
 /** @brief Registers ectx:aw, the error context writer, and notif:a, the alarm notifications. */
 void rl_srv_install_ectx(void);
 

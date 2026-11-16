@@ -441,6 +441,48 @@ static rl_ipc_object *nv_open_session(void)
     return o;
 }
 
+/**
+ * @brief nn::nvdrv::INvDrv2User, the Switch 2's nvdrv session from gsv
+ * (CreateNvDrv2UserSession*): the nvdrv commands without Initialize, which
+ * the supervisor's boot replaces, and SetConfiguration (13), whose bit 0 is
+ * the graphics firmware memory margin.
+ */
+static const rl_ipc_cmd nv2_cmds[] = {
+    { 0, "Open", cmd_open },
+    { 1, "Ioctl", cmd_ioctl },
+    { 2, "Close", cmd_close },
+    { 4, "QueryEvent", cmd_query_event },
+    RL_SRV_STUB(9, "DumpStatus"),
+    RL_SRV_STUB(10, "InitializeDevtools"),
+    { 11, "Ioctl2", cmd_ioctl2 },
+    { 12, "Ioctl3", cmd_ioctl3 },
+    RL_SRV_STUB(13, "SetConfiguration"),
+};
+
+static const rl_ipc_class nv2_class = {
+    .name = "nn::nvdrv::INvDrv2User",
+    .cmds = nv2_cmds,
+    .ncmds = sizeof nv2_cmds / sizeof nv2_cmds[0],
+    .pointer_buffer_size = 0,
+    .destroy = session_destroy,
+};
+
+rl_result rl_srv_nv2_open(uint32_t *handle)
+{
+    nv_session *s = calloc(1, sizeof *s);
+    if (!s)
+        return KR_OUT_OF_RESOURCE;
+    s->owner = HOS_PID;
+    rl_ipc_object *o = rl_srv_object(&nv2_class, s);
+    if (!o) {
+        free(s);
+        return KR_OUT_OF_RESOURCE;
+    }
+    rl_result rc = rl_ipc_session_open(o, handle);
+    rl_ipc_object_unref(o);
+    return rc;
+}
+
 void rl_srv_install_nv(void)
 {
     rl_ipc_register_service("nvdrv", nv_open_session);
