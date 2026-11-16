@@ -1,7 +1,9 @@
 //! Shared plumbing of the single-purpose tools for Nintendo DS files
 //! (`relift-ndsrom`): inputs from files or stdin, JSON and the one-line
-//! error exit. All format logic lives in `relift-nds-formats`.
+//! error exit. All format logic lives in `relift-nds-formats`, discovery
+//! in `relift-nds-analyze`.
 
+pub mod functions;
 pub mod units;
 
 use std::io::{Read, Write};

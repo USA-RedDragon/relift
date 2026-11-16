@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 clap = { workspace = true }
 relift-cache = { workspace = true }
+relift-nds-analyze = { workspace = true }
 relift-nds-formats = { workspace = true }
 serde_json = { workspace = true }
 

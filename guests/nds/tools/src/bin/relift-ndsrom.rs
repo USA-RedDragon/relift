@@ -1,6 +1,6 @@
 //! `relift-ndsrom`: print the header of a Nintendo DS ROM and check its
-//! CRCs and logo hash, list and hash its units, extract them, and list its
-//! files.
+//! CRCs and logo hash, list and hash its units, extract them, list its
+//! files, and find the functions of every unit.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -10,6 +10,7 @@ use clap::{Args, Parser, Subcommand};
 use relift_nds_formats::checksum::{LOGO_SHA256, hex, parse_sha256};
 use relift_nds_formats::header::{Binary, Table};
 use relift_nds_formats::{Checks, Header, Rom};
+use relift_nds_tools::functions::{self, FunctionsArgs};
 use relift_nds_tools::units::{self, Unit};
 use relift_nds_tools::{BoxError, input, print_json, run};
 use serde_json::{Value, json};
@@ -58,6 +59,10 @@ enum Command {
     },
     /// List the files of the file system with their sizes.
     Files(RomArg),
+    /// Find the functions of every unit: one discovery run per static
+    /// binary and per overlay, repeated while calls between units give
+    /// new entries.
+    Functions(FunctionsArgs),
 }
 
 fn main() -> ExitCode {
@@ -80,6 +85,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Command::Files(a) => files(&a),
+        Command::Functions(a) => functions::run(&a),
     })
 }
 

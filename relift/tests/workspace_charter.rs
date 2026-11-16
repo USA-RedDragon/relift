@@ -435,8 +435,14 @@ const CHARTERS: &[Charter] = &[
     Charter {
         member: "relift-nds-tools",
         band: 2,
-        why: "single-purpose tools for decrypted Nintendo DS files, thin wrappers over relift-nds-formats",
-        normal: &["clap", "relift-cache", "relift-nds-formats", "serde_json"],
+        why: "single-purpose tools for decrypted Nintendo DS files, thin wrappers over relift-nds-formats and relift-nds-analyze",
+        normal: &[
+            "clap",
+            "relift-cache",
+            "relift-nds-analyze",
+            "relift-nds-formats",
+            "serde_json",
+        ],
         dev: &["relift-proc", "serde_json"],
         build: NONE,
     },

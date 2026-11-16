@@ -191,3 +191,47 @@ fn bad_input_is_a_one_line_error() {
             .success()
     );
 }
+
+#[test]
+fn functions_reports_every_unit_and_writes_one_file_each() {
+    let d = dir("functions");
+    let rom = put(&d, "a.nds", &sample());
+    let out = d.join("out");
+    let v = json(&ndsrom(
+        &d,
+        &[
+            "functions",
+            path(&rom),
+            "--json",
+            "--out",
+            path(&out),
+            "--tag",
+            "t",
+            "--jobs",
+            "2",
+        ],
+    ));
+    let units: Vec<&str> = v["units"]
+        .as_array()
+        .expect("an array")
+        .iter()
+        .map(|u| u["unit"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(units, ["static", "arm7", "ov4"]);
+    assert_eq!(
+        v["units"][2]["sha256"],
+        hex(&sha256(&synth::pattern(0x400, 3)))
+    );
+    for u in units {
+        let f = out.join(format!("t-{u}.out.json"));
+        let bytes = std::fs::read(&f).expect("a report per unit");
+        let r: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON report");
+        assert!(r["functions"].is_array() && r["data"].is_array(), "{u}");
+        assert_eq!(r["unit"], u);
+    }
+    let t = text(&ndsrom(&d, &["functions", path(&rom)]));
+    assert!(
+        t.lines().any(|l| l.starts_with("ov4 02100000-02100400")),
+        "{t}"
+    );
+}

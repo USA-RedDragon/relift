@@ -1241,6 +1241,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "relift-cache",
+ "relift-nds-analyze",
  "relift-nds-formats",
  "relift-proc",
  "serde_json",
