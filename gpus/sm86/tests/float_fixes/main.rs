@@ -1354,3 +1354,30 @@ fn flush_hosts_round_before_the_tininess_check() {
         &cases,
     );
 }
+
+/// MUFU R14, R4 of `func` (9: TANH, 4: RCP).
+fn mufu(func: u64) -> u128 {
+    word(0x108, 1, &[(16, 8, 14), (32, 8, 4), (74, 4, func)])
+}
+
+/// MUFU.TANH has no model of the unit, so every host reports it inexact.
+#[test]
+fn mufu_tanh_is_reported_inexact() {
+    let tanh = program(mufu(9), 0, 0, 0);
+    assert!(
+        tanh.decode()[5]
+            .as_ref()
+            .is_ok_and(|i| i.to_string().starts_with("MUFU.TANH"))
+    );
+    for h in HostProfile::presets() {
+        let s = translate_with(&tanh, &host(h.clone())).unwrap_or_else(|e| panic!("{e}"));
+        let n = s
+            .interface
+            .host
+            .inexact
+            .iter()
+            .filter(|l| l.contains("TANH"))
+            .count();
+        assert_eq!(n, 1, "{}", h.name);
+    }
+}

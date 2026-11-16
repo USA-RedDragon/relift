@@ -33,8 +33,9 @@
 //! With [`Options::exact_mufu`](super::Options) off, RCP, RSQ, SQRT, EX2 and
 //! LG2 use the GLSL operations, which the NVIDIA driver lowers to these same
 //! MUFU operations. SIN and COS always use the model (the driver scales the
-//! operand by 1/2pi itself). TANH always uses the GLSL operation and is not
-//! exact.
+//! operand by 1/2pi itself). TANH has no model: it always uses the GLSL
+//! operation, which does not match the unit, and the program is reported
+//! inexact ([`HostReport::inexact`](super::HostReport)).
 
 use super::{Ctx, Res, bad};
 use crate::spirv::{glsl, op};
@@ -166,7 +167,13 @@ fn func(c: &mut Ctx, kind: &str, x: u32) -> Res<u32> {
         "COS" => sincos(c, x, true),
         "RCP64H" => rcp(c, x, F64H),
         "RSQ64H" => rsq(c, x, F64H),
-        "TANH" => native_op(c, x, Some(glsl::TANH)),
+        "TANH" => {
+            let note = "MUFU.TANH uses the host's tanh, which differs from the SM86 unit";
+            if !c.iface.host.inexact.iter().any(|l| l == note) {
+                c.iface.host.inexact.push(note.to_string());
+            }
+            native_op(c, x, Some(glsl::TANH))
+        }
         k => return bad(format!("MUFU.{k}")),
     })
 }
