@@ -9,7 +9,7 @@ use std::sync::Arc;
 use relift_switch_formats::nso::{self, NsoSpec};
 use relift_switch_formats::nup::{self, BuildPackage, PackageKind};
 use relift_switch_formats::storage::MemStorage;
-use relift_switch_shaders::carve::{BRA_SELF, Kind, carve};
+use relift_switch_shaders::carve::{BRA_SELF, Kind, MAX_LINES, carve};
 use relift_switch_shaders::ktgl::{self, Location};
 use relift_switch_shaders::{DirSource, NupSource, Options, Report, Source, sarc, scan};
 
@@ -260,6 +260,39 @@ fn carve_ignores_a_header_that_is_not_one() {
     g[0] = 3;
     let b = blob(&[&g]);
     assert_eq!(carve(&b)[0].kind, Kind::Compute);
+}
+
+#[test]
+fn a_program_longer_than_the_walk_is_marked_and_reported() {
+    for n in [MAX_LINES - 1, MAX_LINES] {
+        let at_limit = code(5, n);
+        let b = blob(&[&at_limit]);
+        let f = carve(&b);
+        assert_eq!(f.len(), 1);
+        assert!(!f[0].cut, "{n} lines");
+        assert_eq!(&b[f[0].start..f[0].end], &at_limit[..]);
+    }
+    let long = code(6, MAX_LINES + 4);
+    let b = blob(&[&long]);
+    let f = carve(&b);
+    assert_eq!(f.len(), 1);
+    assert!(f[0].cut, "the walk stops before the program's start");
+    let root = scratch("long");
+    put(
+        &root.join("tree"),
+        &[("romfs/Shader/l.bfsha".to_string(), b)],
+    );
+    let r = scan(
+        &DirSource::new(&root.join("tree")),
+        &root.join("out"),
+        &opts(&root.join("cache")),
+    )
+    .expect("scans");
+    assert!(r.programs.is_empty(), "no cut program is written");
+    assert_eq!(
+        r.errors[&format!("carve: a program is longer than {MAX_LINES} lines; not written")].count,
+        1
+    );
 }
 
 #[test]

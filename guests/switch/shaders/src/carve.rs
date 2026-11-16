@@ -12,7 +12,8 @@ pub const BRA_SELF: [u8; 12] = [
 const NOP_LO: u16 = 0x7918;
 const LINE: usize = 16;
 const SPH_LEN: usize = 0x80;
-const MAX_LINES: usize = 65536;
+/// The longest walk back from a terminator, in 16-byte lines.
+pub const MAX_LINES: usize = 65536;
 const SPH_SLACK: usize = SPH_LEN + 16 * 8;
 
 /// Which kind of program a carve found.
@@ -54,6 +55,9 @@ pub struct Found {
     pub end: usize,
     /// Graphics or compute.
     pub kind: Kind,
+    /// The walk back stopped at [`MAX_LINES`] with code still before
+    /// `code`: the start is not the program's, so the bytes are not one.
+    pub cut: bool,
 }
 
 impl Found {
@@ -158,7 +162,8 @@ fn past_nops(b: &[u8], p: usize) -> Option<usize> {
 /// instruction lines (and over NOP lines inside a program) to the first
 /// line that is zero, a NOP run after a terminator or an SPH, another
 /// terminator or past the start; look for an SPH within 0x80 to 0x100
-/// bytes before that line; without one the program is compute.
+/// bytes before that line; without one the program is compute. A walk
+/// that reaches [`MAX_LINES`] marks the find [`Found::cut`].
 pub fn carve(b: &[u8]) -> Vec<Found> {
     let mut out = Vec::new();
     for e in find_all(b, &BRA_SELF) {
@@ -181,6 +186,9 @@ pub fn carve(b: &[u8]) -> Vec<Found> {
             code: first,
             end: e + LINE,
             kind: Kind::Compute,
+            cut: p >= 0
+                && steps >= MAX_LINES
+                && matches!(line_kind(b, p as usize), Line::Ins | Line::Nop),
         };
         if let Some(q) = sph_before(b, first) {
             found.start = q;

@@ -348,6 +348,16 @@ impl Ctx<'_> {
         }
         out.container("bnsh", find_all(b, b"BNSH").count() as u64);
         for f in carve::carve(b) {
+            if f.cut {
+                out.error(
+                    format!(
+                        "carve: a program is longer than {} lines; not written",
+                        carve::MAX_LINES
+                    ),
+                    &format!("{name}@{:#x}", f.end),
+                );
+                continue;
+            }
             let sha = carve::program_sha(b, &f);
             let p = out.programs.entry(sha.clone()).or_insert_with(|| Program {
                 kind: f.kind,
