@@ -284,6 +284,10 @@ fn tess_eval_reads_patch_vertices_through_handles() {
     for b in [0, 7, 11, 12, 13, 14] {
         assert!(builtin(&s.spirv, b), "built-in {b}");
     }
+    assert!(
+        !builtin(&s.spirv, 41),
+        "the TessCoord lane needs no subgroup"
+    );
     assert_eq!(
         s.interface.patch_inputs.iter().copied().collect::<Vec<_>>(),
         vec![5]
@@ -301,6 +305,7 @@ fn tess_eval_reads_patch_vertices_through_handles() {
         3,
         "patch input and both level arrays"
     );
+    assert_eq!(s.interface.host.warp_ops, 0);
 }
 
 #[test]

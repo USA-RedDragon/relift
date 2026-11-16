@@ -182,6 +182,9 @@ pub(crate) struct State {
     /// Program counters of the LEPC instructions that only set an ATEXIT
     /// handler.
     pub atexit_lepc: BTreeSet<u64>,
+    /// Program counters of the `S2R SR_LANEID` whose value only names the
+    /// vertex of TessCoord loads; they read 0.
+    pub lane_free: BTreeSet<u64>,
     prim_out: Option<u32>,
 }
 

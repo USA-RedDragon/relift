@@ -118,6 +118,92 @@ pub(crate) fn writes_barrier(i: &Inst) -> bool {
             || (i.has("CLEAR") && i.ops.get(1).and_then(barrier_name).is_some()))
 }
 
+/// Whether instruction `k` is `S2R Rn, SR_LANEID` whose value only names
+/// the vertex of TessCoord loads (`ALD.O a[0x2f0], Rn`, which the
+/// translation reads without it) before Rn is written again or the program
+/// exits, all in straight-line code.
+fn tess_coord_lane(insts: &[Inst], k: usize) -> bool {
+    let i = &insts[k];
+    if i.mnemonic != "S2R" || !matches!(i.ops.get(1), Some(Operand::Sym(s)) if s == "SR_LANEID") {
+        return false;
+    }
+    let Some(Operand::Reg(r, _)) = i.ops.first() else {
+        return false;
+    };
+    let r = *r;
+    fn near(o: &Operand, r: u8, wide: bool) -> bool {
+        match o {
+            Operand::Reg(n, _) => *n == r || (wide && *n < r && r - *n < 4),
+            Operand::Attr { index, .. } | Operand::CBuf { index, .. } => {
+                index.as_deref().is_some_and(|i| near(i, r, wide))
+            }
+            Operand::Mem { base, .. } => base.as_deref().is_some_and(|b| near(b, r, wide)),
+            Operand::Sym(s) => s
+                .split(|ch: char| !ch.is_ascii_alphanumeric())
+                .filter_map(|t| t.strip_prefix('R')?.parse::<u8>().ok())
+                .any(|n| n == r || (wide && n < r && r - n < 4)),
+            _ => false,
+        }
+    }
+    for j in insts.iter().skip(k + 1) {
+        if j.mnemonic == "EXIT" && j.guard.is_none() {
+            return true;
+        }
+        if matches!(
+            j.mnemonic,
+            "BRA" | "BRX" | "BRXU" | "JMX" | "JMP" | "CALL" | "RET" | "EXIT" | "KILL"
+        ) {
+            return false;
+        }
+        let coord = j.mnemonic == "ALD"
+            && j.has("O")
+            && !j.has("P")
+            && matches!(j.ops.get(1), Some(Operand::Attr { index: None, offset, .. }) if (0x2f0..0x2f8).contains(offset))
+            && matches!(j.ops.get(2), Some(Operand::Reg(n, _)) if *n == r);
+        let scalar = matches!(
+            j.mnemonic,
+            "ISETP"
+                | "FSETP"
+                | "PRMT"
+                | "IADD3"
+                | "LOP3"
+                | "SHF"
+                | "FMUL"
+                | "FADD"
+                | "FFMA"
+                | "MOV"
+                | "SEL"
+                | "FSEL"
+                | "FMNMX"
+                | "IMNMX"
+                | "MUFU"
+                | "I2FP"
+                | "F2I"
+                | "PLOP3"
+        ) || (j.mnemonic == "IMAD" && !j.has("WIDE"));
+        let wide = !scalar
+            || j.mods
+                .iter()
+                .any(|m| matches!(*m, "64" | "96" | "128" | "F64"));
+        let near = |o: &Operand| near(o, r, wide);
+        let reads = if coord {
+            false
+        } else {
+            j.ops.iter().skip(1).any(near)
+                || j.ops
+                    .first()
+                    .is_some_and(|o| !matches!(o, Operand::Reg(..)) && near(o))
+        };
+        if reads || j.guard.as_ref().is_some_and(near) {
+            return false;
+        }
+        if j.guard.is_none() && matches!(j.ops.first(), Some(Operand::Reg(n, _)) if *n == r) {
+            return true;
+        }
+    }
+    false
+}
+
 fn branch_target(i: &Inst) -> Option<usize> {
     i.ops.iter().find_map(|o| match o {
         Operand::Target(t) if *t >= 0 => Some((*t / 16) as usize),
@@ -163,6 +249,13 @@ impl Ctx {
         let ops: Vec<(usize, bool)> = insts
             .iter()
             .enumerate()
+            .filter(|&(k, _)| {
+                let free = self.stage == Stage::TessEval && tess_coord_lane(insts, k);
+                if free {
+                    self.io.vtg.lane_free.insert(16 * k as u64);
+                }
+                !free
+            })
             .filter_map(|(k, i)| warp_op(i).map(|q| (k, q)))
             .collect();
         self.iface.host.warp_ops = ops.len() as u32;

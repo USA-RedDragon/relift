@@ -82,6 +82,7 @@ fn s2r(c: &mut Ctx, i: &Inst) -> Option<Res<()>> {
         return None;
     };
     let v = match name.as_str() {
+        "SR_LANEID" if c.io.vtg.lane_free.contains(&c.pc) => c.m.c_u32(0),
         "SR_LANEID" => c.lane_id(),
         "SR_CLOCKLO" | "SR_CLOCK" => match c.guest_clock() {
             Ok((lo, _)) => lo,
