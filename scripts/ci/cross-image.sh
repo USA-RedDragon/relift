@@ -11,6 +11,7 @@ OWNER="$(id -u):$(id -g)"
 CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-$(nproc)}
 export TARGET OWNER CARGO_BUILD_JOBS
 
+mkdir -p "$ROOT/target/cross/$TARGET"
 docker pull -q "$CROSS_IMAGE" >/dev/null
 docker run --rm -v "$ROOT:/project" -w /project -e TARGET -e OWNER -e CARGO_BUILD_JOBS "$CROSS_IMAGE" bash -euo pipefail -c '
   pinned=$(sed -n "s/^channel = \"\(.*\)\"$/\1/p" rust-toolchain.toml)
