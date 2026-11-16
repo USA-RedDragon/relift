@@ -1922,6 +1922,49 @@ CPU layer `runtime/cpus/arm32` and the glue in `runtime/guests/gba/run`.
 - Missed code stops the program with the crash report; hot-loading for this
   guest is open.
 
+### The VR4300
+
+VR4300 code (`relift/mips/abi.h`, lifted by relift-cpu-mips) runs on the CPU
+layer `runtime/cpus/mips`; the Nintendo 64 machine above it is open.
+
+- `rl_ctx` holds relift-cpu-mips's register slots in slot order
+  (`RL_MIPS_SLOTS`, checked against the register file by
+  `cpus/mips/tests/ctx_layout.rs`), then the core's block, the `rl_time`
+  clock in PClock cycles, the 32-entry TLB and the frame stack. Data is
+  big-endian; the dispatch granule is a word.
+- Count advances every second cycle of the clock (`rl_mips_count`); a guest
+  write of Count is seen at the next CP0 sync (`rl_mips_cp0_sync`, after a
+  write of Status, Cause or Compare and at every interrupt check). Count
+  reaching Compare sets IP7; a write of Compare clears it (the lifted
+  template). `rl_mips_timer_cycles` gives the guest layer the cycle to post
+  its timer event at. Random counts down from 31 to Wired, one step a cycle.
+- An interrupt is taken when IE is set, EXL and ERL are clear and an IP bit
+  is set under its IM bit. The guest layer's interrupt hook calls
+  `rl_mips_irq_enter` with its lines (bit n is IP n, for 2 to 6), which
+  enters the general vector with EPC at the sync point's next pc and opens a
+  host frame; the handler's ERET to that pc closes it (`rl_mips_eret_to`). An
+  ERET anywhere else while an interrupt is open (a thread switch) leaves
+  every frame through a redirect.
+- Guards (code 0x1000 plus ExcCode, 0x2000 for the FPU slow path, plus 0x100
+  in a delay slot) leave to `rl_mips_guard`, which runs the instruction:
+  a load or store outside kseg0 and kseg1 through the TLB and the bus
+  (`rl_mips_set_bus`), a COP1 operation through the soft float, anything else
+  as its exception with EPC, Cause.BD and CE, BadVAddr, Context, XContext and
+  EntryHi as the VR4300 sets them, to the refill (0x000, 0x080 in 64-bit
+  addressing), general (0x180) or BEV vectors. A guard in a delay slot goes
+  to `rl_mips_guard_exit`, which also runs the branch.
+- The FPU fast path runs normal operands to normal results in round to
+  nearest with no enable set; FCR31's cause and flag bits come from
+  `rl_mips_fcr31` and compares from `rl_mips_fcmp`. The slow path
+  (`rl_mips_fpu`) implements every rule: subnormal and quiet NaN operands
+  and out-of-range conversions are unimplemented operations, a signalling
+  NaN is invalid, a subnormal result is unimplemented unless FS is set with
+  the underflow and inexact enables clear (then it flushes by the rounding
+  mode), and a NaN result is the default NaN. `relift-check --oracle ares
+  lift --fp-corpus --c-slow-path FILE` compares it with ares.
+- CACHE calls the hook of `rl_mips_set_cache_hook` (code invalidation is the
+  guest layer's).
+
 ## 14. Fibers
 
 The device scheduler (`relift/sched.h`) runs every guest CPU of a machine on
