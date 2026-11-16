@@ -20,7 +20,7 @@ typedef struct rl_gb_unit {
     uint32_t bank;
 } rl_gb_unit;
 
-/** @brief A run of nop instructions [start, end) in a unit's bank, run as one loop (rl_gbx_add_sled). */
+/** @brief A run of nop instructions [start, end) in a unit's bank, or at RAM addresses, run as one loop (rl_gbx_add_sled). */
 typedef struct rl_gb_sled {
     uint32_t bank;
     uint16_t start;
@@ -33,6 +33,30 @@ typedef struct rl_gb_ram {
     uint16_t op;
     rl_fn fn;
 } rl_gb_ram;
+
+/**
+ * @brief The lifted form of the instruction at pc of the window bank bank
+ * (RL_GB_FIXED for the fixed window) as the HALT bug runs it: fetched with
+ * the program counter left on it, after a HALT.
+ */
+typedef struct rl_gb_halt_bug {
+    uint32_t bank;
+    uint16_t pc;
+    rl_fn fn;
+} rl_gb_halt_bug;
+
+/**
+ * @brief The instruction with opcode op at pc of the window bank bank
+ * (RL_GB_FIXED for the fixed window) lifted with its operands read as it
+ * runs: what the boundary runs when the CPU fetched op there from a bus the
+ * OAM DMA held.
+ */
+typedef struct rl_gb_live {
+    uint32_t bank;
+    uint16_t pc;
+    uint16_t op;
+    rl_fn fn;
+} rl_gb_live;
 
 /** @brief What program.c gives rl_gb_main. */
 typedef struct rl_gb_program {
@@ -53,6 +77,12 @@ typedef struct rl_gb_program {
     /** @brief Instructions lifted at RAM addresses, from the learned file of earlier runs. */
     const rl_gb_ram *ram;
     uint32_t ram_count;
+    /** @brief The HALT-bug forms of the instructions after the lifted HALT instructions. */
+    const rl_gb_halt_bug *halt_bug;
+    uint32_t halt_bug_count;
+    /** @brief ROM instructions lifted with live operands, from the learned file of earlier runs. */
+    const rl_gb_live *live;
+    uint32_t live_count;
 } rl_gb_program;
 
 /**
@@ -67,7 +97,10 @@ typedef struct rl_gb_program {
  * counts), --learn FILE, --no-learn (the ROM locations run without lifted
  * code are added to FILE at exit, for the next build), --check (lockstep
  * against the library's own CPU, stopping at the first difference), and the
- * runtime's --relift-set and --relift-settings.
+ * runtime's --relift-set and --relift-settings. Built with
+ * RL_GB_LIFTED_ONLY (a release build) there is no interpreter: the first
+ * instruction with no lifted code writes the stop report and ends the run
+ * (exit 70), and --check is refused.
  */
 RL_RUNTIME_API int rl_gb_main(const rl_gb_program *p, int argc, char **argv);
 

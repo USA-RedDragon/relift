@@ -227,15 +227,26 @@ fn patched(
     Ok((data, last))
 }
 
-fn device_target_dir(settings: &Settings, triple: Option<&str>) -> Result<PathBuf, BoxError> {
+/// The cache folder of a device library build: the release flavor, which
+/// leaves rustyboi's CPU interpreter out, is a build of its own.
+fn device_target_dir(
+    settings: &Settings,
+    triple: Option<&str>,
+    release: bool,
+) -> Result<PathBuf, BoxError> {
+    let flavor = if release { "-lifted" } else { "" };
     Ok(cache_root(settings)?.join(match triple {
-        Some(t) => format!("gb-devices-{t}"),
-        None => "gb-devices".into(),
+        Some(t) => format!("gb-devices{flavor}-{t}"),
+        None => format!("gb-devices{flavor}"),
     }))
 }
 
-fn device_library_path(settings: &Settings, triple: Option<&str>) -> Result<PathBuf, BoxError> {
-    let dir = device_target_dir(settings, triple)?;
+fn device_library_path(
+    settings: &Settings,
+    triple: Option<&str>,
+    release: bool,
+) -> Result<PathBuf, BoxError> {
+    let dir = device_target_dir(settings, triple, release)?;
     let dir = triple.map_or(dir.clone(), |t| dir.join(t));
     Ok(dir.join("release").join(device_library_name(
         cfg!(all(windows, target_env = "msvc")) && triple.is_none(),
@@ -251,11 +262,14 @@ fn device_library_name(msvc: bool) -> &'static str {
 }
 
 /// The device library, built with cargo from `guests/gb/devices` into the
-/// cache the first time and whenever its sources change.
+/// cache the first time and whenever its sources change. A release build's
+/// has no CPU interpreter (`--no-default-features`): every instruction of a
+/// release program is lifted, and the first one that is not stops it.
 fn device_library(
     settings: &Settings,
     rt: &Path,
     triple: Option<&str>,
+    release: bool,
 ) -> Result<PathBuf, BoxError> {
     let manifest = rt
         .join("..")
@@ -270,8 +284,8 @@ fn device_library(
         )
         .into());
     }
-    let target = device_target_dir(settings, triple)?;
-    let lib = device_library_path(settings, triple)?;
+    let target = device_target_dir(settings, triple, release)?;
+    let lib = device_library_path(settings, triple, release)?;
     let mut cmd = relift_proc::command("cargo");
     cmd.args([
         "build",
@@ -285,6 +299,9 @@ fn device_library(
     .env("CARGO_TARGET_DIR", &target);
     if let Some(t) = triple {
         cmd.args(["--target", t]);
+    }
+    if release {
+        cmd.arg("--no-default-features");
     }
     let out = cmd
         .output()
@@ -333,7 +350,9 @@ pub struct Built {
 }
 
 /// `relift build` of the Game Boy project in the working directory, with
-/// the ROM-hack patches `mods` (IPS, UPS or BPS) applied in order.
+/// the ROM-hack patches `mods` (IPS, UPS or BPS) applied in order. A
+/// release build lifts what the analysis finds and nothing more: it leaves
+/// the learned file of earlier dev runs out.
 ///
 /// # Errors
 ///
@@ -370,9 +389,13 @@ pub fn build(
     let row = ui.row("rom");
     ui.begin(row, "analyze");
     let learn = p.dir.join(LEARNED_FILE);
-    let learned = std::fs::read_to_string(&learn)
-        .map(|t| relift_gb::program::read_learned(&t))
-        .unwrap_or_default();
+    let learned = if release {
+        relift_gb::program::Learned::default()
+    } else {
+        std::fs::read_to_string(&learn)
+            .map(|t| relift_gb::program::read_learned(&t))
+            .unwrap_or_default()
+    };
     let seen = &learned.rom;
     let report = match relift_gb_analyze::analyze_with(&rom, seen) {
         Ok(r) => {
@@ -423,7 +446,22 @@ pub fn build(
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            relift_gb::program::lift_superset(&rom, r, &ram, image_id, &keys)
+            let ram = relift_gb::program::complete_ram_slots(&ram, relift_gb_analyze::MAX_KEYS);
+            let mut l = relift_gb::program::lift_superset(&rom, r, &ram, image_id, &keys);
+            let live: Vec<_> = r
+                .ram_ops
+                .live
+                .iter()
+                .map(|&(bank, addr, k)| (relift_gb_analyze::Loc { bank, addr }, k))
+                .collect();
+            relift_gb::program::lift_live(&live, image_id, &mut l);
+            l.sleds.extend(
+                r.ram_ops
+                    .sleds
+                    .iter()
+                    .map(|&(s, e)| (relift_gb::program::RAM_UNIT, s, e)),
+            );
+            l
         }
         None => relift_gb::program::lift_nothing(image_id),
     };
@@ -482,6 +520,8 @@ pub fn build(
                 &lifted.units,
                 &lifted.sleds,
                 &lifted.ram,
+                &lifted.halt_bug,
+                &lifted.live,
                 &relift_gb::program::Program {
                     title: &name,
                     model: &p.model,
@@ -673,6 +713,7 @@ fn compile(
         .chain(extras.defines())
         .chain(static_rt)
         .chain((!release && cross.is_none()).then(|| "-DRL_DEV_RUN".to_string()))
+        .chain(release.then(|| "-DRL_GB_LIFTED_ONLY".to_string()))
         .collect();
     let obj = |src: &Path, tag: &str| {
         let stem = src
@@ -746,7 +787,7 @@ fn compile(
         if shared { rt_obj(s) } else { obj(s, "rt") }
     }));
     let triple = cross.map(cross::Build::triple);
-    let devices = device_library(settings, &rt_real, triple)?;
+    let devices = device_library(settings, &rt_real, triple, release)?;
     let output = out.join(match cross {
         Some(c) => c.program().to_string(),
         None => format!("game{}", std::env::consts::EXE_SUFFIX),
@@ -782,9 +823,12 @@ fn compile(
         drop(lock);
         let exe = output.clone();
         let time = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        let newer = [rt_o.as_path(), &device_library_path(settings, triple)?]
-            .iter()
-            .any(|p| time(p) > time(&exe));
+        let newer = [
+            rt_o.as_path(),
+            &device_library_path(settings, triple, release)?,
+        ]
+        .iter()
+        .any(|p| time(p) > time(&exe));
         if newer && exe.exists() {
             std::fs::remove_file(&exe)?;
         }

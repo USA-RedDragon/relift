@@ -68,6 +68,8 @@ typedef struct host {
     bool stats;
     const char *interp_log;
     const char *learn;
+    int exit_code;
+    int poll_code;
     bool live;
     bool save_soon;
     bool audio;
@@ -309,7 +311,9 @@ static int check_step(host *H, rl_ctx *c, uint16_t pc)
         rlgbd_case_regs(H->ref, &want);
         rlgbd_case_poll(H->ref, want.pc);
     }
+#ifndef RL_GB_LIFTED_ONLY
     rlgbd_step_native(H->ref);
+#endif
     H->checked++;
     return 0;
 }
@@ -329,7 +333,8 @@ static int poll(void *user, rl_ctx *c, uint16_t pc)
         }
         if (v != RLGBD_CASE_CONTINUE) {
             H->verdict = v;
-            return 64 + v;
+            H->poll_code = 64 + v;
+            return H->poll_code;
         }
     }
     uint32_t f = H->in_case ? rlgbd_frames(H->h) : rlgbd_frame_poll(H->h);
@@ -337,7 +342,8 @@ static int poll(void *user, rl_ctx *c, uint16_t pc)
         H->frames = f;
         on_frame(H);
     }
-    return __atomic_load_n(&H->quit, __ATOMIC_ACQUIRE) ? 64 : 0;
+    H->poll_code = __atomic_load_n(&H->quit, __ATOMIC_ACQUIRE) ? 64 : 0;
+    return H->poll_code;
 }
 
 static void on_window(void *user, rl_window *w, int event)
@@ -356,7 +362,7 @@ static void print_stats(void)
     fprintf(stderr,
             "relift-gb stats: lifted %llu (nop sleds %llu), traps %llu, steps %llu, irqs %llu, native halt-bug %llu oam-bug %llu fetch %llu "
             "bank0 %llu dma %llu, redirects ret %llu bank %llu trap %llu native %llu depth %llu, interpreter rom %llu entries %llu "
-            "instructions, ram %llu entries %llu instructions, max depth %llu\n",
+            "instructions, ram %llu entries %llu instructions, max depth %llu, halt-bug forms %llu, live forms %llu\n",
             (unsigned long long)s->lifted, (unsigned long long)s->sled, (unsigned long long)s->traps, (unsigned long long)s->steps, (unsigned long long)s->irqs,
             (unsigned long long)s->native[RL_GBX_HALT_BUG], (unsigned long long)s->native[RL_GBX_OAM_BUG],
             (unsigned long long)s->native[RL_GBX_FETCH], (unsigned long long)s->native[RL_GBX_BANK0],
@@ -365,7 +371,8 @@ static void print_stats(void)
             (unsigned long long)s->redirects[RL_GBX_TRAP], (unsigned long long)s->redirects[RL_GBX_NATIVE],
             (unsigned long long)s->redirects[RL_GBX_DEPTH], (unsigned long long)s->interp_entries[RL_GBX_ROM],
             (unsigned long long)s->interp[RL_GBX_ROM], (unsigned long long)s->interp_entries[RL_GBX_RAM],
-            (unsigned long long)s->interp[RL_GBX_RAM], (unsigned long long)s->max_depth);
+            (unsigned long long)s->interp[RL_GBX_RAM], (unsigned long long)s->max_depth,
+            (unsigned long long)s->forms, (unsigned long long)s->live);
 }
 
 static int verdict_report(host *H, int code)
@@ -546,6 +553,8 @@ static int run_body(void *arg)
     a->c->l = r.l;
     a->c->sp = r.sp;
     int code = rl_gbx_run(a->c, a->mem, r.pc);
+    if (code != RL_OK && rl_common(a->c)->pend.kind == RL_PEND_EXIT_PROCESS && (int)rl_common(a->c)->pend.code != H->poll_code)
+        H->exit_code = (int)rl_common(a->c)->pend.code;
     audio_drain(H);
     if (H->show && H->win && H->in_case && !H->diverged) {
         H->case_ret = verdict_report(H, code);
@@ -716,6 +725,12 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     H.audio = !no_audio && !case_file;
     if (H.audio)
         rlgbd_audio_enable(H.h, 1);
+#ifdef RL_GB_LIFTED_ONLY
+    if (check) {
+        fprintf(stderr, "relift-gb: --check needs the library's CPU interpreter, which a release build leaves out\n");
+        return 2;
+    }
+#endif
     if (check)
         H.ref = rlgbd_new_with((uint32_t)hw, p->rom, p->rom_len, flags);
     bool correction = rl_setting_bool("video.gb_color_correction");
@@ -746,6 +761,16 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
             fprintf(stderr, "relift-gb: a RAM instruction was refused\n");
             return 1;
         }
+    for (uint32_t i = 0; i < p->halt_bug_count; i++)
+        if (rl_gbx_add_halt_bug(p->halt_bug[i].bank, p->halt_bug[i].pc, p->halt_bug[i].fn) != 0) {
+            fprintf(stderr, "relift-gb: a HALT-bug form was refused\n");
+            return 1;
+        }
+    for (uint32_t i = 0; i < p->live_count; i++)
+        if (rl_gbx_add_live(p->live[i].bank, p->live[i].pc, p->live[i].op, p->live[i].fn) != 0) {
+            fprintf(stderr, "relift-gb: a live ROM instruction was refused\n");
+            return 1;
+        }
     for (uint32_t i = 0; i < p->sled_count; i++)
         if (rl_gbx_add_sled(p->sleds[i].bank, p->sleds[i].start, p->sleds[i].end) != 0) {
             fprintf(stderr, "relift-gb: a nop sled was refused\n");
@@ -770,6 +795,8 @@ int rl_gb_main(const rl_gb_program *p, int argc, char **argv)
     int code = rl_window_main(run_body, &ra);
     rl_window_set_events(NULL, NULL);
     int ret = H.reported ? H.case_ret : verdict_report(&H, code);
+    if (H.exit_code == RL_EXIT_SOFTWARE)
+        ret = H.exit_code;
     if (H.ref)
         fprintf(stderr, "relift-gb: check: %llu steps matched\n", (unsigned long long)H.checked);
     if (H.audio && (H.wav || H.stop_frames))

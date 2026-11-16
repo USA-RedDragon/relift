@@ -9,6 +9,10 @@
  * between: its accesses go to the library at the cycle the lifter placed
  * them, the operand fetches and internal cycles before them are made here,
  * and the sync point after the instruction closes it and opens the next.
+ * The control instructions (EI, DI, HALT, STOP and the unused opcodes) run
+ * as the library's control bodies (rlgbd_control), next to the boundary
+ * state they act on; the instruction after a HALT that the HALT bug runs
+ * again runs as its lifted HALT-bug form.
  *
  * Host frames follow guest calls. A shadow stack holds the return address
  * of every open host frame, so a return that goes elsewhere, or a direct
@@ -17,7 +21,10 @@
  * dispatch. Code with no lifted function (code in RAM, missed by discovery,
  * or entered mid-function after an unwind) runs on the library's CPU, one
  * instruction at a time, until its frame returns; calls and jumps from it
- * into lifted functions go back to lifted code.
+ * into lifted functions go back to lifted code. Built with
+ * RL_GB_LIFTED_ONLY (release builds, whose device library has no CPU
+ * interpreter) there is no such fallback: the first instruction with no
+ * lifted code writes the stop report and ends the run (gbx_missed).
  */
 #include "exact_int.h"
 #include "crash.h"
@@ -72,6 +79,12 @@ typedef struct gbx {
     rl_gbx_stats st;
     bool logging;
     bool learning;
+    rl_fn *hb[BANKS];
+    rl_fn *hb_fixed;
+    rl_gbx_ram_fn **live[BANKS + 1];
+    uint8_t *live_n[BANKS + 1];
+    rl_fn form;
+    uint16_t form_pc;
     uint8_t cause;
     uint64_t run_key;
     rl_gbx_seen *seen;
@@ -80,7 +93,10 @@ typedef struct gbx {
 
 static gbx G;
 
+#ifndef RL_GB_LIFTED_ONLY
 static int interp(rl_ctx *c, uint8_t *mem);
+#endif
+static int unlifted(rl_ctx *c, uint8_t *mem);
 static int ram_fn(rl_ctx *c, uint8_t *mem);
 
 static int window_fn(rl_ctx *c, uint8_t *mem);
@@ -90,7 +106,6 @@ const rl_gbx_stats *rl_gbx_stats_get(void) { return &G.st; }
 void rl_gbx_log_interpreted(bool on) { G.logging = on; }
 
 void rl_gbx_log_entries(bool on) { G.learning = on; }
-
 
 /** @brief Report peek: the bus as the library sees it, without side effects. */
 static bool report_peek(uint64_t a, void *out, size_t n)
@@ -155,6 +170,43 @@ static int report_find(uint64_t a, rl_fn_hit *out)
 
 static const rl_report_guest g_report_guest = { report_peek, report_where, 1, report_find };
 
+static const char *const g_miss_names[RL_GBX_MISSES] = {
+    [RL_GBX_MISS_HALT_BUG] = "the HALT bug ran an instruction with no lifted HALT-bug form",
+    [RL_GBX_MISS_FETCH] = "the opcode fetched is not the ROM byte the code was lifted from",
+    [RL_GBX_MISS_BANK0] = "MBC1 maps another bank at 0x0000",
+    [RL_GBX_MISS_DMA] = "an OAM DMA may meet the bus for the operand bytes",
+    [RL_GBX_MISS_ROM] = "no lifted code at the ROM address",
+    [RL_GBX_MISS_RAM] = "no lifted code for the instruction in RAM",
+    [RL_GBX_MISS_CONTROL] = "a lifted control instruction found another opcode",
+};
+
+const char *rl_gbx_miss_name(int why) { return why >= 0 && why < RL_GBX_MISSES && g_miss_names[why] ? g_miss_names[why] : "unknown"; }
+
+#ifdef RL_GB_LIFTED_ONLY
+/**
+ * @brief The stop at the instruction at pc, opcode op, with no lifted code
+ * to run it for the reason why (enum rl_gbx_miss): writes the stop report
+ * and ends the run.
+ */
+static int gbx_missed(rl_ctx *c, uint16_t pc, uint8_t op, int why)
+{
+    rl_miss_info m;
+    if (!rl_sm83_last_miss(c, &m) || m.target != pc)
+        m = (rl_miss_info){pc, RL_SITE_NONE, RL_MISS_JUMP, 0};
+    char where[32], what[200];
+    if (pc < WINDOW)
+        snprintf(where, sizeof where, "ROM bank 0");
+    else if (pc < WINDOW_END)
+        snprintf(where, sizeof where, "ROM bank %u", G.h ? rlgbd_rom_bank(G.h) : 1u);
+    else
+        snprintf(where, sizeof where, "RAM");
+    snprintf(what, sizeof what, "no lifted code at guest 0x%04x (%s); %s (opcode 0x%02x)", pc, where, rl_gbx_miss_name(why), op);
+    rl_report_stop(c, "missed code", what, &m, NULL, 0);
+    return rl_pend_exit_process(c, RL_EXIT_SOFTWARE);
+}
+#endif
+
+#ifndef RL_GB_LIFTED_ONLY
 static uint64_t seen_hash(uint64_t k)
 {
     k ^= k >> 29;
@@ -218,6 +270,8 @@ static void log_entry(uint16_t pc)
     if (s)
         s->count++;
 }
+#endif
+
 
 const rl_gbx_seen *rl_gbx_seen_get(size_t *n)
 {
@@ -249,7 +303,7 @@ static rl_fn lifted_at(uint16_t pc)
 static rl_fn find(uint16_t pc)
 {
     rl_fn f = lifted_at(pc);
-    return f ? f : interp;
+    return f ? f : unlifted;
 }
 
 static int window_fn(rl_ctx *c, uint8_t *mem) { RL_MUSTTAIL return find(c->pc)(c, mem); }
@@ -298,16 +352,15 @@ static int32_t idu_value(const rl_ctx *c, uint8_t op);
 /**
  * @brief The lifted function for the open instruction at pc in RAM, or NULL;
  * makes the DMG increment unit's bus value when it returns one, as boundary
- * does for lifted ROM code.
+ * does for lifted ROM code. The byte after a CB prefix that an OAM DMA may
+ * hold is fetched on the bus now, its M-cycle, and picks the function.
  */
 static rl_fn ram_enter(rl_ctx *c, uint16_t pc)
 {
     uint32_t i = pc - WINDOW_END;
     if (pc < WINDOW_END || !G.ram_n[i])
         return NULL;
-    if (G.op == 0xCB && !peek_is_bus((uint16_t)(pc + 1)))
-        return NULL;
-    uint16_t key = ram_key(pc);
+    uint16_t key = G.op == 0xCB && !peek_is_bus((uint16_t)(pc + 1)) ? (uint16_t)(0x100u | rl_gb_operand(c, 0)) : ram_key(pc);
     for (uint32_t k = 0; k < G.ram_n[i]; k++)
         if (G.ram[i][k].op == key) {
             if (G.dmg) {
@@ -323,10 +376,110 @@ static rl_fn ram_enter(rl_ctx *c, uint16_t pc)
     return NULL;
 }
 
+int rl_gbx_add_halt_bug(uint32_t bank, uint16_t pc, rl_fn fn)
+{
+    if (!fn)
+        return -1;
+    rl_fn **t;
+    uint32_t i;
+    if (bank == UINT32_MAX) {
+        if (pc >= WINDOW)
+            return -1;
+        t = &G.hb_fixed;
+        i = pc;
+    } else {
+        if (bank >= BANKS || pc < WINDOW || pc >= WINDOW_END)
+            return -1;
+        t = &G.hb[bank];
+        i = pc - WINDOW;
+    }
+    if (!*t) {
+        *t = calloc(WINDOW, sizeof(rl_fn));
+        if (!*t)
+            return -1;
+    }
+    (*t)[i] = fn;
+    return 0;
+}
+
+int rl_gbx_add_live(uint32_t bank, uint16_t pc, uint16_t op, rl_fn fn)
+{
+    uint32_t b = bank == UINT32_MAX ? BANKS : bank;
+    bool edge = pc == WINDOW_END && op >= 0x100;
+    if (!fn || op >= 0x200 || b > BANKS || (pc >= WINDOW_END && !edge) || (b == BANKS) != (pc < WINDOW))
+        return -1;
+    uint32_t i = pc < WINDOW ? pc : pc - WINDOW;
+    if (!G.live[b]) {
+        G.live[b] = calloc(WINDOW + 1, sizeof *G.live[b]);
+        G.live_n[b] = calloc(WINDOW + 1, 1);
+        if (!G.live[b] || !G.live_n[b])
+            return -1;
+    }
+    for (uint32_t k = 0; k < G.live_n[b][i]; k++)
+        if (G.live[b][i][k].op == op)
+            return 0;
+    if (G.live_n[b][i] == UINT8_MAX)
+        return -1;
+    rl_gbx_ram_fn *t = realloc(G.live[b][i], (G.live_n[b][i] + 1u) * sizeof *t);
+    if (!t)
+        return -1;
+    t[G.live_n[b][i]++] = (rl_gbx_ram_fn){.op = op, .fn = fn};
+    G.live[b][i] = t;
+    return 0;
+}
+
+/** @brief The live form with key op (the opcode, plus 0x100 when the fetch left pc) at pc in the ROM mapped now, or NULL. */
+static rl_fn live_at(uint16_t pc, uint16_t op)
+{
+    uint32_t b = pc < WINDOW ? BANKS : rlgbd_rom_bank(G.h);
+    if (b > BANKS || !G.live[b] || (pc < WINDOW && G.mbc1 && rlgbd_rom_bank0(G.h) != 0))
+        return NULL;
+    uint32_t i = pc < WINDOW ? pc : pc - WINDOW;
+    for (uint32_t k = 0; k < G.live_n[b][i]; k++)
+        if (G.live[b][i][k].op == op)
+            return G.live[b][i][k].fn;
+    return NULL;
+}
+
+/**
+ * @brief The HALT-bug form of the open instruction at pc, or NULL: in ROM,
+ * the form lifted for the bank mapped now; in RAM, the lifted RAM instruction
+ * with its opcode at the address before pc, whose operands are read from pc
+ * on (0x1CB for a CB prefix, read again as the second byte); at the first
+ * RAM address, after a HALT at the end of the window, the live form lifted
+ * at the window's last address for the bank mapped now.
+ */
+static rl_fn halt_bug_at(uint16_t pc)
+{
+    if (pc == WINDOW_END)
+        return G.op == 0xCB ? NULL : live_at(pc, 0x100u | G.op);
+    if (pc > WINDOW_END) {
+        uint32_t i = pc - 1u - WINDOW_END;
+        uint16_t key = G.op == 0xCB ? 0x1CB : G.op;
+        for (uint32_t k = 0; k < G.ram_n[i]; k++)
+            if (G.ram[i][k].op == key)
+                return G.ram[i][k].fn;
+        return NULL;
+    }
+    if (pc < WINDOW)
+        return G.hb_fixed && !(G.mbc1 && rlgbd_rom_bank0(G.h) != 0) ? G.hb_fixed[pc] : NULL;
+    if (pc < WINDOW_END) {
+        uint32_t b = rlgbd_rom_bank(G.h);
+        return b < BANKS && G.hb[b] ? G.hb[b][pc - WINDOW] : NULL;
+    }
+    return NULL;
+}
+
 int rl_gbx_add_sled(uint32_t bank, uint16_t start, uint16_t end)
 {
     if (start >= end)
         return 0;
+    if (start >= WINDOW_END) {
+        for (uint32_t a = start; a < end; a++)
+            if (rl_gbx_add_ram((uint16_t)a, 0, sled_fn) != 0)
+                return -1;
+        return 0;
+    }
     if (bank == UINT32_MAX) {
         if (end > WINDOW)
             return -1;
@@ -382,18 +535,27 @@ int rl_gbx_add_unit(const rl_unit *u, uint32_t bank)
     return u->map_count ? rl_fn_maps_register(u->maps, u->map_count) : 0;
 }
 
-/** @brief The dispatch miss: lifted RAM code for the open instruction, else the interpreter. */
+/** @brief The dispatch miss: lifted RAM code for the open instruction, else unlifted. */
 static int miss_fn(rl_ctx *c, uint8_t *mem)
 {
     if (c->pc >= WINDOW_END && c->pc <= 0xFFFF && G.ram_n[c->pc - WINDOW_END])
         RL_MUSTTAIL return ram_fn(c, mem);
-    RL_MUSTTAIL return interp(c, mem);
+    RL_MUSTTAIL return unlifted(c, mem);
 }
 
 int rl_gbx_init(rlgbd *h, const uint8_t *rom, size_t rom_len, bool dmg, bool mbc1)
 {
     for (uint32_t i = 0; i < BANKS; i++)
         free(G.banks[i]);
+    for (uint32_t i = 0; i < BANKS; i++)
+        free(G.hb[i]);
+    for (uint32_t i = 0; i <= BANKS; i++) {
+        for (uint32_t k = 0; G.live[i] && k < WINDOW; k++)
+            free(G.live[i][k]);
+        free(G.live[i]);
+        free(G.live_n[i]);
+    }
+    free(G.hb_fixed);
     for (uint32_t i = 0; i < 0x10000 - WINDOW_END; i++)
         free(G.ram[i]);
     free(G.seen);
@@ -459,6 +621,7 @@ static bool hits_dma(uint16_t a) { return a == 0xFF46; }
 
 static bool pushes_on_dma(uint16_t sp) { return hits_dma((uint16_t)(sp - 1)) || hits_dma((uint16_t)(sp - 2)); }
 
+#ifndef RL_GB_LIFTED_ONLY
 /** @brief Whether the open instruction op at pc may write the OAM DMA register, from the registers in c. */
 static bool may_start_dma(const rl_ctx *c, uint16_t pc, uint8_t op)
 {
@@ -483,22 +646,45 @@ static bool may_start_dma(const rl_ctx *c, uint16_t pc, uint8_t op)
         return (op & 0xC7) == 0xC7 && pushes_on_dma(c->sp);
     }
 }
+#endif
 
 static void dma_started(void) { G.dma_until = rlgbd_now(G.h) + DMA_DOTS; }
 
+/** @brief Loads the registers of c into the library's CPU, at the pc it has. */
+static void push_regs(const rl_ctx *c)
+{
+    rlgbd_regs r;
+    rl_gbx_regs(c, rlgbd_pc(G.h), &r);
+    rlgbd_set_regs(G.h, &r);
+}
+
+/** @brief Runs the open control instruction as the library's control body; -1 when the opcode is not one. */
+static int run_control(rl_ctx *c)
+{
+    push_regs(c);
+    if (rlgbd_control(G.h, G.op) < 0)
+        return -1;
+    G.open = false;
+    pull(c);
+    return 0;
+}
+
+#ifndef RL_GB_LIFTED_ONLY
 /** @brief Runs the open instruction on the library's CPU with the registers of c. */
 static void run_native(rl_ctx *c)
 {
-    rlgbd_regs r;
     bool dma = may_start_dma(c, G.ipc, G.op);
-    rl_gbx_regs(c, rlgbd_pc(G.h), &r);
-    rlgbd_set_regs(G.h, &r);
-    rlgbd_exec_native(G.h, G.op);
+    push_regs(c);
+    if (G.op == 0xCB && G.fetched)
+        rlgbd_exec_native_cb(G.h, G.imm[0]);
+    else
+        rlgbd_exec_native(G.h, G.op);
     G.open = false;
     pull(c);
     if (dma)
         dma_started();
 }
+#endif
 
 static int redirect(rl_ctx *c, uint16_t pc, int why)
 {
@@ -542,7 +728,9 @@ static int native_reason(const rl_ctx *c, uint16_t pc, uint8_t op)
 {
     (void)c;
     if (pc < WINDOW_END && g_len[op] > 1 && rlgbd_now(G.h) < G.dma_until)
-        return RL_GBX_DMA;
+        for (uint32_t i = 1; i < g_len[op]; i++)
+            if (rlgbd_dma_conflict(G.h, (uint16_t)(pc + i)))
+                return RL_GBX_DMA;
     if (pc < WINDOW) {
         if (G.mbc1 && rlgbd_rom_bank0(G.h) != 0)
             return RL_GBX_BANK0;
@@ -583,19 +771,50 @@ static int boundary(rl_ctx *c, uint8_t *mem, uint16_t pc, bool lifted)
             G.off = 4;
             c->time.budget = 0;
             if (lifted) {
-                int why = lpc != (uint16_t)(pc + 1) ? RL_GBX_HALT_BUG : native_reason(c, pc, (uint8_t)op);
+                int why = native_reason(c, pc, (uint8_t)op);
+                bool bug = lpc != (uint16_t)(pc + 1);
+                rl_fn form = NULL;
+                if ((why == RL_GBX_DMA || why == RL_GBX_FETCH) && !bug) {
+                    form = live_at(pc, G.op);
+                    if (form)
+                        why = -1;
+                } else if (why == RL_GBX_FETCH && bug) {
+                    form = live_at(pc, 0x100u | G.op);
+                    if (form)
+                        why = -1;
+                } else if (why < 0 && bug) {
+                    form = halt_bug_at(pc);
+                    if (!form)
+                        why = RL_GBX_HALT_BUG;
+                }
                 if (why >= 0) {
                     G.st.native[why]++;
+#ifdef RL_GB_LIFTED_ONLY
+                    return gbx_missed(c, pc, (uint8_t)op, why);
+#else
                     run_native(c);
                     return MOVED;
+#endif
                 }
-                if (G.dmg && pc < WINDOW_END) {
+                if (G.dmg && (pc < WINDOW_END || form)) {
                     int32_t pre = idu_value(c, (uint8_t)op);
                     if (pre >= 0) {
                         if ((pre & 0xFF00) == 0xFE00)
                             G.st.native[RL_GBX_OAM_BUG]++;
                         rlgbd_idu(G.h, (uint16_t)pre);
                     }
+                }
+                if (form) {
+                    G.form = form;
+                    G.form_pc = pc;
+                    if (bug) {
+                        G.fpc = pc;
+                        G.form_pc = (uint16_t)(pc - 1);
+                        G.st.forms++;
+                    } else {
+                        G.st.live++;
+                    }
+                    return redirect(c, pc, RL_GBX_FORM);
                 }
             }
             return RL_OK;
@@ -751,7 +970,7 @@ static int ram_fn(rl_ctx *c, uint8_t *mem)
     rl_fn f = ram_enter(c, (uint16_t)c->pc);
     if (f)
         RL_MUSTTAIL return f(c, mem);
-    RL_MUSTTAIL return interp(c, mem);
+    RL_MUSTTAIL return unlifted(c, mem);
 }
 
 /**
@@ -785,7 +1004,13 @@ static int sled_fn(rl_ctx *c, uint8_t *mem)
 int rl_gb_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
 {
     uint16_t next = (uint16_t)code;
-    run_native(c);
+    if (run_control(c) != 0) {
+#ifdef RL_GB_LIFTED_ONLY
+        return gbx_missed(c, G.ipc, G.op, RL_GBX_MISS_CONTROL);
+#else
+        run_native(c);
+#endif
+    }
     G.st.traps++;
     if (c->pc != next)
         return redirect(c, c->pc, RL_GBX_TRAP);
@@ -793,6 +1018,18 @@ int rl_gb_trap(rl_ctx *c, uint8_t *mem, uint32_t code)
     return b == MOVED ? redirect(c, c->pc, RL_GBX_NATIVE) : b;
 }
 
+/** @brief An open instruction with no lifted code: the interpreter, or the stop in a build without it. */
+static int unlifted(rl_ctx *c, uint8_t *mem)
+{
+#ifdef RL_GB_LIFTED_ONLY
+    (void)mem;
+    return gbx_missed(c, G.ipc, G.op, G.ipc < WINDOW_END ? RL_GBX_MISS_ROM : RL_GBX_MISS_RAM);
+#else
+    RL_MUSTTAIL return interp(c, mem);
+#endif
+}
+
+#ifndef RL_GB_LIFTED_ONLY
 static bool is_return(uint8_t op) { return op == 0xC9 || op == 0xD9 || op == 0xC0 || op == 0xC8 || op == 0xD0 || op == 0xD8; }
 
 static bool is_call(uint8_t op)
@@ -894,6 +1131,8 @@ static int interp(rl_ctx *c, uint8_t *mem)
     }
 }
 
+#endif
+
 int rl_gbx_run(rl_ctx *c, uint8_t *mem, uint16_t pc)
 {
     bool need = true;
@@ -902,7 +1141,11 @@ int rl_gbx_run(rl_ctx *c, uint8_t *mem, uint16_t pc)
         G.depth = 0;
         rl_pending *p = &rl_common(c)->pend;
         int r = RL_OK;
-        if (need) {
+        rl_fn f = G.form;
+        G.form = NULL;
+        if (f) {
+            c->pc = G.form_pc;
+        } else if (need) {
             r = boundary(c, mem, pc, true);
             if (r == MOVED) {
                 pc = c->pc;
@@ -910,8 +1153,11 @@ int rl_gbx_run(rl_ctx *c, uint8_t *mem, uint16_t pc)
             }
         }
         if (r == RL_OK) {
-            c->pc = pc;
-            r = find(pc)(c, mem);
+            if (!f) {
+                c->pc = pc;
+                f = find(pc);
+            }
+            r = f(c, mem);
         }
         G.cause = RL_GBX_SEEN_DISPATCH;
         if (r == RL_OK) {

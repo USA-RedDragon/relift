@@ -11,11 +11,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use relift_cpu_sm83::{HALF, Mnemonic, decode};
+use relift_cpu_sm83::{HALF, decode};
 use relift_emit::{Function, Insn, Options, Output};
 use relift_gb_analyze::{Loc, Report};
 use relift_guest::{Frontend, LiftFailure};
-use relift_ir::{Block, Next};
+use relift_ir::{Block, Flow, Next};
 
 use crate::frontend::{Gb, device_map};
 
@@ -68,11 +68,148 @@ pub struct Lifted {
     /// sleds, left to dispatch.
     pub filler: usize,
     /// Runs of `nop` past [`FILLER_RUN`] as (unit bank, first address,
-    /// end address), which the runtime runs as one loop.
+    /// end address), which the runtime runs as one loop; [`RAM_UNIT`] for a
+    /// run in RAM (`RamOps::sleds`).
     pub sleds: Vec<(u32, u16, u16)>,
     /// Instructions lifted at RAM addresses as (address, opcode key, host
     /// name), in the units whose bank is [`RAM_UNIT`].
     pub ram: Vec<(u16, u16, String)>,
+    /// ROM instructions lifted with their operands read as they run, as
+    /// (unit bank, address, opcode, host name), in the units whose bank is
+    /// [`LIVE_UNIT`]: see [`lift_live`].
+    pub live: Vec<(u32, u16, u16, String)>,
+    /// The instruction after each lifted `HALT` as the HALT bug runs it, as
+    /// (unit bank, address, host name), in the units whose bank is
+    /// [`HALT_BUG_UNIT`]: see [`halt_bug_bytes`].
+    pub halt_bug: Vec<(u32, u16, String)>,
+}
+
+/// The [`Unit::bank`] of a unit of HALT-bug forms ([`Lifted::halt_bug`]),
+/// which the runtime reaches through its HALT-bug table rather than
+/// dispatch.
+pub const HALT_BUG_UNIT: u32 = u32::MAX - 2;
+
+/// The [`Unit::bank`] of a unit of live ROM instructions
+/// ([`Lifted::live`]), which the runtime reaches through its table of them.
+pub const LIVE_UNIT: u32 = u32::MAX - 3;
+
+/// Lifts the ROM instructions of `live`, each as (location, opcode), with
+/// their operand bytes read as they run, as code in RAM is: while the OAM
+/// DMA holds the bus the CPU fetches the DMA's bytes rather than the ROM's,
+/// so the runtime runs the one lifted for the opcode it fetched. An opcode
+/// plus 0x100 is one fetched without the program counter moving: it is
+/// lifted one byte before its location, as a HALT-bug form is
+/// ([`halt_bug_bytes`]), so its operands are read from the location on;
+/// such a location may be `$8000`, after a `HALT` at the window's end.
+/// The locations and opcodes come from the analysis (`RamOps::live`).
+pub fn lift_live(live: &[(Loc, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
+    let fe = Gb::live();
+    let mut by: BTreeMap<(u32, u16), BTreeSet<u16>> = BTreeMap::new();
+    for &(l, k) in live {
+        let edge = l.addr == 0x8000 && k >= 0x100;
+        if (l.addr < 0x8000 || edge)
+            && k < 0x200
+            && k & 0xFF != 0xCB
+            && (k < 0x100 || l.addr & 0x3FFF != 0 || edge)
+        {
+            let key = if l.addr < 0x4000 {
+                FIXED
+            } else {
+                u32::from(l.bank)
+            };
+            by.entry((key, l.addr)).or_default().insert(k);
+        }
+    }
+    let mut groups: Vec<Vec<Function<'_>>> = Vec::new();
+    let mut lifts = Vec::new();
+    for (&(key, pc), keys) in &by {
+        for (i, &k) in keys.iter().enumerate() {
+            let bytes = [k as u8, 0, 0];
+            let bank = (key != FIXED).then_some(u64::from(key));
+            let entry = live_entry(pc, k);
+            let blocks: Vec<_> = lift_one(&fe, &bytes, u64::from(entry), bank)
+                .into_iter()
+                .filter(|(_, r, _)| r.is_ok())
+                .collect();
+            if blocks.is_empty() {
+                continue;
+            }
+            lifts.push((i * 4 + usize::from(entry & 3), key, pc, k, blocks));
+        }
+    }
+    for (g, key, pc, k, _) in &lifts {
+        let name = live_name(*key, *pc, *k);
+        lifted.live.push((*key, *pc, *k, name));
+        if groups.len() <= *g {
+            groups.resize_with(*g + 1, Vec::new);
+        }
+    }
+    for (g, key, pc, k, blocks) in &lifts {
+        groups[*g].push(Function {
+            entry: u64::from(live_entry(*pc, *k)),
+            name: live_name(*key, *pc, *k),
+            guest_name: None,
+            span: 1,
+            insts: blocks
+                .iter()
+                .filter_map(|(at, r, raw)| {
+                    r.as_ref()
+                        .ok()
+                        .map(|block| (*at, Insn::Lifted { block, raw: *raw }))
+                })
+                .collect(),
+            tables: BTreeMap::new(),
+            pads: BTreeSet::new(),
+        });
+    }
+    for fns in &mut groups {
+        fns.sort_by_key(|f| f.entry);
+    }
+    for (i, fns) in groups.iter().enumerate().filter(|(_, f)| !f.is_empty()) {
+        let symbol = format!("rl_unit_gb_live{i}");
+        let opts = Options {
+            unit_name: format!("live{i}"),
+            unit_symbol: symbol.clone(),
+            io_map: device_map(),
+            regs_in_context: true,
+            image_id,
+            ..Options::default()
+        };
+        let output = relift_emit::emit(&fe, fns, &[], &opts);
+        lifted.units.push(Unit {
+            bank: LIVE_UNIT,
+            symbol,
+            dir: format!("live{i}"),
+            output,
+            functions: fns.len(),
+        });
+    }
+}
+
+fn live_entry(pc: u16, k: u16) -> u16 {
+    if k >= 0x100 { pc - 1 } else { pc }
+}
+
+fn live_name(key: u32, pc: u16, k: u16) -> String {
+    if key == FIXED {
+        format!("gb_live_f_{pc:04x}_{k:02x}")
+    } else {
+        format!("gb_live_b{key:03x}_{pc:04x}_{k:02x}")
+    }
+}
+
+/// The bytes the CPU runs as one instruction at `l`, the address after a
+/// `HALT`, when the HALT bug leaves the program counter on it: the opcode
+/// at `l` is fetched without the program counter moving, so the operand
+/// reads start at `l` again. They are lifted as an instruction one byte
+/// before `l`, whose fetch has moved the program counter to `l`; its
+/// length, relative targets and return address then come out as the
+/// hardware's.
+#[must_use]
+pub fn halt_bug_bytes(rom: &[u8], l: Loc) -> Option<[u8; 3]> {
+    let b = bytes_at(rom, l)?;
+    let op = *b.first()?;
+    Some([op, op, b.get(1).copied().unwrap_or(0xFF)])
 }
 
 /// The [`Unit::bank`] of a unit of instructions lifted at RAM addresses,
@@ -116,8 +253,11 @@ pub fn host_name(l: Loc) -> String {
     }
 }
 
+/// Lifted blocks as (address, block or failure, raw bytes).
+type Blocks = Vec<(u64, Result<Block, LiftFailure>, u64)>;
+
 struct Lifts {
-    blocks: Vec<(u64, Result<Block, LiftFailure>, u64)>,
+    blocks: Blocks,
     span: u64,
 }
 
@@ -212,6 +352,168 @@ fn lift_function(
     }
 }
 
+/// The blocks of one instruction lifted from `bytes` at `pc` with `bank`,
+/// with the continuations its exits name.
+fn lift_one(
+    fe: &Gb,
+    bytes: &[u8],
+    pc: u64,
+    bank: Option<u64>,
+) -> Vec<(u64, Result<Block, LiftFailure>, u64)> {
+    let raw = bytes
+        .iter()
+        .take(3)
+        .fold(0u64, |a, b| (a << 8) | u64::from(*b));
+    let mut out = Vec::new();
+    let mut todo = vec![pc];
+    let mut seen = BTreeSet::new();
+    while let Some(at) = todo.pop() {
+        if !seen.insert(at) {
+            continue;
+        }
+        let r = fe.lift(bytes, at).map(|mut b| {
+            b.bank = bank;
+            b
+        });
+        if let Ok(b) = &r {
+            let targets: Vec<u64> = match b.exit.next {
+                Next::Const(t) => vec![t],
+                Next::Select {
+                    taken, not_taken, ..
+                } => vec![taken, not_taken],
+                Next::Dynamic(_) => Vec::new(),
+            };
+            todo.extend(
+                targets
+                    .into_iter()
+                    .filter(|&t| t >= HALF && t & 0xFFFF == pc & 0xFFFF),
+            );
+        }
+        out.push((at, r, raw));
+    }
+    out.sort_by_key(|(a, ..)| *a);
+    out
+}
+
+/// The HALT-bug forms ([`halt_bug_bytes`]) of the instructions after the
+/// lifted `HALT` instructions of `groups`, and of both bytes after each
+/// `STOP` (a speed switch may end it at either), emitted into units of their own.
+/// Each goes to a unit whose other functions start at least 4 bytes away,
+/// so no function of a unit starts where another one's instruction ends: a
+/// transfer there must go through dispatch.
+fn lift_halt_bug(
+    rom: &[u8],
+    groups: &BTreeMap<u32, Vec<(Loc, Lifts)>>,
+    fe: &Gb,
+    image_id: [u8; 32],
+    lifted: &mut Lifted,
+) {
+    let mut sites = BTreeSet::new();
+    for (&key, list) in groups {
+        for (_, l) in list {
+            for (pc, r, _) in &l.blocks {
+                let Ok(b) = r else { continue };
+                if *pc >= HALF
+                    || !matches!(b.exit.flow, Flow::Trap(code) if code >> 16 == 0x76 || code >> 16 == 0x10)
+                {
+                    continue;
+                }
+                let (key, end) = if *pc < 0x4000 {
+                    (FIXED, 0x4000)
+                } else {
+                    (key, 0x8000)
+                };
+                let stop = matches!(b.exit.flow, Flow::Trap(code) if code >> 16 == 0x10);
+                for k in 1..=if stop { 2 } else { 1 } {
+                    let at = (*pc as u16).wrapping_add(k);
+                    if u32::from(at) < end && (key == FIXED || at >= 0x4000) {
+                        sites.insert((key, at));
+                    }
+                }
+            }
+        }
+    }
+    let mut units: Vec<Vec<(u32, u16, Blocks)>> = Vec::new();
+    for (key, at) in sites {
+        let l = Loc {
+            bank: if key == FIXED { 0 } else { key as u16 },
+            addr: at,
+        };
+        let Some(bytes) = halt_bug_bytes(rom, l) else {
+            continue;
+        };
+        let bank = (key != FIXED).then_some(u64::from(key));
+        let blocks: Vec<_> = lift_one(fe, &bytes, u64::from(at) - 1, bank)
+            .into_iter()
+            .filter(|(_, r, _)| r.is_ok())
+            .collect();
+        if blocks.is_empty() {
+            continue;
+        }
+        let entry = at - 1;
+        let slot = units.iter().position(|u| {
+            u.iter()
+                .all(|(_, a, _)| (i32::from(*a) - 1 - i32::from(entry)).abs() >= 4)
+        });
+        match slot {
+            Some(i) => units[i].push((key, at, blocks)),
+            None => units.push(vec![(key, at, blocks)]),
+        }
+    }
+    for u in &mut units {
+        u.sort_by_key(|(_, at, _)| *at);
+    }
+    for (i, list) in units.iter().enumerate() {
+        let fns: Vec<Function<'_>> = list
+            .iter()
+            .map(|(key, at, blocks)| Function {
+                entry: u64::from(*at) - 1,
+                name: halt_bug_name(*key, *at),
+                guest_name: None,
+                span: 1,
+                insts: blocks
+                    .iter()
+                    .filter_map(|(pc, r, raw)| {
+                        r.as_ref()
+                            .ok()
+                            .map(|block| (*pc, Insn::Lifted { block, raw: *raw }))
+                    })
+                    .collect(),
+                tables: BTreeMap::new(),
+                pads: BTreeSet::new(),
+            })
+            .collect();
+        let symbol = format!("rl_unit_gb_hb{i}");
+        let opts = Options {
+            unit_name: format!("hb{i}"),
+            unit_symbol: symbol.clone(),
+            io_map: device_map(),
+            regs_in_context: true,
+            image_id,
+            ..Options::default()
+        };
+        let output = relift_emit::emit(fe, &fns, &[], &opts);
+        for (key, at, _) in list {
+            lifted.halt_bug.push((*key, *at, halt_bug_name(*key, *at)));
+        }
+        lifted.units.push(Unit {
+            bank: HALT_BUG_UNIT,
+            symbol,
+            dir: format!("hb{i}"),
+            output,
+            functions: fns.len(),
+        });
+    }
+}
+
+fn halt_bug_name(key: u32, at: u16) -> String {
+    if key == FIXED {
+        format!("gb_hb_f_{at:04x}")
+    } else {
+        format!("gb_hb_b{key:03x}_{at:04x}")
+    }
+}
+
 /// Functions in their own bank's unit for the instructions that analysis
 /// functions of other units held there and no function of the bank lifts:
 /// one per bank, entered at its lowest instruction.
@@ -265,8 +567,7 @@ pub fn lift(rom: &[u8], report: &Report, ram: &[(u16, u16)], image_id: [u8; 32])
 /// Functions over every address of the units `keys` (a bank, or [`FIXED`])
 /// that starts an instruction the bytes decode to and no function of the
 /// unit lifts: a superset of the code there, entered at any instruction.
-/// An unused opcode is left out: the device library's CPU runs it, as it
-/// runs one in code that discovery found.
+/// An unused opcode is lifted as the lock the library makes of it.
 fn superset(
     rom: &[u8],
     groups: &BTreeMap<u32, Vec<(Loc, Lifts)>>,
@@ -296,9 +597,6 @@ fn superset(
                 continue;
             };
             let Ok(ins) = decode(bytes) else { continue };
-            if ins.opcode.mnemonic == Mnemonic::Illegal {
-                continue;
-            }
             let len = ins.length();
             if usize::from(addr) + usize::from(len) > usize::from(hi) {
                 continue;
@@ -445,6 +743,7 @@ pub fn lift_superset(
             functions: fns.len(),
         });
     }
+    lift_halt_bug(rom, &groups, &fe, image_id, &mut lifted);
     lift_ram(ram, image_id, &mut lifted);
     lifted
 }
@@ -544,6 +843,55 @@ pub fn read_learned(text: &str) -> Learned {
 /// where another one's instruction ends (up to 3 bytes on): a transfer
 /// there must go through the RAM table, which checks the opcode fetched,
 /// not straight to the function.
+/// The RAM instructions to lift: `ram` (address, opcode key), with every
+/// key at each address where `ram` already holds more than `slot` keys: a
+/// test driver's slot that it fills with each opcode in turn, which the
+/// analysis saw run with many of them. The runtime picks the one lifted for
+/// the opcode it fetches, so an opcode the analysis did not see run there
+/// is still lifted code. An address whose stored values are many but which
+/// no path ran (`RamOps::wide`) is not completed: that is data more often
+/// than code, and 512 functions there cost a build far more than they give.
+#[must_use]
+pub fn complete_ram_slots(ram: &[(u16, u16)], slot: usize) -> Vec<(u16, u16)> {
+    let mut by: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
+    for &(a, k) in ram {
+        by.entry(a).or_default().insert(k);
+    }
+    for ks in by.values_mut() {
+        if ks.len() > slot {
+            ks.extend(0..0x200);
+        }
+    }
+    by.into_iter()
+        .filter(|(a, _)| *a >= 0x8000)
+        .flat_map(|(a, ks)| ks.into_iter().map(move |k| (a, k)))
+        .collect()
+}
+
+/// The HALT-bug forms of the instructions after the `HALT` instructions of
+/// the RAM code `by_pc` (address to opcode keys): the instruction after a
+/// `HALT` at `h` whose opcode key is `k` runs as an instruction at `h` with
+/// that opcode, whose operands are read as it runs from the address after
+/// `h` on ([`halt_bug_bytes`]): the key `k`, or `0x1CB` for a CB-prefixed
+/// one, whose prefix byte is read again as the second byte. That is an
+/// instruction of RAM code like any other, so the runtime finds it in the
+/// RAM table at `h`.
+fn ram_halt_bug_keys(by_pc: &BTreeMap<u16, BTreeSet<u16>>) -> Vec<(u16, u16)> {
+    let mut out = Vec::new();
+    for (&h, keys) in by_pc {
+        if !keys.contains(&0x76) {
+            continue;
+        }
+        let Some(next) = h.checked_add(1).and_then(|n| by_pc.get(&n)) else {
+            continue;
+        };
+        for &k in next {
+            out.push((h, if k >= 0x100 { 0x1CB } else { k }));
+        }
+    }
+    out
+}
+
 fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
     let fe = Gb::new();
     let mut by_pc: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
@@ -551,6 +899,9 @@ fn lift_ram(ram: &[(u16, u16)], image_id: [u8; 32], lifted: &mut Lifted) {
         if pc >= 0x8000 && k < 0x200 {
             by_pc.entry(pc).or_default().insert(k);
         }
+    }
+    for (pc, k) in ram_halt_bug_keys(&by_pc) {
+        by_pc.entry(pc).or_default().insert(k);
     }
     let mut groups: Vec<Vec<(u16, u16, Lifts)>> = Vec::new();
     for (&pc, keys) in &by_pc {
@@ -654,6 +1005,8 @@ pub fn program_c(
     units: &[Unit],
     sleds: &[(u32, u16, u16)],
     ram: &[(u16, u16, String)],
+    halt_bug: &[(u32, u16, String)],
+    live: &[(u32, u16, u16, String)],
     p: &Program<'_>,
 ) -> String {
     let mut t = String::from(
@@ -673,6 +1026,29 @@ pub fn program_c(
         }
         t.push_str("};\n");
     }
+    if !halt_bug.is_empty() {
+        for (_, _, name) in halt_bug {
+            let _ = writeln!(t, "RL_LIFTED({name});");
+        }
+        t.push_str("static const rl_gb_halt_bug halt_bug[] = {\n");
+        for (bank, pc, name) in halt_bug {
+            let _ = writeln!(t, "    {{ UINT32_C({bank:#x}), {pc:#x}u, {name} }},");
+        }
+        t.push_str("};\n");
+    }
+    if !live.is_empty() {
+        for (_, _, _, name) in live {
+            let _ = writeln!(t, "RL_LIFTED({name});");
+        }
+        t.push_str("static const rl_gb_live live[] = {\n");
+        for (bank, pc, k, name) in live {
+            let _ = writeln!(
+                t,
+                "    {{ UINT32_C({bank:#x}), {pc:#x}u, {k:#x}u, {name} }},"
+            );
+        }
+        t.push_str("};\n");
+    }
     if !sleds.is_empty() {
         t.push_str("static const rl_gb_sled sleds[] = {\n");
         for (bank, start, end) in sleds {
@@ -681,7 +1057,8 @@ pub fn program_c(
         t.push_str("};\n");
     }
     t.push_str("static const rl_gb_unit units[] = {\n");
-    for u in units.iter().filter(|u| u.bank != RAM_UNIT) {
+    let listed = |u: &&Unit| u.bank != RAM_UNIT && u.bank != HALT_BUG_UNIT && u.bank != LIVE_UNIT;
+    for u in units.iter().filter(listed) {
         let _ = writeln!(t, "    {{ &{}, UINT32_C({:#x}) }},", u.symbol, u.bank);
     }
     t.push_str("};\nRL_TEXT_BOUNDS_DEFINE()\nextern int relift_info_main(void);\n");
@@ -713,8 +1090,8 @@ pub fn program_c(
     }
     let _ = write!(
         t,
-        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {}, {}, {}, {}u, {}, {}u }};\n    int status = rl_gb_main(&prog, argc, argv);\n{}    return status;\n}}\n",
-        units.iter().filter(|u| u.bank != RAM_UNIT).count(),
+        "    rl_gb_program prog = {{ rl_gb_rom, rl_gb_rom_len, units, {}u, {}, {}, {}, {}, {}, {}u, {}, {}u, {}, {}u, {}, {}u }};\n    int status = rl_gb_main(&prog, argc, argv);\n{}    return status;\n}}\n",
+        units.iter().filter(listed).count(),
         c_string(p.title),
         c_string(p.model),
         if p.entry == Entry::Main {
@@ -727,6 +1104,14 @@ pub fn program_c(
         sleds.len(),
         if ram.is_empty() { "NULL" } else { "ram" },
         ram.len(),
+        if halt_bug.is_empty() {
+            "NULL"
+        } else {
+            "halt_bug"
+        },
+        halt_bug.len(),
+        if live.is_empty() { "NULL" } else { "live" },
+        live.len(),
         match p.entry {
             Entry::Android => "    rl_android_flush();\n",
             Entry::Ios => "    rl_ios_flush();\n",
@@ -826,6 +1211,8 @@ mod tests {
             &l.units,
             &l.sleds,
             &l.ram,
+            &l.halt_bug,
+            &l.live,
             &Program {
                 title: "T",
                 model: "dmg",
@@ -921,7 +1308,7 @@ mod tests {
     }
 
     #[test]
-    fn the_superset_leaves_an_unused_opcode_to_the_device_library() {
+    fn the_superset_lifts_an_unused_opcode_as_the_library_lock() {
         let mut r = rom();
         r[0x300..0x302].copy_from_slice(&[0xD3, 0xC9]);
         let report = relift_gb_analyze::analyze(&r).expect("analyzes");
@@ -932,9 +1319,99 @@ mod tests {
             .iter()
             .map(|f| f.text.as_str())
             .collect();
-        assert!(!c.contains("L_300: {"), "{c}");
+        assert!(c.contains("L_300: {"), "{c}");
+        assert!(c.contains("rl_gb_trap(c, mem, 0xd30301u)"), "{c}");
         assert!(c.contains("L_301: {"), "{c}");
         assert!(!c.contains("rl_undefined"), "{c}");
+    }
+
+    #[test]
+    fn the_instruction_after_halt_is_lifted_as_the_halt_bug_runs_it() {
+        let mut r = rom();
+        r[0x150..0x154].copy_from_slice(&[0x76, 0x3E, 0x07, 0xC9]);
+        let report = relift_gb_analyze::analyze(&r).expect("analyzes");
+        let l = lift(&r, &report, &[], [0; 32]);
+        assert_eq!(l.halt_bug, [(FIXED, 0x151, "gb_hb_f_0151".to_string())]);
+        let hb: String = l
+            .units
+            .iter()
+            .filter(|u| u.bank == HALT_BUG_UNIT)
+            .flat_map(|u| u.output.files.iter().map(|f| f.text.as_str()))
+            .collect();
+        assert!(hb.contains("gb_hb_f_0151"), "{hb}");
+        assert!(hb.contains("0x3e"), "{hb}");
+        assert!(hb.contains("UINT64_C(0x152)"), "{hb}");
+        let prog = program_c(
+            &l.units,
+            &l.sleds,
+            &l.ram,
+            &l.halt_bug,
+            &l.live,
+            &Program {
+                title: "T",
+                model: "dmg",
+                save: "",
+                entry: Entry::Main,
+                learn: "",
+            },
+        );
+        assert!(
+            prog.contains("{ UINT32_C(0xffffffff), 0x151u, gb_hb_f_0151 },"),
+            "{prog}"
+        );
+        assert!(!prog.contains("&rl_unit_gb_hb0"), "{prog}");
+    }
+
+    #[test]
+    fn an_opcode_slot_in_ram_gets_every_key() {
+        let mut ram: Vec<(u16, u16)> = (0..40).map(|k| (0xD820, k)).collect();
+        ram.push((0xC000, 0x3E));
+        let all = complete_ram_slots(&ram, 32);
+        assert_eq!(all.iter().filter(|(a, _)| *a == 0xD820).count(), 0x200);
+        assert_eq!(all.iter().filter(|(a, _)| *a == 0xC000).count(), 1);
+    }
+
+    #[test]
+    fn a_halt_in_ram_code_gets_the_forms_of_what_follows_it() {
+        let mut by_pc: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
+        by_pc.entry(0xC000).or_default().insert(0x76);
+        by_pc.entry(0xC001).or_default().extend([0x3E, 0x1A1]);
+        by_pc.entry(0xC010).or_default().insert(0x3E);
+        assert_eq!(ram_halt_bug_keys(&by_pc), [(0xC000, 0x3E), (0xC000, 0x1CB)]);
+    }
+
+    #[test]
+    fn live_rom_instructions_are_lifted_with_live_operands() {
+        let live = [
+            (Loc::fixed(0x0A2D), 0x00),
+            (
+                Loc {
+                    bank: 3,
+                    addr: 0x4100,
+                },
+                0x3E,
+            ),
+            (Loc::fixed(0x0A2D), 0xCB),
+            (Loc::fixed(0x9000), 0x00),
+            (Loc::fixed(0x1031), 0x13C),
+        ];
+        let mut lifted = Lifted::default();
+        lift_live(&live, [0; 32], &mut lifted);
+        assert_eq!(
+            lifted.live,
+            [
+                (3, 0x4100, 0x3E, "gb_live_b003_4100_3e".to_string()),
+                (FIXED, 0x0A2D, 0x00, "gb_live_f_0a2d_00".to_string()),
+                (FIXED, 0x1031, 0x13C, "gb_live_f_1031_13c".to_string()),
+            ]
+        );
+        let c: String = lifted
+            .units
+            .iter()
+            .filter(|u| u.bank == LIVE_UNIT)
+            .flat_map(|u| u.output.files.iter().map(|f| f.text.as_str()))
+            .collect();
+        assert!(c.contains("rl_gb_operand(c, ((uint8_t)0x0))"), "{c}");
     }
 
     #[test]
@@ -980,6 +1457,8 @@ mod tests {
             &l.units,
             &l.sleds,
             &l.ram,
+            &l.halt_bug,
+            &l.live,
             &Program {
                 title: "T",
                 model: "dmg",
@@ -1004,6 +1483,8 @@ mod tests {
             &l.units,
             &l.sleds,
             &l.ram,
+            &l.halt_bug,
+            &l.live,
             &Program {
                 title: "T\"",
                 model: "cgb",
@@ -1029,6 +1510,8 @@ mod tests {
             &l.units,
             &l.sleds,
             &l.ram,
+            &l.halt_bug,
+            &l.live,
             &Program {
                 title: "T",
                 model: "cgb",
@@ -1052,6 +1535,8 @@ mod tests {
             &l.units,
             &l.sleds,
             &l.ram,
+            &l.halt_bug,
+            &l.live,
             &Program {
                 title: "T",
                 model: "cgb",

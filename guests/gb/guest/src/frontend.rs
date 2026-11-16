@@ -4,8 +4,9 @@
 //! instruction boundary, so lifted code makes every access through the
 //! runtime (`rl_gb_io_read`, `rl_gb_io_write`), ends every block in a sync
 //! point that closes the instruction and opens the next one
-//! (`rl_gb_sync`), and leaves `EI`, `DI`, `HALT` and `STOP` to the
-//! library's own CPU (`rl_gb_trap`). The sync call carries what the
+//! (`rl_gb_sync`), and leaves `EI`, `DI`, `HALT`, `STOP` and the unused
+//! opcodes, which act on the CPU's own state at the instruction boundary
+//! the library runs, to the library's control instructions (`rl_gb_trap`). The sync call carries what the
 //! runtime checks the host frames against: the kind of transfer, the
 //! return address of a call, and the bank a direct transfer into the
 //! switchable window assumes.
@@ -39,14 +40,23 @@ pub const SYNC_RET_SHIFT: u32 = 16;
 /// lifted instruction by the opcode it fetched.
 pub const RAM: u64 = 0x8000;
 
-/// The opcodes the library's CPU runs through `rl_gb_trap`.
+/// The opcodes the library runs through `rl_gb_trap` besides the unused
+/// ones ([`is_control`]).
 pub const NATIVE: [u8; 4] = [0xF3, 0xFB, 0x76, 0x10];
+
+/// Whether the library runs `op` through `rl_gb_trap`: `EI`, `DI`, `HALT`,
+/// `STOP`, or an unused opcode, which locks the CPU.
+#[must_use]
+pub fn is_control(op: u8) -> bool {
+    NATIVE.contains(&op) || decode(&[op, 0, 0]).is_ok_and(|i| i.opcode.is_illegal())
+}
 
 /// The exact-mode frontend.
 #[derive(Clone, Debug)]
 pub struct Gb {
     inner: Sm83,
     window: BTreeSet<(u64, u64)>,
+    live: bool,
 }
 
 impl Default for Gb {
@@ -106,6 +116,19 @@ impl Gb {
                 sync: SyncPolicy::Every,
             },
             window,
+            live: false,
+        }
+    }
+
+    /// The frontend that lifts code at any address as code in RAM is
+    /// lifted: the operand bytes read as it runs (`rl_gb_operand`), for
+    /// ROM addresses where the CPU may fetch other bytes than the ROM's
+    /// (a bus the OAM DMA holds).
+    #[must_use]
+    pub fn live() -> Gb {
+        Gb {
+            live: true,
+            ..Gb::new()
         }
     }
 
@@ -148,11 +171,11 @@ impl Frontend for Gb {
     fn lift(&self, bytes: &[u8], pc: u64) -> Result<Block, LiftFailure> {
         if pc < HALF
             && let Some(&op) = bytes.first()
-            && NATIVE.contains(&op)
+            && is_control(op)
         {
             return Gb::native(bytes, pc);
         }
-        let mut b = if pc & 0xFFFF >= RAM {
+        let mut b = if self.live || pc & 0xFFFF >= RAM {
             let opts = Options {
                 map: self.inner.map.clone(),
                 sync: self.inner.sync,
@@ -273,6 +296,13 @@ mod tests {
                 Flow::Trap((u32::from(bytes[0]) << 16) | (0x150 + len) as u32)
             );
         }
+    }
+
+    #[test]
+    fn an_unused_opcode_locks_the_cpu_in_the_library() {
+        let b = Gb::new().lift(&[0xD3], 0x150).expect("lifts");
+        assert!(b.insts.is_empty());
+        assert_eq!(b.exit.flow, Flow::Trap((0xD3 << 16) | 0x151));
     }
 
     #[test]

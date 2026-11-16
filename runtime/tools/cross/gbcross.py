@@ -217,7 +217,7 @@ def device_library(args, tool, env):
         return os.path.abspath(args.device_library)
     manifest = os.path.join(ROOT, "guests", "gb", "devices", "Cargo.toml")
     target_dir = os.path.join(args.work, "devlib")
-    cmd = ["cargo", "build", "--release", "--locked", "--quiet", "--manifest-path", manifest, "--target", tool.target["rust"]]
+    cmd = ["cargo", "build", "--release", "--locked", "--quiet", "--no-default-features", "--manifest-path", manifest, "--target", tool.target["rust"]]
     e = dict(env, CARGO_TARGET_DIR=target_dir)
     if args.rust_toolchain:
         e["RUSTUP_TOOLCHAIN"] = args.rust_toolchain
@@ -319,7 +319,7 @@ def adb_run(exe, work, serial, gba=None):
             r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./game {' '.join(GBA_ARGS)}; echo exit=$?"])
             print(r.stdout + r.stderr)
             return "exit=0" in r.stdout and gba_report(r.stdout) == gba
-        r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./game --case case.txt --model dmg --check --stats; echo exit=$?"])
+        r = run(adb + ["shell", f"cd {d} && RELIFT_VIDEO=headless HOME={d} ./game --case case.txt --model dmg --stats; echo exit=$?"])
         print(r.stdout + r.stderr)
         return "relift-gb: pass" in r.stdout and "exit=0" in r.stdout
     finally:
@@ -339,7 +339,7 @@ def wine_run(exe, work, gba=None):
     with open(case, "w") as f:
         f.write("protocol=mooneye\nframes=0xf\nmarker=0x40\n")
     env = dict(os.environ, RELIFT_VIDEO="headless", WINEDEBUG="-all", WINEPREFIX=os.path.join(work, "wineprefix"))
-    r = run([wine, exe, "--case", case, "--model", "dmg", "--check", "--stats"], env=env)
+    r = run([wine, exe, "--case", case, "--model", "dmg", "--stats"], env=env)
     print(r.stdout + r.stderr)
     return r.returncode == 0 and "relift-gb: pass" in r.stdout
 
@@ -352,7 +352,7 @@ def host_run(exe, work, gba=None):
     case = os.path.join(work, "case.txt")
     with open(case, "w") as f:
         f.write("protocol=mooneye\nframes=0xf\nmarker=0x40\n")
-    r = run([exe, "--case", case, "--model", "dmg", "--check", "--stats"], env=dict(os.environ, RELIFT_VIDEO="headless"))
+    r = run([exe, "--case", case, "--model", "dmg", "--stats"], env=dict(os.environ, RELIFT_VIDEO="headless"))
     print(r.stdout + r.stderr)
     return r.returncode == 0 and "relift-gb: pass" in r.stdout
 

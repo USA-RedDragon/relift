@@ -18,21 +18,42 @@
 enum rl_gbx_redirect {
     RL_GBX_RET = 0,     /**< a return went elsewhere than its call returns to */
     RL_GBX_BANK = 1,    /**< a direct transfer into the window found another bank mapped */
-    RL_GBX_TRAP = 2,    /**< an instruction of the library's CPU left the lifted path (STOP) */
+    RL_GBX_TRAP = 2,    /**< a control instruction left the lifted path (STOP, HALT with the HALT bug) */
     RL_GBX_NATIVE = 3,  /**< an instruction ran on the library's CPU at its boundary */
     RL_GBX_DEPTH = 4,   /**< the host frames reached their bound */
-    RL_GBX_REDIRECTS = 5
+    RL_GBX_FORM = 5,    /**< the open instruction runs as its lifted HALT-bug or live form */
+    RL_GBX_REDIRECTS = 6
 };
 
 /** @brief Why an instruction ran on the library's CPU at its boundary. */
 enum rl_gbx_native {
-    RL_GBX_HALT_BUG = 0, /**< the fetch after HALT did not advance pc */
+    RL_GBX_HALT_BUG = 0, /**< the fetch after HALT did not advance pc, and no lifted HALT-bug form fits */
     RL_GBX_OAM_BUG = 1,  /**< not run natively: counts lifted INC rr, DEC rr and PUSH on a DMG whose increment unit puts an OAM address on the bus */
     RL_GBX_FETCH = 2,    /**< the fetched opcode is not the ROM byte the code was lifted from */
     RL_GBX_BANK0 = 3,    /**< MBC1 maps another bank at 0x0000 */
-    RL_GBX_DMA = 4,      /**< operand bytes fetched while an OAM DMA may hold the bus, so they may not be the ROM's */
+    RL_GBX_DMA = 4,      /**< operand bytes fetched while an OAM DMA may meet the bus, so they may not be the ROM's */
     RL_GBX_NATIVES = 5
 };
+
+/**
+ * @brief Why the run met an instruction with no lifted code; a build without
+ * the interpreter (RL_GB_LIFTED_ONLY, a release build) stops there. The
+ * first values are the enum rl_gbx_native reasons the instruction would have
+ * run on the library's CPU for.
+ */
+enum rl_gbx_miss {
+    RL_GBX_MISS_HALT_BUG = RL_GBX_HALT_BUG, /**< the HALT bug ran an instruction with no lifted HALT-bug form */
+    RL_GBX_MISS_FETCH = RL_GBX_FETCH,       /**< the opcode fetched is not the ROM byte the code was lifted from */
+    RL_GBX_MISS_BANK0 = RL_GBX_BANK0,       /**< MBC1 maps another bank at 0x0000 */
+    RL_GBX_MISS_DMA = RL_GBX_DMA,           /**< an OAM DMA may meet the bus for the instruction's operand bytes */
+    RL_GBX_MISS_ROM = RL_GBX_NATIVES,       /**< no lifted code at the ROM address */
+    RL_GBX_MISS_RAM,                        /**< no lifted code for the instruction at the RAM address */
+    RL_GBX_MISS_CONTROL,                    /**< a lifted control instruction found another opcode */
+    RL_GBX_MISSES
+};
+
+/** @brief The name of a enum rl_gbx_miss reason, for reports. */
+const char *rl_gbx_miss_name(int why);
 
 /** @brief Where interpreted code ran. */
 enum rl_gbx_region { RL_GBX_ROM = 0, RL_GBX_RAM = 1, RL_GBX_REGIONS = 2 };
@@ -40,7 +61,9 @@ enum rl_gbx_region { RL_GBX_ROM = 0, RL_GBX_RAM = 1, RL_GBX_REGIONS = 2 };
 /** @brief Counters of one run. */
 typedef struct rl_gbx_stats {
     uint64_t lifted;                       /**< instructions run by lifted code */
-    uint64_t traps;                        /**< instructions lifted code left to the library's CPU (EI, DI, HALT, STOP) */
+    uint64_t traps;                        /**< control instructions lifted code left to the library (EI, DI, HALT, STOP, unused opcodes) */
+    uint64_t forms;                        /**< instructions run as their lifted HALT-bug form */
+    uint64_t live;                         /**< ROM instructions run as their live form, fetched from a bus the OAM DMA held */
     uint64_t sled;                         /**< of lifted, nop instructions run by a sled loop */
     uint64_t steps;                        /**< boundaries */
     uint64_t irqs;                         /**< interrupt entries */
@@ -76,6 +99,23 @@ typedef struct rl_gbx_ram_fn {
  */
 int rl_gbx_add_ram(uint16_t pc, uint16_t op, rl_fn fn);
 
+/**
+ * @brief Registers fn as the HALT-bug form of the instruction at pc of the
+ * window bank bank (UINT32_MAX for the fixed window): what the boundary runs
+ * when the opcode there was fetched with pc left on it. Returns 0 or -1.
+ */
+int rl_gbx_add_halt_bug(uint32_t bank, uint16_t pc, rl_fn fn);
+
+/**
+ * @brief Registers fn as the instruction with opcode op at pc of the window
+ * bank bank (UINT32_MAX for the fixed window) lifted with its operands read
+ * as it runs, for when the CPU fetched op there from a bus the OAM DMA held
+ * or a speed switch left; op plus 0x100 for a fetch that did not move the
+ * program counter, lifted at pc - 1 (pc may then be 0x8000, after a HALT or
+ * STOP at the window's end). Returns 0 or -1.
+ */
+int rl_gbx_add_live(uint32_t bank, uint16_t pc, uint16_t op, rl_fn fn);
+
 /** @brief The key of a rl_gbx_seen: kind, the ROM bank mapped in the window (0 elsewhere) and pc. */
 #define RL_GBX_SEEN_KEY(kind, bank, pc) ((uint64_t)(kind) << 32 | (uint64_t)(bank) << 16 | (uint64_t)(pc))
 
@@ -109,7 +149,8 @@ int rl_gbx_add_unit(const rl_unit *u, uint32_t bank);
 /**
  * @brief Registers [start, end) of the window bank bank (UINT32_MAX for the
  * fixed window) as a run of nop instructions: dispatch there runs each one
- * at its own boundary in one loop, where no lifted function is. Call after
+ * at its own boundary in one loop, where no lifted function is. A run at RAM
+ * addresses (bank ignored) is the instruction for opcode 0 there. Call after
  * the units. Returns 0 or -1.
  */
 int rl_gbx_add_sled(uint32_t bank, uint16_t start, uint16_t end);

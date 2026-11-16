@@ -49,8 +49,8 @@ fn main() -> ExitCode {
         Command::Import { dump, update } => {
             relift::import::run(&settings, dump, update.as_deref(), &mut ui)
         }
-        Command::Build { target, mods } => {
-            relift::build::run_build(&settings, target, mods, &mut ui)
+        Command::Build { target, mods, dev } => {
+            relift::build::run_build(&settings, target, mods, *dev, &mut ui)
         }
         Command::Push { target, device } => {
             relift::push::run_push(&settings, target, device.as_deref(), &mut ui)

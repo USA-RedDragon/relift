@@ -1863,8 +1863,14 @@ pub fn run_build(
     settings: &Settings,
     targets: &[String],
     mods: &[PathBuf],
+    dev: bool,
     ui: &mut Ui,
 ) -> Result<(), BoxError> {
+    if dev && !crate::gb::is_project() {
+        return Err(
+            "--dev is for a Game Boy project; `relift run` makes the dev build of others".into(),
+        );
+    }
     let handheld = if crate::gb::is_project() {
         Some("Game Boy")
     } else if crate::gba::is_project() {
@@ -1881,7 +1887,7 @@ pub fn run_build(
             None => None,
         };
         let built = if crate::gb::is_project() {
-            crate::gb::build(settings, mods, true, target, ui)?
+            crate::gb::build(settings, mods, !dev, target, ui)?
         } else {
             crate::gba::build(settings, mods, true, target, ui)?
         };
