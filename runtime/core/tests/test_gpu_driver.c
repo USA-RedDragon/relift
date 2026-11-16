@@ -8,6 +8,7 @@
 
 #include <relift/settings.h>
 
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,11 +48,17 @@ static void make_root(void)
     put("nometa", "vulkan.x.so", "x");
 }
 
+static int remove_one(const char *path, const struct stat *st, int flag, struct FTW *ftw)
+{
+    (void)st;
+    (void)flag;
+    (void)ftw;
+    return remove(path);
+}
+
 static void remove_root(void)
 {
-    char cmd[700];
-    snprintf(cmd, sizeof cmd, "rm -rf '%s'", g_root);
-    if (system(cmd) != 0)
+    if (nftw(g_root, remove_one, 16, FTW_DEPTH | FTW_PHYS) != 0)
         fprintf(stderr, "could not remove %s\n", g_root);
 }
 
