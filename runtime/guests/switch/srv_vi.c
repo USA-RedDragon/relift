@@ -34,6 +34,7 @@ static vi_clock vsync_clock;
 static bool clock_ready;
 static bool vsync_running;
 static bool vsync_quit;
+static void *vsync_timer_h;
 
 typedef struct disp_state {
     int type;
@@ -59,6 +60,8 @@ void vi_get_resolution(uint32_t *w, uint32_t *h)
 
 static int64_t mono_ns(void)
 {
+    if (hos_fixed())
+        return (int64_t)hos_clock_ns();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
@@ -67,7 +70,7 @@ static int64_t mono_ns(void)
 static void clock_start(void)
 {
     if (!clock_ready) {
-        vi_clock_init(&vsync_clock, mono_ns(), rl_setting_bool("vi.follow_display"));
+        vi_clock_init(&vsync_clock, mono_ns(), !hos_fixed() && rl_setting_bool("vi.follow_display"));
         clock_ready = true;
     }
 }
@@ -83,6 +86,8 @@ int64_t vi_vsync_after(int64_t t)
 
 void vi_host_flip(int64_t t)
 {
+    if (hos_fixed())
+        return;
     pthread_mutex_lock(&clock_lock);
     clock_start();
     int64_t shift = vi_clock_flip(&vsync_clock, t);
@@ -122,13 +127,29 @@ static void *vsync_main(void *arg)
     }
 }
 
+static void vsync_timer(void *ctx)
+{
+    (void)ctx;
+    pthread_mutex_lock(&vsync_lock);
+    hos_revent *e = vsync_ev;
+    if (e)
+        hos_kobj_ref(&e->obj);
+    pthread_mutex_unlock(&vsync_lock);
+    if (e) {
+        rl_hos_event_signal(e);
+        hos_kobj_unref(&e->obj);
+    }
+}
+
 hos_revent *vi_vsync_event(bool start)
 {
     pthread_mutex_lock(&vsync_lock);
     if (!vsync_ev)
         vsync_ev = rl_hos_event_create();
     hos_revent *e = vsync_ev;
-    if (start && !vsync_running && !vsync_quit && e) {
+    if (start && hos_fixed() && !vsync_timer_h && !vsync_quit && e) {
+        vsync_timer_h = hos_fs_every((uint64_t)vi_vsync_after(mono_ns()), VI_VSYNC_NS, vsync_timer, NULL);
+    } else if (start && !hos_fixed() && !vsync_running && !vsync_quit && e) {
         int rc = pthread_create(&vsync_thread, NULL, vsync_main, NULL);
         if (rc == 0) {
             vsync_running = true;
@@ -154,7 +175,10 @@ void rl_vi_stop(void)
     vsync_quit = true;
     bool join = vsync_running;
     vsync_running = false;
+    void *timer = vsync_timer_h;
+    vsync_timer_h = NULL;
     pthread_mutex_unlock(&vsync_lock);
+    hos_fs_cancel(timer);
     if (join)
         pthread_join(vsync_thread, NULL);
     vi_layers_deactivate();

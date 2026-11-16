@@ -30,6 +30,8 @@ static uint64_t frames_queued;
 
 static int64_t now_ns(void)
 {
+    if (hos_fixed())
+        return (int64_t)hos_clock_ns();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;

@@ -512,6 +512,8 @@ void vkf_queue_pull_leave(vkf_call *k);
 void vkf_wait_enter(vkf_call *k, uint64_t timeout);
 /** @brief Ends vkf_wait_enter: waits for the core again. Call with no host lock held. */
 void vkf_wait_return(vkf_call *k);
+/** @brief Fixed step: waits until host queue q has finished its work (fns: the device's), so completions the guest can poll come at fixed points. */
+void vkf_settle(const vkf_fns *fns, VkQueue q);
 
 /** @brief Guest stack room for a callback's data: pushes go down from sp and stay at or above lim. */
 typedef struct vkf_gstack {

@@ -162,6 +162,12 @@ void vkf_queue_pull_leave(vkf_call *k)
     vkf_queue_unlock(k);
 }
 
+void vkf_settle(const vkf_fns *fns, VkQueue q)
+{
+    if (hos_fixed() && q)
+        VKF_FN(fns, vkQueueWaitIdle)(q);
+}
+
 void vkf_wait_enter(vkf_call *k, uint64_t timeout)
 {
     if (!timeout || k->left)

@@ -422,6 +422,8 @@ int vkh_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
     VkResult r = VKF_FN(k.fns, vkQueueSubmit)(q, n, si, (VkFence)(uintptr_t)c->x[3]);
     if (r >= 0 && (used.n || d->wdead))
         track(&k, queue_device(&k), d, q, &used);
+    if (r >= 0)
+        vkf_settle(k.fns, q);
     vkf_queue_unlock(&k);
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueueSubmit, r);
     return vkf_end(&k);
@@ -454,6 +456,8 @@ int vkh_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
     VkResult r = fn(q, n, si, (VkFence)(uintptr_t)c->x[3]);
     if (r >= 0 && (used.n || d->wdead))
         track(&k, queue_device(&k), d, q, &used);
+    if (r >= 0)
+        vkf_settle(k.fns, q);
     vkf_queue_unlock(&k);
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueueSubmit2, r);
     return vkf_end(&k);

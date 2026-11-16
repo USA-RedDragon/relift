@@ -132,6 +132,8 @@ static vkf_swap *swap_of(uint64_t id, const vkf_obj *dobj)
 
 static int64_t now_ns(void)
 {
+    if (hos_fixed())
+        return (int64_t)hos_clock_ns();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec;
@@ -967,8 +969,12 @@ static VkResult swap_acquire(vkf_swap *s, uint64_t timeout, VkSemaphore sem, VkF
             }
             int64_t d = s->free_at[i] - now < left ? s->free_at[i] - now : left;
             pthread_mutex_unlock(&s->lock);
-            struct timespec ts = { (time_t)(d / 1000000000ll), (long)(d % 1000000000ll) };
-            nanosleep(&ts, NULL);
+            if (hos_fixed()) {
+                hos_sleep_thread(d);
+            } else {
+                struct timespec ts = { (time_t)(d / 1000000000ll), (long)(d % 1000000000ll) };
+                nanosleep(&ts, NULL);
+            }
             slept += now_ns() - now;
             pthread_mutex_lock(&s->lock);
             continue;
@@ -1043,6 +1049,8 @@ static VkResult acquire_signal(vkf_call *k, const vkf_swap *s, VkSemaphore sem, 
     };
     vkf_queue_lock(k);
     VkResult r = DFN(s, vkQueueSubmit)(q, 1, &si, fence);
+    if (r >= 0)
+        vkf_settle(s->fns, q);
     vkf_queue_unlock(k);
     return r;
 }
@@ -1408,6 +1416,7 @@ static VkResult swap_present(vkf_swap *s, const vkf_dev *d, VkQueue q, const VkS
     r = s->offscreen ? VK_SUCCESS : DFN(s, vkQueuePresentKHR)(q, &pi);
     if (!s->offscreen && r >= 0)
         vkf_flip_presented(d, s->dev, s->host, s->present_id);
+    vkf_settle(s->fns, q);
     if (t_s)
         vi_trace('H', (uint64_t)(t_h - t_s), (uint64_t)(t_x - t_h), (uint64_t)(vi_trace_now() - t_x));
     show(s, i);
