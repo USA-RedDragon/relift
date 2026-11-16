@@ -860,6 +860,31 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_after_a_sync_takes_the_flag_from_before_the_sync() {
+        let mut r = rom();
+        let prog = [0xAF, 0xFB, 0xE0, 0x0F, 0x28, 0xFE, 0x18, 0xFE];
+        r[0x150..0x150 + prog.len()].copy_from_slice(&prog);
+        let report = relift_gb_analyze::analyze(&r).expect("analyzes");
+        let l = lift(&r, &report, &[], [0; 32]);
+        let c: String = l.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        let start = c.find("L_154: {").expect("the jr z block");
+        let body = &c[start..start + c[start..].find("\n}\n").expect("its end")];
+        let sync =
+            body.find("rl_gb_sync(c, mem, (").expect("a sync") + "rl_gb_sync(c, mem, (".len();
+        let cond = &body[sync..sync + body[sync..].find(' ').expect("a condition")];
+        assert!(cond.starts_with('v'), "{body}");
+        assert!(
+            body.contains(&format!("if ({cond}) {{ goto L_154; }}")),
+            "{body}"
+        );
+    }
+
+    #[test]
     fn a_seen_root_at_an_illegal_opcode_is_no_function() {
         let mut r = rom();
         r[0x300] = 0xD3;

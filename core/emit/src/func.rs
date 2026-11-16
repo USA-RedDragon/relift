@@ -943,7 +943,19 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     let mut s = String::new();
     let mut sets = Vec::new();
     let vec = vectors(b, !cx.in_context);
-    let inl = inlined(b, &vec);
+    let mut inl = inlined(b, &vec);
+    // The sync may run an interrupt handler, which changes the registers:
+    // the exit takes the register as it was before the sync.
+    if cx.clock.is_some() && matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)) {
+        let target = match b.exit.next {
+            Next::Select { cond, .. } => Some(cond),
+            Next::Dynamic(v) => Some(v),
+            Next::Const(_) => None,
+        };
+        if let Some(v) = target.filter(|v| matches!(b.insts[v.index()].op, Op::Get(_))) {
+            inl[v.index()] = None;
+        }
+    }
     let mut zero: Vec<Reg> = Vec::new();
     let val = |v: Value| inl[v.index()].clone().unwrap_or_else(|| val(v));
     for (i, inst) in b.insts.iter().enumerate() {
