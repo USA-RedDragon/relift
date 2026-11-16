@@ -1680,7 +1680,7 @@ fn word_layout_ram_takes_bytes_at_xor_3_halves_at_xor_2_and_words_as_they_are() 
 
 #[test]
 fn a_return_goes_to_the_caller_only_at_the_link_value_of_entry() {
-    let code = [word(0x04, 0, 5), word(0x03, 0, 0)];
+    let code = [word(0x04, 0, 5), word(0x0a, 3, 1), word(0x03, 0, 0)];
     let blocks = lift_all(&code, 0x100);
     let out = emit(
         &LINKED,
@@ -1694,7 +1694,7 @@ fn a_return_goes_to_the_caller_only_at_the_link_value_of_entry() {
         "{s}"
     );
     assert!(
-        s.contains("    uint64_t rl_to = (uint64_t)r3;\n    c->x[0] = r0;\n    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return rl_ret_far(c, rl_to, UINT64_C(0x104));"),
+        s.contains("    uint64_t rl_to = (uint64_t)r3;\n    c->x[0] = r0; c->x[3] = r3;\n    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return rl_ret_far(c, rl_to, UINT64_C(0x108));"),
         "{s}"
     );
     let plain = emit(&Toy, &[function(0x100, &blocks)], &[], &Options::default());
@@ -1735,7 +1735,7 @@ fn split_pieces_carry_the_expected_return_address_through_the_context() {
     let code = [
         word(0x04, 0, 5),
         branch(0x07, 1, 2),
-        word(0x05, 0, 1),
+        word(0x05, 3, 1),
         word(0x03, 0, 0),
     ];
     let blocks = lift_all(&code, 0x100);
@@ -1760,4 +1760,57 @@ fn split_pieces_carry_the_expected_return_address_through_the_context() {
         "{all}"
     );
     assert!(all.contains("if (RL_LIKELY(rl_to == rl_ra))"), "{all}");
+}
+
+#[test]
+fn a_return_of_the_unchanged_entry_link_value_needs_no_check() {
+    let code = [
+        word(0x09, 0, 0xffff),
+        branch(0x07, 0, 2),
+        branch(0x01, 0, -2),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let out = emit(
+        &LINKED,
+        &[function(0x100, &blocks)],
+        &[],
+        &Options::default(),
+    );
+    let s = shard(&out);
+    assert!(!s.contains("rl_ra"), "{s}");
+    assert!(s.contains("    c->x[0] = r0;\n    return RL_OK;\n"), "{s}");
+}
+
+#[test]
+fn a_return_after_a_call_or_a_write_on_any_path_keeps_its_check() {
+    let code = [
+        branch(0x02, 0, 2),
+        word(0x03, 0, 0),
+        word(0x03, 0, 0),
+        branch(0x07, 1, 2),
+        word(0x04, 3, 0x40),
+        word(0x03, 0, 0),
+    ];
+    let blocks = lift_all(&code, 0x100);
+    let fns = [
+        function(0x100, &blocks[0..2]),
+        function(0x108, &blocks[2..3]),
+        function(0x10c, &blocks[3..6]),
+    ];
+    let out = emit(&LINKED, &fns, &[], &Options::default());
+    let s = shard(&out);
+    let body = |name: &str| {
+        let f = &s[s.find(&format!("RL_TEXT RL_LIFTED({name})")).expect(name)..];
+        f[..f.find("\n}\n\n").unwrap_or(f.len())].to_string()
+    };
+    assert!(
+        body("F_100").contains("return rl_ret_far(c, rl_to, UINT64_C(0x104));"),
+        "{s}"
+    );
+    assert!(!body("F_108").contains("rl_ra"), "{s}");
+    assert!(
+        body("F_10c").contains("return rl_ret_far(c, rl_to, UINT64_C(0x114));"),
+        "{s}"
+    );
 }

@@ -104,6 +104,8 @@ struct Ctx<'a> {
     /// transfer must check the link register against `rl_ra` (it may have
     /// changed since entry).
     link: Option<(ReturnLink, bool)>,
+    /// The returns that need no check ([`entry_link_returns`]).
+    plain: &'a BTreeSet<u64>,
 }
 
 /// The C local holding whether hoisted guard register `r` is nonzero.
@@ -430,6 +432,84 @@ fn resume_points(f: &Function<'_>, targets: &Targets<'_>) -> BTreeSet<u64> {
         .collect()
 }
 
+/// The returns of `f` whose target is, by register dataflow, the link
+/// register's value at the function's entry: on every path from the entry
+/// no instruction writes it (no `Set`, call or trap), no other entry (a
+/// landing pad, a resume point, every instruction under `anywhere`, the
+/// instruction after one that does not lift) reaches the return, and the
+/// return's target is the block's `Get` of it before any `Set`. Such a
+/// return goes where the C caller resumes, so it needs no check.
+fn entry_link_returns(
+    f: &Function<'_>,
+    targets: &Targets<'_>,
+    blocks: &BTreeMap<u64, Block>,
+    resumes: &BTreeSet<u64>,
+    link: Reg,
+    anywhere: bool,
+) -> BTreeSet<u64> {
+    if anywhere {
+        return BTreeSet::new();
+    }
+    let pcs: Vec<u64> = f.insts.keys().copied().collect();
+    let mut unknown: BTreeSet<u64> = resumes.clone();
+    let mut preds: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for (k, &pc) in pcs.iter().enumerate() {
+        let b = blocks.get(&pc);
+        if b.is_none() {
+            unknown.extend(pcs.get(k + 1));
+        }
+        for t in successors(f, pc, b) {
+            if inside(f, targets, t) {
+                preds.entry(t).or_default().push(pc);
+            }
+        }
+    }
+    let sets = |insts: &[relift_ir::Inst]| {
+        insts
+            .iter()
+            .any(|i| matches!(i.op, Op::Set(r, _) if r == link))
+    };
+    let kills =
+        |b: &Block| matches!(b.exit.flow, Flow::Call { .. } | Flow::Trap(_)) || sets(&b.insts);
+    let mut kept: BTreeSet<u64> = pcs
+        .iter()
+        .copied()
+        .filter(|pc| !unknown.contains(pc))
+        .collect();
+    loop {
+        let before = kept.len();
+        let now: BTreeSet<u64> = kept
+            .iter()
+            .copied()
+            .filter(|pc| {
+                let from = preds.get(pc).map_or(&[][..], Vec::as_slice);
+                (*pc == f.entry || !from.is_empty())
+                    && from
+                        .iter()
+                        .all(|p| kept.contains(p) && blocks.get(p).is_some_and(|b| !kills(b)))
+            })
+            .collect();
+        kept = now;
+        if kept.len() == before {
+            break;
+        }
+    }
+    kept.into_iter()
+        .filter(|pc| {
+            let Some(b) = blocks.get(pc) else {
+                return false;
+            };
+            let (Flow::Return, Next::Dynamic(v)) = (b.exit.flow, b.exit.next) else {
+                return false;
+            };
+            b.insts
+                .get(v.index())
+                .is_some_and(|i| i.op == Op::Get(link))
+                && !sets(&b.insts[..v.index()])
+        })
+        .collect()
+}
+
 /// The constant addresses the instruction at `pc` may continue at.
 fn successors(f: &Function<'_>, pc: u64, b: Option<&Block>) -> Vec<u64> {
     let Some(b) = b else {
@@ -483,12 +563,16 @@ pub(crate) fn emit_function(
     let blocks = drop_dead_sets(fe, f, targets, blocks);
     let all: Vec<u64> = f.insts.keys().copied().collect();
     let shape = Shape::of(fe);
+    let plain = fe.return_link().map_or_else(BTreeSet::new, |l| {
+        entry_link_returns(f, targets, &blocks, &resumes, l.reg, anywhere)
+    });
     let env = Env {
         fe,
         f,
         targets,
         blocks: &blocks,
         resumes: &resumes,
+        plain: &plain,
         io,
         anywhere,
         in_context: opts.regs_in_context,
@@ -588,6 +672,9 @@ pub(crate) struct Env<'a> {
     pub(crate) targets: &'a Targets<'a>,
     pub(crate) blocks: &'a BTreeMap<u64, Block>,
     resumes: &'a BTreeSet<u64>,
+    /// The returns that go to the entry's link register value
+    /// ([`entry_link_returns`]).
+    plain: &'a BTreeSet<u64>,
     io: &'a IoMap,
     anywhere: bool,
     in_context: bool,
@@ -652,7 +739,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
     let returns = pcs
         .iter()
         .filter_map(|pc| blocks.get(pc))
-        .any(|b| b.exit.flow == Flow::Return);
+        .any(|b| b.exit.flow == Flow::Return && !env.plain.contains(&b.pc));
     let link = fe.return_link().and_then(|l| {
         let moved = split.is_some() || written.contains(&l.reg);
         (split.is_some() || returns || moved).then_some((l, moved))
@@ -780,6 +867,7 @@ fn emit_piece(env: &Env<'_>, pcs: &[u64], split: Option<(&Split, usize)>) -> Wri
         slow: Vec::new(),
         site: 0,
         link,
+        plain: env.plain,
     };
     let mut undefined = 0;
     let mut sizes = BTreeMap::new();
@@ -1155,7 +1243,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
     }
     match b.exit.flow {
         Flow::Return => match cx.link {
-            Some((l, _)) => {
+            Some((l, _)) if !cx.plain.contains(&b.pc) => {
                 let _ = writeln!(
                     s,
                     "    uint64_t rl_to = {};\n{}    if (RL_LIKELY(rl_to == rl_ra))\n        return RL_OK;\n    return {}(c, rl_to, UINT64_C({:#x}));",
@@ -1165,7 +1253,7 @@ fn block(cx: &mut Ctx<'_>, b: &Block, raw: u64) -> Result<String, (u64, String)>
                     b.pc
                 );
             }
-            None => {
+            _ => {
                 s.push_str(&Ctx::line(&out_store, "    "));
                 s.push_str("    return RL_OK;\n");
             }
