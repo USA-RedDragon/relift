@@ -7,7 +7,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let dir = args.get(1).cloned().unwrap_or_default();
-    let out = args.get(2).filter(|o| o.as_str() != "-").cloned();
+    let out = match args.get(2).map(String::as_str) {
+        None | Some("" | "-") => None,
+        Some(o) => {
+            let p = std::path::PathBuf::from(o);
+            if !p.is_absolute() || !p.is_dir() {
+                panic!(
+                    "{o}: the output directory must be an existing absolute path, or - for none"
+                );
+            }
+            Some(o.to_string())
+        }
+    };
     let threads: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(4);
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{dir}: {e}"))
