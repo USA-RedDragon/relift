@@ -81,17 +81,19 @@ typedef struct rl_vk_surface_provider {
      */
     int32_t (*recreate)(void *user, void *host_instance, void *gipa, uint64_t surface, uint64_t *fresh);
     /**
-     * @brief The surfaces are never shown: a guest swapchain renders each
-     * present into images the layer owns instead of a host swapchain, and
-     * every device and queue family supports the surface. For drivers that
-     * cannot present to a surface of this kind (NVIDIA on headless ones).
+     * @brief The surfaces are never shown and have no host surface: the
+     * layer makes each guest surface handle itself (create, presents and
+     * recreate are not called), answers every surface query, and a guest
+     * swapchain renders each present into images the layer owns instead of
+     * a host swapchain. Works on any host with VK_KHR_surface, also one that
+     * cannot present at all (NVIDIA without a display).
      */
     bool offscreen;
     /** @brief Passed to create, extent, presents and recreate. */
     void *user;
 } rl_vk_surface_provider;
 
-/** @brief A provider that creates VK_EXT_headless_surface surfaces (tests, offscreen runs). */
+/** @brief The offscreen provider (tests, headless runs): no host surface, only VK_KHR_surface on the host. */
 RL_RUNTIME_API const rl_vk_surface_provider *rl_vk_headless_surfaces(void);
 
 /**

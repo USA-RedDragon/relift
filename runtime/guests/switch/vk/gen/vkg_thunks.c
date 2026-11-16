@@ -2137,22 +2137,6 @@ static int vkt_vkDestroyShaderModule(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
-static int vkt_vkDestroySurfaceKHR(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkInstance a0 = (VkInstance)vkf_first(&k, VKG_KIND_VkInstance, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkDestroySurfaceKHR, c->x[0]);
-    VkSurfaceKHR a1 = (VkSurfaceKHR)(uintptr_t)(c->x[1]);
-    const VkAllocationCallbacks * a2 = NULL;
-    PFN_vkDestroySurfaceKHR fn = (PFN_vkDestroySurfaceKHR)k.fns->f[VKG_vkDestroySurfaceKHR];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkDestroySurfaceKHR);
-    fn(a0, a1, a2);
-    return vkf_end(&k);
-}
-
 static int vkt_vkDeviceWaitIdle(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -2348,23 +2332,6 @@ static int vkt_vkGetDeviceGroupPresentCapabilitiesKHR(rl_ctx *restrict c, uint8_
         }
     }
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetDeviceGroupPresentCapabilitiesKHR, r);
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetDeviceGroupSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkDevice a0 = (VkDevice)vkf_first(&k, VKG_KIND_VkDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetDeviceGroupSurfacePresentModesKHR, c->x[0]);
-    VkSurfaceKHR a1 = (VkSurfaceKHR)(uintptr_t)(c->x[1]);
-    VkDeviceGroupPresentModeFlagsKHR * a2 = (VkDeviceGroupPresentModeFlagsKHR *)vkf_ptr(&k, c->x[2]);
-    PFN_vkGetDeviceGroupSurfacePresentModesKHR fn = (PFN_vkGetDeviceGroupSurfacePresentModesKHR)k.fns->f[VKG_vkGetDeviceGroupSurfacePresentModesKHR];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetDeviceGroupSurfacePresentModesKHR);
-    VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetDeviceGroupSurfacePresentModesKHR, r);
     return vkf_end(&k);
 }
 
@@ -2656,24 +2623,6 @@ static int vkt_vkGetPhysicalDeviceMultisamplePropertiesEXT(rl_ctx *restrict c, u
     return vkf_end(&k);
 }
 
-static int vkt_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR, c->x[0]);
-    VkSurfaceKHR a1 = (VkSurfaceKHR)(uintptr_t)(c->x[1]);
-    uint32_t * a2 = (uint32_t *)vkf_ptr(&k, c->x[2]);
-    VkRect2D * a3 = (VkRect2D *)vkf_ptr(&k, c->x[3]);
-    PFN_vkGetPhysicalDevicePresentRectanglesKHR fn = (PFN_vkGetPhysicalDevicePresentRectanglesKHR)k.fns->f[VKG_vkGetPhysicalDevicePresentRectanglesKHR];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR);
-    VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR, r);
-    return vkf_end(&k);
-}
-
 static int vkt_vkGetPhysicalDeviceSparseImageFormatProperties(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -2714,31 +2663,6 @@ static int vkt_vkGetPhysicalDeviceSparseImageFormatProperties2(rl_ctx *restrict 
         uint64_t w3 = (a2 ? *a2 : 0);
         vkg_aout_VkSparseImageFormatProperties2(&k, c->x[3], a3, w3 < n3 ? w3 : n3);
     }
-    return vkf_end(&k);
-}
-
-static int vkt_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t *mem)
-{
-    vkf_call k;
-    vkf_begin(&k, c, mem);
-    VkPhysicalDevice a0 = (VkPhysicalDevice)vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
-    if (!a0)
-        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR, c->x[0]);
-    const VkPhysicalDeviceSurfaceInfo2KHR * a1 = vkg_ain_VkPhysicalDeviceSurfaceInfo2KHR(&k, c->x[1], 1);
-    uint32_t * a2 = (uint32_t *)vkf_ptr(&k, c->x[2]);
-    uint64_t n3 = (a2 ? *a2 : 0);
-    VkSurfaceFormat2KHR *a3 = vkg_ain_VkSurfaceFormat2KHR(&k, c->x[3], n3);
-    PFN_vkGetPhysicalDeviceSurfaceFormats2KHR fn = (PFN_vkGetPhysicalDeviceSurfaceFormats2KHR)k.fns->f[VKG_vkGetPhysicalDeviceSurfaceFormats2KHR];
-    if (!fn)
-        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR);
-    VkResult r = fn(a0, a1, a2, a3);
-    if (r >= 0) {
-        {
-            uint64_t w3 = (a2 ? *a2 : 0);
-            vkg_aout_VkSurfaceFormat2KHR(&k, c->x[3], a3, w3 < n3 ? w3 : n3);
-        }
-    }
-    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR, r);
     return vkf_end(&k);
 }
 
@@ -4067,7 +3991,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkDestroySamplerYcbcrConversion,
     vkt_vkDestroySemaphore,
     vkt_vkDestroyShaderModule,
-    vkt_vkDestroySurfaceKHR,
+    vkh_vkDestroySurfaceKHR,
     vkh_vkDestroySwapchainKHR,
     vkt_vkDeviceWaitIdle,
     vkt_vkEndCommandBuffer,
@@ -4090,7 +4014,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetDeviceBufferMemoryRequirements,
     vkt_vkGetDeviceGroupPeerMemoryFeatures,
     vkt_vkGetDeviceGroupPresentCapabilitiesKHR,
-    vkt_vkGetDeviceGroupSurfacePresentModesKHR,
+    vkh_vkGetDeviceGroupSurfacePresentModesKHR,
     vkt_vkGetDeviceImageMemoryRequirements,
     vkt_vkGetDeviceImageSparseMemoryRequirements,
     vkt_vkGetDeviceMemoryCommitment,
@@ -4119,7 +4043,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkh_vkGetPhysicalDeviceMemoryProperties,
     vkh_vkGetPhysicalDeviceMemoryProperties2,
     vkt_vkGetPhysicalDeviceMultisamplePropertiesEXT,
-    vkt_vkGetPhysicalDevicePresentRectanglesKHR,
+    vkh_vkGetPhysicalDevicePresentRectanglesKHR,
     vkh_vkGetPhysicalDeviceProperties,
     vkh_vkGetPhysicalDeviceProperties2,
     vkh_vkGetPhysicalDeviceQueueFamilyProperties,
@@ -4128,7 +4052,7 @@ const rl_fn vkg_thunks[VKG_COUNT] = {
     vkt_vkGetPhysicalDeviceSparseImageFormatProperties2,
     vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR,
     vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR,
-    vkt_vkGetPhysicalDeviceSurfaceFormats2KHR,
+    vkh_vkGetPhysicalDeviceSurfaceFormats2KHR,
     vkh_vkGetPhysicalDeviceSurfaceFormatsKHR,
     vkh_vkGetPhysicalDeviceSurfacePresentModesKHR,
     vkh_vkGetPhysicalDeviceSurfaceSupportKHR,

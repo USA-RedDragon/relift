@@ -29,7 +29,7 @@ static bool usable(const vkf_fns *fns, VkPhysicalDevice pd)
 static bool presents(const vkf_obj *inst, VkPhysicalDevice pd)
 {
     const rl_vk_surface_provider *sp = vkf.cfg.surfaces;
-    if (!inst->inst->vi_surface || !sp || !sp->presents)
+    if (!inst->inst->vi_surface || !sp || sp->offscreen || !sp->presents)
         return true;
     void *gipa;
     memcpy(&gipa, &vkf.gipa, sizeof gipa);

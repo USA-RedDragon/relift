@@ -181,12 +181,6 @@ void vkf_vi_caps(uint64_t surface, VkSurfaceCapabilitiesKHR *caps)
                                 VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 }
 
-static bool offscreen_surfaces(void)
-{
-    const rl_vk_surface_provider *p = vkf.cfg.surfaces;
-    return p && p->offscreen;
-}
-
 int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -199,7 +193,7 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *m
         return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
     VkSurfaceCapabilitiesKHR *caps = vkf_ptr(&k, c->x[2]);
     VkResult r = VK_ERROR_INITIALIZATION_FAILED;
-    if (caps && offscreen_surfaces()) {
+    if (caps && vkf_offscreen()) {
         memset(caps, 0, sizeof *caps);
         r = VK_SUCCESS;
     } else if (caps) {
@@ -224,7 +218,7 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *
     const VkPhysicalDeviceSurfaceInfo2KHR *info = vkg_ain_VkPhysicalDeviceSurfaceInfo2KHR(&k, c->x[1], 1);
     VkSurfaceCapabilities2KHR *caps = vkg_ain_VkSurfaceCapabilities2KHR(&k, c->x[2], 1);
     VkResult r = VK_ERROR_INITIALIZATION_FAILED;
-    if (info && caps && offscreen_surfaces()) {
+    if (info && caps && vkf_offscreen()) {
         memset(&caps->surfaceCapabilities, 0, sizeof caps->surfaceCapabilities);
         r = VK_SUCCESS;
     } else if (info && caps) {
@@ -261,13 +255,15 @@ int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *m
     return vkf_end(&k);
 }
 
+static const VkSurfaceFormatKHR vi_formats[] = {
+    { VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+    { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
+};
+
 int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
 {
-    static const VkSurfaceFormatKHR formats[] = {
-        { VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
-        { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
-    };
-    const uint32_t n = sizeof formats / sizeof formats[0];
+    const VkSurfaceFormatKHR *formats = vi_formats;
+    const uint32_t n = sizeof vi_formats / sizeof vi_formats[0];
     vkf_call k;
     vkf_begin(&k, c, mem);
     VkPhysicalDevice pd = vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
@@ -289,6 +285,41 @@ int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
         r = w < n ? VK_INCOMPLETE : VK_SUCCESS;
     }
     c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceFormatsKHR, r);
+    return vkf_end(&k);
+}
+
+int vkh_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t *mem)
+{
+    vkf_call k;
+    vkf_begin(&k, c, mem);
+    VkPhysicalDevice pd = vkf_first(&k, VKG_KIND_VkPhysicalDevice, c->x[0]);
+    if (!pd)
+        return vkf_bad_handle(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR, c->x[0]);
+    PFN_vkGetPhysicalDeviceSurfaceFormats2KHR fn = VKF_FN(k.fns, vkGetPhysicalDeviceSurfaceFormats2KHR);
+    if (!fn)
+        return vkf_no_fn(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR);
+    const VkPhysicalDeviceSurfaceInfo2KHR *info = vkg_ain_VkPhysicalDeviceSurfaceInfo2KHR(&k, c->x[1], 1);
+    uint32_t *count = vkf_ptr(&k, c->x[2]);
+    uint64_t cap = count ? *count : 0;
+    VkSurfaceFormat2KHR *list = vkg_ain_VkSurfaceFormat2KHR(&k, c->x[3], cap);
+    VkResult r;
+    if (!vkf_offscreen())
+        r = fn(pd, info, count, list);
+    else if (!info || !count)
+        r = VK_ERROR_INITIALIZATION_FAILED;
+    else {
+        const uint32_t n = sizeof vi_formats / sizeof vi_formats[0];
+        uint32_t w = !list ? n : cap < n ? (uint32_t)cap : n;
+        for (uint32_t i = 0; list && i < w; i++)
+            list[i].surfaceFormat = vi_formats[i];
+        *count = w;
+        r = list && w < n ? VK_INCOMPLETE : VK_SUCCESS;
+    }
+    if (r >= 0 && list) {
+        uint64_t w = *count;
+        vkg_aout_VkSurfaceFormat2KHR(&k, c->x[3], list, w < cap ? w : cap);
+    }
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR, r);
     return vkf_end(&k);
 }
 
@@ -724,7 +755,7 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     s->fns = k.fns;
     s->phys = k.obj->parent->host;
     s->ifns = k.obj->parent->fns;
-    s->offscreen = offscreen_surfaces();
+    s->offscreen = vkf_offscreen();
     s->surface = ci->surface;
     s->hsurf = ci->surface;
     s->inst = k.obj->parent->parent->host;

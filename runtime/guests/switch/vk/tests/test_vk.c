@@ -927,11 +927,29 @@ TEST(vk_debug_messenger_calls_guest_code)
 static uint32_t g_host_w = 64, g_host_h = 64;
 static uint64_t g_host_gen;
 
-static int32_t resizable_create(void *user, void *host_instance, void *gipa, uint64_t guest_window, uint64_t *surface)
+static const char *const g_headless_exts[] = { VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, NULL };
+
+static int32_t headless_surface(void *host_instance, void *gipa, uint64_t *surface)
+{
+    PFN_vkGetInstanceProcAddr get;
+    memcpy(&get, &gipa, sizeof get);
+    PFN_vkVoidFunction raw = get(host_instance, "vkCreateHeadlessSurfaceEXT");
+    PFN_vkCreateHeadlessSurfaceEXT f;
+    memcpy(&f, &raw, sizeof f);
+    if (!f)
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    VkHeadlessSurfaceCreateInfoEXT ci = { .sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT };
+    VkSurfaceKHR s = NULL;
+    VkResult r = f(host_instance, &ci, NULL, &s);
+    *surface = (uint64_t)(uintptr_t)s;
+    return r;
+}
+
+static int32_t headless_create(void *user, void *host_instance, void *gipa, uint64_t guest_window, uint64_t *surface)
 {
     (void)user;
-    const rl_vk_surface_provider *h = rl_vk_headless_surfaces();
-    return h->create(h->user, host_instance, gipa, guest_window, surface);
+    (void)guest_window;
+    return headless_surface(host_instance, gipa, surface);
 }
 
 static void resizable_extent(void *user, uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation)
@@ -945,7 +963,7 @@ static void resizable_extent(void *user, uint64_t surface, uint32_t guest[2], ui
     *generation = g_host_gen;
 }
 
-static rl_vk_surface_provider g_resizable = { .create = resizable_create, .extent = resizable_extent };
+static rl_vk_surface_provider g_resizable = { .extent = resizable_extent };
 
 static int64_t mono_ns(void)
 {
@@ -998,7 +1016,7 @@ static bool capture_is_the_clear_color(const char *dir, int format)
 TEST(vk_vi_surface_presents_headless)
 {
     g_resizable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
-    g_resizable.offscreen = rl_vk_headless_surfaces()->offscreen;
+    g_resizable.offscreen = true;
     g_host_w = g_host_h = 64;
     g_host_gen = 0;
     CHECK_EQ(boot(&g_resizable), 0);
@@ -1192,8 +1210,7 @@ static int32_t lost_recreate(void *user, void *host_instance, void *gipa, uint64
     (void)surface;
     if (++g_recreates < g_recreate_ready_after)
         return VK_NOT_READY;
-    const rl_vk_surface_provider *h = rl_vk_headless_surfaces();
-    return h->create(h->user, host_instance, gipa, 0, fresh);
+    return headless_surface(host_instance, gipa, fresh);
 }
 
 static VkResult losing_acquire(VkDevice dev, VkSwapchainKHR sw, uint64_t timeout, VkSemaphore sem, VkFence fence, uint32_t *i)
@@ -1205,11 +1222,10 @@ static VkResult losing_acquire(VkDevice dev, VkSwapchainKHR sw, uint64_t timeout
     return g_real_acquire(dev, sw, timeout, sem, fence, i);
 }
 
-static rl_vk_surface_provider g_losable = { .create = resizable_create, .recreate = lost_recreate };
+static rl_vk_surface_provider g_losable = { .instance_extensions = g_headless_exts, .create = headless_create, .recreate = lost_recreate };
 
 TEST(vk_a_lost_host_surface_is_made_again_behind_the_guest)
 {
-    g_losable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
     CHECK_EQ(boot(&g_losable), 0);
     const char *exts[] = { "VK_KHR_surface", "VK_NN_vi_surface" };
     CHECK(make_instance(exts, 2, 0) != 0);
@@ -1326,7 +1342,6 @@ static const rl_touchpad_guest g_pause_guest = {
 
 TEST(vk_a_paused_frame_repaints_through_suboptimal_presents)
 {
-    g_losable.instance_extensions = rl_vk_headless_surfaces()->instance_extensions;
     CHECK_EQ(boot(&g_losable), 0);
     rl_touchpad_declare(&g_pause_guest);
     rl_touchpad_set_touch_screen(true);

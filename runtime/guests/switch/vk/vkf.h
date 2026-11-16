@@ -478,6 +478,8 @@ void vkf_shadow_flush(vkf_call *k);
 /** @brief Copies host-cached shadow-mapped ranges of the call's device from host to guest. */
 void vkf_shadow_pull(vkf_call *k);
 
+/** @brief The surface provider is offscreen: guest surfaces are the layer's own and never reach the host. */
+bool vkf_offscreen(void);
 /** @brief Guest extent (the layer's size), host drawable extent and its generation for a surface, from the provider. */
 void vkf_surface_extent(uint64_t surface, uint32_t guest[2], uint32_t host[2], uint64_t *generation);
 /** @brief Rewrites host surface capabilities into the ones a guest swapchain on the surface gets. */

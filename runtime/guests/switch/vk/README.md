@@ -288,16 +288,24 @@ provider's instance extensions. When the guest enables it, `vkCreateInstance`
 enables the provider's host extensions instead, and `vkCreateViSurfaceNN`
 calls the provider with the host instance and the guest address of the
 `nn::vi::NativeWindowHandle`. Everything after that is plain `VK_KHR_surface`
-and `VK_KHR_swapchain` forwarding.
+and `VK_KHR_swapchain` forwarding, except on an `offscreen` provider.
+
+An `offscreen` provider's surfaces have no host surface. `vkCreateViSurfaceNN`
+returns a handle the layer makes (the provider's `create` is not called), and
+the layer answers every call on it without the host: surface support (every
+queue family), capabilities, formats (also `vkGetPhysicalDeviceSurfaceFormats2KHR`),
+present modes, present rectangles, device group present modes and
+`vkDestroySurfaceKHR`. A swapchain on it has no host swapchain: each present
+blits into two images the layer owns (sized by `extent`), and the layer signals
+the guest's acquire semaphore and fence with an empty submit. The host needs
+only `VK_KHR_surface`, so it works where the host cannot present at all
+(NVIDIA's Linux driver offers no `VK_EXT_headless_surface` without another ICD,
+and presents to no headless surface when it has one).
 
 Providers:
 
-- Headless (`rl_vk_headless_surfaces`, `VK_EXT_headless_surface`): tests and
-  offscreen runs. NVIDIA's Linux driver reports no queue family that presents to
-  it and no surface formats, so the provider is `offscreen`: a swapchain on it
-  has no host swapchain, each present blits into two images the layer owns
-  (sized by `extent`), the layer answers surface support itself and signals
-  the guest's acquire semaphore and fence with an empty submit.
+- Headless (`rl_vk_headless_surfaces`): tests and offscreen runs; `offscreen`,
+  host extensions `VK_KHR_surface` only.
 - Window (`rl_vk_window_surfaces`, `vk_window.c`): the player. It needs a
   window backend that is up (`core/include/relift/window.h`; SDL3 in
   `runtime/host/window_sdl3.c`, built with `VIDEO=sdl3`). Each `vi` layer the

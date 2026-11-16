@@ -1453,6 +1453,10 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *
 int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkGetDeviceGroupSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *mem);
+int vkh_vkDestroySurfaceKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkDestroySwapchainKHR(rl_ctx *restrict c, uint8_t *mem);
 int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem);
