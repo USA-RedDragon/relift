@@ -5,10 +5,12 @@ SASS words that prints nvdisasm's text form, and a translator from SASS to
 SPIR-V (`relift-gpu-sm86`). Field positions follow Mesa NAK's SM70+ encoder
 (`src/nouveau/compiler/nak/sm70_encode.rs`, MIT, Collabora).
 
-The translator covers a first subset: straight-line vertex and fragment
-programs with float ALU, MUFU, attribute loads and stores, interpolation and
-user constant banks (`c[3+n]` is uniform binding `n`). Anything else is
-rejected with the reason.
+The translator takes vertex, fragment and compute programs: structured
+control flow, the integer, float, half and conversion ALU, MUFU, stage
+inputs and outputs, constant banks, global, shared and local memory,
+atomics, warp operations, textures and surfaces, for a host profile (see
+`translate::HostProfile`). What it cannot reproduce exactly on that host is
+rejected with the reason or listed in `HostReport::inexact`.
 
 ```sh
 cargo test -p relift-gpu-sm86
