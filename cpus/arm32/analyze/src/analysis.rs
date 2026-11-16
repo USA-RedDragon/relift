@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::config::Config;
+use crate::eval;
 use crate::func::{self, Env, FnRun, Lifted, Summary};
 use crate::image::Image;
 use crate::loc::Loc;
@@ -32,6 +33,28 @@ pub fn discover(platform: &dyn Platform, config: &Config) -> Report {
         }
     }
     run(image, &roots, &config.hints)
+}
+
+/// A code address candidate: the address, the state, whether only the
+/// scan of every image word gives it, and whether that word is in another
+/// segment than the address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Cand {
+    addr: u32,
+    thumb: bool,
+    scanned: bool,
+    far: bool,
+}
+
+impl Cand {
+    fn taken(addr: u32, thumb: bool) -> Cand {
+        Cand {
+            addr,
+            thumb,
+            scanned: false,
+            far: false,
+        }
+    }
 }
 
 /// The field stores of one run that keep the same bits: the first store,
@@ -211,11 +234,16 @@ impl<'a> Driver<'a> {
 
     /// The code addresses discovered code takes: odd words in the image
     /// that discovered code reads as constants (Thumb functions), and the
-    /// tables of such words a constant read points at. A candidate becomes
-    /// an entry when its own run lifts without an undefined instruction,
-    /// stays in code bytes and overlaps no constant read as data and no
-    /// instruction found in the other state or at another alignment.
+    /// tables of such words a constant read points at; with
+    /// [`crate::Options::arm_pointers`] the even words it reads too (ARM
+    /// functions), and with [`crate::Options::scan_words`] every word of
+    /// the image. A candidate becomes an entry when its own run lifts
+    /// without an undefined instruction, stays in code bytes and overlaps
+    /// no constant read as data and no instruction found in the other
+    /// state or at another alignment.
     fn address_taken(&mut self) -> bool {
+        let opts = self.image.options;
+        let platform = self.image.platform;
         let mut data: HashSet<u32> = HashSet::new();
         let mut words: BTreeSet<u32> = BTreeSet::new();
         for r in self.runs.values() {
@@ -238,32 +266,30 @@ impl<'a> Driver<'a> {
                 }
             }
         }
-        let mut cands: BTreeSet<u32> = BTreeSet::new();
+        let mut cands: BTreeSet<Cand> = BTreeSet::new();
         for r in self.runs.values() {
-            cands.extend(r.escaped.iter().copied());
-            for &(a, n) in &r.data {
-                if n == 4 {
-                    words.insert(a);
-                }
-            }
+            cands.extend(r.escaped.iter().map(|&v| Cand::taken(v & !1, true)));
         }
         let word = |a: u32| self.image.read(None, a, 4);
         let mut scans = Vec::new();
         for &a in &words {
             let Some(v) = word(a) else { continue };
-            if v & 1 == 1 && self.image.platform.code_addr(v & !1) {
-                cands.insert(v);
+            if v & 1 == 1 && platform.code_addr(v & !1) {
+                cands.insert(Cand::taken(v & !1, true));
+            }
+            if opts.arm_pointers && v & 3 == 0 && platform.code_addr(v) {
+                cands.insert(Cand::taken(v, false));
             }
             if v & 3 == 0 && self.image.in_image(v) {
                 let mut t = v;
                 while let Some(e) = word(t) {
-                    if !(e & 1 == 1 && self.image.platform.code_addr(e & !1))
+                    if !(e & 1 == 1 && platform.code_addr(e & !1))
                         || data.contains(&t) && !words.contains(&t)
                         || t > v && self.stops.range(v + 1..=t + 3).next().is_some()
                     {
                         break;
                     }
-                    cands.insert(e);
+                    cands.insert(Cand::taken(e & !1, true));
                     t += 4;
                 }
                 if t > v {
@@ -271,14 +297,56 @@ impl<'a> Driver<'a> {
                 }
             }
         }
+        if opts.scan_words {
+            let segments = platform.segments();
+            let segment = |a: u32| {
+                segments
+                    .iter()
+                    .rposition(|(b, d)| a.wrapping_sub(*b) < d.len() as u32)
+            };
+            for &(base, bytes) in &segments {
+                for (i, w) in bytes.as_chunks::<4>().0.iter().enumerate() {
+                    let a = base + 4 * i as u32;
+                    if code.contains_key(&a) && !data.contains(&a) {
+                        continue;
+                    }
+                    let v = u32::from_le_bytes(*w);
+                    let (t, thumb) = match v & 3 {
+                        1 | 3 => (v & !1, true),
+                        0 if opts.arm_pointers => (v, false),
+                        _ => continue,
+                    };
+                    if !platform.code_addr(t) || cands.contains(&Cand::taken(t, thumb)) {
+                        continue;
+                    }
+                    cands.insert(Cand {
+                        addr: t,
+                        thumb,
+                        scanned: true,
+                        far: segment(a) != segment(t),
+                    });
+                }
+            }
+        }
         self.scans.extend(scans);
         let mut added = false;
-        for v in cands {
-            let l = Loc::rom(v & !1, true);
+        let mut seen: HashSet<(u32, bool)> = HashSet::new();
+        for c in cands {
+            if !seen.insert((c.addr, c.thumb)) || !platform.owns(c.addr) {
+                continue;
+            }
+            let l = Loc::rom(c.addr, c.thumb);
             if self.entries.contains(&l)
                 || self.rejected.contains(&l)
-                || code.get(&l.addr) == Some(&(l.addr, true))
+                || code.get(&l.addr) == Some(&(l.addr, c.thumb))
             {
+                continue;
+            }
+            if !c.thumb && !self.always_runs(l) {
+                self.rejected.insert(l);
+                continue;
+            }
+            if c.far && !func::opens_frame(&self.image, l) {
                 continue;
             }
             let run = {
@@ -294,7 +362,7 @@ impl<'a> Driver<'a> {
                     specials: &self.specials,
                     version: self.version,
                 };
-                func::run(&env, l, State::entry(true), &self.no_tables)
+                func::run(&env, l, State::entry(c.thumb), &self.no_tables)
             };
             let bad_insn = run.unresolved.iter().any(|u| {
                 matches!(
@@ -308,7 +376,7 @@ impl<'a> Driver<'a> {
                     data.contains(&a) || code.get(&a).is_some_and(|c| *c != (b.addr, b.thumb))
                 })
             });
-            if bad_insn || overlap {
+            if bad_insn || overlap || c.scanned && c.thumb && self.covers_arm(&run) {
                 self.rejected.insert(l);
                 continue;
             }
@@ -316,6 +384,57 @@ impl<'a> Driver<'a> {
             added = true;
         }
         added
+    }
+
+    fn env(&self) -> Env<'_> {
+        Env {
+            image: &self.image,
+            summaries: &self.summaries,
+            entries: &self.entries,
+            ptrs: &self.ptrs,
+            cache: &self.cache,
+            runs: &self.conc,
+            stops: &self.stops,
+            depth: 0,
+            specials: &self.specials,
+            version: self.version,
+        }
+    }
+
+    /// Whether the instruction at `l` runs whatever the flags are, as a
+    /// function's first instruction does.
+    fn always_runs(&self, l: Loc) -> bool {
+        let env = self.env();
+        let Some(w) = self.image.fetch(l) else {
+            return false;
+        };
+        let Ok(lifted) = env.lift(l, w) else {
+            return false;
+        };
+        let out = eval::eval(
+            &lifted.1,
+            l,
+            &State::entry(l.thumb),
+            &self.image,
+            false,
+            None,
+        );
+        out.may_run && !out.may_skip
+    }
+
+    /// Whether a Thumb run covers ARM code: half or more of its halfwords
+    /// at 2 mod 4 (at least four) are the upper half of a word that lifts
+    /// as an ARM instruction that runs whatever the flags are. In Thumb
+    /// code few halfwords are; in ARM code nearly every word is one.
+    fn covers_arm(&self, run: &FnRun) -> bool {
+        let tops: Vec<Loc> = run
+            .body
+            .keys()
+            .filter(|b| b.thumb && b.addr % 4 == 2)
+            .map(|b| Loc::rom(b.addr - 2, false))
+            .collect();
+        let arm = tops.iter().filter(|l| self.always_runs(**l)).count();
+        tops.len() >= 4 && 2 * arm >= tops.len()
     }
 
     /// Solves until no address-taken entry and no rewritten instruction is
