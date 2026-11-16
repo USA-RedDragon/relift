@@ -153,12 +153,34 @@ fn program(undefined: bool, pointer: bool) -> Vec<u8> {
     text
 }
 
-/// The scratch directory `name`. `RELIFT_TEST_TMP` replaces the build's
-/// target directory, for a test built on one host and run on another.
+/// The scratch directory `name`, private to this process: tests run in
+/// several processes at once on one target directory (the workspace tests
+/// and a job that runs one of them), and a shared path would let one wipe
+/// the other's files. Directories of other processes older than an hour
+/// are removed. `RELIFT_TEST_TMP` replaces the build's target directory,
+/// for a test built on one host and run on another.
 pub fn scratch(name: &str) -> PathBuf {
     let base = std::env::var_os("RELIFT_TEST_TMP")
         .map_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")), PathBuf::from);
-    let d = base.join(name);
+    let prefix = format!("{name}-");
+    let hour = std::time::Duration::from_secs(3600);
+    for e in std::fs::read_dir(&base).into_iter().flatten().flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > hour);
+        let ours = e
+            .file_name()
+            .to_string_lossy()
+            .strip_prefix(&prefix)
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()));
+        if old && ours {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+    let d = base.join(format!("{prefix}{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).expect("the scratch dir is creatable");
     d

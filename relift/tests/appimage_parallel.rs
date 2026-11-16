@@ -97,4 +97,27 @@ fn parallel_builds_package_with_the_pinned_runtime() {
         let parts = std::fs::read_dir(folder.parent().unwrap()).unwrap().count();
         assert_eq!(parts, 1, "only the runtime is in its folder");
     }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn concurrent_processes_do_not_share_scratch() {
+    let exe = std::env::current_exe().expect("the test binary path");
+    let run = || {
+        std::process::Command::new(&exe)
+            .args(["--exact", "parallel_builds_package_with_the_pinned_runtime"])
+            .output()
+            .expect("the test binary runs")
+    };
+    let outs: Vec<_> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..2).map(|_| s.spawn(run)).collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for out in &outs {
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
 }
