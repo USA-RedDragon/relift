@@ -105,7 +105,10 @@ const XREGS: [R; 31] = [
 pub struct Emu {
     uc: Unicorn<'static, ()>,
     loaded: Vec<u32>,
-    el1: Option<bool>,
+    /// Whether it runs pointer authentication words.
+    pauth: bool,
+    /// The emulator pointer authentication words run on, once one has.
+    pac: Option<Box<Emu>>,
 }
 
 impl Emu {
@@ -119,34 +122,22 @@ impl Emu {
         Ok(Emu {
             uc,
             loaded: Vec::new(),
-            el1: None,
+            pauth: false,
+            pac: None,
         })
     }
 
-    /// Runs at EL1 with the check keys while `pauth` is true, and at the
-    /// exception level Unicorn starts in (EL3) otherwise. The first switch
-    /// to EL1 enables the keys and the 39-bit address layout of the Switch
-    /// kernel's EL0 view; the EL1&0 regime has the same upper and lower
-    /// ranges as EL0.
-    fn set_el(&mut self, pauth: bool) -> Result<(), uc_error> {
-        match self.el1 {
-            Some(cur) if cur == pauth => return Ok(()),
-            None if !pauth => return Ok(()),
-            _ => {}
-        }
-        if pauth && self.el1.is_none() {
-            self.setup_pauth()?;
-        }
-        let mode = if pauth { EL1H } else { EL3H };
-        self.uc.reg_write(R::PSTATE, mode)?;
-        if pauth {
-            self.uc
-                .mem_map(PAUTH_DATA, DATA_SIZE as u64, Prot::READ | Prot::WRITE)?;
-        } else if self.el1 == Some(true) {
-            self.uc.mem_unmap(PAUTH_DATA, DATA_SIZE as u64)?;
-        }
-        self.el1 = Some(pauth);
-        Ok(())
+    /// An emulator for pointer authentication words: at EL1 with the check
+    /// keys and the 39-bit address layout of the Switch kernel's EL0 view
+    /// (the EL1&0 regime has the same upper and lower ranges as EL0). A
+    /// separate one, as Unicorn does not return to EL3 as it started.
+    fn new_pauth() -> Result<Emu, uc_error> {
+        let mut e = Emu::new()?;
+        e.setup_pauth()?;
+        e.uc.reg_write(R::PSTATE, EL1H)?;
+        e.uc.mem_map(PAUTH_DATA, DATA_SIZE as u64, Prot::READ | Prot::WRITE)?;
+        e.pauth = true;
+        Ok(e)
     }
 
     fn setup_pauth(&mut self) -> Result<(), uc_error> {
@@ -211,9 +202,15 @@ impl Emu {
     /// is the end of the run, not a fault: Unicorn fetches the next
     /// instruction before it notices the count is reached.
     pub fn run(&mut self, words: &[u32], input: &Guest) -> Result<Outcome, uc_error> {
+        if !self.pauth && words.iter().any(|w| is_pauth(*w)) {
+            let pac = match &mut self.pac {
+                Some(p) => p,
+                None => self.pac.insert(Box::new(Emu::new_pauth()?)),
+            };
+            return pac.run(words, input);
+        }
         self.load(words)?;
-        let pauth = words.iter().any(|w| is_pauth(*w));
-        self.set_el(pauth)?;
+        let pauth = self.pauth;
         let uc = &mut self.uc;
         for (r, v) in XREGS.iter().zip(input.x) {
             uc.reg_write(*r, v)?;
@@ -238,7 +235,6 @@ impl Emu {
         match r {
             Ok(()) => {}
             Err(uc_error::FETCH_UNMAPPED) => {}
-            Err(uc_error::EXCEPTION) if pauth && uc.reg_read(R::PC)? >> 48 != 0 => {}
             Err(uc_error::EXCEPTION) if pauth && uc.reg_read(R::PC)? >> 48 != 0 => {}
             Err(e) => return Ok(Outcome::Fault(format!("{e:?}"))),
         }
@@ -271,9 +267,8 @@ impl Emu {
     }
 }
 
-/// PSTATE of EL1 with SP_EL1, and of EL3 with SP_EL3.
+/// PSTATE of EL1 with SP_EL1.
 const EL1H: u64 = 0x5;
-const EL3H: u64 = 0xd;
 
 /// SCTLR_EL1's EnIA, EnIB, EnDA and EnDB.
 const SCTLR_PAUTH: u64 = 1 << 31 | 1 << 30 | 1 << 27 | 1 << 13;
