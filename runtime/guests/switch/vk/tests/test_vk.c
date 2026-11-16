@@ -930,6 +930,40 @@ TEST(vk_shadow_tracks_only_touched_chunks)
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 
+/** @brief Unmapping a shadow mapping hands the guest's unflushed writes to the device: a fresh mapping reads them back. */
+TEST(vk_shadow_unmap_flushes_guest_writes)
+{
+    setenv(RL_VK_MAP_ENV, "shadow", 1);
+    CHECK_EQ(boot(NULL), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    uint64_t pd = pds[0];
+    uint32_t qf = queue_family(pd, VK_QUEUE_GRAPHICS_BIT);
+    CHECK(qf != UINT32_MAX);
+    uint64_t dev = make_device(pd, qf, NULL, 0);
+    CHECK(dev != 0);
+
+    mapped_buf b;
+    CHECK_EQ(make_mapped(pd, dev, 4096, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &b), 0);
+    memset(g_mem + b.ptr, 0x66, 4096);
+    G("vkUnmapMemory", dev, b.mem);
+    uint64_t gptr = galloc(8);
+    CHECK_EQ(VKR(G("vkMapMemory", dev, b.mem, 0, VK_WHOLE_SIZE, 0, gptr)), VK_SUCCESS);
+    uint64_t again = g64(gptr);
+    unsigned bad = 0;
+    for (uint32_t i = 0; i < 4096; i++)
+        if (g_mem[again + i] != 0x66)
+            bad++;
+    CHECK_EQ(bad, 0);
+
+    G("vkDestroyBuffer", dev, b.buf, 0);
+    G("vkFreeMemory", dev, b.mem, 0);
+    G("vkDestroyDevice", dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
 static uint64_t g_cb_calls, g_cb_user, g_cb_sev, g_cb_x19, g_cb_len, g_cb_sp;
 static char g_cb_msg[256];
 

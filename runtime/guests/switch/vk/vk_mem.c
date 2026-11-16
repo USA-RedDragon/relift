@@ -631,7 +631,6 @@ static void unmap_one(vkf_dev *d, vkf_mem *r, void *dev)
 {
     if (!r->mapped)
         return;
-    r->mapped = false;
     if (r->mode == RL_VK_MAP_PLACED && dev) {
         VkMemoryUnmapInfoKHR ui = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO,
@@ -651,6 +650,7 @@ static void unmap_one(vkf_dev *d, vkf_mem *r, void *dev)
         r->host = NULL;
         vkf_vm_set(r->va, r->va_size, RL_VM_NONE, RL_VM_DISCARD);
     }
+    r->mapped = false;
 }
 
 static void release_one(vkf_dev *d, vkf_mem *r, bool host_alive, void *dev)
