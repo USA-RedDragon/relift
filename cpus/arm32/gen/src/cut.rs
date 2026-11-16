@@ -57,6 +57,11 @@ fn is_flag(b: &Expr, f: &str) -> bool {
     is_pstate(b) && matches!(f, "N" | "Z" | "C" | "V")
 }
 
+/// The ARMv5TE sticky overflow flag, kept as bit 27 of `psr_rsvd`.
+fn is_q(b: &Expr, f: &str) -> bool {
+    is_pstate(b) && f == "Q"
+}
+
 impl Cpu for Arm32 {
     fn stub_ok(name: &str) -> bool {
         STUBS_OK.contains(&name)
@@ -88,6 +93,10 @@ impl Cpu for Arm32 {
         if is_pstate(b) && f == "M" {
             return Some(fail("PSTATE.M read: the mode is only known at run time"));
         }
+        if is_q(b, f) {
+            g.used_cut.insert("PSTATE.Q");
+            return Some(Ok(g.dy(K::Bits(1), "st.q(b)".to_string())));
+        }
         if !is_flag(b, f) {
             return None;
         }
@@ -98,6 +107,23 @@ impl Cpu for Arm32 {
     fn assign_field(g: &mut Gen<'_, Arm32>, b: &Expr, f: &str, v: &V) -> Option<R<()>> {
         if is_pstate(b) && f == "M" {
             return Some(fail("PSTATE.M write outside the PSR cut"));
+        }
+        if is_q(b, f) {
+            g.used_cut.insert("PSTATE.Q");
+            let r = (|| {
+                let v = g.bitify(v)?;
+                let x = g.dx(&v)?;
+                let gd = g.gd();
+                g.effect(format!("st.set_q(b, {x}, {gd});"));
+                Ok(())
+            })();
+            return Some(r);
+        }
+        // The Thumb bit's writes go through `__v4t_SetT` wherever they can
+        // change it; the model's own `PSTATE.T` write is dropped. A write
+        // of any other field with no cut would vanish from the template.
+        if is_pstate(b) && !is_flag(b, f) && f != "T" {
+            return Some(fail(format!("PSTATE.{f} write with no cut")));
         }
         if !is_flag(b, f) {
             return None;
@@ -114,7 +140,7 @@ impl Cpu for Arm32 {
     }
 
     fn field_width(b: &Expr, f: &str) -> Option<u32> {
-        is_flag(b, f).then_some(1)
+        (is_flag(b, f) || is_q(b, f)).then_some(1)
     }
 
     fn decode_args(word: V) -> Vec<V> {
@@ -216,6 +242,8 @@ fn cut(g: &mut Gen<'_, Arm32>, name: &str, a: &[V]) -> R<Option<V>> {
         "__v4t_read" | "__v4t_write" => "BUS",
         "__v4t_internal" | "__v4t_internal_if" | "__v4t_force_n" => "BUS",
         "__v4t_RegShiftForm" => "FORM",
+        "__v5_CPWrite" | "__v5_CPRead" => "CP",
+        "__v5_Exception" => "BRANCH",
         _ => return Ok(None),
     };
     g.used_cut.insert(key);
@@ -381,6 +409,34 @@ fn cut(g: &mut Gen<'_, Arm32>, name: &str, a: &[V]) -> R<Option<V>> {
             V::Unit
         }
         "__v4t_RegShiftForm" => V::Bool(g.cpu.reg_shift),
+        // Coprocessor register transfers: the register key (coproc bit,
+        // opc1, CRn, CRm, opc2) is known at lift time; the runtime's
+        // coprocessor hook does the access.
+        "__v5_CPWrite" => {
+            let key = static_u32(g, &a[0])?;
+            let v = g.bitify(&a[1])?;
+            let x = g.dx(&v)?;
+            let gd = g.gd();
+            g.effect(format!("st.cp_write(b, {key}, {x}, {gd});"));
+            V::Unit
+        }
+        "__v5_CPRead" => {
+            let key = static_u32(g, &a[0])?;
+            if g.guard.d.is_some() {
+                return fail("coprocessor read under a dynamic condition");
+            }
+            g.dy(K::Bits(32), format!("st.cp_read(b, {key})"))
+        }
+        // An exception entry: mode bits, vector, and the return address
+        // as an offset from the instruction.
+        "__v5_Exception" => {
+            let mode = static_u32(g, &a[0])?;
+            let vector = static_u32(g, &a[1])?;
+            let off = g.cint(&a[2])?;
+            let gd = g.gd();
+            g.effect(format!("st.exception(b, {mode}, {vector}, {off}, {gd});"));
+            V::Unit
+        }
         _ => unreachable!(),
     };
     Ok(Some(v))

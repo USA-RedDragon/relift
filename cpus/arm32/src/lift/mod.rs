@@ -7,21 +7,21 @@ use std::fmt;
 
 use relift_ir::{Block, Builder, Width};
 
-use crate::decode::{self, Encoding};
+use crate::decode::{self, Encoding, Profile};
 use crate::regs;
 pub use rt::{Bus, COND_FAIL, St};
 
 /// Why an instruction did not lift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiftError {
-    /// No ARMv4T encoding matches the word.
+    /// No encoding of the profile matches the word.
     Unallocated(u32),
     /// The encoding has no template yet.
     Unsupported(Encoding),
     /// The field values make the instruction UNDEFINED.
     Undefined(Encoding),
     /// The field values make it UNPREDICTABLE and the overlay pins no
-    /// ARM7TDMI behavior.
+    /// behavior for the CPU.
     Unpredictable(Encoding),
 }
 
@@ -39,9 +39,14 @@ impl fmt::Display for LiftError {
 /// A generated template.
 pub(crate) type GenFn = fn(u32, &mut Builder, &mut St) -> Result<(), LiftError>;
 
-/// Whether `enc` has a template.
+/// Whether `enc` has an ARMv4T template.
 pub fn has_template(enc: Encoding) -> bool {
-    generated::template(enc).is_some()
+    has_template_for(enc, Profile::V4t)
+}
+
+/// Whether `enc` has a template on `profile`.
+pub fn has_template_for(enc: Encoding, profile: Profile) -> bool {
+    generated::template(enc, profile).is_some()
 }
 
 /// One lifted instruction.
@@ -54,17 +59,22 @@ pub struct Lifted {
     pub bus: Vec<Bus>,
 }
 
-/// Lifts the A32 word or Thumb halfword `word` at `pc`.
+/// Lifts the ARMv4T A32 word or Thumb halfword `word` at `pc`.
 pub fn lift(word: u32, pc: u32, thumb: bool) -> Result<Lifted, LiftError> {
+    lift_for(word, pc, thumb, Profile::V4t)
+}
+
+/// Lifts the A32 word or Thumb halfword `word` at `pc` on `profile`.
+pub fn lift_for(word: u32, pc: u32, thumb: bool, profile: Profile) -> Result<Lifted, LiftError> {
     let enc = if thumb {
-        decode::decode_t16(word as u16)
+        decode::decode_t16_for(word as u16, profile)
     } else {
-        decode::decode_a32(word)
+        decode::decode_a32_for(word, profile)
     }
     .ok_or(LiftError::Unallocated(word))?;
-    let f = generated::template(enc).ok_or(LiftError::Unsupported(enc))?;
+    let f = generated::template(enc, profile).ok_or(LiftError::Unsupported(enc))?;
     let mut b = Builder::new(regs::regs(), Width::W32, u64::from(pc));
-    let mut st = St::new(thumb);
+    let mut st = St::for_profile(thumb, profile);
     f(word, &mut b, &mut st)?;
     let (exit, bus) = st.finish(&mut b);
     Ok(Lifted {

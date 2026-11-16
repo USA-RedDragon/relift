@@ -1,7 +1,9 @@
-//! ARMv4T (ARM7TDMI, the Game Boy Advance CPU) frontend: decoding of A32
-//! and Thumb words to the encodings of the sail-arm AArch32 model allowed on
-//! ARMv4T, and lifting to `relift-ir` with templates generated from sail-arm
-//! plus the ARMv4T overlay (`gen/armv4t.sail`, see `gen/README.md`).
+//! 32-bit Arm frontend: decoding of A32 and Thumb words to the encodings of
+//! the sail-arm AArch32 model allowed on a [`decode::Profile`] (ARMv4T, the
+//! ARM7TDMI of the Game Boy Advance and the NDS ARM7; ARMv5TE, the
+//! ARM946E-S of the NDS ARM9), and lifting to `relift-ir` with templates
+//! generated from sail-arm plus the profile's overlay (`gen/armv4t.sail`,
+//! `gen/armv5te.sail`, see `gen/README.md`).
 //!
 //! A lifted instruction reads and writes the register file of [`regs`]: the
 //! current mode's registers, the CPSR in parts, the SPSRs and the banked

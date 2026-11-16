@@ -36,6 +36,12 @@ pub trait Form {
     fn accept_clause(&self, _raw: &str) -> Result<(), String> {
         Ok(())
     }
+    /// Whether the clause with fixed bits `mask` and `value` can take the
+    /// encoding's words at all; a CPU whose clause guards exclude some
+    /// words (the A32 condition field 1111 from ARMv5) skips the rest.
+    fn takes_clause(&self, _mask: u32, _value: u32) -> bool {
+        true
+    }
 }
 
 /// Builder calls and state reads without effects, which the dead-line pass
@@ -210,12 +216,16 @@ fn clause_bits(raw: &str, nbits: u32) -> Option<(u32, u32)> {
 /// takes the words whose `known` bits are `value`: `Ok(None)` when none
 /// does, `Err(bits)` when the choice depends on these further bits.
 fn clause_for(
+    enc: &dyn Form,
     cls: &[DecodeClause],
     from: usize,
     known: u32,
     value: u32,
 ) -> Result<Option<usize>, u32> {
     for (i, c) in cls.iter().enumerate().skip(from) {
+        if !enc.takes_clause(c.mask, c.value) {
+            continue;
+        }
         let both = c.mask & known;
         if (c.value ^ value) & both != 0 {
             continue;
@@ -272,7 +282,7 @@ pub fn template<C: Stage>(m: &Model, enc: &dyn Form) -> Result<Template, String>
             // only the clauses after the one that threw it.
             let mut from = 0;
             let (g, r) = loop {
-                let at = match clause_for(&pats, from, known, value) {
+                let at = match clause_for(enc, &pats, from, known, value) {
                     Ok(Some(at)) => at,
                     Ok(None) if from == 0 => return Err(format!("no clause of {group} matches")),
                     Ok(None) => return Err("Error_See and no later clause takes the word".into()),

@@ -4,6 +4,7 @@
 
 use relift_ir::{BinOp, Builder, CmpOp, Exit, Flow, Next, Reg, Value, Width};
 
+use crate::decode::Profile;
 use crate::regs::{self, Bank, Mode};
 
 /// The slow-path code of a guard that leaves when the instruction's
@@ -56,17 +57,28 @@ pub struct St {
     /// The bus events so far.
     pub bus: Vec<Bus>,
     force_n: bool,
+    /// The instruction ends at a sync point (a coprocessor write).
+    sync: bool,
+    /// The CPU has the ARMv5 rules (the Q flag).
+    v5: bool,
 }
 
 impl St {
-    /// A state that has written nothing.
+    /// A state that has written nothing, on an ARMv4T CPU.
     pub fn new(thumb: bool) -> St {
+        St::for_profile(thumb, Profile::V4t)
+    }
+
+    /// A state that has written nothing, on a CPU of `profile`.
+    pub fn for_profile(thumb: bool, profile: Profile) -> St {
         St {
             cur: Vec::new(),
             exit: None,
             thumb,
             bus: Vec::new(),
             force_n: false,
+            sync: false,
+            v5: profile == Profile::V5te,
         }
     }
 
@@ -264,6 +276,10 @@ impl St {
         }
         if mask & 8 != 0 {
             self.set_flags_from(b, v, g);
+            if self.v5 {
+                let q = b.extract(v, 27, Width::W1);
+                self.set_q(b, q, g);
+            }
         }
     }
 
@@ -276,7 +292,7 @@ impl St {
             keep |= 0xff;
         }
         if mask & 8 != 0 {
-            keep |= 0xf000_0000;
+            keep |= if self.v5 { 0xf800_0000 } else { 0xf000_0000 };
         }
         let force = if mask & 1 != 0 { 0x10 } else { 0 };
         let m = self.get(b, regs::M);
@@ -379,6 +395,74 @@ impl St {
         self.set(b, regs::T, zero, g);
         self.set(b, regs::I, one, g);
         self.branch(b, Target::Const(0x08), Kind::Call, g);
+    }
+
+    /// ARMv5TE: the sticky overflow flag Q, bit 27 of the CPSR (kept in
+    /// `psr_rsvd`).
+    pub fn q(&mut self, b: &mut Builder) -> Value {
+        let r = self.get(b, regs::PSR_RSVD);
+        b.extract(r, 27, Width::W1)
+    }
+
+    /// Writes Q (an instruction only ever sets it; MSR writes it).
+    pub fn set_q(&mut self, b: &mut Builder, v: Value, g: Option<Value>) {
+        let r = self.get(b, regs::PSR_RSVD);
+        let k = b.konst(Width::W32, 0xf7ff_ffff);
+        let kept = b.and(r, k);
+        let x = b.zext(v, Width::W32);
+        let s27 = b.konst(Width::W32, 27);
+        let x = b.bin(BinOp::Shl, x, s27);
+        let new = b.or(kept, x);
+        self.set(b, regs::PSR_RSVD, new, g);
+    }
+
+    /// MCR: the coprocessor register `key` (coproc bit 0, opc1, CRn, CRm,
+    /// opc2 from bit 14 down) := `v`, by the runtime's hook. The block ends
+    /// at a sync point after it: a CP15 write may move the TCMs, change the
+    /// MPU regions or wait for an interrupt.
+    pub fn cp_write(&mut self, b: &mut Builder, key: u32, v: Value, g: Option<Value>) {
+        let k = b.konst(Width::W32, u128::from(key));
+        let one = b.konst(Width::W1, 1);
+        let g = g.unwrap_or(one);
+        b.intrinsic("arm.cp_write", &[k, v, g], None);
+        self.sync = true;
+    }
+
+    /// MRC: the coprocessor register `key`, by the runtime's hook.
+    pub fn cp_read(&mut self, b: &mut Builder, key: u32) -> Value {
+        let k = b.konst(Width::W32, u128::from(key));
+        b.intrinsic("arm.cp_read", &[k], Some(Width::W32))
+    }
+
+    /// An exception entry: SPSR_mode := CPSR, mode `mode` in ARM state
+    /// with IRQs masked, `r14_mode` the instruction address plus `off`,
+    /// PC `vector` (the runtime adds the CP15 vector base).
+    pub fn exception(
+        &mut self,
+        b: &mut Builder,
+        mode: u32,
+        vector: u32,
+        off: i128,
+        g: Option<Value>,
+    ) {
+        let old = self.cpsr(b);
+        let m = b.konst(Width::W8, u128::from(mode));
+        self.switch_mode(b, m, g);
+        let lr = b.pc().wrapping_add(off as u64) & 0xffff_ffff;
+        let lr = b.konst(Width::W32, u128::from(lr));
+        self.set(b, regs::r(14), lr, g);
+        if let Some(slot) = Mode::ALL
+            .iter()
+            .find(|x| u32::from(x.bits()) == mode)
+            .and_then(|x| x.spsr())
+        {
+            self.set(b, slot, old, g);
+        }
+        let zero = b.konst(Width::W1, 0);
+        let one = b.konst(Width::W1, 1);
+        self.set(b, regs::T, zero, g);
+        self.set(b, regs::I, one, g);
+        self.branch(b, Target::Const(u64::from(vector)), Kind::Call, g);
     }
 
     /// Leaves for [`COND_FAIL`] unless condition `cond` (the four-bit A32
@@ -525,6 +609,9 @@ impl St {
             if let Some(v) = v {
                 b.set(Reg(i as u16), *v);
             }
+        }
+        if self.sync {
+            b.sync();
         }
         let fall = b.pc().wrapping_add(self.len());
         let exit = match self.exit {

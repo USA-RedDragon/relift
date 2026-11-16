@@ -1,9 +1,11 @@
-//! `relift-cpu-arm32-gen`: generates the ARMv4T decode table and lifting
-//! templates from sail-arm's AArch32 model plus the ARMv4T overlay, with
-//! the shared Sail frontend (`relift-sail`).
+//! `relift-cpu-arm32-gen`: generates the decode tables and lifting
+//! templates of the ARMv4T and ARMv5TE profiles from sail-arm's AArch32
+//! model plus one overlay per profile, with the shared Sail frontend
+//! (`relift-sail`).
 //!
-//! Usage: `relift-cpu-arm32-gen gen SAIL_LIB MODEL_SRC OVERLAY OUT_CRATE`,
-//! or `try SAIL_LIB MODEL_SRC OVERLAY NAME...`.
+//! Usage: `relift-cpu-arm32-gen gen SAIL_LIB MODEL_SRC OVERLAY a32|t16`,
+//! `gen SAIL_LIB MODEL_SRC OVERLAY,OVERLAY... decode` (one table for all
+//! profiles), or `try SAIL_LIB MODEL_SRC OVERLAY NAME...`.
 
 mod cut;
 
@@ -46,6 +48,8 @@ const GROUPS: &[(&str, &str, bool)] = &[
     ("__DecodeA32_BranchBlock", "A32_BRANCHBLOCK", false),
     ("__DecodeA32_SysASIMDFP", "A32_SYSASIMDFP", false),
     ("__DecodeT16", "T16", true),
+    // ARMv5 and later: the condition field 1111 selects this group.
+    ("__DecodeA32_Unconditional", "A32_UNCONDITIONAL", false),
 ];
 
 /// One decode clause of a group.
@@ -68,16 +72,24 @@ struct Enc {
     pos: usize,
 }
 
+/// The A32 group whose words have the condition field 1111.
+const UNCONDITIONAL: &str = "__DecodeA32_Unconditional";
+
 thread_local! {
+    /// The overlay's `$relift profile` (`v4t` without one).
+    static PROFILE: RefCell<String> = RefCell::new("v4t".into());
     static CLAUSES: RefCell<BTreeMap<&'static str, Vec<Clause>>> = const { RefCell::new(BTreeMap::new()) };
     static ALLOW: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
 fn first_match(group: &str, w: u32) -> Option<usize> {
+    // ARMv5 condition 1111 outside the unconditional group: only the
+    // clauses that fix the condition field (as `decode_nv` at lift time).
+    let nv = group.starts_with("__DecodeA32_") && group != UNCONDITIONAL && w >> 28 == 0xf;
     CLAUSES.with(|c| {
         c.borrow()[group]
             .iter()
-            .position(|cl| w & cl.mask == cl.value)
+            .position(|cl| (!nv || cl.mask >> 28 == 0xf) && w & cl.mask == cl.value)
     })
 }
 
@@ -111,12 +123,17 @@ impl Form for Enc {
         }
         false
     }
+    fn takes_clause(&self, mask: u32, _value: u32) -> bool {
+        // ARMv5 words with condition 1111 outside the unconditional group
+        // go only to clauses that fix the condition field.
+        self.thumb || self.group == UNCONDITIONAL || self.value >> 28 != 0xf || mask >> 28 == 0xf
+    }
     fn accept_clause(&self, raw: &str) -> Result<(), String> {
         let name = clause_name(raw).unwrap_or_default();
         if ALLOW.with(|a| a.borrow().contains(&name)) {
             Ok(())
         } else {
-            Err(format!("clause {name} is not ARMv4T"))
+            Err(format!("clause {name} is not in the overlay's profile"))
         }
     }
 }
@@ -147,15 +164,25 @@ fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String
     }
     let text = std::fs::read_to_string(overlay).map_err(|e| e.to_string())?;
     let mut allow = HashSet::new();
+    let mut profile = "v4t".to_string();
     for l in text.lines() {
         if let Some(rest) = l.trim().strip_prefix("$relift allow ") {
             allow.extend(rest.split_whitespace().map(str::to_string));
         }
+        if let Some(rest) = l.trim().strip_prefix("$relift profile ") {
+            profile = rest.trim().to_string();
+        }
     }
+    let v5 = profile != "v4t";
+    PROFILE.with(|p| *p.borrow_mut() = profile);
     let mut encs = Vec::new();
     let mut seen = HashSet::new();
     let mut table = BTreeMap::new();
     for &(group, _, thumb) in GROUPS {
+        if group == UNCONDITIONAL && !v5 {
+            table.insert(group, Vec::new());
+            continue;
+        }
         let raws = m.funcs.get(group).cloned().unwrap_or_default();
         let pats = stage::clauses(&m, group, if thumb { 16 } else { 32 });
         let mut cls = Vec::new();
@@ -177,6 +204,9 @@ fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String
                 // so the templates are generated for AL.
                 let (mask, value) = if thumb {
                     (p.mask, p.value)
+                } else if group == UNCONDITIONAL || (p.mask >> 28 == 0xf && p.value >> 28 == 0xf) {
+                    // ARMv5 words with the condition field 1111.
+                    (p.mask | 0xf000_0000, p.value | 0xf000_0000)
                 } else {
                     (p.mask | 0xf000_0000, (p.value & 0x0fff_ffff) | 0xe000_0000)
                 };
@@ -202,7 +232,9 @@ fn load(lib: &str, src: &str, overlay: &str) -> Result<(Model, Vec<Enc>), String
 }
 
 fn configure(e: &Enc) {
-    let cond = if !e.thumb {
+    let cond = if e.group == UNCONDITIONAL || (!e.thumb && e.value >> 28 == 0xf) {
+        None
+    } else if !e.thumb {
         Some("((w >> 28) & 0xf)")
     } else if e.name == "B_T1" {
         Some("((w >> 8) & 0xf)")
@@ -223,31 +255,102 @@ fn template(m: &Model, e: &Enc) -> Result<stage::Template, String> {
     stage::template::<Arm32>(m, e)
 }
 
-const HEADER: &str = "//! Generated by relift-cpu-arm32-gen from sail-arm 5416ef6b43e9527c38dc71fb752259c1d01a47e1,\n//! the Sail library at c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456 and the ARMv4T overlay\n//! `cpus/arm32/gen/armv4t.sail`. Do not edit; see `cpus/arm32/gen/README.md` to regenerate.\n//! Derived from sail-arm (BSD-3-Clause-Clear, see `NOTICE-sail-arm` next to this crate's\n//! manifest); the Sail library parts are BSD-2-Clause.\n";
+/// The header of a generated file made from the overlays `overlays`.
+fn header(overlays: &[&str]) -> String {
+    let file = |o: &&str| o.rsplit('/').next().unwrap_or(o).to_string();
+    let from = match overlays {
+        [o] => format!(
+            "the {} overlay\n//! `cpus/arm32/gen/{}`",
+            profile_title(&profile_of(o)),
+            file(o)
+        ),
+        _ => {
+            let names: Vec<String> = overlays.iter().map(|o| format!("`{}`", file(o))).collect();
+            format!(
+                "the overlays\n//! {} in `cpus/arm32/gen`",
+                names.join(" and ")
+            )
+        }
+    };
+    format!(
+        "//! Generated by relift-cpu-arm32-gen from sail-arm 5416ef6b43e9527c38dc71fb752259c1d01a47e1,\n//! the Sail library at c44944f11b71e5c9bd4b30cdbf79ea32f6dcf456 and {from}. Do not edit; see `cpus/arm32/gen/README.md` to regenerate.\n//! Derived from sail-arm (BSD-3-Clause-Clear, see `NOTICE-sail-arm` next to this crate's\n//! manifest); the Sail library parts are BSD-2-Clause.\n"
+    )
+}
 
-fn write_table(encs: &[Enc]) -> String {
-    let mut s = String::new();
-    s.push_str(HEADER);
+/// The overlay's `$relift profile` (`v4t` without one).
+fn profile_of(overlay: &str) -> String {
+    std::fs::read_to_string(overlay)
+        .unwrap_or_default()
+        .lines()
+        .find_map(|l| {
+            l.trim()
+                .strip_prefix("$relift profile ")
+                .map(|p| p.trim().to_string())
+        })
+        .unwrap_or_else(|| "v4t".into())
+}
+
+fn profile_title(p: &str) -> String {
+    format!("ARM{}", p.to_uppercase().replacen('V', "v", 1))
+}
+
+/// One profile's decode clauses and encodings, for the decode table.
+struct Loaded {
+    profile: String,
+    encs: Vec<Enc>,
+    table: BTreeMap<&'static str, Vec<Clause>>,
+}
+
+/// The Rust prefix of a profile's tables (none for ARMv4T, which came
+/// first).
+fn prefix(profile: &str) -> String {
+    if profile == "v4t" {
+        String::new()
+    } else {
+        format!("{}_", profile.to_uppercase())
+    }
+}
+
+fn write_table(overlays: &[&str], profiles: &[Loaded]) -> String {
+    let mut s = header(overlays);
     s.push_str("\n#![allow(non_camel_case_types, clippy::all)]\n\n");
-    s.push_str("/// An ARMv4T encoding: a decode clause of sail-arm or the overlay.\n");
+    let titles: Vec<String> = profiles.iter().map(|p| profile_title(&p.profile)).collect();
+    let _ = writeln!(
+        s,
+        "/// An encoding of {}: a decode clause of sail-arm or an overlay.",
+        titles.join(" or ")
+    );
     s.push_str("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\npub enum Encoding {\n");
-    for e in encs {
-        let _ = writeln!(s, "    {},", e.name);
+    let mut names: Vec<&str> = Vec::new();
+    for p in profiles {
+        for e in &p.encs {
+            if !names.contains(&e.name.as_str()) {
+                names.push(&e.name);
+            }
+        }
+    }
+    for n in &names {
+        let _ = writeln!(s, "    {n},");
     }
     s.push_str("}\n\npub(crate) const NAMES: &[&str] = &[\n");
-    for e in encs {
-        let _ = writeln!(s, "    \"{}\",", e.name);
+    for n in &names {
+        let _ = writeln!(s, "    \"{n}\",");
     }
     s.push_str("];\n\n");
-    CLAUSES.with(|c| {
-        let c = c.borrow();
+    for p in profiles {
+        let pre = prefix(&p.profile);
         for &(group, rust, _) in GROUPS {
+            let cls = &p.table[group];
+            if group == UNCONDITIONAL && cls.is_empty() {
+                continue;
+            }
             let _ = writeln!(
                 s,
-                "pub(crate) static {rust}: &[(u32, u32, Option<Encoding>, &str)] = &["
+                "pub(crate) static {pre}{rust}: &[(u32, u32, Option<Encoding>, &str)] = &["
             );
-            for (pos, cl) in c[group].iter().enumerate() {
-                let enc = encs
+            for (pos, cl) in cls.iter().enumerate() {
+                let enc = p
+                    .encs
                     .iter()
                     .find(|e| e.group == group && e.pos == pos)
                     .map(|e| format!("Some(Encoding::{})", e.name))
@@ -262,22 +365,36 @@ fn write_table(encs: &[Enc]) -> String {
             }
             s.push_str("];\n\n");
         }
-    });
-    s.push_str("pub(crate) static FORMS: &[(Encoding, u32, u32, bool, &str)] = &[\n");
-    for e in encs {
+    }
+    for (i, p) in profiles.iter().enumerate() {
         let _ = writeln!(
             s,
-            "    (Encoding::{}, {:#010x}, {:#010x}, {}, \"{}\"),",
-            e.name, e.mask, e.value, e.thumb, e.group
+            "pub(crate) static {}FORMS: &[(Encoding, u32, u32, bool, &str)] = &[",
+            prefix(&p.profile)
         );
+        for e in &p.encs {
+            let _ = writeln!(
+                s,
+                "    (Encoding::{}, {:#010x}, {:#010x}, {}, \"{}\"),",
+                e.name, e.mask, e.value, e.thumb, e.group
+            );
+        }
+        s.push_str("];\n");
+        if i + 1 < profiles.len() {
+            s.push('\n');
+        }
     }
-    s.push_str("];\n");
     s
 }
 
-fn write_class(m: &Model, encs: &[Enc], thumb: bool, fails: &mut Vec<(String, String)>) -> String {
-    let mut s = String::new();
-    s.push_str(HEADER);
+fn write_class(
+    overlay: &str,
+    m: &Model,
+    encs: &[Enc],
+    thumb: bool,
+    fails: &mut Vec<(String, String)>,
+) -> String {
+    let mut s = header(&[overlay]);
     s.push_str("\n#![allow(non_snake_case, unused, clippy::all)]\n\n");
     s.push_str("use relift_ir::{BinOp, Builder, CmpOp, Endian, Order, UnOp, Width};\n\n");
     s.push_str("use crate::decode::Encoding;\nuse crate::lift::rt::{self, Kind, St, Target};\nuse crate::lift::{GenFn, LiftError};\nuse crate::regs;\n\n");
@@ -304,22 +421,41 @@ fn real_main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 5 {
         eprintln!(
-            "usage: relift-cpu-arm32-gen gen|try SAIL_LIB MODEL_SRC OVERLAY decode|a32|t16|NAME..."
+            "usage: relift-cpu-arm32-gen gen|try SAIL_LIB MODEL_SRC OVERLAY[,OVERLAY] decode|a32|t16|NAME..."
         );
         return ExitCode::from(2);
     }
-    let (m, encs) = match load(&args[1], &args[2], &args[3]) {
-        Ok(x) => x,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
+    let overlays: Vec<&str> = args[3].split(',').collect();
+    let mut loaded = Vec::new();
+    let mut last = None;
+    for o in &overlays {
+        match load(&args[1], &args[2], o) {
+            Ok((m, encs)) => {
+                loaded.push(Loaded {
+                    profile: profile_of(o),
+                    encs: encs.clone(),
+                    table: CLAUSES.with(|c| c.borrow().clone()),
+                });
+                last = Some((m, encs));
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
         }
+    }
+    let Some((m, encs)) = last else {
+        return ExitCode::from(2);
     };
+    if overlays.len() > 1 && args[4] != "decode" {
+        eprintln!("only the decode table takes more than one overlay");
+        return ExitCode::from(2);
+    }
     match args[0].as_str() {
         "try" => {
             for n in &args[4..] {
                 match encs.iter().find(|e| &e.name == n) {
-                    None => println!("// {n}: no such ARMv4T encoding"),
+                    None => println!("// {n}: no such encoding in the overlay's profile"),
                     Some(e) => match template(&m, e) {
                         Ok(t) => println!("{}", t.code),
                         Err(err) => println!("// {n}: {err}"),
@@ -331,9 +467,9 @@ fn real_main() -> ExitCode {
         "gen" => {
             let mut fails = Vec::new();
             let text = match args[4].as_str() {
-                "decode" => write_table(&encs),
-                "a32" => write_class(&m, &encs, false, &mut fails),
-                "t16" => write_class(&m, &encs, true, &mut fails),
+                "decode" => write_table(&overlays, &loaded),
+                "a32" => write_class(overlays[0], &m, &encs, false, &mut fails),
+                "t16" => write_class(overlays[0], &m, &encs, true, &mut fails),
                 _ => return ExitCode::from(2),
             };
             for (n, e) in &fails {

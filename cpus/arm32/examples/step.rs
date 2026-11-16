@@ -10,10 +10,12 @@
 //! any other access faults.
 //!
 //! Output lines: `ok NEXT SLOT... SCRATCH` (hex, the condition-failed exit
-//! included as an instruction with no effect), or `err WHY`.
+//! included as an instruction with no effect), or `err WHY`. The argument
+//! `--v5te` lifts with the ARMv5TE tables instead of the ARMv4T ones.
 
 use std::io::{BufRead, Write};
 
+use relift_cpu_arm32::decode::Profile;
 use relift_cpu_arm32::lift::{self, COND_FAIL};
 use relift_cpu_arm32::regs;
 use relift_ir::interp::{self, Fault, GuestMemory, NoIntrinsics, State};
@@ -74,8 +76,15 @@ fn word(t: &str) -> Result<u32, String> {
 }
 
 /// Runs the instruction at `pc` once; gives the next PC.
-fn step(word: u32, pc: u32, thumb: bool, st: &mut State, mem: &mut Mem) -> Result<u32, String> {
-    let l = lift::lift(word, pc, thumb).map_err(|e| e.to_string())?;
+fn step(
+    p: Profile,
+    word: u32,
+    pc: u32,
+    thumb: bool,
+    st: &mut State,
+    mem: &mut Mem,
+) -> Result<u32, String> {
+    let l = lift::lift_for(word, pc, thumb, p).map_err(|e| e.to_string())?;
     let block = simplify(&l.block);
     let out = interp::run(&block, st, mem, &mut NoIntrinsics)
         .map_err(|e| format!("{}: {e}", l.enc.name()))?;
@@ -86,7 +95,7 @@ fn step(word: u32, pc: u32, thumb: bool, st: &mut State, mem: &mut Mem) -> Resul
     })
 }
 
-fn line(l: &str) -> Result<String, String> {
+fn line(p: Profile, l: &str) -> Result<String, String> {
     let t: Vec<&str> = l.split_whitespace().collect();
     let slots = regs::regs().len();
     if t.len() != 6 + slots + 2 {
@@ -105,10 +114,10 @@ fn line(l: &str) -> Result<String, String> {
         st.regs[i] = u128::from(word(v)?);
     }
     let next = if pair {
-        step(insn & 0xffff, pc, true, &mut st, &mut mem)?;
-        step(insn >> 16, pc.wrapping_add(2), true, &mut st, &mut mem)?
+        step(p, insn & 0xffff, pc, true, &mut st, &mut mem)?;
+        step(p, insn >> 16, pc.wrapping_add(2), true, &mut st, &mut mem)?
     } else {
-        step(insn, pc, thumb, &mut st, &mut mem)?
+        step(p, insn, pc, thumb, &mut st, &mut mem)?
     };
     let mut out = format!("ok {next:x}");
     for v in &st.regs {
@@ -122,11 +131,16 @@ fn line(l: &str) -> Result<String, String> {
 }
 
 fn main() {
+    let p = if std::env::args().any(|a| a == "--v5te") {
+        Profile::V5te
+    } else {
+        Profile::V4t
+    };
     let stdin = std::io::stdin();
     let mut out = std::io::BufWriter::new(std::io::stdout());
     for l in stdin.lock().lines() {
         let l = l.expect("reads stdin");
-        let r = match line(&l) {
+        let r = match line(p, &l) {
             Ok(s) => s,
             Err(e) => format!("err {e}"),
         };
