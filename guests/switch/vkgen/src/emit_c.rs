@@ -491,6 +491,12 @@ fn emit_thunk(m: &mut Model, def: &str, primary: &str, o: &mut String) -> Result
         let l = m.type_layout(&ret)?;
         if l.size == 8 {
             writeln!(o, "    c->x[0] = (uint64_t)r;").ok();
+        } else if ret == "VkResult" {
+            writeln!(
+                o,
+                "    c->x[0] = (uint32_t)vkf_result(&k, VKG_{primary}, r);"
+            )
+            .ok();
         } else {
             writeln!(o, "    c->x[0] = (uint32_t)r;").ok();
         }

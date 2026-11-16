@@ -63,7 +63,7 @@ int vkh_vkCreateRenderPass(rl_ctx *restrict c, uint8_t *mem)
     }
     VkRenderPass *out = vkf_ptr(&k, c->x[3]);
     VkResult r = VKF_FN(k.fns, vkCreateRenderPass)(dev, ci, NULL, out);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateRenderPass, r);
     return vkf_end(&k);
 }
 
@@ -86,7 +86,7 @@ int vkh_vkCreateRenderPass2(rl_ctx *restrict c, uint8_t *mem)
     }
     VkRenderPass *out = vkf_ptr(&k, c->x[3]);
     VkResult r = VKF_FN(k.fns, vkCreateRenderPass2)(dev, ci, NULL, out);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateRenderPass2, r);
     return vkf_end(&k);
 }
 

@@ -1456,6 +1456,39 @@ static bool limits_are_the_switch(const VkPhysicalDeviceLimits *l)
     return !memcmp(&a, &b, sizeof a);
 }
 
+TEST(vk_a_failing_result_is_logged_once_with_its_caller)
+{
+    static rl_ctx c;
+    c.x[30] = 0x8123456;
+    vkf_call k;
+    memset(&k, 0, sizeof k);
+    k.c = &c;
+    int fds[2];
+    fflush(stderr);
+    CHECK_EQ(pipe(fds), 0);
+    int saved = dup(2);
+    dup2(fds[1], 2);
+    CHECK_EQ(vkf_result(&k, VKG_vkCreateBuffer, VK_SUCCESS), VK_SUCCESS);
+    CHECK_EQ(vkf_result(&k, VKG_vkCreateBuffer, VK_INCOMPLETE), VK_INCOMPLETE);
+    CHECK_EQ(vkf_result(&k, VKG_vkCreateBuffer, VK_ERROR_FEATURE_NOT_PRESENT), VK_ERROR_FEATURE_NOT_PRESENT);
+    CHECK_EQ(vkf_result(&k, VKG_vkCreateBuffer, VK_ERROR_FEATURE_NOT_PRESENT), VK_ERROR_FEATURE_NOT_PRESENT);
+    CHECK_EQ(vkf_result(&k, VKG_vkCreateImage, VK_ERROR_FEATURE_NOT_PRESENT), VK_ERROR_FEATURE_NOT_PRESENT);
+    fflush(stderr);
+    dup2(saved, 2);
+    close(saved);
+    close(fds[1]);
+    static char out[4096];
+    ssize_t got = read(fds[0], out, sizeof out - 1);
+    out[got > 0 ? got : 0] = 0;
+    close(fds[0]);
+    const char *one = "vkCreateBuffer: VK_ERROR_FEATURE_NOT_PRESENT (-8), called from 0x8123456";
+    const char *at = strstr(out, one);
+    CHECK(at != NULL);
+    CHECK(at && !strstr(at + 1, one));
+    CHECK(strstr(out, "vkCreateImage: VK_ERROR_FEATURE_NOT_PRESENT (-8)") != NULL);
+    CHECK(!strstr(out, "VK_INCOMPLETE") && !strstr(out, "(5)"));
+}
+
 TEST(vk_guest_sees_the_switch_driver)
 {
     uint64_t pd = boot_fake(NULL, -1);

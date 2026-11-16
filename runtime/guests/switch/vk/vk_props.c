@@ -811,7 +811,7 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties(rl_ctx *restrict c, uint8_t *me
         clamp_image_format(&p, type, decoded);
     if (c->x[6])
         memcpy(mem + c->x[6], &p, sizeof p);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceImageFormatProperties, r);
     return vkf_end(&k);
 }
 
@@ -845,7 +845,7 @@ int vkh_vkGetPhysicalDeviceImageFormatProperties2(rl_ctx *restrict c, uint8_t *m
             memset(&out->imageFormatProperties, 0, sizeof out->imageFormatProperties);
         vkg_aout_VkImageFormatProperties2(&k, c->x[2], out, 1);
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceImageFormatProperties2, r);
     return vkf_end(&k);
 }
 
@@ -855,7 +855,7 @@ int vkh_vkEnumerateInstanceVersion(rl_ctx *restrict c, uint8_t *mem)
     vkf_begin(&k, c, mem);
     if (c->x[0])
         rl_st32(mem, c->x[0], vkf_switch.instance_version);
-    c->x[0] = (uint32_t)VK_SUCCESS;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceVersion, VK_SUCCESS);
     return vkf_end(&k);
 }
 

@@ -16,7 +16,7 @@ static int vkt_vkBindBufferMemory(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkBindBufferMemory);
     VkResult r = fn(a0, a1, a2, a3);
     vkf_buffer_bound(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBindBufferMemory, r);
     return vkf_end(&k);
 }
 
@@ -34,7 +34,7 @@ static int vkt_vkBindBufferMemory2(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkBindBufferMemory2);
     VkResult r = fn(a0, a1, a2);
     vkf_buffers_bound(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBindBufferMemory2, r);
     return vkf_end(&k);
 }
 
@@ -1489,7 +1489,7 @@ static int vkt_vkCreateBufferView(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateBufferView);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateBufferView, r);
     return vkf_end(&k);
 }
 
@@ -1507,7 +1507,7 @@ static int vkt_vkCreateCommandPool(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateCommandPool);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateCommandPool, r);
     return vkf_end(&k);
 }
 
@@ -1527,7 +1527,7 @@ static int vkt_vkCreateComputePipelines(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateComputePipelines);
     VkResult r = fn(a0, a1, a2, a3, a4, a5);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateComputePipelines, r);
     return vkf_end(&k);
 }
 
@@ -1545,7 +1545,7 @@ static int vkt_vkCreateDescriptorUpdateTemplate(rl_ctx *restrict c, uint8_t *mem
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateDescriptorUpdateTemplate);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDescriptorUpdateTemplate, r);
     return vkf_end(&k);
 }
 
@@ -1563,7 +1563,7 @@ static int vkt_vkCreateEvent(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateEvent);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateEvent, r);
     return vkf_end(&k);
 }
 
@@ -1581,7 +1581,7 @@ static int vkt_vkCreateFence(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateFence);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateFence, r);
     return vkf_end(&k);
 }
 
@@ -1604,7 +1604,7 @@ static int vkt_vkCreateFramebuffer(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateFramebuffer, r);
     return vkf_end(&k);
 }
 
@@ -1624,7 +1624,7 @@ static int vkt_vkCreateGraphicsPipelines(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateGraphicsPipelines);
     VkResult r = fn(a0, a1, a2, a3, a4, a5);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateGraphicsPipelines, r);
     return vkf_end(&k);
 }
 
@@ -1642,7 +1642,7 @@ static int vkt_vkCreatePipelineCache(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreatePipelineCache);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreatePipelineCache, r);
     return vkf_end(&k);
 }
 
@@ -1665,7 +1665,7 @@ static int vkt_vkCreatePipelineLayout(rl_ctx *restrict c, uint8_t *mem)
         return vkf_end(&k);
     }
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreatePipelineLayout, r);
     return vkf_end(&k);
 }
 
@@ -1683,7 +1683,7 @@ static int vkt_vkCreatePrivateDataSlot(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreatePrivateDataSlot);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreatePrivateDataSlot, r);
     return vkf_end(&k);
 }
 
@@ -1701,7 +1701,7 @@ static int vkt_vkCreateQueryPool(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateQueryPool);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateQueryPool, r);
     return vkf_end(&k);
 }
 
@@ -1719,7 +1719,7 @@ static int vkt_vkCreateSampler(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateSampler);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateSampler, r);
     return vkf_end(&k);
 }
 
@@ -1737,7 +1737,7 @@ static int vkt_vkCreateSamplerYcbcrConversion(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateSamplerYcbcrConversion);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateSamplerYcbcrConversion, r);
     return vkf_end(&k);
 }
 
@@ -1755,7 +1755,7 @@ static int vkt_vkCreateSemaphore(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateSemaphore);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateSemaphore, r);
     return vkf_end(&k);
 }
 
@@ -1773,7 +1773,7 @@ static int vkt_vkCreateShaderModule(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkCreateShaderModule);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateShaderModule, r);
     return vkf_end(&k);
 }
 
@@ -1789,7 +1789,7 @@ static int vkt_vkDebugMarkerSetObjectNameEXT(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDebugMarkerSetObjectNameEXT);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkDebugMarkerSetObjectNameEXT, r);
     return vkf_end(&k);
 }
 
@@ -1805,7 +1805,7 @@ static int vkt_vkDebugMarkerSetObjectTagEXT(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkDebugMarkerSetObjectTagEXT);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkDebugMarkerSetObjectTagEXT, r);
     return vkf_end(&k);
 }
 
@@ -2166,7 +2166,7 @@ static int vkt_vkDeviceWaitIdle(rl_ctx *restrict c, uint8_t *mem)
     vkf_queue_wait_enter(&k);
     VkResult r = fn(a0);
     vkf_queue_wait_return(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkDeviceWaitIdle, r);
     return vkf_end(&k);
 }
 
@@ -2181,7 +2181,7 @@ static int vkt_vkEndCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkEndCommandBuffer);
     VkResult r = fn(a0);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEndCommandBuffer, r);
     return vkf_end(&k);
 }
 
@@ -2198,7 +2198,7 @@ static int vkt_vkEnumerateDeviceLayerProperties(rl_ctx *restrict c, uint8_t *mem
     if (!fn)
         return vkf_no_fn(&k, VKG_vkEnumerateDeviceLayerProperties);
     VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateDeviceLayerProperties, r);
     return vkf_end(&k);
 }
 
@@ -2213,7 +2213,7 @@ static int vkt_vkEnumerateInstanceLayerProperties(rl_ctx *restrict c, uint8_t *m
     if (!fn)
         return vkf_no_fn(&k, VKG_vkEnumerateInstanceLayerProperties);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceLayerProperties, r);
     return vkf_end(&k);
 }
 
@@ -2347,7 +2347,7 @@ static int vkt_vkGetDeviceGroupPresentCapabilitiesKHR(rl_ctx *restrict c, uint8_
             vkg_aout_VkDeviceGroupPresentCapabilitiesKHR(&k, c->x[1], a1, w1 < n1 ? w1 : n1);
         }
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetDeviceGroupPresentCapabilitiesKHR, r);
     return vkf_end(&k);
 }
 
@@ -2364,7 +2364,7 @@ static int vkt_vkGetDeviceGroupSurfacePresentModesKHR(rl_ctx *restrict c, uint8_
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetDeviceGroupSurfacePresentModesKHR);
     VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetDeviceGroupSurfacePresentModesKHR, r);
     return vkf_end(&k);
 }
 
@@ -2456,7 +2456,7 @@ static int vkt_vkGetEventStatus(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetEventStatus);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetEventStatus, r);
     return vkf_end(&k);
 }
 
@@ -2473,7 +2473,7 @@ static int vkt_vkGetFenceStatus(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkGetFenceStatus);
     VkResult r = fn(a0, a1);
     vkf_shadow_pull(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetFenceStatus, r);
     return vkf_end(&k);
 }
 
@@ -2670,7 +2670,7 @@ static int vkt_vkGetPhysicalDevicePresentRectanglesKHR(rl_ctx *restrict c, uint8
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDevicePresentRectanglesKHR, r);
     return vkf_end(&k);
 }
 
@@ -2738,7 +2738,7 @@ static int vkt_vkGetPhysicalDeviceSurfaceFormats2KHR(rl_ctx *restrict c, uint8_t
             vkg_aout_VkSurfaceFormat2KHR(&k, c->x[3], a3, w3 < n3 ? w3 : n3);
         }
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceFormats2KHR, r);
     return vkf_end(&k);
 }
 
@@ -2762,7 +2762,7 @@ static int vkt_vkGetPhysicalDeviceToolProperties(rl_ctx *restrict c, uint8_t *me
             vkg_aout_VkPhysicalDeviceToolProperties(&k, c->x[2], a2, w2 < n2 ? w2 : n2);
         }
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceToolProperties, r);
     return vkf_end(&k);
 }
 
@@ -2780,7 +2780,7 @@ static int vkt_vkGetPipelineCacheData(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetPipelineCacheData);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPipelineCacheData, r);
     return vkf_end(&k);
 }
 
@@ -2820,7 +2820,7 @@ static int vkt_vkGetQueryPoolResults(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetQueryPoolResults);
     VkResult r = fn(a0, a1, a2, a3, a4, a5, a6, a7);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetQueryPoolResults, r);
     return vkf_end(&k);
 }
 
@@ -2853,7 +2853,7 @@ static int vkt_vkGetSemaphoreCounterValue(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkGetSemaphoreCounterValue);
     VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetSemaphoreCounterValue, r);
     return vkf_end(&k);
 }
 
@@ -2871,7 +2871,7 @@ static int vkt_vkMergePipelineCaches(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkMergePipelineCaches);
     VkResult r = fn(a0, a1, a2, a3);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkMergePipelineCaches, r);
     return vkf_end(&k);
 }
 
@@ -2906,7 +2906,7 @@ static int vkt_vkQueueBindSparse(rl_ctx *restrict c, uint8_t *mem)
     vkf_queue_enter(&k);
     VkResult r = fn(a0, a1, a2, a3);
     vkf_queue_unlock(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueueBindSparse, r);
     return vkf_end(&k);
 }
 
@@ -2952,7 +2952,7 @@ static int vkt_vkQueueWaitIdle(rl_ctx *restrict c, uint8_t *mem)
     vkf_queue_wait_enter(&k);
     VkResult r = fn(a0);
     vkf_queue_wait_return(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueueWaitIdle, r);
     return vkf_end(&k);
 }
 
@@ -2969,7 +2969,7 @@ static int vkt_vkResetCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkResetCommandBuffer);
     VkResult r = fn(a0, a1);
     vkf_cb_reset_hook(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkResetCommandBuffer, r);
     return vkf_end(&k);
 }
 
@@ -2987,7 +2987,7 @@ static int vkt_vkResetCommandPool(rl_ctx *restrict c, uint8_t *mem)
         return vkf_no_fn(&k, VKG_vkResetCommandPool);
     VkResult r = fn(a0, a1, a2);
     vkf_pool_reset_hook(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkResetCommandPool, r);
     return vkf_end(&k);
 }
 
@@ -3003,7 +3003,7 @@ static int vkt_vkResetEvent(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkResetEvent);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkResetEvent, r);
     return vkf_end(&k);
 }
 
@@ -3020,7 +3020,7 @@ static int vkt_vkResetFences(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkResetFences);
     VkResult r = fn(a0, a1, a2);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkResetFences, r);
     return vkf_end(&k);
 }
 
@@ -3053,7 +3053,7 @@ static int vkt_vkSetDebugUtilsObjectNameEXT(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkSetDebugUtilsObjectNameEXT);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkSetDebugUtilsObjectNameEXT, r);
     return vkf_end(&k);
 }
 
@@ -3069,7 +3069,7 @@ static int vkt_vkSetDebugUtilsObjectTagEXT(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkSetDebugUtilsObjectTagEXT);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkSetDebugUtilsObjectTagEXT, r);
     return vkf_end(&k);
 }
 
@@ -3085,7 +3085,7 @@ static int vkt_vkSetEvent(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkSetEvent);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkSetEvent, r);
     return vkf_end(&k);
 }
 
@@ -3121,7 +3121,7 @@ static int vkt_vkSetPrivateData(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkSetPrivateData);
     VkResult r = fn(a0, a1, a2, a3, a4);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkSetPrivateData, r);
     return vkf_end(&k);
 }
 
@@ -3137,7 +3137,7 @@ static int vkt_vkSignalSemaphore(rl_ctx *restrict c, uint8_t *mem)
     if (!fn)
         return vkf_no_fn(&k, VKG_vkSignalSemaphore);
     VkResult r = fn(a0, a1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkSignalSemaphore, r);
     return vkf_end(&k);
 }
 
@@ -3226,7 +3226,7 @@ static int vkt_vkWaitForFences(rl_ctx *restrict c, uint8_t *mem)
     vkf_fences_wait_enter(&k);
     VkResult r = fn(a0, a1, a2, a3, a4);
     vkf_wait_pull_return(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkWaitForFences, r);
     return vkf_end(&k);
 }
 
@@ -3245,7 +3245,7 @@ static int vkt_vkWaitSemaphores(rl_ctx *restrict c, uint8_t *mem)
     vkf_semaphores_wait_enter(&k);
     VkResult r = fn(a0, a1, a2);
     vkf_wait_pull_return(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkWaitSemaphores, r);
     return vkf_end(&k);
 }
 

@@ -188,7 +188,7 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rl_ctx *restrict c, uint8_t *m
     }
     if (r >= 0)
         vkf_vi_caps(c->x[1], caps);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceCapabilitiesKHR, r);
     return vkf_end(&k);
 }
 
@@ -215,7 +215,7 @@ int vkh_vkGetPhysicalDeviceSurfaceCapabilities2KHR(rl_ctx *restrict c, uint8_t *
         vkf_vi_caps((uint64_t)(uintptr_t)info->surface, &caps->surfaceCapabilities);
         vkg_aout_VkSurfaceCapabilities2KHR(&k, c->x[2], caps, 1);
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceCapabilities2KHR, r);
     return vkf_end(&k);
 }
 
@@ -238,7 +238,7 @@ int vkh_vkGetPhysicalDeviceSurfacePresentModesKHR(rl_ctx *restrict c, uint8_t *m
         rl_st32(mem, gmodes, VK_PRESENT_MODE_FIFO_KHR);
         rl_st32(mem, gcount, 1);
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfacePresentModesKHR, r);
     return vkf_end(&k);
 }
 
@@ -269,7 +269,7 @@ int vkh_vkGetPhysicalDeviceSurfaceFormatsKHR(rl_ctx *restrict c, uint8_t *mem)
         rl_st32(mem, gcount, w);
         r = w < n ? VK_INCOMPLETE : VK_SUCCESS;
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceFormatsKHR, r);
     return vkf_end(&k);
 }
 
@@ -629,7 +629,7 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     VkSwapchainCreateInfoKHR *ci = vkg_ain_VkSwapchainCreateInfoKHR(&k, c->x[1], 1);
     uint64_t gout = c->x[3];
     if (!ci || !gout || !ci->imageExtent.width || !ci->imageExtent.height) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateSwapchainKHR, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     vkf_swap *s = calloc(1, sizeof *s);
@@ -672,7 +672,7 @@ int vkh_vkCreateSwapchainKHR(rl_ctx *restrict c, uint8_t *mem)
     }
     if (r < 0) {
         swap_free(s);
-        c->x[0] = (uint32_t)r;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateSwapchainKHR, r);
         return vkf_end(&k);
     }
     pthread_mutex_lock(&g_lock);
@@ -747,7 +747,7 @@ int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem)
     vkf_swap *s = swap_of(c->x[1], k.obj);
     uint64_t gcount = c->x[2], garray = c->x[3];
     if (!s || !gcount) {
-        c->x[0] = (uint32_t)VK_ERROR_UNKNOWN;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetSwapchainImagesKHR, VK_ERROR_UNKNOWN);
         return vkf_end(&k);
     }
     if (!garray) {
@@ -759,7 +759,7 @@ int vkh_vkGetSwapchainImagesKHR(rl_ctx *restrict c, uint8_t *mem)
     for (uint32_t i = 0; i < w; i++)
         vkf_s64(&k, garray + 8u * i, (uint64_t)(uintptr_t)s->img[i]);
     rl_st32(mem, gcount, w);
-    c->x[0] = (uint32_t)(w < s->n ? VK_INCOMPLETE : VK_SUCCESS);
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetSwapchainImagesKHR, (w < s->n ? VK_INCOMPLETE : VK_SUCCESS));
     return vkf_end(&k);
 }
 
@@ -916,7 +916,7 @@ int vkh_vkAcquireNextImageKHR(rl_ctx *restrict c, uint8_t *mem)
         r = acquire_signal(&k, s, (VkSemaphore)(uintptr_t)c->x[3], (VkFence)(uintptr_t)c->x[4]);
     if (r == VK_SUCCESS)
         rl_st32(mem, c->x[5], idx);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAcquireNextImageKHR, r);
     return vkf_end(&k);
 }
 
@@ -944,7 +944,7 @@ int vkh_vkAcquireNextImage2KHR(rl_ctx *restrict c, uint8_t *mem)
     }
     if (r == VK_SUCCESS)
         rl_st32(mem, c->x[2], idx);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAcquireNextImage2KHR, r);
     return vkf_end(&k);
 }
 
@@ -1321,7 +1321,7 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
         return vkf_bad_handle(&k, VKG_vkQueuePresentKHR, c->x[0]);
     uint64_t g = c->x[1];
     if (!g) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueuePresentKHR, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     vkf_wait_enter(&k, 1);
@@ -1353,7 +1353,7 @@ int vkh_vkQueuePresentKHR(rl_ctx *restrict c, uint8_t *mem)
     vkf_wait_return(&k);
     if (t_q)
         vi_trace('Q', (uint64_t)(t_q - k.trace_t0), (uint64_t)(t_p - t_q), (uint64_t)(vi_trace_now() - t_p));
-    c->x[0] = (uint32_t)all;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueuePresentKHR, all);
     return vkf_end(&k);
 }
 

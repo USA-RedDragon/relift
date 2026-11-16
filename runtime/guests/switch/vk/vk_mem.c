@@ -264,7 +264,7 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     VkMemoryAllocateInfo *ai = vkg_ain_VkMemoryAllocateInfo(&k, c->x[1], 1);
     uint64_t gout = c->x[3];
     if (!ai || !gout || ai->memoryTypeIndex >= vkf_switch.memory.memoryTypeCount) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAllocateMemory, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     ai->memoryTypeIndex = d->host_type[ai->memoryTypeIndex];
@@ -316,7 +316,7 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
             vkf_va_free(r->va);
         }
         free(r);
-        c->x[0] = (uint32_t)res;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAllocateMemory, res);
         return vkf_end(&k);
     }
     r->handle = (uint64_t)(uintptr_t)h;
@@ -324,7 +324,7 @@ int vkh_vkAllocateMemory(rl_ctx *restrict c, uint8_t *mem)
     vkf_map_put(d->mems, r->handle, r);
     pthread_mutex_unlock(&d->lock);
     vkf_s64(&k, gout, r->handle);
-    c->x[0] = (uint32_t)res;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAllocateMemory, res);
     return vkf_end(&k);
 }
 
@@ -434,7 +434,7 @@ int vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
     uint64_t gout = c->x[5];
     VkResult res = VK_SUCCESS;
     if (!r || !(r->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) || r->mapped || offset >= r->size || !gout) {
-        c->x[0] = (uint32_t)VK_ERROR_MEMORY_MAP_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkMapMemory, VK_ERROR_MEMORY_MAP_FAILED);
         return vkf_end(&k);
     }
     if (r->mode == RL_VK_MAP_PLACED) {
@@ -489,7 +489,7 @@ int vkh_vkMapMemory(rl_ctx *restrict c, uint8_t *mem)
         r->mapped = true;
         vkf_s64(&k, gout, r->va + offset);
     }
-    c->x[0] = (uint32_t)res;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkMapMemory, res);
     return vkf_end(&k);
 }
 
@@ -536,7 +536,7 @@ static int ranges(rl_ctx *c, uint8_t *mem, int cmd, bool flush)
             if (r)
                 sync_range(r, rg[i].offset, rg[i].size, false);
         }
-    c->x[0] = (uint32_t)res;
+    c->x[0] = (uint32_t)vkf_result(&k, cmd, res);
     return vkf_end(&k);
 }
 
@@ -625,6 +625,6 @@ int vkh_vkCreateBuffer(rl_ctx *restrict c, uint8_t *mem)
     VkResult r = VKF_FN(k.fns, vkCreateBuffer)(dev, ci, NULL, &b);
     if (r >= 0 && gout)
         vkf_s64(&k, gout, (uint64_t)(uintptr_t)b);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateBuffer, r);
     return vkf_end(&k);
 }

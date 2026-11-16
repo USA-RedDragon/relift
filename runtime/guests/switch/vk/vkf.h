@@ -331,6 +331,11 @@ void vkf_unknown_stype(vkf_call *k, uint32_t stype);
 int vkf_bad_handle(vkf_call *k, int cmd, uint64_t g);
 /** @brief Ends a call to a command the host lacks: VK_ERROR_FEATURE_NOT_PRESENT. */
 int vkf_no_fn(vkf_call *k, int cmd);
+/**
+ * @brief Passes a command's result through; a failure (a negative result) is logged once for each
+ * command and result, with the guest caller, so the call behind a game's failed check can be found.
+ */
+VkResult vkf_result(vkf_call *k, int cmd, VkResult r);
 
 /** @brief Loads fns from the host for an instance (level 1 and 2 through vkGetInstanceProcAddr). */
 void vkf_load_instance(vkf_fns *fns, void *host_instance);

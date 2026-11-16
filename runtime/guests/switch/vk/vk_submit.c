@@ -47,7 +47,7 @@ int vkh_vkBeginCommandBuffer(rl_ctx *restrict c, uint8_t *mem)
             bi->pInheritanceInfo = inh;
         }
     }
-    c->x[0] = (uint32_t)VKF_FN(k.fns, vkBeginCommandBuffer)(cb, bi);
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBeginCommandBuffer, VKF_FN(k.fns, vkBeginCommandBuffer)(cb, bi));
     return vkf_end(&k);
 }
 
@@ -144,7 +144,7 @@ int vkh_vkQueueSubmit(rl_ctx *restrict c, uint8_t *mem)
     vkf_queue_enter(&k);
     VkResult r = VKF_FN(k.fns, vkQueueSubmit)(q, n, si, (VkFence)(uintptr_t)c->x[3]);
     vkf_queue_unlock(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueueSubmit, r);
     return vkf_end(&k);
 }
 
@@ -173,7 +173,7 @@ int vkh_vkQueueSubmit2(rl_ctx *restrict c, uint8_t *mem)
     vkf_queue_enter(&k);
     VkResult r = fn(q, n, si, (VkFence)(uintptr_t)c->x[3]);
     vkf_queue_unlock(&k);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkQueueSubmit2, r);
     return vkf_end(&k);
 }
 

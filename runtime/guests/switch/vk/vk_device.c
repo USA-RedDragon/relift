@@ -90,13 +90,13 @@ int vkh_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem)
     if (!inst)
         return vkf_bad_handle(&k, VKG_vkEnumeratePhysicalDevices, c->x[0]);
     if (!c->x[1]) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumeratePhysicalDevices, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     uint64_t pd = the_device(&k, inst);
     if (!pd) {
         rl_st32(mem, c->x[1], 0);
-        c->x[0] = (uint32_t)VK_SUCCESS;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumeratePhysicalDevices, VK_SUCCESS);
         return vkf_end(&k);
     }
     VkResult r = VK_SUCCESS;
@@ -108,7 +108,7 @@ int vkh_vkEnumeratePhysicalDevices(rl_ctx *restrict c, uint8_t *mem)
             r = VK_INCOMPLETE;
     } else
         rl_st32(mem, c->x[1], 1);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumeratePhysicalDevices, r);
     return vkf_end(&k);
 }
 
@@ -120,7 +120,7 @@ int vkh_vkEnumeratePhysicalDeviceGroups(rl_ctx *restrict c, uint8_t *mem)
     if (!inst)
         return vkf_bad_handle(&k, VKG_vkEnumeratePhysicalDeviceGroups, c->x[0]);
     if (!c->x[1]) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumeratePhysicalDeviceGroups, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     uint64_t pd = the_device(&k, inst);
@@ -138,6 +138,6 @@ int vkh_vkEnumeratePhysicalDeviceGroups(rl_ctx *restrict c, uint8_t *mem)
         }
     }
     rl_st32(mem, c->x[1], n);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumeratePhysicalDeviceGroups, r);
     return vkf_end(&k);
 }

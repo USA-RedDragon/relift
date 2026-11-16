@@ -409,6 +409,62 @@ int vkf_bad_handle(vkf_call *k, int cmd, uint64_t g)
     return vkf_end(k);
 }
 
+static const char *result_name(VkResult r)
+{
+    switch (r) {
+    case VK_ERROR_OUT_OF_HOST_MEMORY:
+        return "VK_ERROR_OUT_OF_HOST_MEMORY";
+    case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+        return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+    case VK_ERROR_INITIALIZATION_FAILED:
+        return "VK_ERROR_INITIALIZATION_FAILED";
+    case VK_ERROR_DEVICE_LOST:
+        return "VK_ERROR_DEVICE_LOST";
+    case VK_ERROR_MEMORY_MAP_FAILED:
+        return "VK_ERROR_MEMORY_MAP_FAILED";
+    case VK_ERROR_LAYER_NOT_PRESENT:
+        return "VK_ERROR_LAYER_NOT_PRESENT";
+    case VK_ERROR_EXTENSION_NOT_PRESENT:
+        return "VK_ERROR_EXTENSION_NOT_PRESENT";
+    case VK_ERROR_FEATURE_NOT_PRESENT:
+        return "VK_ERROR_FEATURE_NOT_PRESENT";
+    case VK_ERROR_INCOMPATIBLE_DRIVER:
+        return "VK_ERROR_INCOMPATIBLE_DRIVER";
+    case VK_ERROR_TOO_MANY_OBJECTS:
+        return "VK_ERROR_TOO_MANY_OBJECTS";
+    case VK_ERROR_FORMAT_NOT_SUPPORTED:
+        return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+    case VK_ERROR_FRAGMENTED_POOL:
+        return "VK_ERROR_FRAGMENTED_POOL";
+    case VK_ERROR_UNKNOWN:
+        return "VK_ERROR_UNKNOWN";
+    case VK_ERROR_OUT_OF_POOL_MEMORY:
+        return "VK_ERROR_OUT_OF_POOL_MEMORY";
+    case VK_ERROR_INVALID_EXTERNAL_HANDLE:
+        return "VK_ERROR_INVALID_EXTERNAL_HANDLE";
+    case VK_ERROR_FRAGMENTATION:
+        return "VK_ERROR_FRAGMENTATION";
+    case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
+        return "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS";
+    case VK_ERROR_SURFACE_LOST_KHR:
+        return "VK_ERROR_SURFACE_LOST_KHR";
+    case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
+        return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR";
+    case VK_ERROR_OUT_OF_DATE_KHR:
+        return "VK_ERROR_OUT_OF_DATE_KHR";
+    default:
+        return "an error";
+    }
+}
+
+VkResult vkf_result(vkf_call *k, int cmd, VkResult r)
+{
+    if (r < 0 && rl_once(0x766b720000000000ull | ((uint64_t)(uint32_t)cmd << 31) | (uint64_t)(uint32_t)-r))
+        rl_log(RL_LOG_WARN, "vk", "%s: %s (%d), called from 0x%llx", vkg_cmds[cmd].name, result_name(r), (int)r,
+               (unsigned long long)(k->c ? k->c->x[30] : 0));
+    return r;
+}
+
 int vkf_no_fn(vkf_call *k, int cmd)
 {
     if (rl_once(0x766b6e6f666e0000ull | (uint64_t)cmd))
@@ -675,7 +731,7 @@ int vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
     vkf_begin(&k, c, mem);
     if (c->x[0]) {
         rl_st32(mem, c->x[1], 0);
-        c->x[0] = (uint32_t)VK_ERROR_LAYER_NOT_PRESENT;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceExtensionProperties, VK_ERROR_LAYER_NOT_PRESENT);
         return vkf_end(&k);
     }
     uint32_t n;
@@ -688,7 +744,7 @@ int vkh_vkEnumerateInstanceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
         if (vi ? provider_ok(host, n) : in_list(vkg_instance_exts, e->extensionName) && host_has(host, n, e->extensionName))
             out[m++] = *e;
     }
-    c->x[0] = (uint32_t)answer_exts(&k, out, m, c->x[1], c->x[2]);
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateInstanceExtensionProperties, answer_exts(&k, out, m, c->x[1], c->x[2]));
     return vkf_end(&k);
 }
 
@@ -720,7 +776,7 @@ int vkh_vkEnumerateDeviceExtensionProperties(rl_ctx *restrict c, uint8_t *mem)
         else if (rl_once(0x766b657800000000ull | i))
             rl_log(RL_LOG_WARN, "vk", "the host device lacks %s, which the Switch has; the guest does not see it", e->extensionName);
     }
-    c->x[0] = (uint32_t)answer_exts(&k, out, m, c->x[2], c->x[3]);
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkEnumerateDeviceExtensionProperties, answer_exts(&k, out, m, c->x[2], c->x[3]));
     return vkf_end(&k);
 }
 
@@ -732,7 +788,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     VkInstanceCreateInfo *ci = vkg_ain_VkInstanceCreateInfo(&k, c->x[0], 1);
     uint64_t gout = c->x[2];
     if (!ci || !gout) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     uint32_t n_host;
@@ -752,7 +808,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
         }
         if (!in_list(vkg_instance_exts, e)) {
             rl_log(RL_LOG_WARN, "vk", "vkCreateInstance: extension %s is not forwarded", e);
-            c->x[0] = (uint32_t)VK_ERROR_EXTENSION_NOT_PRESENT;
+            c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, VK_ERROR_EXTENSION_NOT_PRESENT);
             return vkf_end(&k);
         }
         exts[n++] = e;
@@ -760,7 +816,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     if (vi) {
         if (!provider_ok(host, n_host)) {
             rl_log(RL_LOG_WARN, "vk", "vkCreateInstance: VK_NN_vi_surface needs a surface provider the host supports");
-            c->x[0] = (uint32_t)VK_ERROR_EXTENSION_NOT_PRESENT;
+            c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, VK_ERROR_EXTENSION_NOT_PRESENT);
             return vkf_end(&k);
         }
         for (const char *const *e = sp->instance_extensions; e && *e; e++) {
@@ -795,7 +851,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     VkResult r = VKF_FN(&vkf.global, vkCreateInstance)(ci, NULL, &inst);
     if (r < 0) {
         vkf_cb_release(0);
-        c->x[0] = (uint32_t)r;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, r);
         return vkf_end(&k);
     }
     vkf_inst *st = calloc(1, sizeof *st);
@@ -808,7 +864,7 @@ int vkh_vkCreateInstance(rl_ctx *restrict c, uint8_t *mem)
     o->inst = st;
     vkf_cb_adopt((uint64_t)(uintptr_t)inst);
     vkf_s64(&k, gout, vkf_id(o));
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateInstance, r);
     return vkf_end(&k);
 }
 
@@ -851,7 +907,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     VkDeviceCreateInfo *ci = vkg_ain_VkDeviceCreateInfo(&k, c->x[1], 1);
     uint64_t gout = c->x[3];
     if (!ci || !gout) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDevice, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     vkf_dev *d = calloc(1, sizeof *d);
@@ -878,7 +934,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         pthread_mutex_destroy(&d->queue_lock);
         pthread_mutex_destroy(&d->lock);
         free(d);
-        c->x[0] = (uint32_t)r;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDevice, r);
         return vkf_end(&k);
     }
     vkf_mem_types_setup(&k, d, pd);
@@ -942,7 +998,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
         pthread_mutex_destroy(&d->queue_lock);
         pthread_mutex_destroy(&d->lock);
         free(d);
-        c->x[0] = (uint32_t)r;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDevice, r);
         return vkf_end(&k);
     }
     vkf_load_device(&d->fns, k.fns, dev);
@@ -957,7 +1013,7 @@ int vkh_vkCreateDevice(rl_ctx *restrict c, uint8_t *mem)
     vkf_obj *o = vkf_obj_add(VKG_KIND_VkDevice, dev, pobj, &d->fns);
     o->dev = d;
     vkf_s64(&k, gout, vkf_id(o));
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDevice, r);
     return vkf_end(&k);
 }
 
@@ -1012,7 +1068,7 @@ int vkh_vkAllocateCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
                 __atomic_add_fetch(&k.obj->dev->secondaries, 1, __ATOMIC_RELAXED);
             vkf_s64(&k, gout + 8u * i, vkf_id(o));
         }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAllocateCommandBuffers, r);
     return vkf_end(&k);
 }
 

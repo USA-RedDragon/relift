@@ -224,7 +224,7 @@ int vkh_vkCreateDebugUtilsMessengerEXT(rl_ctx *restrict c, uint8_t *mem)
         vkf_s64(&k, c->x[3], (uint64_t)(uintptr_t)m);
     } else
         vkf_cb_release(0);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDebugUtilsMessengerEXT, r);
     return vkf_end(&k);
 }
 
@@ -261,7 +261,7 @@ int vkh_vkCreateDebugReportCallbackEXT(rl_ctx *restrict c, uint8_t *mem)
         vkf_s64(&k, c->x[3], (uint64_t)(uintptr_t)cb);
     } else
         vkf_cb_release(0);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDebugReportCallbackEXT, r);
     return vkf_end(&k);
 }
 

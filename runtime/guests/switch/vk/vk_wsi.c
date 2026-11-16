@@ -22,7 +22,7 @@ int vkh_vkCreateViSurfaceNN(rl_ctx *restrict c, uint8_t *mem)
     uint64_t gout = c->x[3];
     const rl_vk_surface_provider *sp = vkf.cfg.surfaces;
     if (!gi || !gout || !sp || !k.obj->inst->vi_surface) {
-        c->x[0] = (uint32_t)VK_ERROR_INITIALIZATION_FAILED;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateViSurfaceNN, VK_ERROR_INITIALIZATION_FAILED);
         return vkf_end(&k);
     }
     uint64_t window = vkf_g64(&k, gi + offsetof(VkViSurfaceCreateInfoNN, window));
@@ -34,7 +34,7 @@ int vkh_vkCreateViSurfaceNN(rl_ctx *restrict c, uint8_t *mem)
         vkf_s64(&k, gout, surface);
     if (rl_cfg()->trace_os)
         rl_log(RL_LOG_INFO, "vk", "vkCreateViSurfaceNN(window 0x%llx) = %d", (unsigned long long)window, r);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateViSurfaceNN, r);
     return vkf_end(&k);
 }
 
@@ -87,6 +87,6 @@ int vkh_vkGetPhysicalDeviceSurfaceSupportKHR(rl_ctx *restrict c, uint8_t *mem)
             r = fn(pd, (uint32_t)c->x[1], (VkSurfaceKHR)(uintptr_t)c->x[2], out);
         }
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkGetPhysicalDeviceSurfaceSupportKHR, r);
     return vkf_end(&k);
 }

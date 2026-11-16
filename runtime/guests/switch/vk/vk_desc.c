@@ -78,7 +78,7 @@ int vkh_vkCreateDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
     }
     if (r >= 0 && gout)
         vkf_s64(&k, gout, (uint64_t)(uintptr_t)pool);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDescriptorPool, r);
     return vkf_end(&k);
 }
 
@@ -136,7 +136,7 @@ int vkh_vkAllocateDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
             for (uint32_t i = 0; i < ai->descriptorSetCount; i++)
                 vkf_map_put(p->owner, (uint64_t)(uintptr_t)out[i], (void *)ai->descriptorPool);
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkAllocateDescriptorSets, r);
     return vkf_end(&k);
 }
 
@@ -153,7 +153,7 @@ int vkh_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
     PFN_vkFreeDescriptorSets fr = VKF_FN(k.fns, vkFreeDescriptorSets);
     vkf_dpool *p = dpool_of(k.obj->dev, (uint64_t)(uintptr_t)pool);
     if (!p || !p->n_extra || !p->owner || !sets) {
-        c->x[0] = (uint32_t)fr(dev, pool, n, sets);
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkFreeDescriptorSets, fr(dev, pool, n, sets));
         return vkf_end(&k);
     }
     VkDescriptorSet *mine = vkf_alloc(&k, (n + 1) * sizeof *mine);
@@ -175,7 +175,7 @@ int vkh_vkFreeDescriptorSets(rl_ctx *restrict c, uint8_t *mem)
         if (e < 0)
             r = e;
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkFreeDescriptorSets, r);
     return vkf_end(&k);
 }
 
@@ -200,7 +200,7 @@ int vkh_vkResetDescriptorPool(rl_ctx *restrict c, uint8_t *mem)
         vkf_map_free(p->owner);
         p->owner = vkf_map_new();
     }
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkResetDescriptorPool, r);
     return vkf_end(&k);
 }
 
@@ -302,14 +302,14 @@ int vkh_vkCreateDescriptorSetLayout(rl_ctx *restrict c, uint8_t *mem)
         return vkf_bad_handle(&k, VKG_vkCreateDescriptorSetLayout, c->x[0]);
     VkResult r = vkf_check_set_layout(&k);
     if (r != VK_SUCCESS) {
-        c->x[0] = (uint32_t)r;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDescriptorSetLayout, r);
         return vkf_end(&k);
     }
     VkDescriptorSetLayoutCreateInfo *ci = vkg_ain_VkDescriptorSetLayoutCreateInfo(&k, c->x[1], 1);
     sort_bindings(&k, ci);
     VkDescriptorSetLayout *out = (VkDescriptorSetLayout *)vkf_ptr(&k, c->x[3]);
     r = VKF_FN(k.fns, vkCreateDescriptorSetLayout)(dev, ci, NULL, out);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateDescriptorSetLayout, r);
     if (r == VK_SUCCESS)
         vkf_note_set_layout(&k);
     return vkf_end(&k);

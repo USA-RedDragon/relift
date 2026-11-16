@@ -134,7 +134,7 @@ int vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
     VkImageCreateInfo *ci = vkg_ain_VkImageCreateInfo(&k, c->x[1], 1);
     VkResult r = vkf_check_image(&k);
     if (r < 0) {
-        c->x[0] = (uint32_t)r;
+        c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateImage, r);
         return vkf_end(&k);
     }
     vkf_dev *d = k.obj->dev;
@@ -163,7 +163,7 @@ int vkh_vkCreateImage(rl_ctx *restrict c, uint8_t *mem)
         pthread_mutex_unlock(&d->decode_lock);
     } else
         free(im);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateImage, r);
     return vkf_end(&k);
 }
 
@@ -269,7 +269,7 @@ int vkh_vkBindImageMemory(rl_ctx *restrict c, uint8_t *mem)
     vkf_image *im = image_of(k.obj->dev, c->x[1]);
     VkResult r = im ? bind_own(&k, dev, img, im)
                     : VKF_FN(k.fns, vkBindImageMemory)(dev, img, (VkDeviceMemory)(uintptr_t)c->x[2], c->x[3]);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBindImageMemory, r);
     return vkf_end(&k);
 }
 
@@ -297,7 +297,7 @@ int vkh_vkBindImageMemory2(rl_ctx *restrict c, uint8_t *mem)
     }
     if (r >= 0 && m)
         r = fn(dev, m, rest);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkBindImageMemory2, r);
     return vkf_end(&k);
 }
 
@@ -324,7 +324,7 @@ int vkh_vkCreateImageView(rl_ctx *restrict c, uint8_t *mem)
     VkResult r = VKF_FN(k.fns, vkCreateImageView)(dev, ci, NULL, &v);
     if (r >= 0 && c->x[3])
         vkf_s64(&k, c->x[3], (uint64_t)(uintptr_t)v);
-    c->x[0] = (uint32_t)r;
+    c->x[0] = (uint32_t)vkf_result(&k, VKG_vkCreateImageView, r);
     return vkf_end(&k);
 }
 
