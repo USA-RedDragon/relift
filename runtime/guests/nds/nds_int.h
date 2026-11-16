@@ -439,7 +439,7 @@ void nds_disp_reset(rl_nds *m);
 int nds_disp_add(rl_nds *m);
 /** @brief Lines the display up with the display timing at tick now and posts the start of VBlank. */
 void nds_disp_resync(rl_nds *m, uint64_t now);
-/** @brief Draws every line whose render tick is at or before to. */
+/** @brief Draws every line whose render tick is at or before to (nothing when called from inside the frame hook). */
 void nds_disp_catch_up(rl_nds *m, uint64_t to);
 /** @brief Brings the display to tick now through the scheduler (before a write it could see). */
 void nds_disp_sync(rl_nds *m, uint64_t now);

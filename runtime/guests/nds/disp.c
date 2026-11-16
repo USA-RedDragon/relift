@@ -175,6 +175,8 @@ static void line(rl_nds *m, nds_disp *d, unsigned l, uint64_t when)
 void nds_disp_catch_up(rl_nds *m, uint64_t to)
 {
     nds_disp *d = &m->disp;
+    if (d->busy)
+        return;
     d->busy = true;
     while (due_of(d) <= to) {
         line(m, d, d->line, due_of(d));
