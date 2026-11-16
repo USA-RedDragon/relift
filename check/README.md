@@ -34,14 +34,15 @@ over ssh; `oracle/README.md` explains the native harness and how to build it.
 | Folder | Holds |
 |---|---|
 | `src` | the checker: A64 (`emu.rs`, `oracle.rs`, `mutate.rs`), `gb/`, `gba/` and `z80/` |
-| `oracle` | the native A64 harness (`oracle/README.md`), the NanoBoyAdvance oracle (`oracle/nba/README.md`) and the ares Z80 oracle (`oracle/ares/README.md`) |
+| `oracle` | the native A64 harness (`oracle/README.md`), the NanoBoyAdvance oracle (`oracle/nba/README.md`) and the ares VR4300 and Z80 oracles (`oracle/ares/README.md`) |
 | `gba-ppu` | scene generator and comparison of the GBA picture unit with NanoBoyAdvance (`compare.py ORACLE SCENE.scn...`) |
 | `tests` | the Unicorn comparison test |
 
 NanoBoyAdvance is GPL-3.0-or-later. It is fetched at a pinned commit, built
 as a separate process by `oracle/nba/build.sh` and never linked.
 
-ares is ISC. It is fetched at a pinned commit, built as a separate process by
-`oracle/ares/build.sh` and never linked. The SingleStepTests z80 data (MIT) and
+ares is ISC. It is fetched at a pinned commit, built as separate processes by
+`oracle/ares/build.sh` (VR4300) and `oracle/ares/build-step.sh` (Z80) and never
+linked. The SingleStepTests z80 data (MIT) and
 the ZEX exerciser (GPL-2) are test data fetched by the caller, not part of the
 repository.

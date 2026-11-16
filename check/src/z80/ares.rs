@@ -379,7 +379,7 @@ impl Report {
 }
 
 /// Where an oracle binary is: the override variable, else the default
-/// cache of `check/oracle/ares/build.sh`.
+/// cache of `check/oracle/ares/build-step.sh`.
 pub fn binary(var: &str, name: &str) -> PathBuf {
     std::env::var_os(var).map_or_else(
         || {

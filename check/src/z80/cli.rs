@@ -15,7 +15,7 @@ usage: relift-check --oracle sst-z80 run DIR [PREFIX] [-j N] [--mutate [flip-con
        relift-check --oracle ares-z80 run [N [SEED]] [--bin FILE]
 DIR holds the SingleStepTests/z80 v1 files. ares-z80 run feeds random states to the ares
 oracle (--bin, RELIFT_ARES_Z80 or ~/.cache/relift/ares-oracle/bin/z80-step, built by
-check/oracle/ares/build.sh), instructions and then interrupt entries (N is states per
+check/oracle/ares/build-step.sh), instructions and then interrupt entries (N is states per
 template, 10 N per entry; default 100 and seed 31). --mutate breaks every lifted block (the constant a register is last set to, or the
 last register write) and succeeds when at least 95% of the files catch it.";
 
@@ -72,7 +72,7 @@ fn ares_run(args: &[String]) -> Result<bool, String> {
     }
     if !bin.exists() {
         return Err(format!(
-            "{} is missing; build it with check/oracle/ares/build.sh",
+            "{} is missing; build it with check/oracle/ares/build-step.sh",
             bin.display()
         ));
     }
