@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# fmt, clippy, tests, charter, generated docs and Vulkan forwarding, deny.
+# fmt, clippy, tests (the Android app's game data import logic too, with javac),
+# charter, generated docs and Vulkan forwarding, deny.
 . "$(dirname "$0")/lib.sh"
 
 cargo fmt --all --check
@@ -13,6 +14,13 @@ cargo clippy --manifest-path guests/gb/devices/Cargo.toml --all-targets --all-fe
 cargo test -p relift --locked --test workspace_charter --test unsafe_roster --test funnels
 cargo test --workspace --locked
 cargo test --manifest-path guests/gb/devices/Cargo.toml --release --locked
+
+java_work="$CI_WORK/android-java-tests"
+rm -rf "$java_work"
+mkdir -p "$java_work/classes" "$java_work/tmp"
+javac -Xlint:all -Werror -d "$java_work/classes" \
+  relift/src/android/java/GameData.java relift/src/android/test/GameDataTest.java
+java -Djava.io.tmpdir="$java_work/tmp" -cp "$java_work/classes" dev.relift.app.GameDataTest
 
 version=$(grep -A1 '^name = "configulator-rs"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
 cfg_root="$CI_WORK/configulator-$version"
