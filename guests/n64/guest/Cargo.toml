@@ -1,0 +1,18 @@
+[package]
+name = "relift-n64"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+relift-cpu-mips = { workspace = true }
+relift-emit = { workspace = true }
+relift-guest = { workspace = true }
+relift-ir = { workspace = true }
+relift-n64-analyze = { workspace = true }
+relift-n64-formats = { workspace = true }
+
+[lints]
+workspace = true

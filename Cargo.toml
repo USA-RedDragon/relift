@@ -42,6 +42,7 @@ relift-info = { path = "core/info" }
 relift-input = { path = "core/input" }
 relift-ir = { path = "core/ir" }
 relift-manifest = { path = "core/manifest" }
+relift-n64 = { path = "guests/n64/guest" }
 relift-n64-analyze = { path = "guests/n64/analyze" }
 relift-n64-formats = { path = "guests/n64/formats" }
 relift-n64-tools = { path = "guests/n64/tools" }

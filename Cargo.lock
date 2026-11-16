@@ -1171,6 +1171,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-n64"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-mips",
+ "relift-emit",
+ "relift-guest",
+ "relift-ir",
+ "relift-n64-analyze",
+ "relift-n64-formats",
+]
+
+[[package]]
 name = "relift-n64-analyze"
 version = "0.1.0"
 dependencies = [

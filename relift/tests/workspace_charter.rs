@@ -506,6 +506,21 @@ const CHARTERS: &[Charter] = &[
         build: NONE,
     },
     Charter {
+        member: "relift-n64",
+        band: 2,
+        why: "the Nintendo 64 guest: the VR4300 frontend for the runtime's N64 layer and a ROM lifted and emitted as one unit per segment, over discovery and the C emitter",
+        normal: &[
+            "relift-cpu-mips",
+            "relift-emit",
+            "relift-guest",
+            "relift-ir",
+            "relift-n64-analyze",
+            "relift-n64-formats",
+        ],
+        dev: NONE,
+        build: NONE,
+    },
+    Charter {
         member: "relift-testguest",
         band: 2,
         why: "the synthetic guest the core is tested against",
