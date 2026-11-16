@@ -90,16 +90,17 @@ pub struct Program {
 }
 
 impl Program {
+    /// The program in `b`: the SPH if there is one, then the code through
+    /// the last `BRA self` (a linked CUDA kernel has one per function).
     pub fn parse(b: &[u8]) -> Program {
         let sph = Sph::parse(b);
         let code = if sph.is_some() { &b[SPH_SIZE..] } else { b };
-        let mut words = Vec::new();
-        for c in code.as_chunks::<16>().0 {
-            words.push(Word::from_bytes(c));
-            if c[..12] == BRA_SELF {
-                break;
-            }
-        }
+        let lines = code.as_chunks::<16>().0;
+        let n = lines
+            .iter()
+            .rposition(|c| c[..12] == BRA_SELF)
+            .map_or(lines.len(), |k| k + 1);
+        let words = lines[..n].iter().map(Word::from_bytes).collect();
         Program { sph, words }
     }
 
