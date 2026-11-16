@@ -1,12 +1,15 @@
 //! `relift-nup`: list and extract NUP containers (decrypted Switch dumps).
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use relift_switch_formats::hex;
 use relift_switch_formats::nup::{Nup, PackageKind, UpdateSelect};
+use relift_switch_formats::romfs_image;
+use relift_switch_formats::storage::FileStorage;
 use relift_switch_tools::{BoxError, input, print_json, run};
 use serde_json::json;
 
@@ -44,6 +47,24 @@ enum Command {
         package: String,
         /// For `title`: the update version to use (decimal or 0x hex), or
         /// `base` for the base alone. The newest update is used by default.
+        #[arg(long)]
+        update: Option<String>,
+    },
+    /// Write the RomFS map of the effective title's romfs (or one DLC's)
+    /// into a directory: `romfs.map`, which reads the files in place in the
+    /// `.nup`, and `romfs.blob` for the zstd files, after checking every
+    /// file's SHA-256. The runtime serves it as the game's romfs
+    /// (`RELIFT_ROMFS=<dir>/romfs.map`) without extracting a file.
+    Romfs {
+        /// The `.nup` file.
+        input: PathBuf,
+        /// The directory to write into.
+        #[arg(short, long)]
+        output: PathBuf,
+        /// `title` (the default) or `dlc:<id>:<index>`.
+        #[arg(long, default_value = "title")]
+        package: String,
+        /// For `title`: the update version to use, or `base`.
         #[arg(long)]
         update: Option<String>,
     },
@@ -169,6 +190,35 @@ fn extract(
     Ok(())
 }
 
+fn romfs(path: &Path, out: &Path, package: &str, update: Option<&str>) -> Result<(), BoxError> {
+    let n = Nup::open(Arc::new(FileStorage::open(path)?))?;
+    let t = if package == "title" {
+        n.effective_title(match update {
+            None => UpdateSelect::Newest,
+            Some(v) => UpdateSelect::parse(v)?,
+        })?
+    } else if package.starts_with("dlc:") {
+        if update.is_some() {
+            return Err("--update only applies to --package title".into());
+        }
+        n.package_title(find_package(&n, package)?)
+            .ok_or("no such package")?
+    } else {
+        return Err(format!("unknown --package {package}: use title or dlc:<id>:<idx>").into());
+    };
+    let w = romfs_image::write_nup(&n, path, &t.romfs, &t.romfs_dirs, out, &mut |_| {})?;
+    romfs_image::remove_others(out, romfs_image::MAP_NAME)?;
+    eprintln!(
+        "{} files: {} read in place, {} in the blob ({} bytes); {} files written",
+        t.romfs.len(),
+        w.in_place,
+        w.blob_files,
+        w.blob_bytes,
+        w.written
+    );
+    Ok(())
+}
+
 fn main() -> ExitCode {
     run::<Cli>("relift-nup", |cli| match cli.command {
         Command::Ls { input: path, json } => ls(&Nup::open(input(&path)?)?, json),
@@ -183,5 +233,11 @@ fn main() -> ExitCode {
             &package,
             update.as_deref(),
         ),
+        Command::Romfs {
+            input: path,
+            output,
+            package,
+            update,
+        } => romfs(&path, &output, &package, update.as_deref()),
     })
 }
