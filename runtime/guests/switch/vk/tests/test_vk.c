@@ -3910,7 +3910,32 @@ static void storage_formats(const uint32_t *w, size_t n, uint32_t *fmts, unsigne
     *caps = rd && wr;
 }
 
-/** @brief The rewrite gives the storage image type of the rg32f shader (both bindings share it) the Unknown format and adds the formatless capabilities; a module without storage images is left alone. */
+/**
+ * @brief SPIR-V (glslc -O -x hlsl) of a compute shader that writes a float2
+ * to an rg32f storage image, as DXC-style HLSL does:
+ *
+ *   RWTexture2D<float2> outputEdge : register(u0);
+ *   [numthreads(1, 1, 1)] void main() { outputEdge[uint2(0, 0)] = float2(0.25, 0.75); }
+ */
+static const uint32_t g_rg2_comp[] = {
+    0x07230203, 0x00010300, 0x000d000b, 0x0000001c, 0x00000000, 0x00020011, 0x00000001, 0x00020011,
+    0x00000031, 0x0006000b, 0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
+    0x00000000, 0x00000001, 0x0005000f, 0x00000005, 0x00000004, 0x6e69616d, 0x00000000, 0x00060010,
+    0x00000004, 0x00000011, 0x00000001, 0x00000001, 0x00000001, 0x00040047, 0x00000011, 0x00000021,
+    0x00000000, 0x00040047, 0x00000011, 0x00000022, 0x00000000, 0x00020013, 0x00000002, 0x00030021,
+    0x00000003, 0x00000002, 0x00030016, 0x00000008, 0x00000020, 0x00040017, 0x00000009, 0x00000008,
+    0x00000002, 0x0004002b, 0x00000008, 0x0000000c, 0x3e800000, 0x0004002b, 0x00000008, 0x0000000d,
+    0x3f400000, 0x0005002c, 0x00000009, 0x0000000e, 0x0000000c, 0x0000000d, 0x00090019, 0x0000000f,
+    0x00000008, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000002, 0x00000006, 0x00040020,
+    0x00000010, 0x00000000, 0x0000000f, 0x0004003b, 0x00000010, 0x00000011, 0x00000000, 0x00040015,
+    0x00000013, 0x00000020, 0x00000000, 0x00040017, 0x00000014, 0x00000013, 0x00000002, 0x0004002b,
+    0x00000013, 0x00000015, 0x00000000, 0x0005002c, 0x00000014, 0x00000016, 0x00000015, 0x00000015,
+    0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005, 0x0004003d,
+    0x0000000f, 0x0000001b, 0x00000011, 0x00040063, 0x0000001b, 0x00000016, 0x0000000e, 0x000100fd,
+    0x00010038,
+};
+
+/** @brief The rewrite gives the storage image type of the rg32f shader (both bindings share it) the Unknown format and adds the formatless capabilities; a module without storage images, and one that writes fewer components than four, are left alone. */
 TEST(vk_spirv_storage_formats_become_unknown)
 {
     size_t n = sizeof g_rg32f_comp / 4;
@@ -3933,6 +3958,11 @@ TEST(vk_spirv_storage_formats_become_unknown)
     static uint32_t plain[sizeof vkf_overlay_frag / 4 + sizeof vkf_overlay_vert / 4 + 4];
     CHECK_EQ(vkf_spirv_formatless(vkf_overlay_frag, sizeof vkf_overlay_frag / 4, plain), 0);
     CHECK_EQ(vkf_spirv_formatless(vkf_overlay_vert, sizeof vkf_overlay_vert / 4, plain), 0);
+    static uint32_t two[sizeof g_rg2_comp / 4 + 4];
+    storage_formats(g_rg2_comp, sizeof g_rg2_comp / 4, f, &nf, &caps);
+    CHECK_EQ(nf, 1);
+    CHECK_EQ(f[0], 6);
+    CHECK_EQ(vkf_spirv_formatless(g_rg2_comp, sizeof g_rg2_comp / 4, two), 0);
 }
 
 /** @brief A 1x1 R8G8B8A8_UNORM storage image, its memory and a view of the same format. */
