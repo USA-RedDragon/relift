@@ -216,11 +216,11 @@ pub fn cases() -> Vec<(&'static str, Gen)> {
         ("BGEZAL", br!(|s, _t, o| i_type(0x01, s, 0x11, o))),
         ("J", |r, c| {
             slot(r, c);
-            0x0800_0000 | ((PC as u32 & 0x0FFF_FFFF) >> 2) + 0x40
+            0x0800_0000 | (((PC as u32 & 0x0FFF_FFFF) >> 2) + 0x40)
         }),
         ("JAL", |r, c| {
             slot(r, c);
-            0x0C00_0000 | ((PC as u32 & 0x0FFF_FFFF) >> 2) + 0x40
+            0x0C00_0000 | (((PC as u32 & 0x0FFF_FFFF) >> 2) + 0x40)
         }),
         ("JR", |r, c| {
             let s = reg(r);
@@ -258,7 +258,7 @@ pub fn cases() -> Vec<(&'static str, Gen)> {
         ("MTC0.PageMask", |r, _c| {
             0x4080_0000 | reg(r) << 16 | 5 << 11
         }),
-        ("MTC0.Index", |r, _c| 0x4080_0000 | reg(r) << 16 | 0 << 11),
+        ("MTC0.Index", |r, _c| 0x4080_0000 | reg(r) << 16),
         ("MTC0.Cause", |r, _c| 0x4080_0000 | reg(r) << 16 | 13 << 11),
         ("MTC1", |r, _c| {
             0x4480_0000 | reg(r) << 16 | (r.below(32) as u32) << 11

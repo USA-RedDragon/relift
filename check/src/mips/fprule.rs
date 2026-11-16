@@ -129,7 +129,7 @@ pub fn fp_rule(op: u32, fmt: u32, fcr: u32, x: u64, y: u64) -> Rule {
             result: res,
         };
     }
-    if ins.iter().any(|c| *c == 5) {
+    if ins.contains(&5) {
         return Rule::Done {
             cause: 16,
             result: qnan(op, fmt),

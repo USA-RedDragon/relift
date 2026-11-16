@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::cases::{Case, DATA_PA, state_json};
 use super::json::{J, jparse};
@@ -47,12 +47,13 @@ pub fn run(
     let mut files = Vec::new();
     for c in cases {
         let p = inp.join(format!("{}.json", c.name));
-        std::fs::write(&p, state_json(c)).map_err(|e| format!("{}: {e}", p.display()))?;
+        relift_cache::write_if_changed(&p, state_json(c).as_bytes())
+            .map_err(|e| format!("{}: {e}", p.display()))?;
         files.push(p);
     }
     let answered = |c: &Case| outp.join(format!("{}.out.json", c.name)).exists();
     let step = |files: &[PathBuf]| -> Result<bool, String> {
-        let mut cmd = Command::new(bin);
+        let mut cmd = relift_proc::command(bin);
         cmd.arg("step").args(files).arg("--out").arg(&outp);
         if let Some(r) = rom {
             cmd.arg("--rom").arg(r);
