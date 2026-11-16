@@ -18,7 +18,13 @@ use std::collections::{HashMap, HashSet};
 
 /// Variants the translator rejects, as it should: it cannot do them exactly
 /// yet. Their vectors stay for when it learns them.
-const REJECTED: &[&str] = &[];
+const REJECTED: &[&str] = &[
+    "F2FP.BF16.PACK_AB",
+    "F2FP.RELU.BF16.PACK_AB",
+    "F2FP.BF16.PACK_AB.RZ",
+    "F2FP.RELU.BF16.PACK_AB.RZ",
+    "F2FP.SATFINITE.BF16.PACK_AB.RZ",
+];
 
 /// How a known mismatch may differ from the device.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -204,4 +210,6 @@ macro_rules! families {
     };
 }
 
-families!(shf, fadd, fmul, ffma, fcmp);
+families!(
+    shf, fadd, fmul, ffma, fcmp, f2i, f2i_f16, i2f, f2f, frnd, f2fp
+);
