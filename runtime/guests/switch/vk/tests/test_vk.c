@@ -2568,6 +2568,185 @@ TEST(vk_secondary_command_buffers_submit_through_a_primary)
     CHECK_EQ(rl_vk_live_handles(), 0);
 }
 
+static void *(*g_idle_real_gdpa)(void *, const char *);
+static PFN_vkDeviceWaitIdle g_real_idle;
+static PFN_vkFreeCommandBuffers g_real_free_cbs;
+static PFN_vkGetFenceStatus g_real_fence_status;
+static PFN_vkDestroyCommandPool g_real_destroy_pool;
+static unsigned g_idles, g_freed, g_freed_early, g_pools_destroyed, g_pools_destroyed_early;
+static VkFence g_watch;
+
+static VkResult VKAPI_PTR counting_idle(VkDevice dev)
+{
+    g_idles++;
+    return g_real_idle(dev);
+}
+
+static void VKAPI_PTR counting_free_cbs(VkDevice dev, VkCommandPool pool, uint32_t n, const VkCommandBuffer *cbs)
+{
+    for (uint32_t i = 0; i < n; i++)
+        if (cbs[i]) {
+            g_freed++;
+            if (g_watch && g_real_fence_status(dev, g_watch) != VK_SUCCESS)
+                g_freed_early++;
+        }
+    g_real_free_cbs(dev, pool, n, cbs);
+}
+
+static void VKAPI_PTR counting_destroy_pool(VkDevice dev, VkCommandPool pool, const VkAllocationCallbacks *a)
+{
+    if (pool) {
+        g_pools_destroyed++;
+        if (g_watch && g_real_fence_status(dev, g_watch) != VK_SUCCESS)
+            g_pools_destroyed_early++;
+    }
+    g_real_destroy_pool(dev, pool, a);
+}
+
+static void *counting_gdpa(void *dev, const char *name)
+{
+    void *r = g_idle_real_gdpa(dev, name);
+    void (*f)(void) = NULL;
+    if (r && !strcmp(name, "vkDeviceWaitIdle"))
+        memcpy(&g_real_idle, &r, sizeof r), f = (void (*)(void))counting_idle;
+    else if (r && !strcmp(name, "vkFreeCommandBuffers"))
+        memcpy(&g_real_free_cbs, &r, sizeof r), f = (void (*)(void))counting_free_cbs;
+    else if (r && !strcmp(name, "vkDestroyCommandPool"))
+        memcpy(&g_real_destroy_pool, &r, sizeof r), f = (void (*)(void))counting_destroy_pool;
+    else if (r && !strcmp(name, "vkGetFenceStatus"))
+        memcpy(&g_real_fence_status, &r, sizeof r);
+    if (f)
+        memcpy(&r, &f, sizeof r);
+    return r;
+}
+
+static void *counting_gipa(void *inst, const char *name)
+{
+    void *r = g_real_gipa(inst, name);
+    if (r && inst && !strcmp(name, "vkGetDeviceProcAddr")) {
+        memcpy(&g_idle_real_gdpa, &r, sizeof r);
+        void *(*f)(void *, const char *) = counting_gdpa;
+        memcpy(&r, &f, sizeof r);
+    }
+    return r;
+}
+
+/** @brief A device, queue, mapped buffer and command pool on a host whose frees and device idles are counted. */
+typedef struct free_rig {
+    uint64_t dev, queue, pool;
+    mapped_buf b;
+} free_rig;
+
+static void free_rig_up(free_rig *r)
+{
+    void *real = rl_hostlib_vulkan_gipa();
+    memcpy(&g_real_gipa, &real, sizeof real);
+    void *(*fg)(void *, const char *) = counting_gipa;
+    void *gipa;
+    memcpy(&gipa, &fg, sizeof gipa);
+    CHECK_EQ(boot_with(NULL, gipa), 0);
+    CHECK(make_instance(NULL, 0, 0) != 0);
+    uint64_t pds[8];
+    CHECK(physical_devices(pds, 8) > 0);
+    r->dev = make_device(pds[0], queue_family(pds[0], 0), NULL, 0);
+    CHECK(r->dev != 0);
+    uint64_t gq = galloc(8);
+    G("vkGetDeviceQueue", r->dev, 0, 0, gq);
+    r->queue = g64(gq);
+    CHECK_EQ(make_mapped(pds[0], r->dev, 64, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &r->b), 0);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", r->dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    r->pool = g64(gpool);
+    g_idles = g_freed = g_freed_early = g_pools_destroyed = g_pools_destroyed_early = 0;
+    g_watch = NULL;
+}
+
+static void free_rig_down(free_rig *r)
+{
+    G("vkDestroyCommandPool", r->dev, r->pool, 0);
+    G("vkDestroyBuffer", r->dev, r->b.buf, 0);
+    G("vkFreeMemory", r->dev, r->b.mem, 0);
+    G("vkDestroyDevice", r->dev, 0);
+    G("vkDestroyInstance", g_inst, 0);
+    CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+/** @brief Allocates a secondary from the rig's pool, records a fill of value, submits it with fence and frees it at once. */
+static void submit_and_free(free_rig *r, uint32_t value, uint64_t fence)
+{
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(r->pool),
+        .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+        .commandBufferCount = 1,
+    };
+    uint64_t gcb = galloc(8);
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", r->dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    record_fill(cb, r->b.buf, value, 0);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", r->queue, 1, gput(&si, sizeof si), fence)), VK_SUCCESS);
+    G("vkFreeCommandBuffers", r->dev, r->pool, 1, gcb);
+}
+
+TEST(vk_a_submitted_secondary_freed_at_once_is_freed_when_its_submit_is_done)
+{
+    free_rig r;
+    free_rig_up(&r);
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    uint64_t gf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFence", r.dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+    uint64_t fence = g64(gf);
+    g_watch = (VkFence)GP(fence);
+    submit_and_free(&r, 0x5A5A5A5Au, fence);
+    unsigned at_free = g_freed;
+    CHECK_EQ(VKR(G("vkWaitForFences", r.dev, 1, gf, VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+    CHECK_EQ(g32(r.b.ptr + 60), 0x5A5A5A5Au);
+    CHECK_EQ(VKR(G("vkQueueSubmit", r.queue, 0, 0, 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", r.queue)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueSubmit", r.queue, 0, 0, 0)), VK_SUCCESS);
+    fprintf(stderr, "  %u host frees at the guest's free, %u after, %u early, %u device idles\n", at_free, g_freed, g_freed_early,
+            g_idles);
+    CHECK_EQ(g_idles, 0);
+    CHECK_EQ(g_freed_early, 0);
+    CHECK_EQ(g_freed, 2);
+    g_watch = NULL;
+    G("vkDestroyFence", r.dev, fence, 0);
+    free_rig_down(&r);
+}
+
+TEST(vk_secondaries_freed_every_frame_never_wait_for_the_device)
+{
+    free_rig r;
+    free_rig_up(&r);
+    enum { FRAMES = 1000, IN_FLIGHT = 2 };
+    uint64_t fences[IN_FLIGHT], gfs[IN_FLIGHT];
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
+    for (int i = 0; i < IN_FLIGHT; i++) {
+        gfs[i] = galloc(8);
+        CHECK_EQ(VKR(G("vkCreateFence", r.dev, gput(&fci, sizeof fci), 0, gfs[i])), VK_SUCCESS);
+        fences[i] = g64(gfs[i]);
+    }
+    uint64_t brk = g_brk;
+    for (uint32_t f = 0; f < FRAMES; f++) {
+        int i = (int)(f % IN_FLIGHT);
+        CHECK_EQ(VKR(G("vkWaitForFences", r.dev, 1, gfs[i], VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+        CHECK_EQ(VKR(G("vkResetFences", r.dev, 1, gfs[i])), VK_SUCCESS);
+        submit_and_free(&r, 0x1000u + f, fences[i]);
+        g_brk = brk;
+    }
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", r.queue)), VK_SUCCESS);
+    CHECK_EQ(g32(r.b.ptr + 60), 0x1000u + FRAMES - 1);
+    CHECK_EQ(VKR(G("vkQueueSubmit", r.queue, 0, 0, 0)), VK_SUCCESS);
+    fprintf(stderr, "  %d frames: %u host frees, %u device idles\n", FRAMES, g_freed, g_idles);
+    CHECK_EQ(g_idles, 0);
+    CHECK_EQ(g_freed, 2 * FRAMES);
+    for (int i = 0; i < IN_FLIGHT; i++)
+        G("vkDestroyFence", r.dev, fences[i], 0);
+    free_rig_down(&r);
+}
+
 static void keep_render_pass(uint64_t dev, bool two, uint64_t *pass)
 {
     uint64_t out = galloc(8);
@@ -2972,6 +3151,82 @@ TEST(vk_secondary_begun_without_inheritance_info_records_into_a_primary)
     G("vkDestroyDevice", dev, 0);
     G("vkDestroyInstance", g_inst, 0);
     CHECK_EQ(rl_vk_live_handles(), 0);
+}
+
+/** @brief Allocates a secondary from pool into gcb, begins it without inheritance info, records a fill of value that waits for the event at gev and submits it with fence. */
+static void submit_twin_waiting(free_rig *r, uint64_t pool, uint64_t gev, uint32_t value, uint64_t fence, uint64_t gcb)
+{
+    VkCommandBufferAllocateInfo cai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = (VkCommandPool)GP(pool),
+        .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+        .commandBufferCount = 1,
+    };
+    CHECK_EQ(VKR(G("vkAllocateCommandBuffers", r->dev, gput(&cai, sizeof cai), gcb)), VK_SUCCESS);
+    uint64_t cb = g64(gcb);
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    CHECK_EQ(VKR(G("vkBeginCommandBuffer", cb, gput(&bi, sizeof bi))), VK_SUCCESS);
+    vkf_obj *o = vkf_obj_of(cb, VKG_KIND_VkCommandBuffer);
+    CHECK(o != NULL && o->as_primary);
+    G("vkCmdWaitEvents", cb, 1, gev, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 0);
+    G("vkCmdFillBuffer", cb, r->b.buf, 0, VK_WHOLE_SIZE, value);
+    VkMemoryBarrier mb = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
+    G("vkCmdPipelineBarrier", cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, gput(&mb, sizeof mb), 0, 0, 0, 0);
+    CHECK_EQ(VKR(G("vkEndCommandBuffer", cb)), VK_SUCCESS);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = GP(gput(&cb, 8)) };
+    CHECK_EQ(VKR(G("vkQueueSubmit", r->queue, 1, gput(&si, sizeof si), fence)), VK_SUCCESS);
+}
+
+/** @brief Lets the submit waiting on the event at gev run, waits for the fence at gf and has the layer look at what it retired. */
+static void release_and_settle(free_rig *r, uint64_t gev, uint64_t gf, uint32_t value)
+{
+    CHECK_EQ(VKR(G("vkSetEvent", r->dev, g64(gev))), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkWaitForFences", r->dev, 1, gf, VK_TRUE, UINT64_MAX)), VK_SUCCESS);
+    CHECK_EQ(g32(r->b.ptr + 60), value);
+    CHECK_EQ(VKR(G("vkQueueWaitIdle", r->queue)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkQueueSubmit", r->queue, 0, 0, 0)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkResetFences", r->dev, 1, gf)), VK_SUCCESS);
+    CHECK_EQ(VKR(G("vkResetEvent", r->dev, g64(gev))), VK_SUCCESS);
+}
+
+TEST(vk_a_secondary_begun_as_a_primary_and_let_go_while_pending_goes_once_done)
+{
+    free_rig r;
+    free_rig_up(&r);
+    VkEventCreateInfo eci = { .sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO };
+    uint64_t gev = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateEvent", r.dev, gput(&eci, sizeof eci), 0, gev)), VK_SUCCESS);
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    uint64_t gf = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateFence", r.dev, gput(&fci, sizeof fci), 0, gf)), VK_SUCCESS);
+    uint64_t fence = g64(gf);
+    g_watch = (VkFence)GP(fence);
+    uint64_t gcb = galloc(8);
+    submit_twin_waiting(&r, r.pool, gev, 0x77777777u, fence, gcb);
+    G("vkFreeCommandBuffers", r.dev, r.pool, 1, gcb);
+    unsigned at_free = g_freed;
+    release_and_settle(&r, gev, gf, 0x77777777u);
+    fprintf(stderr, "  %u host frees at the guest's free, %u after, %u early\n", at_free, g_freed, g_freed_early);
+    CHECK_EQ(at_free, 0);
+    CHECK_EQ(g_freed_early, 0);
+    CHECK_EQ(g_freed, 2);
+    VkCommandPoolCreateInfo pci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    uint64_t gpool = galloc(8);
+    CHECK_EQ(VKR(G("vkCreateCommandPool", r.dev, gput(&pci, sizeof pci), 0, gpool)), VK_SUCCESS);
+    submit_twin_waiting(&r, g64(gpool), gev, 0x78787878u, fence, gcb);
+    G("vkDestroyCommandPool", r.dev, g64(gpool), 0);
+    unsigned at_destroy = g_pools_destroyed;
+    release_and_settle(&r, gev, gf, 0x78787878u);
+    fprintf(stderr, "  %u pool destroys at the guest's destroy, %u after, %u early\n", at_destroy, g_pools_destroyed,
+            g_pools_destroyed_early);
+    CHECK_EQ(at_destroy, 0);
+    CHECK_EQ(g_pools_destroyed_early, 0);
+    CHECK_EQ(g_pools_destroyed, 1);
+    CHECK_EQ(g_freed, 2);
+    g_watch = NULL;
+    G("vkDestroyFence", r.dev, fence, 0);
+    G("vkDestroyEvent", r.dev, g64(gev), 0);
+    free_rig_down(&r);
 }
 
 static void bits_put(uint8_t *b, unsigned *at, uint32_t v, unsigned n)

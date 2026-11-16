@@ -158,7 +158,11 @@ struct vkf_dev {
     VkCommandPool wrap_pool;
     /** @brief Those primaries, keyed by the secondary's host handle. */
     struct vkf_map *wraps;
-    /** @brief Protects wrap_pool and wraps. */
+    /** @brief Fences of the submissions that ran those primaries (vk_submit.c), in use and recycled. */
+    struct vkf_wsub *wsubs, *wsub_free;
+    /** @brief Primaries the guest let go of while a submission may still run them, freed once it is done. */
+    struct vkf_wdead *wdead;
+    /** @brief Protects wrap_pool, wraps, wsubs, wsub_free and wdead. */
     pthread_mutex_t wrap_lock;
     /** @brief Attachment DONT_CARE load and store ops reach the host as LOAD and STORE (vk_pass.c). */
     bool keep_attachments;
@@ -481,8 +485,14 @@ uint64_t vkf_writable_below(uint64_t addr);
 void vkf_mem_device_setup(vkf_call *k, vkf_dev *d, void *phys, const char ***exts, uint32_t *n_exts, void **pnext);
 /** @brief Releases every memory record of a device (after vkDestroyDevice). */
 void vkf_mem_device_teardown(vkf_dev *d);
-/** @brief Frees the primary that runs a secondary command buffer the guest frees. */
-void vkf_wrap_drop(const vkf_fns *fns, void *dev, vkf_dev *d, void *secondary);
+/**
+ * @brief The guest lets go of a secondary (its host handle at the secondary level) and its primary twin (or NULL):
+ * frees the primary that runs the secondary, or retires them all until the submissions that ran either are done. True
+ * when the layer frees the secondary and twin itself later (not with keep, where their pool's destruction frees them).
+ */
+bool vkf_wrap_drop(const vkf_fns *fns, void *dev, vkf_dev *d, void *secondary, void *twin, bool keep);
+/** @brief The guest destroys a command pool: true when the layer destroys it itself, once the submissions that ran its secondaries are done (perhaps at once). */
+bool vkf_wrap_pool_destroy(const vkf_fns *fns, void *dev, vkf_dev *d, uint64_t pool);
 /** @brief Destroys the primaries that run submitted secondaries. */
 void vkf_wrap_device_teardown(const vkf_fns *fns, void *dev, vkf_dev *d);
 /** @brief Destroys the host descriptor pools added behind guest pools and frees their records. */

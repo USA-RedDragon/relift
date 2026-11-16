@@ -1085,6 +1085,12 @@ int vkh_vkAllocateCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
     return vkf_end(&k);
 }
 
+/** @brief A secondary command buffer's host handle at the secondary level, whichever level it was last begun at. */
+static void *cb_secondary(const vkf_obj *o) { return o->as_primary ? o->other : o->host; }
+
+/** @brief A secondary command buffer's primary twin, or NULL. */
+static void *cb_twin(const vkf_obj *o) { return o->as_primary ? o->host : o->other; }
+
 int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
 {
     vkf_call k;
@@ -1096,6 +1102,11 @@ int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
     uint32_t n = (uint32_t)c->x[2];
     uint64_t g = c->x[3];
     VkCommandBuffer *h = (VkCommandBuffer *)vkf_unwrap_n(&k, VKG_KIND_VkCommandBuffer, g, n);
+    for (uint32_t i = 0; g && h && i < n; i++) {
+        vkf_obj *o = vkf_obj_of(vkf_g64(&k, g + 8u * i), VKG_KIND_VkCommandBuffer);
+        if (o && o->secondary && vkf_wrap_drop(k.fns, dev, k.obj->dev, cb_secondary(o), cb_twin(o), false))
+            h[i] = NULL;
+    }
     VKF_FN(k.fns, vkFreeCommandBuffers)(dev, pool, n, h);
     for (uint32_t i = 0; g && i < n; i++) {
         vkf_obj *o = vkf_obj_of(vkf_g64(&k, g + 8u * i), VKG_KIND_VkCommandBuffer);
@@ -1104,10 +1115,9 @@ int vkh_vkFreeCommandBuffers(rl_ctx *restrict c, uint8_t *mem)
         if (o && o->other) {
             VkCommandBuffer twin = o->other;
             vkf_decode_cb_reset(k.fns, dev, k.obj->dev, twin, true);
-            VKF_FN(k.fns, vkFreeCommandBuffers)(dev, pool, 1, &twin);
+            if (h && h[i])
+                VKF_FN(k.fns, vkFreeCommandBuffers)(dev, pool, 1, &twin);
         }
-        if (o && o->secondary)
-            vkf_wrap_drop(k.fns, dev, k.obj->dev, o->as_primary ? o->other : o->host);
         vkf_obj_remove(o);
     }
     return vkf_end(&k);
@@ -1121,7 +1131,19 @@ int vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem)
     if (!dev)
         return vkf_bad_handle(&k, VKG_vkDestroyCommandPool, c->x[0]);
     uint64_t pool = c->x[1];
-    VKF_FN(k.fns, vkDestroyCommandPool)(dev, (VkCommandPool)(uintptr_t)pool, NULL);
+    if (pool) {
+        pthread_mutex_lock(&vkf.lock);
+        for (uint32_t s = 0; s < g_next_slot; s++) {
+            vkf_obj *o = g_slots[s / CHUNK_SLOTS] ? g_slots[s / CHUNK_SLOTS][s % CHUNK_SLOTS] : NULL;
+            if (o && o->kind == VKG_KIND_VkCommandBuffer && o->pool == pool && o->parent == k.obj && o->secondary) {
+                vkf_wrap_drop(k.fns, dev, k.obj->dev, cb_secondary(o), cb_twin(o), true);
+                o->secondary = false;
+            }
+        }
+        pthread_mutex_unlock(&vkf.lock);
+    }
+    if (!pool || !vkf_wrap_pool_destroy(k.fns, dev, k.obj->dev, pool))
+        VKF_FN(k.fns, vkDestroyCommandPool)(dev, (VkCommandPool)(uintptr_t)pool, NULL);
     if (pool) {
         pthread_mutex_lock(&vkf.lock);
         for (uint32_t s = 0; s < g_next_slot; s++) {
@@ -1130,8 +1152,6 @@ int vkh_vkDestroyCommandPool(rl_ctx *restrict c, uint8_t *mem)
                 vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->host, true);
                 if (o->other)
                     vkf_decode_cb_reset(k.fns, dev, k.obj->dev, o->other, true);
-                if (o->secondary)
-                    vkf_wrap_drop(k.fns, dev, k.obj->dev, o->as_primary ? o->other : o->host);
                 remove_locked(o);
             }
         }
