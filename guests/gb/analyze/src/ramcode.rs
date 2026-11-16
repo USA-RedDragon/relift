@@ -31,7 +31,8 @@
 //! interrupt master enable set and known enabled interrupts calls the
 //! handler of the first and forks into the others, a write to `$FF46`
 //! copies the OAM DMA source, and one to `$FF55` the CGB's VRAM DMA source.
-//! A return that pops OAM while the OAM DMA may
+//! A loop left on a branch the path did not know forgets the registers one
+//! more round of it changes. A return that pops OAM while the OAM DMA may
 //! hold it, which then reads `$FF`, forks to the addresses that gives.
 //! While that DMA may still hold the bus, an instruction the path runs in
 //! RAM below OAM may fetch the DMA's byte instead of its own, so every byte
@@ -79,6 +80,9 @@ const DMA_SLACK: i32 = 32;
 /// Most (address, DMA byte) states one walk of the instructions run during
 /// an OAM DMA visits before it gives up.
 const CONFLICT_STATES: usize = 1 << 16;
+
+/// Most instructions [`Machine::widen`] runs for one round of a loop.
+const WIDEN_STEPS: u32 = 256;
 
 /// Most times one root's main path, stuck in a jump to itself with no
 /// interrupt to leave it, goes on as the path forked last.
@@ -1520,6 +1524,42 @@ impl Machine<'_> {
         p.pc = t;
     }
 
+    /// Forgets the registers that change in one more round of the loop
+    /// from `t` that `p` left at `p.pc` on a condition it did not know:
+    /// the round that left it is only one of the rounds it may have run,
+    /// so a count it kept is not known. A round that leaves the loop's
+    /// bytes, or does not get back within [`WIDEN_STEPS`], changes nothing.
+    fn widen(&self, p: &mut Path, t: u16) {
+        let exit = p.pc;
+        let mut q = p.clone();
+        q.pc = t;
+        q.dma = None;
+        let mut scratch = Found::default();
+        let mut back = false;
+        for _ in 0..WIDEN_STEPS {
+            if !(t..exit).contains(&q.pc) {
+                return;
+            }
+            match self.step(&mut q, &mut scratch) {
+                Some(Flow::Next | Flow::Branch(Some(false) | None, _)) => {}
+                Some(Flow::Branch(Some(true), Some(b))) => q.pc = b,
+                _ => return,
+            }
+            if q.pc == exit || q.pc == t {
+                back = true;
+                break;
+            }
+        }
+        if !back {
+            return;
+        }
+        for (r, n) in p.r.iter_mut().zip(q.r) {
+            if r.v != n.v {
+                *r = U;
+            }
+        }
+    }
+
     /// The return addresses a return may take besides the one memory
     /// holds, when it pops from OAM while an OAM DMA may hold it, as OAM
     /// then reads `$FF`.
@@ -1707,6 +1747,9 @@ impl Machine<'_> {
                     Flow::Branch(None, t) => {
                         if again(&mut seen, &p) {
                             break;
+                        }
+                        if let Some(t) = t.filter(|&t| t <= pc) {
+                            self.widen(&mut p, t);
                         }
                         if let Some(t) = t {
                             let mut q = fork(&p);

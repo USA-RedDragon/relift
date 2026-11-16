@@ -294,6 +294,18 @@ fn a_call_whose_target_is_read_from_oam_during_its_dma_reads_ff() {
 }
 
 #[test]
+fn a_loop_left_on_an_unknown_flag_forgets_its_count() {
+    let r = predict(&[(
+        0x150,
+        &[
+            0x06, 0x00, 0x04, 0xF0, 0x41, 0xE6, 0x03, 0x20, 0xF9, 0x78, 0xFE, 0x01, 0x28, 0x08,
+            0x3E, 0xC9, 0xEA, 0x00, 0xC0, 0xCD, 0x00, 0xC0, 0x18, 0xFE,
+        ],
+    )]);
+    assert_eq!(ops(&r), [(0xC000, 0xC9, RamClass::Generated)]);
+}
+
+#[test]
 fn a_vram_dma_copies_code_into_vram() {
     let r = predict_on(
         0x80,
