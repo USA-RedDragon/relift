@@ -127,6 +127,33 @@ fn konst(b: &mut Block, w: Width, v: u64) -> Value {
     push(b, Op::Const(Konst::new(u128::from(v))), Some(w))
 }
 
+/// Makes the constant targets of `b`'s exit that `local` rejects computed
+/// addresses, so the emitter sends the transfer through dispatch rather
+/// than to a lifted function by name: code the runtime binds on its own
+/// (another code run) may hold other bytes by the time the transfer runs.
+pub fn dispatch_exit(b: &mut Block, local: impl Fn(u64) -> bool) {
+    let w = b.addr_width;
+    let sync = matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)).then(|| b.insts.pop());
+    match b.exit.next {
+        Next::Const(t) if matches!(b.exit.flow, Flow::Call { .. } | Flow::Jump) && !local(t) => {
+            let v = konst(b, w, t);
+            b.exit.next = Next::Dynamic(v);
+        }
+        Next::Select {
+            cond,
+            taken,
+            not_taken,
+        } if matches!(b.exit.flow, Flow::Jump) && (!local(taken) || !local(not_taken)) => {
+            let t = konst(b, w, taken);
+            let n = konst(b, w, not_taken);
+            let v = push(b, Op::Select(cond, t, n), Some(w));
+            b.exit.next = Next::Dynamic(v);
+        }
+        _ => {}
+    }
+    b.insts.extend(sync.flatten());
+}
+
 /// What the reshape does to a lifted instruction.
 struct Shape {
     /// `ERET`: the guard that leaves to the runtime's return.
@@ -427,6 +454,15 @@ mod tests {
         b.verify().expect("verifies");
         assert!(matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)));
         assert!(ops(&b).iter().any(|o| matches!(o, Op::Tick(1))));
+    }
+
+    #[test]
+    fn a_transfer_through_dispatch_keeps_its_sync_point_last() {
+        let mut b = N64.lift_at(PC, 0x0C00_0800, 0).expect("lifts");
+        dispatch_exit(&mut b, |_| false);
+        assert!(matches!(b.exit.next, Next::Dynamic(_)));
+        assert!(matches!(b.insts.last().map(|i| &i.op), Some(Op::Sync)));
+        b.verify().expect("verifies");
     }
 
     #[test]

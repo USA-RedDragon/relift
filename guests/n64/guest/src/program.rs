@@ -16,7 +16,10 @@
 //! or the boot), checks the hash against RDRAM on the first entry into it
 //! and enters the unit's functions only when it matches. A jump to an
 //! address with no bound run, or a run whose bytes in RDRAM differ, is
-//! missed code; nothing is interpreted.
+//! missed code; nothing is interpreted. A call or jump from one run to
+//! another goes through dispatch: the other run may hold other code by
+//! then (an overlay loaded over the boot image's bytes), which only its
+//! check sees.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -27,7 +30,7 @@ use relift_ir::{Block, Flow, Next, Op};
 use relift_n64_analyze::{Boot, Report, Source};
 use relift_n64_formats::Cic;
 
-use crate::frontend::{N64, RDRAM_END, io_map};
+use crate::frontend::{N64, RDRAM_END, dispatch_exit, io_map};
 
 /// The physical address bits of a kseg0 or kseg1 address.
 const PHYS: u32 = 0x1FFF_FFFF;
@@ -123,6 +126,20 @@ pub fn unit_symbol(seg: u32) -> String {
 
 type Blocks = BTreeMap<u64, (Result<Block, LiftFailure>, u64)>;
 
+/// The code runs of a segment, as `[first, end)` address ranges.
+#[derive(Clone, Debug, Default)]
+struct Runs(Vec<(u64, u64)>);
+
+impl Runs {
+    /// Whether one run holds both `a` and `b`: a transfer between them
+    /// stays in code the runtime bound in one piece.
+    fn together(&self, a: u64, b: u64) -> bool {
+        self.0
+            .iter()
+            .any(|&(lo, hi)| (lo..hi).contains(&a) && (lo..hi).contains(&b))
+    }
+}
+
 /// The instructions a run from `entry` reaches without calls, stopping at
 /// those of `taken` (other functions', which a jump there enters through
 /// dispatch).
@@ -195,6 +212,15 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
         }
         let bytes = source_bytes(rom, &streams, seg.source);
         let end = seg.offset.saturating_add(seg.len) as usize;
+        let runs = Runs(
+            units
+                .iter()
+                .map(|u| {
+                    let first = sext(u.link.unwrap_or(link));
+                    (first, first.wrapping_add(u64::from(u.len)))
+                })
+                .collect(),
+        );
         let mut blocks: Blocks = BTreeMap::new();
         for u in &units {
             for k in (0..u.len).step_by(4) {
@@ -206,7 +232,10 @@ pub fn lift(rom: &[u8], report: &Report, image_id: [u8; 32]) -> Lifted {
                 } else {
                     0
                 };
-                let r = fe.lift_at(pc, w, slot);
+                let mut r = fe.lift_at(pc, w, slot);
+                if let Ok(b) = &mut r {
+                    dispatch_exit(b, |t| runs.together(pc, t));
+                }
                 if let Err(e) = &r {
                     out.unlifted.push(Unlifted {
                         segment: si,
@@ -482,6 +511,52 @@ mod tests {
             r[0x1000 + 4 * i..0x1004 + 4 * i].copy_from_slice(&w.to_be_bytes());
         }
         r
+    }
+
+    /// A ROM whose boot image calls a leaf in a code run of its own, past
+    /// data.
+    fn two_runs() -> Vec<u8> {
+        let mut r = rom();
+        for i in 0..0x40 {
+            let at = 0x1020 + 4 * i;
+            r[at..at + 4].copy_from_slice(&0xDEAD_BEEFu32.to_be_bytes());
+        }
+        let code: [(usize, u32); 4] = [
+            (0x1000, 0x0C00_0440), // jal 0x80001100
+            (0x1010, 0x1000_FFFF), // b . (the old leaf is gone)
+            (0x1100, 0x03E0_0008), // jr ra
+            (0x1104, 0x2402_0001), // li v0, 1
+        ];
+        for (at, w) in code {
+            r[at..at + 4].copy_from_slice(&w.to_be_bytes());
+        }
+        r
+    }
+
+    #[test]
+    fn a_call_into_another_code_run_goes_through_dispatch() {
+        let r = two_runs();
+        let report = relift_n64_analyze::analyze_with(
+            &r,
+            relift_n64_analyze::Options {
+                cic: Some(Cic::C6102),
+            },
+        )
+        .expect("analyzes");
+        let runs: Vec<Option<u32>> = report.units.iter().map(|u| u.link).collect();
+        assert_eq!(runs, [Some(0x8000_1000), Some(0x8000_1100)]);
+        let l = lift(&r, &report, [0; 32]);
+        let c: String = l.units[0]
+            .output
+            .files
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect();
+        assert!(
+            c.contains("rl_indirect(c, UINT64_C(0xffffffff80001100))"),
+            "{c}"
+        );
+        assert!(!c.contains("rc = n64_s0_80001100(c, mem)"), "{c}");
     }
 
     #[test]
