@@ -684,9 +684,17 @@ impl Graph {
         })
     }
 
+    /// Whether block `b` may end the invocation (EXIT among its targets).
+    fn exits(&self, b: usize) -> bool {
+        self.blocks[b].term.targets().into_iter().any(terminal)
+    }
+
     /// Immediate post-dominator of `b` among the blocks of loop `ctx` (the
     /// whole program for `None`), where leaving the loop or going round it
-    /// ends every path; `None` if paths from `b` share no block.
+    /// ends every path; `None` if paths from `b` share no block. Paths that
+    /// end the invocation are left out, except that a block that may end it
+    /// and has no other way to the end (a loop left only through EXIT)
+    /// ends its paths there.
     fn ipdom(&mut self, ctx: Option<usize>, b: usize) -> Option<usize> {
         if !self.pdoms.contains_key(&ctx) {
             let n = self.blocks.len();
@@ -708,6 +716,18 @@ impl Graph {
                     }
                 }
                 if !any {
+                    rev[end].push(u);
+                }
+            }
+            let mut reach = vec![false; n + 1];
+            let mut work = vec![end];
+            while let Some(u) = work.pop() {
+                if !std::mem::replace(&mut reach[u], true) {
+                    work.extend(rev[u].iter().copied());
+                }
+            }
+            for u in 0..n {
+                if !reach[u] && body.as_ref().is_none_or(|bd| bd[u]) && self.exits(u) {
                     rev[end].push(u);
                 }
             }
