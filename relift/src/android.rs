@@ -124,6 +124,8 @@ pub struct Deps {
     /// libadrenotools, which loads a custom Vulkan driver package
     /// (`video.gpu_driver`); arm64 only.
     pub adrenotools: Option<Adrenotools>,
+    /// The libvpx source tree, when unpacked.
+    pub vpx: Option<crate::runtime_link::Vpx>,
 }
 
 /// The libadrenotools build of one target.
@@ -323,6 +325,7 @@ impl Deps {
             opus_include: opus.join("include"),
             opus_lib: opus.join("lib").join("libopus.a"),
             adrenotools,
+            vpx: crate::runtime_link::find_vpx(cache_root),
         };
         let at_files = d.adrenotools.iter().flat_map(|a| {
             std::iter::once(&a.lib)
@@ -1109,6 +1112,7 @@ mod tests {
             opus_include: PathBuf::new(),
             opus_lib: PathBuf::new(),
             adrenotools: None,
+            vpx: None,
         };
         let a = Apk {
             package: "dev.relift.game.x",

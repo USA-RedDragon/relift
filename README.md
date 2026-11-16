@@ -45,7 +45,9 @@ In development, with no runnable guest yet: the Nintendo 64 CPU (VR4300,
 - clang (or `zig cc`) and ninja.
 - Optional: SDL3 for a window, SDL3 and libopus for sound, a Vulkan loader
   (MoltenVK on macOS) for Switch games that render. Without SDL3 the program
-  runs headless. Phone builds need the Android SDK and NDK, or Xcode.
+  runs headless. Switch games' VP9 movies need the pinned libvpx source
+  (`runtime/tools/libvpx_src.py`). Phone builds need the Android SDK and NDK,
+  or Xcode.
 
 ## Quick start
 

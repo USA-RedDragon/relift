@@ -23,6 +23,13 @@
 //! `include/opus/` and `lib/`) or `pkg-config` (`opus`). Without SDL3 the
 //! audio output is a silent one that keeps time; without libopus Opus
 //! packets decode to silence.
+//!
+//! libvpx's VP9 decoder, which decodes the pictures a Switch game's NVDEC
+//! work submits, is compiled from source: `RELIFT_LIBVPX_DIR` or
+//! `<cache>/sdk/libvpx/<version>/` (unpacked by
+//! `runtime/tools/libvpx_src.py`), plain C only, with the generic
+//! configuration in `runtime/host/vpx`. Without it the pictures stay
+//! undecoded.
 
 use std::path::{Path, PathBuf};
 
@@ -52,6 +59,83 @@ pub struct Opus {
     pub origin: String,
 }
 
+/// The pinned libvpx release whose VP9 decoder the runtime compiles in.
+pub const LIBVPX_VERSION: &str = "1.17.0";
+
+/// The libvpx files the VP9 decoder needs, besides `vp9_decodeframe.c`,
+/// which `runtime/host/vp9_libvpx.c` includes.
+const LIBVPX_SOURCES: [&str; 40] = [
+    "vp9/common/vp9_alloccommon.c",
+    "vp9/common/vp9_blockd.c",
+    "vp9/common/vp9_common_data.c",
+    "vp9/common/vp9_entropy.c",
+    "vp9/common/vp9_entropymode.c",
+    "vp9/common/vp9_entropymv.c",
+    "vp9/common/vp9_filter.c",
+    "vp9/common/vp9_frame_buffers.c",
+    "vp9/common/vp9_idct.c",
+    "vp9/common/vp9_loopfilter.c",
+    "vp9/common/vp9_mvref_common.c",
+    "vp9/common/vp9_pred_common.c",
+    "vp9/common/vp9_quant_common.c",
+    "vp9/common/vp9_reconinter.c",
+    "vp9/common/vp9_reconintra.c",
+    "vp9/common/vp9_rtcd.c",
+    "vp9/common/vp9_scale.c",
+    "vp9/common/vp9_scan.c",
+    "vp9/common/vp9_seg_common.c",
+    "vp9/common/vp9_thread_common.c",
+    "vp9/common/vp9_tile_common.c",
+    "vp9/decoder/vp9_decodemv.c",
+    "vp9/decoder/vp9_decoder.c",
+    "vp9/decoder/vp9_detokenize.c",
+    "vp9/decoder/vp9_dsubexp.c",
+    "vp9/decoder/vp9_job_queue.c",
+    "vpx_dsp/bitreader_buffer.c",
+    "vpx_dsp/bitreader.c",
+    "vpx_dsp/intrapred.c",
+    "vpx_dsp/inv_txfm.c",
+    "vpx_dsp/loopfilter.c",
+    "vpx_dsp/prob.c",
+    "vpx_dsp/vpx_convolve.c",
+    "vpx_dsp/vpx_dsp_rtcd.c",
+    "vpx_mem/vpx_mem.c",
+    "vpx_scale/generic/yv12config.c",
+    "vpx_scale/generic/yv12extend.c",
+    "vpx_scale/vpx_scale_rtcd.c",
+    "vpx/src/vpx_codec.c",
+    "vpx_util/vpx_thread.c",
+];
+
+/// A libvpx source tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Vpx {
+    pub src: PathBuf,
+    pub origin: String,
+}
+
+fn vpx_in(dir: &Path, origin: String) -> Option<Vpx> {
+    dir.join("vp9")
+        .join("decoder")
+        .join("vp9_decodeframe.c")
+        .is_file()
+        .then(|| Vpx {
+            src: dir.to_path_buf(),
+            origin,
+        })
+}
+
+/// The libvpx source tree, or `None`.
+pub fn find_vpx(cache_root: &Path) -> Option<Vpx> {
+    if let Some(d) = std::env::var_os("RELIFT_LIBVPX_DIR").filter(|v| !v.is_empty()) {
+        return vpx_in(Path::new(&d), "RELIFT_LIBVPX_DIR".into());
+    }
+    vpx_in(
+        &cache_root.join("sdk").join("libvpx").join(LIBVPX_VERSION),
+        format!("{LIBVPX_VERSION}, pinned source"),
+    )
+}
+
 /// The extra runtime sources, flags and libraries of one build.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Extras {
@@ -67,6 +151,8 @@ pub struct Extras {
     /// libadrenotools, which lets `video.gpu_driver` load a custom Vulkan
     /// driver package on Android.
     pub adrenotools: Option<crate::android::Adrenotools>,
+    /// libvpx, compiled in for VP9 decoding.
+    pub vpx: Option<Vpx>,
 }
 
 fn c_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -221,6 +307,7 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
     let audio = rt.join("host").join("audio_sdl3.c");
     let opus_src = rt.join("host").join("opus_libopus.c");
     let opus = find_opus().filter(|_| opus_src.is_file());
+    let vpx = find_vpx(cache_root).filter(|_| has_vpx_glue(rt));
     Ok(Extras {
         vk,
         window: sdl3.as_ref().map(|_| window),
@@ -235,7 +322,12 @@ pub fn extras(rt: &Path, cache_root: &Path) -> std::io::Result<Extras> {
         sdl3,
         vulkan: find_moltenvk(cache_root),
         adrenotools: None,
+        vpx,
     })
+}
+
+fn has_vpx_glue(rt: &Path) -> bool {
+    rt.join("host").join("vp9_libvpx.c").is_file()
 }
 
 /// The extras of an Android program: the window, sound and Android glue
@@ -280,6 +372,7 @@ pub fn android_extras(
         opus_src: None,
         opus: None,
         adrenotools: deps.adrenotools.clone(),
+        vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
     })
 }
 
@@ -334,6 +427,7 @@ pub fn ios_extras(rt: &Path, deps: &crate::ios::Deps, with_vk: bool) -> std::io:
         opus_src: None,
         opus: None,
         adrenotools: None,
+        vpx: deps.vpx.clone().filter(|_| has_vpx_glue(rt)),
     })
 }
 
@@ -350,11 +444,17 @@ impl Extras {
             Some(v) => format!("{window}; Vulkan: MoltenVK linked ({})", v.origin),
             None => window,
         };
-        match &self.opus {
+        let audio = match &self.opus {
             Some(o) => format!("{window}; opus: libopus ({})", o.origin),
             None if self.has_host("opus_libopus.c") => window,
             None => format!(
                 "{window}; opus: libopus not found, Opus streams decode to silence (set RELIFT_OPUS_DIR)"
+            ),
+        };
+        match &self.vpx {
+            Some(v) => format!("{audio}; vp9: libvpx ({})", v.origin),
+            None => format!(
+                "{audio}; vp9: libvpx not found, VP9 video stays undecoded (run runtime/tools/libvpx_src.py)"
             ),
         }
     }
@@ -379,6 +479,9 @@ impl Extras {
         }
         if self.opus.is_some() || self.has_host("opus_libopus.c") {
             d.push("-DRL_HOST_OPUS".into());
+        }
+        if self.vpx.is_some() {
+            d.push("-DRL_HOST_VP9".into());
         }
         if let Some(a) = &self.adrenotools {
             d.push("-DRL_ADRENOTOOLS".into());
@@ -455,8 +558,63 @@ impl Extras {
                 stage: 0,
             });
         }
+        if let Some(v) = &self.vpx {
+            out.extend(vpx_compiles(rt, v, rt_flags, obj));
+        }
         out
     }
+}
+
+/// The libvpx sources, with the generic configuration and without the
+/// runtime's include paths and defines, and the glue that includes
+/// libvpx's frame decoder.
+fn vpx_compiles(
+    rt: &Path,
+    v: &Vpx,
+    rt_flags: &[String],
+    obj: &dyn Fn(&Path) -> PathBuf,
+) -> Vec<Compile> {
+    let config = rt.join("host").join("vpx");
+    let own: Vec<String> = rt_flags
+        .iter()
+        .filter(|f| !f.starts_with("-I") && !f.starts_with("-D"))
+        .cloned()
+        .collect();
+    let mut out: Vec<Compile> = LIBVPX_SOURCES
+        .iter()
+        .map(|s| Compile {
+            src: v.src.join(s),
+            obj: obj(&rt.join("host").join("libvpx").join(s)),
+            flags: [
+                format!("-I{}", config.display()),
+                format!("-I{}", v.src.display()),
+                "-D_GNU_SOURCE".into(),
+            ]
+            .into_iter()
+            .chain(own.iter().cloned())
+            .collect(),
+            pool: None,
+            stage: 0,
+        })
+        .collect();
+    let glue = rt.join("host").join("vp9_libvpx.c");
+    out.push(Compile {
+        obj: obj(&glue),
+        src: glue,
+        flags: rt_flags
+            .iter()
+            .cloned()
+            .chain([
+                "-isystem".into(),
+                config.display().to_string(),
+                "-isystem".into(),
+                v.src.display().to_string(),
+            ])
+            .collect(),
+        pool: None,
+        stage: 0,
+    });
+    out
 }
 
 #[cfg(test)]
@@ -507,6 +665,7 @@ mod tests {
             opus_src: None,
             opus: None,
             adrenotools: None,
+            vpx: None,
         };
         assert!(e.note().contains("headless"));
         assert!(e.defines().is_empty());
@@ -529,9 +688,49 @@ mod tests {
                 hooks: Vec::new(),
                 licenses: Vec::new(),
             }),
+            vpx: None,
         };
         assert_eq!(e.defines(), ["-DRL_ADRENOTOOLS", "-I/a/include"]);
         assert_eq!(e.libs(), ["/a/lib/libadrenotools.so"]);
+    }
+
+    #[test]
+    fn libvpx_compiles_its_sources_and_the_glue() {
+        let e = Extras {
+            vk: Vec::new(),
+            window: None,
+            sdl3: None,
+            vulkan: None,
+            host: Vec::new(),
+            opus_src: None,
+            opus: None,
+            adrenotools: None,
+            vpx: Some(Vpx {
+                src: PathBuf::from("/v"),
+                origin: "t".into(),
+            }),
+        };
+        assert!(e.note().contains("vp9: libvpx (t)"));
+        assert_eq!(e.defines(), ["-DRL_HOST_VP9"]);
+        let rt = Path::new("/rt");
+        let flags = ["-O2".to_string(), "-Ix".into(), "-DY".into()];
+        let c = e.compiles(rt, &flags, &|s| s.with_extension("o"));
+        assert_eq!(c.len(), LIBVPX_SOURCES.len() + 1);
+        assert_eq!(c[0].src, Path::new("/v/vp9/common/vp9_alloccommon.c"));
+        assert_eq!(
+            c[0].obj,
+            Path::new("/rt/host/libvpx/vp9/common/vp9_alloccommon.o")
+        );
+        assert!(c[0].flags.contains(&"-O2".to_string()));
+        assert!(!c[0].flags.contains(&"-Ix".to_string()));
+        let glue = c.last().unwrap();
+        assert_eq!(glue.src, Path::new("/rt/host/vp9_libvpx.c"));
+        assert!(glue.flags.contains(&"-DY".to_string()));
+    }
+
+    #[test]
+    fn missing_libvpx_dir_is_not_found() {
+        assert_eq!(vpx_in(Path::new("/nonexistent"), "x".into()), None);
     }
 
     #[test]
@@ -556,6 +755,7 @@ mod tests {
             opus_src: None,
             opus: None,
             adrenotools: None,
+            vpx: None,
         };
         std::fs::remove_dir_all(&m).unwrap();
         assert!(e.note().contains("MoltenVK linked (t)"));

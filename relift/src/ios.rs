@@ -118,6 +118,8 @@ pub struct Deps {
     pub moltenvk: Option<PathBuf>,
     /// What to run when a Switch game needs MoltenVK and it is missing.
     pub moltenvk_missing: String,
+    /// The libvpx source tree, when unpacked.
+    pub vpx: Option<crate::runtime_link::Vpx>,
 }
 
 impl Deps {
@@ -148,6 +150,7 @@ impl Deps {
                 t.name
             ),
             moltenvk: mvk.is_file().then_some(mvk),
+            vpx: crate::runtime_link::find_vpx(cache_root),
         };
         for p in [&d.sdl3_lib, &d.opus_lib] {
             if !p.is_file() {
