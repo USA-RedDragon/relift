@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let dir = args.get(1).cloned().unwrap_or_default();
-    let out = args.get(2).cloned();
+    let out = args.get(2).filter(|o| o.as_str() != "-").cloned();
     let threads: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(4);
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{dir}: {e}"))
@@ -17,6 +17,7 @@ fn main() {
     entries.sort();
     let next = AtomicUsize::new(0);
     let ok = AtomicUsize::new(0);
+    let list: Mutex<String> = Mutex::new(String::new());
     let why: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
     std::thread::scope(|s| {
         for _ in 0..threads {
@@ -38,6 +39,9 @@ fn main() {
                             }
                         }
                         Err(e) => {
+                            if let Ok(mut l) = list.lock() {
+                                l.push_str(&format!("{}\t{}\n", p.display(), e.0));
+                            }
                             let k = e.0.split(' ').take(2).collect::<Vec<_>>().join(" ");
                             if let Ok(mut w) = why.lock() {
                                 *w.entry(k).or_default() += 1;
@@ -48,6 +52,10 @@ fn main() {
             });
         }
     });
+    if let (Some(f), Ok(l)) = (args.get(4), list.into_inner()) {
+        relift_cache::write_if_changed(std::path::Path::new(f), l.as_bytes())
+            .unwrap_or_else(|e| panic!("{f}: {e}"));
+    }
     let why = why.into_inner().unwrap_or_default();
     let mut v: Vec<_> = why.into_iter().collect();
     v.sort_by_key(|x| std::cmp::Reverse(x.1));
