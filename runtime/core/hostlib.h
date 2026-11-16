@@ -11,6 +11,9 @@
 
 #include <relift/abi_core.h>
 
+#include <stdbool.h>
+#include <stddef.h>
+
 /** @brief Opens the first library of a NULL-terminated name list that loads; NULL when none does. */
 RL_RUNTIME_API void *rl_hostlib_open(const char *const *names);
 /** @brief Looks up a symbol in a library from rl_hostlib_open; NULL when absent. */
@@ -33,5 +36,24 @@ RL_RUNTIME_API void *rl_hostlib_sym(void *lib, const char *name);
  * Windows). The library stays loaded.
  */
 RL_RUNTIME_API void *rl_hostlib_vulkan_gipa(void);
+
+/** @brief The driver rl_hostlib_vulkan_gipa loaded: "system", the package name, or NULL before the first call. */
+RL_RUNTIME_API const char *rl_hostlib_gpu_driver_loaded(void);
+
+/**
+ * @brief Calls hook with the package name when the package video.gpu_driver names does not load and the system
+ * driver is used instead. It runs once, on the thread of the first rl_hostlib_vulkan_gipa call, which waits for it.
+ */
+RL_RUNTIME_API void rl_hostlib_on_gpu_driver_failed(void (*hook)(const char *name));
+
+#if defined(__ANDROID__)
+/**
+ * @brief Loads a driver (dir and library: the package folder and its library file name; dir NULL: the system
+ * driver), makes a Vulkan instance and reads its first GPU. True with six lines in out (deviceName, vendorID,
+ * driverVersion, apiVersion, driverName, driverInfo); false with the reason. Meant for a process of its own: the
+ * driver stays loaded.
+ */
+RL_RUNTIME_API bool rl_hostlib_vulkan_probe(const char *dir, const char *library, char *out, size_t size);
+#endif
 
 #endif
