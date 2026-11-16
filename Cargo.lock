@@ -977,6 +977,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "relift-cpu-rsp"
+version = "0.1.0"
+dependencies = [
+ "relift-ir",
+]
+
+[[package]]
+name = "relift-cpu-rsp-gen"
+version = "0.1.0"
+dependencies = [
+ "relift-cpu-rsp",
+ "relift-sail",
+]
+
+[[package]]
 name = "relift-cpu-sm83"
 version = "0.1.0"
 dependencies = [

@@ -9,6 +9,9 @@ cpus/arm32/src/lift/generated/mod.rs -linguist-generated
 cpus/mips/src/*/decode/generated.rs linguist-generated=true
 cpus/mips/src/*/lift/generated/*.rs linguist-generated=true
 cpus/mips/src/*/lift/generated/mod.rs -linguist-generated
+cpus/rsp/src/decode/generated.rs linguist-generated=true
+cpus/rsp/src/lift/generated/*.rs linguist-generated=true
+cpus/rsp/src/lift/generated/mod.rs -linguist-generated
 runtime/guests/gba/tests/vectors_console.h linguist-generated=true
 runtime/guests/gba/tests/vectors_io.h linguist-generated=true
 gpus/sm86/src/translate/mufu/tables.rs linguist-generated=true
