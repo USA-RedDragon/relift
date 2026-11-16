@@ -504,6 +504,20 @@ static inline rl_fn rl_jump_find(rl_ctx *c, uint64_t target)
 RL_RUNTIME_API int rl_dispatch_jump_miss(rl_ctx *c, uint8_t *mem);
 
 /**
+ * @brief Reads a link register at a function's entry for its return check
+ * (docs/abi.md section 5.3). On AArch64 hosts a relaxed atomic load, which
+ * clang never pairs with the load of a neighbouring field: such a pair,
+ * whose halves the caller stored separately, misses store forwarding. On
+ * other hosts a plain load, which the compiler can forward from the
+ * caller's store once it inlines the function, so the check folds away.
+ */
+#if defined(__aarch64__)
+#define RL_LOAD_LINK(lv) __atomic_load_n(&(lv), __ATOMIC_RELAXED)
+#else
+#define RL_LOAD_LINK(lv) (lv)
+#endif
+
+/**
  * @brief A return to target, which is not the address the function's caller
  * expects (x30 at the function's entry), from the return instruction at pc,
  * with the context stored (docs/abi.md section 5.3): sets c->pc to pc and
