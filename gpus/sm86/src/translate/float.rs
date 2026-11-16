@@ -472,16 +472,6 @@ impl Ctx {
         self.rm_zero(out, exact_zero, plus)
     }
 
-    pub(crate) fn sat(&mut self, f: u32, on: bool) -> u32 {
-        if !on {
-            return f;
-        }
-        let t = self.f32t();
-        let z = self.m.c_f32(0);
-        let one = self.m.c_f32(1.0f32.to_bits());
-        self.ext(t, glsl::N_CLAMP, &[f, z, one])
-    }
-
     /// The float comparison `cmp` of `a` and `b`.
     pub(crate) fn fcompare(&mut self, cmp: &str, a: u32, b: u32) -> Res<u32> {
         let opc = match cmp {

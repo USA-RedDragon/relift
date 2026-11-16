@@ -92,6 +92,16 @@ fn f(x: u64) -> f32 {
     f32::from_bits(x as u32)
 }
 
+/// The minimum, a non-NaN operand over a NaN, and the first operand when
+/// they compare equal (so `-0` may come out of a clamp at `+0`).
+fn nmin(x: f32, y: f32) -> f32 {
+    if y.is_nan() || y >= x { x } else { y }
+}
+
+fn nmax(x: f32, y: f32) -> f32 {
+    if y.is_nan() || y <= x { x } else { y }
+}
+
 fn fb(x: f32) -> u64 {
     u64::from(x.to_bits())
 }
@@ -217,9 +227,9 @@ impl Ex<'_> {
             30 => self.fout(fi(a[0]).log2()),
             31 => self.fout(fi(a[0]).sqrt()),
             32 => self.fout(1.0 / fi(a[0]).sqrt()),
-            37 | 79 => self.fout(fi(a[0]).min(fi(a[1]))),
-            40 | 80 => self.fout(fi(a[0]).max(fi(a[1]))),
-            43 | 81 => self.fout(fi(a[0]).max(fi(a[1])).min(fi(a[2]))),
+            37 | 79 => self.fout(nmin(fi(a[0]), fi(a[1]))),
+            40 | 80 => self.fout(nmax(fi(a[0]), fi(a[1]))),
+            43 | 81 => self.fout(nmin(nmax(fi(a[0]), fi(a[1])), fi(a[2]))),
             38 => (a[0] as u32).min(a[1] as u32).into(),
             41 => (a[0] as u32).max(a[1] as u32).into(),
             44 => (a[0] as u32).max(a[1] as u32).min(a[2] as u32).into(),

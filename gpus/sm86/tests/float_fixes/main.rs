@@ -174,8 +174,9 @@ fn check(name: &str, o: &Options, devs: &[Device], inst: u128, cases: &[(u32, u3
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-/// The devices a preset may run on: as promised, or anything for a host
-/// that promises no denormal mode.
+/// The devices a preset may run on: as promised, preserving where the
+/// translator asks for DenormPreserve, or anything for a host that promises
+/// no denormal mode.
 fn devices(h: &HostProfile) -> Vec<Device> {
     use relift_gpu_sm86::translate::Denorm;
     let fused = |d: Device| Device {
@@ -191,6 +192,7 @@ fn devices(h: &HostProfile) -> Vec<Device> {
         .collect();
     match h.denorm {
         Denorm::Flush => flush,
+        Denorm::Unknown if h.denorm_preserve_mode => vec![fused(PRESERVE)],
         Denorm::Preserve => vec![fused(PRESERVE)],
         Denorm::Unknown => [&flush[..], &[fused(PRESERVE)]].concat(),
     }
@@ -421,6 +423,49 @@ fn fmnmx_of_two_nans_is_canonical() {
                 .collect();
             for min in [false, true] {
                 check("FMNMX", &o, &devs, fmnmx(min, ftz), &cases);
+            }
+        }
+    }
+}
+
+/// `.SAT` on result bits: a sign-set result (`-0`, a negative denormal) is
+/// `+0`, a positive denormal stays.
+#[test]
+fn sat_clamps_by_bits() {
+    let fadd_rows: [(u32, u32, u32, [u32; 2]); 9] = [
+        (0x8000_0000, 0x8000_0000, 0, [0, 0]),
+        (0x8000_0001, 0x8000_0000, 0, [0, 0]),
+        (0x0000_0001, 0x0000_0000, 0, [1, 0]),
+        (0x3f80_0000, 0x0000_0001, 0, [0x3f80_0000; 2]),
+        (0x7f80_0000, 0x3f80_0000, 0, [0x3f80_0000; 2]),
+        (0xff80_0000, 0x3f80_0000, 0, [0, 0]),
+        (0x3f00_0000, 0x3f80_0000, 0, [0x3f80_0000; 2]),
+        (0x3f80_0000, 0x8000_0000, 0, [0x3f80_0000; 2]),
+        (0xbf80_0000, 0x3f80_0000, 0, [0, 0]),
+    ];
+    let mul_rows: [(u32, u32, u32, [u32; 2]); 6] = [
+        (0x8000_0000, 0x8000_0000, 0x8000_0000, [0, 0]),
+        (0x3f80_0000, 0x0000_0001, 0x8000_0000, [1, 0]),
+        (0x3f80_0000, 0x8000_0000, 0x8000_0000, [0, 0]),
+        (0xbf80_0000, 0x3f80_0000, 0, [0, 0]),
+        (0x3f00_0000, 0x3f80_0000, 0x8000_0000, [0x3f00_0000; 2]),
+        (0x7f80_0000, 0x3f80_0000, 0x8000_0000, [0x3f80_0000; 2]),
+    ];
+    for h in HostProfile::presets() {
+        let o = host(h.clone());
+        let devs = devices(&h);
+        for ftz in [false, true] {
+            for rnd in 0..4 {
+                let m = RN.rnd(rnd).sat();
+                let m = if ftz { m.ftz() } else { m };
+                let pick = |rows: &[(u32, u32, u32, [u32; 2])]| -> Vec<(u32, u32, u32, u32)> {
+                    rows.iter()
+                        .map(|&(a, b, c, w)| (a, b, c, w[usize::from(ftz)]))
+                        .collect()
+                };
+                check("FADD", &o, &devs, fadd(m), &pick(&fadd_rows));
+                check("FMUL", &o, &devs, fmul(m), &pick(&mul_rows));
+                check("FFMA", &o, &devs, ffma(m), &pick(&mul_rows));
             }
         }
     }

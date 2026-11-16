@@ -212,23 +212,25 @@ impl Ctx {
             .collect()
     }
 
-    /// SAT on result bits: a positive denormal stays and a negative one
-    /// becomes `+0`, which a float clamp could flush.
+    /// SAT on result bits: a NaN and any value with the sign bit set (`-0`
+    /// and negative denormals included) become `+0`, values from `1` up
+    /// become `1`, and the rest stay, which no float clamp promises.
     pub(crate) fn sat_bits(&mut self, bits: u32, on: bool) -> u32 {
         if !on {
             return bits;
         }
-        let x = self.as_float(bits);
-        let s = self.sat(x, true);
-        let s = self.as_bits(s);
-        let d = self.is_denormal(bits);
-        let sm = self.dn_ku(0x8000_0000);
-        let z = self.dn_ku(0);
-        let sg = self.dn_ub(op::BITWISE_AND, bits, sm);
-        let neg = self.dn_bc(op::I_NOT_EQUAL, sg, z);
+        let i = self.i32t();
         let u = self.u32t();
-        let dv = self.select(u, neg, z, bits);
-        self.select(u, d, dv, s)
+        let sb = self.m.emit(op::BITCAST, i, &[bits]);
+        let zi = self.dn_ki(0);
+        let neg = self.dn_bc(op::S_LESS_THAN, sb, zi);
+        let nan = self.is_nan_bits(bits);
+        let one = self.dn_ku(0x3f80_0000);
+        let big = self.dn_bc(op::U_GREATER_THAN_EQUAL, bits, one);
+        let r = self.select(u, big, one, bits);
+        let zero = self.or(neg, nan);
+        let z = self.dn_ku(0);
+        self.select(u, zero, z, r)
     }
 
     /// `a + b` rounded by `mode`, exact on any host.
